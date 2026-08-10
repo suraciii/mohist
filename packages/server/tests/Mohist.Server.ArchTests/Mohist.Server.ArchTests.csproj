@@ -3,17 +3,26 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <RootNamespace>Mohist.Server.ArchTests</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SdkRoslynBinaryRoot>$(MSBuildToolsPath)/Roslyn/bincore</SdkRoslynBinaryRoot>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="TngTech.ArchUnitNET.xUnitV3" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <Reference Include="Microsoft.CodeAnalysis">
+      <HintPath>$(MSBuildToolsPath)/Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp">
+      <HintPath>$(MSBuildToolsPath)/Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
     <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
+    <ProjectReference Include="..\Mohist.Server.SpecTests\Mohist.Server.SpecTests.csproj" />
+    <ProjectReference Include="..\Mohist.Server.UnitTests\Mohist.Server.UnitTests.csproj" />
+    <ProjectReference Include="..\Mohist.Server.TestSupport\Mohist.Server.TestSupport.csproj" />
     <Reference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
       <HintPath>$(PkgMicrosoft_CodeAnalysis_BannedApiAnalyzers)/analyzers/dotnet/cs/Microsoft.CodeAnalysis.BannedApiAnalyzers.dll</HintPath>
       <Private>true</Private>
@@ -46,6 +55,18 @@
     <EmbeddedResource Include="comment-reference-baseline.json">
       <LogicalName>CommentReferenceBaseline.json</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\eng\TestTime.cs">
+      <LogicalName>TestSources/eng/TestTime.cs</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="SpecUnitMigrationLedger.json">
+      <LogicalName>SpecUnitMigrationLedger.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="SpecUnitMigrationProvenance.json">
+      <LogicalName>SpecUnitMigrationProvenance.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="SpecUnitMigrationPr388GitProof.txt">
+      <LogicalName>SpecUnitMigrationPr388GitProof.txt</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="..\..\src\Mohist.Server\Mohist.Server.csproj">
       <LogicalName>ProductionProjects/Mohist.Server.csproj</LogicalName>
     </EmbeddedResource>
@@ -62,5 +83,11 @@
       <LogicalName>BannedSymbols.Tests.txt</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
+
+  <Target Name="CopySdkRoslynForSemanticInventory" AfterTargets="Build">
+    <Copy SourceFiles="$(SdkRoslynBinaryRoot)/Microsoft.CodeAnalysis.dll;$(SdkRoslynBinaryRoot)/Microsoft.CodeAnalysis.CSharp.dll"
+          DestinationFolder="$(TargetDir)"
+          SkipUnchangedFiles="false" />
+  </Target>
 
 </Project>

@@ -1,0 +1,611 @@
+{
+  "schemaVersion": 1,
+  "pr": "#388",
+  "parent": "0f723ddb87dfd0943b32e5b53b9af9ccbc89367d",
+  "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+  "rawRenameCount": 40,
+  "specRenameCount": 39,
+  "supportRenameCount": 1,
+  "deleteCount": 2,
+  "focusedCaseCount": 355,
+  "movedCaseCount": 334,
+  "alreadyOwnedCaseCount": 21,
+  "sourceCaseManifestDigest": "08f8da2c077df6f786dfc2dc0a65086e6ac1b56e09cde694c440765d405319fe",
+  "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+  "validationTree": "ff159609b97df5b1fac6d6404a6d1811f6bda99a",
+  "validationSourceFileCount": 825,
+  "validationSourceTreeDigest": "a06fa371856070cc809fc516b1e5fbb3934fc48bad7133d1d87bb0de032c0333",
+  "validationBaselineDigest": "03cad8aca4e8ddf9688d7b3532d03cb1b93c039e8a9ec4e0e38ee73e5b403c62",
+  "gitDiff": [
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/Services/AgentAvailabilityListSummaryServiceSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Agent/Services/AgentAvailabilityListSummaryServiceTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Agent.Services.AgentAvailabilityListSummaryServiceTests"
+    },
+    {
+      "status": "R099",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Epic/Domain/EpicProgressBuildSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Epic/Domain/EpicProgressBuildTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Epic.Domain.EpicProgressBuildTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Epic/Domain/EpicQuerierExternalPrerequisitesSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Epic/Domain/EpicQuerierExternalPrerequisitesTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Epic.Domain.EpicQuerierExternalPrerequisitesTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Events/EventBridgeSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Events/EventBridgeTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Events.EventBridgeTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Events/EventPushSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Events/EventPushTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Events.EventPushTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Events/ProjectIsolationIntegrationSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Events/ProjectIsolationIntegrationTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests"
+    },
+    {
+      "status": "R099",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Events/SignalRTaskLogDeltaPublisherSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Events/SignalRTaskLogDeltaPublisherTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Events/TranscriptEventPublisherSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Events/TranscriptEventPublisherTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Domain/IssuePatchRawMergeDomainSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Domain/IssuePatchRawMergeDomainTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Domain.IssuePatchRawMergeDomainTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRepositoryBindingDomainSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Domain/IssueRepositoryBindingDomainTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRepositoryBindingDomainTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRiskPersistingDomainSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Domain/IssueRiskPersistingDomainTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRiskPersistingDomainTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Domain/IssueStartReadinessDomainSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Domain/IssueStartReadinessDomainCoverageTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Domain.IssueStartReadinessDomainCoverageTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Profile/EffectiveWorkflowProfileResolverSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Profile/EffectiveWorkflowProfileResolverTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Profile.EffectiveWorkflowProfileResolverTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Profile/MohistDefaultWorkflowProjectionSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Profile/MohistDefaultWorkflowProjectionTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Profile.MohistDefaultWorkflowProjectionTests"
+    },
+    {
+      "status": "R099",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Profile/MohistGithubPrIssueWorkflowProfileTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Profile.MohistGithubPrIssueWorkflowProfileTests"
+    },
+    {
+      "status": "R092",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Profile/WorkflowProfileCatalogSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Profile/WorkflowProfileCatalogTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Profile.WorkflowProfileCatalogTests"
+    },
+    {
+      "status": "R093",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Project/Domain/RepositoryPolicySpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Project/Domain/RepositoryPolicyGitUrlTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Project.Domain.RepositoryPolicyGitUrlTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Api/RunnerPollParentContextMapperSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Runner/Api/RunnerPollParentContextMapperTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Runner.Api.RunnerPollParentContextMapperTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Config/ConfigHotReloadSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Runner/Config/ConfigHotReloadTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests"
+    },
+    {
+      "status": "R090",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/SignalR/RunnerHubSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Runner/SignalR/RunnerHubTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentSessionActivitySummaryReducerSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Sessions/AgentSessionActivitySummaryReducerTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Sessions.AgentSessionActivitySummaryReducerTests"
+    },
+    {
+      "status": "R095",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentSessionPersistenceTestProbeSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Sessions/AgentSessionPersistenceTestProbeTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Sessions.AgentSessionPersistenceTestProbeTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/TranscriptAccumulatorSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Sessions/TranscriptAccumulatorTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Sessions.TranscriptAccumulatorTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/EventBridgeSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/EventBridgeTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateCliOutcomeSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/SystemUpdateCliOutcomeTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateCliOutcomeTests"
+    },
+    {
+      "status": "R092",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateConsistencySpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/SystemUpdateConsistencyTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateConsistencyTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateFailureRecoverySpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/SystemUpdateFailureRecoveryTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateFailureRecoveryTests"
+    },
+    {
+      "status": "R099",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateReconnectSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/SystemUpdateReconnectTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateReconnectTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateStartSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/SystemUpdateStartTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateStartTests"
+    },
+    {
+      "status": "R099",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateTestFactory.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/SystemUpdateTestFactory.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory"
+    },
+    {
+      "status": "R096",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallArgumentSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/WindowsInstallArgumentTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests"
+    },
+    {
+      "status": "R095",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallRegistrationSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/WindowsInstallRegistrationTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallRegistrationTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServerInstallEdgeSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/WindowsServerInstallEdgeTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServerInstallEdgeTests"
+    },
+    {
+      "status": "R096",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtelDiagnosticsSamplerEnabledSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Telemetry/OtelDiagnosticsSamplerEnabledTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests"
+    },
+    {
+      "status": "R097",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtelPortIsolationMiddlewareSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Telemetry/OtelPortIsolationMiddlewareTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Telemetry.OtelPortIsolationMiddlewareTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/RuntimeVariableMergeSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Workflow/Grain/RuntimeVariableMergeTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Workflow.Grain.RuntimeVariableMergeTests"
+    },
+    {
+      "status": "R096",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/TaskOutputCaptureSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Workflow/Grain/TaskOutputCaptureTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Workflow.Grain.TaskOutputCaptureTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Storage/AttachmentStorageContractSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Workflow/Storage/AttachmentStorageContractTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Workflow.Storage.AttachmentStorageContractTests"
+    },
+    {
+      "status": "R098",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Storage/WorkflowArtifactStorageContractSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Workflow/Storage/WorkflowArtifactStorageContractTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Workflow.Storage.WorkflowArtifactStorageContractTests"
+    },
+    {
+      "status": "D",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Domain/IssueManualDoneDomainSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Issue/Domain/IssueManualCompletionTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests"
+    },
+    {
+      "status": "D",
+      "sourcePath": "packages/server/tests/Mohist.Server.SpecTests/Specs/Slack/SlackFinalReplyRendererSpecs.cs",
+      "targetPath": "packages/server/tests/Mohist.Server.UnitTests/Slack/SlackFinalReplyRendererTests.cs",
+      "targetFqn": "Mohist.Server.UnitTests.Slack.SlackFinalReplyRendererTests"
+    }
+  ],
+  "sourceFacts": [
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Agent/Services/AgentAvailabilityListSummaryServiceSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Agent.Services.AgentAvailabilityListSummaryServiceSpecs",
+      "factMethods": 5,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 5
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicProgressBuildSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Epic.Domain.EpicProgressBuildSpecs",
+      "factMethods": 19,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 19
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicQuerierExternalPrerequisitesSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Epic.Domain.EpicQuerierExternalPrerequisitesSpecs",
+      "factMethods": 6,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 6
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Events/EventBridgeSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Events.EventBridgeSpecs",
+      "factMethods": 4,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 4
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Events/EventPushSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Events.EventPushSpecs",
+      "factMethods": 3,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 3
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Events/ProjectIsolationIntegrationSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Events.ProjectIsolationIntegrationSpecs",
+      "factMethods": 6,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 6
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Events/SignalRTaskLogDeltaPublisherSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Events.SignalRTaskLogDeltaPublisherSpecs",
+      "factMethods": 9,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 9
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Events/TranscriptEventPublisherSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Events.TranscriptEventPublisherSpecs",
+      "factMethods": 8,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 8
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssuePatchRawMergeDomainSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssuePatchRawMergeDomainSpecs",
+      "factMethods": 12,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 12
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRepositoryBindingDomainSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRepositoryBindingDomainSpecs",
+      "factMethods": 7,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 7
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRiskPersistingDomainSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRiskPersistingDomainSpecs",
+      "factMethods": 10,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 10
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueStartReadinessDomainSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueStartReadinessDomainSpecs",
+      "factMethods": 13,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 13
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/EffectiveWorkflowProfileResolverSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.EffectiveWorkflowProfileResolverSpecs",
+      "factMethods": 19,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 19
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistDefaultWorkflowProjectionSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.MohistDefaultWorkflowProjectionSpecs",
+      "factMethods": 11,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 11
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.MohistPrIssueWorkflowProfileSpecs",
+      "factMethods": 27,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 27
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/WorkflowProfileCatalogSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.WorkflowProfileCatalogSpecs",
+      "factMethods": 3,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 3
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Project/Domain/RepositoryPolicySpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Project.Domain.RepositoryPolicySpecs",
+      "factMethods": 2,
+      "theoryMethods": 1,
+      "inlineDataRows": 8,
+      "mtpCases": 10
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Runner/Api/RunnerPollParentContextMapperSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Runner.Api.RunnerPollParentContextMapperSpecs",
+      "factMethods": 3,
+      "theoryMethods": 1,
+      "inlineDataRows": 3,
+      "mtpCases": 6
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Runner/Config/ConfigHotReloadSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Runner.Config.ConfigHotReloadSpecs",
+      "factMethods": 3,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 3
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Runner/SignalR/RunnerHubSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Runner.SignalR.RunnerHubSpecs",
+      "factMethods": 3,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 3
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerSpecs",
+      "factMethods": 3,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 3
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionActivitySummaryReducerSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Sessions.AgentSessionActivitySummaryReducerSpecs",
+      "factMethods": 7,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 7
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionPersistenceTestProbeSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Sessions.AgentSessionPersistenceTestProbeSpecs",
+      "factMethods": 3,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 3
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Sessions/TranscriptAccumulatorSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Sessions.TranscriptAccumulatorSpecs",
+      "factMethods": 7,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 7
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/EventBridgeSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.EventBridgeSpecs",
+      "factMethods": 2,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 2
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateCliOutcomeSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateCliOutcomeSpecs",
+      "factMethods": 7,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 7
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateConsistencySpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateConsistencySpecs",
+      "factMethods": 2,
+      "theoryMethods": 1,
+      "inlineDataRows": 2,
+      "mtpCases": 4
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateFailureRecoverySpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateFailureRecoverySpecs",
+      "factMethods": 5,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 5
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateReconnectSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateReconnectSpecs",
+      "factMethods": 13,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 13
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateStartSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateStartSpecs",
+      "factMethods": 13,
+      "theoryMethods": 2,
+      "inlineDataRows": 6,
+      "mtpCases": 19
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateTestFactory.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateTestFactory",
+      "factMethods": 0,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 0
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallArgumentSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallArgumentSpecs",
+      "factMethods": 15,
+      "theoryMethods": 1,
+      "inlineDataRows": 4,
+      "mtpCases": 19
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallRegistrationSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallRegistrationSpecs",
+      "factMethods": 0,
+      "theoryMethods": 3,
+      "inlineDataRows": 6,
+      "mtpCases": 6
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServerInstallEdgeSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServerInstallEdgeSpecs",
+      "factMethods": 9,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 9
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Telemetry/OtelDiagnosticsSamplerEnabledSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Telemetry.OtelDiagnosticsSamplerEnabledSpecs",
+      "factMethods": 3,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 3
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Telemetry/OtelPortIsolationMiddlewareSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Telemetry.OtelPortIsolationMiddlewareSpecs",
+      "factMethods": 7,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 7
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/RuntimeVariableMergeSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.RuntimeVariableMergeSpecs",
+      "factMethods": 4,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 4
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/TaskOutputCaptureSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.TaskOutputCaptureSpecs",
+      "factMethods": 5,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 5
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Workflow/Storage/AttachmentStorageContractSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Storage.AttachmentStorageContractSpecs",
+      "factMethods": 8,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 8
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Workflow/Storage/WorkflowArtifactStorageContractSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Storage.WorkflowArtifactStorageContractSpecs",
+      "factMethods": 9,
+      "theoryMethods": 1,
+      "inlineDataRows": 3,
+      "mtpCases": 12
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueManualDoneDomainSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueManualDoneDomainSpecs",
+      "factMethods": 6,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 6
+    },
+    {
+      "path": "Mohist.Server.SpecTests/Specs/Slack/SlackFinalReplyRendererSpecs.cs",
+      "fqn": "Mohist.Server.SpecTests.Specs.Slack.SlackFinalReplyRendererSpecs",
+      "factMethods": 1,
+      "theoryMethods": 0,
+      "inlineDataRows": 0,
+      "mtpCases": 1
+    }
+  ]
+}
