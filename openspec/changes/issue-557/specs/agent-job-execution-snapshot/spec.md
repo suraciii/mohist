@@ -48,7 +48,7 @@ The AgentJob dispatch envelope SHALL carry `reasoningEffort` and runtime-specifi
 
 ### Requirement: Launch and execution results expose the frozen tuple
 
-Accepted launch responses, Job observations, AgentSession execution facts, and terminal Job results SHALL expose the frozen runtime, model, reasoning effort, and variant using the same field names and value vocabulary. The result SHALL describe the tuple that the Job was asked to execute and SHALL not replace it with a later Agent configuration.
+Accepted launch responses, Job views and observations, AgentSession info/list/summary facts, and terminal Job results SHALL expose the frozen runtime, model, reasoning effort, and variant using the same field names and value vocabulary. The result SHALL describe the tuple that the Job was asked to execute and SHALL not replace it with a later Agent configuration. These surfaces SHALL use the shared execution projection rather than exposing a raw mutable Agent definition.
 
 #### Scenario: A completed Job reports its execution tuple
 
@@ -62,9 +62,15 @@ Accepted launch responses, Job observations, AgentSession execution facts, and t
 - **THEN** the failure or waiting observation SHALL retain the requested runtime, model, reasoning effort, and variant
 - **AND** it SHALL not report a substituted configuration
 
+#### Scenario: Session and Job reads expose the accepted snapshot
+
+- **WHEN** an Agent is edited after a launch is accepted and a caller reads the AgentSession, AgentJob, or launch observation
+- **THEN** each read SHALL expose the same runtime, model, reasoning effort, and variant from the accepted snapshot
+- **AND** no read SHALL derive those fields from the current Agent or omit the effort/variant dimensions
+
 ### Requirement: Temporary execution failure never triggers provider fallback
 
-An AgentJob whose frozen tuple is valid but temporarily unavailable SHALL remain pending, waiting, or retryable according to the Job state machine. Retries SHALL target the same runtime, model, reasoning effort, and variant. A known invalid or incompatible tuple SHALL fail preflight without dispatch rather than being repaired by selecting a different tuple.
+An AgentJob whose frozen tuple is valid but temporarily unavailable SHALL remain pending, waiting, or retryable according to the Job state machine. Confirmed before-execution temporary failures after admission SHALL use that same retry path; inconclusive Runner loss SHALL remain nonterminal until reconciliation. Retries SHALL target the same runtime, model, reasoning effort, and variant. A known invalid or incompatible tuple SHALL fail preflight without dispatch rather than being repaired by selecting a different tuple.
 
 #### Scenario: A temporary runtime failure is retried unchanged
 

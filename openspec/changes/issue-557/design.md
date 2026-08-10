@@ -31,6 +31,8 @@ reasoning capability from a variant with the same spelling.
   registered capability facts without active availability probing.
 - Preserve a valid requested tuple while a compatible Runner or capability
   catalog is temporarily unavailable.
+- Apply the same tuple resolution and compatibility decision to direct, routed,
+  and Agent Connection launches, including Slack-backed Connections.
 - Freeze the resolved tuple before AgentSession or AgentJob acceptance and
   reuse it for retries, recovery, redelivery, and idempotent replay.
 - Give API, Web, CLI, readiness, launch, observation, and Job read surfaces one
@@ -117,6 +119,17 @@ already part of an API, but it is not the execution contract consumed by Web,
 CLI, or Runner code. Accepted Job projections are built from the frozen
 snapshot, never from the current Agent.
 
+One `AgentExecutionProjectionMapper` owns the mapping rules. It maps the
+central reader's mutable Agent result for Agent and Agent Connection list/detail
+and readiness surfaces, and maps the frozen `AgentExecutionDefinition` for
+accepted launch responses, AgentSession info/list/summary DTOs, AgentJob views,
+launch observations, and terminal results. Those accepted-job surfaces do not
+expose the raw definition as their execution contract and never reread the
+mutable Agent. A legacy snapshot without an effort maps to
+`reasoningEffort: null` with `reasoningEffortState: unset`; an accepted new
+snapshot can only be `configured` or `unset` because invalid effort never
+reaches dispatch.
+
 **Alternative rejected:** Add the field only to `AgentExecutionDefinition` and
 let every public route map it independently. That would preserve multiple
 projection rules and would allow list/detail to drift from launch/Job output.
@@ -131,6 +144,11 @@ append-only fields for:
 - `SupportsReasoningEffort`: whether the runtime has this capability at all;
 - `Complete`: whether the catalog is complete enough to make a negative
   compatibility decision.
+
+`SupportsReasoningEffort` is authoritative only when `Complete` is true. A
+false value in an incomplete catalog means that support is unknown, not that
+the runtime is known to reject effort. A complete catalog with false support
+is the only state that produces `runtime-effort-unsupported`.
 
 The existing `Models` and `Variants` fields remain separate. `Variants` is
 never copied into `ReasoningEfforts`, even when both contain `high` or another
@@ -205,6 +223,23 @@ preflight-failed plan so the event remains observable. Temporarily unconfirmed
 capability is accepted as a Job snapshot and waits; it is not repaired by
 changing the tuple.
 
+The same evaluator is used by `AgentConnectionStore`, Slack Connection
+readiness, and `AgentLauncher.LaunchConnectionAsync`; those paths do not call
+the legacy `AgentReadinessDeriver` or parse raw `AgentConfig` independently.
+
+Post-admission execution outcomes are classified separately from preflight
+configuration failures. A confirmed before-execution temporary outcome such as
+`runtime-unavailable`, `model-unavailable`, or `effort-unavailable` moves the
+accepted Job back to `Pending` with a stable `temporary-unavailability`
+waiting reason, clears only the current Runner assignment, and schedules the
+existing recovery/admission signal. It retains the original AgentJob input and
+four-field snapshot, so the next admission must use the same tuple and cannot
+select a fallback. A Runner loss or other inconclusive delivery remains the
+existing nonterminal reconciliation state until the system knows whether the
+prompt was accepted; it is not converted into a terminal configuration error
+or blindly replayed. Once reconciliation confirms that no execution was
+accepted, the same frozen snapshot may return to the pending retry path.
+
 No new polling loop is introduced. Runner registration/heartbeat updates the
 cached catalog, and the existing AgentJob reminder and admission signals
 re-evaluate the pending Job.
@@ -234,6 +269,11 @@ the first accepted plan. A replay returns the projection from that same plan.
 `AgentJobGrain.BuildDispatchAsync` emits `reasoningEffort` as a sibling of
 `model`, `variant`, and `runtime`; it omits only an actually unset effort. The
 Runner never reconstructs the value from `variant`.
+
+`LaunchConnectionAsync` resolves the same definition and passes it through the
+coordinator as every other saved-Agent launch. Slack launch routing and
+Connection list/detail readiness consume the shared projection and evaluator;
+attachments, inbox idempotency, and Session binding remain unchanged.
 
 Launch callers cannot replace any of the four fields through prompt, context,
 or inline runtime options. Any future public override field must be rejected at
@@ -312,14 +352,20 @@ Add focused tests at each owner boundary:
   or process probe is invoked.
 - Registry and admission tests proving incomplete catalogs do not fabricate
   incompatibility, compatible Runner selection preserves the exact tuple, and
-  a known incompatible tuple fails before dispatch.
+  a known incompatible tuple fails before dispatch; Runner registration tests
+  prove Pi effort mapping and OpenCode incomplete-catalog behavior.
 - Launch/coordinator/AgentJob tests proving the first accepted effort survives
-  Agent edits, replay, recovery, redelivery, and routed preparation.
+  Agent edits, replay, recovery, redelivery, routed preparation, and
+  Agent Connection launch; post-admission temporary outcomes return to pending
+  with the same frozen tuple while inconclusive Runner loss remains
+  nonterminal until reconciliation.
 - Runner tests proving the payload has independent effort and variant fields,
-  Pi maps only effort to thinking level, unset effort remains unset, and
-  result diagnostics retain both fields.
+  Pi maps only effort to thinking level, unset effort remains unset, confirmed
+  temporary failures are classified as retryable, and result diagnostics retain
+  both fields.
 - API, Web, and CLI contract tests for set, clear, read-back, invalid values,
-  readiness messages, and list/detail consistency.
+  readiness messages, Agent Connection readiness, Session/Job/launch
+  observation projections, and list/detail consistency.
 
 ## Risks / Trade-offs
 
@@ -340,19 +386,22 @@ Add focused tests at each owner boundary:
    launch responses, and the API contract tests.
 2. **Capability and admission:** Extend `RuntimeCatalogEntry`, Runner
    registration/heartbeat payloads, OpenCode/Pi catalog projection, registry
-   aggregation, readiness evaluation, availability waiting reasons, and
-   AgentJob Runner eligibility. Add the no-probe and incomplete-catalog specs.
+   aggregation, direct and Agent Connection readiness evaluation, availability
+   waiting reasons, and AgentJob Runner eligibility. Add the no-probe,
+   incomplete-catalog, and post-admission outcome classification specs.
 3. **Durable snapshots:** Add `ReasoningEffort` append-only fields to the
    coordinator, routed plan, manual input, AgentJob input, AgentSession
    definition, and dispatch structures. Update all launch construction,
-   replay/equality, recovery, and read projection paths to use the first
-   accepted tuple.
+   replay/equality, recovery, retryable post-admission failure handling, Agent
+   Connection launch, and read projection paths to use the first accepted
+   tuple.
 4. **Runner delivery:** Add the sibling dispatch payload and runtime option
    fields, remove Pi's variant-to-thinking mapping, implement each runtime's
    effort translation, and include both fields in Runner diagnostics and
    AgentJob result projection.
 5. **User surfaces and documentation:** Update the Web Agent entity/editor,
-   CLI typed flags/output, runtime design documents, and Agent execution design
+   Agent Connection readiness views, Session/Job/launch observation views, CLI
+   typed flags/output, runtime design documents, and Agent execution design
    references. Keep Workflow `options.variant` behavior unchanged.
 6. **Rollout audit:** Before enabling new launches, identify saved Agents with
    no canonical effort or with a variant that was previously used as effort.

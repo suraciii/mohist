@@ -26,53 +26,57 @@
       "id": "T-002",
       "title": "Implement runtime capability catalogs and compatibility admission",
       "spec": "specs/agent-execution-compatibility/spec.md#readiness-distinguishes-configuration-and-compatibility-failures",
-      "description": "Extend registered Runner runtime catalogs with independent model-to-effort facts, runtime effort support, and catalog completeness, then evaluate the complete Agent execution tuple from those cached facts. Wire the evaluator into readiness, availability waiting, and AgentJob admission so complete compatible catalogs qualify a Runner, incomplete catalogs remain temporarily unconfirmed, and known incompatibility fails before dispatch without provider probing or fallback selection.",
+      "description": "Extend Runner registration and runtime-host catalog publishers with independent model-to-effort facts, runtime effort support, and catalog completeness, then evaluate the complete Agent execution tuple from those cached facts. Pi registration maps SDK thinking levels to canonical effort values without populating variants; OpenCode publishes an explicit effort source when available and otherwise remains incomplete. Wire the evaluator into direct, routed, and Agent Connection readiness, availability waiting, and AgentJob admission so complete compatible catalogs qualify a Runner, incomplete catalogs remain temporarily unconfirmed, and known incompatibility fails before dispatch without provider probing or fallback selection.",
       "acceptanceCriteria": [
-        "Runner registration and heartbeat retain `ReasoningEfforts`, `SupportsReasoningEffort`, and `Complete` independently from `Models` and `Variants`; legacy or partial catalogs are incomplete and never fabricate effort facts from variant names.",
-        "Readiness returns stable actionable outcomes for missing model/effort, invalid effort, runtime effort unsupported, model-effort incompatible, capability unconfirmed, and variant incompatible, while keeping structural runtime/model errors separate.",
-        "Readiness and list/detail availability use only local configuration and registered catalog facts; tests prove no provider process, model request, or active availability probe is invoked.",
+        "Runner registration and heartbeat retain `ReasoningEfforts`, `SupportsReasoningEffort`, and `Complete` independently from `Models` and `Variants`; Pi maps SDK `thinkingLevels` into `ReasoningEfforts`, and OpenCode is marked incomplete until an independent effort source exists.",
+        "A complete catalog with `SupportsReasoningEffort: false` produces runtime-effort-unsupported, while the same false value in an incomplete catalog produces capability-unconfirmed; no catalog path fabricates effort facts from variant names.",
+        "Readiness returns stable actionable outcomes for missing model/effort, invalid effort, runtime effort unsupported, model-effort incompatible, capability unconfirmed, and variant incompatible, while keeping structural runtime/model errors separate for direct, routed, and Agent Connection launches.",
+        "Readiness, Agent Connection list/detail availability, and launch admission use only local configuration and registered catalog facts; tests prove no provider process, model request, active availability probe, or legacy AgentReadinessDeriver is invoked.",
         "Admission selects only an individual Runner with a complete compatible catalog, excludes complete rejecting catalogs, leaves incomplete or absent catalogs temporarily waiting with a retry reason, and emits no dispatch when all eligible catalogs reject the tuple.",
-        "Registry, readiness, availability, and admission tests cover compatible, missing, invalid, unsupported, incompatible, incomplete, no-runner, and variant-incompatible cases, including exact-tuple preservation during temporary waiting."
+        "Runner registration/heartbeat, registry, readiness, availability, Connection, and admission tests cover Pi effort mapping, OpenCode incomplete catalogs, compatible, missing, invalid, unsupported, incompatible, incomplete, no-runner, and variant-incompatible cases; pending tuple immutability and post-admission retry transitions are verified in T-003."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Runtime catalog contract and registration updates, compatibility evaluator, readiness/admission integration, and passing no-probe and no-fallback compatibility tests.",
+      "output": "Runtime catalog contract and Pi/OpenCode registration publishers, compatibility evaluator, direct and Agent Connection readiness/admission integration, and passing catalog, no-probe, and no-fallback compatibility tests.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Evaluate catalogs per registered Runner. An incomplete catalog cannot prove incompatibility, and temporary unavailability must remain retryable rather than becoming setup failure."
+      "notes": "Evaluate catalogs per registered Runner. `SupportsReasoningEffort` is authoritative only when `Complete` is true. An incomplete catalog cannot prove incompatibility, and temporary unavailability must remain retryable rather than becoming setup failure."
     },
     {
       "id": "T-003",
       "title": "Freeze the four-field tuple through launch and durable Job state",
       "spec": "specs/agent-job-execution-snapshot/spec.md#agentjob-and-agentsession-snapshots-are-immutable",
-      "description": "Carry nullable `ReasoningEffort` through the existing launch coordinator, routed/manual inputs, AgentSession, AgentJob, runtime snapshot, and WorkDispatch structures using append-only Orleans fields, and resolve the Agent-owned tuple before acceptance. Make accepted launch responses, replay, recovery, redelivery, and routed preparation read the first durable snapshot rather than the mutable Agent while preserving unset effort and refusing caller overrides.",
+      "description": "Carry nullable `ReasoningEffort` through the existing launch coordinator, routed/manual inputs, AgentSession, AgentJob, runtime snapshot, and WorkDispatch structures using append-only Orleans fields, and resolve the Agent-owned tuple before acceptance for direct, routed, and Agent Connection/Slack launches. Make accepted launch responses, replay, recovery, redelivery, and routed preparation read the first durable snapshot rather than the mutable Agent while preserving unset effort and refusing caller overrides. Add the retryable post-admission Job state transition and map the frozen definition into every required server Session, Job, launch-observation, and terminal-result DTO.",
       "acceptanceCriteria": [
-        "Saved-Agent launch resolves `runtime`, `model`, `reasoningEffort`, and `variant` from the Agent definition before creating execution state; prompt, context, and inline runtime options cannot replace those fields.",
+        "Every saved-Agent launch path, including `LaunchConnectionAsync` and Slack Connection routing, resolves `runtime`, `model`, `reasoningEffort`, and `variant` from the Agent definition before creating execution state; prompt, context, and inline runtime options cannot replace those fields.",
         "Every existing durable path that carries runtime/model/variant also carries reasoning effort with a nullable append-only field; existing field ids are not renumbered or removed, and input equivalence/replay/difference diagnostics compare effort separately from variant.",
         "The accepted launch response and replay response expose the projection from the first accepted plan, and AgentJob dispatch is built from stored input rather than rereading the Agent configuration.",
+        "AgentSession info/list/summary, AgentJob views, launch observations, and terminal results all use the shared projection mapped from the frozen definition; they expose runtime, model, reasoningEffort, variant, and effort state without returning a raw mutable Agent definition.",
         "Editing, archiving, or disabling an Agent after acceptance does not change a pending, redelivered, recovered, or retried Job; a missing effort in an old durable snapshot remains unset and is never inferred from variant.",
-        "Launch, coordinator, AgentSession, AgentJob, routed preparation, replay, recovery, and redelivery tests prove snapshot immutability, exact tuple retention while waiting, caller-override rejection/ignoring, and no fallback or dispatch for known preflight incompatibility."
+        "A confirmed before-execution `runtime-unavailable`, `model-unavailable`, or `effort-unavailable` result returns the Job to pending/retryable with `temporary-unavailability`, clears only the Runner assignment, and re-admits the exact frozen tuple; inconclusive Runner loss remains nonterminal until reconciliation and is never blindly replayed.",
+        "Launch, coordinator, Agent Connection/Slack, AgentSession, AgentJob, routed preparation, replay, recovery, redelivery, retry, and read-projection tests prove snapshot immutability, exact tuple retention, caller-override rejection/ignoring, and no fallback or dispatch for known preflight incompatibility."
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Updated launch/coordinator/session/job snapshot and dispatch contracts with immutable reasoning-effort capture, plus passing launch and recovery regression tests.",
+      "output": "Updated launch/coordinator/Connection/session/job snapshot and read-projection contracts, retryable post-admission Job handling, immutable reasoning-effort capture, and passing launch, recovery, retry, Connection, and result-projection regression tests.",
       "dependsOn": ["T-001", "T-002"],
       "passes": false,
-      "notes": "Use the existing AgentExecutionDefinition launch boundary. The frozen snapshot, not raw AgentConfig, is authoritative after acceptance."
+      "notes": "Use the existing AgentExecutionDefinition launch boundary for direct, routed, and Connection launches. The frozen snapshot, not raw AgentConfig, is authoritative after acceptance; confirmed pre-execution temporary failures may re-enter Pending, but inconclusive delivery must wait for reconciliation."
     },
     {
       "id": "T-004",
       "title": "Deliver effort and variant independently in Runner execution",
       "spec": "specs/agent-job-execution-snapshot/spec.md#runner-delivery-keeps-effort-and-variant-independent",
-      "description": "Extend AgentJob option parsing, runtime turn/follow-up boundaries, and result helpers so `reasoningEffort` and `variant` remain sibling inputs from dispatch through terminal facts and diagnostics. Update the OpenCode and Pi adapters to translate effort through their native capability boundaries, remove Pi's variant-as-thinking-level behavior, and report unsupported or unrepresentable combinations explicitly while leaving Workflow `options.variant` unchanged.",
+      "description": "Extend AgentJob option parsing, runtime turn/follow-up boundaries, and result helpers so `reasoningEffort` and `variant` remain sibling inputs from dispatch through terminal facts and diagnostics. Consume the catalog facts from T-002 in the OpenCode and Pi adapters, translate effort through their native capability boundaries, remove Pi's variant-as-thinking-level behavior, and classify confirmed before-execution temporary runtime/model/effort failures separately from terminal incompatibility while leaving Workflow `options.variant` unchanged.",
       "acceptanceCriteria": [
         "The flattened AgentJob payload contains `runtime`, `model`, `reasoningEffort`, and `variant` as independent fields, and Runner parsing preserves an actually unset effort without reconstructing it from variant.",
         "Pi maps only reasoning effort to the SDK thinking level; a non-null Pi variant is reported as explicit variant incompatibility and never changes the thinking level.",
         "OpenCode applies native effort and provider variant inputs independently, and an unavailable representation produces the documented incompatible-runtime result rather than silently dropping or translating one field into the other.",
         "AgentJob terminal facts, recovery diagnostics, and Runner results retain the requested model, reasoning effort, and variant from the durable snapshot; Runner output cannot replace those requested values.",
-        "Runner unit/spec tests cover sibling payload fields, unset effort, Pi effort mapping and variant rejection, OpenCode independent inputs, diagnostics/result projection, and regression that Workflow actions still send only their existing model and variant options."
+        "Runner outcomes distinguish confirmed before-execution `runtime-unavailable`, `model-unavailable`, and `effort-unavailable` results that are safe for the server retry path from incompatible or inconclusive results that must not be blindly replayed.",
+        "Runner unit/spec tests cover sibling payload fields, unset effort, Pi effort mapping and variant rejection, OpenCode independent inputs, follow-up delivery, retryable outcome classification, diagnostics/result projection, and regression that Workflow actions still send only their existing model and variant options."
       ],
       "priority": 4,
       "mode": "AFK",
@@ -86,13 +90,13 @@
       "id": "T-005",
       "title": "Expose reasoning effort across Web, CLI, and execution results",
       "spec": "specs/agent-reasoning-effort/spec.md#agent-surfaces-expose-the-complete-execution-configuration",
-      "description": "Update the Web Agent entity public API and editor, the CLI create/edit/list/show commands, and model-catalog consumption to use the shared execution projection and runtime-aware effort capabilities. Add separate set/clear controls and flags, preserve variant when effort changes, render setup-required versus unconfirmed/incompatible states, and keep launch observations and Job result views aligned with the frozen tuple.",
+      "description": "Update the Web Agent entity public API and editor, Agent Connection readiness views, the CLI create/edit/list/show commands, and model-catalog consumption to use the shared execution projection and runtime-aware effort capabilities. Add separate set/clear controls and flags, preserve variant when effort changes, render setup-required versus unconfirmed/incompatible states, and keep AgentSession, AgentJob, launch observation, and Job result views aligned with the frozen tuple.",
       "acceptanceCriteria": [
         "Web Agent types and public exports include canonical effort values, projection state, catalog capability data, and typed create/update fields; the editor uses a separate effort selector, supports clear, preserves variant, and does not guess when capability is unconfirmed or incompatible.",
         "CLI create/edit accepts `--reasoning-effort` and `--clear-reasoning-effort` as mutually exclusive options, validates canonical values before the request, and keeps the retired `--agent-config` path retired.",
-        "CLI list/show JSON and table output, Web Agent list/detail, readiness, launch observation, and terminal Job result views expose runtime, model, reasoningEffort, and variant with the same field names and unset/invalid states.",
+        "CLI list/show JSON and table output, Web Agent list/detail, Agent Connection list/detail readiness, AgentSession list/summary, AgentJob detail/observation, launch observation, and terminal Job result views expose runtime, model, reasoningEffort, and variant with the same field names and unset/invalid states from the shared server projection.",
         "The runtime-aware model catalog endpoint is additive to existing model and variant data, while no Workflow Action input or CLI Issue flag gains reasoning effort in this change.",
-        "Web, CLI, API contract, and end-to-end tests cover set, clear, invalid values, read-back consistency, readiness messages, launch/result tuple consistency, and no-fallback diagnostics; `npm run verify` passes."
+        "Web, CLI, API contract, Connection, Session/Job read, and end-to-end tests cover set, clear, invalid values, read-back consistency, readiness messages, launch/result tuple consistency, retry/wait diagnostics, and no-fallback diagnostics; `npm run verify` passes."
       ],
       "priority": 5,
       "mode": "AFK",

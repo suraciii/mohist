@@ -1,6 +1,6 @@
 ### Requirement: Runtime capability information describes effort support
 
-Each registered runtime SHALL publish known capability information that distinguishes supported models, supported reasoning-effort values, and runtime-specific variants. Capability information SHALL identify whether the catalog is complete enough to make a compatibility decision. A missing or incomplete catalog SHALL mean that compatibility is unconfirmed, not that the requested model or effort is incompatible.
+Each registered runtime SHALL publish known capability information that distinguishes supported models, supported reasoning-effort values, and runtime-specific variants. Capability information SHALL identify whether the catalog is complete enough to make a compatibility decision. A missing or incomplete catalog SHALL mean that compatibility is unconfirmed, not that the requested model or effort is incompatible. Direct, routed, and Agent Connection launches SHALL consume the same per-Runner facts.
 
 #### Scenario: A runtime publishes model effort capabilities
 
@@ -14,9 +14,21 @@ Each registered runtime SHALL publish known capability information that distingu
 - **THEN** the server SHALL mark the requested compatibility as temporarily unconfirmed
 - **AND** it SHALL not report a known model/effort incompatibility solely because the catalog is incomplete
 
+#### Scenario: Pi publishes effort levels separately from variants
+
+- **WHEN** a Pi Runner registers a model with SDK `thinkingLevels`
+- **THEN** the server SHALL retain those levels as canonical `ReasoningEfforts` for that model
+- **AND** the registration SHALL not copy the levels into runtime-specific `Variants`
+
+#### Scenario: OpenCode without an independent effort source remains unconfirmed
+
+- **WHEN** an OpenCode Runner cannot distinguish native reasoning effort from provider variants
+- **THEN** its catalog SHALL be marked incomplete
+- **AND** readiness SHALL report temporary uncertainty rather than claiming support or incompatibility from variant names
+
 ### Requirement: Readiness distinguishes configuration and compatibility failures
 
-Before a new Agent execution is admitted, readiness SHALL evaluate the complete requested tuple of runtime, model, reasoning effort, and runtime-specific variant against known capability information. Readiness SHALL distinguish at least missing configuration, invalid or unknown effort, runtime effort unsupported, model-and-effort incompatible, and temporarily unconfirmed capability states. Each non-ready state SHALL include a stable reason and an actionable next action.
+Before a new Agent execution is admitted, readiness SHALL evaluate the complete requested tuple of runtime, model, reasoning effort, and runtime-specific variant against known capability information. Readiness for direct launches, routed launches, and Agent Connections SHALL use the same evaluator. Readiness SHALL distinguish at least missing configuration, invalid or unknown effort, runtime effort unsupported, model-and-effort incompatible, and temporarily unconfirmed capability states. Each non-ready state SHALL include a stable reason and an actionable next action.
 
 #### Scenario: Required configuration is missing
 
@@ -52,9 +64,15 @@ Readiness and Agent list/detail availability evaluation SHALL use only known, re
 - **THEN** the result SHALL be derived from configuration and registered capability data
 - **AND** no provider or model-availability probe SHALL be required to produce the result
 
+#### Scenario: Agent Connection readiness uses the shared evaluator
+
+- **WHEN** a saved Agent is bound to an Agent Connection and the Connection list, detail, or launch path requests readiness
+- **THEN** the result SHALL include the same execution projection and compatibility gap codes as a direct Agent launch
+- **AND** the Connection path SHALL not parse `variant` as reasoning effort or call a separate readiness derivation
+
 ### Requirement: Temporary unavailability preserves the requested tuple
 
-When a valid Agent tuple cannot currently execute because the selected runtime, model, or effort capability is temporarily unavailable, the system SHALL represent the execution as waiting or retryable with a temporary-unavailability reason. It SHALL preserve the exact requested runtime, model, reasoning effort, and variant and SHALL not substitute another model, effort, runtime, or provider.
+When a valid Agent tuple cannot currently execute because the selected runtime, model, or effort capability is temporarily unavailable, the system SHALL represent the execution as waiting or retryable with a temporary-unavailability reason. It SHALL preserve the exact requested runtime, model, reasoning effort, and variant and SHALL not substitute another model, effort, runtime, or provider. A confirmed before-execution temporary failure reported after admission SHALL return the Job to the pending or retryable state using the existing recovery/admission signals. An inconclusive Runner loss SHALL remain nonterminal until reconciliation establishes whether execution was accepted; it SHALL not become a terminal configuration failure or trigger an unverified replay.
 
 #### Scenario: No eligible runtime is temporarily online
 
@@ -62,3 +80,10 @@ When a valid Agent tuple cannot currently execute because the selected runtime, 
 - **THEN** the execution SHALL remain queued or waiting with a temporary-unavailability reason
 - **AND** recovery SHALL retry the same tuple when capability becomes available
 - **AND** no fallback tuple SHALL be created
+
+#### Scenario: A post-admission temporary failure retries the frozen tuple
+
+- **WHEN** an admitted Job reports `runtime-unavailable`, `model-unavailable`, or `effort-unavailable` before the selected runtime accepts the prompt
+- **THEN** the Job SHALL become pending or retryable with a temporary-unavailability reason
+- **AND** the next admission SHALL reuse the persisted runtime, model, reasoning effort, and variant
+- **AND** no fallback tuple or second provider selection SHALL be created
