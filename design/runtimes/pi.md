@@ -311,7 +311,7 @@ binding, not by an in-memory Session object.
 | Follow-up | Active execution receives a native steer at an iteration boundary. Idle execution starts a Prompt whose preflight callback is the acceptance authority. Model and thinking level are applied first. Preflight rejection is definitive; active or unknown state never triggers binding replacement. |
 | Compact | Allowed only while idle. Uses native compaction with the current model, keeps the Session-file binding and AgentSession identity, and never falls back to a Mohist-generated summary. |
 | Reset | Allowed only while idle. Creates an empty Session in the same work directory, then replaces the complete expected binding. A definitely absent old file may skip selection inheritance; corruption, permission failure, and unclassified reads remain explicit failures. |
-| Cancel | Requests interruption. Provider acceptance of the request does not prove execution stopped; events and `isStreaming` provide stop confirmation. |
+| Stop | Requests interruption. Provider acceptance of the request does not prove execution stopped; events and `isStreaming` provide stop confirmation. |
 
 Compact and Reset preserve the AgentSession ID and transcript. Only Reset replaces
 the physical Session-file binding and begins empty provider context. A stale

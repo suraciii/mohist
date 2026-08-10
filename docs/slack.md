@@ -463,8 +463,8 @@ Mohist does not invent a hidden prompt for it.
 
 After acceptance, Mohist creates an AgentJob, AgentSession, first SessionInput,
 and first AgentTurn. The Bot first confirms acceptance and shows whether the
-work is running or queued. A queued Turn can be cancelled, and a running Turn
-can be stopped. Agent replies, failures, and conclusions that need human action
+work is running or queued. A queued or running Turn can be stopped. Agent
+replies, failures, and conclusions that need human action
 return to the same Slack conversation. Completing the AgentJob does not close
 the Session; when a reply asks a question, the user can answer directly.
 
@@ -730,7 +730,7 @@ unauthorized user receives a short, explicit rejection, and Mohist creates no
 AgentJob or AgentSession.
 
 Only the Connection Owner or the Slack member who started an AgentSession can
-stop or cancel one of its AgentTurns. Other permitted members can continue the
+stop one of its AgentTurns. Other permitted members can continue the
 conversation but cannot stop someone else's execution. A stale button cannot
 stop a later Turn.
 
@@ -797,7 +797,7 @@ confirmation and cannot be hidden behind one ambiguous delete operation:
 | Mohist cannot confirm delivery of an Input to execution | Marks it Unknown and reconciles the same Input instead of replaying it as a new request |
 | Agent concurrency or Session queue limit reached | Shows queued or asks the sender to retry later; capacity is not execution failure, and accepted input is not discarded |
 | Pending-result capacity reached | Collapses replaceable progress, enters Degraded (Backpressured), and rejects new Slack input without dropping final results, definite failures, or user actions |
-| Owner or Session starter cancels a queued Turn | Removes it immediately; the AgentJob for a first Turn ends with failure category `cancelled` |
+| Owner or Session starter stops a queued Turn | Ends it locally and records it cancelled; the AgentJob for a first Turn ends with failure category `cancelled` |
 | Slack cannot send a reply | Work result remains unchanged; a definite rejection retries automatically, while an unknown result shows Delivery uncertain without blind duplication |
 
 ## Non-goals

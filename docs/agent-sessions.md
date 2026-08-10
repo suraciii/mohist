@@ -311,13 +311,15 @@ They present the same result and next action:
 | Activity | Meaning | Safe behavior |
 |---|---|---|
 | Idle | No Turn or session operation is in progress | A follow-up can start a new Turn; Compact and Reset are available |
-| Active | A Turn is queued, executing, or waiting for a confirmed result | Keep Inputs in order; cancel queued work or request Stop for running work |
+| Active | A Turn is queued, executing, or waiting for a confirmed result | Keep Inputs in order; request Stop for queued or running work |
 | Unknown | Mohist cannot confirm input acceptance, a Runtime side effect, binding, or result | Block new work; query the original operation or reconcile it manually |
 
-A queued Turn can be cancelled without contacting the Runtime. To end a running
-Turn, the user must request Stop. Mohist reports it as cancelled only after the
-stop is confirmed. A lost or uncertain Stop response leaves the Turn and Session
-Unknown; it never turns them into Idle by assumption.
+Stop is the single operation for ending work. For a queued Turn, it settles
+locally without contacting the Runtime and records the Turn as cancelled. For a
+running Turn, it requests interruption from the Runtime, and Mohist records the
+Turn as cancelled only after the stop is confirmed. A lost or uncertain Stop
+response leaves the Turn and Session Unknown; it never turns them into Idle by
+assumption.
 
 The target contract uses an explicit force-reset when reconciliation cannot resolve an
 old Unknown. It requires the user to acknowledge that the old Runtime may still
@@ -391,7 +393,7 @@ Every Origin uses the same top-level `mo session` surface:
 
 - `mo session view <session-id>` and
   `mo session transcript <session-id>` read by stable Session ID.
-- `mo session followup`, `compact`, `reset`, `cancel`, and `stop` act on the
+- `mo session followup`, `compact`, `reset`, and `stop` act on the
   Session rather than on a separate Origin-specific resource.
 - `mo session list` can discover Sessions by Agent, Issue, or WorkflowRun.
 
@@ -405,7 +407,7 @@ arguments and operation keys.
 | Follow-up | Continue the same conversation | Creates one Input, joins a running Turn when supported or starts or queues a later Turn, and creates no AgentJob |
 | Compact | Reduce Runtime context without starting over | Preserves the AgentSession and current Runtime Session |
 | Reset | Continue from empty Runtime context | Preserves AgentSession identity and transcript and records the context boundary |
-| Cancel / Stop | End queued work or active work in a session tree | Cancel affects one queued Turn; Stop fixes the attached subtree and requests interruption for its executing Turns; unconfirmed targets remain Unknown |
+| Stop | End queued or active work, one Turn or a session tree | Queued Turns end locally and are recorded cancelled; executing Turns are recorded cancelled only after Runtime confirmation; unconfirmed targets remain Unknown |
 | Force-reset (target) | Continue after an Unknown that cannot be reconciled | Preserves unresolved history and starts a new context only after explicit risk acknowledgement |
 
 These operations change session execution, not work ownership. A follow-up does
@@ -453,8 +455,9 @@ uncertain.
 The product contract requires a caller-visible key for follow-up, Compact,
 Reset, recovery, handoff, rebind, and force-reset. Compact and Reset currently
 generate a hidden key. Clients cannot reliably retry those operations after a
-lost response. Cascade Stop already requires a caller-visible idempotency key;
-Server derives the tree operation identity from the root Session and that key.
+lost response. Stop already requires a caller-visible idempotency key. For a
+single Turn the key identifies that one stop intent; for a session tree, Server
+derives the tree operation identity from the root Session and that key.
 
 Agent Connection Readiness currently checks only whether the Agent has a Model
 and Runtime while keeping Connection health independent. An Agent that has not

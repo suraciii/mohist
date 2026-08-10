@@ -271,7 +271,7 @@ records a boundary result without changing the Binding or `ContextGeneration`.
 types. Input and Turn express acceptance and execution separately. Consumers must not infer current
 Activity from historical completion, failure, or stop facts.
 
-## Follow-up and Cancel
+## Follow-up and Stop
 
 Follow-up has two semantic paths:
 
@@ -300,15 +300,19 @@ idempotently and the complete fence still matches. A terminal or superseded targ
 steer operation without moving the accepted Input. The authoritative adapter seam and result
 mapping are in [`conventions.md#durable-steer-adapter-seam`](conventions.md#durable-steer-adapter-seam).
 
-`cancel` is a Server-only control for one identified queued Turn and never contacts Runtime. A
-cascade stop freezes a Session subtree under
-[`subagents.md#cascade-stop`](subagents.md#cascade-stop). A direct API stop freezes one named Turn
-through the external key mapping in [`agent-api.md`](agent-api.md). Neither path is a loose
-running-Turn counterpart to cancel; each frozen target uses the same canonical rules below:
+`stop` is the only end-work verb; `cancel` is retired from the verb set and survives only as the
+`Cancelled` terminal outcome. Stop has two scopes: one frozen Turn (CLI `--turn-id`, or a direct
+API stop through the external key mapping in [`agent-api.md`](agent-api.md)), or a frozen Session
+subtree under [`subagents.md#cascade-stop`](subagents.md#cascade-stop). The engine, not the caller,
+selects the mechanism from Turn state; each frozen target uses the same canonical rules below:
 
-- a queued Turn is cancelled without contacting Runner;
+- a queued Turn ends locally without contacting Runner and is recorded `Cancelled` in the same
+  Session transaction;
 - a running Turn is addressed only through its snapshotted Turn and complete expected Binding;
-- Runtime stop is fenced before and after the external effect;
+- Runtime stop is fenced before and after the external effect, and a confirmed stop records the
+  Turn `Cancelled`;
+- a Runtime not-cancellable answer means the Turn is still executing: the operation reports
+  not-cancellable honestly and never reports a running Turn as stopped;
 - an unconfirmed result leaves the target Turn and operation `unknown` and reuses the same derived
   target identity for query or bounded retry;
 - a later Turn or changed Binding is outside the target and cannot be stopped by stale work.
@@ -425,7 +429,7 @@ original operation active or block a later safe binding operation.
 | Idle Follow-up | Yes | It starts a new execution through the same acceptance identity |
 | Follow-up during execution | No | Replacement would change the physical target of that Input |
 | Compact | No | A missing context cannot be compacted |
-| Cancel or cascade-stop target | No | A replacement is not the original execution target |
+| Stop target | No | A replacement is not the original execution target |
 | Ordinary Reset | No | Reset requires safe admission; unknown requires explicit force-reset |
 
 Recovery never reconstructs Runtime context from Transcript. Transcript is an audit and
@@ -549,6 +553,10 @@ model yet.
 - Some direct launch payloads still carry the legacy `workspacePath` context field. The named
   Workspace is the target identity; caller-supplied materialization paths are not part of the
   target contract.
+- End-work control is still split into `cancel` and `stop` verbs gated by Turn state, and a
+  confirmed stop of a non-initial Turn is recorded `Completed` instead of `Cancelled`
+  (`AgentSessionTurnControlOperations.cs`). The single-verb stop with uniform `Cancelled`
+  recording above is the target.
 
 Every Follow-up requires a non-empty caller `requestId`. Compact, Reset, recovery, handoff, rebind,
 and force-reset require a caller `operationId`; steer reuses its Follow-up `requestId`. Some current
