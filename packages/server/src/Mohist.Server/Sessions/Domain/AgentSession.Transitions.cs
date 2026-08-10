@@ -239,6 +239,11 @@ public static partial class AgentSessionExtensions
                 LastDataAt = now,
                 UsageSummary = usage with { ContextWindowUsed = null, ContextWindowSize = null },
             };
+            session.PersistedActivitySummary = (session.PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty) with
+            {
+                LastTerminalStatus = null,
+                LatestActivity = null,
+            };
             session.BindingEpoch = checked(session.BindingEpoch + 1);
             return [new AgentSessionRuntimeBound(replacement.RuntimeSessionId, session.Runtime.Runtime)];
         }

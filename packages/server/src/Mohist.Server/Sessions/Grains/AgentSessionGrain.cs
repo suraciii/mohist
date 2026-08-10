@@ -2461,7 +2461,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             eventSummary.ToolErrorCount,
             s.Runtime.Runtime,
             usage.CachedWriteTokens,
-            s.BindingEpoch);
+            s.BindingEpoch,
+            s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)

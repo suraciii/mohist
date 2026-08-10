@@ -21,6 +21,7 @@ internal static class TranscriptEventSummaryProjector
         string? resolvedModel = null;
         string? failureReason = null;
         string? failureCategory = null;
+        string? lastTerminalStatus = null;
         var toolCallIds = new HashSet<string>(StringComparer.Ordinal);
         var failedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
 
@@ -61,6 +62,7 @@ internal static class TranscriptEventSummaryProjector
             // left by an older Runtime Session lineage entry.
             failureReason = AgentSessionJsonHelper.GetStringProp(payload, "failureReason");
             failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory");
+            lastTerminalStatus = AgentSessionJsonHelper.GetStringProp(payload, "status");
         }
 
         return new AgentSessionTranscriptSummary(
@@ -68,7 +70,8 @@ internal static class TranscriptEventSummaryProjector
             failureCategory,
             toolCallIds.Count == 0 ? null : toolCallIds.Count,
             failedToolCallIds.Count == 0 ? null : failedToolCallIds.Count,
-            string.IsNullOrWhiteSpace(failureReason) ? null : failureReason);
+            string.IsNullOrWhiteSpace(failureReason) ? null : failureReason,
+            string.IsNullOrWhiteSpace(lastTerminalStatus) ? null : lastTerminalStatus);
     }
 
     private static bool IsLater(TranscriptSummaryEvent? current, TranscriptSummaryEvent candidate)

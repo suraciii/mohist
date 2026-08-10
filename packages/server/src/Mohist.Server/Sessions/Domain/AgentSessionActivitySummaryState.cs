@@ -9,6 +9,7 @@ internal sealed record AgentSessionActivitySummaryState
     public int? ToolCallCount { get; init; }
     public int? ToolErrorCount { get; init; }
     public string? FailureReason { get; init; }
+    public string? LastTerminalStatus { get; init; }
     public long CurrentTurnSequence { get; init; }
     public long CurrentPartSequence { get; init; }
     public IReadOnlyList<AgentSessionActivitySummaryPart> CurrentTurnParts { get; init; } = [];
@@ -24,7 +25,8 @@ internal sealed record AgentSessionActivitySummaryState
         FailureCategory,
         ToolCallCount,
         ToolErrorCount,
-        FailureReason);
+        FailureReason,
+        LastTerminalStatus);
 
     public AgentSessionActivitySummaryState Normalize() => this with
     {
@@ -46,4 +48,5 @@ internal sealed record AgentSessionActivitySummaryCandidate(
     long PartSequence,
     string PartId,
     string? FailureCategory,
-    string? FailureReason);
+    string? FailureReason,
+    string? LastTerminalStatus = null);

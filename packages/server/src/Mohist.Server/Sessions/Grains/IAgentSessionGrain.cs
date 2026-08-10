@@ -334,7 +334,8 @@ public sealed record AgentSessionInfo(
     [property: Id(21)] int? ToolErrorCount,
     [property: Id(22)] string? Runtime,
     [property: Id(23)] long? CachedWriteTokens,
-    [property: Id(24)] long BindingEpoch = 0);
+    [property: Id(24)] long BindingEpoch = 0,
+    [property: Id(25)] string? LastTerminalStatus = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(
