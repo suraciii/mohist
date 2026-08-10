@@ -294,6 +294,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       status: "failed",
       state: "failed",
     })
+    expect(handles.eventsByType("turn.failed")).toHaveLength(0)
   })
 
   it("serializes input and projected event enqueues in observation order", async () => {

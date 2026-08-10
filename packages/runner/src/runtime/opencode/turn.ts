@@ -85,7 +85,7 @@ export interface TurnExecutionDeps {
    * arrive; used by tests to assert routing. Not used in
    * production code paths.
    */
-  readonly onEvent?: (event: RuntimeGlobalEvent) => void
+  readonly onEvent?: (event: RuntimeGlobalEvent) => RuntimeEventFailure | null
 }
 
 /**
@@ -150,6 +150,21 @@ export async function runTurn(
         })
       }
     }
+    const runtimeFailureFromEvent = (event: ReturnType<typeof eventProjector.project>[number]): RuntimeEventFailure | null => {
+      if (event.type !== "turn.failed") return null
+      const message = typeof event.payload["failureReason"] === "string"
+        ? event.payload["failureReason"]
+        : typeof event.payload["message"] === "string"
+          ? event.payload["message"]
+          : "OpenCode turn failed"
+      const diagnostic = {
+        severity: "error" as const,
+        code: "turn-failed",
+        message,
+        details: { source: event.payload["source"] },
+      }
+      return normalizeTurnFailed({ message }, [diagnostic])
+    }
 
     const policy = deps.policy ?? DEFAULT_PROVIDER_ERROR_POLICY
     const promptResult = await executePrompt({
@@ -168,8 +183,19 @@ export async function runTurn(
       trackPendingOperation: deps.trackPendingOperation,
       onEvent: (event) => {
         deps.onEvent?.(event)
-        if (event.sessionID !== sessionId) return
-        for (const projected of eventProjector.project(event)) emitProjectedEvent(projected)
+        const eventSessionId = event.sessionID
+          ?? (typeof event.payload?.["sessionID"] === "string" ? event.payload["sessionID"] : undefined)
+        if (eventSessionId !== sessionId) return
+        let failure: RuntimeEventFailure | null = null
+        for (const projected of eventProjector.project(event)) {
+          const projectedFailure = runtimeFailureFromEvent(projected)
+          if (projectedFailure) {
+            failure ??= projectedFailure
+            continue
+          }
+          emitProjectedEvent(projected)
+        }
+        return failure
       },
     })
     if (promptResult.kind === "failure") {
@@ -321,7 +347,8 @@ type PromptFailure = {
 }
 type PromptResult = PromptSuccess | PromptFailure
 
-type AbortReason = "provider" | "reconciliation-failed" | "permission-reply-failed" | "deadline" | "signal"
+type RuntimeEventFailure = ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime>
+type AbortReason = "provider" | "reconciliation-failed" | "permission-reply-failed" | "runtime-failure" | "deadline" | "signal"
 
 interface ProviderRetryStatus {
   readonly type?: string
@@ -336,12 +363,18 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
   let requestedAbort: AbortReason | null = null
   let reconciliationFailure: RuntimeDiagnostic | null = null
   let permissionFailure: RuntimeDiagnostic | null = null
+  let runtimeFailure: RuntimeEventFailure | null = null
   let reconciliationInFlight: Promise<void> | null = null
   const repliedPermissionIds = new Set<string>()
   const resolveAbort = (reason: AbortReason) => {
     if (requestedAbort !== null) return
     requestedAbort = reason
     abortPromise.resolve(reason)
+  }
+  const resolveRuntimeFailure = (failure: RuntimeEventFailure) => {
+    if (runtimeFailure !== null) return
+    runtimeFailure = failure
+    resolveAbort("runtime-failure")
   }
   const resolveProviderAbort = () => {
     if (retryTracker.abortedDueToNonRecoverable() || retryTracker.abortedDueToThreshold()) {
@@ -399,7 +432,8 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     respondToPermissionRequest(event)
     retryTracker.observe(event)
     resolveProviderAbort()
-    args.onEvent?.(event)
+    const failure = args.onEvent?.(event)
+    if (failure) resolveRuntimeFailure(failure)
   })
 
   let abortHandler: (() => void) | null = null
@@ -425,7 +459,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     args.trackPendingOperation?.(initialStatus)
     const initialRace = await Promise.race([initialStatus, abortPromise.promise])
     if (typeof initialRace === "string") {
-      return finishAbortedTurn(args, retryTracker, initialRace, reconciliationFailure, permissionFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, initialRace, reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
     }
     if (!initialRace.ok) {
       const diagnostic = providerStatusDiagnostic(initialRace.cause)
@@ -433,7 +467,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
     }
     if (requestedAbort !== null) {
-      return finishAbortedTurn(args, retryTracker, requestedAbort, reconciliationFailure, permissionFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, requestedAbort, reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
     }
 
     const promptCall = args.client.session.prompt({
@@ -447,7 +481,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     args.trackPendingOperation?.(promptCall)
     const raced = await Promise.race([promptCall, abortPromise.promise])
     if (typeof raced === "string") {
-      return finishAbortedTurn(args, retryTracker, raced, reconciliationFailure, permissionFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, raced, reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
     }
     promptOutcome = raced as { ok: true; response: unknown } | { ok: false; cause: unknown }
   } finally {
@@ -456,15 +490,19 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     abortHandler?.()
   }
 
+  if (runtimeFailure !== null) {
+    return finishAbortedTurn(args, retryTracker, "runtime-failure", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+  }
+
   if (!promptOutcome.ok) {
     if (retryTracker.abortedDueToNonRecoverable() || retryTracker.abortedDueToThreshold()) {
-      return finishAbortedTurn(args, retryTracker, "provider", reconciliationFailure, permissionFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, "provider", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
     }
     if (reconciliationFailure !== null) {
-      return finishAbortedTurn(args, retryTracker, "reconciliation-failed", reconciliationFailure, permissionFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, "reconciliation-failed", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
     }
     if (args.signal.aborted) {
-      return finishAbortedTurn(args, retryTracker, args.deadlineExpired() ? "deadline" : "signal", reconciliationFailure, permissionFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, args.deadlineExpired() ? "deadline" : "signal", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
     }
     if (isTransportFailure(promptOutcome.cause)) {
       return finishTransportFailure(args, promptOutcome.cause, promptDiagnostics)
@@ -591,6 +629,7 @@ async function finishAbortedTurn(
   reconciliationFailure: RuntimeDiagnostic | null,
   permissionFailure: RuntimeDiagnostic | null,
   promptDiagnostics: RuntimeDiagnostic[],
+  runtimeFailure: RuntimeEventFailure | null,
 ): Promise<PromptFailure> {
   const providerVerdict = retryTracker.nonRecoverableVerdict() ?? retryTracker.thresholdVerdict()
   const contextDiagnostics = [
@@ -606,6 +645,16 @@ async function finishAbortedTurn(
       : [...contextDiagnostics, { severity: "error" as const, code: "abort-unconfirmed", message: abortResult.message }]
     const error = normalizeDeadlineExceeded(args.deadlineMs ?? 0, diagnostics)
     return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
+  if (reason === "runtime-failure" && runtimeFailure) {
+    if (!abortResult.ok) {
+      const error = {
+        ...runtimeFailure,
+        diagnostics: [...runtimeFailure.diagnostics, { severity: "error" as const, code: "abort-unconfirmed", message: abortResult.message }],
+      }
+      return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    }
+    return { kind: "failure", error: runtimeFailure, diagnostics: [...runtimeFailure.diagnostics] }
   }
   if (!abortResult.ok) {
     const error = normalizeAbortUnconfirmed(abortResult.message, contextDiagnostics)

@@ -184,6 +184,39 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     }
   })
 
+  it.each(["session.next.step.failed", "session.error"])(
+    "converges %s into a failed turn and terminal activity",
+    async (eventType) => {
+      const { runtime } = buildRuntime({
+        emitDuringPrompt: (subscription, sessionId) => {
+          subscription.emit({
+            type: eventType,
+            sessionID: sessionId,
+            payload: { error: { message: "child task failed" } },
+          })
+        },
+      })
+      await ensureReady(runtime)
+      const handles = makeRecordingOutbox()
+
+      const result = await callAction(opencodeAction, baseContext({
+        openCodeRuntime: runtime,
+        serverConnection: handles.connection,
+        agentSessionRuntimeEventOutbox: handles.outbox,
+      }))
+
+      expect(result.error?.code).toBe("turn-failed")
+      expect(result.error?.message).toBe("child task failed")
+      expect(handles.eventTypeList()).toEqual(["session.input", "turn.failed", "session.activity"])
+      expect(handles.eventsByType("session.activity")[0]?.event.payload).toMatchObject({
+        activity: "idle",
+        status: "failed",
+        exitCode: 1,
+        failureReason: "child task failed",
+      })
+    },
+  )
+
   it("settles close after reconciled events when no live deltas fire but final-response reconciliation emits after prompt returns", async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
