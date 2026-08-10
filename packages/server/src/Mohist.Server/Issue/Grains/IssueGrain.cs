@@ -699,14 +699,16 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (await HasChildrenAsync(_issue.Number))
             throw new InvalidOperationException($"Issue #{_issue.Number} has child issues and cannot be marked done manually");
 
-        var workflowRunId = _issue.WorkflowRunId
-            ?? throw new InvalidOperationException($"Issue #{_issue.Number} has no workflow run to complete");
-        var workflowStatus = (await _workflowQuerier.GetStatusAsync(workflowRunId))?.Status;
-        if (workflowStatus is not ("stopped" or "completed"))
+        var workflowRunId = _issue.WorkflowRunId;
+        if (workflowRunId is not null)
         {
-            var observed = workflowStatus ?? "unavailable";
-            throw new InvalidOperationException(
-                $"Cannot mark issue done while workflow is {observed}. Stop the workflow first.");
+            var workflowStatus = (await _workflowQuerier.GetStatusAsync(workflowRunId))?.Status;
+            if (workflowStatus is not ("stopped" or "completed"))
+            {
+                var observed = workflowStatus ?? "unavailable";
+                throw new InvalidOperationException(
+                    $"Cannot mark issue done while workflow is {observed}. Stop the workflow first.");
+            }
         }
 
         if (!_issue.MarkDone(_timeProvider.GetUtcNow().UtcDateTime)) return;

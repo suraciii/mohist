@@ -463,15 +463,28 @@ public sealed partial class Issue
     public bool MarkDone(DateTime? now = null)
     {
         if (_status == IssueStatus.Done) return false;
+
+        // A direct done command is the explicit delivery attestation for
+        // work completed outside Mohist. It is valid only for an untouched
+        // backlog issue; started work still needs its bound run.
+        if (_status == IssueStatus.Backlog && _workflowRunId is null)
+            return CompleteCore(workflowRunId: null, IssueCompletionKinds.Manual, now);
+
+        if (_status != IssueStatus.InProgress)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
+
         var workflowRunId = _workflowRunId
             ?? throw new InvalidOperationException($"Issue #{Number} has no workflow run to complete");
         return CompleteCore(workflowRunId, IssueCompletionKinds.Manual, now);
     }
 
-    private bool CompleteCore(string workflowRunId, string completionKind, DateTime? now)
+    private bool CompleteCore(string? workflowRunId, string completionKind, DateTime? now)
     {
         if (_status == IssueStatus.Done) return false;
-        if (_status != IssueStatus.InProgress)
+        var isManualDelivery = _status == IssueStatus.Backlog
+            && workflowRunId is null
+            && completionKind == IssueCompletionKinds.Manual;
+        if (_status != IssueStatus.InProgress && !isManualDelivery)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
         var completedAt = now ?? DateTime.UtcNow;
         _completedAt = completedAt;
