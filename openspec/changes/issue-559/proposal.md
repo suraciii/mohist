@@ -18,7 +18,7 @@ Workflow profiles can reference a configured Agent, but the current path transla
 
 ## Impact
 
-- **Server:** Workflow task translation and reporting, AgentJob and AgentSession creation/linkage, Agent execution snapshot resolution, readiness/workspace/concurrency admission, recovery coordination, durable projections, and persistence for the cross-context lineage.
+- **Server:** Workflow task translation and typed handoff reporting, AgentJob and AgentSession creation/linkage, Agent execution snapshot resolution, readiness/workspace/concurrency admission, recovery coordination, the Server-side WorkflowAgentFinalizer, durable effect receipts, projections, and persistence for the cross-context lineage.
 - **Runner and runtime adapters:** Agent-backed dispatch and result reporting must carry the stable Job/Session/Input/Turn references while continuing to use the existing runtime execution boundaries. The handoff uses a separate typed request/acknowledgement route and never enters the ordinary Workflow task/check report path.
 - **Workflow and Agent read APIs:** Add or extend projections so a Workflow invocation and its Agent execution can be queried from either side without exposing internal Runner or transcript details.
 - **Workflow definitions and validation:** Define the supported `mohist/agent` inputs and output/status contract; existing inline runtime Actions and unrelated Action contracts remain unchanged.

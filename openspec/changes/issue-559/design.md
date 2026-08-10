@@ -363,15 +363,25 @@ invocation result.
 Session runtime events, Session Activity, and Session terminal-close events are
 queryable audit facts only. They never call the Workflow result command.
 
-### 6. Preserve task-level completion and side effects at the AgentJob boundary
+### 6. Finalize Workflow side effects through an explicit AgentJob bridge
 
 The handoff plan freezes the Workflow task contract separately from the Agent
-execution snapshot:
+execution snapshot. It carries the complete Workflow owner identity and a
+deterministic finalizer key:
 
 ```text
 WorkflowTaskContract {
+  workflowRunId
+  taskRunId
+  taskAttempt
+  jobId
+  sessionId
+  inputId
+  turnId
+  finalizerKey = SHA-256(canonical JSON(workflowRunId, taskRunId, taskAttempt, jobId))
   expect
   artifacts
+  outputs
   setVars
   recovery
   recoveryRemaining
@@ -379,28 +389,72 @@ WorkflowTaskContract {
 }
 ```
 
-The AgentJob dispatch carries this contract and the stable Workflow owner
-identity. The AgentJob Runner path executes the Agent runtime directly, as it
-already does for direct AgentJobs, then invokes a shared Workflow-task
-finalizer for this dispatch kind:
+The authoritative `WorkflowAgentFinalizer` is Server-side and Workflow-owned.
+The Runner has only a completion adapter for facts that require the AgentJob
+workspace. After the Agent runtime returns, that adapter:
 
-- `expect` is evaluated against the final Agent result and the persisted
-  workspace using the existing completion evaluator. `_output` reads the
-  structured final assistant text from the AgentJob result, never Session
-  transcript content.
-- Artifact uploads use the Workflow owner and `(workflowRunId, taskRunId,
-  jobId)` as their idempotency scope. Existing AgentJob task logs remain
-  AgentJob-owned.
-- `setVars` is applied through an idempotent Workflow-scoped projection keyed
-  by the same Job/TaskRun pair. A repeated finalizer call is a no-op.
-- The finalizer produces one structured `WorkflowAgentResult` in the AgentJob
-  terminal report. WorkflowRun consumes it only through the durable terminal
-  delivery command.
+- evaluates `expect` with the existing completion evaluator against the
+  persisted workspace and structured Agent result; `_output` reads the final
+  assistant text supplied by the AgentJob result, never Session transcript
+  content;
+- captures and uploads declared or dynamic artifacts through
+  `POST /api/runner/{runnerId}/agent-job-workflow-artifacts`, carrying
+  `(workflowRunId, taskRunId, jobId, finalizerKey, path, contentType,
+  contentHash, size)`. The Server-side
+  `WorkflowAgentInvocationArtifactResolver` validates the immutable
+  WorkflowAgentInvocation and Job identity instead of looking for active
+  Workflow work. Uploads are idempotent under
+  `(finalizerKey, path, contentHash)`; the Server computes a SHA-256 content
+  hash when the Runner does not supply one, so the idempotency key is never
+  based on a missing hash; and
+- extracts `_output`, declared outputs, and `setVars` values into a typed
+  finalization envelope. It does not call the generic Workflow variable patch
+  route, send an ordinary Workflow task report, or advance WorkflowRun.
 
-If a postcondition fails, the AgentJob terminal result is failed with the
-stable Action error and the Workflow recovery policy sees the same failure
-boundary as an ordinary Action. The finalizer never advances WorkflowRun
-itself.
+The AgentJob terminal report carries exactly one
+`WorkflowAgentFinalizationRequest` when the dispatch has a Workflow owner:
+
+```text
+WorkflowAgentFinalizationRequest {
+  workflowRunId
+  taskRunId
+  taskAttempt
+  jobId
+  sessionId
+  inputId
+  turnId
+  finalizerKey
+  result = {
+    status = completed | failed | cancelled
+    reason?
+    output?
+    capturedOutputs?
+    artifactUploadIds?
+    setVars?
+  }
+}
+```
+
+`AgentJobGrain` persists this envelope with the terminal result. Its durable
+terminal delivery invokes
+`IWorkflowGrain.ApplyAgentJobFinalizationAsync` rather than fabricating an
+ordinary Runner task report. The Server finalizer verifies every lineage field,
+checks that each artifact upload belongs to the same invocation and
+`finalizerKey`, then records a `WorkflowAgentFinalizationReceipt` containing
+the request fingerprint, applied artifact ids, and variable-patch fingerprint.
+It applies `setVars` only through a keyed
+`WorkflowRunVariablesStore.PatchVariablesIfNewAsync(workflowRunId,
+finalizerKey, vars)` operation and applies the existing Workflow completion or
+recovery boundary once.
+
+The same `finalizerKey` and payload replay the existing receipt as `Accepted`
+or `Stale` without repeating artifact binding, variable mutation, or task
+application. A conflicting payload is rejected as `finalization_conflict`; a
+transient storage or Workflow failure returns `Retry` and leaves the delivery
+obligation pending. The finalizer never derives facts from Session events and
+never changes the AgentJob terminal result. A Runner-side postcondition failure
+is reported as the stable failed `WorkflowAgentResult`, so Workflow recovery
+sees the same failure boundary as an ordinary Action.
 
 ### 7. Make uncertain work recovering and non-replayable
 
@@ -482,8 +536,9 @@ inventing a success or failure.
   Never replace it with a raw path or Runner default after acceptance.
 - [Workflow `expect`, artifact, and variable side effects cross from a
   Workflow owner to an AgentJob owner] -> Freeze a separate Workflow task
-  contract, run one shared finalizer under stable `(jobId, taskRunId)`
-  idempotency, and deliver only its structured result to WorkflowRun.
+  contract, let the Runner completion adapter prepare workspace facts, and let
+  the Server-side WorkflowAgentFinalizer validate artifacts and apply all
+  Workflow effects under the durable `finalizerKey` receipt.
 - [Workflow and Agent read surfaces could disagree during terminal delivery] ->
   AgentJob remains the sole execution authority; Workflow stores only lineage
   and application acknowledgement. Assemblers expose both the Job terminal
@@ -515,10 +570,11 @@ inventing a success or failure.
    the Job result is applied, but remove the Runner assignment and capacity
    accounting immediately after handoff.
 4. **Runner handoff and AgentJob execution:** implement virtual Action render /
-   validate plus the internal handoff command. Extend AgentJob dispatch with
-   the frozen Workflow task contract and implement the idempotent finalizer for
-   `expect`, artifacts, and `setVars`. Keep the AgentJob runtime branch above
-   ordinary Action resolution.
+   validate plus the typed internal handoff command. Extend AgentJob dispatch
+   with the frozen Workflow task contract and finalizer key; implement the
+   Runner completion adapter, invocation-keyed artifact upload route, and
+   Server-side WorkflowAgentFinalizer for `expect`, artifacts, and `setVars`.
+   Keep the AgentJob runtime branch above ordinary Action resolution.
 5. **Result and read projections:** implement the durable AgentJob-to-Workflow
    terminal delivery, Workflow result application, cross-links, status mapping,
    and `WorkflowAgentInvocationRead`. Add tests for every required lifecycle,

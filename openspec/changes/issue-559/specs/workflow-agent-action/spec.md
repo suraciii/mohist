@@ -124,6 +124,25 @@ The Workflow invocation MUST resolve its workspace through the canonical Agent l
 - **WHEN** the workspace's current home Runner is offline before execution
 - **THEN** admission MUST apply the direct Agent workspace-affinity and fallback rules, and MUST expose a stable waiting or failure reason rather than silently using an arbitrary path
 
+### Requirement: Workflow Agent completion finalization bridge
+An accepted Workflow AgentJob dispatch MUST carry a complete immutable `WorkflowTaskContract` containing `workflowRunId`, `taskRunId`, `taskAttempt`, `jobId`, `sessionId`, `inputId`, `turnId`, `finalizerKey`, `expect`, `artifacts`, `outputs`, `setVars`, and the declared recovery fields. `finalizerKey` MUST be the SHA-256 of canonical JSON for `(workflowRunId, taskRunId, taskAttempt, jobId)`, so it is deterministic for the accepted attempt. The authoritative `WorkflowAgentFinalizer` SHALL be Server-side and Workflow-owned. The Runner MAY evaluate workspace-dependent completion and capture artifacts, but it MUST NOT apply Workflow variables, send an ordinary Workflow task report, or advance WorkflowRun directly.
+
+The Runner completion adapter MUST evaluate `expect` against the structured Agent result and the persisted workspace, derive `_output` from the final assistant text in that result, and upload artifacts through `POST /api/runner/{runnerId}/agent-job-workflow-artifacts` with `workflowRunId`, `taskRunId`, `jobId`, `finalizerKey`, path, content type, content hash, and size. The Server artifact resolver MUST validate the immutable WorkflowAgentInvocation and Job identity without requiring active Workflow Runner work, compute a SHA-256 content hash when the request omits one, and make repeated uploads with the same `(finalizerKey, path, contentHash)` idempotent.
+
+The AgentJob terminal report MUST carry one typed `WorkflowAgentFinalizationRequest` containing the complete lineage, `finalizerKey`, terminal status/reason/output, captured outputs, artifact upload ids, and extracted `setVars`. Durable AgentJob terminal delivery SHALL invoke `IWorkflowGrain.ApplyAgentJobFinalizationAsync`. That operation MUST verify every lineage field, persist a `WorkflowAgentFinalizationReceipt` with the request fingerprint, apply `setVars` only through a keyed `PatchVariablesIfNewAsync(workflowRunId, finalizerKey, vars)` operation, and apply the existing Workflow completion or recovery boundary once. A replay with the same key and payload MUST return `Accepted` or `Stale` without repeating effects; a conflicting payload MUST be rejected as `finalization_conflict`; and a transient failure MUST return `Retry` while retaining the delivery obligation.
+
+#### Scenario: Workflow task side effects have a durable owner
+- **WHEN** an AgentJob completes for an accepted Workflow Agent invocation
+- **THEN** the Runner MUST send the typed finalization envelope with the frozen Workflow contract, and the Server-side WorkflowAgentFinalizer MUST own artifact validation, variable mutation, and Workflow task application
+
+#### Scenario: Workflow finalization is replayed
+- **WHEN** terminal AgentJob delivery repeats the same finalizer key and payload
+- **THEN** the Server MUST replay the existing finalization receipt and MUST NOT bind artifacts again, patch variables again, or apply the Workflow task twice
+
+#### Scenario: Finalization arrives after Workflow Runner work was cleared
+- **WHEN** the AgentJob finalizer receives artifact or variable effects after the handoff removed the original Workflow Runner assignment
+- **THEN** identity resolution MUST use `(workflowRunId, taskRunId, jobId, finalizerKey)` from the immutable invocation and MUST NOT derive TaskRun identity from active work or an AgentJob work id
+
 ### Requirement: Stable lifecycle and recovery projection
 The Workflow and Agent read projections for an accepted invocation MUST expose the stable status vocabulary `queued`, `executing`, `completed`, `failed`, `cancelled`, and `recovering`. An accepted invocation MUST begin as `queued`, become `executing` only after AgentJob execution is admitted and claimed, and enter exactly one terminal status. `recovering` MUST identify nonterminal reconciliation of dispatch, Runner loss, result delivery, Session delivery, or another uncertain execution fact. Recovery MUST NOT replay the prompt or synthesize a completed or failed result without authoritative evidence. A terminal status and its result MUST be immutable; late reports MUST be acknowledged as stale and MUST NOT rewrite it.
 
@@ -144,11 +163,11 @@ The Workflow and Agent read projections for an accepted invocation MUST expose t
 - **THEN** the invocation MUST report `failed` or `cancelled` with a stable reason and MUST release its shared admission resources exactly once
 
 ### Requirement: Stable result and Workflow arbitration
-The Action result returned to the Workflow MUST contain stable status, Job, Session, Input, and Turn identifiers, and a stable final result or reason when terminal. Nonterminal results MUST NOT fabricate final output. Workflow task advancement, retry, and recovery decisions MUST consume the AgentJob result projection and remain owned by the Workflow task lifecycle. Session transcript events MUST NOT independently advance the Workflow or decide the AgentJob result. The result contract MUST NOT require Workflow logic to parse internal transcript, Runtime, Runner, or provider payloads.
+The Action result returned to the Workflow MUST contain stable status, Job, Session, Input, and Turn identifiers, and a stable final result or reason when terminal. Nonterminal results MUST NOT fabricate final output. Workflow task advancement, retry, and recovery decisions MUST consume the AgentJob result projection through the typed WorkflowAgentFinalizationRequest and remain owned by the Workflow task lifecycle. Session transcript events MUST NOT independently advance the Workflow or decide the AgentJob result. The result contract MUST NOT require Workflow logic to parse internal transcript, Runtime, Runner, or provider payloads.
 
 #### Scenario: A completed result returns to the Workflow
 - **WHEN** the AgentJob completes with a structured result
-- **THEN** the Workflow task MUST receive that result through its stable Action projection and MUST be able to advance or project variables without parsing Session transcript parts
+- **THEN** the Workflow task MUST receive that result through the durable finalization bridge and MUST be able to advance or project variables without parsing Session transcript parts
 
 #### Scenario: A failed result enters Workflow recovery
 - **WHEN** the AgentJob fails with a stable failure reason
