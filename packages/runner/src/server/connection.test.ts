@@ -178,8 +178,8 @@ describe("ServerConnection workspace reclaimability", () => {
     ["active with no bound sessions", { status: "active", activeBoundSessions: 0 }, { status: "active", activeBoundSessions: 0 }],
     ["active with bound sessions", { status: "active", activeBoundSessions: 2 }, { status: "active", activeBoundSessions: 2 }],
     ["archived", { status: "archived", activeBoundSessions: 0 }, { status: "archived", activeBoundSessions: 0 }],
-  ] as const)("parses the %s answer", async (_label, payload, expected) => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }))
+  ] as const)("parses the wrapped %s answer", async (_label, data, expected) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data }), { status: 200, headers: { "content-type": "application/json" } }))
 
     const info = await new ServerConnection(options).getWorkspaceReclaimability("project-1", "pay", signal)
 
@@ -195,8 +195,10 @@ describe("ServerConnection workspace reclaimability", () => {
   })
 
   it.each([
-    ["an unknown status", JSON.stringify({ status: "suspended", activeBoundSessions: 0 }), "unknown status"],
-    ["a malformed count", JSON.stringify({ status: "active", activeBoundSessions: -1 }), "invalid session count"],
+    ["an unknown status", JSON.stringify({ data: { status: "suspended", activeBoundSessions: 0 } }), "unknown status"],
+    ["a malformed count", JSON.stringify({ data: { status: "active", activeBoundSessions: -1 } }), "invalid session count"],
+    ["a missing data envelope", JSON.stringify({ status: "active", activeBoundSessions: 0 }), "malformed response"],
+    ["a non-object data envelope", JSON.stringify({ data: null }), "malformed response"],
     ["malformed JSON", "not-json", "malformed JSON"],
   ])("rejects %s", async (_label, body, message) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": "application/json" } }))

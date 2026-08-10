@@ -437,7 +437,7 @@ export class ServerConnection {
     } catch {
       throw new Error("workspace reclaimability returned malformed JSON")
     }
-    return parseWorkspaceReclaimability(payload)
+    return parseWorkspaceReclaimability(readObject(payload, ["data"]))
   }
 
   async openAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession> {
