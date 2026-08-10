@@ -22,6 +22,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
     internal const string StopRecoveryReminderName = "stop-recovery";
     internal static readonly TimeSpan ScheduleRecoveryReminderPeriod = TimeSpan.FromMinutes(1);
     internal static readonly TimeSpan StopRecoveryReminderPeriod = TimeSpan.FromMinutes(1);
+    internal static readonly TimeSpan StopOperationDeadline = TimeSpan.FromMinutes(5);
     internal static readonly TimeSpan OneShotReminderPeriod = TimeSpan.FromMinutes(1);
     private const string OpenCodeRuntime = "opencode";
     private const string PiRuntime = "pi";
@@ -497,7 +498,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
             throw new InvalidOperationException("A follow-up operation is already in progress.");
-        if (session.Status.PendingStop is { } stop)
+        if (session.Status.PendingStop is { IsActive: true } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
         if (session.Status.Activity == AgentSessionActivity.Unknown)
             throw new SessionActivityUnknownException(session.Id);
@@ -597,7 +598,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
             throw new InvalidOperationException("A follow-up operation is already in progress.");
-        if (session.Status.PendingStop is { } stop)
+        if (session.Status.PendingStop is { IsActive: true } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
         if (session.Status.Activity == AgentSessionActivity.Unknown)
             throw new SessionActivityUnknownException(session.Id);
@@ -848,7 +849,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 
     private async Task EnsureStopRecoveryReminderAsync()
     {
-        if (_session?.Status.PendingStop is not null)
+        if (_session?.Status.PendingStop is { IsActive: true })
         {
             await this.RegisterOrUpdateReminder(
                 StopRecoveryReminderName,
@@ -906,9 +907,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
     {
         var session = await GetRequiredAsync();
         var claim = session.Status.PendingStop;
-        if (claim is null)
+        if (claim is not { IsActive: true })
         {
             await EnsureStopRecoveryReminderAsync();
+            return;
+        }
+
+        if (claim.DeadlineAt is { } deadline && deadline <= _timeProvider.GetUtcNow())
+        {
+            await ApplyStopDeliveryAsync(
+                claim.TurnId,
+                claim.OperationId,
+                AgentSessionStopDisposition.Blocked,
+                "stop-recovery-deadline-exhausted");
             return;
         }
 
@@ -935,54 +946,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             claim = session.Status.PendingStop ?? claim;
         }
 
-        var reply = await _sessionStopDelivery.DispatchAsync(request);
-        var state = reply?.State?.ToLowerInvariant();
-        if (state is null)
-        {
-            await EnsureStopRecoveryReminderAsync();
-            return;
-        }
-
-        if (state == "unknown")
-        {
-            var control = session.ResolveTurnControl(turn.Id);
-            if (control?.IsLaunchTurn == true && control.JobId is not null)
-            {
-                await _grains.GetGrain<IAgentJobGrain>(control.JobId).MarkUnknownAsync("stop-unconfirmed");
-            }
-            else
-            {
-                var events = session.MarkTurnTerminal(turn.Id, AgentTurnStatus.Unknown, null, Now());
-                if (events.Count > 0)
-                    await CommitAsync(session, events);
-                else
-                    await _stateStore.SaveAsync(SessionId, session);
-            }
-
-            await EnsureStopRecoveryReminderAsync();
-            await AbandonWorkflowWorkIfBoundAsync("runtime-stop-unknown");
-            return;
-        }
-
-        if (state == "stopped")
-        {
-            var events = session.MarkTurnTerminal(turn.Id, AgentTurnStatus.Cancelled, null, Now());
-            session.CompleteTurnStop(turn.Id, claim.OperationId);
-            if (events.Count > 0)
-                await CommitAsync(session, events);
-            else
-                await _stateStore.SaveAsync(SessionId, session);
-            await EnsureStopRecoveryReminderAsync();
-            await AbandonWorkflowWorkIfBoundAsync("session-stop");
-            return;
-        }
-
-        if (state == "not-cancellable")
-        {
-            session.CompleteTurnStop(turn.Id, claim.OperationId);
-            await _stateStore.SaveAsync(SessionId, session);
-            await EnsureStopRecoveryReminderAsync();
-        }
+        var result = SessionStopDeliveryArbitration.Interpret(
+            await _sessionStopDelivery.DispatchAsync(request));
+        await ApplyStopDeliveryAsync(turn.Id, claim.OperationId, result.Disposition);
     }
 
     private Task AbandonWorkflowWorkIfBoundAsync(string reason)
@@ -1515,7 +1481,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             .Any(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
         if (pending.Count > 0
             || hasNonTerminalTurn
-            || session.Status.PendingStop is not null
+            || session.Status.PendingStop is { IsActive: true }
             || session.Status.Activity != AgentSessionActivity.Idle)
             throw new InvalidOperationException(
                 $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session. "
@@ -2608,7 +2574,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             return;
 
         var pending = session.Status.PendingStop;
-        if (pending is not null
+        if (pending is { IsActive: true }
             && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
         {
             session.CompleteTurnStop(turnId, pending.OperationId);
@@ -3475,7 +3441,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
     public async Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId, string? operationId = null)
     {
         var session = await GetRequiredAsync();
-        var result = session.ClaimTurnStop(turnId, operationId);
+        var result = session.ClaimTurnStop(
+            turnId,
+            operationId,
+            _timeProvider.GetUtcNow(),
+            StopOperationDeadline);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
         await EnsureStopRecoveryReminderAsync();
@@ -3525,11 +3495,96 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
             return;
         var session = await GetRequiredAsync();
-        session.CompleteTurnStop(turnId, operationId);
+        session.SettleTurnStop(turnId, operationId, AgentSessionStopDisposition.NotCancellable);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
         await EnsureStopRecoveryReminderAsync();
     }
+
+    public async Task ApplyStopDeliveryAsync(
+        string turnId,
+        string operationId,
+        AgentSessionStopDisposition disposition,
+        string? reason = null)
+    {
+        if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
+            return;
+
+        var session = await GetRequiredAsync();
+        var pending = session.Status.PendingStop;
+        if (pending is null
+            || !pending.IsActive
+            || !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+            || !string.Equals(pending.OperationId, operationId, StringComparison.Ordinal))
+            return;
+
+        var control = session.ResolveTurnControl(turnId);
+        switch (disposition)
+        {
+            case AgentSessionStopDisposition.Unavailable:
+                await EnsureStopRecoveryReminderAsync();
+                return;
+
+            case AgentSessionStopDisposition.StopRequested:
+                session.SettleTurnStop(turnId, operationId, disposition, reason);
+                await _stateStore.SaveAsync(SessionId, session);
+                _session = session;
+                await EnsureStopRecoveryReminderAsync();
+                return;
+
+            case AgentSessionStopDisposition.Unknown:
+            case AgentSessionStopDisposition.Blocked:
+                if (control?.IsLaunchTurn == true && control.JobId is not null)
+                {
+                    await _grains.GetGrain<IAgentJobGrain>(control.JobId).MarkUnknownAsync(
+                        reason ?? "stop-unconfirmed");
+                }
+                else if (control is not null)
+                {
+                    var events = session.MarkTurnTerminal(turnId, AgentTurnStatus.Unknown, null, Now());
+                    if (events.Count > 0)
+                        await CommitAsync(session, events);
+                }
+
+                session.SettleTurnStop(turnId, operationId, disposition, reason);
+                await _stateStore.SaveAsync(SessionId, session);
+                _session = session;
+                await EnsureStopRecoveryReminderAsync();
+                await AbandonWorkflowWorkIfBoundAsync("runtime-stop-unknown");
+                return;
+
+            case AgentSessionStopDisposition.Stopped:
+                if (control is not null)
+                {
+                    var events = session.MarkTurnTerminal(turnId, AgentTurnStatus.Cancelled, null, Now());
+                    session.SettleTurnStop(turnId, operationId, disposition, reason);
+                    if (events.Count > 0)
+                        await CommitAsync(session, events);
+                    else
+                        await _stateStore.SaveAsync(SessionId, session);
+                }
+                else
+                {
+                    session.SettleTurnStop(turnId, operationId, disposition, reason);
+                    await _stateStore.SaveAsync(SessionId, session);
+                }
+
+                _session = session;
+                await EnsureStopRecoveryReminderAsync();
+                await AbandonWorkflowWorkIfBoundAsync("session-stop");
+                return;
+
+            default:
+                session.SettleTurnStop(turnId, operationId, disposition, reason);
+                await _stateStore.SaveAsync(SessionId, session);
+                _session = session;
+                await EnsureStopRecoveryReminderAsync();
+                return;
+        }
+    }
+
+    public async Task<AgentSessionStopClaim?> GetStopClaimAsync() =>
+        (await GetRequiredAsync()).Status.PendingStop;
 
     public async Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId)
     {

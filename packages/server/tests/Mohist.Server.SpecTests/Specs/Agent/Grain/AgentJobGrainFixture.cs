@@ -118,14 +118,16 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                 _responses.Enqueue(response);
         }
 
-        public Task<RunnerStopReply?> DispatchAsync(
+        public Task<SessionStopDeliveryResponse> DispatchAsync(
             SessionStopDeliveryRequest request,
             CancellationToken cancellationToken = default)
         {
             lock (_gate)
             {
                 _requests.Add(request);
-                return Task.FromResult(_responses.Count > 0 ? _responses.Dequeue() : null);
+                return Task.FromResult(new SessionStopDeliveryResponse(
+                    _responses.Count > 0 ? _responses.Dequeue() : null,
+                    DispatchStarted: true));
             }
         }
     }

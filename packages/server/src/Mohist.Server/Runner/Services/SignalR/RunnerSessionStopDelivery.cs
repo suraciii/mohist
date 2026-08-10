@@ -10,7 +10,7 @@ public sealed class RunnerSessionStopDelivery(
     RunnerConnectionTracker connections,
     ILogger<RunnerSessionStopDelivery> log) : ISessionStopDelivery, IScopedService
 {
-    public async Task<RunnerStopReply?> DispatchAsync(
+    public async Task<SessionStopDeliveryResponse> DispatchAsync(
         SessionStopDeliveryRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -19,7 +19,7 @@ public sealed class RunnerSessionStopDelivery(
             || string.IsNullOrWhiteSpace(request.Runtime)
             || string.IsNullOrWhiteSpace(request.RuntimeSessionId)
             || string.IsNullOrWhiteSpace(request.WorkDir))
-            return null;
+            return new(null, DispatchStarted: false);
 
         object binding = new
         {
@@ -47,7 +47,8 @@ public sealed class RunnerSessionStopDelivery(
 
         try
         {
-            return await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerStopReply?>(
+            return new(
+                await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerStopReply?>(
                 "CancelAgentSession",
                 new
                 {
@@ -56,7 +57,8 @@ public sealed class RunnerSessionStopDelivery(
                     turnId = request.TurnId,
                     operationId = request.OperationId,
                 },
-                cancellationToken);
+                cancellationToken),
+                DispatchStarted: true);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -70,7 +72,7 @@ public sealed class RunnerSessionStopDelivery(
                 request.RunnerId,
                 request.SessionId,
                 request.TurnId);
-            return null;
+            return new(null, DispatchStarted: true);
         }
     }
 }

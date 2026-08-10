@@ -143,6 +143,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Unknown)
         {
+            if (EnsureUnknownInitialTurnDelivery(State.FailureReason ?? AgentJobFailureReasons.RunnerUnavailable))
+            {
+                await EnsureRecoveryReminderAsync();
+                await PersistAsync();
+            }
             return;
         }
 
@@ -728,6 +733,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal)
             return;
 
+        if (State.Status == AgentJobStatus.Unknown)
+        {
+            if (EnsureUnknownInitialTurnDelivery(State.FailureReason ?? reason))
+                await PersistAsync();
+            await EnsureRecoveryReminderAsync();
+            return;
+        }
+
         var previousStatus = State.Status;
         State.Status = AgentJobStatus.Unknown;
         State.FailureReason = reason;
@@ -737,11 +750,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         DisposeJobTimeoutTimer();
 
-        await EnsureRecoveryReminderAsync();
-        await PersistAsync();
-
-        await PropagateUnknownToInitialTurnAsync(reason);
+        EnsureUnknownInitialTurnDelivery(reason);
         StageTerminalDeliveryEvent(AgentJobStatus.Unknown, reason, null, reason, "unknown", null, null);
+        await EnsureRecoveryReminderAsync();
         await PersistAsync();
         if (State.PendingTerminalDeliveryEvent is not null)
             await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
@@ -751,31 +762,47 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             Key, previousStatus, reason);
     }
 
-    private async Task PropagateUnknownToInitialTurnAsync(string reason)
+    private bool EnsureUnknownInitialTurnDelivery(string reason)
     {
         var sessionId = State.Input?.AgentSessionId;
         if (string.IsNullOrWhiteSpace(sessionId)
             || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
-            return;
+            return false;
 
+        if (State.PendingInitialTurnTerminalDelivery is not null)
+            return false;
+
+        State.PendingInitialTurnTerminalDelivery = new PendingInitialTurnTerminalDelivery(
+            AgentJobSessionDeliveryIds.InitialTurnUnknownDeliveryId(Key),
+            sessionId,
+            State.Input!.InitialTurnId!,
+            AgentTurnStatus.Unknown,
+            new AgentTurnResult(
+                Message: reason,
+                Output: null,
+                FailureReason: reason,
+                FailureCategory: "unknown",
+                ExitCode: null));
+        return true;
+    }
+
+    private async Task DeliverInitialTurnTerminalAsync(PendingInitialTurnTerminalDelivery pending)
+    {
         try
         {
-            var sessionGrain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var sessionGrain = _grains.GetGrain<IAgentSessionGrain>(pending.SessionId);
             await sessionGrain.MarkInitialTurnTerminalAsync(
                 Key,
-                AgentTurnStatus.Unknown,
-                new AgentTurnResult(
-                    Message: reason,
-                    Output: null,
-                    FailureReason: reason,
-                    FailureCategory: "unknown",
-                    ExitCode: null));
+                pending.Status,
+                pending.Result);
+            State.PendingInitialTurnTerminalDelivery = null;
+            await PersistAsync();
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
-                "AgentJob {Id} could not propagate unknown verdict to initial turn on session {SessionId}; reminder will retry",
-                Key, sessionId);
+                "AgentJob {Id} could not deliver initial-turn verdict to session {SessionId}; deliveryId={DeliveryId} retained for retry",
+                Key, pending.SessionId, pending.DeliveryId);
         }
     }
 
@@ -1869,8 +1896,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Unknown)
         {
-            await PropagateUnknownToInitialTurnAsync(State.FailureReason
-                ?? AgentJobFailureReasons.RunnerUnavailable);
+            if (State.PendingInitialTurnTerminalDelivery is { } pending)
+                await DeliverInitialTurnTerminalAsync(pending);
+            if (State.PendingInitialTurnTerminalDelivery is null)
+                await UnregisterSelfAsync(reminderName);
             return;
         }
 

@@ -139,8 +139,7 @@ public static partial class IssueRoutes
             SessionStopRequest? request,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
-            IHubContext<RunnerHub> runnerHub,
-            RunnerConnectionTracker connections,
+            ISessionStopDelivery stopDelivery,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
@@ -156,8 +155,7 @@ public static partial class IssueRoutes
                 request,
                 sessions,
                 grains,
-                runnerHub,
-                connections,
+                stopDelivery,
                 idempotencyKey,
                 ct);
         });

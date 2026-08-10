@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Api;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -61,6 +62,82 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
         Assert.Equal(2, requests.Count);
         Assert.All(requests, request => Assert.Equal("stop-recovery-operation", request.OperationId));
         Assert.Equal(AgentTurnStatus.Cancelled, Assert.Single(await session.ListTurnsAsync()).Status);
+    }
+
+    [Fact]
+    public async Task RecoveryReminder_DeadlineExhausted_SettlesBlockedWithoutAnotherDelivery()
+    {
+        _fixture.StopDelivery.Reset();
+        var sessionId = $"session-stop-deadline-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-stop-deadline",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/stop-deadline",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                $"project-stop-deadline-{Guid.NewGuid():N}", "agent-test", "agent-test"))));
+        await session.AttachPhysicalSessionAsync(
+            new AttachPhysicalSessionCommand("runtime-stop-deadline", WorkDir: "/tmp/stop-deadline"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        const string turnId = "turn-stop-deadline";
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-stop-deadline", turnId, "follow up", "generic-followup"));
+        await session.MarkTurnExecutingAsync(turnId);
+        Assert.True((await session.ClaimTurnStopAsync(turnId, "stop-deadline-operation")).CanDispatch);
+
+        await session.RunStopRecoveryAsync();
+        Assert.Single(_fixture.StopDelivery.Requests);
+
+        _fixture.TimeProvider.Advance(AgentSessionGrain.StopOperationDeadline);
+        await session.RunStopRecoveryAsync();
+
+        Assert.Single(_fixture.StopDelivery.Requests);
+        var claim = await session.GetStopClaimAsync();
+        Assert.Equal(AgentSessionStopDisposition.Blocked, claim?.Disposition);
+        Assert.Equal("stop-recovery-deadline-exhausted", claim?.Reason);
+        Assert.Equal(AgentTurnStatus.Unknown, Assert.Single(await session.ListTurnsAsync()).Status);
+    }
+
+    [Fact]
+    public async Task RecoveryUnknown_PersistsJobDeliveryBeforeTheAsyncSessionLeg()
+    {
+        _fixture.StopDelivery.Reset();
+        _fixture.StopDelivery.Enqueue(new RunnerStopReply("unknown"));
+
+        var sessionId = $"session-stop-one-way-{Guid.NewGuid():N}";
+        var jobId = $"job-stop-one-way-{Guid.NewGuid():N}";
+        const string inputId = "input-stop-one-way";
+        const string turnId = "turn-stop-one-way";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-stop-one-way",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/stop-one-way",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                $"project-stop-one-way-{Guid.NewGuid():N}", "agent-test", "agent-test"))));
+        await session.AttachPhysicalSessionAsync(
+            new AttachPhysicalSessionCommand("runtime-stop-one-way", WorkDir: "/tmp/stop-one-way"));
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId, turnId, "stop launch", "agent-launch", jobId));
+        await session.MarkInitialTurnExecutingAsync(jobId);
+
+        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            sessionId, inputId, turnId, "stop launch", AgentId: "agent-test"));
+        Assert.True((await session.ClaimTurnStopAsync(turnId, "stop-one-way-operation")).CanDispatch);
+
+        await session.RunStopRecoveryAsync();
+
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(await session.ListTurnsAsync()).Status);
+        Assert.Equal(AgentSessionStopDisposition.Unknown, (await session.GetStopClaimAsync())?.Disposition);
+
+        await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+        Assert.Equal(AgentTurnStatus.Unknown, Assert.Single(await session.ListTurnsAsync()).Status);
+
+        await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+        Assert.Equal(AgentTurnStatus.Unknown, Assert.Single(await session.ListTurnsAsync()).Status);
     }
 
     [Fact]
