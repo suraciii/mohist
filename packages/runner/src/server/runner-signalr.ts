@@ -45,6 +45,7 @@ import type { FollowupOperationJournalStore } from "../runtime/followup-operatio
 import type { CancelOperationJournalStore } from "../runtime/cancel-operation-journal.js"
 import type { BindingRecoveryCoordinator } from "../runtime/binding-recovery.js"
 import type { ServerConnection } from "./connection.js"
+import type { BuildInfo } from "../runtime/build-info.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
 import {
   callSessionCommand,
@@ -142,11 +143,19 @@ export class RunnerSignalRClient {
     private readonly runnerRoot: string,
     buildGitHash: string | null = null,
     options: RunnerSignalRClientOptions = {},
+    buildInfo: BuildInfo | null = null,
   ) {
     const baseUrl = serverUrl.replace(/\/$/, "")
     const params = new URLSearchParams()
     params.set("runnerId", runnerId)
     if (buildGitHash) params.set("buildGitHash", buildGitHash)
+    if (buildInfo?.component) params.set("component", buildInfo.component)
+    if (buildInfo?.version) params.set("version", buildInfo.version)
+    if (buildInfo?.sourceRevision ?? buildInfo?.gitHash) params.set("sourceRevision", buildInfo.sourceRevision ?? buildInfo.gitHash!)
+    if (buildInfo?.treeHash) params.set("treeHash", buildInfo.treeHash)
+    if (buildInfo?.artifactDigest) params.set("artifactDigest", buildInfo.artifactDigest)
+    if (buildInfo?.releaseId) params.set("releaseId", buildInfo.releaseId)
+    if (buildInfo?.generation) params.set("generation", String(buildInfo.generation))
     this.probeTimeoutMs = options.probeTimeoutMs ?? 5_000
     this.onReconnected = options.onReconnected
     this.connection = new signalR.HubConnectionBuilder()

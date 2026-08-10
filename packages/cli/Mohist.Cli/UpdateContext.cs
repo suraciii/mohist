@@ -61,19 +61,26 @@ internal static class CliOutcomeJson
 /// </summary>
 internal sealed class UpdateContext
 {
-    public UpdateContext(bool dryRun, string? repoRoot, string? cliPath, CancellationToken cancellationToken)
+    public UpdateContext(
+        bool dryRun,
+        string? repoRoot,
+        string? cliPath,
+        CancellationToken cancellationToken,
+        TimeProvider? timeProvider = null)
     {
         DryRun = dryRun;
         RepoRoot = repoRoot;
         CliPath = cliPath;
         CancellationToken = cancellationToken;
         JobId = Guid.NewGuid().ToString("N");
+        TimeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public bool DryRun { get; }
     public string? RepoRoot { get; }
     public string? CliPath { get; }
     public CancellationToken CancellationToken { get; }
+    public TimeProvider TimeProvider { get; }
 
     public string JobId { get; }
     public UpdateStage Stage { get; set; } = UpdateStage.Start;
@@ -89,6 +96,9 @@ internal sealed class UpdateContext
     public string? UnavailableCapability { get; set; }
     public string? SourceHead { get; set; }
     public int LastExitCode { get; set; }
+    public UpdateSourceContext? SourceContext { get; set; }
+    public RuntimeTargetSet? ExpectedTargets { get; set; }
+    public ManagedUpdateSession? ManagedSession { get; set; }
 
     public void RecordWarning(string warning)
     {
@@ -97,7 +107,7 @@ internal sealed class UpdateContext
 
     public void RecordStage(string label, string message)
     {
-        StageLogEntries.Add(new UpdateStageLogEntry(label, message, DateTimeOffset.UtcNow));
+        StageLogEntries.Add(new UpdateStageLogEntry(label, message, TimeProvider.GetUtcNow()));
     }
 
     public void RecordRuntimeCheck(RuntimeCheckResult check)

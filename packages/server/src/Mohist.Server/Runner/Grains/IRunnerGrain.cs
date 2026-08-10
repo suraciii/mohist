@@ -40,6 +40,16 @@ public interface IRunnerGrain : IGrainWithStringKey
     [AlwaysInterleave]
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
+    Task UpdateRuntimeIdentityAsync(
+        string? buildGitHash,
+        string? component,
+        string? version,
+        string? sourceRevision,
+        string? treeHash,
+        string? artifactDigest,
+        string? releaseId,
+        long? generation,
+        string? connectionGeneration = null);
     Task<RunnerInfo?> GetInfoAsync();
 
     /// <summary>
@@ -118,7 +128,15 @@ public record RunnerInfo(
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
     ActionCatalog? ActionCatalog = null,
-    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null,
+    string? Component = null,
+    string? Version = null,
+    string? SourceRevision = null,
+    string? TreeHash = null,
+    string? ArtifactDigest = null,
+    string? ReleaseId = null,
+    long? Generation = null,
+    string? ConnectionGeneration = null);
 
 [GenerateSerializer]
 public record WorkDispatch(

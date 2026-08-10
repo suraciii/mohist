@@ -11,22 +11,13 @@ public static class SystemRoutes
         app.MapGet("/api/system/info", async (SystemInfoService systemInfo, CancellationToken ct) =>
             ApiResults.Ok(await systemInfo.GetSystemInfoAsync())).RequireScopes(Scope.Operator);
 
-        app.MapPost("/api/system/update", async (SystemUpdateRequest? request, SystemUpdateService updates, CancellationToken ct) =>
-        {
-            var result = await updates.StartAsync(request ?? new SystemUpdateRequest(), ct);
-            if (!result.Started)
-            {
-                return result.Code == "update_in_progress"
-                    ? ApiResults.Conflict(result.Error ?? "A system update is already in progress", result.Code)
-                    : ApiResults.Fail(result.Error ?? "System update failed", 400, result.Code);
-            }
-
-            return Results.Json(
-                new ApiResponse<SystemUpdateStartResponse>(
-                    true,
-                    new SystemUpdateStartResponse(result.Status!)),
-                statusCode: 202);
-        }).RequireScopes(Scope.Operator);
+        app.MapPost(
+            "/api/system/update",
+            () => ApiResults.Fail(
+                "Server-initiated updates are disabled; run mo update with --repo-root",
+                409,
+                "cli_only_update"))
+            .RequireScopes(Scope.Operator);
 
         app.MapGet("/api/system/update/status", async (SystemUpdateService updates, CancellationToken ct) =>
         {

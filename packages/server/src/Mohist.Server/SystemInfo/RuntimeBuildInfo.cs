@@ -8,6 +8,10 @@ public interface IRuntimeBuildInfo
     string? Version { get; }
     string? GitHash { get; }
     DateTimeOffset StartedAt { get; }
+    string? TreeHash => null;
+    string? ArtifactDigest => null;
+    string? ReleaseId => null;
+    long Generation => 0;
 }
 
 public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
@@ -17,14 +21,59 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     public string? Version { get; }
     public string? GitHash { get; }
     public DateTimeOffset StartedAt { get; }
+    public string? TreeHash { get; }
+    public string? ArtifactDigest { get; }
+    public string? ReleaseId { get; }
+    public long Generation { get; }
 
     public RuntimeBuildInfo(
         IEnvironmentVariableProvider environment,
         IRuntimeSourceIdentity sourceIdentity,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IFileSystem? fileSystem = null)
     {
         StartedAt = timeProvider.GetUtcNow();
+        var managed = ReadManagedIdentity(environment, fileSystem);
+        if (managed is not null)
+        {
+            Version = managed.Version;
+            GitHash = managed.SourceRevision;
+            TreeHash = managed.TreeHash;
+            ArtifactDigest = managed.ArtifactDigest;
+            ReleaseId = managed.ReleaseId;
+            Generation = managed.Generation;
+            return;
+        }
+
         (Version, GitHash) = ResolveIdentity(environment, sourceIdentity);
+        TreeHash = null;
+        ArtifactDigest = null;
+        ReleaseId = null;
+        Generation = 0;
+    }
+
+    public const string RuntimeIdentityPathEnvironmentVariable = "MOHIST_RUNTIME_IDENTITY_PATH";
+
+    private static RuntimeIdentityMetadata? ReadManagedIdentity(
+        IEnvironmentVariableProvider environment,
+        IFileSystem? fileSystem)
+    {
+        var path = environment.GetEnvironmentVariable(RuntimeIdentityPathEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        try
+        {
+            var json = fileSystem is null ? File.ReadAllText(path) : fileSystem.ReadAllText(path);
+            var identity = System.Text.Json.JsonSerializer.Deserialize<RuntimeIdentityMetadata>(json);
+            return identity is { IsComplete: true } ? identity : null;
+        }
+        catch
+        {
+            // A managed process must not silently claim source checkout identity when its
+            // immutable runtime identity is absent or malformed.
+            return new RuntimeIdentityMetadata(null, null, null, null, null, null, 0);
+        }
     }
 
     private static (string? Version, string? GitHash) ResolveIdentity(
@@ -76,4 +125,23 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         return (version, string.IsNullOrWhiteSpace(gitHash) ? null : gitHash);
     }
 
+}
+
+internal sealed record RuntimeIdentityMetadata(
+    string? Component,
+    string? Version,
+    string? SourceRevision,
+    string? TreeHash,
+    string? ArtifactDigest,
+    string? ReleaseId,
+    long Generation)
+{
+    public bool IsComplete =>
+        !string.IsNullOrWhiteSpace(Component)
+        && !string.IsNullOrWhiteSpace(Version)
+        && !string.IsNullOrWhiteSpace(SourceRevision)
+        && !string.IsNullOrWhiteSpace(TreeHash)
+        && !string.IsNullOrWhiteSpace(ArtifactDigest)
+        && !string.IsNullOrWhiteSpace(ReleaseId)
+        && Generation > 0;
 }

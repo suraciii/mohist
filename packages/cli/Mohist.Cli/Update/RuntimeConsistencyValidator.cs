@@ -117,6 +117,42 @@ internal sealed class RuntimeConsistencyValidator
             $"Server identity matches source HEAD '{sourceHead}'");
     }
 
+    internal async Task<RuntimeCheckResult> VerifyServerRuntimeIdentityAsync(
+        RuntimeIdentity expected,
+        CancellationToken token)
+    {
+        var info = await TryGetSystemInfoAsync(token);
+        var running = info?.Running;
+        if (running is null)
+        {
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
+                "GET /api/system/info did not provide a running identity");
+        }
+
+        var actual = new RuntimeIdentity(
+            "server",
+            running.Version ?? string.Empty,
+            running.SourceRevision ?? running.GitHash ?? string.Empty,
+            running.TreeHash ?? string.Empty,
+            running.ArtifactDigest ?? string.Empty,
+            running.ReleaseId ?? string.Empty,
+            running.Generation);
+        if (!actual.IsComplete)
+        {
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
+                "Server did not report a complete managed runtime identity");
+        }
+
+        if (!actual.Matches(expected))
+        {
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
+                $"Server identity differs from candidate {expected.SourceRevision}/{expected.ArtifactDigest}");
+        }
+
+        return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Pass,
+            $"Server identity matches release {expected.ReleaseId}");
+    }
+
     internal async Task<RuntimeCheckResult> CheckWebAssetsAsync(UpdateContext context, CancellationToken token)
     {
         try
@@ -433,6 +469,24 @@ internal sealed class RuntimeConsistencyValidator
     {
         [System.Text.Json.Serialization.JsonPropertyName("gitHash")]
         public string? GitHash { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("version")]
+        public string? Version { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("sourceRevision")]
+        public string? SourceRevision { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("treeHash")]
+        public string? TreeHash { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("artifactDigest")]
+        public string? ArtifactDigest { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("releaseId")]
+        public string? ReleaseId { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("generation")]
+        public long Generation { get; set; }
     }
 
     private sealed class SystemInfoServiceSnapshot

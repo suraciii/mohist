@@ -37,7 +37,14 @@ public static class RunnerRoutes
                 BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
                 CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
                 ActionCatalog: req.ActionCatalog,
-                RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs)));
+                RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
+                Component: NormalizeIdentity(req.Component),
+                Version: NormalizeIdentity(req.Version),
+                SourceRevision: NormalizeIdentity(req.SourceRevision) ?? NormalizeBuildGitHash(req.BuildGitHash),
+                TreeHash: NormalizeIdentity(req.TreeHash),
+                ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
+                ReleaseId: NormalizeIdentity(req.ReleaseId),
+                Generation: req.Generation > 0 ? req.Generation : null));
             return Results.Ok();
         });
 
@@ -66,7 +73,14 @@ public static class RunnerRoutes
                     BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
                     CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
                     ActionCatalog: req.ActionCatalog,
-                    RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs));
+                    RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
+                    Component: NormalizeIdentity(req.Component),
+                    Version: NormalizeIdentity(req.Version),
+                    SourceRevision: NormalizeIdentity(req.SourceRevision) ?? NormalizeBuildGitHash(req.BuildGitHash),
+                    TreeHash: NormalizeIdentity(req.TreeHash),
+                    ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
+                    ReleaseId: NormalizeIdentity(req.ReleaseId),
+                    Generation: req.Generation > 0 ? req.Generation : null);
                 await runner.HeartbeatRepairAsync(info);
 
                 if (!string.IsNullOrWhiteSpace(req.ConnectionId))
@@ -799,6 +813,8 @@ public static class RunnerRoutes
         return trimmed.Length > 0 ? trimmed : null;
     }
 
+    private static string? NormalizeIdentity(string? value) => NormalizeBuildGitHash(value);
+
     private static Dictionary<string, string[]>? NormalizeCoderModelVariants(Dictionary<string, string[]>? variants)
     {
         if (variants is null || variants.Count == 0)
@@ -893,7 +909,14 @@ public record RunnerRegisterRequest(
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
     ActionCatalog? ActionCatalog = null,
-    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null,
+    string? Component = null,
+    string? Version = null,
+    string? SourceRevision = null,
+    string? TreeHash = null,
+    string? ArtifactDigest = null,
+    string? ReleaseId = null,
+    long? Generation = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
 public record RunnerHeartbeatRequest(
@@ -905,7 +928,14 @@ public record RunnerHeartbeatRequest(
     Dictionary<string, string[]>? CoderModelVariants = null,
     string? ConnectionId = null,
     ActionCatalog? ActionCatalog = null,
-    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null,
+    string? Component = null,
+    string? Version = null,
+    string? SourceRevision = null,
+    string? TreeHash = null,
+    string? ArtifactDigest = null,
+    string? ReleaseId = null,
+    long? Generation = null);
 public record RunnerReportRequest(
     string WorkId,
     string Status,

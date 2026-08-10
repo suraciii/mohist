@@ -74,7 +74,8 @@ internal sealed class UpdateTestFactory
         TimeSpan? runnerIdentityPollInterval = null,
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        bool managedUpdatesEnabled = false)
     {
         var home = userHome ?? Root;
         return SourceCodeUpdater.CreateWithDefaults(
@@ -91,7 +92,8 @@ internal sealed class UpdateTestFactory
             runnerIdentityPollInterval: runnerIdentityPollInterval,
             getLocalHostname: getLocalHostname,
             unitDir: unitDir,
-            timeProvider: timeProvider);
+            timeProvider: timeProvider,
+            managedUpdatesEnabled: managedUpdatesEnabled);
     }
 
     public static string HealthySystemInfoJson(string runningGitHash = "abc123", string runnerStatus = "active")

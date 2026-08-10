@@ -1,0 +1,596 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+namespace Mohist.Cli;
+
+internal sealed record ManagedUpdateSession(
+    UpdateSourceContext Context,
+    RuntimeTargetSet Targets,
+    RuntimeTargetSet? PreviousTargets,
+    string ReleaseRoot,
+    string Scope);
+
+/// <summary>
+/// Owns the source snapshot to installed release boundary. A service target is only changed after
+/// every requested payload has been published into the managed runtime root and its identity has
+/// been written. Active and transaction records are replaced with a single file move so recovery
+/// never has to infer a release from the source checkout.
+/// </summary>
+internal sealed class ManagedRuntimeTransaction
+{
+    private readonly TextWriter _out;
+    private readonly TextWriter _err;
+    private readonly ICommandExecutor _commands;
+    private readonly IFileSystem _files;
+    private readonly IEnvironmentVariableProvider _environment;
+    private readonly UpdateSourceResolver _sourceResolver;
+    private readonly IManagedRuntimeActivator _activator;
+    private readonly string? _unitDir;
+
+    public ManagedRuntimeTransaction(
+        TextWriter output,
+        TextWriter error,
+        ICommandExecutor commands,
+        IFileSystem files,
+        IEnvironmentVariableProvider environment,
+        UpdateSourceResolver sourceResolver,
+        IManagedRuntimeActivator activator,
+        string? unitDir = null)
+    {
+        _out = output;
+        _err = error;
+        _commands = commands;
+        _files = files;
+        _environment = environment;
+        _sourceResolver = sourceResolver;
+        _activator = activator;
+        _unitDir = unitDir;
+    }
+
+    public async Task<(ManagedUpdateSession? Session, string? Error)> PrepareAsync(
+        string? repoRoot,
+        string scope,
+        string transactionId,
+        string? cliPath,
+        CancellationToken cancellationToken = default)
+    {
+        var resolved = await _sourceResolver.ResolveAsync(
+            repoRoot,
+            scope,
+            transactionId,
+            cliPath,
+            cancellationToken);
+        if (resolved.Context is null)
+            return (null, resolved.Error ?? "source identity could not be established");
+
+        var context = resolved.Context;
+        var unchanged = await _sourceResolver.VerifyUnchangedAsync(context, cancellationToken);
+        if (unchanged is not null)
+            return (null, unchanged);
+
+        var previous = ReadVerifiedTargets(context.RuntimeRoot);
+        var generation = previous?.Generation is > 0 ? previous.Generation + 1 : 1;
+        var built = new Dictionary<string, BuiltRuntime>(StringComparer.Ordinal);
+        RuntimeTargetSet? activatedTargets = null;
+        var activePointerWritten = false;
+
+        try
+        {
+            if (Includes(scope, "cli"))
+            {
+                var cli = await PublishDotnetAsync(
+                    context,
+                    "cli",
+                    Path.Combine("packages", "cli", "Mohist.Cli", "Mohist.Cli.csproj"),
+                    generation,
+                    cancellationToken);
+                if (cli is null)
+                    return (null, "CLI candidate publish failed");
+                built["cli"] = cli;
+            }
+
+            if (Includes(scope, "server"))
+            {
+                var server = await PublishDotnetAsync(
+                    context,
+                    "server",
+                    Path.Combine("packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj"),
+                    generation,
+                    cancellationToken);
+                if (server is null)
+                    return (null, "Server candidate publish failed");
+                built["server"] = server;
+            }
+
+            if (Includes(scope, "runner"))
+            {
+                var runner = await BuildRunnerAsync(context, generation, cancellationToken);
+                if (runner is null)
+                    return (null, "Runner candidate build or install failed");
+                built["runner"] = runner;
+            }
+
+            unchanged = await _sourceResolver.VerifyUnchangedAsync(context, cancellationToken);
+            if (unchanged is not null)
+                return (null, unchanged);
+
+            var releaseId = context.Source.ReleaseId(scope);
+            var releaseRoot = Path.Combine(
+                context.RuntimeRoot,
+                "releases",
+                $"{releaseId}-g{generation}").Replace('\\', '/');
+            if (_files.Exists(releaseRoot))
+                return (null, $"managed release target already exists: {releaseRoot}");
+
+            var releaseParent = Path.GetDirectoryName(releaseRoot);
+            if (string.IsNullOrWhiteSpace(releaseParent))
+                return (null, "managed release parent is unavailable");
+            _files.CreateDirectory(releaseParent);
+            _files.Move(context.CandidateRoot, releaseRoot);
+
+            var targets = BuildTargetSet(context, releaseRoot, generation, previous, built);
+            if (!targets.IsCompleteFor(scope))
+                return (null, "candidate target set is incomplete");
+            if (!targets.Cli?.IsAbsoluteTarget ?? false)
+                return (null, "candidate CLI target is not absolute");
+            if (targets.Server is not null && !targets.Server.IsAbsoluteTarget)
+                return (null, "candidate Server target is not absolute");
+            if (targets.Runner is not null && !targets.Runner.IsAbsoluteTarget)
+                return (null, "candidate Runner target is not absolute");
+
+            var transactionPath = Path.Combine(
+                context.RuntimeRoot,
+                "transactions",
+                context.TransactionId,
+                "state.json").Replace('\\', '/');
+            WriteAtomic(transactionPath, targets with { Status = "candidate-staged", Previous = previous });
+            WriteAtomic(
+                Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                targets with { Status = "candidate-activated", Previous = null });
+            activatedTargets = targets;
+            activePointerWritten = true;
+
+            var activation = await _activator.ApplyManagedRuntimeAsync(
+                targets,
+                scope,
+                _unitDir,
+                cancellationToken);
+            if (activation != 0)
+            {
+                await RestoreAfterFailureAsync(context, previous, scope, activation, "service activation failed", CancellationToken.None);
+                return (null, $"managed service activation failed with exit code {activation}");
+            }
+
+            _out.WriteLine($"Staged managed {scope} release {releaseId} from source {context.Source.GitCommit}.");
+            return (new ManagedUpdateSession(context, targets, previous, releaseRoot, scope), null);
+        }
+        catch (OperationCanceledException)
+        {
+            if (activePointerWritten && activatedTargets is not null)
+                await RestoreAfterFailureAsync(context, previous, scope, 1, "managed update was cancelled", CancellationToken.None);
+            return (null, "managed update was cancelled before activation completed");
+        }
+        catch (Exception ex)
+        {
+            if (activePointerWritten && activatedTargets is not null)
+                await RestoreAfterFailureAsync(context, previous, scope, 1, "managed update staging failed", CancellationToken.None);
+            _err.WriteLine($"Managed update staging failed: {ex.Message}");
+            return (null, "managed update staging failed");
+        }
+    }
+
+    public async Task<int> CommitAsync(ManagedUpdateSession session, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var committed = session.Targets with { Status = "verified", Previous = null };
+            WriteAtomic(
+                Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                committed);
+            WriteAtomic(
+                Path.Combine(session.Context.RuntimeRoot, "verified.json").Replace('\\', '/'),
+                committed);
+            WriteAtomic(
+                Path.Combine(session.Context.RuntimeRoot, "transactions", session.Context.TransactionId, "state.json").Replace('\\', '/'),
+                committed);
+            await Task.CompletedTask;
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Managed runtime commit failed: {ex.Message}");
+            return 1;
+        }
+    }
+
+    public async Task<int> RollbackAsync(
+        ManagedUpdateSession session,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var restoreCode = await _activator.RestoreManagedRuntimeAsync(
+                session.PreviousTargets,
+                session.Scope,
+                _unitDir,
+                cancellationToken);
+            if (restoreCode != 0)
+            {
+                WriteAtomic(
+                    Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                    NoneTargets(session));
+                _err.WriteLine($"Managed runtime rollback failed with exit code {restoreCode}; no runtime is trusted. Reason: {reason}");
+                return restoreCode;
+            }
+
+            WriteAtomic(
+                Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                session.PreviousTargets is null
+                    ? NoneTargets(session)
+                    : session.PreviousTargets with { Status = "verified", Previous = null });
+            WriteAtomic(
+                Path.Combine(session.Context.RuntimeRoot, "transactions", session.Context.TransactionId, "state.json").Replace('\\', '/'),
+                session.Targets with { Status = "rolled-back", Previous = session.PreviousTargets });
+            _err.WriteLine($"Managed runtime rolled back after {reason}.");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            WriteAtomic(
+                Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                NoneTargets(session));
+            _err.WriteLine($"Managed runtime rollback could not be proven: {ex.Message}");
+            return 1;
+        }
+    }
+
+    public RuntimeTargetSet? ReadVerifiedTargets(string runtimeRoot)
+    {
+        var path = Path.Combine(runtimeRoot, "verified.json").Replace('\\', '/');
+        if (!_files.Exists(path))
+            return null;
+
+        try
+        {
+            var value = JsonSerializer.Deserialize<RuntimeTargetSet>(_files.ReadAllText(path), JsonOptions);
+            return value is { Status: "verified" } && IsTrusted(value) ? value : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<BuiltRuntime?> PublishDotnetAsync(
+        UpdateSourceContext context,
+        string component,
+        string projectRelativePath,
+        long generation,
+        CancellationToken cancellationToken)
+    {
+        var root = Path.Combine(context.CandidateRoot, component).Replace('\\', '/');
+        _files.CreateDirectory(root);
+        var project = Path.Combine(context.SnapshotRoot, projectRelativePath).Replace('\\', '/');
+        var args = new[]
+        {
+            "publish",
+            project,
+            "-c", "Release",
+            "-r", UpdateOperations.RuntimeIdentifier(),
+            "--self-contained", "true",
+            "/p:PublishSingleFile=true",
+            $"/p:InformationalVersion={context.Version}",
+            $"/p:SourceRevisionId={context.Source.GitCommit}",
+            "-o", root,
+        };
+        var (exitCode, stdout, stderr) = await _commands.ExecuteAsync(
+            "dotnet", args, context.BuildWorkspaceRoot, cancellationToken);
+        if (exitCode != 0)
+        {
+            WriteCommandFailure(stdout, stderr);
+            return null;
+        }
+
+        var entryName = component == "cli" ? "Mohist.Cli" : "Mohist.Server";
+        return await CompleteArtifactAsync(context, component, root, entryName, generation, cancellationToken);
+    }
+
+    private async Task<BuiltRuntime?> BuildRunnerAsync(
+        UpdateSourceContext context,
+        long generation,
+        CancellationToken cancellationToken)
+    {
+        var runnerSource = Path.Combine(context.SnapshotRoot, "packages", "runner").Replace('\\', '/');
+        var runnerRoot = Path.Combine(context.CandidateRoot, "runner").Replace('\\', '/');
+        var distRoot = Path.Combine(runnerRoot, "dist").Replace('\\', '/');
+        _files.CreateDirectory(runnerRoot);
+        _files.CreateDirectory(distRoot);
+
+        var (install, installOut, installErr) = await _commands.ExecuteAsync(
+            "npm", ["ci", "--ignore-scripts"], context.SnapshotRoot, cancellationToken);
+        if (install != 0)
+        {
+            WriteCommandFailure(installOut, installErr);
+            return null;
+        }
+
+        var (build, buildOut, buildErr) = await _commands.ExecuteAsync(
+            "npm", ["run", "build", "-w", "packages/runner"], context.SnapshotRoot, cancellationToken);
+        if (build != 0)
+        {
+            WriteCommandFailure(buildOut, buildErr);
+            return null;
+        }
+
+        var copies = new[]
+        {
+            (Path.Combine(runnerSource, "dist").Replace('\\', '/'), distRoot),
+            (Path.Combine(runnerSource, "package.json").Replace('\\', '/'), Path.Combine(runnerRoot, "package.json").Replace('\\', '/')),
+            (Path.Combine(context.SnapshotRoot, "node_modules").Replace('\\', '/'), Path.Combine(runnerRoot, "node_modules").Replace('\\', '/')),
+        };
+        foreach (var (source, target) in copies)
+        {
+            var (copy, copyOut, copyErr) = await _commands.ExecuteAsync(
+                "cp", ["-RL", source, target], context.BuildWorkspaceRoot, cancellationToken);
+            if (copy != 0)
+            {
+                WriteCommandFailure(copyOut, copyErr);
+                return null;
+            }
+        }
+
+        return await CompleteArtifactAsync(context, "runner", runnerRoot, "dist/cli.js", generation, cancellationToken);
+    }
+
+    private async Task<BuiltRuntime?> CompleteArtifactAsync(
+        UpdateSourceContext context,
+        string component,
+        string root,
+        string entryRelativePath,
+        long generation,
+        CancellationToken cancellationToken)
+    {
+        var payload = _files.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !IsMetadataPath(path))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        if (payload.Length == 0)
+        {
+            _err.WriteLine($"{component} publish completed without an installed payload at {root}.");
+            return null;
+        }
+
+        var entry = Path.Combine(root, entryRelativePath).Replace('\\', '/');
+        if (!_files.Exists(entry))
+        {
+            _err.WriteLine($"{component} publish did not produce required entrypoint {entry}.");
+            return null;
+        }
+
+        var artifactDigest = ComputeArtifactDigest(root, payload);
+        var identity = new RuntimeIdentity(
+            component,
+            context.Version,
+            context.Source.GitCommit,
+            context.Source.TreeHash,
+            artifactDigest,
+            context.Source.ReleaseId(context.Scope),
+            generation,
+            component == "runner" ? ResolveRunnerId() : null);
+        if (!identity.IsComplete)
+            return null;
+
+        _files.WriteAllText(
+            Path.Combine(root, "runtime-identity.json").Replace('\\', '/'),
+            identity.ToJson());
+        _files.WriteAllText(
+            Path.Combine(root, "release.json").Replace('\\', '/'),
+            JsonSerializer.Serialize(new
+            {
+                identity,
+                sourceRoot = context.Source.RepositoryRoot,
+                snapshotRoot = context.SnapshotRoot,
+            }, JsonOptions));
+        if (component == "runner")
+        {
+            _files.WriteAllText(
+                Path.Combine(root, "dist", "build-info.json").Replace('\\', '/'),
+                JsonSerializer.Serialize(new
+                {
+                    component = "runner",
+                    version = identity.Version,
+                    gitHash = identity.SourceRevision,
+                    sourceRevision = identity.SourceRevision,
+                    treeHash = identity.TreeHash,
+                    artifactDigest = identity.ArtifactDigest,
+                    releaseId = identity.ReleaseId,
+                    generation = identity.Generation,
+                    runnerId = identity.RunnerId,
+                }, JsonOptions));
+        }
+
+        await Task.CompletedTask;
+        return new BuiltRuntime(component, root, entry, identity);
+    }
+
+    private RuntimeTargetSet BuildTargetSet(
+        UpdateSourceContext context,
+        string releaseRoot,
+        long generation,
+        RuntimeTargetSet? previous,
+        IReadOnlyDictionary<string, BuiltRuntime> built)
+    {
+        RuntimeTarget? Target(string component, string relativeEntry, string relativeWorkingDirectory) {
+            if (!built.TryGetValue(component, out var runtime))
+                return previous is null ? null : component switch
+                {
+                    "cli" => previous.Cli,
+                    "server" => previous.Server,
+                    "runner" => previous.Runner,
+                    _ => null,
+                };
+
+            var working = Path.Combine(releaseRoot, component, relativeWorkingDirectory).Replace('\\', '/');
+            var entry = Path.Combine(releaseRoot, component, relativeEntry).Replace('\\', '/');
+            var node = component == "runner" ? ResolveExecutable("node") : null;
+            return new RuntimeTarget(
+                component,
+                entry,
+                working,
+                [],
+                UpdateOperations.RuntimeIdentifier(),
+                runtime.Identity,
+                node,
+                component == "runner" ? working : null);
+        }
+
+        return new RuntimeTargetSet(
+            "candidate-staged",
+            generation,
+            context.TransactionId,
+            Target("cli", "Mohist.Cli", ""),
+            Target("server", "Mohist.Server", ""),
+            Target("runner", "dist/cli.js", ""),
+            previous);
+    }
+
+    private async Task RestoreAfterFailureAsync(
+        UpdateSourceContext context,
+        RuntimeTargetSet? previous,
+        string scope,
+        int activationCode,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var restoreCode = await _activator.RestoreManagedRuntimeAsync(previous, scope, _unitDir, cancellationToken);
+            if (restoreCode != 0)
+            {
+                WriteAtomic(
+                    Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                    new RuntimeTargetSet("none", 0, context.TransactionId, null, null, null, null));
+                _err.WriteLine($"Recovery after activation exit {activationCode} failed with exit code {restoreCode}; no runtime is trusted.");
+                return;
+            }
+
+            WriteAtomic(
+                Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                previous is null
+                    ? new RuntimeTargetSet("none", 0, context.TransactionId, null, null, null, null)
+                    : previous with { Status = "verified", Previous = null });
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                WriteAtomic(
+                    Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
+                    new RuntimeTargetSet("none", 0, context.TransactionId, null, null, null, null));
+            }
+            catch
+            {
+                // The original failure remains fail-closed even if the diagnostic pointer cannot be rewritten.
+            }
+            _err.WriteLine($"Recovery after activation exit {activationCode} failed: {ex.Message}; no success was emitted.");
+        }
+        _err.WriteLine($"Managed runtime activation was rejected: {reason}.");
+    }
+
+    private RuntimeTargetSet NoneTargets(ManagedUpdateSession session) =>
+        new("none", session.Targets.Generation, session.Context.TransactionId, null, null, null, null);
+
+    private void WriteAtomic(string path, RuntimeTargetSet value)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            _files.CreateDirectory(directory);
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        _files.WriteAllText(temp, JsonSerializer.Serialize(value, JsonOptions));
+        _files.MoveFile(temp, path);
+    }
+
+    private static bool IsTrusted(RuntimeTargetSet value)
+    {
+        if (value.Generation <= 0 || string.IsNullOrWhiteSpace(value.TransactionId))
+            return false;
+        return (value.Cli is null || value.Cli.IsAbsoluteTarget && value.Cli.Identity.IsComplete)
+            && (value.Server is null || value.Server.IsAbsoluteTarget && value.Server.Identity.IsComplete)
+            && (value.Runner is null || value.Runner.IsAbsoluteTarget && value.Runner.Identity.IsComplete);
+    }
+
+    private static bool Includes(string scope, string component) =>
+        string.Equals(scope, "full", StringComparison.Ordinal)
+            || string.Equals(scope, component, StringComparison.Ordinal);
+
+    private string ResolveRunnerId() =>
+        _environment.GetEnvironmentVariable("MOHIST_RUNNER_ID")?.Trim() is { Length: > 0 } id
+            ? id
+            : "managed-runner";
+
+    private string ResolveExecutable(string name)
+    {
+        var path = _environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            foreach (var raw in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var candidate = Path.Combine(raw.Trim(), name).Replace('\\', '/');
+                if (_files.Exists(candidate))
+                    return candidate;
+            }
+        }
+
+        return OperatingSystem.IsWindows()
+            ? $"C:/Program Files/nodejs/{name}.exe"
+            : $"/usr/bin/{name}";
+    }
+
+    private string ComputeArtifactDigest(string root, IReadOnlyList<string> files)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var path in files)
+        {
+            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            var bytes = ReadBytes(path);
+            hash.AppendData(Encoding.UTF8.GetBytes($"{relative}\n{bytes.Length}\n"));
+            hash.AppendData(bytes);
+        }
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private byte[] ReadBytes(string path)
+    {
+        using var stream = _files.OpenRead(path);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    private static bool IsMetadataPath(string path)
+    {
+        var name = Path.GetFileName(path);
+        return string.Equals(name, "runtime-identity.json", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "release.json", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "build-info.json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void WriteCommandFailure(string stdout, string stderr)
+    {
+        if (!string.IsNullOrWhiteSpace(stdout)) _err.WriteLine(stdout.TrimEnd());
+        if (!string.IsNullOrWhiteSpace(stderr)) _err.WriteLine(stderr.TrimEnd());
+    }
+
+    private sealed record BuiltRuntime(
+        string Component,
+        string Root,
+        string Entrypoint,
+        RuntimeIdentity Identity);
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+    };
+}

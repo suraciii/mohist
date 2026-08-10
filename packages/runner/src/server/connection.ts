@@ -1,5 +1,6 @@
 import { hostname } from "node:os"
 import type { CleanupPolicy, DispatchWorkItem, JsonObject, RunnerConfigResponse, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
+import type { BuildInfo } from "../runtime/build-info.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 import type { TaskLogBatch } from "../runtime/task-log.js"
@@ -7,11 +8,13 @@ import { WorkspaceHomeClaimedError } from "../runtime/workspace-entity.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
+  private readonly buildInfo: BuildInfo | null
   private readonly credential: string | null
   readonly runnerId: string
 
-  constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
+  constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null, buildInfo: BuildInfo | null = null) {
     this.buildGitHash = buildGitHash
+    this.buildInfo = buildInfo
     this.credential = options.credential ?? null
     this.runnerId = options.runnerId
   }
@@ -25,11 +28,25 @@ export class ServerConnection {
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
-    await this.post("register", { hostname: hostname(), ...registration }, signal)
+    await this.post("register", { hostname: hostname(), ...registration, ...this.identityPayload() }, signal)
   }
 
   async heartbeat(state: RunnerRegistration, signal: AbortSignal) {
-    await this.post("heartbeat", { hostname: hostname(), ...state, buildGitHash: this.buildGitHash }, signal)
+    await this.post("heartbeat", { hostname: hostname(), ...state, ...this.identityPayload() }, signal)
+  }
+
+  private identityPayload(): Record<string, unknown> {
+    return {
+      buildGitHash: this.buildGitHash,
+      component: this.buildInfo?.component ?? null,
+      version: this.buildInfo?.version ?? null,
+      sourceRevision: this.buildInfo?.sourceRevision ?? this.buildInfo?.gitHash ?? null,
+      treeHash: this.buildInfo?.treeHash ?? null,
+      artifactDigest: this.buildInfo?.artifactDigest ?? null,
+      releaseId: this.buildInfo?.releaseId ?? null,
+      generation: this.buildInfo?.generation ?? null,
+      runnerId: this.buildInfo?.runnerId ?? this.options.runnerId,
+    }
   }
 
   async disconnect(signal: AbortSignal) {

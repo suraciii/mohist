@@ -41,13 +41,15 @@ public class RunnerHubTests
     public void DisconnectingAnOldConnectionDoesNotRemoveTheCurrentRunnerConnection()
     {
         var tracker = new RunnerConnectionTracker();
-        tracker.Register("runner-1", "old-connection");
-        tracker.Register("runner-1", "new-connection");
+        var oldGeneration = tracker.Register("runner-1", "old-connection");
+        var newGeneration = tracker.Register("runner-1", "new-connection");
         tracker.RegisterSession("runner-1", "session-1");
 
         var staleSessions = tracker.UnregisterAndGetSessions("runner-1", "old-connection");
 
         Assert.Empty(staleSessions);
+        Assert.NotEqual(oldGeneration, newGeneration);
+        Assert.Equal(newGeneration, tracker.GetConnectionGeneration("runner-1"));
         Assert.Equal("new-connection", tracker.GetConnectionId("runner-1"));
         Assert.Equal(["session-1"], tracker.UnregisterAndGetSessions("runner-1", "new-connection"));
     }

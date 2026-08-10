@@ -390,5 +390,13 @@ export interface RunnerRegistration {
   coderModelVariants?: Record<string, string[]>
   runtimeCatalogs?: Record<string, RuntimeCatalogEntry>
   buildGitHash?: string | null
+  component?: string | null
+  version?: string | null
+  sourceRevision?: string | null
+  treeHash?: string | null
+  artifactDigest?: string | null
+  releaseId?: string | null
+  generation?: number | null
+  runnerId?: string | null
   connectionId?: string | null
 }

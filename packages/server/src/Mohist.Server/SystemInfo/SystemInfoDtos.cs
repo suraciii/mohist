@@ -3,7 +3,11 @@ namespace Mohist.Server.SystemInfo;
 public sealed record RunningInfo(
     string? Version,
     string? GitHash,
-    DateTimeOffset StartedAt);
+    DateTimeOffset StartedAt,
+    string? TreeHash = null,
+    string? ArtifactDigest = null,
+    string? ReleaseId = null,
+    long Generation = 0);
 
 public sealed record SourceInfo(
     string? Path,

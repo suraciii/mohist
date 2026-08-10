@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Mohist.Cli;
 
-internal sealed class SystemdServiceInstaller : IServiceInstaller
+internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRuntimeActivator
 {
     private const string ServerUnit = "mohist.service";
     private const string RunnerUnit = "mohist-runner.service";
@@ -118,6 +118,124 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     public Task<int> StatusSlackAsync(ServiceCommandOptions options) => StatusAsync(SlackUnit, options);
     public Task<int> LogsSlackAsync(ServiceCommandOptions options) => LogsAsync(SlackUnit, options);
     public Task<int> UninstallSlackAsync(ServiceCommandOptions options) => UninstallAsync(SlackUnit, options);
+
+    public async Task<int> ApplyManagedRuntimeAsync(
+        RuntimeTargetSet targets,
+        string scope,
+        string? unitDir,
+        CancellationToken cancellationToken = default)
+    {
+        if (!EnsureSystemdSupported(dryRun: false))
+            return 1;
+
+        if (Includes(scope, "server") && targets.Server is null
+            || Includes(scope, "runner") && targets.Runner is null)
+        {
+            _err.WriteLine("Managed runtime activation was requested without a complete service target.");
+            return 1;
+        }
+
+        var resolvedUnitDir = ResolveUnitDir(unitDir);
+        try
+        {
+            if (Includes(scope, "server"))
+                await WriteManagedUnitAsync(resolvedUnitDir, ServerUnit, "Mohist Server", targets.Server!, cancellationToken);
+            if (Includes(scope, "runner"))
+                await WriteManagedUnitAsync(resolvedUnitDir, RunnerUnit, "Mohist Runner", targets.Runner!, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Managed service target installation failed: {ex.Message}");
+            return 1;
+        }
+
+        var (reload, _, reloadErr) = await _commandExecutor.ExecuteAsync(
+            "systemctl", ["--user", "daemon-reload"], cancellationToken: cancellationToken);
+        if (reload != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(reloadErr)) _err.Write(reloadErr);
+            return reload;
+        }
+
+        if (Includes(scope, "server"))
+        {
+            var server = await RestartAsync(ServerUnit, new ServiceCommandOptions(false, unitDir, 100, false));
+            if (server != 0) return server;
+        }
+        if (Includes(scope, "runner"))
+        {
+            var runner = await RestartAsync(RunnerUnit, new ServiceCommandOptions(false, unitDir, 100, false));
+            if (runner != 0) return runner;
+        }
+
+        return 0;
+    }
+
+    public async Task<int> RestoreManagedRuntimeAsync(
+        RuntimeTargetSet? targets,
+        string scope,
+        string? unitDir,
+        CancellationToken cancellationToken = default)
+    {
+        if (!EnsureSystemdSupported(dryRun: false))
+            return 1;
+
+        if (targets is null)
+        {
+            var stopCode = 0;
+            if (Includes(scope, "runner"))
+                stopCode = await StopAsync(RunnerUnit, new ServiceCommandOptions(false, unitDir, 100, false));
+            if (Includes(scope, "server"))
+            {
+                var serverStop = await StopAsync(ServerUnit, new ServiceCommandOptions(false, unitDir, 100, false));
+                if (stopCode == 0) stopCode = serverStop;
+            }
+            return stopCode;
+        }
+
+        return await ApplyManagedRuntimeAsync(targets, scope, unitDir, cancellationToken);
+    }
+
+    private async Task WriteManagedUnitAsync(
+        string unitDir,
+        string unitName,
+        string description,
+        RuntimeTarget target,
+        CancellationToken cancellationToken)
+    {
+        if (!target.IsAbsoluteTarget || !target.Identity.IsComplete)
+            throw new InvalidOperationException($"managed target {target.Component} is not trusted");
+
+        var environment = BuildServiceEnvironment();
+        var identityRoot = target.Component == "runner"
+            ? target.DependencyRoot ?? target.WorkingDirectory
+            : target.WorkingDirectory;
+        environment["MOHIST_RUNTIME_IDENTITY_PATH"] = Path.Combine(identityRoot, "runtime-identity.json").Replace('\\', '/');
+        if (target.Component == "runner")
+            environment["SERVER_URL"] = _environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://127.0.0.1:3456";
+
+        var executable = target.Component == "runner"
+            ? $"{ShellQuote(target.NodeExecutable!)} {ShellQuote(target.Entrypoint)}"
+            : $"{ShellQuote(ResolveExecutable("dotnet"))} {ShellQuote(target.Entrypoint)}";
+        if (target.Arguments.Length > 0)
+            executable += " " + string.Join(' ', target.Arguments.Select(ShellQuote));
+
+        var unit = new SystemdUnit(
+            unitName,
+            description,
+            target.WorkingDirectory,
+            executable,
+            environment);
+        var unitPath = Path.Combine(unitDir, unitName).Replace('\\', '/');
+        _fileSystem.CreateDirectory(unitDir);
+        var tempPath = $"{unitPath}.{target.Identity.ReleaseId}.{target.Identity.Generation}.tmp";
+        await _fileSystem.WriteAllTextAsync(tempPath, unit.Render());
+        _fileSystem.MoveFile(tempPath, unitPath);
+    }
+
+    private static bool Includes(string scope, string component) =>
+        string.Equals(scope, "full", StringComparison.Ordinal)
+        || string.Equals(scope, component, StringComparison.Ordinal);
 
     public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default)
     {
