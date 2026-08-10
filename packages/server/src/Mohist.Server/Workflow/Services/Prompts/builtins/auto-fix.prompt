@@ -5,7 +5,14 @@ tags: [check, review]
 stage: check
 ---
 `openspec/changes/issue-${{ issue.number }}/review.md` lists the problems found by the review.
-Fix every one of them, then verify with the relevant build and test commands.
+Dispose of every must-fix finding: fix it, or explain why it does not meet the
+must-fix bar (leaving it unfixed would not make the change wrong or incomplete
+relative to the issue's acceptance criteria). Observations do not require
+action.
+
+Verify with the relevant build and test commands. Then state each finding's
+disposition — fixed, or won't-fix with the reason — in your final response; the
+next review verifies them one by one.
 
 You may be interrupted at any time: commit incrementally and keep your progress
 notes current.

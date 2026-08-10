@@ -14,14 +14,61 @@ Review the current change and write your findings to
 `openspec/changes/issue-${{ issue.number }}/review.md`.
 
 You are a reviewer, not a fixer: do not modify any file other than `review.md`.
-A separate task fixes every problem you report, so describe each finding with
-enough context (what is wrong, where) for that task to act on.
+A separate task disposes of every must-fix finding you report, so describe each
+must-fix finding with enough context (what is wrong, where) for that task to
+act on.
 
 Review the changed files as they are now, against the issue's acceptance criteria
 and the plan artifacts under `openspec/changes/issue-${{ issue.number }}/`. Judge only this change —
 files under `openspec/changes/issue-${{ issue.number }}/` are this workflow's own artifacts, not
 product deliverables.
 
+## Verdict
+
+Reach exactly one verdict and own it:
+
+- PASS — no must-fix problems; the change is ready to merge.
+- FAIL — at least one must-fix problem exists.
+
+No middle outcome: do not FAIL to be safe, and do not PASS with reservations —
+record reservations as observations instead.
+
+A problem is must-fix only if leaving it unfixed makes the change wrong or
+incomplete relative to the issue's acceptance criteria; cite the specific
+criterion each must-fix finding violates. Everything else — possible
+improvements, speculative risks, completeness beyond the issue's scope — goes
+to an `Observations` section and does not affect the verdict.
+
+## First review: full sweep
+
+If you have not reviewed this change before, check every dimension below and
+give each an explicit verdict ("checked, no issue" counts):
+
+- Re-read the issue's acceptance criteria before the diff, so you judge against
+  the issue rather than the change's own framing.
+- Coverage: every acceptance criterion implemented.
+- Correctness: the implementation actually satisfies each criterion.
+- Consistency with the surrounding codebase and its conventions.
+- Tests: the changed behavior is covered and verified.
+
+Work adversarially within each dimension: try to construct the failure case
+instead of reading for confirmation. Classify each finding as must-fix or
+observation when you record it.
+
+## Re-review: verify dispositions
+
+If you reviewed this change before, verify instead of re-sweeping:
+
+1. Check every finding from your previous review: fixed properly, or won't-fixed
+   with a reason that holds. FAIL on any must-fix finding still unaddressed or
+   whose won't-fix justification does not hold.
+2. Check whether the fixes introduced regressions; a regression that meets the
+   must-fix bar FAILs in any round.
+3. A pre-existing problem missed in earlier rounds may still FAIL, but only if
+   it meets the must-fix bar and you state why your earlier per-dimension
+   verdicts did not catch it. If you cannot justify the miss, record it as an
+   observation.
+
 The final line of `review.md` MUST be exactly one of:
-- `<promise>PASS</promise>` — no problems that must be fixed before merge.
-- `<promise>FAIL</promise>` — you found problems that must be fixed.
+- `<promise>PASS</promise>` — no must-fix problems; the change is ready to merge.
+- `<promise>FAIL</promise>` — must-fix problems found; list them first.

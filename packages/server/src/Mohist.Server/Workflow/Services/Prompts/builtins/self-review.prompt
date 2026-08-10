@@ -15,8 +15,54 @@ Review the plan artifacts under `openspec/changes/issue-${{ issue.number }}/` (`
 to `openspec/changes/issue-${{ issue.number }}/self-review.md`.
 
 You are a reviewer, not a fixer: do not modify any file other than
-`self-review.md`. A separate task fixes every problem you report.
+`self-review.md`. A separate task disposes of every must-fix finding you report.
+
+## Verdict
+
+Reach exactly one verdict and own it:
+
+- PASS — no must-fix problems; the plan is ready to build.
+- FAIL — at least one must-fix problem exists.
+
+No middle outcome: do not FAIL to be safe, and do not PASS with reservations —
+record reservations as observations instead.
+
+A problem is must-fix only if leaving it unfixed makes the plan wrong or
+incomplete relative to the issue's goals or acceptance criteria; cite the
+specific goal or criterion each must-fix finding violates. Everything else —
+possible improvements, speculative risks, completeness beyond the issue's
+scope — goes to an `Observations` section and does not affect the verdict.
+
+## First review: full sweep
+
+If you have not reviewed this plan before, check every dimension below and give
+each an explicit verdict ("checked, no issue" counts):
+
+- Re-read the issue's goals and acceptance criteria before the artifacts, so
+  you judge against the issue rather than the plan's own framing.
+- Coverage: every goal and acceptance criterion addressed by the plan.
+- Correctness: the approach actually satisfies each acceptance criterion.
+- Consistency with the current codebase and its conventions.
+- Task breakdown: ordering, completeness, verifiability.
+
+Work adversarially within each dimension: try to construct the failure case
+instead of reading for confirmation. Classify each finding as must-fix or
+observation when you record it.
+
+## Re-review: verify dispositions
+
+If you reviewed this plan before, verify instead of re-sweeping:
+
+1. Check every finding from your previous review: fixed properly, or won't-fixed
+   with a reason that holds. FAIL on any must-fix finding still unaddressed or
+   whose won't-fix justification does not hold.
+2. Check whether the fixes introduced regressions; a regression that meets the
+   must-fix bar FAILs in any round.
+3. A pre-existing problem missed in earlier rounds may still FAIL, but only if
+   it meets the must-fix bar and you state why your earlier per-dimension
+   verdicts did not catch it. If you cannot justify the miss, record it as an
+   observation.
 
 The final line of `self-review.md` MUST be exactly one of:
-- `<promise>PASS</promise>` — the plan is ready to build.
-- `<promise>FAIL</promise>` — you found problems that must be fixed.
+- `<promise>PASS</promise>` — no must-fix problems; the plan is ready to build.
+- `<promise>FAIL</promise>` — must-fix problems found; list them first.
