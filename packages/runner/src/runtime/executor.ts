@@ -10,7 +10,7 @@ import type { NamedWorkspaceManager } from "./workspace-entity.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
-import type { OpenCodeRuntime } from "./opencode/index.js"
+import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnResult } from "./opencode/index.js"
 import type { PiRuntime } from "./pi/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
@@ -308,14 +308,6 @@ export class WorkExecutor {
         const variant = definition?.variant ?? request.options?.variant
 
         const runtime = self.openCodeRuntime
-        if (!runtime) {
-          return actionFail("runtime-unavailable", "agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
-        }
-        if (!runtime.ready()) {
-          const diagnostic = runtime.diagnostic()
-          return actionFail("runtime-unavailable", `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
-        }
-
         const sessionName = request.session ?? work.workId
         let binding: { runtimeSessionId: string | null; workDir: string; runnerId: string; runtime: "opencode" } | null = null
         if (self.connection && work.projectId) {
@@ -337,7 +329,21 @@ export class WorkExecutor {
               signal,
             )
             if (opened.workDir && opened.workDir !== workDir) {
-              return actionFail("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
+              const mismatchReporter = createWorkflowReporter(
+                work.projectId,
+                work.workflowRunId,
+                sessionName,
+                { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+                opened.runtimeSessionId ?? null,
+                self.agentSessionRuntimeEventOutbox,
+                self.runtimeEventRecordId,
+              )
+              return await workflowActionFailure(
+                mismatchReporter,
+                opened.runtimeSessionId ?? null,
+                "session-workspace-mismatch",
+                "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying",
+              )
             }
             binding = {
               runtimeSessionId: opened.runtimeSessionId ?? null,
@@ -346,24 +352,57 @@ export class WorkExecutor {
               runtime: "opencode",
             }
           } catch (error) {
-            return actionFail("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`)
+            return runtimeActionFailure("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${errorMessage(error)}`)
           }
         }
         if (!binding) {
           binding = { runtimeSessionId: null, workDir, runnerId: self.connection?.runnerId ?? "", runtime: "opencode" }
         }
 
+        let reporter = createWorkflowReporter(
+          work.projectId ?? null,
+          work.workflowRunId,
+          sessionName,
+          { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+          binding.runtimeSessionId,
+          self.agentSessionRuntimeEventOutbox,
+          self.runtimeEventRecordId,
+        )
+
+        if (!runtime) {
+          return await workflowActionFailure(
+            reporter,
+            binding.runtimeSessionId,
+            "runtime-unavailable",
+            "agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding",
+          )
+        }
+        if (!runtime.ready()) {
+          const diagnostic = runtime.diagnostic()
+          return await workflowActionFailure(
+            reporter,
+            binding.runtimeSessionId,
+            "runtime-unavailable",
+            `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`,
+          )
+        }
+
         if (binding.runtimeSessionId === null && sessionName && self.connection && work.projectId) {
           const modelResult = modelName ? parseModelIdentifier(modelName) : null
           const model = modelResult?.kind === "ok" ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID } : null
-          const created = await runtime.createSession({
-            target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
-            model,
-          })
+          let created: Awaited<ReturnType<OpenCodeRuntime["createSession"]>>
+          try {
+            created = await runtime.createSession({
+              target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
+              model,
+            })
+          } catch (error) {
+            return runtimeActionFailure("turn-failed", `OpenCode session creation failed: ${errorMessage(error)}`)
+          }
           if (!created.ok) {
             const kind = created.error.kind
             const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
-            return actionFail(code, created.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+            return runtimeActionFailure(code, created.error.message)
           }
           try {
             await self.connection.attachWorkflowAgentSession(
@@ -381,7 +420,21 @@ export class WorkExecutor {
               signal,
             )
           } catch (error) {
-            return actionFail("session-binding-failed", `Failed to persist the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
+            const attachReporter = createWorkflowReporter(
+              work.projectId,
+              work.workflowRunId,
+              sessionName,
+              { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+              created.value.runtimeSessionId,
+              self.agentSessionRuntimeEventOutbox,
+              self.runtimeEventRecordId,
+            )
+            return await workflowActionFailure(
+              attachReporter,
+              created.value.runtimeSessionId,
+              "session-binding-failed",
+              `Failed to persist the Workflow AgentSession binding: ${errorMessage(error)}`,
+            )
           }
           binding = {
             runtimeSessionId: created.value.runtimeSessionId,
@@ -389,41 +442,60 @@ export class WorkExecutor {
             runnerId: self.connection.runnerId,
             runtime: "opencode",
           }
+          reporter = createWorkflowReporter(
+            work.projectId ?? null,
+            work.workflowRunId,
+            sessionName,
+            { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+            binding.runtimeSessionId,
+            self.agentSessionRuntimeEventOutbox,
+            self.runtimeEventRecordId,
+          )
         }
 
         const deadlineMs = request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS
         const modelOptions = modelName ? parseModelIdentifier(modelName) : null
         if (binding.runtimeSessionId && self.connection && work.projectId) {
           const expected = binding
-          const recovery = await resolveOrRecoverBinding({
-            runnerId: self.connection.runnerId,
-            expected,
-            runtime: { kind: "opencode", runtime },
-            probe: async (candidate) => {
-              const result = await runtime.resolveSession({
-                target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
-              })
-              if (result.ok) return { ok: true, activeTurn: result.value.activeTurn }
-              return { ok: false, kind: result.error.kind, message: result.error.message }
-            },
-            replace: async (current, replacement) => {
-              await self.connection!.recoverMissingWorkflowAgentSession(
-                work.projectId!, work.workflowRunId, sessionName,
-                {
-                  expectedRunnerId: current.runnerId,
-                  expectedRuntime: current.runtime,
-                  expectedRuntimeSessionId: current.runtimeSessionId,
-                  replacementRuntimeSessionId: replacement.runtimeSessionId,
-                },
-                signal,
-              )
-            },
-            model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
-            recoveryKey: expected.runtimeSessionId!,
-            coordinator: self.bindingRecoveryCoordinator ?? undefined,
-          })
+          let recovery: Awaited<ReturnType<typeof resolveOrRecoverBinding>>
+          try {
+            recovery = await resolveOrRecoverBinding({
+              runnerId: self.connection.runnerId,
+              expected,
+              runtime: { kind: "opencode", runtime },
+              probe: async (candidate) => {
+                const result = await runtime.resolveSession({
+                  target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
+                })
+                if (result.ok) return { ok: true, activeTurn: result.value.activeTurn }
+                return { ok: false, kind: result.error.kind, message: result.error.message }
+              },
+              replace: async (current, replacement) => {
+                await self.connection!.recoverMissingWorkflowAgentSession(
+                  work.projectId!, work.workflowRunId, sessionName,
+                  {
+                    expectedRunnerId: current.runnerId,
+                    expectedRuntime: current.runtime,
+                    expectedRuntimeSessionId: current.runtimeSessionId,
+                    replacementRuntimeSessionId: replacement.runtimeSessionId,
+                  },
+                  signal,
+                )
+              },
+              model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
+              recoveryKey: expected.runtimeSessionId!,
+              coordinator: self.bindingRecoveryCoordinator ?? undefined,
+            })
+          } catch (error) {
+            return await workflowActionFailure(
+              reporter,
+              binding.runtimeSessionId,
+              "session-binding-failed",
+              `Workflow AgentSession binding recovery failed: ${errorMessage(error)}`,
+            )
+          }
           if (!recovery.ok) {
-            return actionFail(recovery.kind, recovery.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+            return await workflowActionFailure(reporter, binding.runtimeSessionId, recovery.kind, recovery.message)
           }
           binding = {
             ...recovery.binding,
@@ -448,7 +520,7 @@ export class WorkExecutor {
           },
         }
 
-        const reporter = createWorkflowReporter(
+        reporter = createWorkflowReporter(
           work.projectId ?? null,
           work.workflowRunId,
           sessionName,
@@ -462,12 +534,22 @@ export class WorkExecutor {
           try {
             await reporter.awaitInput(prompt, selectedBinding.runtimeSessionId)
           } catch (error) {
-            return actionFail("execution-unavailable", `failed to durably enqueue the Workflow AgentSession input: ${error instanceof Error ? error.message : String(error)}`)
+            return await workflowActionFailure(
+              reporter,
+              selectedBinding.runtimeSessionId,
+              "execution-unavailable",
+              `failed to durably enqueue the Workflow AgentSession input: ${errorMessage(error)}`,
+            )
           }
         }
 
         const observer = createWorkflowObserver(reporter)
-        const result = await runtime.runTurn(runtimeRequest, signal, observer)
+        let result: RuntimeResult<RuntimeTurnResult>
+        try {
+          result = await runtime.runTurn(runtimeRequest, signal, observer)
+        } catch (error) {
+          result = failedRuntimeTurn(`OpenCode turn failed: ${errorMessage(error)}`)
+        }
 
         enqueueTerminalClose(reporter, result, selectedBinding.runtimeSessionId)
         await reporter?.settle()
@@ -475,7 +557,7 @@ export class WorkExecutor {
         if (!result.ok) {
           const kind = result.error.kind
           const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
-          return actionFail(code, result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+          return runtimeActionFailure(code, result.error.message)
         }
 
         const facts = result.value.facts
@@ -739,6 +821,26 @@ function formatCheckUnresolvedError(unresolved: string[]): string {
 function stringField(obj: JsonObject, key: string): string | null {
   const value = obj[key]
   return typeof value === "string" ? value : null
+}
+
+function runtimeActionFailure(code: string, message: string): ActionResult {
+  return actionFail(code, message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+}
+
+async function workflowActionFailure(
+  reporter: WorkflowAgentSessionReporter | null,
+  runtimeSessionId: string | null,
+  code: string,
+  message: string,
+): Promise<ActionResult> {
+  enqueueTerminalClose(reporter, failedRuntimeTurn(message), runtimeSessionId)
+  await reporter?.settle()
+  return runtimeActionFailure(code, message)
+}
+
+function failedRuntimeTurn(message: string): RuntimeResult<RuntimeTurnResult> {
+  const error = { kind: "turn-failed" as const, message, diagnostics: [] }
+  return { ok: false, error, diagnostics: [] }
 }
 
 function createWorkflowReporter(
