@@ -107,6 +107,7 @@ interface FakeRuntimeHandles {
   runtime: OpenCodeRuntime
   cancelCalls: RuntimeCancelRequest[]
   setCancelResult: (result: RuntimeResult<RuntimeCancelResult>) => void
+  setResolveResult: (result: RuntimeResult<{ runtimeSessionId: string; workDir: string; activeTurn: boolean }>) => void
   setReady: (ready: boolean) => void
 }
 
@@ -121,6 +122,11 @@ function makeFakeRuntime(): FakeRuntimeHandles {
     },
     diagnostics: [],
   }
+  let nextResolveResult: RuntimeResult<{ runtimeSessionId: string; workDir: string; activeTurn: boolean }> = {
+    ok: true,
+    value: { runtimeSessionId: "runtime-1", workDir: "/work/project", activeTurn: true },
+    diagnostics: [],
+  }
   const runtime: Partial<OpenCodeRuntime> = {
     ready: () => ready,
     diagnostic: () => null,
@@ -128,11 +134,15 @@ function makeFakeRuntime(): FakeRuntimeHandles {
       cancelCalls.push(request)
       return nextResult
     },
+    async resolveSession() {
+      return nextResolveResult
+    },
   }
   return {
     runtime: runtime as OpenCodeRuntime,
     cancelCalls,
     setCancelResult(result) { nextResult = result },
+    setResolveResult(result) { nextResolveResult = result },
     setReady(value) { ready = value },
   }
 }
@@ -325,13 +335,65 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       snapshot() { return [] },
     }
 
-    buildClient({ resolver, outbox, openCodeRuntime: runtime.runtime })
+    buildClient({
+      resolver,
+      outbox,
+      openCodeRuntime: runtime.runtime,
+      cancelOperationJournal: new MemoryCancelOperationJournal(),
+    })
     const builder = lastBuilder()
 
-    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+    const reply = (await emitCancel(builder, {
+      ...genericCancelPayload("gen-session-1"),
+      sessionId: "gen-session-1",
+      turnId: "turn-1",
+      operationId: "stop-outbox-unhealthy",
+    })) as { state: string }
 
     expect(reply).toEqual({ state: "stopped" })
     expect(runtime.cancelCalls).toHaveLength(1)
+  })
+
+  it("StartedCancel_ReplayedAfterTargetEnded_CompletesAsEndedWithoutFlippingVerdict", async () => {
+    const runtime = makeFakeRuntime()
+    runtime.setCancelResult({
+      ok: false,
+      error: {
+        kind: "turn-failed",
+        message: "transport dropped",
+        diagnostics: [],
+      },
+      diagnostics: [],
+    })
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    const journal = new MemoryCancelOperationJournal()
+    const payload: CancelAgentSessionPayload = {
+      ...genericCancelPayload("gen-session-1"),
+      sessionId: "gen-session-1",
+      turnId: "turn-1",
+      operationId: "stop-fulfilled",
+    }
+
+    buildClient({ resolver, outbox: readyOutbox(), openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
+    await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "stop-requested" })
+
+    runtime.setResolveResult({
+      ok: false,
+      error: {
+        kind: "missing-session",
+        message: "no physical session",
+        diagnostics: [],
+      },
+      diagnostics: [],
+    })
+    buildClient({ resolver, outbox: readyOutbox(), openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
+    await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "ended" })
+
+    expect(runtime.cancelCalls).toHaveLength(1)
+    await expect(journal.get("gen-session-1", "stop-fulfilled")).resolves.toMatchObject({
+      state: "completed",
+      reply: { state: "ended" },
+    })
   })
 
   it("NoResolverRegistered_RepliesNotCancellableAndDoesNotCallCancel", async () => {
