@@ -20,13 +20,30 @@ The candidate `release.json` SHALL define, for each component, `component`, `ver
 - **THEN** the expected identity comparison is limited to the Runner entry and activated dependencies
 - **AND** the result records that Server and CLI were untouched rather than treating them as matching the Runner release
 
+### Requirement: Generate one canonical release identity
+The update SHALL normalize the resolved Git revision to the lowercase full commit ID with no whitespace. For a full update, `version` SHALL be `0.0.0+<sourceRevision>` and `releaseId` SHALL be `mohist-full-<sourceRevision>` for every CLI, Server, and Runner entry. For a component-scoped update, the activated component SHALL use the same normalized `version` and `releaseId` SHALL be `mohist-<scope>-<sourceRevision>`, where `<scope>` is `cli`, `server`, or `runner`; untouched active entries retain their previous identities. Existing package or assembly version values remain compatibility metadata and SHALL not determine runtime consistency.
+
+#### Scenario: Repeated full builds have the same canonical identity
+- **WHEN** two full candidates are built from the same normalized source revision and scope
+- **THEN** both candidates use the same `version` and `releaseId`
+- **AND** the identity does not depend on the process working directory, build timestamp, or host
+
+#### Scenario: Same version with a different source is not equal
+- **WHEN** a runtime reports `version` `0.0.0+<source-122>` but the candidate expects `0.0.0+<source-123>`
+- **THEN** the identity comparison fails even if a compatibility package version is the same
+
 ### Requirement: Expose a canonical identity from every required component
-The installed CLI SHALL expose the canonical runtime identity as one machine-readable JSON object through the internal `mo runtime identity --json` command. Server health/system-info and Runner identity readback SHALL expose the same field names and equality facts. A missing, malformed, or incomplete identity SHALL be reported as unavailable and SHALL fail a required consistency check.
+The installed CLI SHALL expose the canonical runtime identity as one machine-readable JSON object through the internal `mo runtime identity --json` command. Server health/system-info and Runner identity readback SHALL expose the same field names and equality facts from artifact-owned metadata. Server identity SHALL fail when embedded metadata is absent or conflicts with launcher environment values; it SHALL not fall back to source HEAD. Runner identity readback SHALL include the exact `runnerId` and Server-issued `connectionGeneration` used for the active connection. A missing, malformed, stale, or incomplete identity SHALL be reported as unavailable and SHALL fail a required consistency check.
 
 #### Scenario: CLI identity is machine-readable and complete
 - **WHEN** the installed CLI belongs to release `target-release` for source revision `target-123`
 - **THEN** `mo runtime identity --json` returns `component`, `version`, `sourceRevision`, and `releaseId`
 - **AND** the returned `sourceRevision` and `releaseId` exactly match the candidate manifest
+
+#### Scenario: Runner identity from another connection is rejected
+- **WHEN** the requested hostname has a stale connection generation whose release ID matches an older candidate
+- **THEN** the identity readback is unavailable or mismatched for the active Runner connection
+- **AND** the update cannot return success based on the stale connection
 
 #### Scenario: CLI identity cannot be inferred from a generic version string
 - **WHEN** the installed CLI returns a version string without a source revision or release ID

@@ -36,44 +36,64 @@ Add an `UpdateSourceContext` owned by the CLI update boundary. It contains:
 - whether the root came from `--repo-root` or the default resolver;
 - the full source revision returned by `git rev-parse HEAD` from that root;
 - the immutable snapshot root materialized from that exact revision;
+- the source snapshot marker/digest used to validate the snapshot without relying on a `.git` directory;
+- the transaction-owned writable build workspace root and candidate release root;
 - the clean/usable validation result needed to build an identity; and
 - the requested update scope and CLI path needed by the transaction.
 
-The resolver runs once before CLI publication, service changes, or artifact builds. It rejects a missing root, a root without `Mohist.sln`, an unavailable Git revision, and a dirty worktree, then materializes the resolved revision into a staging snapshot and makes that snapshot read-only to builders. The clean-worktree rule is deliberate: a Git HEAD alone cannot identify uncommitted content, and the issue acceptance criteria explicitly use a clean source directory. Snapshot creation and a second revision check on the snapshot are part of preflight; a failure stops before managed runtime state changes. Every operation receives the context rather than calling `ResolveRepoRoot` or `git rev-parse` again.
+The resolver runs once before CLI publication, service changes, or artifact builds. It rejects a missing root, a root without `Mohist.sln`, an unavailable Git revision, and a dirty worktree, then materializes the resolved revision into a staging snapshot and makes the source files read-only to builders. The snapshot carries a sidecar source marker and digest because a staged source tree is not required to contain `.git`. The transaction creates separate writable `BuildWorkspaceRoot` and `CandidateRoot` directories; compiler intermediates, web output, generated identity files, dependency staging, and release files are written only there. The clean-worktree rule is deliberate: a Git HEAD alone cannot identify uncommitted content, and the issue acceptance criteria explicitly use a clean source directory. Snapshot creation, snapshot validation, and writable-root preparation are part of preflight; a failure stops before managed runtime state changes. Every operation receives the context rather than calling `ResolveRepoRoot` or `git rev-parse` again.
 
-The existing mutable `UpdateContext.SourceHead` becomes a value from this context. Human output and dry-run output use the same context to label explicit/default source mode, authority root, snapshot root, and target revision. Build commands use only `SnapshotRoot`; the requested repository root is retained for reporting and source-authority diagnostics.
+The existing mutable `UpdateContext.SourceHead` becomes a value from this context. Human output and dry-run output use the same context to label explicit/default source mode, authority root, snapshot root, build workspace, candidate root, and target revision. Build commands read source files only from `SnapshotRoot`; the requested repository root is retained for reporting and source-authority diagnostics.
 
 **Alternative considered:** Let each stage resolve the root and read HEAD when it needs it. Rejected because the process working directory, source branch, or source contents can differ between stages, recreating the exact build-one-version/run-another failure.
 
 ### B. Persist the source context across CLI self-update continuation
 
-Create a transaction record before the CLI self-update stage. The record stores the source context including `SnapshotRoot`, update scope, job ID, candidate/previous active-target sets, CLI slots, service targets, required identities, and state. The pre-update process invokes the refreshed CLI with an internal transaction identifier, for example `--continue-after-cli-update --update-id <id>`, instead of reconstructing the whole context from command-line strings. The continuation loads and validates the record before it performs any post-CLI stage.
+Create a transaction record before the CLI self-update stage. The record stores the source context including `SnapshotRoot`, `BuildWorkspaceRoot`, `CandidateRoot`, update scope, job ID, candidate/previous active-target sets, CLI slots, recovery CLI path, service targets, required identities, and state. The pre-update process invokes the refreshed CLI with an internal transaction identifier, for example `--continue-after-cli-update --update-id <id>`, instead of reconstructing the whole context from command-line strings. The continuation loads and validates the record before it performs any post-CLI stage.
 
-The record is written through an `IUpdateTransactionStore` using a temporary file plus atomic rename. It is local state under the managed runtime root, not server database state. The CLI-owned reconciler reads every nonterminal record before a new update and from the stable managed launcher before it starts a target associated with that record. The Server outcome endpoint remains a reporting sink; failure to post the outcome cannot change the local activation result.
+The record is written through an `IUpdateTransactionStore` using a temporary file plus atomic rename. It is local state under the managed runtime root, not server database state. The CLI-owned reconciler reads every nonterminal record before a new update and from the stable managed launcher before it starts a target associated with that record. The launcher invokes the recorded recovery CLI slot, never the unverified candidate slot, and refuses to start a candidate when that recovery slot is unavailable. The Server outcome endpoint remains a reporting sink; failure to post the outcome cannot change the local activation result.
 
 **Alternative considered:** Pass the repository root, source hash, previous target, and recovery flags as hidden continuation arguments. Rejected because duplicated arguments can drift, are fragile to quoting, and do not provide durable recovery when the continuation process exits unexpectedly.
+
+### B1. Bootstrap legacy installations before managed self-update
+
+An installation whose active CLI does not support the transaction record, recovery slot, and immutable build context SHALL fail preflight with `bootstrap_required` before replacing the CLI, stopping a service, or changing `active.json`. The error SHALL direct the operator to install the current CLI package or run the supported CLI installer once; that bootstrap operation installs the stable launcher, recovery slot, and runtime-root metadata without claiming that the legacy source-bound runtime is verified. A managed update starts only on the next invocation of the new CLI, which can persist `Prepared` before any self-update.
+
+After bootstrap, the current CLI remains runnable in a recorded recovery slot while the candidate CLI is staged. A crash before or after candidate slot replacement therefore invokes the recorded recovery slot and reconciles the transaction without executing the candidate as its own recovery authority. This is an explicit breaking migration boundary, not an attempt to make an older CLI understand the new transaction schema.
 
 ### C. Use a versioned managed release store
 
 Add a `ManagedRuntimeStore` behind the existing `IFileSystem` boundary. The per-user store has this logical layout:
 
+The product runtime root is fixed for the first implementation: `$HOME/.local/share/mohist/runtime` on Linux and `%LOCALAPPDATA%/Mohist/runtime` on Windows. `RuntimeRootResolver` expands and validates the platform path once, records the absolute value in the transaction, and passes it to the CLI, service installers, stable launchers, and reconciler. Tests inject an equivalent absolute root; there is no product-relative or unresolved runtime-root option in this change.
+
 ```text
 <managed-runtime-root>/
+  snapshots/<job-id>/
+    source-marker.json
   releases/<release-id>/
     release.json
     cli/mo
     server/...
-    runner/...
+    runner/
+      dist/...
+      package.json
+      node_modules/...
+      dependency-manifest.json
   active.json
-  transactions/<job-id>.json
+  transactions/<job-id>/
+    record.json
+    build/...
+    candidate/...
+  dependencies/node/<lock-id>/...
   launchers/server
   launchers/runner
   launchers/cli
 ```
 
-`release.json` is the canonical local artifact record. It contains the release ID, authority source root, source revision, component scope, and one entry per built component with `component`, `version`, `sourceRevision`, `releaseId`, and an absolute artifact path. A candidate is complete only when the required component files and manifest are present. `active.json` is one atomically replaced activation record containing a generation, transaction ID, status, and the complete CLI/Server/Runner target set. Component-scoped updates replace one entry while retaining the other active entries and are reported as scoped; a full update publishes one shared release ID for all three entries. A candidate is never written in place over an active release.
+`release.json` is the canonical local artifact record. It contains the release ID, authority source root, source revision, scope, canonical version, snapshot marker/digest, dependency-lock identity, and one entry per built component with `component`, `version`, `sourceRevision`, `releaseId`, and an absolute artifact path. A candidate is complete only when the required component files, runtime dependency closure, and manifest are present. `active.json` is one atomically replaced activation record containing a generation, transaction ID, status, and the complete CLI/Server/Runner target set. Component-scoped updates replace one entry while retaining the other active entries and are reported as scoped; a full update publishes one shared release ID for all three entries. A candidate is never written in place over an active release.
 
-The release ID is derived from the target source revision plus the component build identity. The source revision remains the primary equality fact; component versions and release ID make the installed artifact set inspectable and prevent a Server artifact from being paired silently with a Runner artifact from another build. Stable absolute launchers read `active.json` at process start, so services never read the source worktree and never observe a partially written target record.
+The canonical release identity is generated before any artifact is compiled: the normalized full source revision is lowercase with no whitespace, `version` is `0.0.0+<sourceRevision>`, and `releaseId` is `mohist-full-<sourceRevision>` for a full release or `mohist-<scope>-<sourceRevision>` for a component release. Build timestamps, host paths, package-manager paths, and compatibility package versions do not enter the identity. Stable absolute launchers read `active.json` at process start, so services never read the source worktree and never observe a partially written target record.
 
 **Alternative considered:** Continue executing from `packages/server/bin`, `packages/runner/dist`, and the selected worktree. Rejected because those paths are mutable build outputs and are not an installation boundary.
 
@@ -81,9 +101,13 @@ The release ID is derived from the target source revision plus the component bui
 
 ### D. Publish artifacts into the candidate release, then activate service targets
 
-`UpdateOperations` gains release-oriented build methods. The Server is published into the candidate `server` directory rather than started with `dotnet run`; the publish command is executed with `SnapshotRoot` as its working directory and includes the web assets required by the publish output. The Runner build receives `MOHIST_REPO_ROOT=SnapshotRoot` from the source context and writes its build manifest into the staged Runner artifact. The CLI is published into the candidate `cli` directory from the same snapshot, with generated identity metadata supplied by the transaction rather than read from the mutable authority worktree.
+`UpdateOperations` gains release-oriented build methods. The Server publish command reads the project from `SnapshotRoot`, writes MSBuild intermediates below `BuildWorkspaceRoot/server`, and writes its publish output below `CandidateRoot/server`. The web typecheck/build reads `SnapshotRoot/packages/web` but receives an explicit output directory below `BuildWorkspaceRoot/web`; the Server publish target copies that staged web output into `CandidateRoot/server/wwwroot` instead of reading `SnapshotRoot/packages/web/dist`. No command uses the source tree's default `bin`, `obj`, `dist`, or `.publish` location.
 
-The Runner build manifest is extended from `{ gitHash, builtAt }` to include `component`, `version`, `sourceRevision`, and `releaseId`. Server `RuntimeBuildInfo` is extended with the same release identity and is populated from explicit service environment/manifest data before any source fallback. The service environment includes the expected source revision and release ID, so a managed artifact remains identifiable after its source worktree is moved or removed.
+The Runner builder reads TypeScript source and package metadata from `SnapshotRoot`, writes compiler output to `CandidateRoot/runner/dist`, and writes `build-info.json` with the transaction's canonical identity and explicit output path; it does not invoke a script that runs `git rev-parse` or writes under the snapshot. Before publication, the builder materializes the lockfile-resolved production dependency closure into `CandidateRoot/runner/node_modules` and writes the runtime `package.json` and dependency manifest beside it. The package-manager cache/toolchain used to build is separate from the release dependency closure.
+
+The CLI is published into `CandidateRoot/cli` from the same snapshot. The builder supplies the canonical identity through generated source under `BuildWorkspaceRoot/cli-generated` and redirects .NET intermediates and publish output to transaction-owned paths. The generated identity is compiled into the executable; it is not read from the mutable authority worktree or launcher environment.
+
+The Runner build manifest is extended from `{ gitHash, builtAt }` to include `component`, `version`, `sourceRevision`, and `releaseId`, plus the dependency-lock identity. Server `RuntimeBuildInfo` is extended with the same release identity and reads it from generated artifact-owned metadata. The service environment includes expected identity values only as a cross-check; a missing or conflicting embedded value is unavailable identity, and no managed artifact falls back to source HEAD.
 
 Extend `IServiceInstaller` with a target-set activation seam. A `RuntimeTargetSet` contains the complete CLI, Server, and Runner entries, absolute launcher paths, managed release working directories, data roots, and identity environment values. The systemd backend and the Windows scheduled-task/Startup backend are installed once with stable absolute launchers; those launchers resolve the component entry from `active.json` and never use a source worktree or relative `dist` path. Existing data directories, enrollment credentials, operator credentials, and `RUNNER_ROOT` remain outside the release and are passed through unchanged.
 
@@ -97,11 +121,11 @@ Introduce a small `RuntimeIdentity` value with `Component`, `Version`, `SourceRe
 
 Readback uses existing surfaces with additive identity fields:
 
-- Server `/api/health` and `/api/system/info` expose `component`, `version`, `sourceRevision`, and `releaseId` from `RuntimeBuildInfo`; existing `gitHash` may remain as a compatibility alias but is not the consistency field.
-- Runner `/api/runner/identity` exposes `component`, `version`, `sourceRevision`, and `releaseId` from the installed build manifest; existing `buildGitHash` may remain as a compatibility alias but is not the consistency field.
+- Server `/api/health` and `/api/system/info` expose `component`, `version`, `sourceRevision`, and `releaseId` from artifact-owned `RuntimeBuildInfo`; existing `gitHash` may remain as a compatibility alias but is not the consistency field. `RuntimeBuildInfo` fails closed when generated identity metadata is absent, and launcher environment values are compared against the embedded values rather than used to replace them.
+- Runner `/api/runner/identity` exposes `component`, `version`, `sourceRevision`, and `releaseId` from the installed build manifest, plus the exact `runnerId` and Server-issued `connectionGeneration`; existing `buildGitHash` may remain as a compatibility alias but is not the consistency field. The Server stores identity per connection generation and never chooses a Runner only by hostname.
 - The CLI identity reader invokes the installed CLI's exact `mo runtime identity --json` surface. The command writes exactly one JSON object to stdout with `component: "cli"`, `version`, `sourceRevision`, and `releaseId`; it writes diagnostics to stderr and exits nonzero when embedded identity metadata is absent, malformed, or ambiguous. A generated `MohistRuntimeIdentity.g.cs` file is supplied to the isolated `dotnet publish` inputs from the candidate manifest, so the four values are compiled into the published CLI assembly rather than inferred from the current source directory. The assembly metadata and `release.json` are cross-checked at staging time.
 
-`RuntimeConsistencyValidator` accepts the expected identity and produces check results containing expected and observed values. CLI, Server, and Runner identity checks are required only for the components in the operation scope and any component the operation actually activates or restarts. Unavailable, ambiguous, or mismatched values are failures. Readiness and asset checks can retain their existing advisory behavior where the specs do not make them identity gates, but an identity mismatch can never become `Recovered` with exit code zero. The normal success line is emitted only after all required checks pass.
+`RuntimeConsistencyValidator` accepts the expected identity and produces check results containing expected and observed values. It queries Runner identity by the active `runnerId` and validates the returned `connectionGeneration`; hostname is diagnostic metadata only. CLI, Server, and Runner identity checks are required only for the components in the operation scope and any component the operation actually activates or restarts. Unavailable, ambiguous, stale, or mismatched values are failures. Readiness and asset checks can retain their existing advisory behavior where the specs do not make them identity gates, but an identity mismatch can never become `Recovered` with exit code zero. The normal success line is emitted only after all required checks pass.
 
 **Alternative considered:** Compare each running process with the current source HEAD. Rejected because source HEAD may be read from a different root or may advance while the update is in flight; it also cannot prove that the installed artifact is the one just built.
 
@@ -121,9 +145,9 @@ Add a `RuntimeActivationCoordinator` that owns the destructive boundary. The tra
 8. `NoVerifiedRuntime`: candidate was stopped/removed because no verified target existed.
 9. `RecoveryFailed`: neither candidate nor previous target could be verified.
 
-The coordinator persists `CandidateStaged` with the candidate and previous complete target sets before changing a service unit, active record, or CLI slot. It atomically replaces `active.json` once for the complete target set, then records `CandidateActivated` and `Verifying`. On candidate failure after activation it records `RollingBack`, restores the previous active record and any recorded unit/slot backups, restarts affected services, and verifies the restored identity. If there is no previous verified release, it stops or disables the candidate and removes its active target. Candidate files are deleted only after the terminal state is persisted, so a failed cleanup remains diagnosable.
+The coordinator persists `CandidateStaged` with the candidate and previous complete target sets before changing a service unit, active record, or CLI slot. It atomically replaces `active.json` once for the complete target set, then records `CandidateActivated` and `Verifying`. On candidate failure after activation it records `RollingBack`, restores the previous active record and any recorded unit/slot backups, restarts affected services, and verifies the restored identity. If there is no previous verified release, it stops or disables the candidate and atomically publishes an `active.json` record with `status: "none"` and no target set. If the previous release cannot be verified, it also stops or disables every candidate service, atomically clears the active target to `status: "none"`, preserves the transaction and candidate paths for diagnosis, and ends in `RecoveryFailed`. A stable launcher refuses to start while the active record has no target. Candidate files are deleted only after the terminal state is persisted, so a failed cleanup remains diagnosable.
 
-`RuntimeTransactionReconciler` runs before a new update and from the stable managed launcher. For every nonterminal record it compares the active record with the recorded candidate and previous sets. An unapplied candidate is cleaned and terminally marked; an active candidate is bounded-verified and either committed or rolled back; a `RollingBack` record resumes restoration; a missing or corrupt active record attempts the previous target and ends in `RecoveryFailed` if that target cannot be verified. Recovery has a bounded timeout using `TimeProvider`; it does not poll without a deadline, and no concurrent update can start while a record remains unresolved.
+`RuntimeTransactionReconciler` runs before a new update and from the stable managed launcher. For every nonterminal record it compares the active record with the recorded candidate and previous sets. An unapplied candidate is cleaned and terminally marked; an active candidate is bounded-verified and either committed or rolled back; a `RollingBack` record resumes restoration; a missing or corrupt active record attempts the previous target and ends in `RecoveryFailed` only after stopping candidate services and atomically publishing `active.json` with `status: "none"` when that target cannot be verified. Recovery has a bounded timeout using `TimeProvider`; it does not poll without a deadline, and no concurrent update can start while a record remains unresolved.
 
 The existing Runner-stop recovery becomes one operation in this coordinator. `FinalizeAfterServerAsync` and `RunRecoveryStageAsync` delegate to it instead of independently deciding whether to start the Runner. Required identity failure is never converted to the existing warning-based `UpdateOutcome.Recovered` state.
 
@@ -161,6 +185,12 @@ The command surface uses one source snapshot and one activation/recovery protoco
 
 Component-scoped commands retain untouched entries in `active.json` and explicitly report them as untouched. If an implementation restarts or activates another component, that component is added to the required checks and rollback scope; it is never silently omitted. Only `mo update` may claim that CLI, Server, and Runner form one globally verified release.
 
+### I. Make the Server update surface projection-only
+
+`POST /api/system/update` returns HTTP 409 with `UpdateMutationOwnedByCli` and does not create a background job. `GET /api/system/update/status` and `GET /api/system/consistency` only read the latest CLI outcome and local runtime facts; they do not call an advance method, run a command, restart a service, acquire an update lock, or mark a job successful. `POST /api/system/update/outcome` remains a projection sink for CLI-reported terminal and nonterminal facts, not an activation authority.
+
+On Server startup, persisted web-owned jobs in `running` or `waiting-for-reconnect` are atomically marked `rejected` with reason `UpdateMutationOwnedByCli` and their web lock is released. They are not resumed or advanced. A CLI-owned transaction is projected only by matching its job ID and target identity; status reads cannot create or complete one. The same projection-only behavior applies to a status request made while a legacy web job is present.
+
 ## Risks / Trade-offs
 
 - [Existing custom systemd units and Windows launchers may continue to execute source-bound paths] -> Detect legacy targets during preflight, report the migration command and exact unsupported dependency, and do not claim them as managed verified releases.
@@ -173,7 +203,7 @@ Component-scoped commands retain untouched entries in `active.json` and explicit
 - [The source authority worktree changes during a long build] -> Build only from the read-only revision snapshot and fail preflight if snapshot materialization or revision validation fails.
 - [A crash leaves a durable nonterminal transaction] -> Run `RuntimeTransactionReconciler` before new updates and managed startup, using the recorded candidate/previous target sets to commit or restore deterministically.
 - [A second update could race the first transaction] -> Acquire an exclusive transaction lock before staging, reject concurrent updates with the active job ID, and release the lock only in a terminal state.
-- [The web update job currently mutates source-bound artifacts] -> Reject `POST /api/system/update` with `UpdateMutationOwnedByCli`; status and outcome surfaces remain projections and the CLI transaction remains authoritative for local success.
+- [The web update job currently mutates source-bound artifacts] -> Reject `POST /api/system/update`, quarantine persisted nonterminal web jobs on Server startup, and keep status/consistency reads free of command and service side effects; the CLI transaction remains authoritative for local success.
 
 ## Migration Plan
 
@@ -181,18 +211,14 @@ Component-scoped commands retain untouched entries in `active.json` and explicit
 2. Add staged Server, Runner, and CLI artifact builds from `SnapshotRoot`. Update Runner build-info generation, generated CLI identity metadata, and Server runtime identity to carry release metadata. Add dry-run output for release paths and target identities.
 3. Add stable absolute launchers for systemd and Windows scheduled-task/Startup fallback. Make `active.json` the single atomic target-set pointer and migrate supported units without silently rewriting unsupported custom source-bound units.
 4. Add activation/rollback orchestration, transaction-ID continuation, and crash reconciliation. Publish a complete candidate active-target record only after staging; commit it as verified only after required readback, and restore it when verification or reconciliation fails.
-5. Make CLI, Server, and Runner identity checks fail closed, implement the explicit full/component operation matrix, reject the Server web mutation endpoint, and extend terminal/outcome reporting with target/observed facts.
+5. Make CLI, Server, and Runner identity checks fail closed, implement the explicit full/component operation matrix, reject and quarantine the Server web mutation path, and extend terminal/outcome reporting with target/observed facts.
 6. Update focused CLI, snapshot, installer, Server, Runner, artifact-manifest, web-route, and transaction tests, then add scenarios for explicit/default roots, source mutation during build, every operation scope, stale identities, successful commit, kill-point recovery, no verified release, CLI continuation failure, and both service backends.
 
-For an existing installation, the first managed update records the legacy target and creates a managed candidate. A supported service install/update operation must install the stable launchers before relying on automatic activation; custom source-bound units are not silently rewritten. User data roots and credentials are retained. If the first candidate fails before any managed release is verified, the candidate is removed or disabled as specified; the system does not pretend that the old source-bound unit is a verified managed release. Once a managed release exists, rollback restores the previous `active.json` target set and its recorded artifact paths.
+For an existing installation, the operator first bootstraps the current CLI and stable launchers when the installed CLI reports `bootstrap_required`. The bootstrap does not claim the legacy source-bound runtime as verified. A supported service install/update operation must install the stable launchers before relying on automatic activation; custom source-bound units are not silently rewritten. User data roots and credentials are retained. If the first candidate fails before any managed release is verified, the candidate is removed or disabled as specified; the system does not pretend that the old source-bound unit is a verified managed release. Once a managed release exists, rollback restores the previous `active.json` target set and its recorded artifact paths.
 
 Rollback is transaction-local and automatic. A failed candidate restores the previous verified release when possible; if restoration cannot be verified, the command reports `RecoveryFailed` and never prints success. Code rollback is a normal deployment rollback to the previous CLI/server build; no database migration or external service migration is introduced by this change.
 
 ## Open Questions
 
-- Should the managed runtime root be fixed to `~/.local/share/mohist/runtime` and `%LOCALAPPDATA%/Mohist/runtime`, or be configurable before the first implementation lands?
 - Should release cleanup retain exactly one previous verified release, or should a configurable count/size policy be added with the initial store?
-- Should the identity fields be added only to existing health/system-info/Runner identity payloads, or should a dedicated authenticated runtime-identity endpoint be introduced later?
-- Should Windows scheduled-task/Startup activation ship in the same rollout as systemd activation, or be explicitly gated until its launcher rollback tests are complete?
 - Should a future version support dirty worktrees by recording a content digest, or should updates continue to require clean Git revisions permanently?
-- Should the server-side `SystemUpdateService` eventually read the local transaction record directly, or remain a projection of CLI-posted outcomes and runtime readback?

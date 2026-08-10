@@ -12,21 +12,27 @@ The update command SHALL resolve one effective repository root before it perform
 - **AND** the resolved root is recorded as a default-root update rather than being indistinguishable from an explicit-root update
 
 ### Requirement: Carry an immutable source identity through the update
-The command SHALL create an update source context containing the effective normalized repository root, the source revision identity resolved from that root, and the immutable snapshot root used for building. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
+The command SHALL create an update source context containing the effective normalized repository root, the source revision identity resolved from that root, the immutable `SnapshotRoot` used as read-only source input, and transaction-owned writable `BuildWorkspaceRoot` and `CandidateRoot` paths. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
 
 #### Scenario: Server and Runner are built from the same explicit source
 - **WHEN** the selected repository root resolves to source revision `target-123`
-- **THEN** the Server build receives that root and target identity
-- **AND** the Runner build receives that same root and target identity
+- **THEN** the Server build reads source files from the same `SnapshotRoot` and receives the target identity
+- **AND** the Runner build reads source files from that same `SnapshotRoot` and receives the target identity
 - **AND** the installed services and final verification use that same target identity
 
 ### Requirement: Build from an immutable source snapshot
-After resolving a usable clean source revision, the command SHALL materialize a read-only build snapshot of that revision before any artifact build or service change. All build commands SHALL use the snapshot root; the requested repository root remains the reported source authority but changes to it after snapshot creation SHALL not change the candidate artifacts. Snapshot creation failure SHALL stop the update before managed runtime state is changed.
+After resolving a usable clean source revision, the command SHALL materialize a read-only build snapshot of that revision before any artifact build or service change. Build commands SHALL read source files only from `SnapshotRoot` and SHALL write compiler intermediates, generated metadata, web output, and candidate artifacts only under `BuildWorkspaceRoot` or `CandidateRoot`; no build command may write to `SnapshotRoot`. The requested repository root remains the reported source authority but changes to it after snapshot creation SHALL not change the candidate artifacts. Snapshot creation or writable build-root preparation failure SHALL stop the update before managed runtime state is changed.
 
 #### Scenario: Selected worktree changes after source resolution
 - **WHEN** the selected repository resolves to `target-123` and the original worktree is modified or advances after the snapshot is materialized
 - **THEN** Server, Runner, and CLI artifacts are built from the snapshot for `target-123`
 - **AND** the later worktree change does not change the candidate identity or its contents
+
+#### Scenario: Build output does not mutate the source snapshot
+- **WHEN** Server, web, Runner, and CLI builds run for source revision `target-123`
+- **THEN** all compiler intermediates, generated identity files, web output, and Runner build metadata are written below the transaction build or candidate roots
+- **AND** the snapshot revision marker and source-file digest remain unchanged
+- **AND** the candidate records both the snapshot revision and its writable output roots
 
 #### Scenario: Snapshot creation fails
 - **WHEN** the selected revision is readable but the immutable build snapshot cannot be materialized
