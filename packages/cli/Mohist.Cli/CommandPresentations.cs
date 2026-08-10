@@ -352,8 +352,8 @@ internal static class CommandPresentations
                     CommandCapability.Automation, "Compact the session in place"));
                 CommandPresentationCatalog.Attach(Find(group, "reset"), new CommandPresentation(
                     CommandCapability.Automation, "Reset the session in place"));
-                CommandPresentationCatalog.Attach(Find(group, "cancel"), new CommandPresentation(
-                    CommandCapability.Automation, "Cancel a running Session"));
+                CommandPresentationCatalog.Attach(Find(group, "stop"), new CommandPresentation(
+                    CommandCapability.Automation, "Stop a Turn or cascade a Session tree"));
             }
         }
 
