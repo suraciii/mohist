@@ -131,47 +131,24 @@ public static partial class IssueRoutes
                 ct: ctx.RequestAborted);
         });
 
-        group.MapPost("/{number:int}/sessions/{name}/cancel", async (
-            HttpContext ctx,
-            string projectRef,
-            int number,
-            string name,
-            AgentSessionCancelRequest? request,
-            AgentSessionQuerier sessions,
-            IGrainFactory grains,
-            WorkflowSessionWorkReconciler workReconciler,
-            CancellationToken ct) =>
-        {
-            var project = GetRequiredProject(ctx);
-            var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
-            if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
-
-            return await AgentSessionCancelRoutes.ExecuteCancelAsync(
-                project.Id,
-                sessionId,
-                request,
-                sessions,
-                grains,
-                workReconciler,
-                ct);
-        });
-
         group.MapPost("/{number:int}/sessions/{name}/stop", async (
             HttpContext ctx,
             string projectRef,
             int number,
             string name,
-            AgentSessionCancelRequest? request,
+            SessionStopRequest? request,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
-            WorkflowSessionWorkReconciler workReconciler,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
+            var idempotencyKey = ctx.Request.Headers["Idempotency-Key"].ToString();
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                return ApiResults.BadRequest("Idempotency-Key is required", "idempotency_key_missing");
 
             return await AgentSessionStopRoutes.ExecuteStopAsync(
                 project.Id,
@@ -181,7 +158,7 @@ public static partial class IssueRoutes
                 grains,
                 runnerHub,
                 connections,
-                workReconciler,
+                idempotencyKey,
                 ct);
         });
     }

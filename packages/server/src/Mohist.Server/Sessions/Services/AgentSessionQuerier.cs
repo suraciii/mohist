@@ -499,7 +499,7 @@ public class AgentSessionQuerier : IScopedService
                 : null);
     }
 
-    public async Task<SessionCancelTarget?> ResolveCancelTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
+    public async Task<SessionStopTarget?> ResolveStopTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
@@ -518,7 +518,7 @@ public class AgentSessionQuerier : IScopedService
             && !string.Equals(sourceKind, "agent-connection", StringComparison.Ordinal))
             return null;
 
-        return new SessionCancelTarget(
+        return new SessionStopTarget(
             record.Session.Runtime.RunnerId,
             record.Session.Id,
             sourceKind!,
@@ -1167,7 +1167,7 @@ public sealed record FollowupTarget(
 /// <see cref="SessionId"/> alone — there is no <c>workflowRunId</c> /
 /// <c>sessionName</c> pair to carry. The runner resolves the session
 /// through the OpenCode runtime's <c>generic:</c>-prefixed binding
-/// lookup at Follow-up / Cancel dispatch time.
+/// lookup at Follow-up / stop dispatch time.
 /// </summary>
 public sealed record GenericFollowupTarget(
     string RunnerId,
@@ -1185,7 +1185,7 @@ public sealed record CanonicalFollowupTarget(
     string? WorkDir,
     AgentExecutionDefinition? Definition = null);
 
-public sealed record SessionCancelTarget(
+public sealed record SessionStopTarget(
     string RunnerId,
     string SessionId,
     string SourceKind,

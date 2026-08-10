@@ -65,7 +65,7 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
     }
 
     [Fact]
-    public async Task ResolveCancelTarget_AgentConnectionSession_ReturnsTarget()
+    public async Task ResolveStopTarget_AgentConnectionSession_ReturnsTarget()
     {
         var (database, factory, sessionId) = await SeedAsync();
         await using var _ = database;
@@ -80,7 +80,7 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
         Assert.Equal("agent-connection", storedLabels.LabelSourceKind);
         Assert.Equal(ConnectionId, storedLabels.LabelConnectionId);
 
-        var target = await querier.ResolveCancelTargetAsync(ProjectId, sessionId);
+        var target = await querier.ResolveStopTargetAsync(ProjectId, sessionId);
 
         Assert.NotNull(target);
         Assert.Equal(sessionId, target!.SessionId);

@@ -196,7 +196,7 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
             Prompt: "follow up please",
             Source: "generic-followup"));
 
-        await session.CancelTurnAsync(turnId);
+        await session.StopTurnAsync(turnId);
 
         var turns = await session.ListTurnsAsync();
         var turn = SingleTurn(turns);
@@ -225,7 +225,7 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
         await session.MarkTurnExecutingAsync(turnId);
         await session.MarkTurnTerminalAsync(turnId, AgentTurnStatus.Completed, null);
 
-        await session.CancelTurnAsync(turnId);
+        await session.StopTurnAsync(turnId);
 
         var turns = await session.ListTurnsAsync();
         var turn = SingleTurn(turns);
@@ -249,7 +249,7 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
             Source: "generic-followup"));
         await session.MarkTurnExecutingAsync(turnId);
 
-        await session.CancelTurnAsync(turnId);
+        await session.StopTurnAsync(turnId);
 
         var turns = await session.ListTurnsAsync();
         var turn = SingleTurn(turns);
@@ -619,7 +619,7 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
             Prompt: "follow up please",
             Source: "generic-followup"));
 
-        await session.CancelTurnAsync(turnId);
+        await session.StopTurnAsync(turnId);
 
         await session.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
         await session.GetAsync();

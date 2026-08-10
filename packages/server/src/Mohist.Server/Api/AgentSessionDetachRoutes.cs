@@ -8,7 +8,7 @@ public static class AgentSessionDetachRoutes
 {
     public static WebApplication MapAgentSessionDetachRoutes(this WebApplication app)
     {
-        var group = app.MapGroup(AgentSessionCancelRoutes.CancelPathPrefix)
+        var group = app.MapGroup(AgentSessionStopRoutes.PathPrefix)
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
         group.MapPost("/{childSessionId}/detach", async (
