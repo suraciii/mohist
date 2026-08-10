@@ -540,7 +540,7 @@ public class IssueCliStartReadinessTests
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": { "number": 42, "title": "Start me", "status": "running", "workflowRunId": "wr_abc123" } }
+            { "success": true, "data": { "number": 42, "workflowRunId": "wr_abc123" } }
             """);
 
         var output = new StringWriter();
@@ -556,6 +556,7 @@ public class IssueCliStartReadinessTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("workflowRunId: wr_abc123", output.ToString());
+        Assert.DoesNotContain("invalid-response", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -581,6 +582,7 @@ public class IssueCliStartReadinessTests
         var json = JsonNode.Parse(output.ToString())!.AsObject();
         Assert.Equal("wr_abc123", json["workflowRunId"]?.GetValue<string>());
         Assert.Single(json);
+        Assert.DoesNotContain("invalid-response", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -604,6 +606,56 @@ public class IssueCliStartReadinessTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("wr_existing", output.ToString());
+    }
+
+    [Fact]
+    public async Task IssueStart_CompositeSuccessWithoutParentRun_RemainsAValidResource()
+    {
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            { "success": true, "data": { "number": 42 } }
+            """);
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "start", "42", "--project", "mohist-local"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("number:", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid-response", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IssueStart_CompositeJsonSelection_ReturnsNullWorkflowRunId()
+    {
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            { "success": true, "data": { "number": 42 } }
+            """);
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "start", "42", "--project", "mohist-local", "--json", "workflowRunId"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var json = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.True(json.ContainsKey("workflowRunId"));
+        Assert.Null(json["workflowRunId"]);
+        Assert.DoesNotContain("invalid-response", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
