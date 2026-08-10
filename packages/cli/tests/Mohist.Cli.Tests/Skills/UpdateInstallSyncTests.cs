@@ -235,7 +235,10 @@ public sealed class UpdateInstallSyncTests
             {
                 BaseAddress = new Uri("http://localhost:3456"),
             },
-            getUserHome: () => tempRoot);
+            getUserHome: () => tempRoot,
+            // These tests exercise the packaged skill-cache synchronization contract.
+            // Managed artifact installation has its own fake transaction coverage.
+            managedUpdatesEnabled: false);
         return (updater, files);
     }
 
