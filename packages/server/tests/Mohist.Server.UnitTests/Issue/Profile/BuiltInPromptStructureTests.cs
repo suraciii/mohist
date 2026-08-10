@@ -20,6 +20,32 @@ public class BuiltInPromptStructureTests
     }
 
     [Fact]
+    public void IssueQueryBuiltIns_UseCurrentIssueViewCommand()
+    {
+        var templates = new FilePromptLoader().LoadAllTemplates();
+        var queryPromptKeys = new[]
+        {
+            "apply-feedback",
+            "build",
+            "design",
+            "proposal",
+            "review",
+            "self-review",
+            "specs",
+            "tasks",
+        };
+
+        Assert.Equal(8, queryPromptKeys.Length);
+        Assert.All(templates.Values, template => Assert.DoesNotContain("mo issue show", template.Body));
+        foreach (var key in queryPromptKeys)
+        {
+            Assert.True(templates.TryGetValue(key, out var template), $"Missing builtin prompt: {key}");
+            Assert.DoesNotContain("mo issue show", template!.Body);
+            Assert.Contains("mo issue view ${{ issue.number }} --project ${{ issue.projectId }}", template.Body);
+        }
+    }
+
+    [Fact]
     public void FixPrChecksPrompt_UsesProjectPrContextAndFailureError()
     {
         var body = new FilePromptLoader().LoadAllTemplates()["fix-pr-checks"].Body;
