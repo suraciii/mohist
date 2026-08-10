@@ -2,176 +2,190 @@
 
 ## Review Context
 
-This is a re-review of the plan after commits `34a8024e7` and `0463dd321`.
-Issue 559 was read with:
+This is a re-review. The previous review identified three must-fix gaps in
+handoff rejection, terminal delivery, and artifact binding. The current issue
+was read first with:
 
 ```text
 mo issue view 559 --project proj_f6c141d63b6243bfbb481737b2243b87
 ```
 
-The issue is titled `可复用的 Agent Workflow Action`, remains in plan/in-progress
-state, and has an empty body. Issue-level coverage is therefore checked against
-the title and the proposal/spec contract. The current artifacts contain twelve
-requirements mapped across T-001 through T-005. This review modifies only this
-file.
+The issue is in progress, P1, high risk, and its body defines six acceptance
+criteria: Agent selection and permitted task context; mutually locatable
+Job/Session/Input/Turn lineage; immutable Agent configuration; shared
+readiness/workspace/concurrency rules; queued/executing/terminal/recovering
+states; and stable results without transcript parsing. The plan contains twelve
+normative requirements mapped across T-001 through T-005.
 
-## Findings
+## Must-Fix Findings
 
-### 1. HIGH - Definitive handoff rejection does not specify how the TaskRun fails
+### 1. HIGH - Preflight rejection is not durably fenced for replay
 
-The new transport contract correctly permits a transient `agent-handoff` claim,
-but it stops short of specifying the Workflow state transition for a definitive
-rejection. The spec still requires the task to fail with `agent_not_found` when
-the Agent is unavailable (`specs/workflow-agent-action/spec.md:48-50`) and to
-reject readiness failures (`specs/workflow-agent-action/spec.md:100-102`).
+The revised rejection operation correctly applies a Workflow failure boundary
+(`design.md:163-174`; `specs/workflow-agent-action/spec.md:23,37-39`). However,
+the stated coordinator order resolves Agent, readiness, and workspace before
+invoking the coordinator (`design.md:183-194`), while the coordinator is where
+the `(projectId, commandId)` fingerprint and acknowledgement are persisted
+(`design.md:146-181`). The same pre-coordinator ordering is repeated at
+`design.md:299-302`.
 
-The design says that `accepted` and `rejected` are terminal transport
-acknowledgements, that the Server retires the handoff obligation, and that the
-handoff bypasses `/report`, `ReceiveTaskReportAsync`, and
-`ReceiveCheckReportAsync` (`design.md:156-161`). It then says a failed preflight
-returns a rejection and retires the already-claimed transport
-(`design.md:185-191`), but names no `IWorkflowGrain` operation that fails the
-still-running TaskRun or applies its recovery boundary.
+If an unavailable Agent or readiness failure causes
+`ApplyAgentHandoffRejectionAsync` to succeed and the HTTP response is lost, the
+plan does not require a durable rejected acknowledgement to have been stored.
+A replay of the same command can rerun preflight after the Agent becomes
+available and accept a new Job instead of replaying the original rejection.
+That violates the handoff requirement that the same command and fingerprint
+replay the original acknowledgement (`specs/workflow-agent-action/spec.md:23,33-39`)
+and can turn a definitive pre-acceptance rejection into accepted Agent
+execution.
 
-The current Workflow grain has a separate
-`RejectActiveWorkDispatchAsync(workerId, workId, error)` operation
-(`packages/server/src/Mohist.Server/Workflow/Grains/IWorkflowGrain.cs:29-34`),
-whose implementation calls `FailTask` and deletes the dispatch snapshot
-(`packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.Reports.cs:103-121`).
-The new handoff route is explicitly forbidden from using the ordinary report
-path, so the plan must state whether it calls this operation or adds a
-lineage-checked `RejectAgentHandoffAsync` equivalent, and must make that
-operation idempotent under the command/fingerprint before returning `rejected`.
-Without that contract, the Runner can retire transport while the Workflow task
-remains `Running`, violating the `agent_not_found` and readiness acceptance
-scenarios.
+The plan must persist the command and terminal rejection outcome before or as
+part of preflight handling, or route every preflight failure through a durable
+coordinator rejection record. The record must retain the original error and
+make duplicate Workflow failure application idempotent.
 
-### 2. HIGH - Terminal delivery still has two incompatible contracts
+### 2. HIGH - Workflow acceptance precedes Agent participant promotion without a compensation path
 
-The finalizer fix defines a typed `WorkflowAgentFinalizationRequest` and says
-durable delivery invokes `IWorkflowGrain.ApplyAgentJobFinalizationAsync`
-(`design.md:414-448`; `specs/workflow-agent-action/spec.md:127-144`). However,
-the preceding terminal-delivery decision still stages a
-`PendingWorkflowTerminalDelivery` containing only a generic “structured Agent
-result” and retries `IWorkflowGrain.ReceiveAgentJobResultAsync`
-(`design.md:346-352`). T-003 separately requires delivery to verify
-`finalizerKey` before the Server-side finalizer runs
-(`tasks.json:50-59`).
+The participant sequence records the Workflow lineage before promoting the
+provisional AgentJob and AgentSession (`design.md:183-204`). Separately, the
+design says that acceptance atomically records `WorkflowAgentInvocation`, marks
+the TaskRun `Running`, clears the Runner assignment, and removes the Workflow
+dispatch obligation (`design.md:250-255`).
 
-The plan does not say whether `PendingWorkflowTerminalDelivery` now carries the
-complete finalization request, whether `ReceiveAgentJobResultAsync` is renamed
-or becomes a wrapper, or which acknowledgement is persisted for the finalizer
-receipt. An implementation following the older section can deliver the Agent
-terminal result while dropping `capturedOutputs`, `artifactUploadIds`, and
-`setVars`, so the Workflow result can become terminal without applying the
-required side effects. One canonical delivery DTO, operation, and
-Accepted/Stale/Retry contract is required before build.
+There is no named operation for the failure case after that Workflow commit but
+before AgentJob/AgentSession promotion, and `WorkflowAgentInvocation` has no
+provisional or recovering materialization state (`design.md:227-243`). A
+promotion failure or coordinator loss can therefore leave a Running TaskRun
+with an accepted invocation pointing at hidden or absent participants, no
+claimable AgentJob, and no active handoff on which the rejection operation can
+act. That violates the issue's lineage criterion and T-001's requirement for
+one mutually locatable Job/Session/Input/Turn lineage for every accepted attempt
+(`tasks.json:14-16`; `specs/workflow-agent-action/spec.md:71-84`).
 
-### 3. HIGH - Uploaded artifacts are validated but never explicitly bound
+The plan must either promote and durably verify all provisional participants
+before accepting the Workflow lineage, or define a durable compensation and
+recovery state that can reject or finish the accepted invocation without
+leaving the TaskRun stuck.
 
-The revised design adds an invocation-keyed upload route and a
-`WorkflowAgentInvocationArtifactResolver` (`design.md:400-409`), but the
-Server-side finalizer only says that it verifies upload ownership and records
-the applied upload ids (`design.md:438-448`). Neither the design nor T-002's
-acceptance criteria names the operation that converts those pending uploads
-into visible Workflow artifacts.
+### 3. HIGH - The typed finalization request has no specified Runner-to-AgentJob transport
 
-This is a concrete gap in the current artifact contract. The existing upload
-route documents that uploads remain hidden until Workflow result reporting
-binds them (`packages/server/src/Mohist.Server/Api/WorkflowArtifactUploadRoutes.cs:9-28`).
-The existing `IWorkflowArtifactBindService.BindAsync` is the operation that
-creates `WorkflowArtifact` rows and removes pending uploads
-(`packages/server/src/Mohist.Server/Workflow/Services/Artifacts/WorkflowArtifactBindService.cs:11-22,64-132`).
-The current implementation derives that binding from active `(workflowRunId,
-workId)` context, but the new design intentionally clears the Workflow Runner
-assignment before AgentJob execution (`design.md:234-239`).
+The design now correctly defines `WorkflowAgentFinalizationRequest` and requires
+it in `PendingWorkflowTerminalDelivery` (`design.md:362-394,457-504`; the
+corresponding spec is `specs/workflow-agent-action/spec.md:132-154`). It does
+not define how the Runner completion adapter transmits that request to
+AgentJob.
 
-The plan must define an invocation-keyed bind command/resolver using
-`(workflowRunId, taskRunId, jobId, finalizerKey)`, and include the bind receipt
-in the finalizer's idempotency fence. Otherwise an AgentJob can report success
-and the finalizer can record upload ids while the artifacts remain pending or
-expire, violating the proposal's Workflow task artifact semantics.
+The current boundary cannot carry the required fields: the server `WorkResult`
+contains status, output, artifact upload ids, and error but no
+`capturedOutputs`, `setVars`, or typed Workflow finalization field
+(`packages/server/src/Mohist.Server/Runner/Grains/IRunnerGrain.cs:256-273`),
+and `RunnerReportRequest` exposes the same limitation
+(`packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:939-951`). The Runner's
+`ServerConnection.report` also serializes only the generic result fields
+(`packages/runner/src/server/connection.ts:106-129`).
+
+T-002 says the adapter prepares the typed envelope and T-003 says AgentJob
+persists it, but neither task names a report field, separate endpoint, request
+acknowledgement, or retry/idempotency rule connecting those two steps. An
+implementation can therefore produce the envelope in memory while dropping
+`capturedOutputs` or `setVars` before terminal delivery, violating the Workflow
+artifact/variable side-effect criteria and the stable-result criterion
+(`tasks.json:30-37,50-59`; `specs/workflow-agent-action/spec.md:136-146`).
+
+The plan must specify one canonical Runner-to-AgentJob wire contract, including
+its direct-Agent compatibility boundary, validation, acknowledgement, and
+replay behavior.
+
+### 4. HIGH - Artifact binding has a crash window before the finalizer receipt
+
+The revised plan names `BindAgentInvocationAsync` and requires it to create
+visible artifacts and remove pending uploads in an idempotent transaction
+(`design.md:481-500`; `specs/workflow-agent-action/spec.md:136,156-158`). It then
+explicitly records the `WorkflowAgentFinalizationReceipt` after that bind
+operation (`design.md:493-504`).
+
+If the bind transaction commits and the process fails before the finalizer
+receipt is persisted, the pending uploads are gone and the visible artifact
+rows exist, but there is no stated durable record from which a replay can
+recover the bound artifact ids. A retry can see no pending upload and fail, or
+create duplicate visible rows if it treats the upload as new. This violates the
+requirements that a repeated finalizer payload not repeat artifact binding and
+that bound ids remain in the receipt (`tasks.json:35,54-57`; `specs/workflow-agent-action/spec.md:138,144-146`).
+
+The bind result needs its own durable finalizer-key fence/receipt, a unique
+invocation-keyed artifact binding that can be replayed after the crash, or an
+atomic transaction covering the bind outcome and finalizer receipt. The plan
+must define which mechanism owns this boundary.
 
 ## Previous Finding Dispositions
 
-- Finding 1, unavailable-Agent semantics: **fixed**. The plan now distinguishes
-  temporary non-execution transport from accepted Agent execution and updates
-  the spec and T-001 criteria accordingly (`design.md:88-104`,
-  `specs/workflow-agent-action/spec.md:20-35`, `tasks.json:12-16`). The rejection
-  transition gap is reported separately above.
-- Finding 2, handoff transport/report contract: **mostly fixed but not closed**.
-  The endpoint, request fields, command identity, fingerprint, acknowledgement
-  states, replay fence, retirement, and ordinary-report bypass are now explicit
-  (`design.md:116-168`; `specs/workflow-agent-action/spec.md:20-35`). Finding 1
-  above remains in this area because the rejected acknowledgement still lacks
-  its required Workflow failure operation.
-- Finding 3, AgentJob-to-Workflow finalizer bridge: **not fully fixed**. The
-  owner, finalizer key, envelope, artifact resolver, and keyed variable command
-  are now named, but Findings 2 and 3 show that the terminal delivery payload
-  and artifact binding operation are still incomplete.
+- Previous finding 1, missing Workflow transition for definitive handoff
+  rejection: **fixed in the direct contract**. `ApplyAgentHandoffRejectionAsync`
+  now verifies lineage, applies failure/recovery, and is required before the
+  rejected acknowledgement (`design.md:163-174`; `spec.md:23,37-39`). Finding 1
+  above is a separate replay-fence gap exposed by tracing the revised order.
+- Previous finding 2, incompatible terminal-delivery contracts: **fixed**. The
+  plan now has one `PendingWorkflowTerminalDelivery`, one typed finalization
+  request, and one `Accepted/Stale/Retry/Conflict` operation
+  (`design.md:362-394`; `tasks.json:50-59`). Finding 3 above is the distinct
+  upstream Runner-to-AgentJob transport gap.
+- Previous finding 3, no explicit artifact bind operation: **partially fixed**.
+  `BindAgentInvocationAsync` and its invocation-keyed identity are now named
+  (`design.md:481-500`; `spec.md:136,156-158`), but Finding 4 remains an
+  exact-once crash-safety gap at the bind/receipt boundary.
 
 ## Observations
 
-### 4. MEDIUM - `session` and `timeout` semantics remain open
+### 5. MEDIUM - `session` and `timeout` semantics remain open
 
-The spec says optional `session` and `timeout` retain existing semantics
-(`specs/workflow-agent-action/spec.md:1-18`), while the design intentionally
-uses a new physical Session per attempt and leaves timeout range, default
-normalization, and delivery margin as open questions (`design.md:300-312`,
-`design.md:595-606`). Existing OpenCode and Pi paths do not currently normalize
-these inputs identically. This remains a non-blocking design follow-up for the
-current issue review, but T-002 should resolve it before implementation.
+The plan intentionally creates a new physical Session per accepted attempt but
+leaves timeout range, default normalization, and delivery margin as open
+questions (`design.md:309-313,651-662`). Existing OpenCode and Pi paths do not
+currently normalize all of these inputs identically. This is non-blocking for
+the issue's six acceptance criteria, but T-002 should settle it before
+implementation.
 
-### 5. LOW - Read-surface privacy and API shape remain unresolved
+### 6. LOW - Read route shape and privacy boundary remain implementation choices
 
-The design still lists `workspaceName/workspacePath` in Session metadata while
-the proposal/spec prohibit raw workspace paths and existing Session read models
-expose Runner/work-directory fields (`design.md:314-325,502-507`). T-004 also
-leaves embedded-versus-dedicated read routing open (`tasks.json:70-88`,
-`design.md:595-600`). This is recorded as an observation because the task
-requires a sanitized projection, but the first implementation should settle the
-route and filtering boundary explicitly.
-
-### 6. LOW - Issue-level acceptance criteria are absent
-
-`mo issue view` returned an empty issue body. The proposal and twelve normative
-requirements provide an inferred acceptance source, but the issue itself has no
-independent Done When criteria. This is non-blocking for the artifact review
-because the plan declares its proposal/spec contract, but it remains a product
-tracking gap.
+The design leaves embedded-versus-dedicated invocation reads open
+(`design.md:651-659`; `tasks.json:70-88`) and carries workspace metadata
+internally while requiring public projections to omit raw paths and Runner
+details (`design.md:330-341,540-563`). This is an observation because the
+projection requirement is explicit; the chosen route and sanitization boundary
+should nevertheless be fixed in T-004.
 
 ## Dimension Checks
 
-- **Coverage:** checked. The proposal goals are represented by twelve spec
-  requirements, and every requirement is referenced by at least one task. The
-  three findings above are implementation-completeness gaps in otherwise covered
-  requirements.
-- **Correctness:** failed. Findings 1-3 leave rejection, terminal side effects,
-  or artifact visibility without a complete owner/operation contract.
-- **Current codebase consistency:** checked. The review traced the current
-  dispatch claim path, Runner `awaitingAck` reporting, AgentJob report contract,
-  Workflow rejection operation, and pending-artifact bind path. The artifacts'
-  migration target matches the current `mohist/agent` translator behavior, but
-  the new routes and DTOs are not implemented yet.
-- **Task breakdown:** checked with gaps. The dependency graph remains linear
-  (`T-001 -> T-002 -> T-003 -> T-004 -> T-005`), and focused test categories are
-  listed, but Findings 1-3 need explicit acceptance criteria and test cases for
-  rejection application, finalization delivery payload replay, and artifact
-  binding replay.
+- **Issue goals and acceptance criteria:** checked. The issue body was read
+  before the artifacts, and all six criteria are represented in the proposal,
+  twelve spec requirements, and T-001 through T-005.
+- **Coverage:** checked, no unmapped goal found. Findings 1-4 are completeness
+  defects inside covered handoff, lineage, finalization, and artifact criteria.
+- **Correctness:** failed. Findings 1-4 permit replay, promotion, transport,
+  or crash paths that can violate the issue's stable lineage and side-effect
+  guarantees.
+- **Current codebase consistency:** checked with issues recorded. The plan
+  reuses the existing AgentRefResolver, readiness service, AgentJob ledger,
+  Runner admission, and artifact store boundaries, but Findings 3-4 must define
+  the extensions to the current report and artifact contracts.
+- **Task breakdown and verifiability:** failed. The dependency graph is
+  coherent (`T-001 -> T-002 -> T-003 -> T-004 -> T-005`) and focused tests are
+  listed, but no task explicitly verifies preflight rejection replay,
+  post-acceptance promotion failure, finalization-envelope delivery, or
+  bind/receipt crash recovery.
 
 ## Verification Notes
 
-- No product tests or build gates were run during this review; this was an
-  artifact/code-contract review only.
-- Static evidence came from the current issue output, the four plan artifacts,
-  commits `34a8024e7` and `0463dd321`, and the cited Server/Runner sources.
-- The prior local verification limitation remains `tsx: not found`; it is an
-  environment gap, not evidence for or against the findings above.
+- No product tests or build gates were run; this was a read-only issue,
+  artifact, and current-code contract review.
+- Static evidence came from the current `mo issue view` output, all four plan
+  artifacts, the prior self-review, and the cited Server/Runner sources.
+- Only this `self-review.md` file was modified.
 
 ## Verdict
 
-The plan is not ready to build. The new transport and finalizer contracts
-resolve much of the previous review, but Findings 1-3 still violate the
-required rejection semantics and Workflow task side-effect guarantees.
+FAIL. The direct text fixes from the prior review are present, but the plan is
+not ready to build until the four must-fix failure paths above have explicit
+durable contracts and focused verification.
 
 <promise>FAIL</promise>
