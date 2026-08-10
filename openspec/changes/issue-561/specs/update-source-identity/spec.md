@@ -12,7 +12,7 @@ The update command SHALL resolve one effective repository root before it perform
 - **AND** the resolved root is recorded as a default-root update rather than being indistinguishable from an explicit-root update
 
 ### Requirement: Carry an immutable source identity through the update
-The command SHALL create an update source context containing the effective normalized repository root and the source revision identity resolved from that root. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
+The command SHALL create an update source context containing the effective normalized repository root, the source revision identity resolved from that root, and the immutable snapshot root used for building. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
 
 #### Scenario: Server and Runner are built from the same explicit source
 - **WHEN** the selected repository root resolves to source revision `target-123`
@@ -20,13 +20,26 @@ The command SHALL create an update source context containing the effective norma
 - **AND** the Runner build receives that same root and target identity
 - **AND** the installed services and final verification use that same target identity
 
+### Requirement: Build from an immutable source snapshot
+After resolving a usable clean source revision, the command SHALL materialize a read-only build snapshot of that revision before any artifact build or service change. All build commands SHALL use the snapshot root; the requested repository root remains the reported source authority but changes to it after snapshot creation SHALL not change the candidate artifacts. Snapshot creation failure SHALL stop the update before managed runtime state is changed.
+
+#### Scenario: Selected worktree changes after source resolution
+- **WHEN** the selected repository resolves to `target-123` and the original worktree is modified or advances after the snapshot is materialized
+- **THEN** Server, Runner, and CLI artifacts are built from the snapshot for `target-123`
+- **AND** the later worktree change does not change the candidate identity or its contents
+
+#### Scenario: Snapshot creation fails
+- **WHEN** the selected revision is readable but the immutable build snapshot cannot be materialized
+- **THEN** the command exits unsuccessfully before stopping, replacing, or activating a managed service
+- **AND** the failure identifies the selected root, target revision, and snapshot failure
+
 #### Scenario: CLI continuation preserves the selected source
 - **WHEN** a full update replaces the CLI and resumes through a continuation process
 - **THEN** the continuation receives the original source context
 - **AND** it does not fall back to the continuation process working directory or reselect a different repository
 
 ### Requirement: Reject an unidentifiable source before changing managed runtime state
-The command SHALL fail before changing a managed service target when the effective repository root does not exist, is not a usable repository, or has no resolvable source revision identity. The failure SHALL identify the selected root and the reason that the target identity could not be established.
+The command SHALL fail before changing a managed service target when the effective repository root does not exist, is not a usable repository, has no resolvable source revision identity, or cannot produce the required immutable snapshot. The failure SHALL identify the selected root and the reason that the target identity or snapshot could not be established.
 
 #### Scenario: Explicit root is missing
 - **WHEN** `--repo-root /workspaces/missing` is supplied and that path does not exist

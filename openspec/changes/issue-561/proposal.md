@@ -4,11 +4,12 @@
 
 ## What Changes
 
-- Resolve one update source identity from the explicit or default repository root and carry it through CLI self-update continuation, Server build, Runner build, service activation, and runtime readback.
-- Build and install Server and Runner artifacts from that source into stable, versioned managed runtime locations. Service units switch to absolute active artifacts instead of depending on an arbitrary worktree or relative build output. **BREAKING** for installations or custom units that rely on source-bound working directories and relative entrypoints.
-- Make the full update and component-specific updates use the same target identity. The full update coordinates the CLI, Server, and installed Runner so they cannot silently build one version and run another.
-- Verify the running identities against the target source/artifact before declaring success. Build or restart success alone is insufficient; a mismatch or unavailable required identity fails the update and emits no success result.
-- Treat activation and verification as a recoverable update transaction. Preserve the last verified runtime and service target on failure, stop or remove an unverified candidate when no verified version exists, and report the expected version, observed version, and an actionable recovery result.
+- Resolve one update source identity from the explicit or default repository root, materialize an immutable snapshot of that revision, and carry it through CLI self-update continuation, Server build, Runner build, service activation, and runtime readback.
+- Build and install Server and Runner artifacts from that snapshot into stable, versioned managed runtime locations. Service units switch to absolute active artifacts instead of depending on an arbitrary worktree or relative build output. **BREAKING** for installations or custom units that rely on source-bound working directories and relative entrypoints.
+- Make the full update and component-specific updates use the same target identity with an explicit scope contract. The full update coordinates the CLI, Server, and installed Runner; component commands verify and report only the components they activate, without claiming global consistency.
+- Verify a structured runtime identity from the running CLI, Server, and Runner against the candidate manifest before declaring success. Build or restart success alone is insufficient; a mismatch or unavailable required identity fails the update and emits no success result.
+- Treat activation and verification as a recoverable update transaction with one atomic active-target record and crash reconciliation. Preserve the last verified runtime and service target on failure, stop or remove an unverified candidate when no verified version exists, and report the expected version, observed version, and an actionable recovery result.
+- Keep the CLI transaction as the only managed-runtime mutator. The Server web-update endpoint becomes a read/report-only surface that rejects direct builds and service restarts rather than bypassing the transaction.
 - Keep default-root and explicit-root updates distinguishable in human output and dry-run previews. This change does not alter Agent model selection, provider fallback, or inference configuration.
 
 ## Capabilities
@@ -21,7 +22,7 @@
 ## Impact
 
 - **CLI (`packages/cli`):** update orchestration and context, source/build operations, runtime consistency checks, Runner refresh results, service installation options, managed runtime paths, and their fake-boundary tests.
-- **Server (`packages/server`):** runtime identity production and readback used to confirm the installed Server artifact; existing update/status surfaces may gain the artifact facts needed for exact verification, without changing workflow or Agent domain state.
+- **Server (`packages/server`):** runtime identity production and readback used to confirm the installed Server artifact; the web update mutation is disabled in this change, while status/outcome surfaces remain projections of the authoritative local CLI update.
 - **Runner (`packages/runner`):** build manifest and startup/connection identity so the running process can be matched to the selected source artifact; Runner execution and model behavior remain unchanged.
 - **Managed services and local filesystem:** systemd unit generation, versioned runtime storage, activation links, and rollback state change from source-bound execution to verified installed artifacts. No external dependency is required.
 - **Documentation and tests:** self-host/update guidance and deterministic tests covering default and explicit roots, identity mismatches, successful activation, and recovery paths.
