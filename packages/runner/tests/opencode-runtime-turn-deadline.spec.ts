@@ -4,6 +4,7 @@ import {
   type RuntimeProviderErrorPolicy,
 } from "../src/runtime/opencode/index.js"
 import {
+  CLEANUP_OPERATION_TIMEOUT_MS,
   DEADLINE_WARNING_TEXT,
   WARNING_WINDOW_MS,
 } from "../src/runtime/opencode/turn.js"
@@ -44,6 +45,7 @@ interface FakeClientHandles {
   sessionPrompt: ReturnType<typeof vi.fn>
   sessionPromptAsync: ReturnType<typeof vi.fn>
   sessionAbort: ReturnType<typeof vi.fn>
+  sessionStatus: ReturnType<typeof vi.fn>
   sessionGet: ReturnType<typeof vi.fn>
   instanceDispose: ReturnType<typeof vi.fn>
 }
@@ -55,6 +57,8 @@ interface BuildArgs {
   createId?: (params: { directory?: string }) => string
   policy?: RuntimeProviderErrorPolicy
   abortResult?: boolean
+  abortHangs?: boolean
+  statusHangs?: boolean
 }
 
 interface BuildResult {
@@ -87,9 +91,15 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     return { data: true }
   })
 
-  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: args.abortResult ?? true }))
+  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => {
+    if (args.abortHangs) return await new Promise<never>(() => {})
+    return { data: args.abortResult ?? true }
+  })
   const sessionGet = vi.fn(async () => ({ data: { id: "ses_1" } }))
-  const sessionStatus = vi.fn(async () => ({ data: {} }))
+  const sessionStatus = vi.fn(async () => {
+    if (args.statusHangs) return await new Promise<never>(() => {})
+    return { data: {} }
+  })
   const instanceDispose = vi.fn(async () => ({ data: true }))
 
   const clientProxy = {
@@ -118,6 +128,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     sessionPrompt,
     sessionPromptAsync,
     sessionAbort,
+    sessionStatus,
     sessionGet,
     instanceDispose,
   }
@@ -480,6 +491,76 @@ describe("OpenCodeRuntime.runTurn — deadline abort", () => {
       expect(result.error.diagnostics.some((diagnostic) => diagnostic.code === "abort-unconfirmed")).toBe(true)
       expect(client.sessionCreate).toHaveBeenCalledTimes(1)
       expect(client.sessionAbort).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("Returns deadline-exceeded after the bounded abort cleanup window when session.abort hangs", async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps, client } = buildRuntime({ abortHangs: true })
+      const runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+      client.sessionPrompt.mockImplementationOnce(() => new Promise(() => {}))
+
+      const deadlineMs = 1_000
+      const turnPromise = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "hangs during abort cleanup",
+        deadlineMs,
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(0)
+      const statusCallsBeforeDeadline = client.sessionStatus.mock.calls.length
+      await vi.advanceTimersByTimeAsync(deadlineMs)
+      expect(client.sessionAbort).toHaveBeenCalledTimes(1)
+      expect(client.sessionStatus).toHaveBeenCalledTimes(statusCallsBeforeDeadline)
+
+      await vi.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS)
+      const result = await turnPromise
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.kind).toBe("deadline-exceeded")
+      expect(result.error.message).toContain("cleanup: OpenCode session.abort cleanup timed out")
+      expect(result.error.diagnostics).toContainEqual(expect.objectContaining({
+        code: "abort-cleanup-timeout",
+        message: expect.stringContaining(`${CLEANUP_OPERATION_TIMEOUT_MS}ms`),
+      }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("Returns deadline-exceeded after the bounded status cleanup window when session.status hangs", async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps, client } = buildRuntime({ statusHangs: true })
+      const runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+      client.sessionPrompt.mockImplementationOnce(() => new Promise(() => {}))
+
+      const deadlineMs = 1_000
+      const turnPromise = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "hangs during status cleanup",
+        deadlineMs,
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(0)
+      const statusCallsBeforeDeadline = client.sessionStatus.mock.calls.length
+      await vi.advanceTimersByTimeAsync(deadlineMs)
+      expect(client.sessionAbort).toHaveBeenCalledTimes(1)
+      expect(client.sessionStatus).toHaveBeenCalledTimes(statusCallsBeforeDeadline + 1)
+
+      await vi.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS)
+      const result = await turnPromise
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.kind).toBe("deadline-exceeded")
+      expect(result.error.message).toContain("cleanup: OpenCode session.status cleanup timed out")
+      expect(result.error.diagnostics).toContainEqual(expect.objectContaining({
+        code: "status-cleanup-timeout",
+        message: expect.stringContaining(`${CLEANUP_OPERATION_TIMEOUT_MS}ms`),
+      }))
     } finally {
       vi.useRealTimers()
     }

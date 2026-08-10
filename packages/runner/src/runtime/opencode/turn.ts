@@ -105,6 +105,11 @@ export const DEADLINE_WARNING_TEXT = [
 ].join(" ")
 
 export const WARNING_WINDOW_MS = 5 * 60 * 1000
+/**
+ * Abort and status are separate provider calls. Each gets its own bounded
+ * cleanup window so a stuck local runtime cannot extend the turn forever.
+ */
+export const CLEANUP_OPERATION_TIMEOUT_MS = 5_000
 
 export async function runTurn(
   request: RuntimeTurnRequest,
@@ -532,7 +537,7 @@ async function finishTransportFailure(
   }
   const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
   if (!abortResult.ok) {
-    const error = normalizeAbortUnconfirmed(abortResult.message, [...promptDiagnostics, transportDiagnostic])
+    const error = normalizeAbortUnconfirmed(abortResult.message, [...promptDiagnostics, transportDiagnostic], abortResult.code)
     return { kind: "failure", error, diagnostics: [...error.diagnostics] }
   }
   const error = toUnavailableOrTurnError(cause, "OpenCode local transport failed")
@@ -642,22 +647,26 @@ async function finishAbortedTurn(
   if (reason === "deadline") {
     const diagnostics = abortResult.ok
       ? contextDiagnostics
-      : [...contextDiagnostics, { severity: "error" as const, code: "abort-unconfirmed", message: abortResult.message }]
+      : [...contextDiagnostics, { severity: "error" as const, code: abortResult.code, message: abortResult.message }]
     const error = normalizeDeadlineExceeded(args.deadlineMs ?? 0, diagnostics)
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    const finalError = abortResult.ok
+      ? error
+      : { ...error, message: `${error.message}; cleanup: ${abortResult.message}` }
+    return { kind: "failure", error: finalError, diagnostics: [...finalError.diagnostics] }
   }
   if (reason === "runtime-failure" && runtimeFailure) {
     if (!abortResult.ok) {
       const error = {
         ...runtimeFailure,
-        diagnostics: [...runtimeFailure.diagnostics, { severity: "error" as const, code: "abort-unconfirmed", message: abortResult.message }],
+        message: `${runtimeFailure.message}; cleanup: ${abortResult.message}`,
+        diagnostics: [...runtimeFailure.diagnostics, { severity: "error" as const, code: abortResult.code, message: abortResult.message }],
       }
       return { kind: "failure", error, diagnostics: [...error.diagnostics] }
     }
     return { kind: "failure", error: runtimeFailure, diagnostics: [...runtimeFailure.diagnostics] }
   }
   if (!abortResult.ok) {
-    const error = normalizeAbortUnconfirmed(abortResult.message, contextDiagnostics)
+    const error = normalizeAbortUnconfirmed(abortResult.message, contextDiagnostics, abortResult.code)
     return { kind: "failure", error, diagnostics: [...error.diagnostics] }
   }
 
@@ -742,35 +751,76 @@ async function abortAndConfirmSession(
   client: OpencodeClient,
   sessionId: string,
   directory: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true } | { ok: false; code: "abort-unconfirmed" | "abort-cleanup-timeout" | "status-cleanup-timeout"; message: string }> {
+  let aborted: Awaited<ReturnType<OpencodeClient["session"]["abort"]>>
   try {
-    const aborted = await client.session.abort(
-      { sessionID: sessionId, directory },
-      { throwOnError: true },
+    aborted = await withCleanupTimeout(
+      () => client.session.abort(
+        { sessionID: sessionId, directory },
+        { throwOnError: true },
+      ),
+      "abort",
     )
-    if (aborted.data !== true) {
-      return { ok: false, message: "OpenCode session.abort did not confirm the turn was stopped" }
+  } catch (cause) {
+    const timedOut = isCleanupTimeout(cause, "abort")
+    return {
+      ok: false,
+      code: timedOut ? "abort-cleanup-timeout" : "abort-unconfirmed",
+      message: timedOut
+        ? `OpenCode session.abort cleanup timed out after ${CLEANUP_OPERATION_TIMEOUT_MS}ms`
+        : `OpenCode session.abort failed to confirm the turn was stopped: ${errorMessage(cause, "unknown abort error")}`,
     }
+  }
 
-    const statusResponse = await client.session.status(
-      { directory },
-      { throwOnError: true },
+  if (aborted.data !== true) {
+    return { ok: false, code: "abort-unconfirmed", message: "OpenCode session.abort did not confirm the turn was stopped" }
+  }
+
+  try {
+    const statusResponse = await withCleanupTimeout(
+      () => client.session.status(
+        { directory },
+        { throwOnError: true },
+      ),
+      "status",
     )
     const statuses = statusResponse.data
     if (!statuses || typeof statuses !== "object") {
-      return { ok: false, message: "OpenCode session.status returned no status map after abort" }
+      return { ok: false, code: "abort-unconfirmed", message: "OpenCode session.status returned no status map after abort" }
     }
     const status = (statuses as Record<string, ProviderRetryStatus>)[sessionId]
     if (status !== undefined && status.type !== "idle") {
-      return { ok: false, message: `OpenCode Session remained ${status.type ?? "active"} after abort` }
+      return { ok: false, code: "abort-unconfirmed", message: `OpenCode Session remained ${status.type ?? "active"} after abort` }
     }
     return { ok: true }
   } catch (cause) {
+    const timedOut = isCleanupTimeout(cause, "status")
     return {
       ok: false,
-      message: `OpenCode turn abort or status confirmation failed: ${errorMessage(cause, "unknown abort error")}`,
+      code: timedOut ? "status-cleanup-timeout" : "abort-unconfirmed",
+      message: timedOut
+        ? `OpenCode session.status cleanup timed out after ${CLEANUP_OPERATION_TIMEOUT_MS}ms`
+        : `OpenCode session.status failed after abort: ${errorMessage(cause, "unknown status error")}`,
     }
   }
+}
+
+async function withCleanupTimeout<T>(operation: () => Promise<T>, operationName: "abort" | "status"): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`session.${operationName} cleanup timeout`)), CLEANUP_OPERATION_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+function isCleanupTimeout(cause: unknown, operationName: "abort" | "status"): boolean {
+  return cause instanceof Error && cause.message === `session.${operationName} cleanup timeout`
 }
 
 /**

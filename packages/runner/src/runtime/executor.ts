@@ -347,6 +347,12 @@ export class WorkExecutor {
                 "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying",
               )
             }
+            if (opened.runtimeSessionId && isUnsettledWorkflowSessionStatus(opened.status)) {
+              return runtimeActionFailure(
+                "session-binding-failed",
+                `Workflow AgentSession is ${opened.status}; the previous Runtime Session has not reached a terminal state, so retry is fail-closed`,
+              )
+            }
             binding = {
               runtimeSessionId: opened.runtimeSessionId ?? null,
               workDir: opened.workDir || workDir,
@@ -544,6 +550,7 @@ export class WorkExecutor {
                 )
               },
               model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
+              rejectActiveTurn: true,
               recoveryKey: expected.runtimeSessionId!,
               coordinator: self.bindingRecoveryCoordinator ?? undefined,
             })
@@ -556,6 +563,9 @@ export class WorkExecutor {
             )
           }
           if (!recovery.ok) {
+            if (recovery.kind === "active-turn") {
+              return runtimeActionFailure("session-binding-failed", recovery.message)
+            }
             return await workflowActionFailure(reporter, binding.runtimeSessionId, recovery.kind, recovery.message)
           }
           binding = {
@@ -882,6 +892,10 @@ function formatCheckUnresolvedError(unresolved: string[]): string {
 function stringField(obj: JsonObject, key: string): string | null {
   const value = obj[key]
   return typeof value === "string" ? value : null
+}
+
+function isUnsettledWorkflowSessionStatus(status: string | null | undefined): status is "active" | "unknown" {
+  return status === "active" || status === "unknown"
 }
 
 function runtimeActionFailure(code: string, message: string): ActionResult {

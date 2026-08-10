@@ -27,6 +27,12 @@ export interface ResolveOrRecoverBindingRequest {
   readonly probe: (binding: RuntimeBinding) => Promise<BindingProbeResult>
   readonly replace: (expected: RuntimeBinding, replacement: RuntimeBinding) => Promise<void>
   readonly model?: { readonly providerID: string; readonly modelID: string } | null
+  /**
+   * Workflow retries must not submit a second prompt while the previous
+   * physical session still has an active turn. Background convergence and
+   * follow-up steering deliberately leave this false.
+   */
+  readonly rejectActiveTurn?: boolean
   readonly recoveryKey?: string
   readonly coordinator?: BindingRecoveryCoordinator
 }
@@ -49,7 +55,8 @@ export async function resolveOrRecoverBinding(
   request: ResolveOrRecoverBindingRequest,
 ): Promise<BindingRecoveryResult> {
   if (request.coordinator && request.recoveryKey) {
-    return request.coordinator.run(request.recoveryKey, () => resolveOrRecoverBinding({ ...request, coordinator: undefined, recoveryKey: undefined }))
+    const mode = request.rejectActiveTurn === true ? "reject-active" : "allow-active"
+    return request.coordinator.run(`${mode}:${request.recoveryKey}`, () => resolveOrRecoverBinding({ ...request, coordinator: undefined, recoveryKey: undefined }))
   }
   const expected = request.expected
   if (expected.runnerId !== request.runnerId) {
@@ -66,7 +73,12 @@ export async function resolveOrRecoverBinding(
     } catch (error) {
       return failure("unavailable-runtime", error instanceof Error ? error.message : String(error))
     }
-    if (resolved.ok) return { ok: true, binding: expected, recovered: false }
+    if (resolved.ok) {
+      if (request.rejectActiveTurn === true && resolved.activeTurn) {
+        return failure("active-turn", "The bound Runtime Session still has an active turn; refusing to reuse it for a workflow retry")
+      }
+      return { ok: true, binding: expected, recovered: false }
+    }
     if (resolved.kind !== "missing-session") return failure(resolved.kind, resolved.message)
   }
 
