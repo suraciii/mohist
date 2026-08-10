@@ -69,6 +69,82 @@ public sealed class WorkflowSessionLifecycleSpecs
     }
 
     [Fact]
+    public async Task GivenRunningWorkflow_WhenSessionReportsFailedIdle_ThenWorkflowTaskFailsAndLateReportIsStale()
+    {
+        var active = await CreateActiveWorkflowSessionAsync("runtime-failure-session");
+
+        await _client.PostOkAsync(
+            RuntimeEventsPath(active),
+            new
+            {
+                runtimeSessionId = "stale-runtime-session",
+                runtimeEvents = new object[]
+                {
+                    new { type = "turn.failed", payload = new { status = "failed", failureReason = "pending apply_patch failed" } },
+                    new { type = "session.activity", payload = new { activity = "idle", status = "failed", exitCode = 1, failureReason = "pending apply_patch failed" } },
+                },
+            });
+
+        Assert.Equal(active.Work.Id, await active.Workflow.GetCurrentWorkIdAsync());
+        Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
+
+        await _client.PostOkAsync(
+            RuntimeEventsPath(active),
+            new
+            {
+                runtimeSessionId = active.RuntimeSessionId,
+                runtimeEvents = new object[]
+                {
+                    new { type = "turn.failed", payload = new { status = "failed", failureReason = "pending apply_patch failed" } },
+                    new { type = "session.activity", payload = new { activity = "idle", status = "failed", exitCode = 1, failureReason = "pending apply_patch failed" } },
+                },
+            });
+
+        Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
+        Assert.Null(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
+        Assert.Equal(
+            ReportAck.Stale,
+            await active.Workflow.AbandonActiveWorkAsync(active.RunnerId, active.Work.Id!, "duplicate-session-failure"));
+        Assert.Equal(
+            ReportAck.Stale,
+            await active.Workflow.ReceiveTaskReportAsync(active.RunnerId, active.Work.Id!, new TaskReport(
+                active.Work.Id!,
+                TaskReportStatus.Failed,
+                Output: null,
+                Artifacts: null,
+                Detail: "late runner failure")));
+    }
+
+    [Fact]
+    public async Task GivenRunningWorkflow_WhenSessionReportsCompletedIdle_ThenTaskReportRemainsAuthoritative()
+    {
+        var active = await CreateActiveWorkflowSessionAsync("runtime-success-session");
+
+        await _client.PostOkAsync(
+            RuntimeEventsPath(active),
+            new
+            {
+                runtimeSessionId = active.RuntimeSessionId,
+                runtimeEvents = new object[]
+                {
+                    new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0 } },
+                },
+            });
+
+        Assert.Equal(active.Work.Id, await active.Workflow.GetCurrentWorkIdAsync());
+        Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
+
+        Assert.Equal(
+            ReportAck.Accepted,
+            await active.Workflow.ReceiveTaskReportAsync(active.RunnerId, active.Work.Id!, new TaskReport(
+                active.Work.Id!,
+                TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null)));
+        Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
+    }
+
+    [Fact]
     public async Task GivenPausedWorkflow_WhenQueuedSessionCancelCompletes_ThenWorkflowTaskIsReleased()
     {
         var active = await CreateActiveWorkflowSessionAsync("paused-session-cancel");

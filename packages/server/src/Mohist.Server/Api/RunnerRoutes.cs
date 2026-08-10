@@ -361,7 +361,9 @@ public static class RunnerRoutes
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
             var events = await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
-            if (HasConfirmedSessionStop(req.RuntimeEvents))
+            if (HasConfirmedSessionFailure(events))
+                await workReconciler.ReconcileAsync(projectId, sessionId, runnerId, "session-failure", ct);
+            else if (HasConfirmedSessionStop(events))
                 await workReconciler.ReconcileAsync(projectId, sessionId, runnerId, "session-stop", ct);
             await followups.DispatchNextAsync(projectId, sessionId, ct);
             return Results.Ok(events);
@@ -728,18 +730,20 @@ public static class RunnerRoutes
             req.Title,
             EpicNumber: req.EpicNumber is > 0 ? req.EpicNumber : null);
 
-    private static bool HasConfirmedSessionStop(IReadOnlyList<AgentSessionRuntimeEventRequest> events) =>
+    private static bool HasConfirmedSessionStop(IReadOnlyList<AgentSessionRuntimeEventInfo> events) =>
         events.Any(IsConfirmedSessionStop);
 
-    private static bool IsConfirmedSessionStop(AgentSessionRuntimeEventRequest runtimeEvent)
+    private static bool HasConfirmedSessionFailure(IReadOnlyList<AgentSessionRuntimeEventInfo> events) =>
+        events.Any(IsConfirmedSessionFailureEvent);
+
+    private static bool IsConfirmedSessionStop(AgentSessionRuntimeEventInfo runtimeEvent)
     {
         if (!string.Equals(runtimeEvent.Type, "session.activity", StringComparison.Ordinal)
-            || runtimeEvent.Payload.ValueKind != JsonValueKind.Object)
+            || !TryParseObjectPayload(runtimeEvent.PayloadJson, out var payload))
         {
             return false;
         }
 
-        var payload = runtimeEvent.Payload;
         return payload.TryGetProperty("activity", out var activity)
             && activity.ValueKind == JsonValueKind.String
             && string.Equals(activity.GetString(), "idle", StringComparison.Ordinal)
@@ -748,6 +752,39 @@ public static class RunnerRoutes
             && string.Equals(source.GetString(), "cancel", StringComparison.Ordinal)
             && payload.TryGetProperty("stopConfirmed", out var confirmed)
             && confirmed.ValueKind == JsonValueKind.True;
+    }
+
+    // WorkflowAgentSessionReporter emits this terminal fact for runtime and
+    // tool failures. A completed session is intentionally excluded: its
+    // WorkItemResult remains the authority for successful task completion.
+    private static bool IsConfirmedSessionFailureEvent(AgentSessionRuntimeEventInfo runtimeEvent)
+    {
+        if (!string.Equals(runtimeEvent.Type, "session.activity", StringComparison.Ordinal)
+            || !TryParseObjectPayload(runtimeEvent.PayloadJson, out var payload))
+        {
+            return false;
+        }
+
+        return payload.TryGetProperty("activity", out var activity)
+            && activity.ValueKind == JsonValueKind.String
+            && string.Equals(activity.GetString(), "idle", StringComparison.Ordinal)
+            && payload.TryGetProperty("status", out var status)
+            && status.ValueKind == JsonValueKind.String
+            && string.Equals(status.GetString(), "failed", StringComparison.Ordinal);
+    }
+
+    private static bool TryParseObjectPayload(string payloadJson, out JsonElement payload)
+    {
+        try
+        {
+            payload = JsonSerializer.Deserialize<JsonElement>(payloadJson);
+            return payload.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            payload = default;
+            return false;
+        }
     }
 
     private static RunnerAgentSessionResponse ToRunnerAgentSession(string projectId, string workflowRunId, string sessionName, AgentSessionInfo session) =>
