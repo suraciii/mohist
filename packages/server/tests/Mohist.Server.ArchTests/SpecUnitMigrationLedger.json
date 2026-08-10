@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
   "validationSourceFileCount": 828,
-  "validationSourceTreeDigest": "8503b434a124d89438388585cba033bc1750e5952f6a3a543f95bea22fd27dbd",
+  "validationSourceTreeDigest": "8187aac41428c533880db46f3a06fd8967ab984290d017e4035f84e9625a8c59",
   "validationBaselineDigest": "03cad8aca4e8ddf9688d7b3532d03cb1b93c039e8a9ec4e0e38ee73e5b403c62",
   "validationHeadMeaning": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8 with tree ff159609b97df5b1fac6d6404a6d1811f6bda99a is the exact current master baseline used to interpret the checked-in migration ledger; it is not the final validation commit. Planned Unit targets are contracts only, while PR #388 history remains 602efa6abd6fca3efcd43b66b47ba10a80d9faba.",
   "history": {
@@ -1046,8 +1046,8 @@
           "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests.TestHubCallerContext",
           "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests.ThrowingGrainFactory"
         ],
-        "digest": "dafa992ccd98920e1fe6f601597b3a44d60527ea640ffa41bf5dd97f86639546",
-        "evidence": "source-path=Mohist.Server.UnitTests/Runner/SignalR/RunnerHubTests.cs source-fqn=Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests case-digest=66f3ecb5ccb12894789983ff3367791a94459e3671da6efcee6253df7ec0e666 source-content-digest=557fa8fe78b4f0c83274d24e7d929204ea175229438a1c2680ecf0e5b3311e04 executable-closure-digest=dafa992ccd98920e1fe6f601597b3a44d60527ea640ffa41bf5dd97f86639546 edges-digest=cc60e6bce4c93d4d3d3c66c75a04917096ad50fe7180d65b766e1c1907038144"
+        "digest": "2ad4cbbc9a411698f7ab61aedeeb7c77f20d0babbeaa6c1b3dc34945a1e74ece",
+        "evidence": "source-path=Mohist.Server.UnitTests/Runner/SignalR/RunnerHubTests.cs source-fqn=Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests case-digest=66f3ecb5ccb12894789983ff3367791a94459e3671da6efcee6253df7ec0e666 source-content-digest=0dd7e3029e7a9d6ea3108f884824e7aa1e874bbdc9cf214e931f9b5240a7295d executable-closure-digest=2ad4cbbc9a411698f7ab61aedeeb7c77f20d0babbeaa6c1b3dc34945a1e74ece edges-digest=cc60e6bce4c93d4d3d3c66c75a04917096ad50fe7180d65b766e1c1907038144"
       },
       "owner": "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests",
       "history": {
@@ -1065,8 +1065,8 @@
         "fqn": "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests",
         "caseCount": 3,
         "caseIdentityDigest": "66f3ecb5ccb12894789983ff3367791a94459e3671da6efcee6253df7ec0e666",
-        "closureIdentityDigest": "dafa992ccd98920e1fe6f601597b3a44d60527ea640ffa41bf5dd97f86639546",
-        "sourceContentDigest": "557fa8fe78b4f0c83274d24e7d929204ea175229438a1c2680ecf0e5b3311e04"
+        "closureIdentityDigest": "2ad4cbbc9a411698f7ab61aedeeb7c77f20d0babbeaa6c1b3dc34945a1e74ece",
+        "sourceContentDigest": "0dd7e3029e7a9d6ea3108f884824e7aa1e874bbdc9cf214e931f9b5240a7295d"
       }
     },
     {
