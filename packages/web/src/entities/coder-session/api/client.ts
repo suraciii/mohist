@@ -211,21 +211,9 @@ export function postFollowup(
   )
 }
 
-export interface SessionCancelResult {
+export interface SessionStopResult {
   state: string
   interruptUnconfirmed?: boolean | null
-}
-
-export function cancelSession(
-  number: number,
-  name: string,
-  turnId: string,
-  projectId?: string | null,
-): Promise<SessionCancelResult> {
-  return request<SessionCancelResult>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/cancel`),
-    { method: 'POST', body: JSON.stringify({ turnId }) },
-  )
 }
 
 export function stopSession(
@@ -233,9 +221,15 @@ export function stopSession(
   name: string,
   turnId: string,
   projectId?: string | null,
-): Promise<SessionCancelResult> {
-  return request<SessionCancelResult>(
+  idempotencyKey?: string,
+): Promise<SessionStopResult> {
+  const requestKey = idempotencyKey ?? createIdempotencyKey()
+  return request<SessionStopResult>(
     projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/stop`),
-    { method: 'POST', body: JSON.stringify({ turnId }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({ turnId }),
+      headers: { 'Idempotency-Key': requestKey },
+    },
   )
 }

@@ -3,11 +3,10 @@ export { canFollowupSession, canRecoverSession, deriveSessionActivity, deriveSes
 export { useWorkflowRunSessions } from './model/useWorkflowRunSessions'
 export { useFollowupMutation } from './model/useFollowupMutation'
 export type { FollowupMutationInput } from './model/useFollowupMutation'
-export { useCancelSessionMutation } from './model/useCancelSessionMutation'
-export type { CancelSessionMutationInput } from './model/useCancelSessionMutation'
+export { useStopSessionMutation } from './model/useStopSessionMutation'
+export type { StopSessionMutationInput } from './model/useStopSessionMutation'
 export {
   compactSession,
-  cancelSession,
   stopSession,
   compactGenericSession,
   getAgentSessionEvents,
@@ -24,7 +23,7 @@ export {
   resetSession,
   resetGenericSession,
 } from './api/client'
-export type { SessionCancelResult, SessionRecoveryResult, SessionFollowupResult, SessionAttachment, SessionAttachmentRejection } from './api/client'
+export type { SessionStopResult, SessionRecoveryResult, SessionFollowupResult, SessionAttachment, SessionAttachmentRejection } from './api/client'
 export type { AgentTurnObservation, FollowupOutcome, FollowupStatus, SessionInputObservation, UnifiedSessionContextRefsDto, UnifiedSessionSummaryDto } from './model/types'
 export { clampPercent, isContextHealthStatus } from './lib/context-health'
 export type { ContextHealthStatus } from './lib/context-health'

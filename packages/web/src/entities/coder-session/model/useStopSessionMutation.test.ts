@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { cancelSessionMutationOptions } from './useCancelSessionMutation'
+import { stopSessionMutationOptions } from './useStopSessionMutation'
 import { issueWorkflowKeys } from '../../issue/api/query-keys'
 
-describe('cancelSessionMutationOptions', () => {
+describe('stopSessionMutationOptions', () => {
   it('reconciles the workflow session detail, transcript, and list queries', () => {
     const queryClient = { invalidateQueries: vi.fn() }
 
-    cancelSessionMutationOptions('proj-1', queryClient).onSuccess(
+    stopSessionMutationOptions('proj-1', queryClient).onSuccess(
       { state: 'not-cancellable' },
-      { issueNumber: 42, sessionName: 'build', turnId: 'turn-1', operation: 'cancel' },
+      { issueNumber: 42, sessionName: 'build', turnId: 'turn-1' },
     )
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({

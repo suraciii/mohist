@@ -44,7 +44,7 @@ function makeSummary(overrides: Partial<UnifiedSessionSummaryDto> = {}): Unified
 }
 
 interface CapturedFollowup { sessionId: string; text: string; attachments: string[] | undefined; idempotencyKey: string }
-interface CapturedTurnControl { sessionId: string; turnId: string; operation: 'cancel' | 'stop' }
+interface CapturedTurnControl { sessionId: string; turnId: string }
 
 let followupSequence: SessionFollowupResult[] = []
 const followupCalls: CapturedFollowup[] = []
@@ -160,10 +160,10 @@ describe('useUnifiedSessionDataSource — both Session sources', () => {
     expect(followupCalls[0].sessionId).toBe('session-1')
 
     act(() => {
-      result.current.cancel?.mutate()
+      result.current.stop?.mutate()
     })
     expect(turnControlCalls[0].sessionId).toBe('session-1')
-    expect(turnControlCalls[0].operation).toBe('cancel')
+    expect(turnControlCalls[0]).toEqual({ sessionId: 'session-1', turnId: 'turn-agent' })
   })
 
   it('drives follow-up and turn control for a workflow Session through the same canonical APIs', async () => {
@@ -196,8 +196,7 @@ describe('useUnifiedSessionDataSource — both Session sources', () => {
       result.current.stop?.mutate()
     })
     expect(turnControlCalls[0].sessionId).toBe('workflow-session-1')
-    expect(turnControlCalls[0].operation).toBe('stop')
-    expect(result.current.cancel).toBeNull()
+    expect(turnControlCalls[0]).toEqual({ sessionId: 'workflow-session-1', turnId: 'turn-workflow' })
   })
 
   it('exposes one derived timeline and resolves semantic Issue references through project routing', () => {
