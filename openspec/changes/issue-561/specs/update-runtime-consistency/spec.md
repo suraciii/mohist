@@ -50,6 +50,19 @@ The installed CLI SHALL expose the canonical runtime identity as one machine-rea
 - **THEN** the CLI identity check reports unavailable
 - **AND** the update cannot return success
 
+### Requirement: Bind Runner identity to an authenticated connection generation
+The Server SHALL derive the Runner ID from the authenticated machine credential, not from an untrusted hostname or query parameter. For every accepted Runner connection it SHALL allocate an opaque monotonically increasing `connectionGeneration` and store the tuple `(runnerId, connectionGeneration, connectionId)`. A new connection SHALL invalidate the previous generation, and disconnect SHALL remove the mapping only when both connection ID and generation match. The handshake and identity response SHALL carry the generation. `/api/runner/identity` SHALL require the exact Runner ID and generation selected by the update operation; hostname SHALL be diagnostic only. A response for an invalidated generation SHALL be unavailable and SHALL never be substituted with another connection.
+
+#### Scenario: Same-host stale Runner connection is rejected
+- **WHEN** two authenticated Runner connections report the same hostname and the second connection replaces the first generation
+- **THEN** identity readback for the first generation is rejected as stale
+- **AND** readback for the second generation includes its exact Runner ID and generation
+
+#### Scenario: Reconnect races with identity verification
+- **WHEN** a Runner reconnects while an identity request for the previous generation is in flight
+- **THEN** the validator rejects the response unless the Runner ID and generation still match the active mapping
+- **AND** online status or a matching build hash from the old connection cannot satisfy verification
+
 ### Requirement: Define the scope contract for every update command
 The update commands SHALL use the following operation contract. A component-scoped command SHALL not claim global consistency for untouched components, even when their existing identities happen to match the candidate source revision.
 
@@ -61,6 +74,24 @@ The update commands SHALL use the following operation contract. A component-scop
 | `mo update runner` | Runner | Runner target and Runner service | Runner | Previous Runner target and Runner service | Runner-scoped |
 
 If a component-scoped operation activates or restarts another component, that component becomes required for the operation and its rollback scope; otherwise untouched components remain the previous active entries and are reported as untouched.
+
+### Requirement: Define the full-update Runner precondition
+A full `mo update` SHALL require an existing managed Runner target before it stages or mutates the CLI, Server, or active target. When no Runner service or active Runner target exists, the command SHALL fail closed with `RunnerNotInstalled`, leave all managed targets unchanged, and direct the operator to `mo install runner` before retrying. The update SHALL not silently skip the Runner and SHALL not downgrade a full result to component scope. A stopped but installed Runner MAY be started temporarily for the required identity check; its prior desired stopped state SHALL be restored after commit. An installed but unreachable Runner SHALL fail the transaction and use the normal rollback contract.
+
+#### Scenario: Full update has no Runner target
+- **WHEN** `mo update` is invoked without an installed managed Runner target
+- **THEN** preflight returns `RunnerNotInstalled` before candidate staging, service stop, CLI replacement, or active-record publication
+- **AND** output directs the operator to `mo install runner`
+
+#### Scenario: Full update preserves a stopped Runner
+- **WHEN** an installed Runner target is stopped before a full update
+- **THEN** the update records the desired stopped state, starts the candidate only as needed for identity verification, and restores the stopped state after commit
+- **AND** it does not claim success without first verifying the candidate Runner identity
+
+#### Scenario: Full update cannot reach the installed Runner
+- **WHEN** a full update has an installed Runner target but the required generation or identity cannot be read
+- **THEN** the update fails as unavailable or stale identity
+- **AND** it does not claim global consistency or leave the candidate as the verified release
 
 #### Scenario: Full update claims global consistency only after all checks
 - **WHEN** `mo update` activates a candidate built from one source snapshot

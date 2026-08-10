@@ -14,14 +14,20 @@ An update SHALL track the last verified runtime release and its managed service 
 - **AND** the update returns failure without a success result
 
 ### Requirement: Persist activation before destructive changes and reconcile crashes
-Before any candidate target, service unit, or CLI slot can affect managed runtime execution, the coordinator SHALL atomically persist a transaction record containing the operation scope, candidate active-target set, previous verified active-target set, CLI slot state, required identities, and current state. The active-target set SHALL be written as one temporary file followed by an atomic rename; it SHALL contain one generation and one transaction ID for the complete Server, Runner, and CLI set. A transaction SHALL use this write-ahead order: persist `CandidateStaged`, publish the complete candidate active-target record, persist `CandidateActivated`, persist `Verifying`, then persist `Committed` only after required identity checks pass. Rollback SHALL persist `RollingBack` before restoring the previous record and SHALL end in `RolledBack`, `NoVerifiedRuntime`, or `RecoveryFailed`.
+Before any candidate target, service unit, or CLI slot can affect managed runtime execution, the coordinator SHALL atomically persist a transaction record containing the operation scope, candidate active-target set, previous verified active-target set, CLI slot state, desired service states, required identities, and current state. For a full update, `CandidateStaged` SHALL not be persisted until the CLI, Server, Runner, web assets, dependency closure, launch metadata, and identity metadata are complete; the CLI slot SHALL not be changed and a service SHALL not be stopped before that point. A component update SHALL apply the same rule to every artifact in its declared scope. The active-target set SHALL be written as one same-directory temporary file followed by a durable atomic replacement; it SHALL contain one generation and one transaction ID for the complete Server, Runner, and CLI set. A transaction SHALL use this write-ahead order: acquire the transaction lock, persist `Prepared`, stage the scoped candidate, persist `CandidateStaged`, publish the complete candidate active-target record, persist `CandidateActivated`, persist `Verifying`, then persist `Committed` only after required identity checks pass. Rollback SHALL persist `RollingBack` before restoring the previous record and SHALL end in `RolledBack`, `NoVerifiedRuntime`, or `RecoveryFailed`. Cancellation before activation SHALL end in `Cancelled` after candidate cleanup; cancellation after activation SHALL persist `Cancelling`, restore and verify the previous scope when possible, and then end in `Cancelled` or `RecoveryFailed`.
 
-The CLI-owned reconciler SHALL run before a new update accepts work and before a managed launcher starts a target associated with a nonterminal transaction. It SHALL resolve every nonterminal transaction to a terminal state: verify and commit a candidate that is active and passes bounded checks, restore the previous verified target when verification fails, clean an unapplied candidate when activation never published it, or report `RecoveryFailed` when neither target can be verified. A second update SHALL not proceed while reconciliation is unresolved.
+The CLI-owned reconciler SHALL run before a new update accepts work and before a managed launcher starts a target associated with a nonterminal transaction. It SHALL resolve every nonterminal transaction to a terminal state: clean a `Prepared` transaction that never reached `CandidateStaged`, verify and commit a candidate that is active and passes bounded checks, restore the previous verified target when verification fails, clean an unapplied candidate when activation never published it, resume `Cancelling` or `RollingBack`, or report `RecoveryFailed` when neither target can be verified. A second update SHALL not proceed while reconciliation is unresolved.
 
 #### Scenario: Crash before candidate activation
 - **WHEN** the process dies after `CandidateStaged` is persisted but before the candidate active-target record is published
 - **THEN** the previous active-target record remains authoritative
 - **AND** the next update or managed startup reconciles the transaction, cleans the unapplied candidate, and records rollback or no-verified-runtime cleanup
+
+#### Scenario: Crash while the candidate is still being staged
+- **WHEN** the process dies in `Prepared` while building or copying a candidate and before `CandidateStaged` is persisted
+- **THEN** the previous active-target record and CLI slot remain authoritative
+- **AND** the next update or managed startup removes the incomplete candidate and records `RolledBack` when a previous verified target exists or `NoVerifiedRuntime` otherwise
+- **AND** no service was stopped and no partially built CLI is used for recovery
 
 #### Scenario: Crash after candidate target publication
 - **WHEN** the process dies after the candidate active-target record is atomically published but before `CandidateActivated`, `Verifying`, or `Committed` is persisted
@@ -94,8 +100,69 @@ An installed CLI that cannot read or write the managed transaction record SHALL 
 - **THEN** the stable launcher invokes the recorded recovery CLI slot rather than the candidate slot
 - **AND** reconciliation restores or quarantines the target set without recursively executing the unverified candidate
 
+### Requirement: Make cancellation a durable transaction outcome
+Cancellation SHALL be recorded as a state-machine event rather than only as a process interruption. Before activation, cancellation SHALL clean the candidate and persist `Cancelled` while leaving the previous active target and CLI slot unchanged. After activation or any service/CLI target effect, cancellation SHALL persist `Cancelling`, restore and verify the previous scope when possible, persist `Cancelled`, return exit code 130, release the lock only after the terminal record is durable, and project the terminal cancellation outcome. If restoration cannot be verified, cancellation SHALL stop or disable the candidate, clear the active target when required, preserve diagnostic paths, and end in `RecoveryFailed` without success. A `Cancelling` record SHALL be reconciled before any new update or managed launch.
+
+#### Scenario: Cancellation before candidate activation
+- **WHEN** cancellation arrives after `Prepared` or `CandidateStaged` but before `active.json` publishes the candidate
+- **THEN** the candidate is cleaned without changing the previous active target or CLI slot
+- **AND** the transaction becomes `Cancelled`, releases its lock after durable persistence, and returns exit code 130
+
+#### Scenario: Cancellation after target publication
+- **WHEN** cancellation arrives after the candidate active record or a service effect has been applied
+- **THEN** the transaction first persists `Cancelling`
+- **AND** it restores and verifies the previous target and desired service states before persisting `Cancelled`
+- **AND** it does not report success or leave a nonterminal record
+
+#### Scenario: Cancellation after CLI replacement
+- **WHEN** cancellation arrives after the candidate CLI slot has been selected and before runtime verification completes
+- **THEN** the recovery CLI slot performs reconciliation rather than the candidate slot
+- **AND** the previous verified CLI slot is selected when restoration succeeds, or the trusted recovery slot is selected when no verified runtime remains
+
+#### Scenario: Cancellation rollback fails
+- **WHEN** cancellation arrives after activation and the previous target cannot be verified
+- **THEN** candidate services are stopped or disabled and `active.json` is set to `status: "none"` when no target is verified
+- **AND** the transaction ends in `RecoveryFailed` with the cancellation and recovery facts
+
+### Requirement: Keep a trusted CLI executable for every terminal recovery state
+The selected CLI slot SHALL be part of `active.json` and the stable `launchers/cli` wrapper SHALL resolve only that record. `Committed` and `RolledBack` SHALL select a verified release CLI slot. `NoVerifiedRuntime`, `Cancelled` after candidate activation, and `RecoveryFailed` SHALL set the Server and Runner target set to none while selecting the last trusted recovery CLI slot. If no trusted recovery slot exists, the wrapper SHALL refuse to execute the candidate and SHALL report `bootstrap_required`. The supported manual repair command SHALL be `mo install cli`; it SHALL recreate the recovery slot, stable launchers, and runtime-root metadata before another `mo update`.
+
+#### Scenario: Rollback selects the verified CLI slot
+- **WHEN** a candidate fails after the candidate CLI was selected and the previous verified release is restored
+- **THEN** `active.json` selects the previous verified CLI slot
+- **AND** the stable wrapper executes that slot rather than the failed candidate
+
+#### Scenario: No verified runtime keeps only recovery CLI access
+- **WHEN** there is no verified release or restoration fails
+- **THEN** Server and Runner targets are stopped or disabled and `active.json` has no service target
+- **AND** the stable CLI wrapper selects the trusted recovery slot
+- **AND** the output identifies `mo install cli` as the manual repair action
+
+#### Scenario: Recovery slot is unavailable
+- **WHEN** rollback or recovery fails and no trusted recovery CLI slot is runnable
+- **THEN** the stable wrapper refuses to execute the candidate slot
+- **AND** it returns `bootstrap_required` with no normal update success result
+
+### Requirement: Make transaction persistence and locking crash-durable
+The transaction lock SHALL be an OS-backed exclusive file containing a schema version, transaction ID, owner process ID, owner process-start token, and creation time. File contents and the containing directory SHALL be flushed before `Prepared` is considered durable. A process-local semaphore SHALL be only an optimization and SHALL not establish ownership. A lock SHALL be considered stale only when its owner process-start token is not live or its transaction is terminal; an ambiguous owner SHALL fail closed. The reconciler SHALL resolve the transaction before removing a stale lock. The lock SHALL remain held until a terminal transaction state is durable; a release failure SHALL persist `lockReleasePending` and SHALL be retried before the next update.
+
+Transaction records and `active.json` SHALL be written through an injected atomic-file boundary that flushes file contents, replaces only within the same directory, and flushes the directory entry after replacement. The Linux implementation SHALL use a write-through file flush and directory flush; the Windows implementation SHALL use the platform replace operation with write-through semantics. The write order SHALL be: lock, `Prepared`, candidate files and manifest, `CandidateStaged`, active record, `CandidateActivated`, service/launcher effects, `Verifying`, terminal state, and lock release. Stable launchers SHALL not start a target while its transaction is unresolved.
+
+#### Scenario: Crash leaves a lock file
+- **WHEN** the process dies after acquiring the transaction lock or after a terminal state is persisted but before lock release
+- **THEN** startup reads the lock owner and transaction record
+- **AND** it removes the lock only when the owner is stale or the transaction is terminal
+- **AND** a new update is rejected until reconciliation completes
+
+#### Scenario: Atomic replacement fails
+- **WHEN** a state or active-record replacement cannot complete or its durability boundary fails
+- **THEN** the previous complete record remains authoritative
+- **AND** the transaction remains nonterminal until reconciliation either restores it or reports `RecoveryFailed`
+
 ### Requirement: Keep managed-runtime mutation in the CLI transaction
-The Server web-update service SHALL not build artifacts, change service targets, replace a CLI slot, start/stop a managed service, or advance a persisted web job. `POST /api/system/update` SHALL reject direct mutation with HTTP `409 Conflict` and a machine-readable `UpdateMutationOwnedByCli` outcome that directs the caller to the local CLI transaction. `GET /api/system/update/status` and `GET /api/system/consistency` SHALL be side-effect-free projections; they SHALL not resume stale web jobs or create a successful update result without the CLI-owned candidate activation and required identity verification. Persisted `running` or `waiting-for-reconnect` web jobs SHALL be marked rejected on Server startup and SHALL not be resumed.
+The Server web-update service SHALL not build artifacts, change service targets, replace a CLI slot, start/stop a managed service, or advance a persisted web job. Persisted update state SHALL have schema version 2 and record an `owner` of `web` or `cli`, a scope, source mode, target identity, sequence, and `lockReleasePending`; records without an owner SHALL be classified as legacy `web` records before they are migrated. `rejected` SHALL be a terminal status reserved for quarantined web jobs. `POST /api/system/update` SHALL reject direct mutation with HTTP `409 Conflict` and a machine-readable `UpdateMutationOwnedByCli` outcome that directs the caller to the local CLI transaction. `GET /api/system/update/status` and `GET /api/system/consistency` SHALL be side-effect-free projections; they SHALL not resume stale web jobs or create a successful update result without the CLI-owned candidate activation and required identity verification. Persisted `running` or `waiting-for-reconnect` web jobs SHALL be marked rejected on Server startup and SHALL not be resumed.
+
+CLI outcome projection SHALL require an existing local CLI transaction and its durable `projection-lease.json`. The lease SHALL bind the job ID, nonce hash, operation scope, source mode, target identity, and last accepted sequence. Each outcome request SHALL include the job ID, nonce, sequence, status, stage, outcome, scope, source mode, and target facts. The Server SHALL reject an unknown job, missing or mismatched lease, changed target facts, invalid transition, or non-increasing sequence. Duplicate delivery of an identical sequence and payload SHALL be idempotent. A successful projection SHALL require the matching local transaction record to be durably `Committed`; the outcome endpoint SHALL never create a successful projection from an arbitrary POST or from Server-local source/runtime facts.
 
 #### Scenario: Web update mutation is rejected
 - **WHEN** a caller invokes `POST /api/system/update`
@@ -109,8 +176,20 @@ The Server web-update service SHALL not build artifacts, change service targets,
 
 #### Scenario: Server startup quarantines a legacy web job
 - **WHEN** the Server starts with a nonterminal web-owned update job
-- **THEN** it atomically marks the job rejected with `UpdateMutationOwnedByCli` and releases the web lock
+- **THEN** the registered `SystemUpdateStartupReconciler` migrates the record to schema version 2 and durably persists `owner: "web"`, `status: "rejected"`, `stage: "Rejected"`, and reason `UpdateMutationOwnedByCli`
+- **AND** it releases the web lock only after the rejected state is durable
+- **AND** if release fails, it persists `lockReleasePending: true` and retries on the next startup
 - **AND** no background update task is resumed
+
+#### Scenario: CLI outcome requires an owned lease
+- **WHEN** the CLI posts a prepared or later outcome with a valid local transaction, matching lease, target facts, and a greater sequence
+- **THEN** the Server persists an `owner: "cli"` projection without building or activating anything
+- **AND** the projection preserves the scope, source mode, target identity, sequence, and recovery facts
+
+#### Scenario: Unknown or stale outcome is rejected
+- **WHEN** an outcome has no local transaction, no matching lease, a changed target, an old sequence, or a different nonce
+- **THEN** the Server rejects it without changing the latest projection or lock
+- **AND** it cannot create a successful update result
 
 #### Scenario: Web status projects a CLI transaction
 - **WHEN** the CLI owns an update transaction and the Server status surface is queried

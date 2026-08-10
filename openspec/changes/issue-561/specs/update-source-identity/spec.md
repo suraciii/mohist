@@ -21,7 +21,7 @@ The command SHALL create an update source context containing the effective norma
 - **AND** the installed services and final verification use that same target identity
 
 ### Requirement: Build from an immutable source snapshot
-After resolving a usable clean source revision, the command SHALL materialize a read-only build snapshot of that revision before any artifact build or service change. Build commands SHALL run with `SnapshotRoot` as their source working directory, use the transaction's explicit .NET intermediate/restore paths and Node/npm dependency projection, and write compiler intermediates, generated metadata, web output, and candidate artifacts only under `BuildWorkspaceRoot` or `CandidateRoot`; no build command may write to `SnapshotRoot` or use its `node_modules`. Missing lockfile-matching build dependencies, supported SDK/toolchain versions, or explicit output paths SHALL fail before artifact staging. The requested repository root remains the reported source authority but changes to it after snapshot creation SHALL not change the candidate artifacts. Snapshot creation or writable build-root preparation failure SHALL stop the update before managed runtime state is changed.
+After resolving a usable clean source revision, the command SHALL materialize a read-only build snapshot of that revision before any artifact build or service change. .NET commands SHALL use `SnapshotRoot` as their source working directory; Node commands SHALL use a writable `NodeWorkspaceViewRoot` whose package directories are symlinks to `SnapshotRoot` and whose manifests, lockfile projection, cache, and `node_modules` are below `BuildWorkspaceRoot`. Build commands SHALL use the transaction's explicit .NET intermediate/restore paths, offline npm workspace projection, and explicit output paths, and SHALL write compiler intermediates, generated metadata, web output, and candidate artifacts only under `BuildWorkspaceRoot` or `CandidateRoot`; no build command may write to `SnapshotRoot` or use its source-tree `node_modules`. Missing lockfile-matching build dependencies, supported SDK/toolchain versions, or explicit output paths SHALL fail before artifact staging. The requested repository root remains the reported source authority but changes to it after snapshot creation SHALL not change the candidate artifacts. Snapshot creation or writable build-root preparation failure SHALL stop the update before managed runtime state is changed.
 
 #### Scenario: Selected worktree changes after source resolution
 - **WHEN** the selected repository resolves to `target-123` and the original worktree is modified or advances after the snapshot is materialized
@@ -39,6 +39,12 @@ After resolving a usable clean source revision, the command SHALL materialize a 
 - **THEN** web typecheck/Vite, Server publish/restore, Runner compilation/dependency staging, and CLI publish use the recorded build dependency/toolchain projection
 - **AND** .NET `obj`/NuGet files, npm cache and dependency files, web output, generated CLI identity, Runner output, and Server publish output are all below `BuildWorkspaceRoot` or `CandidateRoot`
 - **AND** the command records the exact runtime identifier, toolchain identity, and output roots in the transaction
+
+#### Scenario: npm workspace projection is isolated
+- **WHEN** the selected revision is built with no source-tree or workspace `node_modules`
+- **THEN** the builder runs an offline lockfile-matching `npm ci` in `NodeWorkspaceViewRoot` using only the recorded cache
+- **AND** workspace package links resolve to read-only snapshot directories
+- **AND** TypeScript, Vite, Runner, and web assertion outputs remain below the declared build or candidate roots
 
 #### Scenario: Snapshot creation fails
 - **WHEN** the selected revision is readable but the immutable build snapshot cannot be materialized

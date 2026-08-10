@@ -18,6 +18,20 @@ The full update process SHALL build the CLI, Server, and Runner into a managed r
 - **THEN** the incomplete output is not made the active release
 - **AND** no managed service is pointed at the incomplete output
 
+### Requirement: Materialize an isolated npm workspace projection
+The web and Runner builders SHALL create a writable `NodeWorkspaceViewRoot` below the transaction build workspace. The view SHALL contain copied root/package manifests and lockfile, symlink-only workspace package directories that resolve to the read-only `SnapshotRoot`, and a projected `node_modules` tree. The builder SHALL run `npm ci --offline --ignore-scripts --cache <NpmCache> --prefix <NodeWorkspaceViewRoot>` and SHALL fail when the cache or lockfile identity does not match. TypeScript, Vite, Runner compilation, and web assertions SHALL be invoked from the projected binaries with explicit source/config and output paths; no package script may fall back to source-relative `dist`, `node_modules`, or cache paths. The Server web-publish target SHALL consume the same explicit web output root.
+
+#### Scenario: Web build uses only the projected workspace
+- **WHEN** the source worktree and workspace `node_modules` are unavailable
+- **THEN** offline npm installation succeeds only from the recorded lockfile-matching cache in `NodeWorkspaceViewRoot`
+- **AND** TypeScript/Vite resolve through the projected workspace and write web output below the transaction build root
+- **AND** the snapshot remains unchanged
+
+#### Scenario: Workspace dependency projection is unavailable
+- **WHEN** the required lockfile-matching cache or workspace dependency cannot be materialized
+- **THEN** staging fails before any service, CLI slot, or active-target change
+- **AND** the failure identifies the lockfile identity and missing dependency
+
 ### Requirement: Make the managed Runner release self-contained
 The candidate Runner release SHALL contain its compiled `dist` files, runtime `package.json`, and every production dependency required by the resolved lockfile. Runtime dependency links SHALL resolve inside the candidate release or the documented immutable managed dependency store; they SHALL not resolve through the source worktree, a workspace `node_modules`, or a developer-only package. `release.json` SHALL record the dependency-lock identity and dependency root used by the Runner target.
 
