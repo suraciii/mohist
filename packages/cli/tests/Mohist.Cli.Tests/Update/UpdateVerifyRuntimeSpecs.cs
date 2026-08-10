@@ -13,13 +13,14 @@ public class UpdateVerifyRuntimeSpecs
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
         f.SeedManagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
         f.Commands.SetStdoutFor("git", _ => true, "abc123");
         var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
         var handler = SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK));
-        var updater = f.BuildUpdater(handler);
+        var updater = f.BuildUpdater(handler, unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
@@ -32,27 +33,31 @@ public class UpdateVerifyRuntimeSpecs
     }
 
     [Fact]
-    public async Task UpdateAll_VerifyRuntime_ServerIdentityMismatch_ReportsRecoveredWithWarnings()
+    public async Task UpdateAll_VerifyRuntime_ServerIdentityMismatch_FailsClosed()
     {
         var tempRoot = "/mohist-tests/mohist-verify-identity";
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+oldhash");
         f.Commands.SetStdoutFor("git", _ => true, "newhash");
         var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "oldhash");
-        var updater = f.BuildUpdater(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)));
+        var updater = f.BuildUpdater(
+            SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)),
+            unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-        Assert.Equal(0, exitCode);
+        Assert.Equal(1, exitCode);
         var output = f.Stdout.ToString();
         Assert.Contains("Verifying workflow runtime", output);
-        Assert.Contains("recovered with warnings", output);
-        Assert.Contains("Server identity", output);
-        Assert.Contains("does not match source HEAD", output);
-        Assert.DoesNotContain("not fully usable", output);
+        Assert.DoesNotContain("recovered with warnings", output);
+        var error = f.Stderr.ToString();
+        Assert.Contains("Server identity", error);
+        Assert.Contains("does not match source HEAD", error);
+        Assert.Contains("not fully usable", error);
     }
 
     [Fact]
@@ -61,12 +66,15 @@ public class UpdateVerifyRuntimeSpecs
         var tempRoot = "/mohist-tests/mohist-verify-runner";
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
         f.Commands.SetStdoutFor("git", _ => true, "match");
-        var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runnerStatus: "inactive");
-        var updater = f.BuildUpdater(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)));
+        var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "match", runnerStatus: "inactive");
+        var updater = f.BuildUpdater(
+            SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)),
+            unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
@@ -83,16 +91,18 @@ public class UpdateVerifyRuntimeSpecs
         var tempRoot = "/mohist-tests/mohist-verify-skills";
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
         f.Commands.SetStdoutFor("git", _ => true, "match");
-        var systemInfo = UpdateTestFactory.HealthySystemInfoJson();
+        var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "match");
         var emptyHome = "/mohist-tests/mohist-verify-skills-home";
         f.Files.AddDirectory(emptyHome);
         var updater = f.BuildUpdater(
             SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)),
-            userHome: emptyHome);
+            userHome: emptyHome,
+            unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
@@ -110,6 +120,7 @@ public class UpdateVerifyRuntimeSpecs
         var tempRoot = "/mohist-tests/mohist-verify-webassets";
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
@@ -117,14 +128,14 @@ public class UpdateVerifyRuntimeSpecs
         // System info is healthy; readiness passes; verification GET /
         // returns 500. The verification stage should fail with web asset
         // unavailability.
-        var systemInfo = UpdateTestFactory.HealthySystemInfoJson();
+        var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "match");
         var handler = SequenceHttpHandler.WithSystemInfo(
             systemInfo,
             new ResponseSpec(HttpStatusCode.OK),
             new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
             new ResponseSpec(HttpStatusCode.OK),
             new ResponseSpec(HttpStatusCode.InternalServerError));
-        var updater = f.BuildUpdater(handler);
+        var updater = f.BuildUpdater(handler, unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
@@ -197,9 +208,9 @@ public class UpdateVerifyRuntimeSpecs
     }
 
     [Fact]
-    public async Task CheckServerIdentity_WhenHashesMismatch_ReportsWarn()
+    public async Task CheckServerIdentity_WhenHashesMismatch_ReportsFail()
     {
-        var tempRoot = "/mohist-tests/mohist-check-identity-warn";
+        var tempRoot = "/mohist-tests/mohist-check-identity-fail";
         var f = new UpdateTestFactory(tempRoot);
         f.Commands.SetStdoutFor("git", _ => true, "newhash");
         var updater = f.BuildUpdater(SequenceHttpHandler.WithSystemInfo(UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "oldhash"), new ResponseSpec(HttpStatusCode.OK)));
@@ -207,7 +218,24 @@ public class UpdateVerifyRuntimeSpecs
 
         var result = await updater.Validator.CheckServerIdentityAsync(context, CancellationToken.None);
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
+        Assert.Contains("does not match source HEAD", result.Message);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentity_WhenHashesMismatch_ReportsFail()
+    {
+        var tempRoot = "/mohist-tests/mohist-check-runner-identity-fail";
+        var f = new UpdateTestFactory(tempRoot);
+        f.Commands.SetStdoutFor("git", _ => true, "newhash");
+        var updater = f.BuildUpdater(SequenceHttpHandler.WithSystemInfo(
+            UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "oldhash"),
+            new ResponseSpec(HttpStatusCode.OK)));
+        var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
+
+        var result = await updater.Validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Contains("does not match source HEAD", result.Message);
     }
 

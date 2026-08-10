@@ -11,6 +11,7 @@ internal abstract record RunnerRefreshOutcome
     {
         StaleRunnerRuntime => 1,
         NotReconnected => 1,
+        UnknownIdentity => 1,
         _ => 0,
     };
 

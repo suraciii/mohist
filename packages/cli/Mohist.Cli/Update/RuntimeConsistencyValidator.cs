@@ -96,20 +96,20 @@ internal sealed class RuntimeConsistencyValidator
         var runningHash = info.Running?.GitHash;
         if (string.IsNullOrWhiteSpace(runningHash))
         {
-            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
                 "Server reported an empty git hash; cannot verify identity");
         }
 
         var sourceHead = await TryGetSourceHeadAsync(context);
         if (string.IsNullOrWhiteSpace(sourceHead))
         {
-            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
-                "Source HEAD could not be determined; skipping identity check");
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
+                "Source HEAD could not be determined; cannot verify identity");
         }
 
         if (!string.Equals(runningHash, sourceHead, StringComparison.Ordinal))
         {
-            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
                 $"Running server git hash '{runningHash}' does not match source HEAD '{sourceHead}'");
         }
 
@@ -191,27 +191,27 @@ internal sealed class RuntimeConsistencyValidator
         var sourceHead = await TryGetSourceHeadAsync(context);
         if (string.IsNullOrWhiteSpace(sourceHead))
         {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
-                "Source HEAD could not be determined; skipping identity check");
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Fail,
+                "Source HEAD could not be determined; cannot verify identity");
         }
 
         var identity = await PollForRunnerIdentityAsync(token);
         if (identity is null)
         {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Fail,
                 "GET /api/runner/identity did not respond");
         }
 
         var runnerHash = identity.BuildGitHash;
         if (string.IsNullOrWhiteSpace(runnerHash))
         {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Fail,
                 "Runner did not report a buildGitHash; cannot verify identity");
         }
 
         if (!string.Equals(runnerHash, sourceHead, StringComparison.Ordinal))
         {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Fail,
                 $"Runner buildGitHash '{runnerHash}' does not match source HEAD '{sourceHead}'");
         }
 

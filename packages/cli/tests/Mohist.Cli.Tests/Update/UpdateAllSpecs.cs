@@ -103,7 +103,7 @@ public class UpdateAllSpecs
     }
 
     [Fact]
-    public async Task UpdateAll_WhenRunnerNotInstalled_SkipsRunnerRefreshAfterServerUpdate()
+    public async Task UpdateAll_WhenRunnerNotInstalled_FailsBeforeAnyComponentMutation()
     {
         var tempRoot = "/mohist-tests/mohist-update-all-no-runner";
         var f = new UpdateTestFactory(tempRoot);
@@ -111,17 +111,16 @@ public class UpdateAllSpecs
 
         var updater = f.BuildUpdater(new SequenceHttpHandler(HttpStatusCode.OK));
 
-        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
-        Assert.Equal(0, exitCode);
+        Assert.Equal(1, exitCode);
+        Assert.DoesNotContain(f.Commands.ExecutedCommands, c => c.FileName == "dotnet");
         Assert.DoesNotContain(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-        Assert.Contains(f.Commands.ExecutedCommands, c =>
-            c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
         Assert.DoesNotContain(f.Commands.ExecutedCommands, c => c.FileName == "npm");
-        var output = f.Stdout.ToString();
-        Assert.Contains("Runner service is not installed; skipping pre-server runner stop.", output);
-        Assert.Contains("Runner refresh skipped: runner service is not installed", output);
-        Assert.Contains("runner-refresh-skipped(runner service is not installed)", output);
+        Assert.Contains("Checking update prerequisites", f.Stdout.ToString());
+        var error = f.Stderr.ToString();
+        Assert.Contains("Runner not installed", error);
+        Assert.Contains("mo install runner", error);
     }
 }

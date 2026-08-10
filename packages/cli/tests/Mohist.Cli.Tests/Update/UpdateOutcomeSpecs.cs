@@ -13,13 +13,14 @@ public class UpdateOutcomeSpecs
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
         f.SeedManagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
         f.Commands.SetStdoutFor("git", _ => true, "abc123");
         var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
         var handler = new OutcomeCapturingHttpHandler(systemInfo);
-        var updater = f.BuildUpdater(handler);
+        var updater = f.BuildUpdater(handler, unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
@@ -46,6 +47,7 @@ public class UpdateOutcomeSpecs
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
         f.SeedManagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
@@ -55,7 +57,7 @@ public class UpdateOutcomeSpecs
         {
             OutcomeResponseStatusCode = HttpStatusCode.ServiceUnavailable,
         };
-        var updater = f.BuildUpdater(handler);
+        var updater = f.BuildUpdater(handler, unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
@@ -93,13 +95,14 @@ public class UpdateOutcomeSpecs
         var f = new UpdateTestFactory(tempRoot);
         f.SeedPackagedSkillAssets();
         f.SeedManagedSkillAssets();
+        f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
         f.Commands.SetStdoutFor("git", _ => true, "abc123");
         var systemInfo = UpdateTestFactory.HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
         var handler = new OutcomeCapturingHttpHandler(systemInfo);
-        var updater = f.BuildUpdater(handler);
+        var updater = f.BuildUpdater(handler, unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 

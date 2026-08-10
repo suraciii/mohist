@@ -6,6 +6,7 @@ namespace Mohist.Cli;
 internal enum UpdateStage
 {
     Start,
+    Preflight,
     UpdateCli,
     PrepareRunner,
     UpdateServer,

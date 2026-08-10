@@ -29,10 +29,10 @@ internal partial class SourceCodeUpdater
         {
             var reason = "runner service is not installed";
             context.RecordStage(StageLabels.PrepareRunner, reason);
-            _out.WriteLine("Runner service is not installed; skipping pre-server runner stop.");
-            _out.WriteLine($"Runner refresh skipped: {reason}");
-            _runnerRefreshVerifier.WriteSkippedSummary(reason, _out, _err);
-            return 0;
+            context.UnavailableCapability ??= "Runner not installed";
+            _err.WriteLine("Full update requires an installed managed runner.");
+            _err.WriteLine("Install the runner with: mo install runner");
+            return 1;
         }
 
         if (!context.DryRun)

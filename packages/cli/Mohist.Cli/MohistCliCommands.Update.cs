@@ -233,6 +233,25 @@ internal partial class SourceCodeUpdater
             return await FinalizeAsync(context, 1);
         }
 
+        var preflight = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await ValidateFullUpdatePreflightAsync(ctx, token);
+        });
+
+        if (context.Interrupted)
+        {
+            if (!context.RunnerStopped)
+            {
+                _out.WriteLine("Update cancelled before the runner was stopped. No recovery needed.");
+            }
+            return await FinalizeAsync(context, 130);
+        }
+
+        if (!preflight.Success)
+        {
+            return await FinalizeAsync(context, preflight.ExitCode);
+        }
+
         if (!continueAfterCliUpdate)
         {
             var cliOutcome = await RunStageMachineAsync(context, async (ctx, token) =>
@@ -324,6 +343,28 @@ internal partial class SourceCodeUpdater
         return await _operations.ResolveCliPathAsync(explicitPath);
     }
 
+    private async Task<int> ValidateFullUpdatePreflightAsync(UpdateContext context, CancellationToken token)
+    {
+        context.Stage = UpdateStage.Preflight;
+        _out.WriteLine(StageLabels.Preflight);
+        context.RecordStage(StageLabels.Preflight, "checking managed runner installation");
+
+        token.ThrowIfCancellationRequested();
+        context.RunnerInstalled = context.DryRun || await _operations.IsRunnerInstalledAsync();
+        if (context.RunnerInstalled)
+        {
+            context.RecordStage(StageLabels.Preflight, "managed runner is installed");
+            return 0;
+        }
+
+        const string reason = "runner service is not installed";
+        context.UnavailableCapability = "Runner not installed";
+        context.RecordStage(StageLabels.Preflight, $"failed: {reason}");
+        _err.WriteLine("Full update requires an installed managed runner.");
+        _err.WriteLine("Install the runner with: mo install runner");
+        return 1;
+    }
+
     private async Task<int> ContinueWithUpdatedCliAsync(UpdateContext context)
     {
         if (string.IsNullOrWhiteSpace(context.CliPath))
@@ -396,6 +437,7 @@ internal partial class SourceCodeUpdater
 
     private static class StageLabels
     {
+        public const string Preflight = "Checking update prerequisites";
         public const string CliUpdate = "Updating CLI";
         public const string PrepareRunner = "Preparing workflow runner";
         public const string UpdateServer = "Updating Mohist Server";
