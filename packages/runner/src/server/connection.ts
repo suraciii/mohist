@@ -553,6 +553,7 @@ export interface AgentSessionReconcileBinding {
 export interface WorkflowAgentSession {
   runtimeSessionId?: string | null
   runtime?: string | null
+  status?: string | null
   workDir?: string | null
   model?: string | null
   resolvedModel?: string | null

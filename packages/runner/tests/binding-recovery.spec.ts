@@ -33,6 +33,26 @@ describe("resolveOrRecoverBinding", () => {
     expect(replace).not.toHaveBeenCalled()
   })
 
+  it("fails closed for a workflow retry when the bound physical session is still active", async () => {
+    const create = vi.fn()
+    const replace = vi.fn()
+    const result = await resolveOrRecoverBinding({
+      runnerId: "runner-1",
+      expected,
+      runtime: { kind: "opencode", runtime: runtime(create) },
+      probe: async () => ({ ok: true, activeTurn: true }),
+      replace,
+      rejectActiveTurn: true,
+    })
+    expect(result).toEqual({
+      ok: false,
+      kind: "active-turn",
+      message: "The bound Runtime Session still has an active turn; refusing to reuse it for a workflow retry",
+    })
+    expect(create).not.toHaveBeenCalled()
+    expect(replace).not.toHaveBeenCalled()
+  })
+
   it("creates one candidate and confirms the replacement after deterministic missing", async () => {
     const create = vi.fn(async () => ({ ok: true as const, value: { runtimeSessionId: "session-new", workDir: expected.workDir }, diagnostics: [] }))
     const replace = vi.fn(async () => undefined)
