@@ -600,36 +600,91 @@ public class CliRunControlSpecs
     }
 
     [Theory]
-    [InlineData("approve")]
-    [InlineData("reject")]
-    [InlineData("retry")]
-    [InlineData("rerun")]
-    [InlineData("pause")]
-    [InlineData("resume")]
-    [InlineData("stop")]
-    public async Task RunControl_WithJsonSelectionAndEmptySuccessData_ReturnsProjectedObject(string verb)
+    [InlineData("retry", "retried", "workflowRunId,retried,status,stage")]
+    [InlineData("resume", "resumed", "workflowRunId,status,stage,resumed,paused,decidedBy")]
+    [InlineData("pause", "paused", "workflowRunId,status,stage,resumed,paused,decidedBy")]
+    public async Task RunControl_WithRealEmptySuccessEnvelope_ProjectsAcceptedMutation(
+        string verb,
+        string actionField,
+        string selectedFields)
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
             req.Method == HttpMethod.Post
-                ? RecordingHttpHandler.Json(new { success = true, data = (object?)null })
+                ? RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = (object?)null,
+                    error = (string?)null,
+                    code = (string?)null,
+                    details = (object?)null,
+                })
                 : null!);
 
-        var args = verb switch
-        {
-            "approve" => new[] { "run", verb, WrId, "--display-name", "supervisor", "--json", "workflowRunId,status" },
-            "reject" => new[] { "run", verb, WrId, "--message", "reason", "--json", "workflowRunId,status" },
-            "stop" => new[] { "run", verb, WrId, "--yes", "--json", "workflowRunId,status" },
-            _ => new[] { "run", verb, WrId, "--json", "workflowRunId,status" },
-        };
+        var args = new[] { "run", verb, WrId, "--json", selectedFields };
 
         var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var projected = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
         Assert.NotNull(projected);
-        Assert.True(projected!.ContainsKey("workflowRunId"));
-        Assert.True(projected.ContainsKey("status"));
+        Assert.Equal(selectedFields.Split(','), projected!.Select(pair => pair.Key).ToArray());
+        Assert.Equal(WrId, projected["workflowRunId"]?.GetValue<string>());
+        Assert.True(projected[actionField]?.GetValue<bool>());
+        Assert.DoesNotContain("success", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("invalid-response", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Retry_WithSelectedJsonAndNonObjectSuccessData_FailsExplicitly()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[] { new { workflowRunId = WrId } },
+                })
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["run", "retry", WrId, "--json", "workflowRunId,retried"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.Contains("The server returned a non-object resource", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("invalid-response", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Resume_WithSelectedJsonAndErrorEnvelope_FailsWithoutJsonOutput()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.JsonError(
+                    "Workflow is not active for this run",
+                    code: "conflict",
+                    statusCode: HttpStatusCode.Conflict)
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["run", "resume", WrId, "--json", "workflowRunId,resumed"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.Contains("Workflow is not active for this run", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("conflict", error.ToString(), StringComparison.Ordinal);
         Assert.Single(handler.Requests);
     }
 
