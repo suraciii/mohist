@@ -65,6 +65,10 @@ internal partial class SourceCodeUpdater
             {
                 _err.WriteLine("Start the runner manually with: mo service start runner");
             }
+            else if (string.Equals(context.UnavailableCapability, "Runner not installed", StringComparison.Ordinal))
+            {
+                _err.WriteLine("Install the runner with: mo install runner");
+            }
         }
         else if (context.Warnings.Count > 0)
         {

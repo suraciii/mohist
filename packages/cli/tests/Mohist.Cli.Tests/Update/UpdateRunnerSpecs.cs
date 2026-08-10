@@ -13,8 +13,10 @@ public class UpdateRunnerSpecs
     {
         var f = new UpdateTestFactory();
         f.SeedRunnerUnit();
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
         var updater = f.BuildUpdater(
-            new SequenceHttpHandler(new ResponseSpec(HttpStatusCode.OK, UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", Environment.MachineName, null, "online"), "application/json")),
+            new SequenceHttpHandler(new ResponseSpec(HttpStatusCode.OK, UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", Environment.MachineName, hash, "online"), "application/json")),
             unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
@@ -24,6 +26,23 @@ public class UpdateRunnerSpecs
         Assert.Equal(new[] { "run", "build", "-w", "packages/runner" }, npm.Args);
         Assert.Contains(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(new[] { "--user", "restart", "mohist-runner.service" }));
+    }
+
+    [Fact]
+    public async Task UpdateRunner_WhenIdentityIsUnknown_FailsClosed()
+    {
+        var f = new UpdateTestFactory();
+        f.SeedRunnerUnit();
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
+        var updater = f.BuildUpdater(
+            new SequenceHttpHandler(new ResponseSpec(HttpStatusCode.OK, UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", Environment.MachineName, null, "online"), "application/json")),
+            unitDir: UpdateTestFactory.UnitDir);
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("unknown-identity", f.Stdout.ToString());
     }
 
     [Fact]
