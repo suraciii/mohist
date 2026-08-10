@@ -148,7 +148,7 @@ export class WorkflowAgentSessionReporter {
   }
 
   registerClose(payload: {
-    readonly status: "completed" | "failed"
+    readonly status: "completed" | "failed" | "unknown"
     readonly exitCode: number
     readonly failureReason?: string | null
     readonly runtimeSessionId: string
@@ -158,13 +158,26 @@ export class WorkflowAgentSessionReporter {
     // Flush buffered deltas before the activity fact so the outbox preserves turn order.
     this.flushDeltaBuffer()
     const records: RuntimeEventRecord[] = []
-    if (payload.status === "failed") records.push(this.buildRecord(payload.runtimeSessionId, {
+    if (payload.status !== "completed") records.push(this.buildRecord(payload.runtimeSessionId, {
       type: "turn.failed",
-      payload: { status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}) },
+      payload: {
+        status: payload.status,
+        exitCode: payload.exitCode,
+        ...(payload.status === "unknown" ? { failureCategory: "unknown" } : {}),
+        ...(payload.failureReason ? { failureReason: payload.failureReason } : {}),
+      },
     }))
     records.push(this.buildRecord(payload.runtimeSessionId, {
       type: "session.activity",
-      payload: { activity: "idle", status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}), runtimeSessionId: payload.runtimeSessionId, observedAt: new Date().toISOString() },
+      payload: {
+        activity: "idle",
+        status: payload.status,
+        exitCode: payload.exitCode,
+        ...(payload.status === "unknown" ? { failureCategory: "unknown" } : {}),
+        ...(payload.failureReason ? { failureReason: payload.failureReason } : {}),
+        runtimeSessionId: payload.runtimeSessionId,
+        observedAt: new Date().toISOString(),
+      },
     }))
     const promise = this.outbox.enqueueProducedFactBatch(records)
       .catch((error) => {

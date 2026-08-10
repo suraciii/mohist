@@ -38,7 +38,7 @@ import type {
   RuntimeTurnRequest,
   RuntimeTurnResult,
 } from "./types.js"
-import { errorKindFor, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
+import { errorKindFor, hasUnconfirmedCleanup, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
 import type { OpencodeServerHandle } from "./server-process.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
 import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
@@ -309,7 +309,13 @@ export class OpenCodeRuntime {
           trackPendingOperation: lease.trackPending,
         }
         const result = await runTurn(request, deps, signal, observer)
-        if (!result.ok && result.error.diagnostics.some((diagnostic) => diagnostic.code === "opencode-transport-failed")) {
+        if (!result.ok && hasUnconfirmedCleanup(result.error.diagnostics)) {
+          this.triggerRebuild(server, {
+            severity: "error",
+            code: "cleanup-unconfirmed",
+            message: "OpenCode turn cleanup did not reach a confirmed terminal state; invalidating the runtime generation before reuse",
+          })
+        } else if (!result.ok && result.error.diagnostics.some((diagnostic) => diagnostic.code === "opencode-transport-failed")) {
           this.triggerRebuild(server)
         }
         return result
@@ -554,14 +560,14 @@ export class OpenCodeRuntime {
     })
   }
 
-  private triggerRebuild(server: OpencodeServerHandle): void {
+  private triggerRebuild(server: OpencodeServerHandle, diagnostic?: RuntimeDiagnostic): void {
     if (this.state.rebuildTriggered) return
     if (!this.state.ready) return
     if (this.state.server !== server) return
     this.state.rebuildTriggered = true
     this.directoryInstances.resetGeneration()
     this.state.ready = false
-    this.state.diagnostic = {
+    this.state.diagnostic = diagnostic ?? {
       severity: "error",
       code: "server-exit",
       message: "OpenCode server exited; rebuilding runtime",

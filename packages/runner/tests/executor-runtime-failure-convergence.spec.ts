@@ -149,6 +149,47 @@ describe("WorkExecutor runtime failure convergence", () => {
     })
   })
 
+  it("settles a turn with unconfirmed cleanup as unknown instead of reporting failure as terminally safe", async () => {
+    const { executor, outbox } = createExecutor(
+      fakeRuntime({
+        runTurn: async () => ({
+          ok: false as const,
+          error: {
+            kind: "deadline-exceeded" as const,
+            message: "OpenCode turn timed out; cleanup: OpenCode session.abort cleanup timed out after 5000ms",
+            diagnostics: [{
+              severity: "error" as const,
+              code: "abort-cleanup-timeout",
+              message: "OpenCode session.abort cleanup timed out after 5000ms",
+            }],
+          },
+          diagnostics: [{
+            severity: "error" as const,
+            code: "abort-cleanup-timeout",
+            message: "OpenCode session.abort cleanup timed out after 5000ms",
+          }],
+        }),
+      }),
+      fakeConnection(),
+    )
+
+    const result = await executor.execute(work(), new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.error?.code).toBe("timeout")
+    expect(outbox.eventTypeList()).toEqual(["session.input", "turn.failed", "session.activity"])
+    expect(outbox.eventsByType("turn.failed")[0]?.event.payload).toMatchObject({
+      status: "unknown",
+      failureCategory: "unknown",
+    })
+    expect(outbox.eventsByType("session.activity")[0]?.event.payload).toMatchObject({
+      activity: "idle",
+      status: "unknown",
+      failureCategory: "unknown",
+      exitCode: 1,
+    })
+  })
+
   it("keeps create/attach failures as deterministic failed results", async () => {
     const create = vi.fn(async () => {
       throw new Error("OpenCode createSession unavailable")
