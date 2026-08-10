@@ -1,0 +1,112 @@
+{
+  "project": "mohist-local",
+  "description": "Implement reusable mohist/agent Workflow execution with durable AgentJob and AgentSession lineage, shared admission, stable lifecycle results, and Workflow-owned arbitration.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Materialize the Workflow Agent handoff and immutable launch lineage",
+      "spec": "specs/workflow-agent-action/spec.md#requirement-workflow-agent-task-contract, specs/workflow-agent-action/spec.md#requirement-agent-selection-and-acceptance, specs/workflow-agent-action/spec.md#requirement-invocation-lineage-and-idempotent-materialization, specs/workflow-agent-action/spec.md#requirement-immutable-invocation-snapshot, specs/workflow-agent-action/spec.md#requirement-shared-agent-readiness-and-admission",
+      "description": "Replace the current mohist/agent-to-runtime translation with the durable agent-handoff envelope while keeping profile validation virtual, task-only, and independent of live Agent existence. Add the Server handoff service and coordinator extension that resolve the active Agent, readiness, workspace, and immutable execution snapshot, then provision and idempotently accept one AgentJob, AgentSession, SessionInput, and AgentTurn lineage for each TaskRun attempt. Include the Workflow ownership record, provisional visibility, acceptance/abort paths, and shared AgentJob admission integration in the same feature slice.",
+      "acceptanceCriteria": [
+        "Profile validation accepts mohist/agent only for tasks, requires literal name and prompt strings, allows only name/prompt/session/timeout, and does not query live Agent state; checks and invalid inputs are rejected with actionable errors.",
+        "A claimed mohist/agent task produces an agent-handoff dispatch rather than mohist/opencode or mohist/pi, and the handoff is keyed by the project, WorkflowRun, and TaskRun attempt for idempotent replay.",
+        "Agent resolution follows the canonical agent_* id-only and name-first fallback rules; missing, archived, or readiness-rejected Agents create no accepted Runner work or accepted AgentJob/AgentSession lineage.",
+        "An accepted attempt persists one immutable Agent snapshot, one WorkflowAgentInvocation, and mutually locatable Job, Session, Input, and Turn identifiers; replay returns those identities without submitting a duplicate prompt.",
+        "A failure during provisional Session creation or Workflow acceptance aborts hidden participants and leaves no claimable Runner ledger entry; direct Agent launches, Inline Agent Actions, and checks retain their existing behavior.",
+        "Focused Server and Runner tests cover virtual validation, Agent selection, readiness rejection, snapshot isolation, provisional acceptance/abort, lineage creation, and idempotent redelivery."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server and Runner support for the durable agent-handoff path, immutable WorkflowAgentInvocation lineage, and passing contract/admission tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep AgentRefResolver, AgentReadinessService, named Workspace resolution, AgentLaunchCoordinatorGrain, and AgentJobGrain as the authoritative seams; the coordinator must replay the resolved snapshot rather than re-read mutable Agent or Project state."
+    },
+    {
+      "id": "T-002",
+      "title": "Execute Agent-backed Workflow tasks with completion side effects",
+      "spec": "specs/workflow-agent-action/spec.md#requirement-agent-execution-composition, specs/workflow-agent-action/spec.md#requirement-canonical-workspace-and-execution-context",
+      "description": "Add the Runner agent-handoff execution branch and extend the canonical AgentJob dispatch with the frozen Agent execution definition, turn deadline, workspace identity, and WorkflowTaskContract. Run OpenCode or Pi only through the existing AgentJob executor, then apply an idempotent Workflow-task finalizer for expect evaluation, _output, artifact binding, setVars, and recovery inputs without making AgentSession transcript events authoritative.",
+      "acceptanceCriteria": [
+        "The Runner does not resolve mohist/agent through ActionRegistry or start a runtime for the handoff; it renders and validates the envelope, sends the internal Server command, and retires the handoff only after an accepted or definitive rejection acknowledgement.",
+        "AgentJob dispatch carries the snapshotted runtime, model, variant, ordered Skills, instructions, Job/Session/Input/Turn references, Workflow owner identity, workspace binding, and the validated per-turn timeout; Workflow input cannot override Agent execution properties.",
+        "Named workspace materialization and home-Runner affinity use the persisted workspace identity, including delayed materialization and unavailable-home behavior, without substituting a raw Runner directory.",
+        "The Workflow finalizer evaluates expect against the structured Agent result and persisted workspace, treats _output as final assistant text, binds artifacts under Workflow idempotency, applies setVars once, and preserves recovery/retry semantics on postcondition failure.",
+        "OpenCode and Pi execution paths receive both Agent instructions and the Workflow prompt, while direct AgentJob execution and unrelated Workflow Actions remain unchanged.",
+        "Focused Runner, AgentJob, workspace, artifact, variable, and completion-evaluator tests cover OpenCode/Pi selection, timeout/default handling, delayed workspace materialization, _output, idempotent side effects, and postcondition failures."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentJob-backed Workflow execution with the frozen task contract, workspace/timeout handling, and passing Runner finalizer tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Keep the Workflow task contract separate from the Agent execution snapshot. The finalizer may prepare side effects, but it must never advance WorkflowRun directly; terminal arbitration remains the next task."
+    },
+    {
+      "id": "T-003",
+      "title": "Deliver terminal Agent results and arbitrate Workflow advancement",
+      "spec": "specs/workflow-agent-action/spec.md#requirement-stable-lifecycle-and-recovery-projection, specs/workflow-agent-action/spec.md#requirement-stable-result-and-workflow-arbitration",
+      "description": "Extend AgentJob terminal state with a durable Workflow delivery obligation and add guarded Workflow operations for lineage-checked result application. Project AgentJob facts into queued, executing, recovering, completed, failed, and cancelled invocation states, preserve immutable terminal results, release shared admission exactly once, and route success/failure/cancellation through existing Workflow completion and recovery boundaries.",
+      "acceptanceCriteria": [
+        "AgentJob status maps to queued, executing, recovering, completed, failed, or cancelled using the documented rules, and nonterminal reads never fabricate a final result.",
+        "Terminal delivery persists a stable delivery id and retries until Workflow acknowledges Accepted or Stale; every delivery verifies WorkflowRun, TaskRun, Job, Session, Input, and Turn identity before applying a result.",
+        "Duplicate terminal reports and late Runner reports are acknowledged as stale and cannot rewrite a terminal Job, invocation result, or Workflow task; shared Agent concurrency resources are released once.",
+        "Unknown or uncertain post-claim work is non-claimable and recovering, reconciliation uses the original work identity, and recovery never creates a replacement Job, Turn, or prompt.",
+        "Completed results advance the Workflow through the existing task lifecycle, failed results enter declared recovery, and cancelled AgentJobs remain cancelled in the invocation projection while crossing the existing Workflow failure boundary.",
+        "Session runtime, transcript, activity, and terminal-close events remain audit facts and cannot independently complete, fail, cancel, or advance the Workflow.",
+        "Focused Server grain and integration tests cover every lifecycle state, terminal-delivery retry, duplicate/stale result, runner loss, unknown recovery, cancellation, permit release, and Workflow retry/recovery path."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Durable AgentJob-to-Workflow terminal arbitration with immutable status/result semantics and passing recovery tests.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Use the existing AgentJob recovery reminder and Workflow ReportAck-style Accepted/Stale semantics where they fit; do not synthesize ordinary Runner task reports from transcript events."
+    },
+    {
+      "id": "T-004",
+      "title": "Expose cross-owner Workflow Agent invocation projections",
+      "spec": "specs/workflow-agent-action/spec.md#requirement-invocation-lineage-and-idempotent-materialization, specs/workflow-agent-action/spec.md#requirement-stable-lifecycle-and-recovery-projection, specs/workflow-agent-action/spec.md#requirement-stable-result-and-workflow-arbitration",
+      "description": "Implement the internal WorkflowAgentInvocationRead assembler and expose it through the existing Workflow task/run read surface or the selected dedicated route. Add Job and Session cross-links back to WorkflowRun and TaskRun, join canonical AgentJob facts with immutable Workflow lineage and Session initial-launch identities, and expose delivery application state without leaking Runner, Runtime Binding, workspace paths, prompts, transcript, or provider payloads.",
+      "acceptanceCriteria": [
+        "The invocation read contains WorkflowRunId, TaskRunId, attempt, Job/Session/Input/Turn ids, Agent identity, session name, mapped status, reason, terminal result, workflowApplication, and observedAt.",
+        "A Workflow caller can locate the canonical AgentJob and AgentSession from the invocation, and AgentJob/AgentSession reads can locate the originating WorkflowRun and TaskRun without transcript parsing.",
+        "The projection joins status from AgentJob rather than persisting a second execution state machine; terminal AgentJob results are visible while workflowApplication=pending until Workflow acknowledgement arrives.",
+        "Nonterminal reads return result=null, terminal results remain stable across replay and Agent edits, and recovering work is represented without synthesizing success or failure.",
+        "Public read surfaces do not expose internal Runner identity, Runtime Binding, raw workspace paths, prompt content, transcript parts, or provider payloads.",
+        "Focused Server projection and API tests cover queued/executing/recovering/terminal states, cross-links, pending/applied/stale application acknowledgements, and absent terminal results."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Bidirectional Workflow/Agent invocation read projections and passing API/assembler tests.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Resolve the open API-shape question during implementation by choosing either an embedded task DTO field or a dedicated route, then keep the read model internal and stable."
+    },
+    {
+      "id": "T-005",
+      "title": "Complete legacy cutover, documentation, and end-to-end regression coverage",
+      "spec": "specs/workflow-agent-action/spec.md#requirement-unchanged-product-boundaries",
+      "description": "Apply the migration and cleanup plan after the new path is proven: preserve already-persisted concrete Inline Agent dispatch snapshots, route new mohist/agent attempts only through agent-handoff, and remove the old translator fallback and Workflow AgentSession reporter path once legacy work drains. Update the Agent execution/API, Action, and Session documentation and add end-to-end regression coverage for direct launches, inline Actions, checks, legacy draining, rollback behavior, and the complete Workflow-to-Agent lifecycle.",
+      "acceptanceCriteria": [
+        "Existing persisted mohist/agent dispatch snapshots that already contain mohist/opencode or mohist/pi finish through the legacy path, while new TaskRun attempts create only agent-handoff work.",
+        "After the drain condition, the old WorkflowItemTranslator Agent fallback and Workflow AgentSession reporter advancement path are removed or unreachable for new invocations, with no second Agent scheduler or Runner-process protocol introduced.",
+        "Inline mohist/opencode and mohist/pi tasks, checks, unrelated Workflow Actions, direct Agent launches, Slack/Connection behavior, and external Agent API allowlists retain their existing semantics.",
+        "design/agent-execution.md, design/agent-api.md, docs/actions/agent.md, and docs/agent-sessions.md document the new ownership, identifiers, lifecycle/result contract, recovery rules, and breaking consumer change.",
+        "End-to-end tests cover valid and invalid Workflow inputs, Agent selection, queued/executing/terminal/recovering flow, stable lineage/result reads, Workflow expect/artifacts/setVars/recovery, stale delivery, and legacy cutover/rollback behavior.",
+        "The repository verification gate passes, or any environment limitation is recorded with the failing command and root cause."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Completed Workflow Agent cutover, updated documentation, end-to-end regression coverage, and a verified migration state.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Do not backfill completed TaskRuns. Rollback stops new handoffs, lets accepted AgentJobs finish through the canonical ledger, and retains the terminal bridge until pending Workflow invocations drain."
+    }
+  ]
+}
