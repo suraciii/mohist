@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
   "validationSourceFileCount": 828,
-  "validationSourceTreeDigest": "8187aac41428c533880db46f3a06fd8967ab984290d017e4035f84e9625a8c59",
+  "validationSourceTreeDigest": "178b8709e27bf3dbcf8adb930ef7639e0c6841fdcb1d31fbbbd5e2460eaa345a",
   "validationBaselineDigest": "03cad8aca4e8ddf9688d7b3532d03cb1b93c039e8a9ec4e0e38ee73e5b403c62",
   "validationHeadMeaning": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8 with tree ff159609b97df5b1fac6d6404a6d1811f6bda99a is the exact current master baseline used to interpret the checked-in migration ledger; it is not the final validation commit. Planned Unit targets are contracts only, while PR #388 history remains 602efa6abd6fca3efcd43b66b47ba10a80d9faba.",
   "history": {
@@ -2154,8 +2154,8 @@
         "symbols": [
           "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests"
         ],
-        "digest": "a7ef96570758ae86cac38f252aae7bbe662d90f3577f5ce2c3db1395b52ec008",
-        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Domain/IssueManualCompletionTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests case-digest=0a6acd0c75f214a0701e93ba3a78f733462becaf3b87c36209978b63cad6aee3 source-content-digest=b7335ae9bbdc18b7e105c71104bcc4bd4acdea50cc97b93d90633f67da22eac9 executable-closure-digest=a7ef96570758ae86cac38f252aae7bbe662d90f3577f5ce2c3db1395b52ec008 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "digest": "fd45bae7b6f0bf56c99002b6143afed04aa294f0564596fba67e892f4c813ece",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Domain/IssueManualCompletionTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests case-digest=0a6acd0c75f214a0701e93ba3a78f733462becaf3b87c36209978b63cad6aee3 source-content-digest=2b69ba6f1c683729c297cf613e2a7c3c10cde109b52336a6dfe23b8fc356f764 executable-closure-digest=fd45bae7b6f0bf56c99002b6143afed04aa294f0564596fba67e892f4c813ece edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "owner": "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests",
       "history": {
@@ -2173,8 +2173,8 @@
         "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests",
         "caseCount": 6,
         "caseIdentityDigest": "0a6acd0c75f214a0701e93ba3a78f733462becaf3b87c36209978b63cad6aee3",
-        "closureIdentityDigest": "a7ef96570758ae86cac38f252aae7bbe662d90f3577f5ce2c3db1395b52ec008",
-        "sourceContentDigest": "b7335ae9bbdc18b7e105c71104bcc4bd4acdea50cc97b93d90633f67da22eac9"
+        "closureIdentityDigest": "fd45bae7b6f0bf56c99002b6143afed04aa294f0564596fba67e892f4c813ece",
+        "sourceContentDigest": "2b69ba6f1c683729c297cf613e2a7c3c10cde109b52336a6dfe23b8fc356f764"
       }
     },
     {

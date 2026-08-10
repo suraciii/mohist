@@ -43,10 +43,14 @@ public class IssueManualCompletionTests
     {
         var issue = NewIssue();
 
-        var error = Assert.Throws<InvalidOperationException>(() => issue.MarkDone(Now));
+        var changed = issue.MarkDone(Now);
 
-        Assert.Contains("no workflow run", error.Message);
-        Assert.Equal(IssueStatus.Backlog, issue.Status);
+        Assert.True(changed);
+        Assert.Equal(IssueStatus.Done, issue.Status);
+        Assert.Equal(Now, issue.CompletedAt);
+        var completed = Assert.Single(CompletionEvents(issue));
+        Assert.Null(completed.WorkflowRunId);
+        Assert.Equal(IssueCompletionKinds.Manual, completed.CompletionKind);
     }
 
     [Fact]
@@ -66,7 +70,10 @@ public class IssueManualCompletionTests
         var field = typeof(DomainIssue).GetProperty("WorkflowRunId");
         field?.SetValue(issue, null);
 
-        Assert.Throws<InvalidOperationException>(() => issue.MarkDone(Now));
+        var error = Assert.Throws<InvalidOperationException>(() => issue.MarkDone(Now));
+
+        Assert.Contains("no workflow run", error.Message);
+        Assert.Equal(IssueStatus.InProgress, issue.Status);
     }
 
     [Fact]
