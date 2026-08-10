@@ -160,6 +160,19 @@ and the Runner removes it from `awaitingAck`. The Runner never sends an
 `ReceiveTaskReportAsync` or `ReceiveCheckReportAsync`. Only the typed handoff
 service may acknowledge or retire this work.
 
+Before returning a definitive `rejected` acknowledgement, the handoff service
+must call the lineage-checked
+`IWorkflowGrain.ApplyAgentHandoffRejectionAsync` operation with
+`(runnerId, workId, taskRunId, commandId, requestFingerprint, ExecutionError)`.
+That Workflow-owned operation verifies the active handoff and fingerprint,
+applies the normal failed-TaskRun and declared recovery boundary, clears the
+active handoff snapshot, and returns `Accepted` or `Stale`. The service returns
+the terminal transport rejection only after that operation succeeds. A retry
+of the same command replays the stored rejection without applying the failure
+twice; a conflicting fingerprint returns `handoff_conflict` and cannot mutate
+the TaskRun. A transient failure of the Workflow operation returns `retry` and
+keeps the transport obligation available for replay.
+
 The endpoint is implemented by a Server handoff service backed by an extension
 of the existing `AgentLaunchCoordinatorGrain`, not by a separate launch
 protocol. Its durable plan contains the Workflow origin, TaskRun ID, rendered
@@ -189,6 +202,9 @@ before promotion; when provisional participants already exist, the coordinator
 aborts them and records the rejection under the same request identity. The
 already-claimed transport work is retired, but no accepted AgentJob,
 AgentSession, SessionInput, AgentTurn, or external Runtime work is created.
+The rejection also applies the Workflow failure/recovery boundary through
+`ApplyAgentHandoffRejectionAsync` before the terminal transport acknowledgement
+is persisted.
 
 **Alternative considered:** resolve the Agent in
 `WorkflowItemTranslator` and continue sending `mohist/opencode` or
