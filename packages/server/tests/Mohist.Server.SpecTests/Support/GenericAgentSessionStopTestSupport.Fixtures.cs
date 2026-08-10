@@ -1,66 +1,31 @@
-using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
+
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
+public abstract partial class GenericAgentSessionStopTestSupport
 {
-    protected readonly MohistIntegrationFixture _fixture;
-    protected readonly HttpClient _client;
-    protected readonly string _runnerId = $"generic-cancel-{Guid.NewGuid():N}";
-
-    protected GenericAgentSessionCancelApiTestSupport(MohistIntegrationFixture fixture)
-    {
-        _fixture = fixture;
-        _client = fixture.Client;
-    }
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        try
-        {
-            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/unregister", content: null);
-            _ = response;
-        }
-        catch
-        {
-        }
-    }
-
-    protected async Task<HttpResponseMessage> PostGenericCancelAsync(string projectId, string sessionId)
-    {
-        var turns = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync();
-        var turnId = turns.FirstOrDefault()?.Id ?? $"missing-turn-{Guid.NewGuid():N}";
-        return await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel",
-            new { turnId });
-    }
-
-    protected async Task<(ProjectRef Project, string SessionId)> CreateCanonicalSessionForCancelAsync(string sourceKind, string runtime = "opencode")
+    protected async Task<(ProjectRef Project, string SessionId)> CreateCanonicalSessionForStopAsync(
+        string sourceKind,
+        string runtime = "opencode")
     {
         var project = await CreateProjectAsync($"preserves-{sourceKind}");
+        var agent = await CreateAgentAsync(project.Id, "stop-agent");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
             .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
-        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        tracker.Register(_runnerId, $"{_runnerId}-conn");
+        RegisterRunnerConnection();
 
-        var sessionId = $"cancel-{Guid.NewGuid():N}";
+        var sessionId = $"stop-{Guid.NewGuid():N}";
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
         var metadata = sourceKind switch
         {
@@ -70,8 +35,8 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
                 "build")),
             "agent-launch" => GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
                 project.Id,
-                $"agent-{Guid.NewGuid():N}",
-                "cancel-agent")),
+                agent.Id,
+                agent.Name)),
             _ => throw new ArgumentOutOfRangeException(nameof(sourceKind), sourceKind, "Unknown AgentSession source"),
         };
 
@@ -89,28 +54,35 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
             inputId,
             turnId,
-            "before cancel",
+            "before stop",
             "user"));
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $"{{\"role\":\"user\",\"text\":\"before cancel\",\"kind\":\"task\",\"runtimeSessionId\":\"{runtimeSessionId}\",\"turnId\":\"{turnId}\"}}"),
+                $"{{\"role\":\"user\",\"text\":\"before stop\",\"kind\":\"task\",\"runtimeSessionId\":\"{runtimeSessionId}\",\"turnId\":\"{turnId}\"}}"),
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.MessageDelta,
                 "{\"text\":\"preserved assistant text\"}"),
         }, runtimeSessionId));
         await persistence.WaitAsync();
 
+        var activeResource = await CreateActiveLaunchResourceAsync(project, agent, "stop-resource");
+        _launchStopResources.Add(activeResource);
+        await EstablishStopResourcePreconditionAsync(sessionId, project, agent, activeResource);
         return (project, sessionId);
     }
 
-    protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateQueuedSessionForCancelAsync()
+    protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateQueuedSessionForStopAsync()
     {
         var project = await CreateProjectAsync("queued");
-        var sessionId = $"queued-cancel-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(project.Id, "queued-agent");
+        var sessionId = $"queued-stop-{Guid.NewGuid():N}";
         var turnId = $"turn-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
+            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+        RegisterRunnerConnection();
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: string.Empty,
@@ -118,8 +90,8 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             WorkDir: $"/workspaces/{project.Id}",
             Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
                 project.Id,
-                "queued-agent",
-                "queued-agent"))));
+                agent.Id,
+                agent.Name))));
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
             $"input-{Guid.NewGuid():N}",
@@ -127,47 +99,101 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             "queued input",
             "user"));
         await persistence.WaitAsync();
+
+        var activeResource = await CreateActiveLaunchResourceAsync(project, agent, "queued-resource");
+        _launchStopResources.Add(activeResource);
+        await EstablishStopResourcePreconditionAsync(sessionId, project, agent, activeResource);
         return (project, sessionId, turnId);
     }
 
-    protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateExecutingSessionForCancelAsync()
+    protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateExecutingSessionForStopAsync()
     {
-        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
-        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
+        var (project, sessionId) = await CreateCanonicalSessionForStopAsync("agent-launch");
+        var turn = Assert.Single(
+            await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
         return (project, sessionId, turn.Id);
     }
 
-    protected async Task<(ProjectRef Project, string SessionId, string TurnId, string JobId)> CreateExecutingLaunchSessionForStopAsync()
+    private async Task<LaunchStopResource> CreateActiveLaunchResourceAsync(
+        ProjectRef project,
+        AgentRef agent,
+        string prefix)
     {
-        var project = await CreateProjectAsync("launch-stop");
-        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
-            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
-        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(_runnerId, $"{_runnerId}-conn");
-
-        var sessionId = $"launch-stop-{Guid.NewGuid():N}";
-        var jobId = $"job-{Guid.NewGuid():N}";
-        var inputId = $"input-{Guid.NewGuid():N}";
-        var turnId = $"turn-{Guid.NewGuid():N}";
+        var sessionId = $"{prefix}-session-{Guid.NewGuid():N}";
+        var jobId = $"{prefix}-job-{Guid.NewGuid():N}";
+        var inputId = $"{prefix}-input-{Guid.NewGuid():N}";
+        var turnId = $"{prefix}-turn-{Guid.NewGuid():N}";
         var workDir = $"/workspaces/{project.Id}";
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(
             _runnerId,
             "pi",
             workDir,
-            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "launch-stop-agent", "launch-stop-agent"))));
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{Guid.NewGuid():N}", workDir));
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                agent.Id,
+                agent.Name))));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            $"runtime-{Guid.NewGuid():N}",
+            workDir));
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            inputId, turnId, "stop this launch", "agent-launch", jobId));
+            inputId,
+            turnId,
+            "stop resource precondition",
+            "agent-launch",
+            jobId));
 
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
-            sessionId, inputId, turnId, "stop this launch", WorkspaceName: null, ProjectId: project.Id, Runtime: "pi", AgentId: "launch-stop-agent"));
+            sessionId,
+            inputId,
+            turnId,
+            "stop resource precondition",
+            WorkspaceName: null,
+            ProjectId: project.Id,
+            Runtime: "pi",
+            AgentId: agent.Id));
         await job.SubmitPreparedLaunchAsync();
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{_runnerId}/poll", content: null);
         poll.EnsureSuccessStatusCode();
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
         await grain.MarkInitialTurnExecutingAsync(jobId);
-        return (project, sessionId, turnId, jobId);
+
+        return new LaunchStopResource(
+            project.Id,
+            agent.Id,
+            _runnerId,
+            jobId,
+            sessionId,
+            turnId);
+    }
+
+    protected async Task<(
+        ProjectRef Project,
+        string SessionId,
+        string TurnId,
+        string JobId,
+        string AgentId)> CreateExecutingLaunchSessionForStopAsync()
+    {
+        var project = await CreateProjectAsync("launch-stop");
+        var agent = await CreateAgentAsync(project.Id, "launch-stop-agent");
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
+            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+        RegisterRunnerConnection();
+
+        var activeResource = await CreateActiveLaunchResourceAsync(project, agent, "launch-stop");
+        _launchStopResources.Add(activeResource);
+        await EstablishStopResourcePreconditionAsync(
+            activeResource.SessionId,
+            project,
+            agent,
+            activeResource);
+        return (
+            project,
+            activeResource.SessionId,
+            activeResource.TurnId,
+            activeResource.JobId,
+            agent.Id);
     }
 
     protected async Task<SessionEvidence> ReadSessionEvidenceAsync(string sessionId)
@@ -200,59 +226,14 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             parts.Select(part => $"{part.Id}|{part.Sequence}|{part.Type}|{part.Text}|{part.PayloadJson}").ToArray());
     }
 
-    protected async Task<(ProjectRef Project, AgentRef Agent, string SessionId, AgentSessionInfo Info)> LaunchAndOpenGenericSessionAsync(string name)
-    {
-        var project = await CreateProjectAsync(name);
-        var runnerId = _runnerId;
-        var agent = await CreateAgentAsync(project.Id, $"gen-cancel-agent-{name}");
-
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = $"{runnerId}-host",
-            projectId = project.Id,
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
-
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = $"hello from {name}" });
-
-        response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-
-        // Open + attach the generic session so the runner's Runtime.RunnerId
-        // is bound and IsActive resolves true (matches the followup
-        // helper used in T-004).
-        await _fixture.Client.PostOkAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
-            new
-            {
-                workId = $"work-{Guid.NewGuid():N}",
-                workType = "task",
-                stage = "Build",
-                title = $"session for {name}",
-                issueNumber = 1,
-            });
-
-        await _fixture.Client.PostOkAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/attach",
-            new
-            {
-                runtimeSessionId = sessionId,
-                workDir = $"/workspaces/{project.Id}",
-                processPid = 1234,
-            });
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var info = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
-        return (project, agent, sessionId, info);
-    }
-
     protected async Task<ProjectRef> CreateProjectAsync(string name)
     {
-        var projectName = $"gen-cancel-{Guid.NewGuid():N}";
-        if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
+        var projectName = $"gen-stop-{Guid.NewGuid():N}";
+        if (projectName.Length > 63)
+            projectName = projectName[..63];
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            projectName);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
