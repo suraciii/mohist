@@ -126,6 +126,15 @@ public class MentionTokenParserTests
     }
 
     [Fact]
+    public void Parse_LongMentionBody_RemainsLinearAndDeduped()
+    {
+        var name = new string('a', 50_000);
+        var tokens = MentionTokenParser.Parse($"@{name} @Agent @agent");
+
+        Assert.Equal(new[] { name, "Agent" }, tokens);
+    }
+
+    [Fact]
     public void Parse_MentionsOnSeparateLines_BothMatch()
     {
         var body = "line one @supervisor\nline two @coder";
