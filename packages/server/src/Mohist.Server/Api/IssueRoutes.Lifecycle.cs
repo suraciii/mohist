@@ -28,8 +28,8 @@ public static partial class IssueRoutes
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
-                await grain.StartWorkAsync();
-                return ApiResults.Ok();
+                var workflowRunId = await grain.StartWorkAsync();
+                return ApiResults.Ok(IssueStartResponse.FromGrainResult(number, workflowRunId));
             }
             catch (IssueStartBlockedException ex)
             {
@@ -305,3 +305,9 @@ public sealed record IssueArchiveCompletedResponse(
     int Skipped,
     IReadOnlyList<int> SkippedNumbers,
     string Message);
+
+public sealed record IssueStartResponse(int Number, string? WorkflowRunId)
+{
+    public static IssueStartResponse FromGrainResult(int number, string workflowRunId) =>
+        new(number, string.IsNullOrEmpty(workflowRunId) ? null : workflowRunId);
+}
