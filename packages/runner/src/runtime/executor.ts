@@ -208,21 +208,22 @@ export class WorkExecutor {
         : null
       const projected = projectTaskOutput(work, validatedResult, completion, caps)
       const resultForRecovery = projected
-      const recoveryResult = tryRecovery(work, resultForRecovery, variables)
-      if (recoveryResult) return recoveryResult
-      if (resultForRecovery.status !== "completed") {
+      if (isActionFailure(validatedResult)) {
+        const recoveryResult = tryRecovery(work, resultForRecovery, variables)
+        if (recoveryResult) return recoveryResult
         return resultForRecovery
       }
       const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
       if (endCheck.kind === "violation") {
         return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
       }
+      const artifactResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, resultForRecovery, validatedResult, variables, signal)
       const worktreeHostBuilder = (cleanupWork: DispatchWorkItem, cleanupSignal: AbortSignal, cleanupWorkDir: string) =>
         this.buildActionHost(cleanupWork, cleanupWorkDir, cleanupSignal, log, caps)
       const worktreeResult = await enforceCleanWorktree(
         work,
         workDir,
-        resultForRecovery,
+        artifactResult,
         renderedWith,
         variables,
         signal,
@@ -230,13 +231,12 @@ export class WorkExecutor {
         { buildHost: worktreeHostBuilder },
         log,
       )
+      const recoveryResult = tryRecovery(work, worktreeResult, variables)
+      if (recoveryResult) return recoveryResult
       if (worktreeResult.status !== "completed") {
-        const recoveryResult = tryRecovery(work, worktreeResult, variables)
-        if (recoveryResult) return recoveryResult
         return worktreeResult
       }
-      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, validatedResult, variables, signal)
-      const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, validatedResult)
+      const withCapturedOutputs = this.captureDeclaredOutputs(work, worktreeResult, validatedResult)
       const withVarsResult = await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal, effects.writeVars ?? {})
       if (withVarsResult.status !== "completed") return withVarsResult
       return effects.addTasks && effects.addTasks.length > 0

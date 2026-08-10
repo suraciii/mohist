@@ -27,11 +27,13 @@ describe("recovery action error protocol", () => {
       }],
     }), {
       status: "failed",
+      artifactUploadIds: ["artup_1"],
       error: { code: "conflict", message: "Rebase stopped on a conflict." },
     })
 
     expect(result).toMatchObject({
       status: "completed",
+      artifactUploadIds: ["artup_1"],
       error: { code: "conflict", message: "Rebase stopped on a conflict." },
       addTasks: [
         { id: "resolve", with: { message: "Rebase stopped on a conflict." } },
