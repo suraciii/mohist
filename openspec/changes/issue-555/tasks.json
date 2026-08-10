@@ -1,0 +1,157 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver the private versioned External Agent API with grant-aware PAT authentication, durable idempotency, public execution projections, Session replay, and fenced Turn-stop behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add External Agent grants and bearer authorization",
+      "spec": "specs/external-agent-authentication/spec.md#direct-bearer-authentication",
+      "description": "Add additive persistence for External Agent grants, keeping integration credentials and their existing ProjectId semantics separate. Extend PAT issuance, listing, revocation, CLI options, Bearer-only request resolution, and Project/scope authorization so an ExternalAgentCaller is resolved and authorized before resource lookup, body admission, or request-ledger access.",
+      "acceptanceCriteria": [
+        "A PAT has exactly one valid External Agent grant form: a non-empty explicit Project set or operator_all; operator_all is rejected unless the PAT has operator scope, and readonly operator_all issuance is rejected before persistence.",
+        "Repeated --project bindings and --all-projects are supported by the server and CLI, are mutually exclusive, validate every Project before persistence, and leave no Credential or grant row after a failed binding.",
+        "The full PAT value is returned only by a successful create operation, is stored only as a hash, and list, audit, and revoke responses expose only safe metadata and the token prefix; revocation makes later direct authentication fail immediately.",
+        "The /api/v1 authentication branch accepts exactly one valid Authorization: Bearer PAT credential, rejects cookies, query-string tokens, Agent Connection identities, Runner credentials, malformed credentials, and revoked or expired PATs with the same safe 401 challenge behavior.",
+        "Grant and route-scope checks run before Project or canonical resource lookup and before request-body parsing for admission or mapping reads; an out-of-grant Project returns 403 without revealing whether the Project or mapping exists, while an authorized missing resource reaches the appropriate 404 path.",
+        "Server and CLI tests cover grant validation, atomic failure, token disclosure, revocation, bearer rejection, scope enforcement, and authorization ordering using fake persistence and injectable time; the affected suites pass via npm run test:fast."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "External Agent grant rows and migration, grant-aware PAT server/CLI lifecycle, ExternalAgentCaller resolution, bearer authorization middleware/service, and passing authentication tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design decisions 2 and 3. Do not reuse Credential.ProjectId or encode the grant in ScopesJson; existing Web, CLI, Agent Connection, Runner, and internal Session authentication behavior remains unchanged."
+    },
+    {
+      "id": "T-002",
+      "title": "Build the durable external idempotency ledger",
+      "spec": "specs/external-agent-idempotency/spec.md#required-idempotency-key",
+      "description": "Add the ExternalAgentRequestMapping persistence model, unique indexes, and store, then implement the shared command-admission service for key validation, versioned server-computed fingerprints, caller/resource isolation, atomic claim, and durable outcome reconciliation. The service must preserve definitive rejection and unresolved unknown decisions and expose stable conflict results without returning raw requests or fingerprints.",
+      "acceptanceCriteria": [
+        "Every write admission rejects a missing, duplicated, malformed, non-ASCII, or out-of-bounds Idempotency-Key with the specified safe 400 code before creating a mapping or any canonical or external effect.",
+        "The fingerprint includes the contract version, command kind, canonical route IDs, canonical scope, and the parsed text exactly as supplied; surrounding whitespace remains significant and follow-up ownership is derived from the canonical Session rather than the body.",
+        "Mappings are uniquely isolated by caller credential identity and command scope: launch by caller, Project, Agent, and key; follow-up by caller, Session, and key; stop by caller, Project, Session, Turn, and key.",
+        "The first request claims a durable mapping and stable reconciliation identity before invoking a canonical effect; a matching retry returns the original mapping and outcome without minting another Job, Input, Turn, dispatch, stop operation, or external effect.",
+        "A changed fingerprint returns stable 409 idempotency_key_reused, and key reuse by another caller or canonical resource creates an independent mapping rather than resolving an unrelated operation.",
+        "Definitive admission rejection is persisted as a terminal decision and returned unchanged on matching retries; an unresolved outcome remains queryable as unknown and polling or reconnecting never creates replacement work.",
+        "Ledger tests cover atomic claim races, response-loss recovery, conflicting payloads, caller/resource isolation, durable rejection, unknown recovery, and injectable TimeProvider behavior with fake canonical effect invokers; the affected server suites pass via npm run test:fast."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ExternalAgentRequestMapping schema and migration, shared command-admission/reconciliation service, and passing idempotency tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design decision 4. The ledger is the public retry boundary; existing launch-coordinator and Session-grain fences remain canonical execution authorities."
+    },
+    {
+      "id": "T-003",
+      "title": "Build the public execution projection and journal engine",
+      "spec": "specs/external-agent-execution/spec.md#strict-public-execution-projection",
+      "description": "Add additive persistence for the allowlisted public execution snapshot, public Session event rows, source checkpoints, stream generations, sequence metadata, and retention state. Implement the projector and reducer over canonical AgentJob/AgentSession facts and outboxes so snapshots and public events commit transactionally, deduplicate source transitions, apply the five-state precedence rules, and expose a projection watermark for lag-aware API reads.",
+      "acceptanceCriteria": [
+        "Every PublicExecutionRead contains all specified public keys with observedAt always present, null IDs only for absent canonical facts, and output/error limited to persisted safe public data; prompts, transcripts, Runtime or Runner identities, workspace paths, operation/fence IDs, provider payloads, and stack traces never serialize.",
+        "The reducer produces only accepted, queued, running, terminal, or unknown and covers prepared Job anchors, retryable capacity blocking, outcome_pending, durable rejection, unresolved effects, and terminal precedence without replaying unknown work.",
+        "A prepared launch is addressable through its Job anchor with status=accepted and null Session, Input, and Turn IDs until canonical Session acceptance is projected; later canonical facts join the same public record rather than creating a second anchor.",
+        "The projector commits the public snapshot, normalized event identity, event sequence, stream generation/checkpoint, and source watermark in one transaction; crash-before-commit recovery leaves no partial state and replay-after-commit creates no duplicate sequence.",
+        "Public event filtering emits only the defined execution vocabulary and emits session.context_reset only for a durable canonical context boundary; raw internal CloudEvents, transcript entries, and UI/SignalR delivery are never used as the public journal.",
+        "A required source watermark ahead of the committed projection is observable as projection lag for API adapters, without converting the stale read to unknown; retention metadata preserves public events independently of transcript compaction.",
+        "Projection tests cover all five states, privacy allowlists, prepared-job anchoring, terminal precedence, context-reset filtering, transaction crash/replay behavior, deduplication, and projection-watermark lag using fake canonical facts, outboxes, and injectable TimeProvider; the affected server suites pass via npm run test:fast."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Public snapshot/event/checkpoint persistence and migration, canonical-fact projector/reducer, safe public mappers, and passing projection tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design decision 5 and the projection portion of the migration plan. Keep this projection separate from AgentSessionEvents, internal transcripts, Runner events, and UI event delivery; the worker must support disabled/observe-only rollout."
+    },
+    {
+      "id": "T-004",
+      "title": "Expose launch, follow-up, and public resource reads",
+      "spec": "specs/external-agent-execution/spec.md#versioned-direct-route-surface",
+      "description": "Implement the versioned /api/v1 route group for launch, Session input, Job read, Input read, and Turn read. Route each request through the shared authentication/grant and canonical ownership pipeline, strict JSON/header validation, idempotency reconciliation, canonical IAgentLauncher/AgentSession admission, projection checkpoint waiting, and dedicated public DTO mapping without serializing internal response types.",
+      "acceptanceCriteria": [
+        "The API exposes POST /projects/{projectId}/agents/{agentId}/launch, POST /projects/{projectId}/agent-sessions/{sessionId}/inputs, GET agent-jobs/{jobId}, GET agent-inputs/{inputId}, and GET agent-turns/{turnId} under /api/v1 with operator scope for writes and readonly or operator scope for reads.",
+        "Launch and follow-up bodies accept only one required non-empty text string in a JSON object; unknown fields, duplicate property names, invalid JSON, attachments, context references, execution selectors, malformed headers, and caller-supplied ownership values return 400 before admission, while input text never appears in a response or public event.",
+        "A successful launch converges on at most one canonical AgentJob and initial Session/Input/Turn, remains readable by Job ID while Session acceptance is pending, and a follow-up appends to the canonical Session without creating another Job.",
+        "Each command and resource read returns the dedicated public object with every allowlisted field present and the correct five-state status, job/session/input/turn statuses, timestamps, outcome, safe reason, output, error, and sequence; internal DTOs and forbidden identities/details are absent.",
+        "The authorization order is observable in route tests: out-of-grant Projects return 403 before body parsing or mapping lookup, readonly callers cannot create any write state, and an authorized missing canonical resource returns 404 rather than public unknown.",
+        "Matching launch and follow-up retries return the original canonical identities and latest projection, changed keys return 409 idempotency_key_reused, durable admission rejection returns 200 terminal/rejected, and required projection lag returns 503 projection_lag without a new effect.",
+        "Route integration/spec tests cover the full launch-to-follow-up flow, prepared Job reads, strict validation, authorization ordering, all public statuses, response-loss replay, conflicting keys, projection lag, and privacy; the affected server suites pass via npm run test:fast."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Versioned launch/follow-up/Job/Input/Turn route handlers, public request/response contracts, canonical adapters, and passing direct API execution tests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Implements design decisions 1 and 3 for the non-event, non-stop routes. Preserve the existing /api/projects and internal Session route adapters unchanged."
+    },
+    {
+      "id": "T-005",
+      "title": "Add durable Session event replay with opaque cursors",
+      "spec": "specs/external-agent-session-replay/spec.md#exclusive-opaque-cursor-semantics",
+      "description": "Add the /api/v1 Session-events read route over the public journal and implement the versioned cursor codec, exclusive pagination, stream-generation validation, retention floors, and closed-stream tombstones. Bind every cursor and read to the authorized Project and Session and expose only ordered public events and safe sequence bounds.",
+      "acceptanceCriteria": [
+        "GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events returns only that authorized Session's durable public events, each with ascending sequence, opaque cursor, type, occurrence timestamp, and an allowlisted execution observation or constrained context-reset payload.",
+        "The default event limit is 100 and the maximum is 100; after is exclusive, nextCursor advances after the last returned event, and an empty page advances to the current high-water sequence without fabricating an event.",
+        "Cursors are versioned, tamper-evident, and bound to Project, Session, stream generation, and exclusive sequence position; malformed, cross-scope, tampered, or old-generation cursors return 400 cursor_invalid without falling back to the beginning.",
+        "A cursor before the retained floor returns 410 cursor_expired with only safe earliest/latest sequence bounds, and a closed Session retains a tombstone for the configured window while a no-cursor read returns 404 session_not_found.",
+        "Repeated and concurrent page reads remain ascending and stable by (SessionId, sequence), tolerate lost responses and out-of-order delivery, and never renumber or imply a missing event; the stream remains available through transcript compaction and independent of SignalR or CloudEvent dispatch flags.",
+        "A canonical fact ahead of the public checkpoint returns 503 projection_lag, and a non-durable reset observation never creates a session.context_reset event.",
+        "Replay tests cover reconnect/exclusive resume, empty high-water pages, default/max limits, cursor tampering and scope binding, generation changes, retention expiry, closed tombstones, concurrent/repeated reads, projection lag, and context-reset privacy; the affected server suites pass via npm run test:fast."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Session event route, versioned cursor codec, retention/generation/tombstone handling, and passing replay tests.",
+      "dependsOn": ["T-001", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Completes the external-agent-session-replay capability on top of T-003's transactional journal. Cursors remain server-owned opaque values; handlers never accept a caller-decoded sequence."
+    },
+    {
+      "id": "T-006",
+      "title": "Fence Turn-stop effects and terminal races",
+      "spec": "specs/external-agent-idempotency/spec.md#fenced-stop-replay-and-terminal-race",
+      "description": "Implement the versioned Turn-stop route and public stop adapter through the existing Session/Runner control authority. Before any control effect, freeze the target revision, context generation, complete or explicit-null binding, and deadline in the caller-scoped mapping, then converge stop and execution results through one durable terminal fence and the public projection reducer.",
+      "acceptanceCriteria": [
+        "POST /api/v1/projects/{projectId}/agent-turns/{turnId}/stop requires operator scope and exactly one valid Idempotency-Key, accepts an empty body only, verifies Project/Turn ownership before target selection, and exposes no Runner, Runtime, workspace, binding, operation, or provider identity.",
+        "The first stop persists the canonical Turn revision, context generation, binding choice, and deadline before issuing the existing control effect; a matching retry uses the frozen target and never contacts the Runner or creates a second stop effect.",
+        "A changed stop fingerprint returns 409 idempotency_key_reused, while a different key for a Turn with an unresolved stop returns 409 stop_outcome_unknown, leaves admission blocked, and cannot supersede or replay the unresolved effect.",
+        "A confirmed stop returns the original public Turn observation on response-loss retry, an unresolved stop remains public unknown and queryable through its original mapping, and polling or reconnecting never auto-replays it.",
+        "The terminal fence gives the first durable terminal fact precedence: a late Runner result or delayed projector delivery cannot rewrite public outcome, output, error, or event sequence, and at most one terminal public event remains.",
+        "Stop integration/spec tests cover empty-body and authorization ordering, target freezing, response-loss replay, changed-key conflict, unresolved stop, terminal/stop race ordering, late-result suppression, safe public mapping, and injectable deadline time; the affected server suites pass via npm run test:fast."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Versioned Turn-stop route, caller-scoped frozen stop mapping, terminal-fence integration with canonical control and projection, and passing stop-race tests.",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Implements design decision 6. Reuse the existing Session/Runner control path and keep unresolved external effects observable rather than automatically replayed."
+    },
+    {
+      "id": "T-007",
+      "title": "Enable and publish the complete External Agent contract",
+      "spec": "specs/external-agent-execution/spec.md#safe-public-errors-and-projection-lag",
+      "description": "Wire the feature-flagged rollout guard across grant issuance and /api/v1 admissions, add readiness/checkpoint handling for newly created and selected backfilled Sessions, and publish the exact shipped contract in docs/auth.md, docs/agent-api.md, and implementation-status guidance. Add cross-capability integration coverage that exercises the public lifecycle without introducing a second execution path.",
+      "acceptanceCriteria": [
+        "The direct API and new External Agent grant issuance remain disabled until the configured projection readiness/checkpoint condition is met; pausing or resuming the projector preserves durable mappings and checkpoints without replaying unresolved effects.",
+        "docs/auth.md documents Bearer PATs, explicit Project and operator_all grants, scopes, issuance/list/revoke disclosure rules, and authorization ordering; docs/agent-api.md documents every /api/v1 route, required keys/bodies, public fields/states, errors, cursor semantics, lag behavior, and stop fencing without exposing internal identities.",
+        "Implementation-status guidance distinguishes the shipped public contract from existing Web, CLI, Agent Connection, Runner, and internal Session adapters and records the selected retention, cursor-key, backfill, and public-output policies required to enable the route.",
+        "Cross-capability integration tests create a granted PAT, launch once, recover a lost response with the same key, follow up on the returned Session, resume events with an exclusive cursor, read public resources, and stop a Turn while asserting no duplicate canonical records or forbidden fields.",
+        "Integration coverage verifies unauthorized and readonly behavior, conflicting keys, durable rejection, projection lag, cursor expiry, stop/terminal races, and existing internal route regression behavior using only fakes and injectable TimeProvider.",
+        "Additive migrations apply cleanly, the complete affected server/CLI test set passes, and npm run verify succeeds."
+      ],
+      "priority": 5,
+      "mode": "HITL",
+      "type": "WRITE",
+      "output": "Feature-flagged External Agent rollout wiring, published auth/API/status documentation, cross-capability integration coverage, and a passing full verification gate.",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006"],
+      "passes": false,
+      "notes": "Completes the migration plan's rollout and documentation steps. Enabling production access must preserve the additive rollback rule: disable new admissions and grants without deleting mappings, projection data, or canonical work."
+    }
+  ]
+}
