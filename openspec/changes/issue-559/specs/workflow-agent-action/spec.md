@@ -17,8 +17,25 @@
 - **WHEN** a `mohist/agent` task omits `name` or `prompt`, uses a non-string value, uses a templated `name`, or supplies an unknown input
 - **THEN** validation MUST reject the task with an actionable input error before execution
 
+### Requirement: Agent handoff transport and acknowledgement
+After a `mohist/agent` task is claimed, the Runner SHALL treat an `agent-handoff` dispatch as temporary non-execution transport. It MAY occupy a transient Runner claim, but it MUST NOT resolve a runtime, open an AgentSession, submit an Agent prompt, or control a process. The Runner SHALL render and validate the deferred input, then submit exactly this internal command: `POST /api/runner/{runnerId}/agent-handoffs` with `commandId` equal to the stable dispatch `workId`, the `requestFingerprint`, `projectId`, `workflowRunId`, `taskRunId`, `taskAttempt`, `workId`, and the rendered `{name, prompt, session?, timeout?}` input. The response SHALL be a JSON acknowledgement with `disposition` equal to `accepted`, `rejected`, or `retry`. `accepted` MUST include Job, Session, Input, and Turn identifiers; `rejected` MUST include a stable code and reason; `retry` MUST be nonterminal and MUST NOT create a second command identity.
+
+The Server SHALL key the handoff command by `(projectId, commandId)` and persist the request fingerprint before promoting any Agent participant. Repeating the same command and fingerprint MUST replay the original acknowledgement; a conflicting fingerprint MUST return definitive `rejected` with `handoff_conflict`. A lost response, timeout, 5xx response, or `retry` acknowledgement MUST retain the same transport work and resend the same command and fingerprint. `accepted` and `rejected` MUST retire the transport obligation. Handoff acknowledgements MUST bypass `/report`, `ReceiveTaskReportAsync`, and `ReceiveCheckReportAsync`.
+
+#### Scenario: Handoff transport is claimed before Agent preflight
+- **WHEN** the Runner claims an `agent-handoff` dispatch for a task whose Agent is unavailable
+- **THEN** the transport claim MAY exist temporarily, but no accepted AgentJob, AgentSession, SessionInput, AgentTurn, external Runtime execution, or Agent concurrency admission MUST be created
+
+#### Scenario: A handoff is accepted
+- **WHEN** the handoff command passes Agent selection, readiness, workspace, and Workflow acceptance
+- **THEN** the Server MUST return `accepted` with the original command and fingerprint plus the stable Job, Session, Input, and Turn identifiers, and the Runner MUST retire only the transport work
+
+#### Scenario: A handoff response is lost
+- **WHEN** the Runner does not receive the response after the Server accepted or rejected the command
+- **THEN** the Runner MUST resend the same command identity, fingerprint, and rendered input, and the Server MUST replay the prior acknowledgement without creating another lineage or entering the ordinary Workflow report path
+
 ### Requirement: Agent selection and acceptance
-At execution time, the Action SHALL resolve the Agent within the Workflow Project using the canonical reference rule: a reference beginning with `agent_` MUST resolve by id only; every other reference MUST resolve by name first and by id only when no name matches. The resolved Agent MUST be active and retain a stable Agent identity for the invocation. A missing, archived, or otherwise unresolvable Agent MUST produce the structured `agent_not_found` failure and MUST NOT create accepted Runner work.
+At execution time, the Action SHALL resolve the Agent within the Workflow Project using the canonical reference rule: a reference beginning with `agent_` MUST resolve by id only; every other reference MUST resolve by name first and by id only when no name matches. The resolved Agent MUST be active and retain a stable Agent identity for the invocation. A missing, archived, or otherwise unresolvable Agent MUST produce the structured `agent_not_found` failure and MUST NOT create accepted Agent execution or external Runner work.
 
 #### Scenario: An Agent is selected by name
 - **WHEN** a task references an active Agent by name
@@ -30,7 +47,7 @@ At execution time, the Action SHALL resolve the Agent within the Workflow Projec
 
 #### Scenario: A referenced Agent is unavailable at dispatch
 - **WHEN** a pending task is dispatched after its referenced Agent is archived, deleted, or cannot be resolved
-- **THEN** the task MUST fail with `agent_not_found`, and no accepted AgentJob, AgentSession, SessionInput, AgentTurn, or Runner work MUST be created
+- **THEN** the task MUST fail with `agent_not_found`, and no accepted AgentJob, AgentSession, SessionInput, AgentTurn, external Runtime execution, or Agent concurrency admission MUST be created; any transient handoff transport claim MUST be retired as a rejected acknowledgement
 
 ### Requirement: Agent execution composition
 An accepted invocation MUST execute the selected Agent definition together with the Workflow task prompt. The Agent's instructions MUST remain part of the execution input and the Workflow prompt MUST remain the invocation's task goal. The invocation MUST use the snapshotted Agent runtime, model, variant, and ordered Skills; task input MUST NOT replace those Agent-selected execution properties. The Action MUST use the existing runtime execution boundary and MUST NOT expose Runtime handles or Runner process controls to Workflow content.
@@ -82,7 +99,7 @@ The Workflow Action MUST use the same Agent readiness, workspace, Agent concurre
 
 #### Scenario: An Agent needs setup
 - **WHEN** the selected Agent lacks a required instruction, model, or valid runtime configuration
-- **THEN** the Workflow Action MUST reject the invocation with the canonical readiness gaps and MUST NOT start Runner work
+- **THEN** the Workflow Action MUST reject the invocation with the canonical readiness gaps and MUST NOT start AgentJob Runner work or external execution; any transient handoff transport claim MUST be retired as a rejected acknowledgement
 
 #### Scenario: Agent concurrency is full
 - **WHEN** the selected Agent has reached its configured concurrent execution limit

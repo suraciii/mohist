@@ -86,8 +86,11 @@ With = raw attempt-snapshot inputs
 ```
 
 The handoff is not Agent execution and is not a second execution queue. It is a
-short-lived use of the existing Workflow dispatch path so the Runner can apply
-the established variable and template rules. The Runner performs these steps:
+short-lived, claimable transport work item on the existing Workflow dispatch
+path so the Runner can apply the established variable and template rules. A
+transport claim may occupy a temporary Runner slot, but it is not an accepted
+Agent execution, does not count against Agent concurrency, and does not permit
+an external Runtime or process to start. The Runner performs these steps:
 
 1. Resolve Workflow variables and deferred templates from the attempt snapshot.
 2. Validate `name`, `prompt`, `session`, and `timeout` against the virtual
@@ -96,7 +99,9 @@ the established variable and template rules. The Runner performs these steps:
 3. Send the rendered, validated envelope to an internal Server handoff command
    keyed by `(projectId, workflowRunId, taskRunId)`.
 4. Retire the handoff work after the Server acknowledges either accepted
-   lineage or a definitive pre-acceptance rejection.
+   lineage or a definitive pre-acceptance rejection. A rejected handoff may
+   therefore have been claimed as transport, but it has no accepted
+   AgentJob/AgentSession lineage and no external execution.
 
 `agent-handoff` is a protocol branch, not a Runner `ActionRegistry` entry. Its
 executor renders and validates the virtual Action envelope, sends the internal
@@ -108,12 +113,59 @@ The Runner does not resolve live Agent state, open a Session, submit a prompt,
 start a Runtime, or control a process for this work type. A lost handoff
 response is retried with the same task attempt and request fingerprint.
 
-The Server handoff command is implemented by an extension of the existing
-`AgentLaunchCoordinatorGrain`, not by a separate launch protocol. Its durable
-plan contains the Workflow origin, TaskRun ID, rendered prompt, session name,
-timeout, immutable Workflow task contract, resolved Agent snapshot, workspace
-identity, and pre-minted Job/Session/Input/Turn IDs. The coordinator persists
-the plan before calling another aggregate.
+The handoff wire contract is explicit and separate from `/report`:
+
+```text
+POST /api/runner/{runnerId}/agent-handoffs
+
+AgentHandoffRequest {
+  commandId = WorkDispatch.WorkId
+  requestFingerprint
+  projectId
+  workflowRunId
+  taskRunId
+  taskAttempt
+  workId = WorkDispatch.WorkId
+  input = { name, prompt, session?, timeout? }
+}
+
+AgentHandoffAck {
+  commandId
+  requestFingerprint
+  disposition = accepted | rejected | retry
+  code?
+  reason?
+  jobId?
+  sessionId?
+  inputId?
+  turnId?
+  retryAfterMs?
+}
+```
+
+`requestFingerprint` is the SHA-256 of canonical JSON containing the project,
+WorkflowRun, TaskRun, attempt, and rendered validated input. The coordinator
+is keyed by `(projectId, commandId)` and stores that fingerprint before any
+participant promotion. Repeating the same request returns the original
+`accepted` or `rejected` acknowledgement; a conflicting fingerprint is a
+definitive `rejected` acknowledgement with `handoff_conflict`. `retry` is a
+nonterminal acknowledgement for a transient server condition. A timeout,
+connection loss, or 5xx response is treated the same as `retry` and is retried
+with the same request body.
+
+`accepted` and `rejected` are terminal transport acknowledgements. The Server
+retires the matching Workflow handoff obligation as part of either response,
+and the Runner removes it from `awaitingAck`. The Runner never sends an
+`agent-handoff` result to `/report`; the route never calls
+`ReceiveTaskReportAsync` or `ReceiveCheckReportAsync`. Only the typed handoff
+service may acknowledge or retire this work.
+
+The endpoint is implemented by a Server handoff service backed by an extension
+of the existing `AgentLaunchCoordinatorGrain`, not by a separate launch
+protocol. Its durable plan contains the Workflow origin, TaskRun ID, rendered
+prompt, session name, timeout, immutable Workflow task contract, resolved Agent
+snapshot, workspace identity, and pre-minted Job/Session/Input/Turn IDs. The
+coordinator persists the command and plan before calling another aggregate.
 
 The coordinator advances the participants in this order:
 
@@ -134,8 +186,9 @@ The provisional visibility state prevents a partial launch from appearing as
 accepted Agent work. If Agent selection, deterministic readiness, Session
 creation, or Workflow acceptance fails, the Server handoff rejects the request
 before promotion; when provisional participants already exist, the coordinator
-aborts them and records the rejection under the same request identity. No
-accepted Runner work is created.
+aborts them and records the rejection under the same request identity. The
+already-claimed transport work is retired, but no accepted AgentJob,
+AgentSession, SessionInput, AgentTurn, or external Runtime work is created.
 
 **Alternative considered:** resolve the Agent in
 `WorkflowItemTranslator` and continue sending `mohist/opencode` or

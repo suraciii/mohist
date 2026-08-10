@@ -8,7 +8,7 @@ Workflow profiles can reference a configured Agent, but the current path transla
 - Create a stable AgentJob and independent AgentSession for each accepted invocation, with locatable initial SessionInput and AgentTurn references. The Workflow task and Agent execution must be able to correlate their own records without parsing runtime transcript contents.
 - Freeze the selected Agent execution definition and accepted input/workspace facts for the invocation. Later edits to the Agent definition must not change queued or running work; only a new invocation can observe those edits.
 - Reuse the canonical Agent readiness, workspace resolution, concurrency, and Runner admission rules used by direct Agent launches. The Workflow Action must not create a second queue or control Runner internals directly.
-- Project the invocation through stable Workflow and Agent read surfaces with distinguishable queued, executing, completed, failed, cancelled, and recovering states, plus a stable final result. Workflow advancement remains Workflow-owned, while AgentJob owns the Agent execution lifecycle and result.
+- Project the invocation through stable Workflow and Agent read surfaces with distinguishable queued, executing, completed, failed, cancelled, and recovering states, plus a stable final result. The transient `agent-handoff` may be claimed only as non-executing transport; a rejection after that transport claim still creates no accepted Agent execution. Workflow advancement remains Workflow-owned, while AgentJob owns the Agent execution lifecycle and result.
 - **BREAKING**: Existing `mohist/agent` consumers that assume a TaskRun-only lifecycle or inline runtime output must adopt the AgentJob/AgentSession identifiers and stable status/result contract.
 - Leave other Workflow Actions unchanged. Slack Bot behavior, a general external Agent API, and direct Runner-process control remain out of scope.
 
@@ -19,7 +19,7 @@ Workflow profiles can reference a configured Agent, but the current path transla
 ## Impact
 
 - **Server:** Workflow task translation and reporting, AgentJob and AgentSession creation/linkage, Agent execution snapshot resolution, readiness/workspace/concurrency admission, recovery coordination, durable projections, and persistence for the cross-context lineage.
-- **Runner and runtime adapters:** Agent-backed dispatch and result reporting must carry the stable Job/Session/Input/Turn references while continuing to use the existing runtime execution boundaries.
+- **Runner and runtime adapters:** Agent-backed dispatch and result reporting must carry the stable Job/Session/Input/Turn references while continuing to use the existing runtime execution boundaries. The handoff uses a separate typed request/acknowledgement route and never enters the ordinary Workflow task/check report path.
 - **Workflow and Agent read APIs:** Add or extend projections so a Workflow invocation and its Agent execution can be queried from either side without exposing internal Runner or transcript details.
 - **Workflow definitions and validation:** Define the supported `mohist/agent` inputs and output/status contract; existing inline runtime Actions and unrelated Action contracts remain unchanged.
 - **Tests and documentation:** Add contract coverage for Agent selection, snapshot isolation, admission, lineage, lifecycle/recovery states, and stable results. No new external dependency is expected.
