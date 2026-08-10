@@ -312,6 +312,7 @@ public sealed partial class Issue
         if (_status == IssueStatus.InProgress) return false;
         if (_status != IssueStatus.Backlog)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only Backlog can start composite");
+        _compositeReopenFence = false;
         var at = now ?? DateTime.UtcNow;
         _status = IssueStatus.InProgress;
         Touch(at);
@@ -358,6 +359,12 @@ public sealed partial class Issue
         if (childrenSnapshot.Count == 0)
             throw new IssueEmptyCompositeSnapshotException(Number);
         if (_status == IssueStatus.Cancelled) return false;
+        // A parent can reach Cancelled directly from Backlog when all of its
+        // children are cancelled. Only an explicit composite reopen fences
+        // that otherwise valid aggregate transition.
+        if (_status == IssueStatus.Backlog && _compositeReopenFence) return false;
+        if (_status is not (IssueStatus.InProgress or IssueStatus.Backlog))
+            throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress or Backlog can cancel composite");
         if (RecomputeCompositeStatus(childrenSnapshot) != IssueStatus.Cancelled)
             throw new InvalidOperationException($"Issue #{Number} children snapshot does not yield aggregated Cancelled");
         var previous = _status;
@@ -379,6 +386,7 @@ public sealed partial class Issue
     {
         if (_status != IssueStatus.Cancelled) return false;
         var at = now ?? DateTime.UtcNow;
+        _compositeReopenFence = true;
         _status = IssueStatus.Backlog;
         Touch(at);
         RecordEvent(new IssueCompositeStatusChanged(

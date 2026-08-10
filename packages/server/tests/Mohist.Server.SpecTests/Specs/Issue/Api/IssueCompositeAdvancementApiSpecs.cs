@@ -101,6 +101,10 @@ public class IssueCompositeAdvancementApiSpecs
         {
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
+        // The child-cancel event may be delivered after the explicit parent
+        // reopen. Recompute it directly to model that stale delivery without
+        // timing, retries, or sleeps; it must preserve the reopen fence.
+        await _grains.GetGrain<IIssueGrain>(parent.IssueKey).RecomputeCompositeStatusAsync();
         using var scope = _services.CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<Mohist.Server.Issue.Services.IssueQuerier>();
         Assert.Equal("backlog", (await querier.GetAsync(projectId, parent.Number))!.Status);

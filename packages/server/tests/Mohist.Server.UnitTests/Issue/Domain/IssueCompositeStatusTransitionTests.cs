@@ -192,6 +192,22 @@ public class IssueCompositeStatusTransitionTests
     }
 
     [Fact]
+    public void MarkCompositeCancelled_TransitionsBacklogToCancelled_WhenAllChildrenCancelled()
+    {
+        var parent = CreateParent();
+
+        var changed = parent.MarkCompositeCancelled(
+            Children(IssueStatus.Cancelled, IssueStatus.Cancelled),
+            Now.AddMinutes(1));
+
+        Assert.True(changed);
+        Assert.Equal(IssueStatus.Cancelled, parent.Status);
+        var statusChanged = SingleStatusChange(parent);
+        Assert.Equal("backlog", statusChanged.PreviousStatus);
+        Assert.Equal("cancelled", statusChanged.NewStatus);
+    }
+
+    [Fact]
     public void MarkCompositeCancelled_IsNoopWhenAlreadyCancelled()
     {
         var parent = CreateParent();
@@ -206,6 +222,23 @@ public class IssueCompositeStatusTransitionTests
 
         Assert.False(changed);
         Assert.Equal(startCount, parent.PendingEvents.Count);
+    }
+
+    [Fact]
+    public void MarkCompositeCancelled_IsNoopFromBacklogAfterExplicitReopen()
+    {
+        var parent = CreateParent();
+        parent.MarkCompositeStarted(Children(IssueStatus.Backlog), Now.AddMinutes(1));
+        parent.MarkCompositeCancelled(Children(IssueStatus.Cancelled), Now.AddMinutes(2));
+        parent.ReopenComposite(Now.AddMinutes(3));
+        Assert.True(parent.CompositeReopenFence);
+        parent.ClearPendingEvents();
+
+        var changed = parent.MarkCompositeCancelled(Children(IssueStatus.Cancelled), Now.AddMinutes(4));
+
+        Assert.False(changed);
+        Assert.Equal(IssueStatus.Backlog, parent.Status);
+        Assert.Empty(parent.PendingEvents);
     }
 
     [Fact]
