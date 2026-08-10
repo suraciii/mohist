@@ -19,7 +19,8 @@ interface CommandCall {
 class FakeGitRunner {
   readonly calls: CommandCall[] = []
   readonly remoteBranches = new Set(["master", "issue-symlink", "issue-parent-swap", "issue-mismatch", "issue-recover-registry"])
-  readonly remoteUrl = "https://example.test/mohist.git"
+  remoteUrl = "https://example.test/mohist.git"
+  remoteOriginResult: CommandResult | null = null
   cloneResult: CommandResult | null = null
   lsRemoteResult: CommandResult | null = null
   failedCheckouts = 0
@@ -74,6 +75,13 @@ class FakeGitRunner {
     }
 
     if (gitArgs[0] === "remote" && gitArgs[1] === "get-url" && gitArgs[2] === "origin") {
+      if (this.remoteOriginResult) {
+        return {
+          ...this.remoteOriginResult,
+          stdout: this.remoteOriginResult.stdout.replaceAll("<workspace>", workspacePath),
+          stderr: this.remoteOriginResult.stderr.replaceAll("<workspace>", workspacePath),
+        }
+      }
       return commandResult(0, `${this.remoteUrl}\n`)
     }
 
@@ -291,12 +299,18 @@ describe("WorkspaceManager.prepare", () => {
       name: "WorkspaceNetworkTimeoutError",
       step: {
         name: "git-clone",
-        command: expect.stringMatching(new RegExp(`^clone https://example\\.test/mohist\\.git ${managedPathPattern(`${issueWorkspacePath(runnerRoot, "wr-timeout")}.preparing`)}$`)),
+        command: `clone https://example.test/mohist.git ${issueWorkspacePath(runnerRoot, "wr-timeout")}`,
         exitCode: 124,
         status: "timeout",
         timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
       },
     })
+    expect(gitRunner.commandArgs()).toContainEqual([
+      "clone",
+      "https://example.test/mohist.git",
+      managedPath(`${issueWorkspacePath(runnerRoot, "wr-timeout")}.preparing`),
+    ])
+    expect(gitRunner.commandArgs().find((args) => args[0] === "clone")?.[2]).toMatch(/\/proc\/\d+\/fd\/\d+/)
   })
 
   it("Preparation_DoesNotUseGitWorktreeCommands", async () => {
@@ -457,6 +471,97 @@ describe("WorkspaceManager.prepare", () => {
     await expect(manager.prepare(mismatched, new AbortController().signal)).rejects.toMatchObject({ kind: "workspace-identity-mismatch" })
     expect(first.path).toBe(issueWorkspacePath(runnerRoot, "wr-repo-mismatch"))
     expect(gitRunner.commandArgs()).toEqual([])
+  })
+
+  it.runIf(process.platform === "linux")("FreshOriginMismatch_UsesFdForGitButStablePathForDiagnostics", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const stablePath = issueWorkspacePath(runnerRoot, "wr-origin-fresh")
+    gitRunner.remoteUrl = "https://example.test/other.git"
+
+    const failure = await new WorkspaceManager(runnerRoot).prepare(work("wr-origin-fresh"), new AbortController().signal).catch((error) => error)
+
+    expect(failure).toMatchObject({
+      kind: "workspace-identity-mismatch",
+      workspacePath: stablePath,
+      originDiagnostic: {
+        kind: "value-mismatch",
+        exitCode: 0,
+      },
+    })
+    expect(failure.message).toContain(`Workflow workspace ${stablePath}`)
+    expect(failure.message).not.toMatch(/\/proc\/\d+\/fd\/\d+/)
+    expect(gitRunner.commandArgs()).toContainEqual([
+      "-C",
+      managedPath(`${stablePath}.preparing`),
+      "remote",
+      "get-url",
+      "origin",
+    ])
+  })
+
+  it.runIf(process.platform === "linux")("ReentryOriginProbeFailure_PreservesExitCodeWithoutFdLeak", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const item = work("wr-origin-reentry")
+    const first = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    gitRunner.remoteOriginResult = commandResult(17, "", "fatal: cannot read <workspace> origin at https://user:secret@example.test/repository.git")
+
+    const failure = await manager.prepare(item, new AbortController().signal).catch((error) => error)
+
+    expect(failure).toMatchObject({
+      kind: "workspace-identity-mismatch",
+      workspacePath: first.path,
+      originDiagnostic: {
+        kind: "probe-failed",
+        exitCode: 17,
+        diagnostic: "fatal: cannot read " + first.path + " origin at https://***@example.test/repository.git",
+      },
+    })
+    expect(failure.message).toContain(`origin probe failed (exit 17)`)
+    expect(failure.message).toContain(first.path)
+    expect(failure.message).not.toContain("secret")
+    expect(failure.message).not.toMatch(/\/proc\/\d+\/fd\/\d+/)
+    expect(gitRunner.commandArgs()).toEqual([[
+      "-C",
+      managedPath(first.path),
+      "remote",
+      "get-url",
+      "origin",
+    ]])
+  })
+
+  it.runIf(process.platform === "linux")("VerifyOriginProbeFailure_UsesFdForGitButStablePathForDiagnostics", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const item = work("wr-origin-verify")
+    const prepared = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    gitRunner.remoteOriginResult = commandResult(19, "", "fatal: origin unavailable at <workspace>")
+
+    const failure = await manager.verify(item, new AbortController().signal).catch((error) => error)
+
+    expect(failure).toMatchObject({
+      kind: "workspace-identity-mismatch",
+      workspacePath: prepared.path,
+      originDiagnostic: {
+        kind: "probe-failed",
+        exitCode: 19,
+        diagnostic: "fatal: origin unavailable at " + prepared.path,
+      },
+    })
+    expect(failure.message).toContain(prepared.path)
+    expect(failure.message).not.toMatch(/\/proc\/\d+\/fd\/\d+/)
+    expect(gitRunner.commandArgs()).toEqual([[
+      "-C",
+      managedPath(prepared.path),
+      "remote",
+      "get-url",
+      "origin",
+    ]])
   })
 
   it("ConcurrentRuns_MaterializeIndependentStableWorkspaces", async () => {
