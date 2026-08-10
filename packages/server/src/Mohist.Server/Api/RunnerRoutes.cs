@@ -345,6 +345,50 @@ public static class RunnerRoutes
             }
         });
 
+        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/reset", async (
+            string runnerId, string projectId, string workflowRunId, string sessionName,
+            WorkflowAgentSessionResetRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
+            if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
+
+            var grain = sessions.GetGrain(sessionId);
+            var existing = await grain.GetAsync();
+            if (existing is null) return ApiResults.NotFound($"Session {sessionName} not found");
+            if (!string.Equals(existing.RunnerId, runnerId, StringComparison.Ordinal)
+                || !string.Equals(req.ExpectedRunnerId, runnerId, StringComparison.Ordinal)
+                || !string.Equals(existing.Runtime, req.ExpectedRuntime, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(existing.AgentSessionId, req.ExpectedRuntimeSessionId, StringComparison.Ordinal))
+            {
+                return ApiResults.Conflict(
+                    $"Workflow AgentSession binding for {sessionName} changed before retry reset",
+                    "stale_binding",
+                    new { sessionId });
+            }
+
+            try
+            {
+                await grain.ResetAsync(new ResetAgentSessionCommand(
+                    req.ExpectedRuntimeSessionId,
+                    req.ReplacementRuntimeSessionId,
+                    req.ReplacementRuntime,
+                    existing.BindingEpoch));
+                var session = await grain.GetAsync();
+                return session is null
+                    ? ApiResults.NotFound($"Session {sessionName} not found")
+                    : Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
+            }
+            catch (StaleRuntimeSessionBindingException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "stale_binding", new { sessionId = ex.SessionId });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "agent_session_recovery_conflict");
+            }
+        });
+
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/runtime-events", async (
             string runnerId, string projectId, string workflowRunId, string sessionName,
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
@@ -733,7 +777,16 @@ public static class RunnerRoutes
             session.WorkDir,
             session.Model,
             session.ResolvedModel,
-            session.Runtime);
+            session.Runtime,
+            NeedsFreshRuntimeSession(session.AgentSessionId, session.LastTerminalStatus));
+
+    internal static bool NeedsFreshRuntimeSession(string? runtimeSessionId, string? lastTerminalStatus) =>
+        !string.IsNullOrWhiteSpace(runtimeSessionId)
+        && lastTerminalStatus is not null
+        && (string.Equals(lastTerminalStatus, "failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(lastTerminalStatus, "aborted", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(lastTerminalStatus, "cancelled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(lastTerminalStatus, "timeout", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsWorkflowRuntime(string? runtime) =>
         string.Equals(runtime, "opencode", StringComparison.OrdinalIgnoreCase)
@@ -879,7 +932,7 @@ public record RunnerAgentSessionReconcileResponse(
     string RuntimeSessionId,
     string WorkDir);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
-public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null);
+public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null, bool NeedsFreshRuntimeSession = false);
 public record AgentSessionOpenRequest(
     string? WorkId = null,
     string? WorkType = null,
@@ -933,6 +986,12 @@ public record MissingRuntimeSessionRecoveryRequest(
     string ExpectedRuntime,
     string ExpectedRuntimeSessionId,
     string ReplacementRuntimeSessionId);
+public record WorkflowAgentSessionResetRequest(
+    string ExpectedRunnerId,
+    string ExpectedRuntime,
+    string ExpectedRuntimeSessionId,
+    string ReplacementRuntimeSessionId,
+    string ReplacementRuntime = "opencode");
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents, string? RuntimeSessionId = null);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(

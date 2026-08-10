@@ -310,6 +310,8 @@ export class WorkExecutor {
         const runtime = self.openCodeRuntime
         const sessionName = request.session ?? work.workId
         let binding: { runtimeSessionId: string | null; workDir: string; runnerId: string; runtime: "opencode" } | null = null
+        let freshRuntimeSessionRequired = false
+        let freshBindingCreated = false
         if (self.connection && work.projectId) {
           try {
             const opened = await self.connection.openWorkflowAgentSession(
@@ -347,10 +349,11 @@ export class WorkExecutor {
             }
             binding = {
               runtimeSessionId: opened.runtimeSessionId ?? null,
-              workDir: opened.workDir || "",
+              workDir: opened.workDir || workDir,
               runnerId: self.connection.runnerId,
               runtime: "opencode",
             }
+            freshRuntimeSessionRequired = opened.needsFreshRuntimeSession === true
           } catch (error) {
             return runtimeActionFailure("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${errorMessage(error)}`)
           }
@@ -453,9 +456,67 @@ export class WorkExecutor {
           )
         }
 
+        if (freshRuntimeSessionRequired && binding.runtimeSessionId && sessionName && self.connection && work.projectId) {
+          const modelResult = modelName ? parseModelIdentifier(modelName) : null
+          const model = modelResult?.kind === "ok" ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID } : null
+          let created: Awaited<ReturnType<OpenCodeRuntime["createSession"]>>
+          try {
+            created = await runtime.createSession({
+              target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
+              model,
+            })
+          } catch (error) {
+            return runtimeActionFailure("turn-failed", `OpenCode retry session creation failed: ${errorMessage(error)}`)
+          }
+          if (!created.ok) {
+            const kind = created.error.kind
+            const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
+            return runtimeActionFailure(code, created.error.message)
+          }
+
+          try {
+            await self.connection.resetWorkflowAgentSession(
+              work.projectId,
+              work.workflowRunId,
+              sessionName,
+              {
+                expectedRunnerId: binding.runnerId,
+                expectedRuntime: binding.runtime,
+                expectedRuntimeSessionId: binding.runtimeSessionId,
+                replacementRuntimeSessionId: created.value.runtimeSessionId,
+                replacementRuntime: "opencode",
+              },
+              signal,
+            )
+          } catch (error) {
+            return runtimeActionFailure(
+              "session-binding-failed",
+              `Failed to persist the fresh Workflow AgentSession binding: ${errorMessage(error)}`,
+            )
+          }
+
+          binding = {
+            runtimeSessionId: created.value.runtimeSessionId,
+            workDir: created.value.workDir,
+            runnerId: self.connection.runnerId,
+            runtime: "opencode",
+          }
+          freshRuntimeSessionRequired = false
+          freshBindingCreated = true
+          reporter = createWorkflowReporter(
+            work.projectId ?? null,
+            work.workflowRunId,
+            sessionName,
+            { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+            binding.runtimeSessionId,
+            self.agentSessionRuntimeEventOutbox,
+            self.runtimeEventRecordId,
+          )
+        }
+
         const deadlineMs = request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS
         const modelOptions = modelName ? parseModelIdentifier(modelName) : null
-        if (binding.runtimeSessionId && self.connection && work.projectId) {
+        if (!freshRuntimeSessionRequired && !freshBindingCreated && binding.runtimeSessionId && self.connection && work.projectId) {
           const expected = binding
           let recovery: Awaited<ReturnType<typeof resolveOrRecoverBinding>>
           try {

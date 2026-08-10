@@ -62,7 +62,8 @@ internal static class AgentSessionActivitySummaryReducer
                     partSequence,
                     part.PartId,
                     NullIfWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "failureCategory")),
-                    NullIfWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "failureReason")));
+                    NullIfWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "failureReason")),
+                    NullIfWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "status")));
                 if (IsLater(latestActivity, candidate))
                     latestActivity = candidate;
             }
@@ -82,6 +83,7 @@ internal static class AgentSessionActivitySummaryReducer
             ResolvedModel = resolvedModel,
             FailureCategory = latestActivity?.FailureCategory,
             FailureReason = latestActivity?.FailureReason,
+            LastTerminalStatus = latestActivity?.LastTerminalStatus,
             ToolCallCount = toolCallIds.Count == 0 ? null : toolCallIds.Count,
             ToolErrorCount = failedToolCallIds.Count == 0 ? null : failedToolCallIds.Count,
             CurrentTurnSequence = currentTurnSequence,
