@@ -23,6 +23,7 @@ public sealed partial class Issue
     private bool _isDraft;
     private string? _workflowProfileId;
     private bool _hasWorkflowStarted;
+    private bool _compositeReopenFence;
     private long _repositoryBindingRevision;
     private IssueRepositoryBindingReceipt? _lastRepositoryCommand;
     private readonly List<IssueEvent> _pendingEvents = new();
@@ -165,6 +166,16 @@ public sealed partial class Issue
     {
         get => _hasWorkflowStarted;
         init => _hasWorkflowStarted = value;
+    }
+
+    /// <summary>
+    /// Keeps an explicit composite reopen authoritative while the parent is
+    /// Backlog. The fence is cleared when a new composite run starts.
+    /// </summary>
+    public bool CompositeReopenFence
+    {
+        get => _compositeReopenFence;
+        init => _compositeReopenFence = value;
     }
 
     /// <summary>
