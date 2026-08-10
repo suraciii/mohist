@@ -1,0 +1,108 @@
+{
+  "project": "mohist",
+  "description": "Make CLI, Server, and Runner updates use one authoritative source identity and a verified managed runtime release.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make source identity authoritative across update scopes",
+      "spec": "specs/update-source-identity/spec.md#select-one-authoritative-update-source",
+      "description": "Add an immutable UpdateSourceContext and route full, CLI, Server, and Runner updates through one normalized source resolver. Persist that context in a transaction record before CLI self-update and resume continuation by transaction ID so later stages cannot re-resolve a different root or revision.",
+      "acceptanceCriteria": [
+        "Explicit roots are normalized to absolute paths, default roots are resolved once, and dry-run/human output distinguishes the selection mode, root, and target revision.",
+        "Missing, unusable, dirty, or revision-less roots fail before any managed service target is stopped or replaced and report the selected root and failure reason.",
+        "Server build, Runner build, artifact installation, service activation, runtime verification, and CLI continuation all consume the same source context; no stage reads a different process working directory or source HEAD.",
+        "The continuation process loads the original source context and transaction state by ID, including after the CLI executable has been replaced.",
+        "Focused CLI tests cover explicit/default roots, invalid source failure ordering, single revision resolution, dry-run reporting, and continuation argument/state propagation using fake command and filesystem boundaries."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "UpdateSourceContext, source resolver, durable transaction record, and continuation wiring in packages/cli.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep source selection and transaction serialization rules in one authority; do not implement a parallel server-side transaction store."
+    },
+    {
+      "id": "T-002",
+      "title": "Publish and activate versioned managed runtime artifacts",
+      "spec": "specs/managed-runtime-artifacts/spec.md#build-a-complete-versioned-managed-runtime-release",
+      "description": "Implement the managed runtime store and release-oriented artifact builder for Server, Runner, and CLI outputs. Extend both service-installer backends to activate concrete RuntimeTarget paths from a complete candidate release while preserving data roots and credentials outside the release.",
+      "acceptanceCriteria": [
+        "A successful build creates an isolated release directory containing release.json plus the required Server, Runner, and CLI artifacts, with one source revision and release identity recorded for the set.",
+        "Server publishing runs from the selected source into the candidate output, Runner build metadata is written from the source context, and CLI publication uses the managed slot path rather than a source-bound executable.",
+        "A Server, Runner, or required metadata failure leaves the previous active release and service target unchanged and never exposes a partial candidate as active.",
+        "Systemd units and Windows scheduled-task/Startup launchers use absolute managed artifact paths and release working directories; they do not depend on a source worktree, relative dist path, or process working directory.",
+        "Artifact-store, build-command, release-manifest, systemd-rendering, and Windows-launcher tests use fake process/filesystem boundaries and verify source-worktree removal does not change the active executable."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ManagedRuntimeStore, RuntimeArtifactBuilder, RuntimeTarget activation APIs, release manifests, and platform installer coverage.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use versioned release directories and atomic metadata updates; do not overwrite the active artifact in place."
+    },
+    {
+      "id": "T-003",
+      "title": "Expose and enforce runtime release identity",
+      "spec": "specs/update-runtime-consistency/spec.md#treat-missing-or-mismatched-identity-as-a-failed-update",
+      "description": "Introduce the shared RuntimeIdentity contract and expose release/source identity from Server, Runner, and CLI runtime readback. Make RuntimeConsistencyValidator compare actual processes with the candidate manifest, treating missing, ambiguous, or mismatched required identities as failures rather than warnings.",
+      "acceptanceCriteria": [
+        "Server health/system-info, Runner identity, and CLI version readback expose enough version, source revision, and release ID to identify the executing artifact without reading the source worktree.",
+        "The expected identity is loaded from the candidate release and remains fixed even when the current working directory or source HEAD differs during verification.",
+        "A full update requires matching CLI, Server, and Runner identities; component-specific updates verify every component they activate or rely on.",
+        "Missing identity, an online Runner without build identity, or any source/release mismatch produces a nonzero failure and no normal success message.",
+        "Server, Runner, CLI, validator, and focused update-flow tests cover matching, mismatched, unavailable, wrong-root, and dry-run cases with injected HTTP, process, filesystem, and time seams."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RuntimeIdentity production/readback fields and strict RuntimeConsistencyValidator plus Server/Runner/CLI tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Readiness and auxiliary asset checks may retain advisory semantics, but required identity checks must be fail-closed."
+    },
+    {
+      "id": "T-004",
+      "title": "Coordinate activation, commit, and rollback as one transaction",
+      "spec": "specs/update-runtime-recovery/spec.md#treat-activation-and-verification-as-one-recoverable-transaction",
+      "description": "Implement RuntimeActivationCoordinator and integrate it with full and component-specific SourceCodeUpdater flows. Persist explicit transaction states, snapshot the last verified release and service targets, activate candidates only after staging, verify them, and recover deterministically after build, restart, identity, cancellation, or CLI-continuation failures.",
+      "acceptanceCriteria": [
+        "The transaction records Prepared, CandidateStaged, CandidateActivated, Verifying, Committed, RolledBack, NoVerifiedRuntime, or RecoveryFailed states with candidate and previous-target identities.",
+        "A candidate that passes all required checks becomes the active last verified release; a build or installation failure before activation leaves the previous target unchanged.",
+        "A post-activation failure restores and verifies the previous managed release and service targets when one exists, while the command still returns failure and does not print success.",
+        "When no verified release exists, the candidate is stopped or disabled, removed from the active target, and reported as no verified runtime; failed restoration reports recovery failure with an actionable next step.",
+        "CLI self-update continuation carries enough transaction state to recover after later failure, concurrent updates are rejected, and recovery/readiness polling is bounded by injected TimeProvider-driven deadlines.",
+        "UpdateAll, Server-only, Runner-only, cancellation, build failure, readiness timeout, identity mismatch, rollback success, rollback failure, and no-previous-release tests verify command order, service state, exit codes, and cleanup through fake boundaries."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RuntimeActivationCoordinator and integrated full/component update state machine with rollback and recovery tests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Replace the current Runner-only recovery decision path rather than adding a second independent rollback mechanism."
+    },
+    {
+      "id": "T-005",
+      "title": "Report target, observed, and migration outcomes",
+      "spec": "specs/update-runtime-consistency/spec.md#report-target-and-observed-identities-on-verification-failure",
+      "description": "Add a single UpdateReport/output contract for explicit/default source mode, target identity, observed identities, failed stage, and recovery result. Project those facts into CLI outcome and server status/consistency surfaces, preserve non-mutating dry-run behavior, and document the breaking migration from source-bound service units.",
+      "acceptanceCriteria": [
+        "Successful output distinguishes default versus explicit source selection and shows the effective root and target revision/release identity.",
+        "Failure output distinguishes unavailable from mismatched identities, names expected and observed values, reports the failed stage and recovery state, and never emits the normal success message.",
+        "CLI outcome payloads and server update/consistency responses preserve target, observed, source-mode, and recovery facts without making server persistence authoritative for local activation.",
+        "Dry-run output lists planned source, artifact, activation, and verification checks without building, mutating service targets, or claiming any runtime is verified.",
+        "Legacy source-bound unit detection and operator guidance explain the supported managed-service migration, retained data/credentials, and manual recovery action for custom units.",
+        "Focused output, CLI outcome, server status, dry-run, migration-diagnostic, and documentation checks assert exact failure/success semantics and preserve the existing fake-boundary test policy."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "UpdateReport, CLI/server outcome projection changes, migration diagnostics, and operator-facing update documentation.",
+      "dependsOn": ["T-003", "T-004"],
+      "passes": false,
+      "notes": "Keep server-side update status a projection of CLI-reported facts and runtime readback; do not move local transaction authority into the web job."
+    }
+  ]
+}
