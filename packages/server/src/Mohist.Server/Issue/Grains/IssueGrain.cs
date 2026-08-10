@@ -1514,7 +1514,14 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         await _attachmentService.BindCommentAsync(_issue.ProjectId, comment.Id, attachmentIds);
 
-        return new IssueCommentResult(comment.Id, comment.Body, comment.Author, comment.DisplayName);
+        return new IssueCommentResult(
+            comment.Id,
+            comment.Body,
+            comment.Author,
+            comment.DisplayName,
+            comment.ProjectId,
+            comment.IssueNumber,
+            comment.CreatedAt.ToString("o"));
     }
 
 }

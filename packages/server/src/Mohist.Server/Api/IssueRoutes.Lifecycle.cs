@@ -90,7 +90,20 @@ public static partial class IssueRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
-            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body, author = comment.Author, displayName = comment.DisplayName } });
+            return Results.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    id = comment.Id,
+                    projectId = comment.ProjectId,
+                    issueNumber = comment.IssueNumber,
+                    body = comment.Body,
+                    createdAt = comment.CreatedAt,
+                    author = comment.Author,
+                    displayName = comment.DisplayName,
+                },
+            });
         });
 
         group.MapPost("/{number:int}/done", async (

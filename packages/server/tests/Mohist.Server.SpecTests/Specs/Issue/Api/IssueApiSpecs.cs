@@ -28,13 +28,23 @@ public class IssueApiSpecs
         var comment = await _client.PostDataAsync<CommentDto>($"/api/projects/{project.Id}/issues/{issue.Number}/comments", new { displayName = "  Ada Lovelace  ", body = "Looks good" });
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
+        Assert.False(string.IsNullOrWhiteSpace(comment.Id));
+        Assert.Equal(project.Id, comment.ProjectId);
+        Assert.Equal(issue.Number, comment.IssueNumber);
         Assert.Equal("Looks good", comment.Body);
         // The author is the authenticated principal (the spec fixture's
         // operator credential resolves to the service principal); the
         // display alias is kept for display only.
         Assert.Equal("service", comment.Author);
         Assert.Equal("Ada Lovelace", comment.DisplayName);
-        Assert.Contains(detail.Comments, c => c.Id == comment.Id && c.Body == "Looks good" && c.Author == "service" && c.DisplayName == "Ada Lovelace");
+        Assert.False(string.IsNullOrWhiteSpace(comment.CreatedAt));
+        var persisted = Assert.Single(detail.Comments, c => c.Id == comment.Id);
+        Assert.Equal(comment.ProjectId, persisted.ProjectId);
+        Assert.Equal(comment.IssueNumber, persisted.IssueNumber);
+        Assert.Equal(comment.CreatedAt, persisted.CreatedAt);
+        Assert.Equal("Looks good", persisted.Body);
+        Assert.Equal("service", persisted.Author);
+        Assert.Equal("Ada Lovelace", persisted.DisplayName);
     }
 
     [Theory]
@@ -189,7 +199,14 @@ public class IssueApiSpecs
 
     private sealed record IssueDto(int Number, CommentDto[] Comments, string WorkflowProfileId);
     private sealed record ProjectDto(string Id);
-    private sealed record CommentDto(string Id, string Body, string? Author, string? DisplayName = null);
+    private sealed record CommentDto(
+        string Id,
+        string ProjectId,
+        int IssueNumber,
+        string Body,
+        string CreatedAt,
+        string? Author,
+        string? DisplayName = null);
     private sealed record SystemInfoDto(
         RunningInfoDto Running,
         SourceInfoDto Source,
