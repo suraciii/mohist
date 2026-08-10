@@ -101,7 +101,7 @@ If the CLI is replaced before the Server and Runner transaction completes, the c
 - **AND** it does not exit with a success result merely because the CLI replacement succeeded
 
 ### Requirement: Bootstrap legacy CLI installations before managed self-update
-An installed CLI that cannot read or write the managed transaction record SHALL return `bootstrap_required` before replacing its executable, stopping a service, or changing `active.json`. The bootstrap instruction SHALL identify the supported current CLI installation operation. The bootstrap operation SHALL install an always-available `cli/bootstrap/mo` helper outside both update slots, the stable launcher, recovery CLI slot, fixed runtime-root metadata, and transaction schema without claiming the legacy source-bound runtime as verified. A managed self-update SHALL begin only after the new CLI persists `Prepared` with a recovery path that remains runnable if the candidate slot is invalid. The bootstrap helper SHALL be installed with the initial CLI distribution, SHALL never be replaced by candidate activation, and SHALL implement only the restricted `install cli` repair operation.
+An installed CLI that cannot read or write the managed transaction record SHALL return `bootstrap_required` before replacing its executable, stopping a service, or changing `active.json`. The bootstrap instruction SHALL identify the supported current CLI installation operation. The initial CLI distribution SHALL install an always-available `cli/bootstrap/mo` helper and its trusted CLI payload outside both update slots, the stable launcher, recovery CLI slot, fixed runtime-root metadata, and transaction schema; `bootstrap.json` SHALL record the payload path and integrity identity. The restricted helper SHALL be the only wrapper exception when no trusted slot is runnable: `mo install cli` SHALL copy that trusted payload into the recovery slot, atomically recreate the stable launcher and runtime-root metadata, and never copy from or execute the candidate slot. Linux installation SHALL preserve executable mode through same-directory replacement; Windows installation SHALL use the `.exe` payload and `.cmd` stable wrapper with an atomic replacement boundary. Missing or corrupt bootstrap payload metadata SHALL report installation corruption and direct the operator to reinstall the original CLI distribution. A managed self-update SHALL begin only after the new CLI persists `Prepared` with a recovery path that remains runnable if the candidate slot is invalid. The bootstrap helper SHALL never be replaced by candidate activation and SHALL implement only the restricted `install cli` repair operation.
 
 #### Scenario: Legacy CLI fails closed before mutation
 - **WHEN** a pre-transaction CLI invokes `mo update`
@@ -117,7 +117,13 @@ An installed CLI that cannot read or write the managed transaction record SHALL 
 - **WHEN** the active CLI reports `bootstrap_required` or no trusted recovery CLI slot is available
 - **THEN** the stable wrapper dispatches only the exact `install cli` command to `cli/bootstrap/mo`
 - **AND** every other command returns `bootstrap_required` without executing the candidate slot
-- **AND** the bootstrap helper recreates the recovery slot, stable launchers, and runtime-root metadata before another update
+- **AND** the bootstrap helper copies the trusted payload recorded by `bootstrap.json`, recreates the recovery slot, stable launchers, and runtime-root metadata before another update, and does not claim the legacy source-bound runtime as verified
+
+#### Scenario: Bootstrap dispatch works when both managed slots are unavailable
+- **WHEN** the candidate slot is present but untrusted and the recovery slot is missing or corrupt
+- **THEN** Linux `launchers/cli` and the Windows `.cmd` wrapper execute only the independently installed bootstrap helper for `mo install cli`
+- **AND** the helper uses the initial-distribution payload rather than either managed slot
+- **AND** every non-bootstrap command returns `bootstrap_required` until the recovery slot has been recreated
 
 ### Requirement: Make cancellation a durable transaction outcome
 Cancellation SHALL be recorded as a state-machine event rather than only as a process interruption. Before activation, cancellation SHALL clean the candidate and persist `Cancelled` while leaving the previous active target and CLI slot unchanged. After activation or any service/CLI target effect, cancellation SHALL persist `Cancelling`, restore and verify the previous scope when possible, persist `Cancelled`, return exit code 130, release the lock only after the terminal record is durable, and project the terminal cancellation outcome. If restoration cannot be verified, cancellation SHALL stop or disable the candidate, clear the active target when required, preserve diagnostic paths, and end in `RecoveryFailed` without success. A `Cancelling` record SHALL be reconciled before any new update or managed launch.
@@ -191,9 +197,11 @@ Transaction records and `active.json` SHALL be written through an injected atomi
 - **AND** the transaction remains nonterminal until reconciliation either restores it or reports `RecoveryFailed`
 
 ### Requirement: Keep managed-runtime mutation in the CLI transaction
-The Server web-update service SHALL not build artifacts, change service targets, replace a CLI slot, start/stop a managed service, or advance a persisted web job. Persisted update state SHALL have schema version 2 and record an `owner` of `web` or `cli`, a scope, source mode, target identity, sequence, and `lockReleasePending`; records without an owner SHALL be classified as legacy `web` records before they are migrated. `rejected` SHALL be a terminal status reserved for quarantined web jobs. `POST /api/system/update` SHALL reject direct mutation with HTTP `409 Conflict` and a machine-readable `UpdateMutationOwnedByCli` outcome that directs the caller to the local CLI transaction. `GET /api/system/update/status` and `GET /api/system/consistency` SHALL be side-effect-free projections; they SHALL not resume stale web jobs or create a successful update result without the CLI-owned candidate activation and required identity verification. Persisted `running` or `waiting-for-reconnect` web jobs SHALL be marked rejected on Server startup and SHALL not be resumed.
+The Server web-update service SHALL not build artifacts, change service targets, replace a CLI slot, start/stop a managed service, or advance a persisted web job. Persisted update state SHALL have schema version 2 and record an `owner` of `web`, `cli`, or `legacy`, a scope, source mode, target identity, sequence, and `lockReleasePending`. Records without an owner SHALL be migrated to `owner: "legacy"` before status interpretation because the old storage path cannot prove whether an active record came from the web mutator or the CLI outcome endpoint. An ownerless `running` or `waiting-for-reconnect` record SHALL become terminal `legacy-unknown` with stage `Legacy ownership unknown`, reason `Legacy update ownership cannot be proven; run mo update`, preserved target facts/logs, and no resume or ownership claim. An ownerless terminal record SHALL retain its terminal status while gaining the `legacy` owner. `rejected` SHALL be a terminal status reserved for explicitly web-owned jobs. `POST /api/system/update` SHALL reject direct mutation with HTTP `409 Conflict` and a machine-readable `UpdateMutationOwnedByCli` outcome that directs the caller to the local CLI transaction. `GET /api/system/update/status` and `GET /api/system/consistency` SHALL be side-effect-free projections; they SHALL not resume stale web jobs or create a successful update result without the CLI-owned candidate activation and required identity verification. Explicitly web-owned `running` or `waiting-for-reconnect` jobs SHALL be marked rejected on Server startup and SHALL not be resumed. For an ownerless active record with a stale lock, the legacy terminal state SHALL be durable before lock release; a release failure SHALL persist `lockReleasePending` and leave the terminal state for retry.
 
-CLI outcome projection SHALL require an existing local CLI transaction and its durable `projection-lease.json`. The lease SHALL bind the job ID, nonce hash, operation scope, source mode, target identity, and last accepted sequence. Each outcome request SHALL include the job ID, nonce, sequence, status, stage, outcome, scope, source mode, and target facts. The Server SHALL reject an unknown job, missing or mismatched lease, changed target facts, invalid transition, or non-increasing sequence. Duplicate delivery of an identical sequence and payload SHALL be idempotent. A successful projection SHALL require the matching local transaction record to be durably `Committed`; the outcome endpoint SHALL never create a successful projection from an arbitrary POST or from Server-local source/runtime facts.
+CLI outcome projection SHALL require an existing local CLI transaction and its durable `projection-lease.json`. The lease SHALL bind the job ID, nonce hash, operation scope, source mode, target identity, and last accepted sequence. `IUpdateProjectionStore` SHALL hold an OS-backed exclusive `projection.lock` across processes and SHALL use a same-directory `projection-intent.json` write-ahead record. Under that lock it SHALL read the local transaction record, lease, and latest Server projection, compare their expected last sequence and payload hash, validate the transition, and write the complete next projection to the intent record before replacing the lease and Server projection through durable same-directory atomic replacements. It SHALL remove the intent only after both replacements are durable. Startup SHALL resolve an intent before serving status: if one replacement completed, it completes the other from the intent; if neither completed, it discards the intent only after verifying the expected old hash; any other mismatch remains locked and fails closed for reconciliation. A process-local semaphore SHALL be only an optimization.
+
+Each outcome request SHALL include the job ID, nonce, sequence, status, stage, outcome, scope, source mode, target facts, and the expected previous projection hash. The allowed status transitions SHALL be `prepared -> running|waiting-for-reconnect|failed|cancelled`, `running -> running|waiting-for-reconnect|succeeded|failed|recovered|cancelled`, and `waiting-for-reconnect -> running|waiting-for-reconnect|succeeded|failed|recovered|cancelled|superseded`. Terminal `succeeded`, `failed`, `recovered`, `superseded`, `cancelled`, `rejected`, and `legacy-unknown` states SHALL accept only an identical duplicate payload. `succeeded` SHALL require a matching durable local `Committed` transaction, `recovered` SHALL require `RolledBack`, and `cancelled` SHALL require `Cancelled` or `RecoveryFailed`; no terminal state may transition to another outcome. The Server SHALL reject an unknown job, missing or mismatched lease, changed target facts, invalid transition, non-increasing sequence, or mismatched expected hash. A duplicate with the same sequence and identical payload SHALL be idempotent; concurrent requests SHALL be serialized by the OS-backed projection lock and compare-and-set intent, so an older sequence cannot overwrite a newer one and cancellation/failure cannot race into success. The outcome endpoint SHALL never create a successful projection from an arbitrary POST or from Server-local source/runtime facts.
 
 #### Scenario: Web update mutation is rejected
 - **WHEN** a caller invokes `POST /api/system/update`
@@ -205,12 +213,23 @@ CLI outcome projection SHALL require an existing local CLI transaction and its d
 - **THEN** the Server returns the rejected/projection state
 - **AND** it does not build, restart, acquire an update lock, or mark the job successful
 
-#### Scenario: Server startup quarantines a legacy web job
-- **WHEN** the Server starts with a nonterminal web-owned update job
+#### Scenario: Server startup quarantines an explicitly web-owned job
+- **WHEN** the Server starts with a nonterminal update job whose persisted owner is `web`
 - **THEN** the registered `SystemUpdateStartupReconciler` migrates the record to schema version 2 and durably persists `owner: "web"`, `status: "rejected"`, `stage: "Rejected"`, and reason `UpdateMutationOwnedByCli`
 - **AND** it releases the web lock only after the rejected state is durable
 - **AND** if release fails, it persists `lockReleasePending: true` and retries on the next startup
 - **AND** no background update task is resumed
+
+#### Scenario: Server startup quarantines an ownerless active record without guessing its origin
+- **WHEN** the Server starts with an ownerless `running` or `waiting-for-reconnect` record from the pre-migration schema
+- **THEN** the registered `SystemUpdateStartupReconciler` persists `owner: "legacy"`, terminal `status: "legacy-unknown"`, stage `Legacy ownership unknown`, reason `Legacy update ownership cannot be proven; run mo update`, and the preserved target facts/logs
+- **AND** it does not resume the record, post a CLI outcome, or claim it as web-owned
+- **AND** it releases an associated stale lock only after the terminal legacy record is durable, recording `lockReleasePending: true` when release fails
+
+#### Scenario: Server startup preserves an ownerless terminal outcome
+- **WHEN** the Server starts with an ownerless terminal record such as `succeeded`, `failed`, `recovered`, or `cancelled`
+- **THEN** it migrates the record to schema version 2 with `owner: "legacy"` while preserving its terminal status, target facts, sequence, and logs
+- **AND** it does not rewrite the outcome to `rejected` or `legacy-unknown`
 
 #### Scenario: CLI outcome requires an owned lease
 - **WHEN** the CLI posts a prepared or later outcome with a valid local transaction, matching lease, target facts, and a greater sequence
@@ -221,6 +240,12 @@ CLI outcome projection SHALL require an existing local CLI transaction and its d
 - **WHEN** an outcome has no local transaction, no matching lease, a changed target, an old sequence, or a different nonce
 - **THEN** the Server rejects it without changing the latest projection or lock
 - **AND** it cannot create a successful update result
+
+#### Scenario: Concurrent projection delivery uses compare-and-set ordering
+- **WHEN** two valid CLI outcomes race with different sequences or a cancellation races with success
+- **THEN** the projection lock serializes the requests and the expected previous hash/sequence permits only the request based on the current projection
+- **AND** the losing request is rejected or treated as an identical duplicate without overwriting the newer or terminal projection
+- **AND** an intent left by a crash is completed or discarded according to its recorded old and new hashes before another outcome is accepted
 
 #### Scenario: Web status projects a CLI transaction
 - **WHEN** the CLI owns an update transaction and the Server status surface is queried
