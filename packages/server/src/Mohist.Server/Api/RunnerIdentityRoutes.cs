@@ -41,9 +41,17 @@ public static class RunnerIdentityRoutes
                 candidate.RunnerId,
                 candidate.Hostname,
                 candidate.BuildGitHash,
+                candidate.Component,
+                candidate.Version,
+                candidate.SourceRevision,
+                candidate.TreeHash,
+                candidate.ArtifactDigest,
+                candidate.ReleaseId,
+                candidate.Generation,
                 isOnline ? "online" : "offline",
                 runtime?.LastHeartbeatAt,
-                connectionId is not null ? "connected" : "disconnected"));
+                connectionId is not null ? "connected" : "disconnected",
+                tracker.GetConnectionGeneration(candidate.RunnerId)));
         }).RequireScopes(Scope.Operator);
 
         return app;
@@ -54,6 +62,14 @@ public sealed record RunnerIdentityView(
     string RunnerId,
     string Hostname,
     string? BuildGitHash,
+    string? Component,
+    string? Version,
+    string? SourceRevision,
+    string? TreeHash,
+    string? ArtifactDigest,
+    string? ReleaseId,
+    long? Generation,
     string Status,
     DateTimeOffset? LastHeartbeatAt,
-    string ConnectionState);
+    string ConnectionState,
+    string? ConnectionGeneration = null);

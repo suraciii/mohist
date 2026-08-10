@@ -24,11 +24,20 @@ public class RunnerHub : Hub
         var runnerId = query?["runnerId"].ToString();
         if (string.IsNullOrEmpty(runnerId)) return;
 
-        _tracker.Register(runnerId, Context.ConnectionId);
+        var connectionGeneration = _tracker.Register(runnerId, Context.ConnectionId);
 
         var buildGitHash = NormalizeBuildGitHash(query?["buildGitHash"].ToString());
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.UpdateBuildGitHashAsync(buildGitHash);
+        await runner.UpdateRuntimeIdentityAsync(
+            buildGitHash,
+            NormalizeBuildGitHash(query?["component"].ToString()),
+            NormalizeBuildGitHash(query?["version"].ToString()),
+            NormalizeBuildGitHash(query?["sourceRevision"].ToString()) ?? buildGitHash,
+            NormalizeBuildGitHash(query?["treeHash"].ToString()),
+            NormalizeBuildGitHash(query?["artifactDigest"].ToString()),
+            NormalizeBuildGitHash(query?["releaseId"].ToString()),
+            long.TryParse(query?["generation"].ToString(), out var generation) && generation > 0 ? generation : null,
+            connectionGeneration);
     }
 
     public Task<string> Ping() => Task.FromResult(Context.ConnectionId ?? string.Empty);

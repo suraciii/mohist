@@ -10,6 +10,7 @@ internal sealed class UpdateOperations
     private readonly IEnvironmentVariableProvider _environment;
     private readonly string? _unitDir;
     private readonly Func<string?>? _getUserHome;
+    private readonly ManagedRuntimeTransaction? _managedRuntime;
 
     public UpdateOperations(
         TextWriter output,
@@ -29,7 +30,50 @@ internal sealed class UpdateOperations
         _environment = environment;
         _unitDir = unitDir;
         _getUserHome = getUserHome;
+        if (systemd is IManagedRuntimeActivator activator)
+        {
+            var sourceResolver = new UpdateSourceResolver(
+                commandExecutor,
+                fileSystem,
+                getUserHome ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)));
+            _managedRuntime = new ManagedRuntimeTransaction(
+                output,
+                error,
+                commandExecutor,
+                fileSystem,
+                environment,
+                sourceResolver,
+                activator,
+                unitDir);
+        }
     }
+
+    public async Task<(ManagedUpdateSession? Session, string? Error)> PrepareManagedUpdateAsync(
+        string? repoRoot,
+        string scope,
+        string transactionId,
+        string? cliPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (_managedRuntime is null)
+            return (null, "service installer does not support managed runtime activation");
+        return await _managedRuntime.PrepareAsync(repoRoot, scope, transactionId, cliPath, cancellationToken);
+    }
+
+    public Task<int> CommitManagedUpdateAsync(
+        ManagedUpdateSession session,
+        CancellationToken cancellationToken = default) =>
+        _managedRuntime is null
+            ? Task.FromResult(1)
+            : _managedRuntime.CommitAsync(session, cancellationToken);
+
+    public Task<int> RollbackManagedUpdateAsync(
+        ManagedUpdateSession session,
+        string reason,
+        CancellationToken cancellationToken = default) =>
+        _managedRuntime is null
+            ? Task.FromResult(1)
+            : _managedRuntime.RollbackAsync(session, reason, cancellationToken);
 
     public Task<int> UpdateCliAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
     {

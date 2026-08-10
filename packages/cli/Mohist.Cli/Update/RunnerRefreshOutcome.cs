@@ -68,13 +68,21 @@ internal sealed record RunnerIdentityView(
     string RunnerId,
     string Hostname,
     string? BuildGitHash,
+    string? Component,
+    string? Version,
+    string? SourceRevision,
+    string? TreeHash,
+    string? ArtifactDigest,
+    string? ReleaseId,
+    long? Generation,
     string Status,
     DateTimeOffset? LastHeartbeatAt,
-    string ConnectionState);
+    string ConnectionState,
+    string? ConnectionGeneration = null);
 
 /// <summary>
-/// Encapsulates the runner refresh verification flow: poll the runner identity endpoint, fall back
-/// to the on-disk dist/build-info.json manifest, and reduce the result to a
+/// Encapsulates the runner refresh verification flow: poll the authoritative connected runner
+/// identity endpoint and reduce the result to a
 /// <see cref="RunnerRefreshOutcome"/>. Extracted from <see cref="SourceCodeUpdater"/> so the
 /// facade no longer carries the verify identity logic alongside stage orchestration.
 /// </summary>
@@ -150,7 +158,6 @@ internal sealed class RunnerRefreshVerifier
 
         if (identity is null)
         {
-            await VerifyRunnerDistManifestAsync(repoRoot, repoHead, "runner did not reconnect within the verification window");
             return RunnerRefreshOutcome.NotReconnected.Instance;
         }
 
@@ -178,6 +185,68 @@ internal sealed class RunnerRefreshVerifier
                 ReportedHash: identity.BuildGitHash,
                 RepoHeadHash: repoHead,
                 Reason: "reported buildGitHash differs from repo HEAD");
+    }
+
+    public async Task<RunnerRefreshOutcome> VerifyRunnerRuntimeAsync(RuntimeIdentity expected)
+    {
+        var hostname = _getLocalHostname();
+        if (string.IsNullOrWhiteSpace(hostname))
+            return new RunnerRefreshOutcome.UnknownIdentity("local hostname is unavailable; cannot identify local runner");
+
+        using var cts = new CancellationTokenSource();
+        using var timeoutTimer = StartTimeoutTimer(cts, _runnerIdentityTimeout);
+        RunnerIdentityView? identity = null;
+        while (!cts.IsCancellationRequested)
+        {
+            identity = await TryReadRunnerIdentityAsync(hostname, cts.Token);
+            if (identity is not null)
+                break;
+            try
+            {
+                await Task.Delay(_runnerIdentityPollInterval, _timeProvider, cts.Token);
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        if (identity is null)
+            return RunnerRefreshOutcome.NotReconnected.Instance;
+        if (!string.Equals(identity.Status, "online", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(identity.ConnectionState, "connected", StringComparison.OrdinalIgnoreCase))
+        {
+            return new RunnerRefreshOutcome.StaleRunnerRuntime(
+                identity.BuildGitHash,
+                expected.SourceRevision,
+                $"runner status/connection was {identity.Status}/{identity.ConnectionState}");
+        }
+
+        if (string.IsNullOrWhiteSpace(identity.ConnectionGeneration))
+            return new RunnerRefreshOutcome.UnknownIdentity(
+                "connected runner did not report a connection generation");
+
+        var actual = new RuntimeIdentity(
+            "runner",
+            identity.Version ?? string.Empty,
+            identity.SourceRevision ?? identity.BuildGitHash ?? string.Empty,
+            identity.TreeHash ?? string.Empty,
+            identity.ArtifactDigest ?? string.Empty,
+            identity.ReleaseId ?? string.Empty,
+            identity.Generation ?? 0,
+            string.IsNullOrWhiteSpace(identity.RunnerId) ? null : identity.RunnerId,
+            identity.ConnectionGeneration);
+        if (!actual.IsComplete)
+            return new RunnerRefreshOutcome.UnknownIdentity("connected runner did not report a complete managed identity");
+        if (!actual.Matches(expected))
+        {
+            return new RunnerRefreshOutcome.StaleRunnerRuntime(
+                actual.SourceRevision,
+                expected.SourceRevision,
+                "connected runner identity differs from the candidate release");
+        }
+
+        return RunnerRefreshOutcome.Current.Instance;
     }
 
     private async Task<RunnerRefreshOutcome> VerifyRunnerDistManifestAsync(
@@ -302,8 +371,16 @@ internal sealed class RunnerRefreshVerifier
             GetString("runnerId") ?? string.Empty,
             GetString("hostname") ?? string.Empty,
             GetString("buildGitHash"),
+            GetString("component"),
+            GetString("version"),
+            GetString("sourceRevision"),
+            GetString("treeHash"),
+            GetString("artifactDigest"),
+            GetString("releaseId"),
+            long.TryParse(GetString("generation"), out var generation) && generation > 0 ? generation : null,
             GetString("status") ?? "offline",
             GetDate("lastHeartbeatAt"),
-            GetString("connectionState") ?? "disconnected");
+            GetString("connectionState") ?? "disconnected",
+            GetString("connectionGeneration"));
     }
 }

@@ -137,6 +137,7 @@ export class RunnerHost {
   private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
+  private readonly buildInfo: ReturnType<typeof loadBuildInfo>
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
 
@@ -187,8 +188,9 @@ export class RunnerHost {
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
     const build = loadBuildInfo()
+    this.buildInfo = build
     this.buildGitHash = build.gitHash
-    this.connection = new ServerConnection(options, this.buildGitHash)
+    this.connection = new ServerConnection(options, this.buildGitHash, build)
     // Runner-local registry of workspaces this host has materialized.
     // Loaded eagerly at startup so the in-memory cache is hot before the
     // first dispatch or SignalR RPC: active
@@ -258,6 +260,7 @@ export class RunnerHost {
         bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
         skillResolver: this.skillResolver,
       },
+      this.buildInfo,
     )
   }
 
@@ -992,6 +995,14 @@ export class RunnerHost {
         await this.connection.connect({
           ...this.registrationState(),
           buildGitHash: this.buildGitHash,
+          component: this.buildInfo.component,
+          version: this.buildInfo.version,
+          sourceRevision: this.buildInfo.sourceRevision ?? this.buildInfo.gitHash,
+          treeHash: this.buildInfo.treeHash,
+          artifactDigest: this.buildInfo.artifactDigest,
+          releaseId: this.buildInfo.releaseId,
+          generation: this.buildInfo.generation,
+          runnerId: this.buildInfo.runnerId ?? this.options.runnerId,
         }, signal)
         await this.signalR.start()
         return

@@ -168,16 +168,26 @@ describe("RunnerHost", () => {
         }),
         expect.any(AbortSignal),
       )
-      expect(Object.keys(connect.mock.calls[0][0]).sort()).toEqual([
-        "actionCatalog",
+      const registration = connect.mock.calls[0][0]
+      expect(registration).toMatchObject({
+        projectId: "project-1",
+        coderModels: ["openai/gpt-5.5"],
+        runnerId: "runner-test",
+      })
+      for (const identityField of [
         "buildGitHash",
-        "capabilities",
-        "coderModelVariants",
-        "coderModels",
-        "connectionId",
-        "projectId",
-        "runtimeCatalogs",
-      ])
+        "component",
+        "version",
+        "sourceRevision",
+        "treeHash",
+        "artifactDigest",
+        "releaseId",
+        "generation",
+        "runnerId",
+      ]) {
+        expect(registration).toHaveProperty(identityField)
+      }
+      expect(Object.keys(registration).filter((key) => /slot|capacity/i.test(key))).toEqual([])
     } finally {
       controller.abort()
       await run.catch(() => undefined)
