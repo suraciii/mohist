@@ -1,0 +1,106 @@
+{
+  "project": "mohist-local",
+  "description": "Make reasoning effort a first-class saved-Agent execution setting, validate it against registered runtime capabilities, freeze the execution tuple in durable jobs, and expose it consistently through Runner, Web, CLI, and result surfaces.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add canonical Agent execution configuration and projection",
+      "spec": "specs/agent-reasoning-effort/spec.md#agent-configuration-has-a-canonical-reasoning-effort-field",
+      "description": "Add the ordered canonical effort vocabulary (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) to the Agent-only configuration schema and centralize parsing of runtime, model, reasoning effort, and variant into one execution configuration reader. Extend the server Agent create/edit/read, list, and detail contracts with the shared execution projection, accepting only canonical strings or an explicit clear while preserving variant independently and retaining invalid persisted values as invalid read state.",
+      "acceptanceCriteria": [
+        "The schema accepts every canonical effort, preserves explicit `off`, represents null/clear as unset, and rejects blank, unknown, numeric, array, and object values with a field-level reasoning-effort error.",
+        "An Agent with an unset or invalid effort is never given a default or a value copied from `variant`; an existing runtime, model, and variant remain unchanged when effort is cleared.",
+        "The central reader applies only the existing absent-runtime default of `opencode`, reports invalid persisted runtime and effort without coercion, and returns `runtime`, `model`, `reasoningEffort`, `variant`, and `reasoningEffortState` through one projection.",
+        "The reasoning-effort key is accepted only in saved-Agent configuration and is not added to IssueAllowedKeys or inline Workflow options.",
+        "Server API contract tests cover set, explicit `off`, clear/unset, invalid values, independent variant preservation, and list/detail read-back using the same projection and canonical field names."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server Agent configuration schema, centralized execution reader, shared execution projection, updated Agent API DTOs/routes, and passing configuration/projection contract tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the write-side and read-side authority for the four execution fields. Do not migrate existing variant values into reasoningEffort."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement runtime capability catalogs and compatibility admission",
+      "spec": "specs/agent-execution-compatibility/spec.md#readiness-distinguishes-configuration-and-compatibility-failures",
+      "description": "Extend registered Runner runtime catalogs with independent model-to-effort facts, runtime effort support, and catalog completeness, then evaluate the complete Agent execution tuple from those cached facts. Wire the evaluator into readiness, availability waiting, and AgentJob admission so complete compatible catalogs qualify a Runner, incomplete catalogs remain temporarily unconfirmed, and known incompatibility fails before dispatch without provider probing or fallback selection.",
+      "acceptanceCriteria": [
+        "Runner registration and heartbeat retain `ReasoningEfforts`, `SupportsReasoningEffort`, and `Complete` independently from `Models` and `Variants`; legacy or partial catalogs are incomplete and never fabricate effort facts from variant names.",
+        "Readiness returns stable actionable outcomes for missing model/effort, invalid effort, runtime effort unsupported, model-effort incompatible, capability unconfirmed, and variant incompatible, while keeping structural runtime/model errors separate.",
+        "Readiness and list/detail availability use only local configuration and registered catalog facts; tests prove no provider process, model request, or active availability probe is invoked.",
+        "Admission selects only an individual Runner with a complete compatible catalog, excludes complete rejecting catalogs, leaves incomplete or absent catalogs temporarily waiting with a retry reason, and emits no dispatch when all eligible catalogs reject the tuple.",
+        "Registry, readiness, availability, and admission tests cover compatible, missing, invalid, unsupported, incompatible, incomplete, no-runner, and variant-incompatible cases, including exact-tuple preservation during temporary waiting."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runtime catalog contract and registration updates, compatibility evaluator, readiness/admission integration, and passing no-probe and no-fallback compatibility tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Evaluate catalogs per registered Runner. An incomplete catalog cannot prove incompatibility, and temporary unavailability must remain retryable rather than becoming setup failure."
+    },
+    {
+      "id": "T-003",
+      "title": "Freeze the four-field tuple through launch and durable Job state",
+      "spec": "specs/agent-job-execution-snapshot/spec.md#agentjob-and-agentsession-snapshots-are-immutable",
+      "description": "Carry nullable `ReasoningEffort` through the existing launch coordinator, routed/manual inputs, AgentSession, AgentJob, runtime snapshot, and WorkDispatch structures using append-only Orleans fields, and resolve the Agent-owned tuple before acceptance. Make accepted launch responses, replay, recovery, redelivery, and routed preparation read the first durable snapshot rather than the mutable Agent while preserving unset effort and refusing caller overrides.",
+      "acceptanceCriteria": [
+        "Saved-Agent launch resolves `runtime`, `model`, `reasoningEffort`, and `variant` from the Agent definition before creating execution state; prompt, context, and inline runtime options cannot replace those fields.",
+        "Every existing durable path that carries runtime/model/variant also carries reasoning effort with a nullable append-only field; existing field ids are not renumbered or removed, and input equivalence/replay/difference diagnostics compare effort separately from variant.",
+        "The accepted launch response and replay response expose the projection from the first accepted plan, and AgentJob dispatch is built from stored input rather than rereading the Agent configuration.",
+        "Editing, archiving, or disabling an Agent after acceptance does not change a pending, redelivered, recovered, or retried Job; a missing effort in an old durable snapshot remains unset and is never inferred from variant.",
+        "Launch, coordinator, AgentSession, AgentJob, routed preparation, replay, recovery, and redelivery tests prove snapshot immutability, exact tuple retention while waiting, caller-override rejection/ignoring, and no fallback or dispatch for known preflight incompatibility."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated launch/coordinator/session/job snapshot and dispatch contracts with immutable reasoning-effort capture, plus passing launch and recovery regression tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Use the existing AgentExecutionDefinition launch boundary. The frozen snapshot, not raw AgentConfig, is authoritative after acceptance."
+    },
+    {
+      "id": "T-004",
+      "title": "Deliver effort and variant independently in Runner execution",
+      "spec": "specs/agent-job-execution-snapshot/spec.md#runner-delivery-keeps-effort-and-variant-independent",
+      "description": "Extend AgentJob option parsing, runtime turn/follow-up boundaries, and result helpers so `reasoningEffort` and `variant` remain sibling inputs from dispatch through terminal facts and diagnostics. Update the OpenCode and Pi adapters to translate effort through their native capability boundaries, remove Pi's variant-as-thinking-level behavior, and report unsupported or unrepresentable combinations explicitly while leaving Workflow `options.variant` unchanged.",
+      "acceptanceCriteria": [
+        "The flattened AgentJob payload contains `runtime`, `model`, `reasoningEffort`, and `variant` as independent fields, and Runner parsing preserves an actually unset effort without reconstructing it from variant.",
+        "Pi maps only reasoning effort to the SDK thinking level; a non-null Pi variant is reported as explicit variant incompatibility and never changes the thinking level.",
+        "OpenCode applies native effort and provider variant inputs independently, and an unavailable representation produces the documented incompatible-runtime result rather than silently dropping or translating one field into the other.",
+        "AgentJob terminal facts, recovery diagnostics, and Runner results retain the requested model, reasoning effort, and variant from the durable snapshot; Runner output cannot replace those requested values.",
+        "Runner unit/spec tests cover sibling payload fields, unset effort, Pi effort mapping and variant rejection, OpenCode independent inputs, diagnostics/result projection, and regression that Workflow actions still send only their existing model and variant options."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner dispatch parsing, OpenCode/Pi execution option changes, independent diagnostics/result facts, and passing runner adapter and no-alias tests.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Do not rename or repurpose shared Workflow variant fields; the separation applies to saved-Agent execution only."
+    },
+    {
+      "id": "T-005",
+      "title": "Expose reasoning effort across Web, CLI, and execution results",
+      "spec": "specs/agent-reasoning-effort/spec.md#agent-surfaces-expose-the-complete-execution-configuration",
+      "description": "Update the Web Agent entity public API and editor, the CLI create/edit/list/show commands, and model-catalog consumption to use the shared execution projection and runtime-aware effort capabilities. Add separate set/clear controls and flags, preserve variant when effort changes, render setup-required versus unconfirmed/incompatible states, and keep launch observations and Job result views aligned with the frozen tuple.",
+      "acceptanceCriteria": [
+        "Web Agent types and public exports include canonical effort values, projection state, catalog capability data, and typed create/update fields; the editor uses a separate effort selector, supports clear, preserves variant, and does not guess when capability is unconfirmed or incompatible.",
+        "CLI create/edit accepts `--reasoning-effort` and `--clear-reasoning-effort` as mutually exclusive options, validates canonical values before the request, and keeps the retired `--agent-config` path retired.",
+        "CLI list/show JSON and table output, Web Agent list/detail, readiness, launch observation, and terminal Job result views expose runtime, model, reasoningEffort, and variant with the same field names and unset/invalid states.",
+        "The runtime-aware model catalog endpoint is additive to existing model and variant data, while no Workflow Action input or CLI Issue flag gains reasoning effort in this change.",
+        "Web, CLI, API contract, and end-to-end tests cover set, clear, invalid values, read-back consistency, readiness messages, launch/result tuple consistency, and no-fallback diagnostics; `npm run verify` passes."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Web Agent entity/editor, CLI flags/output, runtime-aware catalog response, result/readiness views, documentation references, and passing full verification.",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Use the server execution projection as the contract source. Audit saved Agents with unset or previously overloaded variant values as setup-required without mutating them."
+    }
+  ]
+}
