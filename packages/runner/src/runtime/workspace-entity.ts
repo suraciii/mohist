@@ -5,7 +5,7 @@ import { deleteDirectory, ensureDir, exists, readText, runCommand } from "../sys
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { NamedWorkspaceRegistry } from "./workspace-registry.js"
-import { slugify, withManagedWorkspacePath } from "./workspace.js"
+import { slugify, withManagedWorkspaceHandle } from "./workspace.js"
 
 // Named workspace (Workspace entity) materialization. The named
 // workspace is a PERSISTENT EMPTY-OR-ACCUMULATED directory — it is
@@ -92,7 +92,7 @@ export async function materializeNamedWorkspace(
 ): Promise<NamedWorkspaceMaterializeResult> {
   const workspacePath = namedWorkspacePath(options.runnerRoot, options.projectId, options.workspaceName)
   let created = false
-  await withManagedWorkspacePath(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
+  await withManagedWorkspaceHandle(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
     if (!exists(managedWorkspacePath)) {
       await mkdir(managedWorkspacePath, { recursive: true })
       created = true
@@ -131,7 +131,7 @@ export async function materializeIssueWorkspace(
 ): Promise<NamedWorkspaceMaterializeResult> {
   const workspacePath = namedWorkspacePath(options.runnerRoot, options.projectId, options.workspaceName)
   let created = false
-  await withManagedWorkspacePath(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
+  await withManagedWorkspaceHandle(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
     if (exists(managedWorkspacePath)) {
       const marker = await readNamedWorkspaceMarker(managedWorkspacePath)
       if (!marker || marker.projectId !== options.projectId || marker.workspaceName !== options.workspaceName) {

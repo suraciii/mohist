@@ -43,7 +43,7 @@ describe("WorkspaceRegistry", () => {
     expect(entry.terminalAt).toBeNull()
 
     const persisted = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-    expect(persisted.version).toBe(2)
+    expect(persisted.version).toBe(3)
     expect(persisted.entries["wr-123"]).toMatchObject({
       issueNumber: 42,
       workflowRunId: "wr-123",
@@ -113,7 +113,7 @@ describe("WorkspaceRegistry", () => {
     })
 
     const persisted = JSON.parse(await readFile(filePath, "utf8"))
-    expect(persisted.version).toBe(2)
+    expect(persisted.version).toBe(3)
     expect(persisted.entries["wr-1"]).toMatchObject({ phase: "active" })
   })
 
