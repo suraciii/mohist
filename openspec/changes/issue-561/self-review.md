@@ -2,76 +2,86 @@
 
 ## Artifacts Reviewed
 
-- `proposal.md` — issue motivation, acceptance criteria, capabilities, and impact
-- `design.md` — source context, managed releases, identity contract, transaction state machine, risks, migration, and open questions
-- `tasks.json` — five implementation slices, acceptance criteria, and dependency graph
+- `proposal.md` - issue motivation, capabilities, impact, and breaking changes
+- `design.md` - source snapshot, managed release store, identity contract, activation state machine, migration, and open questions
+- `tasks.json` - five implementation slices, acceptance criteria, and dependency graph
 - `specs/update-source-identity/spec.md`
 - `specs/managed-runtime-artifacts/spec.md`
 - `specs/update-runtime-consistency/spec.md`
 - `specs/update-runtime-recovery/spec.md`
 
-The current issue was read from the canonical Mohist CLI and cross-checked against the existing CLI update pipeline, Server web-update pipeline, service installers, runtime identity code, and focused update tests.
+The issue was read through the supported `mo issue view 561 --project proj_f6c141d63b6243bfbb481737b2243b87` command because this CLI does not support `mo issue show`. The record identifies issue 561 as a P0 plan-stage update-integrity bug, status `in_progress`; its body is empty. The review was cross-checked against the current CLI update pipeline, Server web-update service, service installers, runtime identity surfaces, and Runner build/runtime packaging.
 
 ## Findings
 
-### 1. P1 — The Server web-update endpoint remains an out-of-band mutator
+### 1. P1 - The immutable snapshot has no writable build/output boundary
 
-`SystemRoutes.cs:14-29` exposes a separate `/api/system/update` mutation path. `SystemUpdateService.cs:449-482` still builds `dotnet build Mohist.sln` directly in `state.SourcePath` and restarts the configured Server unit; `SystemUpdateService.cs:169-201` later treats Server hash/readiness as sufficient to restart the Runner and complete the job. It does not publish a managed candidate, activate a `RuntimeTarget`, verify CLI/Server/Runner identities, or use the rollback transaction.
+`design.md:42,84` and `specs/update-source-identity/spec.md:23-34` require a read-only `SnapshotRoot` and say every build uses it. The existing Runner build writes `dist` through `packages/runner/tsconfig.json:8-10` and writes `dist/build-info.json` in `packages/runner/scripts/write-build-info.ts:8-31`. The Server publish path also runs the web build and copies `packages/web/dist` from the source tree in `packages/server/src/Mohist.Server/Mohist.Server.csproj:48-63`. A literal read-only snapshot therefore makes the existing build commands fail; making it writable reintroduces mutation of the identity input. The plan does not define writable intermediate/output roots, web asset staging, or how generated Runner/CLI metadata is injected without changing the snapshot.
 
-This conflicts with the new service contract in `design.md:78-88`: once units point at versioned managed artifacts, the web job's source-tree build either leaves the active artifact unchanged or becomes another source-bound deployment path. The design calls the web job a report-only projection in `design.md:27,152`, but neither `tasks.json:T-005` nor the migration plan disables this mutation or routes it through the same coordinator. A user can therefore still obtain a successful web update with the exact build/restart-versus-running-version ambiguity that issue 561 is intended to remove.
+**Required revision:** Specify separate writable build intermediates and candidate output paths for Server, Runner, web assets, and generated identity files while keeping the source snapshot immutable. Define the exact command/environment contract and add a deterministic test that observes build writes without modifying the snapshot.
 
-**Required revision:** Decide explicitly whether `/api/system/update` is disabled as a mutator or delegates to the same local transaction coordinator. Specify its status/outcome behavior and add a focused test proving it cannot report success without the same candidate activation and CLI/Server/Runner verification contract.
+### 2. P1 - The managed Runner release is not dependency-complete
 
-### 2. P1 — Durable transaction state has no crash-reconciliation or atomic multi-service activation contract
+The release layout in `design.md:58-76` lists `runner/...` but does not define its Node runtime dependencies. `packages/runner/package.json:25-29` imports packages such as `@microsoft/signalr`, `@opencode-ai/sdk`, and `undici`, while the current build only emits TypeScript output through `package.json:13-16`. A service started from the managed release after the source worktree is removed may still resolve modules from the source/workspace `node_modules`, or fail with module-not-found errors. This contradicts `specs/managed-runtime-artifacts/spec.md:30-33`, which requires a previously installed release to start without its build worktree.
 
-`design.md:47-53` introduces a durable transaction file, and `design.md:106-121` defines nonterminal activation states, but no component is assigned to read a nonterminal record after the CLI process crashes or the continuation never starts. The recovery spec covers an in-process verification failure and CLI continuation failure (`specs/update-runtime-recovery/spec.md:10-14,45-52`), not a process death between service-target writes, CLI-slot replacement, and verification. `tasks.json:T-004` likewise tests cancellation and continuation but has no crash/restart reconciliation criterion.
+**Required revision:** Choose and specify a production dependency strategy for the Runner release, such as bundling, a copied production `node_modules` tree, or an explicitly managed shared dependency store. Record it in `release.json` and test startup after the source worktree and workspace dependencies are unavailable.
 
-The risk is observable with the current service boundary: `SystemdServiceInstaller.cs:143-180` writes and installs one unit at a time. A crash after the Server unit or CLI slot changes but before the Runner target and transaction state are committed can leave a mixed target set. The next update has no specified recovery owner, and a lock alone would only reject work while preserving the half-update. That violates the issue acceptance criterion that failure cannot leave a non-runnable or source-ambiguous half-update.
+### 3. P1 - Runtime identity is still not bound to the executing artifact or Runner connection
 
-**Required revision:** Define write-ahead ordering and atomicity for the complete service-target set, then define a reconciler/resume rule for every nonterminal transaction when `mo update` or the managed runtime starts. Add deterministic kill-point tests after each destructive boundary, including partial Server/Runner unit activation and CLI-slot replacement, proving restoration or no-verified-runtime cleanup.
+`design.md:86,100-104` allows Server identity to be populated from service environment values before source fallback. The current `RuntimeBuildInfo` already accepts an environment hash and then the current source HEAD (`packages/server/src/Mohist.Server/SystemInfo/RuntimeBuildInfo.cs:56-76`), so an old Server binary launched with a candidate environment can report the candidate identity without containing the candidate artifact. The plan does not require artifact-owned metadata to be authoritative or require launcher environment values to be cross-checked rather than trusted.
 
-### 3. P1 — CLI identity is not an executable contract
+The Runner path has a separate trust gap. `RunnerIdentityRoutes.cs:14-24` selects the first registered Runner by hostname, while `RunnerHub.cs:21-31` stores a self-reported `buildGitHash` from connection query data. A stale or different Runner connection on the same host can therefore satisfy an identity request. The planned manifest fields do not define an exact Runner ID, connection generation, or authenticated handshake binding.
 
-`design.md:90-100` says the validator will parse an embedded CLI informational version/source revision, but it does not define the output grammar, the embedded fields, or how `dotnet publish` writes the selected source revision and release ID. The current validator only checks that `mo --version` exits successfully and returns non-empty text (`packages/cli/Mohist.Cli/Update/RuntimeConsistencyValidator.cs:53-79`). The CLI project has static version properties and no source-identity property (`packages/cli/Mohist.Cli/Mohist.Cli.csproj:11-14`), while its existing local version reader strips the `+...` suffix (`packages/cli/Mohist.Cli/MohistCliApi.cs:784-805`). Existing update tests use arbitrary non-empty strings such as `1.0.0+oldhash` (`packages/cli/tests/Mohist.Cli.Tests/Update/UpdateVerifyRuntimeSpecs.cs:34-55`) without asserting that the hash is parsed or compared.
+**Required revision:** Make Server identity come from metadata embedded in the published artifact, with environment values used only as consistency checks and no source-tree fallback for managed releases. Bind Runner identity readback to the exact active Runner ID and connection generation, and require the Runner to report its artifact-owned manifest rather than accepting an arbitrary hostname/self-reported hash. Add stale-artifact and wrong-connection tests.
 
-As written, a stale CLI can pass the proposed check, and two independently published CLIs can expose the same version without a verifiable source/release identity. This directly blocks acceptance criteria 2 and 3 and makes the required CLI part of `RuntimeIdentity` non-testable.
+### 4. P1 - Rejecting the POST endpoint does not make the Server update service projection-only
 
-**Required revision:** Define one canonical CLI identity schema or exact machine-readable command, specify how the publish step embeds `sourceRevision` and `releaseId` into the executable, require missing/ambiguous fields to fail, and add tests for matching, stale, same-version/different-source, and missing-identity CLIs.
+The new recovery contract only rejects `POST /api/system/update` in `specs/update-runtime-recovery/spec.md:81-92`. The existing `GET /api/system/update/status` route in `SystemRoutes.cs:31-34` calls `GetStatusEnvelopeAsync`, which calls `AdvanceActiveJobAsync` in `SystemUpdateService.cs:204-208`. That method can restart the Runner at `SystemUpdateService.cs:183-201`, and a previously accepted web job still runs the source-tree `dotnet build` and Server restart in `SystemUpdateService.cs:449-481`. The web service therefore remains an imperative mutator for persisted/running jobs even if new POST requests return 409. The plan has no stale-job startup rule, no migration of existing `running` jobs, and no test that status access performs zero build/restart commands.
 
-### 4. P1 — Component-specific update semantics are left ambiguous
+**Required revision:** Make the entire Server update service read/report-only, including status polling and background-job resumption. Define how existing nonterminal web jobs are marked rejected or projected into CLI-owned transactions, and add tests for POST, status reads, and stale-job startup proving that no build, service restart, or active-target mutation occurs.
 
-The proposal says full and component-specific updates use the same target identity (`proposal.md:7-10`), but the consistency spec only says a component-specific update verifies the component it updates and components it activates or relies on (`specs/update-runtime-consistency/spec.md:10-22`). The design and tasks do not define whether `mo update server` must build and atomically activate a paired Runner release, may leave the existing Runner untouched, or must fail unless the whole CLI/Server/Runner set becomes consistent. The current implementation explicitly warns that Server-only updates do not refresh the Runner (`packages/cli/Mohist.Cli/Update/UpdateOperations.cs:377-390`), so this is a real behavior choice rather than a naming detail.
+### 5. P1 - `RecoveryFailed` has no required physical runtime end state
 
-Different implementations can all satisfy the current task wording while producing different user-visible guarantees: one can report a Server-only success with a stale Runner, while another rebuilds all components and changes the scope and downtime of the command. That leaves the issue's “Server, Runner, and CLI use one version fact” acceptance criterion untestable for component commands.
+`design.md:118-126` and `specs/update-runtime-recovery/spec.md:43-56` describe reporting a failed restoration, but do not state what happens to an active candidate when the previous release cannot start or cannot be verified. The candidate may remain selected by `active.json`, or a partially changed service/CLI slot may remain in place, while the plan still promises that no unverified candidate is left as the managed runtime (`specs/update-runtime-recovery/spec.md:58-70`). Reporting `RecoveryFailed` alone does not restore the issue's no-half-update invariant.
 
-**Required revision:** Add an explicit operation matrix covering `update`, `update cli`, `update server`, and `update runner`: artifacts built, service targets changed, identities required for success, rollback scope, and whether the result is globally consistent or component-scoped. Add matching positive and negative scenarios and task acceptance tests for each command.
+**Required revision:** Define the physical terminal state for rollback failure: stop or disable the candidate, clear or quarantine the active-target record, preserve the transaction and forensic paths, and report `NoVerifiedRuntime` or `RecoveryFailed` with the exact restart/reinstall action. Add tests that assert service state, CLI slot, and `active.json` after rollback failure.
 
-### 5. P2 — A fixed source identity does not make the source input immutable
+### 6. P1 - Initial managed self-update and crash recovery have no trusted bootstrap executable
 
-The design resolves `git rev-parse HEAD` once and passes the path/revision through the pipeline (`design.md:31-45`), while explicitly declining worktree watching (`design.md:20-27`). A clean worktree can still be changed or advanced by another process after preflight and before the Server and Runner builds. Both builds then read mutable files from the same path, while the release manifest can continue to label the artifacts with the earlier revision. The plan has no source lock, immutable checkout, build snapshot, or fail-closed revalidation when source content changes.
+The design requires a transaction record before CLI replacement and says a stable launcher invokes the CLI-owned reconciler (`design.md:48-52,124-126`; `specs/update-runtime-recovery/spec.md:16-41`). The migration section simultaneously targets existing source-bound installations (`design.md:180-187`). An existing installed CLI predating this transaction schema cannot create the required record or run the new reconciler before it replaces itself. The current flow confirms the gap: `SourceCodeUpdater.UpdateAllAsync` enters the CLI update stage and only then continues with the refreshed process (`packages/cli/Mohist.Cli/MohistCliCommands.Update.cs:236-263`), while `UpdateOperations.UpdateCliResolvedAsync` replaces the target executable directly (`packages/cli/Mohist.Cli/Update/UpdateOperations.cs:183-250`). If replacement or continuation crashes, the plan does not identify an older trusted binary, a recovery helper, or a durable handoff that can reconcile the candidate.
 
-This permits two artifacts to carry one target identity while containing content that was not present at that identity, weakening the “sole version authority” guarantee. The issue's clean-source acceptance does not eliminate mutation during a multi-stage update.
+**Required revision:** Define a first-run bootstrap protocol for legacy installations and a recovery executable/slot that remains runnable when the candidate CLI is unverified. Specify the handoff and migration state transitions, including crashes before and after CLI replacement, and add tests from a pre-transaction installation.
 
-**Required revision:** Choose and document an immutable input strategy: materialize the selected revision into a staging checkout, hold a source mutation lock, or revalidate a content/revision fingerprint at the build boundary and abort before activation on change. Add a deterministic source-mutation-during-build test.
+### 7. P2 - Required platform/path choices remain open questions
+
+`design.md:58-74` relies on a managed runtime root and stable launchers, while `design.md:193` leaves the root location/configuration undecided and `design.md:196` leaves Windows rollout undecided. `tasks.json:T-002` already requires both systemd and Windows launcher behavior and its acceptance criteria depend on deterministic paths. The transaction store, launcher bootstrap, permissions, and migration behavior cannot be implemented or tested consistently while these are still open questions.
+
+**Required revision:** Choose the cross-platform runtime-root resolution, permissions, and launcher installation contract before implementation, or explicitly scope the first implementation to one backend and remove the other backend from the current acceptance criteria and migration claims.
+
+### 8. P2 - Component version and release ID generation is not canonical
+
+`design.md:74,76,96,102` requires exact equality for `version` and `releaseId`, but only says the release ID is derived from source revision and component build identity. It does not define the algorithm, normalization, or whether the value is transaction-generated, and it does not define how component versions are selected. The current inputs are independently static (`packages/cli/Mohist.Cli/Mohist.Cli.csproj:11-13` has version `1.0.0`, while `packages/runner/package.json:2-3` has version `0.1.0`). Without a canonical generation/injection contract, repeated builds, same-source builds, and component-scoped releases can produce identities that are not reproducibly comparable.
+
+**Required revision:** Define the release ID algorithm and component-version sources, including normalization and generated .NET informational-version/Runner manifest fields. Add tests for repeated builds, same version with different source revisions, and component-scoped active sets.
 
 ## Issue Coverage Check
 
-| Issue acceptance criterion | Planned coverage | Review status |
+| Issue objective | Planned coverage | Review status |
 |---|---|---|
-| Clean explicit root produces a matching Runner | Source identity, managed release, strict Runner readback | Blocked by the undefined identity schema and source mutability gaps (findings 3 and 5) |
-| Server, Runner, and CLI share one version fact | Full-update consistency and release manifest | Blocked for CLI identity and component-specific scope (findings 3 and 4) |
-| Success only after confirmed consistency | Strict validator and recovery state machine | Blocked by the out-of-band web mutator and missing crash reconciliation (findings 1 and 2) |
-| Failure leaves no half-update | Candidate store and rollback | Blocked for process crash and partial service activation (finding 2) |
-| Default and explicit roots show target/actual results | Source context and UpdateReport | Covered in principle by `specs/update-source-identity/spec.md:41-53` and `tasks.json:T-005`, subject to the execution gaps above |
+| Build Server and Runner from the selected root | Source identity and snapshot requirements | Blocked by the missing writable build/dependency closure (findings 1 and 2) |
+| Prove the running artifacts match the target | Structured identity fields and strict checks | Blocked by artifact/connection trust and noncanonical identity generation (findings 3 and 8) |
+| Success only after verified consistency | Scope matrix and activation state machine | Blocked by the remaining Server mutator and incomplete recovery end state (findings 4 and 5) |
+| Failure does not leave a half-update | Durable transaction and reconciliation | Blocked by rollback physical state and bootstrap ownership (findings 5 and 6) |
+| Existing installations can adopt the managed runtime | Migration plan | Blocked by bootstrap and unresolved platform/root choices (findings 6 and 7) |
 
 ## Verification Limits
 
-- No product tests or full gates were run; this was a read-only plan review as requested.
-- The findings are plan defects or missing contracts, not claims that the unimplemented change already fails in production.
-- The task dependency graph itself is acyclic and its dependencies point to earlier priorities.
+- No product tests or full gates were run; this was a read-only plan review and implementation cross-check.
+- The issue record returned no body text or acceptance-criteria list; the review used its P0 plan-stage status, title, the plan's stated objective, and the current implementation boundaries.
+- No files other than this review artifact were changed.
 
 ## Verdict
 
-The plan is not ready to build. Findings 1-4 are P1 blockers because they leave an alternate mutating path, crash-state behavior, CLI identity, and component command guarantees undefined. Finding 5 is P2 but affects the core source-authority invariant and should be resolved before implementation.
+The plan is not ready to build. Findings 1-6 are P1 blockers because they can make the immutable build fail, allow a stale artifact to self-identify as current, preserve an alternate mutator, leave an unverified runtime after rollback failure, or strand the system during initial CLI replacement. Findings 7-8 are P2 contract gaps that must be resolved before the implementation tasks can be deterministic.
 
 <promise>FAIL</promise>
