@@ -373,6 +373,7 @@ reconstructed:
 | `runtime-events.json` | Runtime event outbox: Session events pending delivery to Server; snapshot written for each new fact | unreadable: mark outbox unhealthy and reload at local retry cadence; never overwrite the unreadable file. If retention is exceeded, discard reconstructible streaming increments first |
 | `followup-operations.json` | Follow-up operation idempotency log: operationId -> claimed / submitted; written on each transition | wrong version or shape: log unavailable and reject new operations (fail closed); missing file means a fresh start |
 | `session-commands.json` | Session command idempotency log: operationId -> started / completed plus result; same write behavior | same: corruption fails closed; missing file means a fresh start |
+| `cancel-operations.json` | Stop operation idempotency log: operationId -> claimed / completed plus verdict; same write behavior | same: corruption fails closed; missing file means a fresh start |
 | `named-workspaces.json` | current named Workspace materialization index: Project, Workspace name, path, phase, and materialization times | unreadable or corrupt: start with an empty index and rebuild on later materialization; Server remains the logical authority |
 | `workspaces.json` | legacy per-WorkflowRun materialization index used only by the fallback execution path | same fail-open behavior; remove with the fallback rather than treating it as a second identity model |
 
@@ -381,6 +382,22 @@ registries fail open because they can be reconstructed from disk. These files
 are Runner-private. The Server never reads or writes them directly;
 cross-process consistency comes from event delivery and poll recomputation, not
 shared files.
+
+### Stop Operations Stay Available and Reconcile by Identity
+
+Stop is the one Runner operation that must remain available while the event
+outbox snapshot is being recovered; its journal never gates on outbox health. A
+redelivered stop under an already-claimed operationId first reconciles by
+identity: it probes the target Turn. If the target Turn no longer exists, the
+stop intent is already fulfilled and the journal records the ended verdict. A
+redelivery never records a contradicting verdict — such as not-cancellable
+after stop-requested — for the same operationId.
+
+Session commands such as Compact and Reset fail closed on an uncertain start
+instead: after a Runner restart the Runtime cannot answer whether the effect
+occurred, so the original operation stays unavailable and Server retries it
+under the same identity. Stop differs because its intent is checkable —
+whether the target Turn still exists — while a Compact or Reset effect is not.
 
 The per-WorkflowRun Workspace manager and `workspaces.json` registry remain an
 implementation gap for dispatches that still lack a named Workspace. New code

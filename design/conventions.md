@@ -931,7 +931,11 @@ actionable `nextAction` to query the same `operationId` or perform bounded same-
 it never creates a new stop operation or claims success.
 An accepted stop is Server-owned: a recovery pass re-delivers a claimed but undelivered or
 unconfirmed delivery with the same operation identity and fence. It never creates another
-operation, and caller disconnect does not abandon delivery.
+operation, and caller disconnect does not abandon delivery. Redelivery is bounded by the operation
+deadline; exhausting the deadline settles the operation `blocked` with a stable non-empty reason
+rather than retrying without limit. The delivery protocol and the reply arbitration have one owner,
+shared by the request path and the recovery pass, so the unconfirmed-result branch behaves
+identically on both.
 
 The launch identities are separate. The caller provides `launchRequestId`; Server creates
 `launchOperationId` exactly once and durably maps `launchRequestId -> launchOperationId`. Neither
