@@ -359,15 +359,41 @@ The Agent read assembler exposes the same Job/Session/Input/Turn references and
 the same mapped status. A nonterminal read has `result=null`; only the
 authoritative terminal Job result can populate it.
 
-When AgentJob becomes terminal, it stages a
-`PendingWorkflowTerminalDelivery` containing the immutable delivery ID,
-WorkflowRun ID, TaskRun ID, Job ID, Session/Input/Turn IDs, terminal status,
-stable reason, and structured Agent result. The AgentJob recovery reminder
-retries `IWorkflowGrain.ReceiveAgentJobResultAsync` until it receives
-`Accepted` or `Stale`. A duplicate terminal report or a late Runner report
-cannot rewrite a terminal Job or TaskRun.
+When AgentJob becomes terminal, it stages one canonical
+`PendingWorkflowTerminalDelivery`:
 
-The Workflow result command verifies every lineage identity before applying the
+```text
+PendingWorkflowTerminalDelivery {
+  deliveryId
+  workflowRunId, taskRunId, taskAttempt
+  jobId, sessionId, inputId, turnId
+  terminalStatus
+  stableReason
+  agentResult
+  workflowFinalization = null | WorkflowAgentFinalizationRequest
+}
+```
+
+For a Workflow-owned AgentJob, `workflowFinalization` is required and is the
+same immutable request persisted with the AgentJob terminal report. For a direct
+AgentJob it remains null and the existing direct-Agent terminal path is
+unchanged. `AgentJobGrain` must reject a Workflow-owned terminal report that
+does not carry the complete finalization request instead of accepting a result
+that cannot be applied to Workflow.
+
+Workflow-owned delivery has one operation:
+`IWorkflowGrain.ApplyAgentJobFinalizationAsync(PendingWorkflowTerminalDelivery)`.
+It returns `WorkflowFinalizationAck = Accepted | Stale | Retry | Conflict`.
+`Accepted` records the first application, `Stale` acknowledges a duplicate or
+late delivery whose receipt already exists, `Retry` keeps the durable delivery
+obligation pending for a transient failure, and `Conflict` terminates retry for
+a different payload under an existing delivery or finalizer key. The AgentJob
+recovery reminder retries this operation only for `Retry`; it stops on
+`Accepted`, `Stale`, or `Conflict`. A duplicate terminal report or a late
+Runner report cannot rewrite a terminal Job, its finalization request, or the
+Workflow TaskRun.
+
+The finalization operation verifies every lineage identity before applying the
 result. On success it applies the existing Workflow task completion and
 advancement logic. On failure it creates the normal Workflow task failure so
 the declared recovery policy can run. A Job `Cancelled` result remains
@@ -451,13 +477,12 @@ WorkflowAgentFinalizationRequest {
 }
 ```
 
-`AgentJobGrain` persists this envelope with the terminal result. Its durable
-terminal delivery invokes
-`IWorkflowGrain.ApplyAgentJobFinalizationAsync` rather than fabricating an
-ordinary Runner task report. The Server finalizer verifies every lineage field,
-checks that each artifact upload belongs to the same invocation and
-`finalizerKey`, then records a `WorkflowAgentFinalizationReceipt` containing
-the request fingerprint, applied artifact ids, and variable-patch fingerprint.
+`AgentJobGrain` persists this envelope with the terminal result and copies it
+verbatim into `PendingWorkflowTerminalDelivery`. The Server finalizer verifies
+every lineage field, checks that each artifact upload belongs to the same
+invocation and `finalizerKey`, then records a
+`WorkflowAgentFinalizationReceipt` containing the request fingerprint, bound
+artifact ids, and variable-patch fingerprint.
 It applies `setVars` only through a keyed
 `WorkflowRunVariablesStore.PatchVariablesIfNewAsync(workflowRunId,
 finalizerKey, vars)` operation and applies the existing Workflow completion or

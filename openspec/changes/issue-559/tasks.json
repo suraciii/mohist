@@ -48,13 +48,13 @@
       "id": "T-003",
       "title": "Deliver terminal Agent results and arbitrate Workflow advancement",
       "spec": "specs/workflow-agent-action/spec.md#requirement-workflow-agent-completion-finalization-bridge, specs/workflow-agent-action/spec.md#requirement-stable-lifecycle-and-recovery-projection, specs/workflow-agent-action/spec.md#requirement-stable-result-and-workflow-arbitration",
-      "description": "Extend AgentJob terminal state with a durable Workflow delivery obligation and make IWorkflowGrain.ApplyAgentJobFinalizationAsync the guarded Server-side WorkflowAgentFinalizer operation for lineage-checked result and side-effect application. Project AgentJob facts into queued, executing, recovering, completed, failed, and cancelled invocation states, preserve immutable terminal results and finalization receipts, release shared admission exactly once, and route success/failure/cancellation through existing Workflow completion and recovery boundaries.",
+      "description": "Extend AgentJob terminal state with one canonical PendingWorkflowTerminalDelivery carrying the immutable WorkflowAgentFinalizationRequest, and make IWorkflowGrain.ApplyAgentJobFinalizationAsync the only guarded Server-side WorkflowAgentFinalizer operation for lineage-checked result and side-effect application. Define Accepted/Stale/Retry/Conflict acknowledgement handling, project AgentJob facts into queued, executing, recovering, completed, failed, and cancelled invocation states, preserve immutable terminal results and finalization receipts, release shared admission exactly once, and route success/failure/cancellation through existing Workflow completion and recovery boundaries.",
       "acceptanceCriteria": [
         "AgentJob status maps to queued, executing, recovering, completed, failed, or cancelled using the documented rules, and nonterminal reads never fabricate a final result.",
-        "Terminal delivery persists a stable delivery id and retries until Workflow acknowledges Accepted or Stale; every delivery verifies WorkflowRun, TaskRun, Job, Session, Input, Turn, and finalizerKey identity before the Server-side WorkflowAgentFinalizer applies a result or side effects.",
+        "Workflow-owned terminal delivery persists one stable PendingWorkflowTerminalDelivery containing the complete WorkflowAgentFinalizationRequest and retries the single ApplyAgentJobFinalizationAsync operation on Retry; every delivery verifies WorkflowRun, TaskRun, Job, Session, Input, Turn, and finalizerKey identity and stops on Accepted, Stale, or definitive Conflict.",
         "Duplicate terminal reports and late Runner reports are acknowledged as stale and cannot rewrite a terminal Job, invocation result, or Workflow task; shared Agent concurrency resources are released once.",
         "Unknown or uncertain post-claim work is non-claimable and recovering, reconciliation uses the original work identity, and recovery never creates a replacement Job, Turn, or prompt.",
-        "Completed results advance the Workflow through the existing task lifecycle exactly once, failed results enter declared recovery, and cancelled AgentJobs remain cancelled in the invocation projection while crossing the existing Workflow failure boundary; a repeated finalizer payload is Accepted/Stale without repeating variables, artifact binding, or task application.",
+        "Completed results advance the Workflow through the existing task lifecycle exactly once, failed results enter declared recovery, and cancelled AgentJobs remain cancelled in the invocation projection while crossing the existing Workflow failure boundary; a repeated finalizer payload is Accepted/Stale without repeating variables, artifact binding, or task application, while conflicting payloads stop as definitive Conflict.",
         "Session runtime, transcript, activity, and terminal-close events remain audit facts and cannot independently complete, fail, cancel, or advance the Workflow.",
         "Focused Server grain and integration tests cover every lifecycle state, terminal-delivery retry, duplicate/stale result, runner loss, unknown recovery, cancellation, permit release, and Workflow retry/recovery path."
       ],
@@ -64,7 +64,7 @@
       "output": "Durable AgentJob-to-Workflow terminal arbitration with immutable status/result semantics and passing recovery tests.",
       "dependsOn": ["T-002"],
       "passes": false,
-      "notes": "Use the existing AgentJob recovery reminder and Workflow ReportAck-style Accepted/Stale semantics where they fit; do not synthesize ordinary Runner task reports from transcript events."
+      "notes": "Use one AgentJob recovery reminder for PendingWorkflowTerminalDelivery and the explicit Accepted/Stale/Retry/Conflict acknowledgement contract; do not retain a separate ReceiveAgentJobResultAsync path or synthesize ordinary Runner task reports from transcript events."
     },
     {
       "id": "T-004",
