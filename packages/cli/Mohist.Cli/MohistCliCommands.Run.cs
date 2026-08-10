@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
@@ -23,6 +24,28 @@ internal static partial class RunCommands
             "decidedBy",
             "displayName",
         ]);
+
+    private static JsonNode? RunControlSuccessData(
+        JsonSelection selection,
+        string runId,
+        string action,
+        string? actionValue = null,
+        string? displayName = null)
+    {
+        if (selection.Kind != JsonSelectionKind.Selected)
+            return null;
+
+        var result = new JsonObject
+        {
+            ["workflowRunId"] = JsonValue.Create(runId),
+            [action] = actionValue is null
+                ? JsonValue.Create(true)
+                : JsonValue.Create(actionValue),
+        };
+        if (displayName is not null)
+            result["displayName"] = JsonValue.Create(displayName);
+        return result;
+    }
 
     public static Command Build(MohistCliApi api)
     {
@@ -173,7 +196,9 @@ internal static partial class RunCommands
                     new { displayName = normalizedDisplayName },
                     RunControlDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
+                    successDataFallback: RunControlSuccessData(
+                        selection, resolvedRunId!, "approved", displayName: normalizedDisplayName));
             }
         });
         return cmd;
@@ -246,7 +271,9 @@ internal static partial class RunCommands
                     new { displayName = normalizedDisplayName, message },
                     RunControlDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
+                    successDataFallback: RunControlSuccessData(
+                        selection, resolvedRunId!, "rejected", displayName: normalizedDisplayName));
             }
         });
         return cmd;
@@ -290,7 +317,8 @@ internal static partial class RunCommands
                     new { },
                     RunControlDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
+                    successDataFallback: RunControlSuccessData(selection, resolvedRunId!, "retried"));
             }
         });
         return cmd;
@@ -352,7 +380,12 @@ internal static partial class RunCommands
                     body,
                     RunControlDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
+                    successDataFallback: RunControlSuccessData(
+                        selection,
+                        resolvedRunId!,
+                        fromStageProvided ? "rerunFromStage" : "rerun",
+                        fromStageProvided ? fromStage : null));
             }
         });
         return cmd;
@@ -398,7 +431,8 @@ internal static partial class RunCommands
                     new { },
                     RunControlDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
+                    successDataFallback: RunControlSuccessData(selection, resolvedRunId!, "paused"));
             }
         });
         return cmd;
@@ -442,7 +476,8 @@ internal static partial class RunCommands
                     new { },
                     RunControlDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
+                    successDataFallback: RunControlSuccessData(selection, resolvedRunId!, "resumed"));
             }
         });
         return cmd;
@@ -521,7 +556,8 @@ internal static partial class RunCommands
                     new { },
                     RunControlDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
+                    successDataFallback: RunControlSuccessData(selection, resolvedRunId!, "stopped"));
             }
         });
         return cmd;

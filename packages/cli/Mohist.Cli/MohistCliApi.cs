@@ -216,8 +216,6 @@ internal sealed class MohistCliApi
         try
         {
             var data = response.Data ?? successDataFallback;
-            if (selection.Kind == JsonSelectionKind.Selected && data is null && normalizeData is null)
-                data = new JsonObject();
             if (normalizeData is not null)
                 data = normalizeData(data);
             if (selection.Kind == JsonSelectionKind.Selected)
