@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Api;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.Agent;
@@ -12,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
@@ -34,6 +36,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
     public AgentLaunchParticipantProbe LaunchFaults { get; } = new();
     public ControllableAgentSessionTranscriptPersistence SessionPersistence { get; } = new();
+    public RecordingSessionStopDelivery StopDelivery { get; } = new();
+    public RecordingSessionWorkPort WorkPort { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
 
     private readonly InMemoryEventBus _sharedEventBus;
@@ -66,6 +70,10 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                 _sharedEventStore,
                 TimeProvider,
                 Persistence);
+            siloBuilder.Services.RemoveAll<ISessionStopDelivery>();
+            siloBuilder.Services.AddSingleton<ISessionStopDelivery>(StopDelivery);
+            siloBuilder.Services.RemoveAll<ISessionWorkPort>();
+            siloBuilder.Services.AddSingleton<ISessionWorkPort>(WorkPort);
             siloBuilder.Services.RemoveAll<IAgentLaunchParticipantProbe>();
             siloBuilder.Services.AddSingleton<IAgentLaunchParticipantProbe>(LaunchFaults);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
@@ -79,6 +87,83 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
         Cluster = builder.Build();
         return new ValueTask(Cluster.DeployAsync());
     }
+
+    public sealed class RecordingSessionStopDelivery : ISessionStopDelivery
+    {
+        private readonly object _gate = new();
+        private readonly List<SessionStopDeliveryRequest> _requests = [];
+        private readonly Queue<RunnerStopReply?> _responses = [];
+
+        public IReadOnlyList<SessionStopDeliveryRequest> Requests
+        {
+            get
+            {
+                lock (_gate)
+                    return _requests.ToArray();
+            }
+        }
+
+        public void Reset()
+        {
+            lock (_gate)
+            {
+                _requests.Clear();
+                _responses.Clear();
+            }
+        }
+
+        public void Enqueue(RunnerStopReply? response)
+        {
+            lock (_gate)
+                _responses.Enqueue(response);
+        }
+
+        public Task<RunnerStopReply?> DispatchAsync(
+            SessionStopDeliveryRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                _requests.Add(request);
+                return Task.FromResult(_responses.Count > 0 ? _responses.Dequeue() : null);
+            }
+        }
+    }
+
+    public sealed class RecordingSessionWorkPort : ISessionWorkPort
+    {
+        private readonly object _gate = new();
+        private readonly List<SessionWorkAbandonRequest> _requests = [];
+
+        public IReadOnlyList<SessionWorkAbandonRequest> Requests
+        {
+            get
+            {
+                lock (_gate)
+                    return _requests.ToArray();
+            }
+        }
+
+        public void Reset()
+        {
+            lock (_gate)
+                _requests.Clear();
+        }
+
+        public Task AbandonActiveWorkAsync(
+            SessionWorkflowWorkBinding binding,
+            string reason,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+                _requests.Add(new SessionWorkAbandonRequest(binding, reason));
+            return Task.CompletedTask;
+        }
+    }
+
+    public sealed record SessionWorkAbandonRequest(
+        SessionWorkflowWorkBinding Binding,
+        string Reason);
 
     public ValueTask DisposeAsync()
     {

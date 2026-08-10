@@ -19,7 +19,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
     private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
     internal const string ScheduleReminderPrefix = "schedule:";
     internal const string ScheduleRecoveryReminderName = "schedule-recovery";
+    internal const string StopRecoveryReminderName = "stop-recovery";
     internal static readonly TimeSpan ScheduleRecoveryReminderPeriod = TimeSpan.FromMinutes(1);
+    internal static readonly TimeSpan StopRecoveryReminderPeriod = TimeSpan.FromMinutes(1);
     internal static readonly TimeSpan OneShotReminderPeriod = TimeSpan.FromMinutes(1);
     private const string OpenCodeRuntime = "opencode";
     private const string PiRuntime = "pi";
@@ -35,6 +37,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
     private readonly IEventStore _eventStore;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IFollowupDispatchScheduler? _followupDispatchScheduler;
+    private readonly ISessionWorkPort? _sessionWorkPort;
+    private readonly ISessionStopDelivery? _sessionStopDelivery;
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
@@ -59,7 +63,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         ILogger<AgentSessionGrain> log,
         IEventStore eventStore,
         IBackgroundTaskLauncher backgroundTasks,
-        IFollowupDispatchScheduler? followupDispatchScheduler = null)
+        IFollowupDispatchScheduler? followupDispatchScheduler = null,
+        ISessionWorkPort? sessionWorkPort = null,
+        ISessionStopDelivery? sessionStopDelivery = null)
     {
         _stateStore = stateStore;
         _transcriptStore = transcriptStore;
@@ -72,6 +78,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         _eventStore = eventStore;
         _backgroundTasks = backgroundTasks;
         _followupDispatchScheduler = followupDispatchScheduler;
+        _sessionWorkPort = sessionWorkPort;
+        _sessionStopDelivery = sessionStopDelivery;
         _log = log;
     }
 
@@ -90,6 +98,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (_session?.Status.PendingTranscriptEvidence?.Count > 0)
             EnsurePersistenceTimer();
         await EnsureScheduleRemindersAsync();
+        await EnsureStopRecoveryReminderAsync();
     }
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
@@ -118,6 +127,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         }
         if (string.Equals(reminderName, ScheduleRecoveryReminderName, StringComparison.Ordinal))
             await RunScheduledInputRecoveryAsync();
+        else if (string.Equals(reminderName, StopRecoveryReminderName, StringComparison.Ordinal))
+            await RunStopRecoveryAsync();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -834,6 +845,177 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             }
         }
     }
+
+    private async Task EnsureStopRecoveryReminderAsync()
+    {
+        if (_session?.Status.PendingStop is not null)
+        {
+            await this.RegisterOrUpdateReminder(
+                StopRecoveryReminderName,
+                StopRecoveryReminderPeriod,
+                StopRecoveryReminderPeriod);
+            return;
+        }
+
+        try
+        {
+            var reminder = await this.GetReminder(StopRecoveryReminderName);
+            if (reminder is not null)
+                await this.UnregisterReminder(reminder);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+        }
+    }
+
+    private SessionStopDeliveryRequest? BuildStopDeliveryRequest(
+        AgentTurnRecord turn,
+        AgentSessionStopClaim claim)
+    {
+        if (_session is null)
+            return null;
+
+        var metadata = _session.Metadata;
+        var projectId = metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        var sourceKind = metadata.Label(AgentSessionQueryMetadataKeys.SourceKind);
+        if (string.IsNullOrWhiteSpace(projectId)
+            || string.IsNullOrWhiteSpace(sourceKind)
+            || string.IsNullOrWhiteSpace(_session.Runtime.RunnerId)
+            || string.IsNullOrWhiteSpace(_session.Runtime.Runtime)
+            || string.IsNullOrWhiteSpace(_session.Status.AgentRuntimeSessionId)
+            || string.IsNullOrWhiteSpace(_session.Runtime.WorkDir))
+            return null;
+
+        return new SessionStopDeliveryRequest(
+            projectId,
+            _session.Id,
+            turn.Id,
+            claim.OperationId,
+            _session.Runtime.RunnerId,
+            sourceKind,
+            metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId),
+            metadata.Label(AgentSessionQueryMetadataKeys.SessionName),
+            _session.Runtime.Runtime,
+            _session.Status.AgentRuntimeSessionId,
+            _session.Runtime.WorkDir);
+    }
+
+    public Task RunStopRecoveryAsync() => RedeliverPendingTurnStopAsync();
+
+    private async Task RedeliverPendingTurnStopAsync()
+    {
+        var session = await GetRequiredAsync();
+        var claim = session.Status.PendingStop;
+        if (claim is null)
+        {
+            await EnsureStopRecoveryReminderAsync();
+            return;
+        }
+
+        var turn = (session.Status.Turns ?? []).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, claim.TurnId, StringComparison.Ordinal));
+        if (turn is null || _sessionStopDelivery is null)
+        {
+            await EnsureStopRecoveryReminderAsync();
+            return;
+        }
+
+        var request = BuildStopDeliveryRequest(turn, claim);
+        if (request is null)
+        {
+            await EnsureStopRecoveryReminderAsync();
+            return;
+        }
+
+        if (!claim.DispatchStarted)
+        {
+            session.MarkTurnStopDispatched(claim.TurnId, claim.OperationId);
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            claim = session.Status.PendingStop ?? claim;
+        }
+
+        var reply = await _sessionStopDelivery.DispatchAsync(request);
+        var state = reply?.State?.ToLowerInvariant();
+        if (state is null)
+        {
+            await EnsureStopRecoveryReminderAsync();
+            return;
+        }
+
+        if (state == "unknown")
+        {
+            var control = session.ResolveTurnControl(turn.Id);
+            if (control?.IsLaunchTurn == true && control.JobId is not null)
+            {
+                await _grains.GetGrain<IAgentJobGrain>(control.JobId).MarkUnknownAsync("stop-unconfirmed");
+            }
+            else
+            {
+                var events = session.MarkTurnTerminal(turn.Id, AgentTurnStatus.Unknown, null, Now());
+                if (events.Count > 0)
+                    await CommitAsync(session, events);
+                else
+                    await _stateStore.SaveAsync(SessionId, session);
+            }
+
+            await EnsureStopRecoveryReminderAsync();
+            await AbandonWorkflowWorkIfBoundAsync("runtime-stop-unknown");
+            return;
+        }
+
+        if (state == "stopped")
+        {
+            var events = session.MarkTurnTerminal(turn.Id, AgentTurnStatus.Cancelled, null, Now());
+            session.CompleteTurnStop(turn.Id, claim.OperationId);
+            if (events.Count > 0)
+                await CommitAsync(session, events);
+            else
+                await _stateStore.SaveAsync(SessionId, session);
+            await EnsureStopRecoveryReminderAsync();
+            await AbandonWorkflowWorkIfBoundAsync("session-stop");
+            return;
+        }
+
+        if (state == "not-cancellable")
+        {
+            session.CompleteTurnStop(turn.Id, claim.OperationId);
+            await _stateStore.SaveAsync(SessionId, session);
+            await EnsureStopRecoveryReminderAsync();
+        }
+    }
+
+    private Task AbandonWorkflowWorkIfBoundAsync(string reason)
+    {
+        if (_sessionWorkPort is null || _session is null)
+            return Task.CompletedTask;
+
+        var metadata = _session.Metadata;
+        if (!string.Equals(
+                metadata.Label(AgentSessionQueryMetadataKeys.SourceKind),
+                "workflow",
+                StringComparison.Ordinal))
+            return Task.CompletedTask;
+
+        var workflowRunId = metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
+        var workId = metadata.Label(AgentSessionQueryMetadataKeys.WorkId);
+        var runnerId = _session.Runtime.RunnerId;
+        if (string.IsNullOrWhiteSpace(workflowRunId)
+            || string.IsNullOrWhiteSpace(workId)
+            || string.IsNullOrWhiteSpace(runnerId))
+            return Task.CompletedTask;
+
+        return _sessionWorkPort.AbandonActiveWorkAsync(
+            new SessionWorkflowWorkBinding(workflowRunId, runnerId, workId),
+            reason);
+    }
+
+    private Task AbandonWorkflowWorkIfBoundAsyncIfNonSuccess(
+        AgentTurnStatus status,
+        string reason) =>
+        status is AgentTurnStatus.Failed or AgentTurnStatus.Cancelled or AgentTurnStatus.Unknown
+            ? AbandonWorkflowWorkIfBoundAsync(reason)
+            : Task.CompletedTask;
 
 
     public async Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync()
@@ -1681,6 +1863,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 
         var previousHealth = _lastHealthStatus;
         var previousUsagePercent = _lastHealthPercent;
+        var workflowSettlement = false;
 
         var entries = new List<RuntimeEventEnvelope>();
         var supplementaryEntries = new List<RuntimeEventEnvelope>();
@@ -1772,6 +1955,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             }
         }
 
+        workflowSettlement = string.Equals(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind),
+                "workflow",
+                StringComparison.Ordinal)
+            && HasNewNonSuccessTurnSettlement(session, turnStatusBefore);
+
         _lastHealthStatus = previousHealth;
         _lastHealthPercent = previousUsagePercent;
 
@@ -1808,6 +1997,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
                 release.WaiterId);
 
         await TryEmitFollowupTerminalDeliveriesAsync(session, turnStatusBefore);
+        await EnsureStopRecoveryReminderAsync();
+
+        if (workflowSettlement)
+        {
+            await FlushAsync(CancellationToken.None);
+            await AbandonWorkflowWorkIfBoundAsync("runtime-settlement");
+        }
 
         return entries.Select(e => ToEventInfo(e)).ToList();
     }
@@ -2404,16 +2600,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
         var terminal = MapTerminalActivityToTurnStatus(
             ParseActivity(payload),
-            AgentSessionJsonHelper.GetStringProp(payload, "status"));
+            AgentSessionJsonHelper.GetStringProp(payload, "status"),
+            !string.IsNullOrWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "stopOperationId")));
         if (terminal is null
             || !TryResolveTurnId(runtimeEvent.PayloadJson, out var turnId))
             return;
 
-        var operationId = AgentSessionJsonHelper.GetStringProp(payload, "stopOperationId");
-        if (!string.IsNullOrWhiteSpace(operationId))
-            session.CompleteTurnStop(turnId, operationId);
-        else
-            session.AbandonUndispatchedTurnStop(turnId, session.Status.PendingStop?.OperationId ?? string.Empty);
+        var pending = session.Status.PendingStop;
+        if (pending is not null
+            && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
+        {
+            session.CompleteTurnStop(turnId, pending.OperationId);
+        }
     }
 
     private static IReadOnlyList<AgentSessionEvent> DriveNonLaunchTurnLifecycle(
@@ -2456,7 +2654,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         var activity = ParseActivity(payload);
         if (activity == AgentSessionActivity.Active)
             return session.SetActivity(activity, now);
-        var terminal = MapTerminalActivityToTurnStatus(activity, status);
+        var terminal = MapTerminalActivityToTurnStatus(
+            activity,
+            status,
+            !string.IsNullOrWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "stopOperationId")));
         if (terminal is null)
             return session.SetActivity(activity, now);
         if (TryResolveTurnId(runtimeEvent.PayloadJson, out var payloadTurnId))
@@ -2478,10 +2679,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         return events;
     }
 
-    private static AgentTurnStatus? MapTerminalActivityToTurnStatus(AgentSessionActivity activity, string? status)
+    private static AgentTurnStatus? MapTerminalActivityToTurnStatus(
+        AgentSessionActivity activity,
+        string? status,
+        bool stopConfirmed)
     {
+        if (activity == AgentSessionActivity.Active)
+            return null;
         if (activity == AgentSessionActivity.Unknown)
             return AgentTurnStatus.Unknown;
+        if (stopConfirmed)
+            return AgentTurnStatus.Cancelled;
         if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
             return AgentTurnStatus.Failed;
         return AgentTurnStatus.Completed;
@@ -3045,7 +3253,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (session.LaunchVisibility == AgentLaunchVisibility.Rejected)
             return;
         if (!string.IsNullOrWhiteSpace(turnId))
-            await CancelQueuedTurnAsync(turnId);
+            await StopQueuedTurnAsync(turnId);
         session = await GetRequiredAsync();
         session.LaunchVisibility = AgentLaunchVisibility.Rejected;
         session.ParentLink = null;
@@ -3141,12 +3349,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             _followupDispatchScheduler?.Schedule(
                 session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
                 session.Id);
+            await AbandonWorkflowWorkIfBoundAsyncIfNonSuccess(status, "runtime-failure");
             return;
         }
         await CommitAsync(session, events);
         _followupDispatchScheduler?.Schedule(
             session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
             session.Id);
+        await AbandonWorkflowWorkIfBoundAsyncIfNonSuccess(status, "runtime-failure");
     }
 
     public async Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command)
@@ -3221,19 +3431,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
+            await AbandonWorkflowWorkIfBoundAsyncIfNonSuccess(status, "runtime-failure");
             return;
         }
         await CommitAsync(session, events);
+        await AbandonWorkflowWorkIfBoundAsyncIfNonSuccess(status, "runtime-failure");
     }
 
-    public async Task<AgentTurnCancelResult> CancelQueuedTurnAsync(string turnId)
+    public async Task<AgentTurnStopResult> StopQueuedTurnAsync(string turnId)
     {
         if (string.IsNullOrWhiteSpace(turnId))
-            return new AgentTurnCancelResult(null, false);
+            return new AgentTurnStopResult(null, false);
         var session = await GetRequiredAsync();
         var lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
             string.Equals(candidate.TurnId, turnId, StringComparison.Ordinal));
-        var result = session.CancelQueuedTurn(turnId, Now());
+        var result = session.StopQueuedTurn(turnId, Now());
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
         if (result.Cancelled && lease is not null)
@@ -3249,12 +3461,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
                 session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
                 session.Id);
         }
+        if (result.Cancelled || result.Control?.Status == AgentTurnStatus.Cancelled)
+            await AbandonWorkflowWorkIfBoundAsync("session-stop");
         return result;
     }
 
-    public async Task CancelTurnAsync(string turnId)
+    public async Task StopTurnAsync(string turnId)
     {
-        _ = await CancelQueuedTurnAsync(turnId);
+        _ = await StopQueuedTurnAsync(turnId);
     }
 
     public async Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId, string? operationId = null)
@@ -3263,6 +3477,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         var result = session.ClaimTurnStop(turnId, operationId);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
+        await EnsureStopRecoveryReminderAsync();
         return result;
     }
 
@@ -3276,17 +3491,35 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         _session = session;
     }
 
-    public async Task AbandonUndispatchedTurnStopAsync(string turnId, string operationId)
+    public async Task CompleteTurnStopAsync(string turnId, string operationId)
     {
         if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
             return;
         var session = await GetRequiredAsync();
-        session.AbandonUndispatchedTurnStop(turnId, operationId);
-        await _stateStore.SaveAsync(SessionId, session);
+        var pending = session.Status.PendingStop;
+        var turn = (session.Status.Turns ?? []).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+        if (pending is null
+            || !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+            || !string.Equals(pending.OperationId, operationId, StringComparison.Ordinal))
+        {
+            if (turn?.Status == AgentTurnStatus.Cancelled)
+                await AbandonWorkflowWorkIfBoundAsync("session-stop");
+            return;
+        }
+
+        var events = session.MarkTurnTerminal(turnId, AgentTurnStatus.Cancelled, null, Now());
+        session.CompleteTurnStop(turnId, operationId);
+        if (events.Count > 0)
+            await CommitAsync(session, events);
+        else
+            await _stateStore.SaveAsync(SessionId, session);
         _session = session;
+        await EnsureStopRecoveryReminderAsync();
+        await AbandonWorkflowWorkIfBoundAsync("session-stop");
     }
 
-    public async Task CompleteTurnStopAsync(string turnId, string operationId)
+    public async Task ReleaseTurnStopAsync(string turnId, string operationId)
     {
         if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
             return;
@@ -3294,6 +3527,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         session.CompleteTurnStop(turnId, operationId);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
+        await EnsureStopRecoveryReminderAsync();
     }
 
     public async Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId)
@@ -3342,6 +3576,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         return turns
             .Where(t => string.IsNullOrWhiteSpace(t.JobId))
             .ToDictionary(t => t.Id, t => t.Status);
+    }
+
+    private static bool HasNewNonSuccessTurnSettlement(
+        AgentSession session,
+        IReadOnlyDictionary<string, AgentTurnStatus> before)
+    {
+        var turns = session.Status.Turns;
+        if (turns is null || turns.Count == 0) return false;
+
+        return turns.Any(turn =>
+            string.IsNullOrWhiteSpace(turn.JobId)
+            && turn.Status is AgentTurnStatus.Failed or AgentTurnStatus.Cancelled or AgentTurnStatus.Unknown
+            && (!before.TryGetValue(turn.Id, out var prior)
+                || prior is not (AgentTurnStatus.Failed or AgentTurnStatus.Cancelled or AgentTurnStatus.Unknown)));
     }
 
     private async Task TryEmitFollowupTerminalDeliveriesAsync(

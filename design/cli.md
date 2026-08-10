@@ -108,9 +108,9 @@ referenced resource:
   `install-agent` is the domain action that installs an existing Agent into a Slack workspace and
   creates or recovers the Connection and Agent App. Access actions live directly under root-level
   `slack`; there is no generic connection subgroup.
-- `session transcript/followup/compact/reset/cancel/stop` reads or changes AgentSession. `cancel`
-  deterministically cancels one specified queued Turn. `stop` creates the durable cascade rooted at
-  the selected Session; it is not a public single-Turn Runtime command. Membership and retry are
+- `session transcript/followup/compact/reset/stop` reads or changes AgentSession. `stop` is the
+  only end-work operation. With `--turn-id` it ends one frozen Turn; without it, `stop` creates the
+  durable cascade rooted at the selected Session. Membership and retry are
   authoritative in [`subagents.md#cascade-stop`](subagents.md#cascade-stop). Paths are not
   duplicated by Issue origin and Agent origin.
 - `epic add/remove` expresses the user intent of Epic membership. Issue remains the sole write

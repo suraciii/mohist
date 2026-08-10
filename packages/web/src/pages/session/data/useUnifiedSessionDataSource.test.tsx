@@ -45,7 +45,7 @@ function makeSummary(overrides: Partial<UnifiedSessionSummaryDto> = {}): Unified
 }
 
 interface CapturedFollowup { sessionId: string; text: string; attachments: string[] | undefined; idempotencyKey: string }
-interface CapturedTurnControl { sessionId: string; turnId: string; operation: 'cancel' | 'stop' }
+interface CapturedTurnControl { sessionId: string; turnId: string }
 
 let followupSequence: SessionFollowupResult[] = []
 const followupCalls: CapturedFollowup[] = []
@@ -288,28 +288,26 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
 })
 
 describe('useUnifiedSessionDataSource — turn control availability', () => {
-  it('exposes cancel only when the current turn is queued and suppresses stop', () => {
+  it('exposes the single stop handle when the current turn is queued', () => {
     const { result } = renderWithSummary({
       activity: 'active', currentTurnId: 'turn-queued',
       turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
     })
-    expect(result.current.cancel).not.toBeNull()
-    expect(result.current.cancel?.state).toBe('queued')
-    expect(result.current.cancel?.turnId).toBe('turn-queued')
-    expect(result.current.stop).toBeNull()
+    expect(result.current.stop).not.toBeNull()
+    expect(result.current.stop?.state).toBe('queued')
+    expect(result.current.stop?.turnId).toBe('turn-queued')
   })
 
-  it('exposes cancel for a queued turn even when the activity field is idle', () => {
+  it('exposes stop for a queued turn even when the activity field is idle', () => {
     const { result } = renderWithSummary({
       activity: 'idle', recoveryAvailable: false, currentTurnId: 'turn-queued',
       turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
     })
-    expect(result.current.cancel?.turnId).toBe('turn-queued')
-    expect(result.current.stop).toBeNull()
+    expect(result.current.stop?.turnId).toBe('turn-queued')
     expect(result.current.recoveryAvailable).toBe(false)
   })
 
-  it('exposes stop only when the current turn is executing and suppresses cancel', () => {
+  it('exposes stop when the current turn is executing', () => {
     const { result } = renderWithSummary({
       activity: 'active', currentTurnId: 'turn-running',
       turns: [{ id: 'turn-running', sequence: 1, inputIds: ['input-1'], status: 'executing' }],
@@ -318,16 +316,13 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
     expect(result.current.stop).not.toBeNull()
     expect(result.current.stop?.state).toBe('executing')
     expect(result.current.stop?.turnId).toBe('turn-running')
-    expect(result.current.cancel).toBeNull()
   })
 
-  it('keeps cancel and stop null while the Session is idle or in an unknown state', () => {
+  it('keeps stop null while the Session is idle or in an unknown state', () => {
     const { result: idleResult } = renderWithSummary({ activity: 'idle', currentTurnId: null })
-    expect(idleResult.current.cancel).toBeNull()
     expect(idleResult.current.stop).toBeNull()
 
     const { result: unknownResult } = renderWithSummary({ activity: 'unknown', currentTurnId: 'turn-stale' })
-    expect(unknownResult.current.cancel).toBeNull()
     expect(unknownResult.current.stop).toBeNull()
   })
 
@@ -338,10 +333,9 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
     })
     expect(result.current.recoveryAvailable).toBe(false)
     expect(result.current.stop).not.toBeNull()
-    expect(result.current.cancel).toBeNull()
   })
 
-  it('dispatches the cancel command with the queued operation and reconciles the unified queries', async () => {
+  it('dispatches the single stop command for a queued Turn and reconciles the unified queries', async () => {
     turnControlSequence = [{ state: 'cancelled' }]
     const deps = makeDependencies({
       useUnifiedSessionSummary: (() => ({
@@ -358,11 +352,11 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     act(() => {
-      result.current.cancel?.mutate({ onSuccess: ({ state }) => { expect(state).toBe('cancelled') } })
+      result.current.stop?.mutate({ onSuccess: ({ state }) => { expect(state).toBe('cancelled') } })
     })
 
     expect(turnControlCalls).toHaveLength(1)
-    expect(turnControlCalls[0]).toEqual({ sessionId: 'session-1', turnId: 'turn-queued', operation: 'cancel' })
+    expect(turnControlCalls[0]).toEqual({ sessionId: 'session-1', turnId: 'turn-queued' })
     await waitFor(() => {
       const keys = invalidateSpy.mock.calls.map((call) => JSON.stringify((call[0] as { queryKey: unknown[] }).queryKey))
       expect(keys.some((key) => key.includes('"unified-session","proj-1","session-1"'))).toBe(true)
@@ -393,7 +387,7 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
 
     expect(observedState).toBe('stop-requested')
     expect(turnControlCalls).toHaveLength(1)
-    expect(turnControlCalls[0].operation).toBe('stop')
+    expect(turnControlCalls[0]).toEqual({ sessionId: 'session-1', turnId: 'turn-running' })
   })
 })
 

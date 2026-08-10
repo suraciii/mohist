@@ -47,9 +47,14 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
     {
         var turns = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync();
         var turnId = turns.FirstOrDefault()?.Id ?? $"missing-turn-{Guid.NewGuid():N}";
-        return await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel",
-            new { turnId });
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-sessions/{sessionId}/stop")
+        {
+            Content = JsonContent.Create(new { turnId }),
+        };
+        request.Headers.Add("Idempotency-Key", $"stop-{Guid.NewGuid():N}");
+        return await _client.SendAsync(request);
     }
 
     protected async Task<(ProjectRef Project, string SessionId)> CreateCanonicalSessionForCancelAsync(string sourceKind, string runtime = "opencode")

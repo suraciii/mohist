@@ -8,7 +8,7 @@ import { UnifiedSessionPage, type UnifiedSessionPageDependencies } from './Unifi
 let summary: any = null
 let transcript: any = { turns: [], partCount: 0, lastActivityAt: null }
 let transcriptOptions: any[] = []
-let turnControlCalls: Array<{ sessionId: string; turnId: string; operation: 'cancel' | 'stop' }> = []
+let turnControlCalls: Array<{ sessionId: string; turnId: string }> = []
 let turnControlState: { state: string } = { state: 'cancelled' }
 
 const baseSummary = (overrides: Record<string, unknown> = {}) => ({
@@ -67,7 +67,7 @@ function makeDependencies(): UnifiedSessionPageDependencies {
       },
       useGenericFollowup: () => ({ mutateAsync: vi.fn(), isPending: false }) as never,
       useGenericTurnControl: () => ({
-        mutate: (input: { sessionId: string; turnId: string; operation: 'cancel' | 'stop' }, options?: { onSuccess?: (result: { state: string }) => void }) => {
+        mutate: (input: { sessionId: string; turnId: string }, options?: { onSuccess?: (result: { state: string }) => void }) => {
           turnControlCalls.push(input)
           options?.onSuccess?.(turnControlState)
         },
@@ -169,7 +169,7 @@ describe('UnifiedSessionPage', () => {
     expect(screen.getByTestId('session-errors-region')).toHaveTextContent('runner timed out')
     expect(screen.getByTestId('session-header-model')).toHaveTextContent('configured-model')
     expect(screen.getByTestId('session-header-model')).toHaveTextContent('resolved-model')
-    expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-stop-trigger')).not.toBeInTheDocument()
   })
 
   it('passes the stable session and current runtime binding to transcript observation', () => {
@@ -217,19 +217,18 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
 
   afterEach(() => cleanup())
 
-  it('renders only the Cancel Turn button when the current turn is queued', () => {
+  it('renders the single Stop Turn button when the current turn is queued', () => {
     summary = baseSummary({
       activity: 'active',
       currentTurnId: 'turn-queued',
       turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
     })
     renderPage()
-    expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
-    expect(screen.getByTestId('session-cancel-trigger')).toHaveAttribute('data-turn-state', 'queued')
-    expect(screen.queryByTestId('session-stop-trigger')).not.toBeInTheDocument()
+    expect(screen.getByTestId('session-stop-trigger')).toBeInTheDocument()
+    expect(screen.getByTestId('session-stop-trigger')).toHaveAttribute('data-turn-state', 'queued')
   })
 
-  it('keeps a queued turn cancellable when the Session activity projection is idle', () => {
+  it('keeps a queued turn stoppable when the Session activity projection is idle', () => {
     summary = baseSummary({
       activity: 'idle',
       recoveryAvailable: false,
@@ -238,8 +237,7 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     })
     renderPage()
 
-    expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
-    expect(screen.queryByTestId('session-stop-trigger')).not.toBeInTheDocument()
+    expect(screen.getByTestId('session-stop-trigger')).toBeInTheDocument()
     expect(screen.getByTestId('recovery')).toHaveAttribute('data-recovery-available', 'false')
   })
 
@@ -252,17 +250,15 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     renderPage()
     expect(screen.getByTestId('session-stop-trigger')).toBeInTheDocument()
     expect(screen.getByTestId('session-stop-trigger')).toHaveAttribute('data-turn-state', 'executing')
-    expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
   })
 
-  it('keeps both Cancel and Stop hidden when no current turn is queued or executing', () => {
+  it('keeps Stop hidden when no current turn is queued or executing', () => {
     summary = baseSummary({ activity: 'idle', currentTurnId: null })
     renderPage()
-    expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
     expect(screen.queryByTestId('session-stop-trigger')).not.toBeInTheDocument()
   })
 
-  it('opens a confirmation dialog and dispatches the cancel command on confirm', () => {
+  it('opens a confirmation dialog and dispatches the stop command for a queued Turn', () => {
     summary = baseSummary({
       activity: 'active',
       currentTurnId: 'turn-queued',
@@ -270,16 +266,16 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     })
     renderPage()
     act(() => {
-      fireEvent.click(screen.getByTestId('session-cancel-trigger'))
+      fireEvent.click(screen.getByTestId('session-stop-trigger'))
     })
-    const alert = screen.getByTestId('session-cancel-alert')
-    expect(alert).toHaveTextContent('Cancel this Turn?')
-    const confirmButton = screen.getByTestId('session-cancel-alert-confirm')
-    expect(confirmButton).toHaveTextContent(/Cancel Turn/i)
+    const alert = screen.getByTestId('session-stop-alert')
+    expect(alert).toHaveTextContent('Stop this Turn?')
+    const confirmButton = screen.getByTestId('session-stop-alert-confirm')
+    expect(confirmButton).toHaveTextContent(/Stop Turn/i)
     act(() => {
       fireEvent.click(confirmButton)
     })
-    expect(turnControlCalls).toEqual([{ sessionId: 'session-1', turnId: 'turn-queued', operation: 'cancel' }])
+    expect(turnControlCalls).toEqual([{ sessionId: 'session-1', turnId: 'turn-queued' }])
   })
 
   it('shows the Stop Turn confirmation dialog with the stop-requested acknowledgement', () => {
@@ -293,14 +289,14 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     act(() => {
       fireEvent.click(screen.getByTestId('session-stop-trigger'))
     })
-    const alert = screen.getByTestId('session-cancel-alert')
+    const alert = screen.getByTestId('session-stop-alert')
     expect(alert).toHaveTextContent('Stop this Turn?')
     expect(alert).toHaveTextContent(/may be unknown/i)
     act(() => {
-      fireEvent.click(screen.getByTestId('session-cancel-alert-confirm'))
+    fireEvent.click(screen.getByTestId('session-stop-alert-confirm'))
     })
-    expect(turnControlCalls).toEqual([{ sessionId: 'session-1', turnId: 'turn-running', operation: 'stop' }])
-    expect(screen.getByTestId('session-cancel-result')).toHaveTextContent(/stop-requested/i)
+    expect(turnControlCalls).toEqual([{ sessionId: 'session-1', turnId: 'turn-running' }])
+    expect(screen.getByTestId('session-stop-result')).toHaveTextContent(/stop-requested/i)
   })
 
   it('gates Compact and Reset off while a queued or executing turn is in flight', () => {

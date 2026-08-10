@@ -142,10 +142,34 @@ stack must never form a cycle:
 These paths form a business loop, but each call stack has one direction and each commit still
 contains exactly one aggregate.
 
+## Session Ends Bound Workflow Work
+
+```text diagram
+Session settles an active Turn with a non-success terminal outcome
+  Session -> WorkflowRun.AbandonActiveWork(runnerId, workId, reason)
+               |
+               +-- transaction: WorkflowRun state
+```
+
+A Workflow-origin Session is bound to one WorkflowRun work item by `(runnerId, workId)`. When the
+Session's active Turn settles with a non-success terminal outcome — an intended stop recorded
+`Cancelled`, or a Runtime-reported failure — Session synchronously abandons that bound active work
+with the settlement reason. The command enters exactly one WorkflowRun transaction and carries the
+frozen identities recorded at settlement, so a late or replayed command cannot abandon work that
+appeared later.
+
+WorkflowRun never calls Session back synchronously from this command; each call stack keeps one
+direction under
+[Synchronous Direction and Asynchronous Closure](#synchronous-direction-and-asynchronous-closure).
+If the command result is lost after the Session settlement committed, replaying the same settlement
+operation re-issues the same abandon; the WorkflowRun command is idempotent on its frozen
+`(runnerId, workId)`.
+
 ## Other Interactions
 
 ```text diagram
 Issue -> Cancel -> WorkflowRun
+Session -> AbandonActiveWork -> WorkflowRun
 Runner --[RunnerDisconnected]--> Session (fails affected sessions)
 
 WorkflowRun: Pause, Resume, Approve, Reject, Retry, Rerun

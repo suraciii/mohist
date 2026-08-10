@@ -182,7 +182,7 @@ forget directory for this Server generation
 ```
 
 The boundary remains held through confirmed disposal, so a Prompt, Follow-up,
-Cancel, Compact, Reset, or Session query cannot race it. A later real request
+Stop, Compact, Reset, or Session query cannot race it. A later real request
 records the directory again. Disposal releases process resources only: it does
 not delete the physical Session, AgentSession, binding, transcript, or disk
 Workspace, and it does not synthesize idle or closed Session state.
@@ -428,7 +428,7 @@ or replace it with a new reservation.
 | Follow-up | Uses native asynchronous input. Active execution receives it at an iteration boundary; idle execution starts after binding preparation. Acceptance returns immediately, and completion remains event-driven. Active or unknown state never triggers binding replacement. |
 | Compact | Allowed only while idle. Uses native compaction with the current model, keeps the physical Session and logical Session identity, and fails actionably when no current model is known. |
 | Reset | Allowed only while idle. Creates an empty physical Session in the same directory, then replaces the complete expected binding. A definitely missing old Session may skip model inheritance; every other read failure remains explicit. |
-| Cancel | Requests interruption of the current execution. Success requires the same stop-confirmation rule used by deadline and provider-error handling; request acceptance alone does not prove execution stopped. |
+| Stop | Requests interruption of the current execution. Success requires the same stop-confirmation rule used by deadline and provider-error handling; request acceptance alone does not prove execution stopped. |
 
 Every command carries the complete expected binding. A replacement is applied only
 if that tuple is still current, so a stale Reset cannot overwrite newer state.

@@ -110,7 +110,7 @@ Temporary loss of the parent's execution environment may be retried with the
 same key. Mohist rejects the delegation when the parent has no inheritable
 working directory, the target is outside the declared scope, the target Needs
 setup, or the target is archived. After acceptance, the child is ordinary work:
-later parent changes do not rewrite its history, and stop or cancel follows the
+later parent changes do not rewrite its history, and stop follows the
 normal child lifecycle. See [Subagent Design](../design/subagents.md) for the
 concurrency and recovery protocol behind this guarantee.
 
@@ -173,9 +173,10 @@ Sessions added or detached during pagination appear only in a new read.
 ## Lifecycle
 
 - **Cascade stop**: Stopping a session stops active work throughout the subtree
-  still attached below it at that time. The sessions remain and can be
-  continued explicitly later. An unconfirmed stop result is shown accurately
-  and can be retried.
+  still attached below it at that time. A queued Turn ends locally; a running
+  Turn ends after Runtime confirmation; both are recorded cancelled. The
+  sessions remain and can be continued explicitly later. An unconfirmed stop
+  result is shown accurately and can be retried.
 
   When stop, attachment of a new child, and detach occur concurrently, the
   operation that actually completes first determines scope. A subtree detached

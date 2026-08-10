@@ -20,7 +20,7 @@ namespace Mohist.Server.Api;
 /// <remarks>
 /// The older <c>GET .../agent-sessions/{sessionId}</c> route stays for the
 /// agent-launch transcript link until the CLI migrates onto this
-/// unified surface. Follow-up / cancel already resolve canonically by id for
+/// unified surface. Follow-up / stop already resolve canonically by id for
 /// both sources and are unchanged here.
 /// </remarks>
 public static class UnifiedSessionRoutes

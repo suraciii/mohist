@@ -120,8 +120,8 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.ProjectWorkflowProfile:
                 RenderProjectWorkflowProfile(data);
                 break;
-            case MohistCliApi.TableShape.AgentSessionCancel:
-                RenderAgentSessionCancel(data);
+            case MohistCliApi.TableShape.AgentSessionStop:
+                RenderAgentSessionStop(data);
                 break;
             case MohistCliApi.TableShape.AgentSessionList:
                 RenderAgentSessionList(data);
@@ -152,9 +152,6 @@ internal sealed partial class TableRenderer
                 break;
             case MohistCliApi.TableShape.SessionFollowup:
                 RenderSessionFollowup(data);
-                break;
-            case MohistCliApi.TableShape.SessionCancel:
-                RenderSessionCancel(data);
                 break;
             case MohistCliApi.TableShape.SessionStop:
                 RenderSessionStop(data);

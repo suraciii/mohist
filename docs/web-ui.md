@@ -185,8 +185,8 @@ The page also supports:
 - Model, usage, compaction records, and current Activity.
 - Follow-up that joins the current execution while active or starts a new
   execution while idle.
-- Cancellation of a queued Turn or requested stop of an active Turn. An
-  uncertain stop remains explicitly Unknown.
+- Stop of a queued or active Turn. An uncertain stop remains explicitly
+  Unknown.
 - Compact through the current backend's native capability.
 - Reset so later input continues from empty Runtime context while recorded
   conversation content remains.
