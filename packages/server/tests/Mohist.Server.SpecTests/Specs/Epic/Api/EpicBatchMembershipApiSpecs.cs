@@ -367,19 +367,50 @@ public class EpicBatchMembershipApiSpecs
     }
 
     [Fact]
-    public async Task SingleLinkEndpoint_RemainsUnchanged_AfterBatchEndpointAdded()
+    public async Task SingleLinkEndpoint_ReturnsCanonicalBatchMembershipOutcome()
     {
         var project = await CreateProjectAsync();
         var epic = await CreateEpicAsync(project.Id, "single-link");
         var issue = await CreateIssueAsync(project.Id, "single");
 
-        await _client.PostOkAsync(
+        using var response = await _client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/epics/{epic.Number}/issues",
             new { issueNumber = issue.Number });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var envelope = await ReadEnvelopeAsync(response);
+        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
+        var outcome = Assert.Single(results.EnumerateArray());
+        Assert.Equal(issue.Number.ToString(), outcome.GetProperty("identifier").GetString());
+        Assert.Equal("linked", outcome.GetProperty("status").GetString());
+        Assert.Equal(issue.Number, outcome.GetProperty("issueNumber").GetInt32());
 
         var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Number}");
         Assert.Single(detail.LinkedIssues);
         Assert.Equal(issue.Number, detail.LinkedIssues[0].Number);
+    }
+
+    [Fact]
+    public async Task SingleUnlinkEndpoint_ReturnsCanonicalBatchMembershipOutcome()
+    {
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "single-unlink");
+        var issue = await CreateIssueAsync(project.Id, "single");
+        await LinkIssueAsync(project.Id, epic, issue);
+
+        using var response = await _client.DeleteAsync(
+            $"/api/projects/{project.Id}/epics/{epic.Number}/issues/{issue.Number}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var envelope = await ReadEnvelopeAsync(response);
+        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
+        var outcome = Assert.Single(results.EnumerateArray());
+        Assert.Equal(issue.Number.ToString(), outcome.GetProperty("identifier").GetString());
+        Assert.Equal("unlinked", outcome.GetProperty("status").GetString());
+        Assert.Equal(issue.Number, outcome.GetProperty("issueNumber").GetInt32());
+
+        var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Number}");
+        Assert.Empty(detail.LinkedIssues);
     }
 
     private async Task<ProjectDto> CreateProjectAsync()

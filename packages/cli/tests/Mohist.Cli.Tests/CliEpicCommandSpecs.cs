@@ -173,7 +173,7 @@ public class CliEpicCommandSpecs
     }
 
     [Fact]
-    public async Task EpicLink_TableSuccess_RendersLinkedMembershipOutcome()
+    public async Task EpicLink_SingleRouteCanonicalResource_RendersLinkedMembershipOutcome()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -194,7 +194,9 @@ public class CliEpicCommandSpecs
         Assert.Equal(0, exitCode);
         Assert.Contains("Linked issue #5", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(error.ToString());
-        Assert.Single(handler.Requests);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/issues", request.RequestUri?.PathAndQuery);
     }
 
     [Fact]
