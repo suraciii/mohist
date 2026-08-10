@@ -190,4 +190,56 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
         Assert.True(reservation.StartsIdleTurn);
         await session.AbandonFollowupAsync(reservation.OperationId!);
     }
+
+    [Fact]
+    public async Task RuntimeSettlement_OnlyAbandonsForANewNonSuccessTurn()
+    {
+        _fixture.WorkPort.Reset();
+
+        var sessionId = $"session-work-settlement-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-work-settlement",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/work-settlement",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = "project-work-settlement",
+                [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+                [AgentSessionQueryMetadataKeys.WorkflowRunId] = "workflow-work-settlement",
+                [AgentSessionQueryMetadataKeys.SessionName] = "session-work-settlement",
+                [AgentSessionQueryMetadataKeys.WorkId] = "work-work-settlement",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+        await session.AttachPhysicalSessionAsync(
+            new AttachPhysicalSessionCommand("runtime-work-settlement", WorkDir: "/tmp/work-settlement"));
+
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-work-settlement-1",
+            "turn-work-settlement-1",
+            "first follow up",
+            "generic-followup"));
+        await session.MarkTurnExecutingAsync("turn-work-settlement-1");
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"idle\",\"status\":\"failed\",\"turnId\":\"turn-work-settlement-1\"}") },
+            "runtime-work-settlement"));
+
+        Assert.Single(_fixture.WorkPort.Requests);
+
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-work-settlement-2",
+            "turn-work-settlement-2",
+            "second follow up",
+            "generic-followup"));
+        await session.MarkTurnExecutingAsync("turn-work-settlement-2");
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"active\",\"status\":\"running\",\"turnId\":\"turn-work-settlement-2\"}") },
+            "runtime-work-settlement"));
+
+        Assert.Single(_fixture.WorkPort.Requests);
+    }
 }

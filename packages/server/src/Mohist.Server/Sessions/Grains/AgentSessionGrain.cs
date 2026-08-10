@@ -1879,16 +1879,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             events.AddRange(domainEvents);
             SettleStopClaimFromRuntimeEvent(session, e);
 
-            if ((e.Type is RuntimeEventTypes.SessionActivity or RuntimeEventTypes.TurnFailed)
-                && (session.Status.Turns?.Any(turn =>
-                    string.IsNullOrWhiteSpace(turn.JobId)
-                    && (turn.Status is AgentTurnStatus.Failed or AgentTurnStatus.Cancelled or AgentTurnStatus.Unknown)) ?? false)
-                && string.Equals(
-                    session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind),
-                    "workflow",
-                    StringComparison.Ordinal))
-                workflowSettlement = true;
-
             if (e.Type == RuntimeEventTypes.SessionInput)
             {
                 var inputPayload = SafeDeserialize(e.PayloadJson);
@@ -1964,6 +1954,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
                 }
             }
         }
+
+        workflowSettlement = string.Equals(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind),
+                "workflow",
+                StringComparison.Ordinal)
+            && HasNewNonSuccessTurnSettlement(session, turnStatusBefore);
 
         _lastHealthStatus = previousHealth;
         _lastHealthPercent = previousUsagePercent;
@@ -3580,6 +3576,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         return turns
             .Where(t => string.IsNullOrWhiteSpace(t.JobId))
             .ToDictionary(t => t.Id, t => t.Status);
+    }
+
+    private static bool HasNewNonSuccessTurnSettlement(
+        AgentSession session,
+        IReadOnlyDictionary<string, AgentTurnStatus> before)
+    {
+        var turns = session.Status.Turns;
+        if (turns is null || turns.Count == 0) return false;
+
+        return turns.Any(turn =>
+            string.IsNullOrWhiteSpace(turn.JobId)
+            && turn.Status is AgentTurnStatus.Failed or AgentTurnStatus.Cancelled or AgentTurnStatus.Unknown
+            && (!before.TryGetValue(turn.Id, out var prior)
+                || prior is not (AgentTurnStatus.Failed or AgentTurnStatus.Cancelled or AgentTurnStatus.Unknown)));
     }
 
     private async Task TryEmitFollowupTerminalDeliveriesAsync(
