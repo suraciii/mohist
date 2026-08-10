@@ -202,13 +202,17 @@ function transportErrorCode(value: unknown): string | undefined {
   return undefined
 }
 
-export function normalizeAbortUnconfirmed(message: string, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
+export function normalizeAbortUnconfirmed(
+  message: string,
+  diagnostics: readonly RuntimeDiagnostic[] = [],
+  diagnosticCode: "abort-unconfirmed" | "abort-cleanup-timeout" | "status-cleanup-timeout" = "abort-unconfirmed",
+): RuntimeError {
   return {
     kind: "turn-failed",
-    message: "OpenCode turn could not be confirmed stopped",
+    message: `OpenCode turn could not be confirmed stopped: ${message}`,
     diagnostics: [
       ...diagnostics,
-      { severity: "error", code: "abort-unconfirmed", message },
+      { severity: "error", code: diagnosticCode, message },
     ],
   }
 }
