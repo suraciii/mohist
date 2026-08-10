@@ -172,4 +172,7 @@ public sealed record IssueCommentResult(
     [property: Id(0)] string Id,
     [property: Id(1)] string Body,
     [property: Id(2)] string? Author,
-    [property: Id(3)] string? DisplayName);
+    [property: Id(3)] string? DisplayName,
+    [property: Id(4)] string ProjectId,
+    [property: Id(5)] int IssueNumber,
+    [property: Id(6)] string CreatedAt);

@@ -32,6 +32,49 @@ public class CliIssueCommentSpecs
     }
 
     [Fact]
+    public async Task IssueCommentAdd_JsonOutputProjectsCanonicalCommentFields()
+    {
+        const string createdAt = "2026-08-10T12:34:56.0000000+00:00";
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        id = "comment_42",
+                        projectId = "proj_abc",
+                        issueNumber = 42,
+                        body = "Looks good",
+                        author = "service",
+                        displayName = "Ada Lovelace",
+                        createdAt,
+                    },
+                }, HttpStatusCode.Created)
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "comment", "create", "42", "--display-name", "Ada Lovelace", "--body", "Looks good", "--json", "id,projectId,issueNumber,body,createdAt,author,displayName"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var result = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal("comment_42", result["id"]?.GetValue<string>());
+        Assert.Equal("proj_abc", result["projectId"]?.GetValue<string>());
+        Assert.Equal(42, result["issueNumber"]?.GetValue<int>());
+        Assert.Equal("Looks good", result["body"]?.GetValue<string>());
+        Assert.Equal("service", result["author"]?.GetValue<string>());
+        Assert.Equal("Ada Lovelace", result["displayName"]?.GetValue<string>());
+        Assert.Equal(createdAt, result["createdAt"]?.GetValue<string>());
+        Assert.Empty(error.ToString());
+        Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
     public async Task IssueCommentAdd_FromFile_ReadsFileAndSendsContentsAsBody()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>

@@ -39,6 +39,8 @@ public class IssueCommentGrainSpecs
 
         var result = await grain.AddCommentAsync("  Ada Lovelace  ", null, "Looks good");
 
+        Assert.Equal(projectId, result.ProjectId);
+        Assert.Equal(issueNumber, result.IssueNumber);
         Assert.Equal("Ada Lovelace", result.Author);
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var row = await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
@@ -48,6 +50,7 @@ public class IssueCommentGrainSpecs
         Assert.Equal(issueNumber, row.IssueNumber);
         Assert.Equal("Ada Lovelace", row.Author);
         Assert.Equal("Looks good", row.Body);
+        Assert.Equal(row.CreatedAt.ToString("o"), result.CreatedAt);
     }
 
     [Theory]
