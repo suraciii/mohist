@@ -52,6 +52,8 @@ When a last verified release exists, a failed candidate transaction SHALL restor
 #### Scenario: Restored runtime cannot be verified
 - **WHEN** candidate verification fails and the previous release cannot be started or its identity cannot be read
 - **THEN** the update remains failed
+- **AND** candidate services are stopped or disabled
+- **AND** `active.json` is atomically replaced with `status: "none"` and no target set while the transaction and candidate paths are retained for diagnosis
 - **AND** output reports that recovery itself could not verify the previous release
 - **AND** no success result is emitted
 
@@ -62,6 +64,7 @@ If no last verified release exists, a failed candidate SHALL be stopped or preve
 - **WHEN** no verified release exists and the first candidate starts but fails identity verification
 - **THEN** the candidate service is stopped or prevented from remaining active
 - **AND** the candidate is removed from the active managed target
+- **AND** `active.json` has `status: "none"` and no target set
 - **AND** the command reports that no verified runtime is available
 
 #### Scenario: First installation fails before activation
@@ -78,13 +81,36 @@ If the CLI is replaced before the Server and Runner transaction completes, the c
 - **AND** it reports the candidate failure and recovery outcome
 - **AND** it does not exit with a success result merely because the CLI replacement succeeded
 
+### Requirement: Bootstrap legacy CLI installations before managed self-update
+An installed CLI that cannot read or write the managed transaction record SHALL return `bootstrap_required` before replacing its executable, stopping a service, or changing `active.json`. The bootstrap instruction SHALL identify the supported current CLI installation operation. The bootstrap operation SHALL install the stable launcher, recovery CLI slot, fixed runtime-root metadata, and transaction schema without claiming the legacy source-bound runtime as verified. A managed self-update SHALL begin only after the new CLI persists `Prepared` with a recovery path that remains runnable if the candidate slot is invalid.
+
+#### Scenario: Legacy CLI fails closed before mutation
+- **WHEN** a pre-transaction CLI invokes `mo update`
+- **THEN** it reports `bootstrap_required` and the supported bootstrap action
+- **AND** it does not replace the CLI, stop or restart a service, or modify `active.json`
+
+#### Scenario: Candidate CLI crash uses the recovery slot
+- **WHEN** a managed transaction crashes before or after replacing the candidate CLI slot
+- **THEN** the stable launcher invokes the recorded recovery CLI slot rather than the candidate slot
+- **AND** reconciliation restores or quarantines the target set without recursively executing the unverified candidate
+
 ### Requirement: Keep managed-runtime mutation in the CLI transaction
-The Server web-update mutation endpoint SHALL not build artifacts, change service targets, replace a CLI slot, or start/stop a managed service. `POST /api/system/update` SHALL reject direct mutation with HTTP `409 Conflict` and a machine-readable `UpdateMutationOwnedByCli` outcome that directs the caller to the local CLI transaction. Server status and outcome read surfaces MAY project the CLI transaction, but they SHALL not create a successful update result without the CLI-owned candidate activation and required identity verification.
+The Server web-update service SHALL not build artifacts, change service targets, replace a CLI slot, start/stop a managed service, or advance a persisted web job. `POST /api/system/update` SHALL reject direct mutation with HTTP `409 Conflict` and a machine-readable `UpdateMutationOwnedByCli` outcome that directs the caller to the local CLI transaction. `GET /api/system/update/status` and `GET /api/system/consistency` SHALL be side-effect-free projections; they SHALL not resume stale web jobs or create a successful update result without the CLI-owned candidate activation and required identity verification. Persisted `running` or `waiting-for-reconnect` web jobs SHALL be marked rejected on Server startup and SHALL not be resumed.
 
 #### Scenario: Web update mutation is rejected
 - **WHEN** a caller invokes `POST /api/system/update`
 - **THEN** the Server returns HTTP `409 Conflict` with `UpdateMutationOwnedByCli`
 - **AND** no build, service restart, active-target change, or CLI-slot change occurs
+
+#### Scenario: Web status does not advance a stale job
+- **WHEN** a caller reads `/api/system/update/status` while a persisted web job is `running` or `waiting-for-reconnect`
+- **THEN** the Server returns the rejected/projection state
+- **AND** it does not build, restart, acquire an update lock, or mark the job successful
+
+#### Scenario: Server startup quarantines a legacy web job
+- **WHEN** the Server starts with a nonterminal web-owned update job
+- **THEN** it atomically marks the job rejected with `UpdateMutationOwnedByCli` and releases the web lock
+- **AND** no background update task is resumed
 
 #### Scenario: Web status projects a CLI transaction
 - **WHEN** the CLI owns an update transaction and the Server status surface is queried

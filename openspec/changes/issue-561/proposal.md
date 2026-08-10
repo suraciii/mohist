@@ -10,14 +10,15 @@
 - Verify a structured runtime identity from the running CLI, Server, and Runner against the candidate manifest before declaring success. Build or restart success alone is insufficient; a mismatch or unavailable required identity fails the update and emits no success result.
 - Treat activation and verification as a recoverable update transaction with one atomic active-target record and crash reconciliation. Preserve the last verified runtime and service target on failure, stop or remove an unverified candidate when no verified version exists, clear the active target after unrecoverable rollback, and report the expected version, observed version, and an actionable recovery result.
 - Keep the CLI transaction as the only managed-runtime mutator. The Server web-update endpoint and status advancement become read/report-only surfaces that reject or quarantine direct builds and service restarts rather than bypassing the transaction.
+- Use deterministic per-user managed runtime roots on Linux and Windows, include the Runner's production dependency closure in each release, and require a fail-closed `bootstrap_required` handoff before a legacy CLI can enter the managed transaction.
 - Keep default-root and explicit-root updates distinguishable in human output and dry-run previews. This change does not alter Agent model selection, provider fallback, or inference configuration.
 
 ## Capabilities
 
 - `update-source-identity`: The selected `--repo-root` and its resolved source identity are authoritative for the entire update, including CLI continuation, Server, Runner, and target/actual reporting.
-- `managed-runtime-artifacts`: Server and Runner builds are installed as stable versioned artifacts, and managed service targets activate those artifacts without reading an implicit source worktree.
-- `update-runtime-consistency`: Running CLI, Server, and Runner identities are checked against the target before success; mismatches fail the update rather than being downgraded to a warning.
-- `update-runtime-recovery`: Candidate activation, verification failure, rollback to the last verified version, no-verified-version cleanup, and actionable recovery output form one bounded failure contract.
+- `managed-runtime-artifacts`: Server and Runner builds are installed as stable, self-contained versioned artifacts, and managed service targets activate those artifacts without reading an implicit source worktree.
+- `update-runtime-consistency`: Running CLI, Server, and Runner artifact-owned identities are checked against the canonical target and exact Runner connection before success; mismatches fail the update rather than being downgraded to a warning.
+- `update-runtime-recovery`: Candidate activation, verification failure, rollback/quarantine to a `status: "none"` target, legacy bootstrap, no-verified-version cleanup, and actionable recovery output form one bounded failure contract.
 
 ## Impact
 

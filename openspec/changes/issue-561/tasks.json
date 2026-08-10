@@ -39,7 +39,7 @@
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "ManagedRuntimeStore, RuntimeArtifactBuilder, RuntimeTarget activation APIs, release manifests, and platform installer coverage.",
+      "output": "ManagedRuntimeStore, RuntimeArtifactBuilder, RuntimeTargetSet activation APIs, release manifests, dependency closure, and platform installer coverage.",
       "dependsOn": ["T-001"],
       "passes": false,
       "notes": "Use versioned release directories and atomic metadata updates; do not overwrite the active artifact in place."
@@ -70,16 +70,16 @@
       "id": "T-004",
       "title": "Coordinate activation, commit, and rollback as one transaction",
       "spec": "specs/update-runtime-recovery/spec.md#treat-activation-and-verification-as-one-recoverable-transaction",
-      "description": "Implement RuntimeActivationCoordinator and RuntimeTransactionReconciler and integrate them with full and component-specific SourceCodeUpdater flows. Persist explicit transaction states and write-ahead target/slot snapshots, atomically publish complete active-target records, verify candidates, and recover deterministically after build, restart, identity, cancellation, crash, or CLI-continuation failures.",
+      "description": "Implement RuntimeActivationCoordinator and RuntimeTransactionReconciler and integrate them with full and component-specific SourceCodeUpdater flows. Persist explicit transaction states and write-ahead target/slot snapshots, atomically publish complete active-target records, verify candidates, and recover deterministically after build, restart, identity, cancellation, crash, bootstrap, or CLI-continuation failures.",
       "acceptanceCriteria": [
         "The transaction records Prepared, CandidateStaged, CandidateActivated, Verifying, Committed, RollingBack, RolledBack, NoVerifiedRuntime, or RecoveryFailed states with candidate and previous target-set, service-unit, CLI-slot, scope, and identity facts.",
         "A candidate that passes all required checks becomes the active last verified release; a build or installation failure before activation leaves the previous target unchanged.",
         "A post-activation failure restores and verifies the previous managed release and service targets when one exists, while the command still returns failure and does not print success.",
-        "When no verified release exists, the candidate is stopped or disabled, removed from the active target, and reported as no verified runtime; failed restoration reports recovery failure with an actionable next step.",
+        "When no verified release exists, the candidate is stopped or disabled, active.json is atomically set to status none with no target, and the result is reported as no verified runtime; failed restoration performs the same physical quarantine, preserves transaction/candidate paths for diagnosis, and reports recovery failure with an actionable next step.",
         "The complete candidate active-target record is published through one atomic file replacement only after CandidateStaged is durable; stable launchers resolve that record so partial Server/Runner unit writes cannot define a mixed full-update target set.",
-        "The reconciler runs before a new update and on managed startup, resolves every nonterminal record, rejects concurrent updates while one is unresolved, and bounds recovery/readiness polling with injected TimeProvider-driven deadlines.",
-        "CLI self-update continuation carries enough transaction state to recover after later failure, including a crash after CLI-slot replacement or partial service activation.",
-        "UpdateAll, CLI-only, Server-only, Runner-only, cancellation, build failure, readiness timeout, identity mismatch, kill points after Server/Runner unit and CLI-slot side effects, rollback success, rollback failure, crash reconciliation, and no-previous-release tests verify command order, service state, exit codes, and cleanup through fake boundaries."
+        "The reconciler runs before a new update and on managed startup, invokes the recorded recovery CLI slot rather than an unverified candidate, resolves every nonterminal record, rejects concurrent updates while one is unresolved, and bounds recovery/readiness polling with injected TimeProvider-driven deadlines.",
+        "A legacy CLI returns bootstrap_required without replacing itself or changing runtime state, while a bootstrapped transaction carries enough state to recover after a crash before or after candidate CLI-slot replacement or partial service activation.",
+        "UpdateAll, CLI-only, Server-only, Runner-only, cancellation, build failure, readiness timeout, identity mismatch, kill points after Server/Runner unit and CLI-slot side effects, rollback success, rollback failure with active-target quarantine, crash reconciliation, legacy bootstrap, and no-previous-release tests verify command order, service state, exit codes, and cleanup through fake boundaries."
       ],
       "priority": 4,
       "mode": "AFK",
@@ -93,16 +93,17 @@
       "id": "T-005",
       "title": "Report target, observed, and migration outcomes",
       "spec": "specs/update-runtime-consistency/spec.md#report-target-and-observed-identities-on-verification-failure",
-      "description": "Add a single UpdateReport/output contract for explicit/default source mode, target identity, observed identities, operation scope, failed stage, and recovery result. Reject the Server web mutation path, project authoritative CLI facts into server status/consistency surfaces, preserve non-mutating dry-run behavior, and document the breaking migration from source-bound service units.",
+      "description": "Add a single UpdateReport/output contract for explicit/default source mode, target identity, observed identities, operation scope, failed stage, and recovery result. Make the entire Server update surface projection-only, quarantine legacy web jobs, project authoritative CLI facts into server status/consistency surfaces, preserve non-mutating dry-run behavior, and document the breaking migration from source-bound service units.",
       "acceptanceCriteria": [
         "Successful output distinguishes default versus explicit source selection and shows the effective root and target revision/release identity.",
         "Failure output distinguishes unavailable from mismatched identities, names expected and observed values, reports the failed stage and recovery state, and never emits the normal success message.",
         "CLI outcome payloads and server update/consistency responses preserve target, observed, source-mode, and recovery facts without making server persistence authoritative for local activation.",
-        "POST `/api/system/update` returns HTTP 409 with `UpdateMutationOwnedByCli` and performs no build, restart, active-target, or CLI-slot mutation; server status remains a projection of CLI-owned transaction state.",
+        "POST `/api/system/update` returns HTTP 409 with `UpdateMutationOwnedByCli` and performs no build, restart, active-target, or CLI-slot mutation; GET status and consistency reads also perform no command, service, lock, or job-advancement side effect.",
+        "Persisted running or waiting-for-reconnect web jobs are marked rejected with `UpdateMutationOwnedByCli` on Server startup, their web lock is released, and no background web update is resumed.",
         "Output and tests implement the explicit matrix for `mo update`, `mo update cli`, `mo update server`, and `mo update runner`, including required identities, rollback scope, untouched components, and global versus component-scoped success claims.",
         "Dry-run output lists planned source, artifact, activation, and verification checks without building, mutating service targets, or claiming any runtime is verified.",
         "Legacy source-bound unit detection and operator guidance explain the supported managed-service migration, retained data/credentials, and manual recovery action for custom units.",
-        "Focused output, CLI outcome, server route/status, dry-run, migration-diagnostic, operation-matrix, and documentation checks assert exact failure/success semantics and preserve the existing fake-boundary test policy."
+        "Focused output, CLI outcome, server route/status/consistency, stale-job startup, dry-run, migration-diagnostic, operation-matrix, bootstrap, and documentation checks assert exact failure/success semantics and preserve the existing fake-boundary test policy."
       ],
       "priority": 5,
       "mode": "AFK",
