@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { isUnderRunnerRoot } from "./workspace-query.js"
-import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, withManagedWorkspacePath } from "./workspace.js"
+import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, withManagedWorkspaceHandle } from "./workspace.js"
 import { deleteDirectory } from "../system/process.js"
 import { runnerLogger } from "../system/logger.js"
 import type { CleanupPolicy } from "../core/types.js"
@@ -310,7 +310,7 @@ export class DefaultCleanupRunner implements CleanupRunner {
     if (!entry.runBranch) return false
     if (entry.workspacePath !== issueWorkspacePath(this.runnerRoot, entry.workflowRunId)) return false
     try {
-      return await withManagedWorkspacePath(this.runnerRoot, entry.workspacePath, true, async (workspacePath) => {
+      return await withManagedWorkspaceHandle(this.runnerRoot, entry.workspacePath, true, async (workspacePath) => {
         const markerRunId = await readMarkerWorkflowRunId(workspacePath)
         if (markerRunId !== entry.workflowRunId) return false
         return await operation(workspacePath)
