@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -11,6 +13,7 @@ namespace Mohist.Server.Infrastructure.Data.Runner;
 /// </summary>
 public class TaskLogStore
 {
+    private static readonly TaskLogAppendGateRegistry AppendGates = new();
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _time;
 
@@ -24,13 +27,9 @@ public class TaskLogStore
     /// Persists a single batch of entries for the given
     /// <paramref name="workId"/> directly to the dedicated store.
     /// Writes the batch metadata (truncation flag) in the same
-    /// transaction so the upload is atomic. Existing entry rows are
-    /// kept for incremental batches; terminal reconciliation batches
-    /// first remove persisted rows that are no longer in the runner's
-    /// retained snapshot. Incoming rows whose <c>Seq</c> is already
-    /// present are skipped so batches merge idempotently by sequence.
+    /// transaction so the upload is atomic.
     /// </summary>
-    public async Task AppendAsync(
+    public async Task<TaskLogAppendResult> AppendAsync(
         string ownerKind,
         string ownerId,
         string workId,
@@ -38,6 +37,28 @@ public class TaskLogStore
         bool truncated,
         bool terminal = false,
         CancellationToken ct = default)
+    {
+        var identity = new TaskLogIdentity(ownerKind, ownerId, workId);
+        using var gate = AppendGates.Acquire(identity);
+        await gate.Semaphore.WaitAsync(ct);
+        try
+        {
+            return await AppendCoreAsync(ownerKind, ownerId, workId, entries, truncated, terminal, ct);
+        }
+        finally
+        {
+            gate.Semaphore.Release();
+        }
+    }
+
+    private async Task<TaskLogAppendResult> AppendCoreAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        IReadOnlyList<TaskLogLine> entries,
+        bool truncated,
+        bool terminal,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(ownerKind))
             throw new ArgumentException("ownerKind must be provided", nameof(ownerKind));
@@ -49,27 +70,57 @@ public class TaskLogStore
         if (entries.Count > TaskLogUploadLimits.MaxEntries)
             throw new ArgumentException($"Too many task-log entries ({entries.Count}); max {TaskLogUploadLimits.MaxEntries}", nameof(entries));
         ValidateEntries(entries);
+        var terminalDigest = terminal ? ComputeTerminalDigest(entries) : null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
+        var existingBatch = await db.TaskLogBatches
+            .FirstOrDefaultAsync(b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId, ct);
+        if (existingBatch?.Terminal == true)
+        {
+            if (terminal
+                && string.Equals(existingBatch.TerminalDigest, terminalDigest, StringComparison.Ordinal)
+                && existingBatch.Truncated == truncated)
+            {
+                await transaction.CommitAsync(ct);
+                return TaskLogAppendResult.Duplicate;
+            }
+
+            await transaction.RollbackAsync(ct);
+            return TaskLogAppendResult.Conflict;
+        }
+
+        var existingRows = await db.TaskLogEntries
+            .Where(e => e.OwnerKind == ownerKind && e.OwnerId == ownerId && e.WorkId == workId)
+            .ToDictionaryAsync(e => e.Seq, ct);
+        var staleRows = new List<TaskLogEntryRow>();
         if (terminal)
         {
             var retainedSeqs = entries.Select(e => e.Seq).ToHashSet();
-            var staleRows = await db.TaskLogEntries
-                .Where(e => e.OwnerKind == ownerKind && e.OwnerId == ownerId && e.WorkId == workId)
-                .Where(e => !retainedSeqs.Contains(e.Seq))
-                .ToListAsync(ct);
+            staleRows = existingRows.Values.Where(e => !retainedSeqs.Contains(e.Seq)).ToList();
             db.TaskLogEntries.RemoveRange(staleRows);
+
+            foreach (var entry in entries)
+            {
+                if (existingRows.TryGetValue(entry.Seq, out var existingRow))
+                {
+                    existingRow.Timestamp = entry.Timestamp;
+                    existingRow.Source = entry.Source;
+                    existingRow.Text = entry.Text;
+                }
+            }
         }
 
-        var existingSeqs = await db.TaskLogEntries
-            .Where(e => e.OwnerKind == ownerKind && e.OwnerId == ownerId && e.WorkId == workId)
-            .Select(e => e.Seq)
-            .ToHashSetAsync(ct);
+        var newEntries = entries
+            .Where(e => !existingRows.ContainsKey(e.Seq))
+            .ToList();
+        var changed = staleRows.Count > 0
+            || newEntries.Count > 0
+            || existingBatch is null
+            || existingBatch.Truncated != truncated
+            || terminal;
 
-        var existingBatch = await db.TaskLogBatches
-            .FirstOrDefaultAsync(b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId, ct);
         if (existingBatch is null)
         {
             db.TaskLogBatches.Add(new TaskLogBatchRow
@@ -78,20 +129,25 @@ public class TaskLogStore
                 OwnerId = ownerId,
                 WorkId = workId,
                 Truncated = truncated,
+                Terminal = terminal,
+                TerminalDigest = terminalDigest,
                 UploadedAt = _time.GetUtcNow(),
             });
         }
-        else
+        else if (changed)
         {
             existingBatch.Truncated = truncated;
+            if (terminal)
+            {
+                existingBatch.Terminal = true;
+                existingBatch.TerminalDigest = terminalDigest;
+            }
             existingBatch.UploadedAt = _time.GetUtcNow();
         }
 
-        if (entries.Count > 0)
+        if (newEntries.Count > 0)
         {
-            var rows = entries
-                .Where(e => !existingSeqs.Contains(e.Seq))
-                .Select(e => new TaskLogEntryRow
+            db.TaskLogEntries.AddRange(newEntries.Select(e => new TaskLogEntryRow
                 {
                     OwnerKind = ownerKind,
                     OwnerId = ownerId,
@@ -100,12 +156,42 @@ public class TaskLogStore
                     Timestamp = e.Timestamp,
                     Source = e.Source,
                     Text = e.Text,
-                });
-            db.TaskLogEntries.AddRange(rows);
+                }));
         }
 
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        try
+        {
+            if (changed)
+                await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return changed ? TaskLogAppendResult.Changed : TaskLogAppendResult.Duplicate;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            var conflict = await ReadCommittedTerminalReceiptAsync(
+                ownerKind,
+                ownerId,
+                workId,
+                terminalDigest,
+                truncated);
+            if (conflict.HasValue)
+                return conflict.Value;
+            throw;
+        }
+        catch (DbUpdateException)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            var conflict = await ReadCommittedTerminalReceiptAsync(
+                ownerKind,
+                ownerId,
+                workId,
+                terminalDigest,
+                truncated);
+            if (conflict.HasValue)
+                return conflict.Value;
+            throw;
+        }
     }
 
     /// <summary>
@@ -204,4 +290,38 @@ public class TaskLogStore
             previous = entry.Seq;
         }
     }
+
+    private static string ComputeTerminalDigest(IReadOnlyList<TaskLogLine> entries)
+    {
+        var payload = entries.Select(entry => new
+        {
+            entry.Seq,
+            entry.Timestamp,
+            entry.Source,
+            entry.Text,
+        });
+        return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(payload)));
+    }
+
+    private async Task<TaskLogAppendResult?> ReadCommittedTerminalReceiptAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? terminalDigest,
+        bool truncated)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(CancellationToken.None);
+        var batch = await db.TaskLogBatches.AsNoTracking()
+            .FirstOrDefaultAsync(
+                b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId,
+                CancellationToken.None);
+        if (batch?.Terminal != true)
+            return null;
+
+        return string.Equals(batch.TerminalDigest, terminalDigest, StringComparison.Ordinal)
+            && batch.Truncated == truncated
+            ? TaskLogAppendResult.Duplicate
+            : TaskLogAppendResult.Conflict;
+    }
+
 }

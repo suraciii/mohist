@@ -63,7 +63,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             entries,
             truncated: false);
 
-        Assert.True(ok);
+        Assert.Equal(TaskLogAppendResult.Changed, ok);
         Assert.NotEmpty(publisher.Published); // publisher WAS called
 
         var page = await _store.QueryAsync(
@@ -92,7 +92,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             entries,
             truncated: true);
 
-        Assert.True(ok);
+        Assert.Equal(TaskLogAppendResult.Changed, ok);
         Assert.Single(publisher.Published);
 
         var page = await _store.QueryAsync(
@@ -122,7 +122,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             entries,
             truncated: false);
 
-        Assert.True(ok);
+        Assert.Equal(TaskLogAppendResult.Changed, ok);
         Assert.Single(publisher.Published);
         Assert.Equal("owner-1", publisher.Published[0].OwnerId);
         Assert.Equal("work-3", publisher.Published[0].WorkId);
@@ -135,11 +135,8 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_WorkItemTerminal_PersistenceIsBypassed_NoPublish()
+    public async Task AppendAsync_NonTerminalBatchAfterAgentWorkSettles_ReturnsNotFoundAndIsNotPersisted()
     {
-        // Phase 1 contract: a non-Outstanding work item (e.g. a
-        // Completed / Failed one) is rejected BEFORE any
-        // persistence or publish attempt.
         await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.AgentJob, "owner-1", "work-4");
         await using (var db = new MohistDbContext(_database.Options))
         {
@@ -157,9 +154,107 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             "owner-1",
             "work-4",
             NewEntries(1, 1),
-            truncated: false);
+            truncated: false,
+            terminal: false);
 
-        Assert.False(ok);
+        Assert.Equal(TaskLogAppendResult.NotFound, ok);
+        Assert.Empty(publisher.Published);
+        var page = await _store.QueryAsync(
+            TaskLogOwnershipKinds.AgentJob,
+            "owner-1",
+            "work-4",
+            afterSeq: null,
+            limit: null,
+            default);
+        Assert.Empty(page.Lines);
+
+        var ledger = await _agentJobs.LoadLedgerAsync("owner-1");
+        Assert.NotNull(ledger);
+        Assert.Contains("\"status\":\"completed\"", ledger!.StateJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AppendAsync_TerminalBatchIsAcceptedAfterAgentWorkSettles()
+    {
+        await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.AgentJob, "owner-1", "work-terminal");
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var row = await db.AgentJobs.SingleAsync(r => r.JobKey == "owner-1");
+            row.State = "{\"status\":\"completed\",\"runnerId\":\"runner-A\",\"workId\":\"work-terminal\"}";
+            await db.SaveChangesAsync();
+        }
+
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+        var entries = NewEntries(1, 2);
+
+        var accepted = await service.AppendAsync(
+            "runner-A",
+            TaskLogOwnershipKinds.AgentJob,
+            "owner-1",
+            "work-terminal",
+            entries,
+            truncated: false,
+            terminal: true);
+        var duplicate = await service.AppendAsync(
+            "runner-A",
+            TaskLogOwnershipKinds.AgentJob,
+            "owner-1",
+            "work-terminal",
+            entries,
+            truncated: false,
+            terminal: true);
+        var different = await service.AppendAsync(
+            "runner-A",
+            TaskLogOwnershipKinds.AgentJob,
+            "owner-1",
+            "work-terminal",
+            NewEntries(2, 1),
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.Changed, accepted);
+        Assert.Equal(TaskLogAppendResult.Duplicate, duplicate);
+        Assert.Equal(TaskLogAppendResult.Conflict, different);
+        Assert.Single(publisher.Published);
+        var page = await _store.QueryAsync(
+            TaskLogOwnershipKinds.AgentJob,
+            "owner-1",
+            "work-terminal",
+            afterSeq: null,
+            limit: null,
+            default);
+        Assert.Equal([1, 2], page.Lines.Select(line => line.Seq).ToArray());
+
+        var ledger = await _agentJobs.LoadLedgerAsync("owner-1");
+        Assert.NotNull(ledger);
+        Assert.Contains("\"status\":\"completed\"", ledger!.StateJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AppendAsync_TerminalBatchFromAnotherRunnerReturnsNotFound()
+    {
+        await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.AgentJob, "owner-1", "work-terminal-owner");
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var row = await db.AgentJobs.SingleAsync(r => r.JobKey == "owner-1");
+            row.State = "{\"status\":\"completed\",\"runnerId\":\"runner-A\",\"workId\":\"work-terminal-owner\"}";
+            await db.SaveChangesAsync();
+        }
+
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+
+        var accepted = await service.AppendAsync(
+            "runner-B",
+            TaskLogOwnershipKinds.AgentJob,
+            "owner-1",
+            "work-terminal-owner",
+            NewEntries(1, 1),
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.NotFound, accepted);
         Assert.Empty(publisher.Published);
     }
 
@@ -226,8 +321,8 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             "runner-A", TaskLogOwnershipKinds.Workflow, "wf-missing-first", "w-late",
             NewEntries(2, 1), truncated: false);
 
-        Assert.False(beforeActivation);
-        Assert.True(afterActivation);
+        Assert.Equal(TaskLogAppendResult.NotFound, beforeActivation);
+        Assert.Equal(TaskLogAppendResult.Changed, afterActivation);
         var envelope = Assert.Single(publisher.Published);
         Assert.Equal("task-late", envelope.TaskId);
     }
@@ -243,7 +338,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             "runner-B", TaskLogOwnershipKinds.Workflow, "wf-owned", "w-1",
             NewEntries(1, 1), truncated: false);
 
-        Assert.False(ok);
+        Assert.Equal(TaskLogAppendResult.NotFound, ok);
         Assert.Empty(publisher.Published);
     }
 
@@ -278,7 +373,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             "runner-A", TaskLogOwnershipKinds.Workflow, "wf-unmapped", workId,
             NewEntries(1, 1), truncated: false);
 
-        Assert.True(ok);
+        Assert.Equal(TaskLogAppendResult.Changed, ok);
         var envelope = Assert.Single(publisher.Published);
         Assert.Null(envelope.TaskId);
         Assert.Null(envelope.ProjectId);

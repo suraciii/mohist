@@ -1800,6 +1800,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.OwnerKind).HasMaxLength(16).IsRequired();
             entity.Property(e => e.OwnerId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Terminal).IsRequired().IsConcurrencyToken();
+            entity.Property(e => e.TerminalDigest).HasMaxLength(64);
             entity.Property(e => e.UploadedAt).IsRequired();
         });
 

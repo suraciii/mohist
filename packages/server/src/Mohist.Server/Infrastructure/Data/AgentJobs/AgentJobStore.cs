@@ -76,6 +76,12 @@ public interface IAgentJobStore
         string runnerId,
         CancellationToken ct = default);
 
+    Task<bool> IsTerminalWorkAsync(
+        string jobKey,
+        string runnerId,
+        string workId,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Returns assigned-pending work for a runner ordered by ReadySince
     /// ASC. The claim path uses this for poll-time claims that should
@@ -319,6 +325,29 @@ public class AgentJobStore : IAgentJobStore
 
         var rows = await ProjectRows(query, includeSubagentTreeFields, ct);
         return rows.Select(ToRecord).ToList();
+    }
+
+    public async Task<bool> IsTerminalWorkAsync(
+        string jobKey,
+        string runnerId,
+        string workId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(jobKey)
+            || string.IsNullOrWhiteSpace(runnerId)
+            || string.IsNullOrWhiteSpace(workId))
+            return false;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.AgentJobs.AsNoTracking()
+            .Where(r => r.JobKey == jobKey)
+            .Select(r => new { r.Status, r.AssignedRunnerId, r.WorkId })
+            .SingleOrDefaultAsync(ct);
+
+        return row is not null
+            && string.Equals(row.AssignedRunnerId, runnerId, StringComparison.Ordinal)
+            && string.Equals(row.WorkId, workId, StringComparison.Ordinal)
+            && row.Status is "completed" or "failed" or "cancelled";
     }
 
     public async Task<IReadOnlyList<AgentJobLedgerRecord>> ListAssignedPendingForRunnerAsync(
