@@ -155,6 +155,15 @@ internal sealed class UpdateOperations
         if (buildExit != 0)
             return buildExit;
 
+        var interruption = await runnerRefreshVerifier.InterruptRunnerAsync(cancellationToken);
+        if (!interruption.Succeeded)
+        {
+            _err.WriteLine($"Runner update interrupt: status=unconfirmed ({interruption.Error ?? "invalid response"}); runner service was not restarted.");
+            return 1;
+        }
+
+        _out.WriteLine(
+            $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
         _out.WriteLine("Runner updated successfully.");
 
         var restart = await _systemd.RestartRunnerAsync(new ServiceCommandOptions(false, null, 100, false));
@@ -168,6 +177,8 @@ internal sealed class UpdateOperations
 
         var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(root);
         outcome.WriteSummary(_out, _err);
+        if (outcome.ExitCode != 0)
+            _err.WriteLine("Runner update recovery: status=unconfirmed; refreshed runner identity was not confirmed.");
         return outcome.ExitCode;
     }
 
