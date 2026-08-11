@@ -212,6 +212,37 @@ public class CliIssueExecutionConfigFlagsSpecs
     }
 
     [Fact]
+    public async Task IssueUpdate_ModelVariant_IsSentInPatchBody_AndSelectedJsonStillRenders()
+    {
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
+        handler.SetResponder((req, _) =>
+            Task.FromResult(req.Method == HttpMethod.Patch
+                ? RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { number = 1, title = "Updated" },
+                })
+                : RecordingHttpHandler.Json(new { success = true, data = new { } })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "edit", "1", "--model-variant", "max", "--json", "number,title"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
+        var body = JsonNode.Parse(patchReq.Body!)!.AsObject();
+        Assert.Equal("max", body["modelVariant"]?.GetValue<string>());
+        Assert.False(body.ContainsKey("model"));
+
+        var selected = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal(["number", "title"], selected.Select(property => property.Key).ToArray());
+        Assert.Equal(1, selected["number"]?.GetValue<int>());
+        Assert.Equal("Updated", selected["title"]?.GetValue<string>());
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
     public async Task IssueUpdate_StageModelVariantsFromFile_IsReadAndSentAsParsedJson()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
