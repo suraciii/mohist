@@ -73,7 +73,8 @@ internal static class SpecUnitMigrationLedgerValidator
     {
         var violations = new List<string>();
         ValidateCurrentRowCore(row, classification, (endpoint, targetViolations) =>
-            ValidateExecutableAndClosure(row, endpoint, executable, classification, targetViolations, "current"), violations);
+            ValidateExecutableAndClosure(row, endpoint, executable,
+                fqn => fqn == classification.Fqn ? classification : null, targetViolations, "current"), violations);
         return violations;
     }
 
@@ -144,16 +145,12 @@ internal static class SpecUnitMigrationLedgerValidator
             violations.Add($"{row.Id}: executable {bindingKind} target endpoint is not a compiled discoverable type: {expectedEndpoint.Path}/{expectedEndpoint.Fqn}");
             return;
         }
-        if (!inventory.TryGetCandidate(actualTarget.Fqn, out var candidate))
-        {
-            ValidateExecutableAndClosure(row, expectedEndpoint, actualTarget, null, violations, bindingKind);
-            return;
-        }
-        ValidateExecutableAndClosure(row, expectedEndpoint, actualTarget, candidate, violations, bindingKind);
+        ValidateExecutableAndClosure(row, expectedEndpoint, actualTarget,
+            fqn => inventory.TryGetCandidate(fqn, out var candidate) ? candidate : null, violations, bindingKind);
     }
 
     private static void ValidateExecutableAndClosure(SpecUnitMigrationLedgerRow row, SpecUnitMigrationEndpoint? expectedEndpoint,
-        SpecUnitMigrationExecutableFacts actualTarget, SpecUnitMigrationCandidate? candidate,
+        SpecUnitMigrationExecutableFacts actualTarget, Func<string, SpecUnitMigrationCandidate?> candidateByFqn,
         ICollection<string> violations, string bindingKind)
     {
         if (row.Executable is null || expectedEndpoint is null) return;
@@ -169,6 +166,7 @@ internal static class SpecUnitMigrationLedgerValidator
             violations.Add($"{row.Id}: executable case identity digest mismatch; ledger={row.Executable.CaseIdentityDigest}, actual={actual.CaseIdentityDigest}");
         if (row.Executable.SourceContentDigest != actual.SourceContentDigest)
             violations.Add($"{row.Id}: executable source-content digest mismatch; ledger={row.Executable.SourceContentDigest}, actual={actual.SourceContentDigest}");
+        var candidate = candidateByFqn(actual.Fqn);
         if (candidate is null)
         {
             violations.Add($"{row.Id}: executable closure cannot classify {actual.Fqn}");
