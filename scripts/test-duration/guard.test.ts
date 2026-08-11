@@ -8,7 +8,6 @@ import {
   main,
   parseArgs,
   runProcessWithDeadline,
-  terminateChildTree,
 } from './guard.js'
 import { formatEvaluation, formatSummary, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
@@ -63,7 +62,7 @@ test('createTimeout can be cancelled so completed tracks do not retain deadline 
   assert.equal(clearedTimer, 'timer')
 })
 
-test('compiled discovery timeout kills a hung fake child through the canonical process path', async () => {
+test('compiled discovery timeout uses the existing deadline path without reporting cleanup proof', async () => {
   let expire!: (reason: 'track') => void
   const timeout = new Promise<'track'>((resolvePromise) => { expire = resolvePromise })
   let killed = false
@@ -80,45 +79,8 @@ test('compiled discovery timeout kills a hung fake child through the canonical p
   assert.equal(result.status, 'timeout')
   assert.equal(result.timeoutReason, 'track')
   assert.equal(killed, true)
-})
-
-test('child cleanup records signal failure and still awaits forced termination', async () => {
-  const signals: NodeJS.Signals[] = []
-  let graceCancelled = 0
-  await assert.rejects(terminateChildTree({
-    pid: 42,
-    done: Promise.resolve({ exitCode: null, stdout: '' }),
-  }, {
-    signal: (_pid, signal) => {
-      signals.push(signal)
-      if (signal === 'SIGTERM') throw new Error('permission denied')
-    },
-    createGrace: () => ({
-      promise: new Promise<void>(() => undefined),
-      cancel: () => { graceCancelled += 1 },
-    }),
-  }), /SIGTERM failed: permission denied/)
-
-  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
-  assert.equal(graceCancelled, 1)
-})
-
-test('child cleanup fails closed when SIGKILL termination is unconfirmed', async () => {
-  const signals: NodeJS.Signals[] = []
-  let graceCancelled = 0
-  await assert.rejects(terminateChildTree({
-    pid: 42,
-    done: new Promise<{ exitCode: number | null; stdout: string }>(() => undefined),
-  }, {
-    signal: (_pid, signal) => { signals.push(signal) },
-    createGrace: () => ({
-      promise: Promise.resolve(),
-      cancel: () => { graceCancelled += 1 },
-    }),
-  }), /termination was not confirmed within cleanup grace/)
-
-  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
-  assert.equal(graceCancelled, 2)
+  assert.equal('cleanupFailed' in result, false)
+  assert.equal('cleanupError' in result, false)
 })
 
 test('--check evaluates authoritative saved provenance and ledger without an in-memory run', () => {

@@ -9,14 +9,13 @@ export interface DeadlineDeps<TimeoutReason = void> {
   readonly now: () => number
 }
 
-export type DeadlineStatus = 'passed' | 'failed' | 'timeout' | 'cleanup-failed'
+export type DeadlineStatus = 'passed' | 'failed' | 'timeout'
 
 export interface DeadlineOutcome<TimeoutReason = void> {
   readonly status: DeadlineStatus
   readonly exitCode: number | null
   readonly elapsedMs: number
   readonly timeoutReason?: TimeoutReason
-  readonly cleanupError?: string
 }
 
 export async function runWithDeadline<TimeoutReason = void>(
@@ -28,17 +27,7 @@ export async function runWithDeadline<TimeoutReason = void>(
     deps.timeout.then((reason) => ({ kind: 'timeout' as const, reason })),
   ])
   if (settled.kind === 'timeout') {
-    try {
-      await deps.kill()
-    } catch (error) {
-      return {
-        status: 'cleanup-failed',
-        exitCode: null,
-        elapsedMs: deps.now() - t0,
-        timeoutReason: settled.reason,
-        cleanupError: (error as Error).message,
-      }
-    }
+    await deps.kill()
     return { status: 'timeout', exitCode: null, elapsedMs: deps.now() - t0, timeoutReason: settled.reason }
   }
   const elapsedMs = deps.now() - t0

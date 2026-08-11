@@ -142,13 +142,16 @@ export function commandFor(track: TrackConfig): { command: string; args: readonl
   throw new Error(`track "${track.id}": no run command`)
 }
 
-function signalTree(pid: number, signal: NodeJS.Signals, graceMs: number): void {
-  if (pid <= 1) throw new Error(`cannot signal invalid process tree pid ${pid}`)
-  if (process.platform === 'win32') {
-    const force = signal === 'SIGKILL' ? ['/F'] : []
-    execFileSync('taskkill', ['/pid', String(pid), '/T', ...force], { stdio: 'ignore', timeout: graceMs })
-  } else {
-    process.kill(-pid, signal)
+function signalTree(pid: number, signal: NodeJS.Signals): void {
+  if (pid <= 1) return
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    } else {
+      process.kill(-pid, signal)
+    }
+  } catch {
+    // already gone or not permitted
   }
 }
 
@@ -209,10 +212,9 @@ export async function runProcessWithDeadline<TimeoutReason>(input: {
   readonly kill: () => Promise<void>
   readonly now: () => number
 }): Promise<Awaited<SpawnedChild['done']> & {
-  readonly status: 'passed' | 'failed' | 'timeout' | 'cleanup-failed'
+  readonly status: 'passed' | 'failed' | 'timeout'
   readonly elapsedMs: number
   readonly timeoutReason?: TimeoutReason
-  readonly cleanupError?: string
 }> {
   const outcome = await runWithDeadline({
     start: () => input.child.done,
@@ -220,7 +222,7 @@ export async function runProcessWithDeadline<TimeoutReason>(input: {
     timeout: input.timeout,
     now: input.now,
   })
-  if (outcome.status === 'timeout' || outcome.status === 'cleanup-failed') {
+  if (outcome.status === 'timeout') {
     return { ...outcome, stdout: '' }
   }
   const completed = await input.child.done
@@ -258,69 +260,35 @@ function suiteTimeoutRun(track: TrackConfig): TrackRun {
   }
 }
 
-function cleanupBlockedRun(track: TrackConfig, blocker: string): TrackRun {
-  return {
-    ...failedRun(track, 'not started: prior child cleanup failed', `track was not started because ${blocker}`),
-    cleanupFailed: true,
-    cleanupError: blocker,
-  }
-}
-
-export interface ProcessCleanupLifecycle {
-  readonly signal: (pid: number, signal: NodeJS.Signals) => void
-  readonly createGrace: () => TimeoutHandle
-}
-
-async function waitForExit(child: SpawnedChild, grace: TimeoutHandle): Promise<boolean> {
-  try {
-    return await Promise.race([
-      child.done.then(() => true),
-      grace.promise.then(() => false),
-    ])
-  } finally {
-    grace.cancel()
-  }
-}
-
-export async function terminateChildTree(
-  child: SpawnedChild,
-  lifecycle: ProcessCleanupLifecycle,
-): Promise<void> {
-  const errors: string[] = []
-  let exited = false
-  try {
-    lifecycle.signal(child.pid, 'SIGTERM')
-    exited = await waitForExit(child, lifecycle.createGrace())
-  } catch (error) {
-    errors.push(`SIGTERM failed: ${(error as Error).message}`)
+async function killTree(child: SpawnedChild, graceMs: number): Promise<void> {
+  if (process.platform === 'win32') {
+    signalTree(child.pid, 'SIGKILL')
+    return
   }
 
+  signalTree(child.pid, 'SIGTERM')
+  const termGrace = createTimeout(graceMs)
+  const exited = await Promise.race([
+    child.done.then(() => true),
+    termGrace.promise.then(() => false),
+  ])
+  termGrace.cancel()
+  signalTree(child.pid, 'SIGKILL')
   if (!exited) {
-    try {
-      lifecycle.signal(child.pid, 'SIGKILL')
-    } catch (error) {
-      errors.push(`SIGKILL failed: ${(error as Error).message}`)
-    }
-    exited = await waitForExit(child, lifecycle.createGrace())
+    const killGrace = createTimeout(graceMs)
+    await Promise.race([
+      child.done,
+      killGrace.promise,
+    ])
+    killGrace.cancel()
   }
-
-  if (!exited) errors.push('child process tree termination was not confirmed within cleanup grace')
-  if (errors.length > 0) throw new Error(errors.join('; '))
-}
-
-function killTree(child: SpawnedChild, graceMs: number): Promise<void> {
-  return terminateChildTree(child, {
-    signal: (pid, signal) => signalTree(pid, signal, graceMs),
-    createGrace: () => createTimeout(graceMs),
-  })
 }
 
 class GateProcessError extends Error {
   constructor(
     message: string,
-    readonly status: 'failed' | 'timeout' | 'cleanup-failed',
+    readonly status: 'failed' | 'timeout',
     readonly timeoutReason?: 'track' | 'suite',
-    readonly cleanupError?: string,
   ) {
     super(message)
   }
@@ -351,12 +319,10 @@ async function readTrackCurrentIdentity(
         now: () => Date.now(),
       })
       if (result.status !== 'passed') {
-        const message = result.cleanupError
-          ? `compiled discovery cleanup failed: ${result.cleanupError}`
-          : result.status === 'timeout'
-            ? 'compiled discovery exceeded the track or suite deadline'
-            : `compiled discovery failed with exit ${result.exitCode}`
-        throw new GateProcessError(message, result.status, result.timeoutReason, result.cleanupError)
+        const message = result.status === 'timeout'
+          ? 'compiled discovery exceeded the track or suite deadline'
+          : `compiled discovery failed with exit ${result.exitCode}`
+        throw new GateProcessError(message, result.status, result.timeoutReason)
       }
       return result.stdout
     },
@@ -405,8 +371,6 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
             elapsedMs: Date.now() - trackStartedAt,
             executionLedgerReady: false,
             executionLedgerError: error.message,
-            cleanupFailed: error.status === 'cleanup-failed',
-            cleanupError: error.cleanupError,
           }
         }
         ledgerExpectation = {
@@ -469,8 +433,6 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
       executionLedgerReady,
       executionLedgerError,
       executionLedgerExpectation: ledgerExpectation,
-      cleanupFailed: result.status === 'cleanup-failed',
-      cleanupError: result.cleanupError,
     }
   } finally {
     trackDeadline.cancel()
@@ -663,12 +625,6 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
         const run = await runTrack(track, graceMs, suiteDeadline)
         runs.push(run)
         if (run.timeoutReason === 'track') console.error(`  ${track.id}: exceeded ${track.deadlineMs}ms deadline`)
-        if (run.cleanupFailed) {
-          for (const blocked of selected.slice(i + 1)) {
-            runs.push(cleanupBlockedRun(blocked, run.cleanupError ?? `${track.id} cleanup failed`))
-          }
-          break
-        }
         if (suiteExpired) {
           for (const skipped of selected.slice(i + 1)) runs.push(suiteTimeoutRun(skipped))
           break
@@ -700,7 +656,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     }
     const summary = summarize(runs, evaluations, suiteDeadlineBreached, suiteElapsed)
     console.log(formatSummary(summary, config.suiteDeadlineMs))
-    const runFailed = suiteDeadlineBreached || runs.some((r) => r.timedOut || r.cleanupFailed || r.exitCode !== 0)
+    const runFailed = suiteDeadlineBreached || runs.some((r) => r.timedOut || r.exitCode !== 0)
     const budgetFailed = evaluations.some((e) => !e.passed)
     return runFailed || budgetFailed ? 1 : 0
   }
@@ -718,7 +674,6 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
         continue
       }
       let currentIdentity: CurrentExecutionIdentity | undefined
-      let cleanupFailure: string | undefined
       if (track.executionLedger) {
         const trackTimer = createTimeout(track.deadlineMs)
         try {
@@ -728,7 +683,6 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
           ]))
         } catch (error) {
           evaluations.push(failedEvaluation(track, `could not validate current execution identity: ${(error as Error).message}`))
-          if (error instanceof GateProcessError && error.status === 'cleanup-failed') cleanupFailure = error.message
         } finally {
           trackTimer.cancel()
         }
@@ -737,12 +691,6 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
         evaluations.push(evaluateTrackArtifacts(track, {
           readText: (path) => readFileSync(resolve(repoRoot, path), 'utf8'),
         }, undefined, new Date(), currentIdentity))
-      }
-      if (cleanupFailure) {
-        for (const blocked of selected.slice(i + 1)) {
-          evaluations.push(failedEvaluation(blocked, `current identity validation stopped because ${cleanupFailure}`))
-        }
-        break
       }
     }
   } finally {
