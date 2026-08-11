@@ -30,6 +30,7 @@ export type {
   RuntimeTurnRequest,
   RuntimeTurnResult,
   RuntimeFilePart,
+  RuntimeOwnershipSnapshot,
 } from "./types.js"
 
 export { parseModelIdentifier } from "./model-string.js"
@@ -54,6 +55,7 @@ export {
 
 export { OpenCodeRuntime } from "./runtime.js"
 export type { OpenCodeRuntimeDeps } from "./runtime.js"
+export type { RuntimeClock } from "./runtime.js"
 
 export type {
   DirectoryReclaimResult,

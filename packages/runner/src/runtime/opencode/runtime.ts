@@ -37,6 +37,7 @@ import type {
   RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,
+  RuntimeOwnershipSnapshot,
 } from "./types.js"
 import { errorKindFor, hasUnconfirmedCleanup, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
 import type { OpencodeServerHandle } from "./server-process.js"
@@ -54,6 +55,8 @@ export interface OpenCodeRuntimeDeps {
   readonly serverFactory?: (directory: string, signal: AbortSignal) => Promise<OpencodeServerHandle>
   readonly eventSubscriptionFactory?: (client: OpencodeClient) => RuntimeEventSubscription
   readonly rebuildDelayMs?: number
+  readonly idleGraceMs?: number
+  readonly clock?: RuntimeClock
   /**
    * Optional override for the provider-error failure policy. Defaults
    * to the quota/credit/billing pattern set with a consecutive-retry
@@ -61,6 +64,20 @@ export interface OpenCodeRuntimeDeps {
    */
   readonly providerErrorPolicy?: RuntimeProviderErrorPolicy
 }
+
+export interface RuntimeClock {
+  readonly now: () => number
+  readonly setTimeout: (callback: () => void, delayMs: number) => unknown
+  readonly clearTimeout: (handle: unknown) => void
+}
+
+const defaultRuntimeClock: RuntimeClock = {
+  now: () => Date.now(),
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
+
+const DEFAULT_IDLE_GRACE_MS = 5 * 60_000
 
 interface InternalState {
   ready: boolean
@@ -70,6 +87,10 @@ interface InternalState {
   generation: RuntimeGeneration | null
   exitWatcher: Promise<void> | null
   rebuildTriggered: boolean
+  ownerIds: Set<string>
+  idleSince: number | null
+  idleTimer: unknown
+  activeOperations: number
 }
 
 interface RuntimeGeneration {
@@ -92,9 +113,13 @@ export class OpenCodeRuntime {
   private inFlight: ReturnType<typeof bindTurnInFlightTracker> | null = null
   private readonly directoryInstances: OpenCodeDirectoryInstances
   private nextGenerationId = 1
+  private readonly clock: RuntimeClock
+  private readonly idleGraceMs: number
 
   constructor(deps: OpenCodeRuntimeDeps) {
     this.deps = deps
+    this.clock = deps.clock ?? defaultRuntimeClock
+    this.idleGraceMs = Math.max(0, Math.floor(deps.idleGraceMs ?? DEFAULT_IDLE_GRACE_MS))
     this.state = {
       ready: false,
       diagnostic: null,
@@ -103,21 +128,43 @@ export class OpenCodeRuntime {
       generation: null,
       exitWatcher: null,
       rebuildTriggered: false,
+      ownerIds: new Set(),
+      idleSince: null,
+      idleTimer: null,
+      activeOperations: 0,
     }
     this.directoryInstances = new OpenCodeDirectoryInstances(() => this.state.server?.client ?? null)
   }
 
   async reclaimWhere(predicate: (directory: string) => boolean): Promise<DirectoryReclaimResult> {
-    return await this.directoryInstances.reclaimWhere(predicate)
+    return await this.withRuntimeOperation(() => this.directoryInstances.reclaimWhere(predicate))
   }
 
   async release(directory: string): Promise<DirectoryReleaseResult> {
-    return await this.directoryInstances.release(directory)
+    return await this.withRuntimeOperation(() => this.directoryInstances.release(directory))
   }
 
   async withRemovalFence<T>(directory: string, callback: () => Promise<T>): Promise<WorkspaceRemovalFenceResult<T>> {
     if (!this.state.ready || !this.state.server) return { kind: "failed" }
-    return await this.directoryInstances.withRemovalFence(directory, callback)
+    return await this.withRuntimeOperation(() => this.directoryInstances.withRemovalFence(directory, callback))
+  }
+
+  setWorkOwners(ownerIds: readonly string[]): void {
+    this.state.ownerIds = new Set(ownerIds.filter((ownerId) => ownerId.trim().length > 0))
+    this.reconcileIdleLifecycle()
+  }
+
+  ownership(): RuntimeOwnershipSnapshot {
+    return {
+      ownerIds: [...this.state.ownerIds].sort(),
+      idleSince: this.state.idleSince,
+      activeOperations: this.state.activeOperations,
+      generation: this.state.generation?.id ?? null,
+    }
+  }
+
+  canPollWhileCold(): boolean {
+    return !this.state.server && !this.startInFlight && !this.rebuildInFlight && this.state.diagnostic === null
   }
 
   /**
@@ -127,6 +174,7 @@ export class OpenCodeRuntime {
    */
   async start(signal: AbortSignal = new AbortController().signal): Promise<RuntimeResult<RuntimeReadyState>> {
     if (this.state.ready) {
+      this.reconcileIdleLifecycle()
       return { ok: true, value: this.readyState(), diagnostics: [] }
     }
     if (this.rebuildInFlight) return this.rebuildInFlight
@@ -167,7 +215,7 @@ export class OpenCodeRuntime {
       return { ok: false, error, diagnostics: error.diagnostics }
     }
     const runtimeSessionId = request.target.runtimeSessionId
-    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+    return await this.withRuntimeOperation(() => this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
       const server = this.state.server
       if (!server || !this.state.ready) {
         const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
@@ -218,7 +266,7 @@ export class OpenCodeRuntime {
         const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to read Runtime Session active-turn status") })
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-    })
+    }))
   }
 
   async createSession(
@@ -228,7 +276,7 @@ export class OpenCodeRuntime {
       const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+    return await this.withRuntimeOperation(() => this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
       const server = this.state.server
       if (!server || !this.state.ready) {
         const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
@@ -261,7 +309,7 @@ export class OpenCodeRuntime {
               : normalizeTurnFailed(raw)
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-    })
+    }))
   }
 
   /**
@@ -292,6 +340,14 @@ export class OpenCodeRuntime {
    * _output` against; the Action does not synthesize `{ promise }`.
    */
   async runTurn(
+    request: RuntimeTurnRequest,
+    signal: AbortSignal,
+    observer?: RuntimeTurnObserver,
+  ): Promise<RuntimeResult<RuntimeTurnResult>> {
+    return await this.withRuntimeOperation(() => this.runTurnCore(request, signal, observer))
+  }
+
+  private async runTurnCore(
     request: RuntimeTurnRequest,
     signal: AbortSignal,
     observer?: RuntimeTurnObserver,
@@ -430,7 +486,7 @@ export class OpenCodeRuntime {
     }
     const runtimeSessionId = request.target.runtimeSessionId
 
-    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+    return await this.withRuntimeOperation(() => this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
       const server = this.state.server
       if (!server || !this.state.ready) {
         const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
@@ -457,7 +513,7 @@ export class OpenCodeRuntime {
         const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode cancel failed") })
         return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
       }
-    })
+    }))
   }
 
   private ensureInFlightTracker() {
@@ -474,11 +530,13 @@ export class OpenCodeRuntime {
    */
   async shutdown(options: { clearDiagnostic?: boolean } = {}): Promise<void> {
     const { events, server, generation } = this.state
+    this.clearIdleTimer()
     this.directoryInstances.resetGeneration()
     this.state.events = null
     this.state.server = null
     this.state.generation = null
     this.state.ready = false
+    this.state.idleSince = null
     if (generation) {
       generation.closed = true
       this.resolveGenerationDrain(generation)
@@ -486,12 +544,12 @@ export class OpenCodeRuntime {
     if (options.clearDiagnostic ?? true) {
       this.state.diagnostic = null
     }
+    if (server) await (server.terminateTree?.() ?? server.close()).catch(() => {})
     if (events) await events.close().catch(() => {})
-    if (server) await server.close().catch(() => {})
   }
 
   private readyState(): RuntimeReadyState {
-    return { ready: this.state.ready, diagnostic: this.state.diagnostic }
+    return { ready: this.state.ready, diagnostic: this.state.diagnostic, ownership: this.ownership() }
   }
 
   private async attemptStart(signal: AbortSignal): Promise<RuntimeResult<RuntimeReadyState>> {
@@ -545,6 +603,8 @@ export class OpenCodeRuntime {
         }
         this.state.diagnostic = diagnostic
         diagnostics.push(diagnostic)
+        await (server.terminateTree?.() ?? server.close()).catch(() => {})
+        this.state.server = null
         const error = normalizeUnavailableRuntime(diagnostics)
         return { ok: false, error, diagnostics }
       }
@@ -552,7 +612,7 @@ export class OpenCodeRuntime {
       const diagnostic = toDiagnostic(cause, "health-failed", "OpenCode health check failed")
       this.state.diagnostic = diagnostic
       diagnostics.push(diagnostic)
-      await server.close().catch(() => {})
+      await (server.terminateTree?.() ?? server.close()).catch(() => {})
       this.state.server = null
       const error = normalizeUnavailableRuntime(diagnostics)
       return { ok: false, error, diagnostics }
@@ -566,6 +626,7 @@ export class OpenCodeRuntime {
 
     this.state.ready = true
     this.state.diagnostic = null
+    this.reconcileIdleLifecycle()
     return { ok: true, value: this.readyState(), diagnostics }
   }
 
@@ -618,8 +679,9 @@ export class OpenCodeRuntime {
       await generation.drained
       if (delay > 0) {
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, delay)
-          timer.unref?.()
+          const timer = this.clock.setTimeout(resolve, delay)
+          const unref = (timer as { unref?: () => void }).unref
+          unref?.call(timer)
         })
       }
       if (this.state.generation === generation) {
@@ -651,6 +713,48 @@ export class OpenCodeRuntime {
     if (generation.drainResolved) return
     generation.drainResolved = true
     generation.resolveDrained()
+  }
+
+  private async withRuntimeOperation<T>(operation: () => Promise<T>): Promise<T> {
+    this.state.activeOperations += 1
+    this.clearIdleTimer()
+    try {
+      return await operation()
+    } finally {
+      this.state.activeOperations -= 1
+      this.reconcileIdleLifecycle()
+    }
+  }
+
+  private reconcileIdleLifecycle(): void {
+    if (!this.state.ready || !this.state.server || this.state.ownerIds.size > 0 || this.state.activeOperations > 0) {
+      this.clearIdleTimer()
+      if (this.state.ownerIds.size > 0) this.state.idleSince = null
+      return
+    }
+    if (this.state.idleSince === null) this.state.idleSince = this.clock.now()
+    if (this.state.idleTimer !== null) return
+    const remaining = Math.max(0, this.idleGraceMs - (this.clock.now() - this.state.idleSince))
+    this.state.idleTimer = this.clock.setTimeout(() => {
+      this.state.idleTimer = null
+      void this.reclaimIfIdle()
+    }, remaining)
+  }
+
+  private clearIdleTimer(): void {
+    if (this.state.idleTimer !== null) {
+      this.clock.clearTimeout(this.state.idleTimer)
+      this.state.idleTimer = null
+    }
+    if (this.state.ownerIds.size > 0 || this.state.activeOperations > 0) this.state.idleSince = null
+  }
+
+  private async reclaimIfIdle(): Promise<void> {
+    if (!this.state.ready || !this.state.server || this.state.ownerIds.size > 0 || this.state.activeOperations > 0 || this.startInFlight || this.rebuildInFlight) {
+      this.reconcileIdleLifecycle()
+      return
+    }
+    await this.shutdown({ clearDiagnostic: false })
   }
 }
 

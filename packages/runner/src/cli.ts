@@ -41,6 +41,7 @@ try {
     dispatchLivenessProbeIntervalMs: numberEnv("DISPATCH_LIVENESS_PROBE_INTERVAL_MS") ?? 10_000,
     cleanupConvergenceIntervalMs: positiveNumberEnv("CLEANUP_CONVERGENCE_INTERVAL_MS") ?? 5 * 60_000,
     cleanupLoopIntervalMs: positiveNumberEnv("CLEANUP_LOOP_INTERVAL_MS") ?? 2 * 60_000,
+    runtimeIdleGraceMs: positiveNumberEnv("RUNTIME_IDLE_GRACE_MS") ?? 5 * 60_000,
     credential: credential ?? undefined,
   }).run(controller.signal)
 } finally {

@@ -188,6 +188,32 @@ function expectedActionCatalog() {
 }
 
 describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
+  it("keeps polling for new work after an unowned runtime has cooled down", async () => {
+    const installed = installFakeOpenCodeRuntimeFactory()
+    const connected = deferred<void>()
+    connect.mockImplementation(async () => { connected.resolve() })
+    poll.mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      ...hostOptions(),
+      runtimeIdleGraceMs: 50,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(installed.lastRuntime?.ready()).toBe(true)
+      await vi.advanceTimersByTimeAsync(50)
+      expect(installed.lastRuntime?.ready()).toBe(false)
+      const callsAfterCooling = poll.mock.calls.length
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
+      expect(poll.mock.calls.length).toBeGreaterThan(callsAfterCooling)
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
   it("ready-claim: starts the runtime without probing or registering a model catalog", async () => {
     installFakeOpenCodeRuntimeFactory()
     const connected = deferred<void>()
