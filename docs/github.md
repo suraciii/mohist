@@ -115,8 +115,8 @@ the production state. Mohist records the failure for inspection.
 
 ## Pull Request Review as Approval
 
-When a Connection has an approver list, a Check Approval point accepts GitHub
-Pull Request reviews:
+When a custom Profile has a Check Approval point and the Connection has an
+approver list, that point accepts GitHub Pull Request reviews:
 
 | Review result | Production action |
 |---|---|
@@ -130,6 +130,8 @@ Pull Request reviews:
   its authenticated caller instead.
 - This applies to Check Approval points for code review. A Plan Approval occurs
   before a Pull Request exists and does not use this path.
+- The built-in `mohist/github-pr` Profile uses its named reviewer Agent as the
+  Check gate and therefore does not consume a Pull Request review as Approval.
 - Mohist decides from state at event arrival. It does not reverse a decision if
   a review is later dismissed or becomes stale after a push.
 
@@ -197,9 +199,9 @@ delivery target through the `mohist/github-pr` Profile. Future Issues will
 deliver App identity and failure inspection.
 
 PR review Approval and completion-comment PR lookup still recognize the old
-`mo/issue-N` branch form. The current Issue Workspace branch is
+`mo/issue-N` branch form. The current Issue Repository branch is
 `mohist/ws-issue-N`, so do not rely on those two correlations until the GitHub
-reader uses the Workspace branch convention.
+reader uses the Repository Workflow branch convention.
 
 ---
 

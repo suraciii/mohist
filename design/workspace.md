@@ -5,26 +5,36 @@ status: wip
 # Workspace
 
 A Workspace is a first-class named execution-environment resource under a
-Project: a persistent directory plus access to a set of repositories. Its
+Project: a persistent root directory plus access to a set of repositories. Its
 lifecycle is independent of any AgentSession or WorkflowRun.
 
 Boundary: a Workspace holds only identity, origin, Repository references,
-status, and materialization routing facts. Directory contents and Git layout
-(clone / branch / worktree) belong to Workflow preparation or Agent behavior,
-not Workspace entity schema.
+status, and materialization routing facts. Its reserved directory roles are a
+platform contract, but individual files and Git checkout state do not enter the
+Workspace entity schema.
 
 A Workspace is the home of the work, while repositories are its materials.
-Repository checkouts live under the Workspace (by convention, in `repos/`), and
-work products such as plans and research belong at the Workspace level. This
-meaning is carried by prompt conventions rather than platform schema. It gives
-cross-repository work a place for artifacts that do not belong to any one
-repository.
+Repository checkouts live under `REPOS/`, while plans, reviews, and research
+belong at the Workspace level. The Runner materializes this contract:
+
+```text diagram
+<workspace.path>/
+|-- REPOS/
+|   `-- <repository.name>/    target checkout at repository.path
+|-- PLANS/                    plans, designs, and reviews
+|-- RESEARCH/                 durable investigation material
+`-- .scratch/                 disposable local work
+```
+
+No checkout may use the Workspace root. Callers use resolved paths and never
+reconstruct a checkout path from strings.
 
 Reference analogy, for explanation only and not as a terminology source:
 Runner ~= Node, WorkflowRun ~= Pod, AgentSession ~= Container, and Workspace ~=
 local PersistentVolume. Its lifecycle is independent of its consumers, its
-materialization location determines scheduling affinity, it is lost with its
-node, and it is shared within one consumer group.
+materialization location determines scheduling affinity, its local files can be
+lost with its node, and its durable sources can be rematerialized for the same
+consumer group.
 
 ## Model
 
@@ -58,7 +68,8 @@ Origin = { kind: issue, issueNumber }
   list; "which Sessions are currently bound" is a query over Sessions.
 - RepositoryNames are access grants and default checkout targets, not evidence
   of materialized checkouts. Workflow preparation owns the clean Issue checkout;
-  an interactive Agent organizes its own checkout layout.
+  an interactive Agent decides which granted Repository to clone but must place
+  it under `REPOS/<repository-name>/`.
 
 ## Semantics
 
@@ -115,21 +126,50 @@ user and must be unique within the Project.
 - Once a Workspace is materialized on Runner R, all subsequent dispatches bound
   to it route to R.
 - If R is unreachable or the directory has been reclaimed, rematerialize the
-  Workspace on an available Runner: replace Home and start from an empty
-  directory. Unpushed Git state and unpersisted artifacts in the old directory
-  are lost; the platform does not guarantee directory continuity.
-- Workflow recovery semantics stay unchanged: the Profile's push discipline is
-  the recovery point, and prepare clones and checks out again in the new
-  directory.
+  Workspace on an available Runner and replace Home. Rematerialization begins
+  from an empty root, recreates the reserved layout, and then reconstructs each
+  durable source independently.
+- For a Workflow Workspace, Repository state is reconstructed by cloning the resolved Repository and
+  checking out its remote Workflow branch at `repository.path`. If that remote
+  branch does not exist because no publish Task has completed, prepare creates
+  the local Workflow branch from the current head of the Repository resource's
+  locked `BaseBranch`; it does not push as an implicit side effect.
+- Declared artifact paths are rendered and normalized to canonical
+  Workspace-root relative keys at capture time. Dynamic Action artifacts are
+  resolved from `ActionContext.workDir` and normalized into the same key space.
+  Absolute paths, `..`, symbolic links, and paths outside the Workspace are
+  rejected before upload.
+- For a Workflow Workspace, Mohist restores every currently retained,
+  successfully recorded artifact under `PLANS/` or `RESEARCH/` from any
+  terminal Task attempt in the current WorkflowRun. This includes a failed
+  review attempt whose report is input to recovery. An artifact that was never
+  recorded is skipped; failure to fetch, validate, or safely extract a recorded
+  capture fails preparation.
+- Restore orders captures by Workflow history. For the same canonical key, only
+  the latest retained capture is selected. If selected file and directory
+  captures overlap, they are applied in history order and the later capture
+  wins for each concrete file path.
+- Artifact restore never writes under `REPOS/` or `.scratch/`. Repository
+  contents come only from Git. Dependency installations, uncommitted Git state,
+  and undeclared files are not durable.
+- Restore applies the same path-confinement and symlink rules as artifact
+  capture. It finishes before the next Action or Runtime Session starts, so a
+  task cannot observe a partially restored Workspace.
+- For an interactive Workspace, rematerialization recreates only the reserved
+  layout and Repository access grants. Agent-managed clones, worktrees, and
+  uncommitted files have no durable checkout metadata and are not restored.
 
 ### Initialization
 
-- Workflow path: clean initialization. Prepare performs a fresh clone from the
-  Repository resource. Workspaces for parallel Issues use separate directories
-  with no shared checkout or dependency cache.
-- Interactive path: an empty directory plus Repository access. The Agent
-  organizes it according to convention; the platform creates no internal
-  layout in advance.
+- Every materialization creates `REPOS/`, `PLANS/`, `RESEARCH/`, and `.scratch/`
+  before execution.
+- Workflow path: clean initialization. Prepare clones the Issue's target
+  Repository to `REPOS/<repository-name>/` and checks out the remote Workflow
+  branch when it exists, otherwise a local Workflow branch at the current
+  remote base head. Workspaces for parallel Issues use separate roots with no
+  shared checkout or dependency cache.
+- Interactive path: the reserved empty layout plus Repository access. The Agent
+  controls checkout timing and Git worktrees within the reserved roles.
 
 ### Archival
 
@@ -154,10 +194,11 @@ The Runner keeps its existing periodic retention and storage-budget
 maintenance. The reclamation guard changes from "WorkflowRun is terminal" to
 the Workspace view:
 
-| Workspace status | Directory handling |
+| Workspace status and consumers | Directory handling |
 |---|---|
 | active with active bound Sessions | reclamation forbidden |
-| active without active bindings | may be reclaimed by disk policy; the entity remains and the next binding rematerializes it |
+| active with a nonterminal WorkflowRun | reclamation forbidden, including while waiting for Approval |
+| active without either consumer | may be reclaimed by disk policy; the entity remains and the next binding rematerializes it |
 | archived | delete under the reclamation grant |
 
 Every deletion must still acquire the directory's Runtime removal fence; that
@@ -167,8 +208,9 @@ invariant does not change.
 
 For execution bound to a Workspace, the Runner injects a working-directory
 anchor containing the absolute path and the instruction "all Workspace files
-are here; do not search `$HOME`". AGENTS.md and prompt conventions define the
-internal layout; it is not platform schema.
+are here; do not search `$HOME`". The anchor names the reserved directories and,
+when available, the target `repository.path`. A task's `working-directory`
+selects its starting directory but does not hide the rest of the Workspace.
 
 ## Status
 
@@ -182,7 +224,9 @@ rematerialization target above is not implemented. The Slack adapter also does
 not yet propagate a provider channel-archive event to the Server's archive
 boundary.
 
-Open questions concern compound-Issue repository attachment, Runtime Binding
-after rematerialization, and whether Workflow OpenSpec artifacts belong at the
-Workspace root. Git worktrees remain a Git implementation detail; a spawned
-Session always inherits its parent Workspace.
+The fixed root layout, child Repository checkout, Workflow artifact restore, and
+nonterminal WorkflowRun reclamation guard are also target behavior rather than
+the current implementation. Open questions concern compound-Issue repository
+attachment and Runtime Binding after rematerialization. Git worktrees remain a
+Git implementation detail; a spawned Session always inherits its parent
+Workspace.

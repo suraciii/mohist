@@ -2,11 +2,13 @@
 
 GitHub PR Action repositories, branches, and Pull Request identities are
 determined by explicit `with` inputs. An Action does not read implicit fallback
-values from Variables and always uses the workspace supplied by the host.
+values from Variables and always uses the working directory supplied by the
+host.
 
 In these examples, `${{ repository.gitUrl }}`,
-`${{ repository.baseBranch }}`, and `${{ workspace.branch }}` come from the
-repository and workspace for the current run. `${{ vars.github.pr.number }}`
+`${{ repository.baseBranch }}`, `${{ repository.path }}`, and
+`${{ repository.branch }}` come from the target Repository for the current run.
+`${{ vars.github.pr.number }}`
 is a Run Variable populated from the `prNumber` output of an earlier
 `mohist/create-github-pr` Action. See
 [Workflow Definition Reference](../workflow-definition.md#template-expressions)
@@ -63,8 +65,9 @@ Creates or updates a GitHub Pull Request for the current branch.
 - id: open-draft-pr
   uses: mohist/create-github-pr
   with:
+    working-directory: ${{ repository.path }}
     repositoryUrl: ${{ repository.gitUrl }}
-    source: ${{ workspace.branch }}
+    source: ${{ repository.branch }}
     target: ${{ repository.baseBranch }}
     draft: true
     titleFrom: issue.title
@@ -114,13 +117,19 @@ idempotent when the Pull Request is already ready.
 - id: mark-pr-ready
   uses: mohist/mark-github-pr-ready
   with:
+    working-directory: ${{ repository.path }}
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
 ```
 
 ## `mohist/merge-github-pr`
 
-Squash-merges the specified GitHub Pull Request.
+Enables GitHub Auto-merge with the squash method for the specified Pull Request
+and waits until GitHub reports the Pull Request state as `MERGED`. It succeeds
+immediately when that Pull Request is already merged at the expected reviewed
+head. Enabling Auto-merge is not completion: the Action reports success only
+after the merged state, reviewed head, and merge commit are confirmed from
+GitHub.
 
 ### Inputs
 
@@ -129,6 +138,7 @@ Squash-merges the specified GitHub Pull Request.
 | `repositoryUrl` | Yes | - | Git repository URL that identifies the GitHub repository. The value is text. |
 | `method` | No | `squash` | Merge method. Only `squash` is supported. The value is text. |
 | `prNumber` | Yes | - | Pull Request number. The value is numeric. |
+| `expectedHeadSha` | Yes | - | Exact Pull Request head commit accepted by the reviewer. The value is text. |
 | `subject` | No | - | Explicit squash-commit subject. The value is text. |
 | `subjectFrom` | No | `issue.title` | Issue field used as the squash-commit subject. The value is text. |
 
@@ -140,8 +150,11 @@ Squash-merges the specified GitHub Pull Request.
 | `status` | Merge status identifier. |
 | `prNumber` | Pull Request number. |
 | `prUrl` | Pull Request URL. |
+| `headSha` | Pull Request head commit that was merged. |
 | `mergeCommitSha` | SHA of the squash-merge commit. |
 | `method` | Merge method that was used. |
+| `autoMergeEnabled` | Whether this invocation enabled Auto-merge; false when it was already enabled or merged. |
+| `prState` | Confirmed terminal Pull Request state, always `MERGED` on success. |
 | `output` | Aggregated `gh` output. |
 | `steps` | `gh` command results for each step. |
 
@@ -156,7 +169,23 @@ Squash-merges the specified GitHub Pull Request.
 | `pr-state-conflict` | An existing Pull Request is in a conflicting state. |
 | `pr-checks-unavailable` | Pull Request check status is unavailable. |
 | `pr-checks-failed` | Required Pull Request checks did not pass. |
+| `pr-head-mismatch` | The live Pull Request head differs from `expectedHeadSha`. |
 | `merge-failed` | Merging the Pull Request failed. |
+
+The Action checks the live Pull Request head before enabling Auto-merge and on
+every subsequent poll. A mismatch produces `pr-head-mismatch`. A closed,
+unmerged Pull Request produces `pr-state-conflict`, and failed required checks
+produce `pr-checks-failed` so Profile recovery can repair and publish another
+commit.
+
+Once this invocation enables Auto-merge, it owns that queued external operation.
+Cancellation, deadline expiry, or any other non-success result is not terminal
+until the Action confirms that Auto-merge is disabled or observes that the
+expected head already merged. Runner loss supersedes the execution attempt but
+keeps its Task nonterminal and schedules reconciliation work. Reconciliation
+first inspects this Pull Request, reports success if the expected head merged,
+or disables Auto-merge before the Task may fail or retry. Mohist therefore never
+records a terminal non-success while GitHub can still merge the queued head.
 
 ### Example
 
@@ -164,8 +193,10 @@ Squash-merges the specified GitHub Pull Request.
 - id: merge-pr
   uses: mohist/merge-github-pr
   with:
+    working-directory: ${{ repository.path }}
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
+    expectedHeadSha: ${{ vars.github.reviewedHead }}
     method: squash
     subjectFrom: issue.title
 ```
@@ -189,6 +220,7 @@ Verifies that the specified GitHub Pull Request is in the expected state.
 | `kind` | Output type identifier. |
 | `status` | Status identifier. |
 | `prNumber` | Pull Request number. |
+| `headSha` | Current Pull Request head commit. |
 | `prUrl` | Pull Request URL. |
 | `prState` | Pull Request state. |
 | `isDraft` | Whether the Pull Request is a draft. |
@@ -209,6 +241,7 @@ Verifies that the specified GitHub Pull Request is in the expected state.
 - id: verify-pr-status
   uses: mohist/github-pr-status
   with:
+    working-directory: ${{ repository.path }}
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
     expect: open,ready
@@ -224,6 +257,7 @@ Waits for every check on the specified GitHub Pull Request to pass.
 |---|---:|---|---|
 | `repositoryUrl` | Yes | - | Git repository URL that identifies the GitHub repository. The value is text. |
 | `prNumber` | Yes | - | Pull Request number. The value is numeric. |
+| `expectedHeadSha` | Yes | - | Exact Pull Request head commit accepted by the reviewer. The value is text. |
 
 ### Outputs
 
@@ -232,6 +266,7 @@ Waits for every check on the specified GitHub Pull Request to pass.
 | `kind` | Output type identifier. |
 | `status` | Check status identifier. |
 | `prNumber` | Pull Request number. |
+| `headSha` | Pull Request head commit whose checks passed. |
 | `pollIntervalMs` | Polling interval in milliseconds. |
 | `message` | User-facing check result. |
 | `output` | Aggregated `gh` output. |
@@ -244,6 +279,7 @@ Waits for every check on the specified GitHub Pull Request to pass.
 | `config-error` | GitHub configuration is missing or invalid. |
 | `pr-checks-unavailable` | Pull Request check status is unavailable. |
 | `pr-checks-failed` | Required Pull Request checks did not pass. |
+| `pr-head-mismatch` | The live Pull Request head differs from `expectedHeadSha`. |
 | `aborted` | Polling was cancelled. |
 
 ### Example
@@ -252,6 +288,17 @@ Waits for every check on the specified GitHub Pull Request to pass.
 - id: wait-for-pr-checks
   uses: mohist/github-pr-checks
   with:
+    working-directory: ${{ repository.path }}
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
+    expectedHeadSha: ${{ vars.github.reviewedHead }}
 ```
+
+## Implementation Gap
+
+The current `mohist/merge-github-pr` implementation attempts the merge directly.
+It does not yet enable GitHub Auto-merge and wait for a confirmed `MERGED`
+state, bind checks and merge to a reviewed head SHA, or reconcile queued
+Auto-merge after interrupted execution. GitHub Actions also still receive the
+checkout at the Workspace root rather than through
+`working-directory: ${{ repository.path }}`.

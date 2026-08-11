@@ -236,7 +236,7 @@ After Approval, the Workflow advances automatically:
   `tasks.json`.
 - **Check**: An Inline Agent reviews its output and can wait for another
   Approval.
-- **Integrate**: Mohist merges the Workspace branch into the base branch.
+- **Integrate**: Mohist merges the Repository Workflow branch into the base branch.
 
 If any stage fails, the Issue enters blocked state. See
 [Troubleshooting](troubleshooting.md) for recovery.
@@ -245,7 +245,7 @@ If any stage fails, the Issue enters blocked state. See
 
 After Integrate finishes, the Issue enters Done:
 
-- The Workspace branch is merged into your base branch.
+- The Repository Workflow branch is merged into your base branch.
 - Your repository contains the code changes.
 - All artifacts remain under `openspec/changes/issue-1/` as an audit record.
 

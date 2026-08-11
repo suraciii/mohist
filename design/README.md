@@ -156,7 +156,7 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 
 - [workflow/definition.md](workflow/definition.md) — Workflow Definition DSL: semantic model (Expect as a first-class concept), single authoritative validator (rule catalog, three entry points incl. `mo` local validation), implementation-side semantic index; syntax authority in [`docs/workflow-definition.md`](../docs/workflow-definition.md).
 - [workflow/actions.md](workflow/actions.md) — Action plugin model: manifest contract, single input channel, structured output, capability injection, catalog validation, failure-recovery orchestration.
-- [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — Design points of built-in workflows (local / github-pr); the yaml definitions are the source of truth.
+- [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — Target design of built-in workflows: OpenSpec-based local delivery and named-agent GitHub PR delivery with Auto-merge; Status records where executable YAML has not converged.
 - [workflow/profile.md](workflow/profile.md) — Workflow Profile: Project-scoped collection, default selection, Issue override, Run snapshot.
 - [workflow/run-state.md](workflow/run-state.md) — WorkflowRun State: persisted content boundary, read/write cost, and one-way format migration rules at startup.
 - [workflow/variables.md](workflow/variables.md) — Workflow Variables: Project / Issue / Run resources, merging, live effect, `setVars` semantics.
@@ -167,8 +167,8 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 ## Supporting topics
 
 - [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
-- [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution (**WIP**).
-- [workspace.md](workspace.md) — Workspace (**WIP**): first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation; Workflow cross-Runner rematerialization and Slack channel-archive propagation remain gaps.
+- [repositories.md](repositories.md) — Repository execution (**WIP**): Project resource authority, Issue binding, child checkout, and runtime path and branch facts.
+- [workspace.md](workspace.md) — Workspace (**WIP**): first-class persistent execution root with reserved layout, Origin resolution, named Runner materialization, Artifact Store recovery, binding affinity, archival, and consumer-aware reclamation.
 - [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
 - [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: implemented v1 general HTTP delivery with CloudEvents, event selection, configurable authentication, 2xx success, and failure inspection; retries, redelivery, attempt history, and Web management remain later capabilities.
 - [github-integration.md](github-integration.md) — GitHub integration: signed ingress, feed/close translation, and write-back are implemented; PR branch correlation, App identity, and failure inspection remain gaps; product behavior in [`docs/github.md`](../docs/github.md).

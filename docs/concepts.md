@@ -52,8 +52,9 @@ An Issue is one unit of work that can enter the production line.
 - A target repository in which the work executes; see
   [Repositories](repositories.md)
 - State such as stage, health, and `approvalState` after it enters a Workflow
-- A complete set of OpenSpec artifacts after completion: proposal, design,
-  specs, tasks, and review
+- The artifacts declared by its selected Profile, such as the default local
+  Profile's OpenSpec files or the GitHub Profile's Workspace-level design, plan,
+  and review
 
 If one requirement crosses multiple repositories, split one Issue into
 **sub-issues**. The parent Issue tracks the complete requirement, and each
@@ -91,15 +92,19 @@ Before the Workflow starts, Draft protects an incomplete requirement and
 Backlog identifies work that may start. Each Workflow stage then has one
 purpose:
 
-- **Plan**: An Inline Agent understands the requirement and produces the
-  proposal, design, specs, and tasks.
-- **Build**: An Inline Agent writes code and runs tests according to the tasks.
-- **Check**: An Inline Agent reviews its output.
-- **Integrate**: Mohist merges the branch into the base branch.
+- **Plan**: The Profile's planning Agent understands the requirement and records
+  an executable plan.
+- **Build**: The Profile's coding Agent writes code and runs tests according to
+  the plan.
+- **Check**: An independent Agent reviews the implementation and evidence.
+- **Integrate**: Mohist delivers the Repository Workflow branch to the base
+  branch directly or through the selected code-hosting platform.
 
-Some stages, Plan and Check by default, enter an **approval point** after
-completion. They wait for an `approve` or `reject` decision. The approver does
-not have to be a specific type of actor. See [Approval](#approval).
+Profiles choose which stages enter an **approval point** after completion. The
+default local Profile uses Plan and Check; the GitHub Profile uses Plan and lets
+its named reviewer gate Check. An Approval point waits for an `approve` or
+`reject` decision. The approver does not have to be a specific type of actor.
+See [Approval](#approval).
 
 See [The Workflow](the-workflow.md).
 
@@ -117,7 +122,8 @@ The built-in Profiles are:
 
 - `mohist/local`: The complete five-stage process with local integration; this
   is the default.
-- `mohist/github-pr`: Uses a GitHub pull request in the Integrate stage.
+- `mohist/github-pr`: Uses named planner, coder, and reviewer Agents and delivers
+  through a GitHub Pull Request and Auto-merge.
 
 See [Workflow Profile](workflow-profiles.md).
 

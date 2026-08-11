@@ -13,7 +13,7 @@ for Repository identity.
 
 ```text literal
 Project.Repository
-  Name
+  Name                 # Portable path segment, case-insensitively unique
   GitUrl
   BaseBranch
   IsDefault
@@ -31,6 +31,13 @@ WorkflowRun
 
 - Project Repository is the only write authority for `GitUrl` and
   `BaseBranch`.
+- Repository `Name` matches `[a-z0-9][a-z0-9_-]*` and is not one of the exact
+  case-insensitive Windows device names `CON`, `PRN`, `AUX`, `NUL`, `COM1`
+  through `COM9`, or `LPT1` through `LPT9`. Validation applies the syntax rule
+  first and then compares the complete name with that reserved set using
+  ordinal case-insensitive comparison. The name remains case-insensitively
+  unique within a Project. This lets the canonical name identify its checkout
+  directory without a second slug or collision map.
 - An Issue's `RepositoryName` is a stable reference to a Project Repository.
   The Issue cannot be rebound after its first start.
 - A WorkflowRun stores only the scalars needed to locate its Issue. It stores
@@ -80,13 +87,18 @@ WorkflowRun.(ProjectId, IssueNumber)
   -> Issue.RepositoryName
   -> Project.Repository
   -> repository.{name, gitUrl, baseBranch}
+  -> Runner materialization
+  -> repository.{path, branch}
 ```
 
-The resolved value belongs only to that dispatch. It is not a Run Variable and
-is not written back to WorkflowRun. There is no fallback to the Project
-default, `main`, or legacy variables. If the target resource is missing, the
-task fails with an actionable Repository error; it may be retried after the
-Project Repository is repaired.
+The resource fields are fixed at Server dispatch. Runner adds `path` and
+`branch` after materializing the Workspace: `path` is the absolute target
+checkout at `<workspace.path>/REPOS/<repository.name>/`, and `branch` is the
+Workflow branch checked out there. These values belong only to that attempt's
+runtime context. They are not Run Variables and are not written back to
+WorkflowRun. There is no fallback to the Project default, `main`, legacy
+variables, or `workspace.branch`. If the target resource or checkout cannot be
+resolved, the task fails with an actionable Repository error.
 
 An unfinished Issue locks the Repository's execution properties, so every
 dispatch in one WorkflowRun sees stable `GitUrl` and `BaseBranch` values without
@@ -111,6 +123,12 @@ checkout must belong to the resolved `GitUrl`. If the Runner cannot confirm the
 remote, it fails preparation before fetch, push, or rebase. This validation does
 not make the remote URL, checkout path, or branch part of Workspace identity.
 
+Actions default to the Workspace root. A Profile passes
+`working-directory: ${{ repository.path }}` for Git, build, test, and coding
+tasks that operate on the target checkout. Runner rejects a working directory
+outside `workspace.path`. This keeps checkout selection explicit without
+requiring Actions to interpret Repository or Workspace context.
+
 ### Workspace Queries and Cleanup
 
 Workspace operations are addressed by `(ProjectId, WorkspaceName)`. A
@@ -118,10 +136,10 @@ WorkflowRun ID may locate workflow history, but it never identifies a
 Workspace. The Server resolves the Workspace Home to a Runner; Repository data
 is supplied only to operations that need source control context.
 
-The Workspace lifecycle and reclamation grant come from the Workspace view, not
-Repository existence or WorkflowRun status. Runner-side registry and deletion
-fences are defined in [`runner.md`](runner.md#local-workspace-lifecycle) and the
-reclamation rules remain authoritative in
+The Workspace lifecycle and reclamation grant come from the Workspace view,
+which accounts for active Sessions and nonterminal WorkflowRuns. They do not
+come from Repository existence or Runner-local inference. Runner-side registry
+and deletion fences are defined in [`runner.md`](runner.md#local-workspace-lifecycle) and the reclamation rules remain authoritative in
 [`workspace.md`](workspace.md#runner-side-directory-reclamation).
 
 ## Failure Semantics
@@ -146,4 +164,7 @@ and the Runner retains a per-WorkflowRun Workspace manager and registry as a
 fallback when a dispatch lacks the named Workspace fact. These fields and the
 `workspaces.json` fallback are retired implementation paths. They do not define
 Workspace identity and must be removed as callers converge on
-`(ProjectId, WorkspaceName)`.
+`(ProjectId, WorkspaceName)`. The current Runner also checks out the Repository
+at the Workspace root and exposes its branch as `workspace.branch`; it has not
+yet implemented the child checkout or `repository.path` and
+`repository.branch` runtime facts.

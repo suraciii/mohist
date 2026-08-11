@@ -153,9 +153,15 @@ integration Credential authentication
 
 **Workspace**:
 A named, persistent Project execution environment that holds an Origin,
-repository references, and archive state and exists across AgentSessions and
-WorkflowRuns. Sessions and Agents with the same Origin share one Workspace;
-directory contents and git organization are outside its definition.
+Repository references, archive state, and one materialized root directory. Its
+reserved root layout contains `REPOS/`, `PLANS/`, `RESEARCH/`, and `.scratch/`.
+It exists across AgentSessions and WorkflowRuns, and all consumers with the same
+Origin share it.
+
+**Repository Checkout**:
+The materialized Git working copy of one Project Repository inside a Workspace,
+at `REPOS/<repository-name>/`. Its path and Workflow branch are execution facts
+of the target Repository, not Workspace identity or user Variables.
 
 **Origin**:
 A Workspace creation source and unique resolution key: an Issue, an interaction
@@ -165,7 +171,10 @@ At most one active Workspace exists for the same Origin at one time.
 **Materialization**:
 A Workspace directory instance on one Runner, with routing facts that determine
 where subsequent execution is scheduled. Its directory can be reclaimed or
-lost with the Runner; rematerialization starts empty without changing Workspace
+lost with the Runner. For an Issue Workflow, rematerialization reconstructs the
+target Repository checkout from Git and previously captured Workspace artifacts
+from Mohist's Artifact Store. Interactive rematerialization recreates only the
+reserved layout and Repository access grants. Neither path changes Workspace
 identity.
 
 _Avoid_: worktree or Runner directory as the Workspace identity
