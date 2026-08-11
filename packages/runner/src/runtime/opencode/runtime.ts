@@ -602,9 +602,14 @@ export class OpenCodeRuntime {
     }
     const rebuild = this.scheduleRebuild(generation)
     this.rebuildInFlight = rebuild
-    void rebuild.finally(() => {
-      if (this.rebuildInFlight === rebuild) this.rebuildInFlight = null
-    })
+    void rebuild.then(
+      () => {
+        if (this.rebuildInFlight === rebuild) this.rebuildInFlight = null
+      },
+      () => {
+        if (this.rebuildInFlight === rebuild) this.rebuildInFlight = null
+      },
+    )
   }
 
   private scheduleRebuild(generation: RuntimeGeneration): Promise<RuntimeResult<RuntimeReadyState>> {
