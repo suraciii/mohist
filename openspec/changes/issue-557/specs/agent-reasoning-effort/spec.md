@@ -44,10 +44,16 @@ The Agent API, Web editor, and CLI SHALL support setting and clearing `reasoning
 
 ### Requirement: Agent surfaces expose the complete execution configuration
 
-Agent list, Agent detail, readiness, launch response, and launch observation surfaces SHALL use one stable projection containing `runtime`, `model`, `reasoningEffort`, and `variant`. The projection SHALL show the final configured values, label an unset or invalid effort explicitly, and SHALL never display a runtime-specific variant as the Agent's reasoning effort.
+Agent list, Agent detail, Agent Connection readiness/launch, readiness, launch response, and launch observation surfaces SHALL use one stable projection containing `runtime`, `model`, `reasoningEffort`, and `variant`. The projection SHALL show the final configured values, label an unset or invalid effort explicitly, and SHALL never display a runtime-specific variant as the Agent's reasoning effort.
 
 #### Scenario: List, detail, and launch result agree
 
 - **WHEN** an Agent is configured with runtime `opencode`, model `openai/gpt-5.6`, a valid reasoning effort, and a runtime-specific variant
 - **THEN** the Agent list, detail response, readiness response, and accepted launch result SHALL expose all four fields
 - **AND** the reasoning-effort and variant fields SHALL retain their distinct values and names
+
+#### Scenario: Connection launch agrees with direct launch
+
+- **WHEN** the same configured Agent is launched directly and through a bound Agent Connection
+- **THEN** the Agent Connection readiness and accepted launch result SHALL expose the same runtime, model, reasoning effort, and variant projection as the direct launch
+- **AND** clearing or changing effort SHALL not reinterpret the Connection's runtime-specific variant
