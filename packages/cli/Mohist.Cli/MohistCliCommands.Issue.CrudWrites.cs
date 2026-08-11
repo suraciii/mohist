@@ -291,6 +291,7 @@ internal static partial class IssueCommands
             var riskProvided = ctx.GetResult(riskOpt) is not null;
             var parentProvided = ctx.GetResult(parentOpt) is not null;
             var modelProvided = ctx.GetResult(modelOpt) is not null;
+            var modelVariantProvided = ctx.GetResult(modelVariantOpt) is not null;
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
             var inheritWorkflowProfileProvided = IsOptionProvided(ctx, inheritWorkflowProfileOpt);
             var repositoryProvided = ctx.GetResult(repositoryOpt) is not null;
@@ -381,6 +382,8 @@ internal static partial class IssueCommands
                     payload["parentIssueNumber"] = parentIssueNumber;
                 if (modelProvided)
                     payload["model"] = model;
+                if (modelVariantProvided)
+                    payload["modelVariant"] = modelVariant;
                 if (repositoryProvided)
                     payload["repositoryName"] = repository;
 
