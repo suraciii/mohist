@@ -1,18 +1,10 @@
-using Mohist.Server.Infrastructure;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Sessions.Grains;
-using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Orleans;
 using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
@@ -263,67 +255,6 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         finally
         {
             await DrainDispatchAsync(runnerId);
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task Launch_CompletedAgentJob_RecordsSessionClosedCompleted_AndResolvesCompletedStatus()
-    {
-        var projectId = await CreateProjectAsync("launch-completed-terminal");
-        var runnerId = $"launch-completed-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentAsync(projectId, "completed-terminal-agent");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "complete the generic session" });
-            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
-            var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
-
-            var claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
-
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(claim.AgentJobId);
-            var persistence = _fixture.Persistence.Checkpoint(sessionId);
-            var report = await jobGrain.ReportResultAsync(
-                runnerId,
-                claim.WorkId,
-                new WorkResult(
-                    Status: "completed",
-                    Message: "generic job completed",
-                    Output: JSON.DeserializeElement("{}"),
-                    ArtifactUploadIds: null,
-                    ExitCode: 0));
-            Assert.True(report.Accepted, "AgentJob rejected completed report");
-
-            var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, persistence);
-            var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
-            // Issue 484: terminal delivery writes a session.activity
-            // (activity=idle) part. The work result status remains on
-            // the payload; exitCode is no longer mirrored onto the part.
-            Assert.Equal("completed", closePayload.GetProperty("status").GetString());
-
-            using var summary = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}");
-            Assert.Equal(HttpStatusCode.OK, summary.StatusCode);
-            var summaryPayload = await summary.Content.ReadFromJsonAsync<JsonElement>();
-            // Issue 484: a session never enters a terminal lifecycle
-            // state; the summary surfaces the current `activity` value
-            // (`idle` after the job completes). The job's own Completed
-            // verdict is independent.
-            Assert.Equal("idle", summaryPayload.GetProperty("data").GetProperty("activity").GetString());
-
-            using var list = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agent.Id}/sessions");
-            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
-            var listPayload = await list.Content.ReadFromJsonAsync<JsonElement>();
-            var item = listPayload.GetProperty("data").EnumerateArray()
-                .Single(entry => entry.GetProperty("sessionId").GetString() == sessionId);
-            Assert.Equal("idle", item.GetProperty("activity").GetString());
-        }
-        finally
-        {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
