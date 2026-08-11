@@ -336,20 +336,20 @@ test('planTracks isolates duration measurements and gates only Node fan-out', ()
   const spec: TrackConfig = {
     id: 'server-spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 1000, enforce: false,
   }
-  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-unit'], 'runner')
+  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli'], 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
   assert.ok(byId.get('cli')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('server-unit')?.dependsOn, ['cli'])
-  assert.ok(byId.get('server-unit')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('runner')?.dependsOn, ['server-unit'])
+  assert.ok(!byId.get('server-unit')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('runner')?.dependsOn, ['cli'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
-  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['server-unit'])
-  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'server-unit'])
+  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['cli'])
+  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'cli'])
 
-  const focused = planTracks([unit], '/evidence', ['cli', 'server-unit'], 'runner')
+  const focused = planTracks([unit], '/evidence', ['cli'], 'runner')
   assert.deepEqual(focused[0].lane.dependsOn, undefined)
   assert.ok(!focused[0].lane.resources?.includes('duration-measurement'))
 })
