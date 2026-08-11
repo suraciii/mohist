@@ -2,9 +2,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Api;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workspace.Grains;
+using Orleans;
 using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
@@ -228,10 +231,18 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var runnerId = $"launch-dispatch-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "dispatch-contract-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var workspaceName = $"launch-dispatch-{Guid.NewGuid():N}";
+        var workspace = _fixture.Grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(projectId, workspaceName));
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await workspace.CreateManualAsync(workspaceName, [], now);
+        await workspace.EnsureMaterializedOnAsync(runnerId, $"/tmp/{workspaceName}", now);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "dispatch contract guard" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "dispatch contract guard", context = new { workspace = workspaceName } });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var mintedSessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;

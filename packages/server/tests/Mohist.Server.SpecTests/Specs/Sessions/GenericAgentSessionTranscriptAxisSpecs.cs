@@ -36,15 +36,23 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             projectId = project.Id,
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            project.Id,
+            _runnerId,
+            "transcript-axis-launch");
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "transcript-axis launch" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                project.Id,
+                agent.Id,
+                new { prompt = "transcript-axis launch", context = new { workspace = workspaceName } });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polledWork = await PollOnceAsync(_runnerId, sessionId);
+            var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
 
             Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkId));
             Assert.Equal(string.Empty, polledWork.WorkflowRunId);
@@ -72,15 +80,23 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             projectId = project.Id,
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            project.Id,
+            _runnerId,
+            "transcript-axis-events");
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "transcript-axis events" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                project.Id,
+                agent.Id,
+                new { prompt = "transcript-axis events", context = new { workspace = workspaceName } });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polledWork = await PollOnceAsync(_runnerId, sessionId);
+            var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
 
             var fakeRun = await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
@@ -209,15 +225,23 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             projectId = project.Id,
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            project.Id,
+            _runnerId,
+            "transcript-axis-followup");
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "transcript-axis first turn" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                project.Id,
+                agent.Id,
+                new { prompt = "transcript-axis first turn", context = new { workspace = workspaceName } });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polledWork = await PollOnceAsync(_runnerId, sessionId);
+            var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
             var firstPersistence = _fixture.Persistence.Checkpoint(sessionId);
             await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
                 project.Id,

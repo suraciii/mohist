@@ -7,14 +7,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workspace.Grains;
 using Orleans;
 using Xunit;
-using Xunit.Sdk;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifetime
@@ -171,31 +172,39 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         return payloads.Select(payload => JsonSerializer.Deserialize<JsonElement>(payload)).ToArray();
     }
 
-    /// <summary>
-    /// A job whose first dispatch attempt found no runner waits on a backoff
-    /// timer that a frozen fake clock never releases, so polling alone can
-    /// never observe it; each miss releases one retry. The happy path matches
-    /// on the first poll and leaves the clock untouched. The registry
-    /// snapshot on timeout distinguishes a job that was never dispatched from
-    /// one that landed on a different runner.
-    /// </summary>
-    protected async Task<PollResult> PollOnceAsync(string runnerId, string expectedSessionId)
+    protected async Task<string> CreateRunnerHomeWorkspaceAsync(
+        string projectId,
+        string runnerId,
+        string prefix)
     {
-        try
-        {
-            return (await TestWait.ForAsync(
-                () => PollDispatchOnceAsync(runnerId, expectedSessionId),
-                found => found is not null,
-                TimeSpan.FromSeconds(1),
-                TimeSpan.FromMilliseconds(100),
-                $"a polled dispatch on runner '{runnerId}' carrying AgentSessionId='{expectedSessionId}'",
-                _fixture.ReleaseDispatchBackoffAsync))!;
-        }
-        catch (XunitException failure)
-        {
-            throw new XunitException(
-                $"{failure.Message}\nRunner registry at timeout:\n{await _fixture.DescribeRunnerRegistryAsync()}");
-        }
+        var workspaceName = $"{prefix}-{Guid.NewGuid():N}";
+        var workspace = _fixture.Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(projectId, workspaceName));
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await workspace.CreateManualAsync(workspaceName, [], now);
+        var home = await workspace.EnsureMaterializedOnAsync(runnerId, $"/tmp/{workspaceName}", now);
+        Assert.NotNull(home);
+        Assert.Equal(runnerId, home.RunnerId);
+        return workspaceName;
+    }
+
+    protected async Task<PollResult> PollOnceAsync(
+        string agentJobId,
+        string runnerId,
+        string expectedSessionId)
+    {
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            agentJobId,
+            TimeSpan.FromSeconds(5));
+        var assignment = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, assignment.RunnerId);
+
+        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
+        Assert.NotNull(dispatch);
+        Assert.Equal(agentJobId, dispatch.AgentJobId);
+        return dispatch;
     }
 
     private async Task<PollResult?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)

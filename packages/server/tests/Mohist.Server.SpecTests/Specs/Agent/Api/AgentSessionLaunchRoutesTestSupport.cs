@@ -61,6 +61,11 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
             agentJobId,
             TimeSpan.FromSeconds(5));
+        var assignment = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, assignment.RunnerId);
+
         var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
 
         Assert.NotNull(dispatch);
