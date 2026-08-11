@@ -104,13 +104,20 @@ public abstract class AgentSessionRecoveryApiTestSupport
     protected RecordingRunnerHubContext RunnerHub =>
         _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
 
-    protected SessionCommandRequest AssertSingleSessionCommandInvocation()
+    protected SessionCommandRequest AssertSingleSessionCommandInvocation(string sessionId)
     {
-        var invocation = Assert.Single(RunnerHub.Invocations);
+        var invocation = Assert.Single(RunnerHub.Invocations, candidate => IsSessionCommandInvocationFor(sessionId, candidate));
         Assert.Equal($"connection-{_runnerId}", invocation.ConnectionId);
-        Assert.Equal("SessionCommand", invocation.Method);
         return Assert.IsType<SessionCommandRequest>(Assert.Single(invocation.Arguments));
     }
+
+    protected void AssertNoSessionCommandInvocations(string sessionId) =>
+        Assert.DoesNotContain(RunnerHub.Invocations, candidate => IsSessionCommandInvocationFor(sessionId, candidate));
+
+    private static bool IsSessionCommandInvocationFor(string sessionId, RecordedRunnerHubInvocation invocation) =>
+        invocation.Method == "SessionCommand"
+        && invocation.Arguments is [SessionCommandRequest request]
+        && request.SessionId == sessionId;
 
     protected async Task<AgentSessionInfo> CreateAgentLaunchSessionAsync(
         ProjectDto project,

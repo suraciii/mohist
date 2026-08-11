@@ -1,8 +1,8 @@
 # Workspace
 
 A Workspace is a persistent execution environment under a Project. It contains
-a set of working directories and access to one or more repositories. It
-persists across Sessions and Agents. Multiple Sessions and Agents can continue
+a fixed root layout and access to one or more repositories. It persists across
+Sessions and Agents. Multiple Sessions and Agents can continue
 work in the same Workspace. A later participant sees the same directories,
 installed dependencies, research material, and uncommitted changes.
 
@@ -11,14 +11,31 @@ live under the Workspace. Plans, research, notes, and other work products belong
 directly to the Workspace rather than to one repository. Work that spans
 several repositories therefore always has a place at the Workspace level.
 
+Every materialized Workspace has this layout:
+
+```text diagram
+<workspace>/
+|-- REPOS/
+|   `-- <repository-name>/
+|-- PLANS/
+|-- RESEARCH/
+`-- .scratch/
+```
+
+`REPOS/` contains Git checkouts. `PLANS/` contains Issue plans and reviews,
+`RESEARCH/` contains durable investigation material, and `.scratch/` contains
+disposable local work. Do not place a repository checkout at the Workspace
+root.
+
 ## Two Sources
 
 ### Workspace for an Issue Workflow
 
 When an Issue first starts, it automatically receives a Workspace named
-`issue-<number>`. Mohist initializes it from a clean checkout of the target
-repository. It does not share directories with other Issues, so many Issues can
-run in parallel without interfering with each other.
+`issue-<number>`. Mohist creates the reserved root directories and initializes a
+clean checkout of the target Repository at
+`REPOS/<repository-name>/`. It does not share directories with other Issues, so
+many Issues can run in parallel without interfering with each other.
 
 All Stages, retries, Sessions, and invited Agents for the same Issue share this
 Workspace. Mohist archives it when the Issue completes or is cancelled.
@@ -47,9 +64,10 @@ accumulates work over time, which enables reuse across Sessions.
 - An Agent invited into a Session or channel enters the same Workspace and sees
   the same files.
 - A delegated child Session inherits the same Workspace. To isolate a child,
-  let the Agent create a Git worktree inside the inherited directory. Spawn
+  let the Agent create a Git worktree under the inherited Workspace. Spawn
   cannot select another Workspace. A Git worktree is a Git tool; Mohist does
-  not provide a child-specific Workspace primitive.
+  not provide a child-specific Workspace primitive or place a worktree at the
+  Workspace root.
 - At any time, one interaction location maps to one active Workspace. There is
   always one answer to the question, "Which directory is the Agent using here?"
 
@@ -78,16 +96,19 @@ contract.
 ## Repositories
 
 A Workspace holds references to repositories declared as Project resources. An
-Issue Workflow starts with the Issue's target repository. Runner owns that
-checkout's branch, marker, and layout so every Stage, retry, and integration
-step observes the same Workspace identity. Treat its recorded home as opaque
-and inspect it through `mo workspace view`.
+Issue Workflow starts with the Issue's target Repository. Runner owns its
+checkout at `REPOS/<repository-name>/` and its Workflow branch so every Stage,
+retry, and integration step addresses the same Repository execution facts.
+Workflow expressions expose the Workspace root as `${{ workspace.path }}` and
+the target checkout and branch as `${{ repository.path }}` and
+`${{ repository.branch }}`. These values are read-only runtime context, not
+Variables.
 
-An interactive Workspace mounts repositories as needed. There, a mount grants
-access and provides a default checkout target, while the Agent controls the
-actual clone, branch, and worktree layout. Conventions such as placing checkouts
-under `repos/` and work products at the Workspace root belong in the Prompt and
-are not enforced by the platform.
+An interactive Workspace materializes the same reserved root layout. Repository
+access grants do not imply that every Repository is already cloned, but any
+checkout created there belongs under `REPOS/<repository-name>/`. Agents may add
+Git worktrees beneath `REPOS/` or `.scratch/`; the reserved top-level directory
+roles do not change.
 
 ## Lifecycle Endpoints
 
@@ -115,19 +136,34 @@ installation. See [Event Routing](event-routing.md) and
 
 The Runner that executes a Workspace hosts its directories. The Workspace still
 exists after Runner failure or disk cleanup, but its directory contents are not
-guaranteed to return. A missing directory can be rematerialized empty on the same
-home Runner. AgentJob scheduling can clear an offline home and select another
-Runner, but a WorkflowRun remains assigned and does not migrate automatically.
-Unpushed work is lost in either case. A Workflow preserves completed work by
-pushing its Workflow branch to the remote. Important work in an interactive
-Workspace must be committed and pushed.
+the durable authority. When Mohist rematerializes an Issue Workspace, it rebuilds
+the target Repository checkout from its remote Workflow branch. If the Workflow
+has not published that branch yet, Mohist recreates it locally from the target
+Repository's current locked base branch. It then restores the latest
+successfully recorded artifacts under `PLANS/` and `RESEARCH/` to their original
+root-relative paths. This includes artifacts recorded by a failed task, such as
+a review report consumed by recovery. A restore failure stops preparation
+instead of running an Agent with partial inputs. `REPOS/` artifacts,
+`.scratch/`, dependency installations, uncommitted changes, and uncaptured files
+are not restored.
+
+An active nonterminal Issue Workflow prevents Workspace directory reclamation,
+including while it waits for Approval. AgentJob scheduling can clear an offline
+home and select another Runner, but a WorkflowRun remains assigned and does not
+migrate automatically. Important interactive work must be committed and pushed
+to an Agent-managed remote; interactive Workspaces have no Workflow artifact
+restore path.
 
 ## Implementation Gaps
 
 Workspace identity, create and archive lifecycle, Issue and interactive source
 resolution, named Runner materialization, and cross-Session reuse are
-implemented. AgentJobs can replace an offline home; WorkflowRuns cannot yet move
-their assignment to another Runner. Slack channel archival also does not yet
-archive its Workspace; until that linkage exists, close the interactive
+implemented. The fixed root layout, Repository child checkout, Repository path
+and branch runtime facts, Workflow-artifact restore, and nonterminal Workflow
+reclamation guard are not yet implemented. Working-directory confinement is not
+yet safe against ancestor symbolic links, and required artifact captures do not
+yet fail closed. AgentJobs can replace an offline home; WorkflowRuns cannot yet
+move their assignment to another Runner. Slack channel archival also does not
+yet archive its Workspace; until that linkage exists, close the interactive
 Workspace explicitly when the channel should no longer retain an active
 environment.

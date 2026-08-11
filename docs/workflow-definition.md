@@ -54,6 +54,7 @@ the decision is submitted.
   title: Merge GitHub PR         # Optional. A user-facing name.
   uses: mohist/merge-github-pr   # Required. Selects an Action.
   with:                          # Optional. Action Input. Supports template expressions.
+    working-directory: ${{ repository.path }}  # Optional engine-reserved execution directory.
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
   expect: <Expect>               # Optional. Completion requirements for this Task.
@@ -71,6 +72,15 @@ default values, output fields, and error codes. Mohist validates `with` against
 that declaration. It rejects unknown fields, missing required fields, and
 invalid types instead of ignoring them.
 
+`working-directory` is an engine-reserved field accepted under `with` for every
+Action. It is not part of an Action's own input contract. An omitted value uses
+`${{ workspace.path }}`. A relative value resolves from that root, and an
+absolute value must still be the root or one of its descendants. Runner rejects
+a path that escapes the Workspace, including a path whose existing ancestor is
+a symbolic link outside it. Use `${{ repository.path }}` for tasks that operate
+on the target checkout and `${{ workspace.path }}` for tasks that produce
+Workspace-level plans, research, or reviews.
+
 ### `expect`: Completion Requirements
 
 ```yaml
@@ -87,16 +97,30 @@ expect:
 
 `expect` defines the Workflow's completion requirements for a Task. It is not
 Action Input. An Action failure makes the Task fail. After the Action succeeds,
-an unmet `expect` also makes the Task fail.
+an unmet `expect` also makes the Task fail. File and marker paths under `expect`
+resolve from the selected `working-directory`.
 
-List a required output file in both `expect.files` and `artifacts.files`. List
-an optional output file only in `artifacts`.
+List a required output file in both `expect.files` and `artifacts.files`. Mohist
+compares their normalized absolute paths, so the two declarations can use
+different relative paths when their anchors differ. List an optional output
+file only in `artifacts`.
 
 ### `artifacts`: Artifact Collection
 
-Collection is best effort. Mohist skips a file that does not exist and does not
-fail the Task. Collected artifacts are stored permanently and are available in
-the Task details.
+Declared artifact paths resolve from `${{ workspace.path }}` even when the
+Action uses another `working-directory`. After template expansion, Mohist
+normalizes each path to a Workspace-root relative key. Absolute paths,
+backtracking, symbolic links, and paths outside the Workspace are invalid.
+Action-produced dynamic artifacts resolve from the selected
+`working-directory` and are normalized to the same key space.
+
+An artifact whose normalized file is also required by `expect` is a required
+capture: missing content or a capture, upload, or recording failure fails the
+Task. Other declared and dynamic artifacts are optional; Mohist records a
+warning when one cannot be captured. Successfully recorded captures remain
+available in Task details according to Artifact Store retention. Only captures
+under `PLANS/` and `RESEARCH/` participate in Workspace rematerialization;
+`REPOS/` is restored from Git and `.scratch/` is disposable.
 
 ### `setVars`: Write Output to Variables
 
@@ -139,6 +163,7 @@ recovery:
   title: Merge verified     # Optional. A user-facing name.
   uses: mohist/github-pr-status
   with:
+    working-directory: ${{ repository.path }}
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
 ```
@@ -148,9 +173,9 @@ Workflow does not enter the next Stage.
 
 ## Template Expressions
 
-Fields under `with` and `expect` can use `${{ }}` expressions. The following
-table lists every available namespace. A root reference not listed here is
-invalid.
+Fields under `with`, `expect`, and `artifacts` can use `${{ }}` expressions.
+The following table lists every available namespace. A root reference not
+listed here is invalid.
 
 | Expression | Meaning |
 |---|---|
@@ -159,8 +184,8 @@ invalid.
 | `work.*` | Current work information, such as `work.id`, `work.type`, `work.title`, and `work.attempt` |
 | `work.approvalFeedback.*` | Available only to approval feedback Tasks. Information that triggered this work, such as `id`, `stage`, `createdAt`, and `summary` |
 | `issue.*` | Issue information, such as `issue.projectId`, `issue.number`, `issue.title`, and `issue.body` |
-| `repository.*` | Target repository information, such as `repository.baseBranch` |
-| `workspace.*` | Workspace information, such as `workspace.branch` |
+| `repository.*` | Target Repository information. Resource facts include `name`, `gitUrl`, and `baseBranch`; Runner facts include the checkout `path` and Workflow `branch` |
+| `workspace.*` | Workspace information: `workspace.name` and the materialized root `workspace.path` |
 | `vars.*` | Merged Variables. See [Variable References](workflow-profiles.md#variable-references) |
 | `tasks.<id>.outputs.*` | Output from a previous Task |
 | `prompts.<key>` | A Project Prompt whose body is read when the Task executes |
@@ -189,6 +214,9 @@ invalid.
 - `workspace` describes only Workspace facts. It does not provide OpenSpec path
   conventions. A Profile or Prompt must write a path such as
   `openspec/changes/issue-${{ issue.number }}` explicitly.
+- `repository.path` and `repository.branch` exist only after Runner materializes
+  the target checkout. A Profile must not construct the checkout path from
+  `workspace.path` or read a branch from `workspace` or `vars`.
 
 ## Validate a Definition
 
@@ -229,12 +257,13 @@ stages:
       - id: proposal
         uses: mohist/opencode
         with:
+          working-directory: ${{ workspace.path }}
           session: plan
           prompt: ${{ prompts.proposal }}
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: docs/proposal.md
+            - path: PLANS/issue-${{ issue.number }}-PLAN.md
           markers:
             - path: _output
               oneOf:
@@ -243,19 +272,21 @@ stages:
               failIf: <promise>unfinished</promise>
         artifacts:
           files:
-            - path: docs/proposal.md
+            - path: PLANS/issue-${{ issue.number }}-PLAN.md
       - id: publish-plan
         uses: mohist/push
         with:
+          working-directory: ${{ repository.path }}
           source: HEAD
-          target: ${{ workspace.branch }}
+          target: ${{ repository.branch }}
           remote: origin
           force: true
       - id: open-draft-pr
         uses: mohist/create-github-pr
         with:
+          working-directory: ${{ repository.path }}
           repositoryUrl: ${{ repository.gitUrl }}
-          source: ${{ workspace.branch }}
+          source: ${{ repository.branch }}
           target: ${{ repository.baseBranch }}
           draft: true
           titleFrom: issue.title
@@ -263,10 +294,20 @@ stages:
         setVars:
           github.pr.number: output.prNumber
           github.pr.url: output.prUrl
+      - id: record-reviewed-head
+        uses: mohist/github-pr-status
+        with:
+          working-directory: ${{ repository.path }}
+          repositoryUrl: ${{ repository.gitUrl }}
+          prNumber: ${{ vars.github.pr.number }}
+          expect: open,ready
+        setVars:
+          github.reviewedHead: output.headSha
     checks:
       - id: health
         uses: core/script
         with:
+          working-directory: ${{ repository.path }}
           run: git diff --check
           timeout: 300000
 
@@ -278,39 +319,15 @@ stages:
       - id: merge-pr
         uses: mohist/merge-github-pr
         with:
+          working-directory: ${{ repository.path }}
           repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
+          expectedHeadSha: ${{ vars.github.reviewedHead }}
           method: squash
         recovery:
           budget: 2
           handlers:
-            - when: error.code=base-moved
-              tasks:
-                - id: recover:rebase
-                  uses: mohist/rebase
-                  with:
-                    baseBranch: ${{ repository.baseBranch }}
-                    remote: origin
-                  recovery:
-                    budget: 2
-                    handlers:
-                      - when: error.code=conflict
-                        tasks:
-                          - id: recover:resolve-conflicts
-                            uses: mohist/opencode
-                            with:
-                              session: integrate
-                              prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              options: ${{ vars.agent }}
-                - id: recover:push
-                  uses: mohist/push
-                  with:
-                    source: ${{ workspace.branch }}
-                    target: ${{ workspace.branch }}
-                    remote: origin
-                    force: true
-              retrySelf: true
-            - when: error.code=protection-conflict
+            - when: error.code=retry-safe
               retrySelf: true
     checks:
       - id: merge-verified

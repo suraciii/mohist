@@ -18,6 +18,7 @@ between Agent, AgentJob, and AgentSession.
   uses: mohist/agent
   with:
     name: reviewer
+    working-directory: ${{ workspace.path }}
     prompt: ${{ prompts.review }}
 ```
 
@@ -42,6 +43,12 @@ Skills. The task cannot override them. `prompt` supplies only the goal for this
 work and cannot modify the Agent definition. Task-level constructs such as
 `expect`, `artifacts`, `setVars`, and recovery behave as they do for other
 Actions.
+
+The engine-reserved `working-directory` field selects where the referenced Agent
+starts. It does not belong to the Agent definition and cannot escape the bound
+Workspace. Use `${{ workspace.path }}` for a planner or reviewer that writes
+Workspace-level artifacts and `${{ repository.path }}` for a coder that changes
+the target checkout. Agents in both locations still share the same Workspace.
 
 `name` uses the same resolution order as the `mo` command surface. A reference
 that starts with `agent_` resolves only as an ID. Other references resolve by
@@ -73,3 +80,10 @@ the selected backend Action. Recovery `when` matching applies in the same way.
 `mohist/agent` can be used only for a task and is rejected when used for a
 check. If the referenced Agent does not exist or is archived, dispatch fails
 with `agent_not_found`.
+
+## Implementation Gap
+
+The current Server translation to the selected Inline Agent backend does not
+yet preserve the engine-reserved `working-directory` field. Until that
+translation is updated, the start-directory behavior above is the target
+contract rather than current executable behavior.

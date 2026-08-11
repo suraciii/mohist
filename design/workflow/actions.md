@@ -217,8 +217,14 @@ setVars:
 
 ### `artifacts`
 
-`artifacts` declares output to collect. Collection is best-effort: a missing file is skipped and
-does not fail the task.
+`artifacts` declares output to collect. Runner renders declared paths against the attempt context,
+resolves them from `workspace.path`, and stores a normalized Workspace-root relative key. Dynamic
+Action artifacts resolve from `ActionContext.workDir` and normalize into the same key space.
+
+When an artifact resolves to the same file as an `expect` requirement, it is a required capture:
+missing content or capture, upload, or recording failure fails the Task. Other captures are
+best-effort and report warnings. Only successfully recorded keys under `PLANS/` and `RESEARCH/`
+participate in Workspace rematerialization.
 
 ```yaml
 artifacts:
@@ -317,32 +323,35 @@ OpenCode implementation.
 
 `mohist/push`, `create-github-pr`, `mark-github-pr-ready`, `merge-github-pr`, and `mohist/rebase`
 are ordinary Workflow Actions with one input channel. A Profile explicitly passes the base branch,
-workflow branch, remote, and other context through `${{ repository.* }}` and
-`${{ workspace.* }}`. An Action does not look up Run Variables itself.
+Workflow branch, remote, and other context through `${{ repository.* }}` and selects the checkout
+with `working-directory: ${{ repository.path }}`. An Action does not look up Run Variables itself.
 
-- `push` is solely responsible for publishing the current workspace's committed HEAD to the remote
-  workflow branch. One WorkflowRun exclusively owns the workflow branch, so the Profile uses a
+- `push` is solely responsible for publishing the current checkout's committed HEAD to the remote
+  Workflow branch. One WorkflowRun exclusively owns the Workflow branch, so the Profile uses a
   force update and does not depend on a remote-tracking ref.
 - `create-github-pr` only creates or updates a draft PR and outputs a stable PR identity. It performs
   no Git operation and does not decide which commit should be published.
 - `mark-github-pr-ready` marks a draft PR ready and is idempotent if it is already ready.
-- `merge-github-pr` squash-merges a PR and must wait for PR checks before the merge.
+- `merge-github-pr` enables GitHub Auto-merge with squash, then waits until GitHub confirms the PR
+  state is `MERGED` and returns its merge commit. Before it returns a recoverable state that permits
+  a content-changing repair, it disables queued Auto-merge and confirms that cancellation.
 
 Publishing, PR metadata, and merging are three independent tasks with independent failure
 boundaries. A push failure retries only push; a PR operation failure retries only that PR operation;
 merge recovery handles only its own failure.
 
-Waiting for PR checks is an internal precondition of the merge Action, not a Stage-level check. It
-polls `gh pr view --json statusCheckRollup`. If checks are empty, it waits within a 120-second grace
-window. Failed checks return `error.code: pr-checks-failed`. The Action performs no implicit repair;
-the Profile must declare explicit recovery.
+The merge Action polls Pull Request state and required checks after enabling Auto-merge. Pending
+checks keep the Action active; failed checks return `error.code: pr-checks-failed`, a closed unmerged
+PR returns `pr-state-conflict`, and only confirmed `MERGED` is success. The Action performs no
+implicit repair; the Profile must declare explicit recovery.
 
 `mohist/github-pr-checks` exposes the same polling and classification logic as an explicit task in
 the Stage graph. A typical Profile places this delivery CI check after `mark-pr-ready` in the check
 Stage. It reuses the merge Action's polling pure function and `pr-checks-failed` error code, so its
-recovery handler is symmetric with merge-pr: the same `recover:fix-pr-checks` + `recover:push` +
-`retrySelf`. It is read-only: it does not modify the PR, push, or perform implicit repair. The
-Profile declares recovery explicitly.
+recovery handler can classify the same external failures. It is read-only: it does not modify the
+PR, push, or perform implicit repair. A handler that changes content must run repair, verification,
+publish, reviewer validation against the new head, and required checks in that order; retrying only
+the failed checks would reuse a stale review verdict. The Profile declares recovery explicitly.
 
 See [`builtin-workflows.md`](builtin-workflows.md) for the complete task graph.
 
@@ -354,3 +363,9 @@ when Runner registers with Server; catalog validation during Profile save with a
 `add-tasks`, and `write-vars`; structured output end to end; and `setVars` projection. Named
 special-case lists, `PROMISE_PROJECTED` and `REMOVED`, have been removed. Privileged access such as
 `openspec-tasks` has been reduced to declarative effects.
+
+The GitHub merge Action still performs a direct merge in the current Runner. Auto-merge enablement,
+reviewed-head binding, interruption reconciliation, cancellation before content repair, and
+confirmed-`MERGED` completion are target behavior. Declared artifacts already render separately,
+but canonical Workspace-root keys, fail-closed required captures, and rematerialization eligibility
+are not yet implemented as one end-to-end contract.

@@ -1,38 +1,42 @@
 # Task Dispatch
 
-This document is the sole authority for when task input templates are evaluated. `tasks[*].with`
-and task-level `expect` are part of the Workflow declaration. Server sends them in their original
-form with the dispatch and does not expand templates in advance. Runner expands them uniformly at
-the execution entry point before invoking an Action. The Prompt body, Effective Stage Variables,
-runtime context, and failure context are part of the immutable snapshot for an attempt.
+This document is the sole authority for when task input templates are evaluated. `tasks[*].with`,
+task-level `expect`, and declared `artifacts` are part of the Workflow declaration. Server sends
+them in their original form with the dispatch and does not expand templates in advance. Runner
+expands them uniformly at the execution entry point before invoking an Action. Server-sourced
+context is immutable at dispatch; Runner appends materialization facts exactly once before it
+creates the final execution snapshot for an attempt.
 
 ## Rendering Boundary
 
 Template evaluation happens only at the Runner execution entry point before an Action call, and
 does **not** happen during Server dispatch:
 
-- Server persists the original `with` and `expect` declarations with the task; it does not expand
-  templates.
-- Every wire dispatch carries the original `with` and `expect` plus an immutable context snapshot
-  for that attempt:
+- Server persists the original `with`, `expect`, and `artifacts` declarations with the task; it
+  does not expand templates.
+- Every wire dispatch carries those original declarations plus an immutable Server context
+  snapshot for that attempt:
   - Effective Stage Variables, resolved at dispatch and frozen under
     [`variables.md`](variables.md);
   - Project Prompt bodies, loaded by key at dispatch;
-  - runtime context: `workflow.runId`, `stage.name`, `work.*`, `issue.*`, `repository.*`,
-    `tasks.<id>.outputs.*`, and `workspace.*`;
+  - runtime context: `workflow.runId`, `stage.name`, `work.*`, `issue.*`, Repository resource
+    facts, `tasks.<id>.outputs.*`, and Workspace identity, but no host filesystem paths;
   - failure context, `failure.*`, for a recovery task when applicable.
-- Before manifest validation and the Action call, Runner renders local inputs for this execution
-  from the original `with` and `expect` against the attempt snapshot. Rendering creates a new
-  structure. It does **not** modify the original `with` or `expect` in the dispatch, a persisted
-  task definition, an Action `addTasks` definition, or a retry source.
-- After rendering, Runner performs manifest validation, resolves `working-directory`, and invokes
-  the Action. The Action receives one rendered and validated input channel. It does **not** receive
-  raw input, a Variables resource, or the complete dispatch context.
+- Runner materializes the bound Workspace and Repository, appends `workspace.path`,
+  `repository.path`, and `repository.branch`, and freezes that augmented context as the execution
+  snapshot. It then renders local inputs and artifact declarations from the original declaration.
+  Rendering creates a new structure. It does **not** modify the dispatch, a persisted task
+  definition, an Action `addTasks` definition, or a retry source.
+- After rendering, Runner performs manifest validation, resolves `working-directory` by real path
+  with ancestor-symlink confinement, and invokes the Action. The Action receives one rendered and
+  validated input channel. It does **not** receive raw input, a Variables resource, or the complete
+  dispatch context.
 
-Once dispatched, an attempt's context snapshot remains unchanged throughout that attempt. Later
-changes to Variables, Prompts, Profile Definition, or a Stage overlay affect only tasks not yet
-dispatched and later attempts, including retry, recovery continuation, and rerun-from-stage. They
-do not change an already dispatched attempt.
+Once Runner creates an attempt's augmented execution snapshot, it remains unchanged throughout
+that attempt. Later changes to Variables, Prompts, Profile Definition, a Stage overlay, or local
+materialization affect only tasks not yet dispatched and later attempts, including retry, recovery
+continuation, and rerun-from-stage. Rematerialization cannot continue an in-flight attempt with new
+filesystem facts; it supersedes that attempt and creates a later attempt after preparation.
 
 ## Template Expression Rules
 
@@ -65,10 +69,12 @@ including nested objects and arrays. An Action can read retained internal templa
 deferred field. No input channel exposes raw `with`, raw `expect`, a Variables resource, or the
 complete dispatch context.
 
-Runner resolves the workspace exactly once for each WorkItem and provides it as
-`ActionContext.workDir`. An Action must not select a working directory again from
-`variables.workspace.path`; that value is a visible dispatch-context fact, not a second execution
-entry point.
+Runner resolves the Workspace and target Repository checkout exactly once for
+each attempt. It appends those facts to the execution snapshot, then evaluates
+the engine-reserved `working-directory` field, defaulting to `workspace.path`,
+and provides the confined real path as `ActionContext.workDir`. An Action must
+not select a directory again from runtime context; the context values are
+visible template facts, not a second execution entry point.
 
 If a persisted WorkItem's `uses` or `with` violates the selected Action's static input contract, or
 if the attempt context cannot resolve a template, Runner must return the deterministic
@@ -108,8 +114,10 @@ source and evaluation timing:
 | `work.*` | dispatch; includes `id`, `type`, `title`, and `attempt` | fixed at dispatch |
 | `work.approvalFeedback.*` | tasks produced only by ApprovalFeedback; includes `id`, `stage`, `createdAt`, `summary` | fixed at dispatch |
 | `issue.*` | Issue context; includes `projectId`, `number`, `title`, and `body` | fixed at dispatch |
-| `repository.*` | target repository reference from Issue; resolved from the Project Repository resource at dispatch | fixed at dispatch |
-| `workspace.*` | workspace resolved during Runner execution | Runner execution entry point |
+| `repository.name`, `repository.gitUrl`, `repository.baseBranch` | target Repository reference from Issue; resolved from the Project Repository resource | fixed at dispatch |
+| `repository.path`, `repository.branch` | target checkout and Workflow branch produced by Runner materialization | fixed in the augmented execution snapshot |
+| `workspace.name` | Workspace selected through the Issue or AgentSession binding | fixed at dispatch |
+| `workspace.path` | Workspace root produced by Runner materialization | fixed in the augmented execution snapshot |
 | `vars.*` | Effective Stage Variables | resolved and frozen in the attempt snapshot at dispatch |
 | `tasks.<id>.outputs.*` | previous task output | fixed at dispatch |
 | `prompts.<key>` | Project Prompt body, read by key | loaded into the snapshot at dispatch; evaluated during Runner rendering |
@@ -132,8 +140,9 @@ is not runtime context. A Profile and Prompt express it directly as
 An attempt snapshot is the contract actually dispatched. Its content semantics are defined above;
 this section defines its **storage lifecycle**:
 
-- The snapshot never changes after first dispatch; the first write wins. Poll redelivery must
-  return the exact original snapshot without rendering it again.
+- The Server snapshot never changes after first dispatch; the first write wins. Poll redelivery
+  returns that exact original snapshot. On the owning Runner, the active attempt also retains its
+  augmented materialization facts so redelivery cannot render against a different path or branch.
 - The snapshot needs to be available only while the attempt is Running, after dispatch and before
   a terminal report. It expires immediately when the attempt becomes Completed, Failed, or
   Cancelled, or when a later attempt supersedes it.
@@ -141,17 +150,23 @@ this section defines its **storage lifecycle**:
   from run State and loaded separately when redelivery needs it. Run State contains only the facts
   required for arbitration and does not copy dispatch payloads. Historical attempt snapshots do
   not exist.
-- A check dispatch does not persist a snapshot; redelivery reconstructs the
-  dispatch through the ordinary translation boundary.
+- Check attempts persist and reuse snapshots under the same rule as Task
+  attempts. Reconstructing templated Check input is allowed only as a new
+  attempt, never as redelivery of the same attempt.
+- Reassignment after Runner loss does not reuse the old augmented snapshot. The old attempt is
+  superseded, Workspace preparation completes on the replacement Runner, and a later attempt gets
+  new materialization facts while retaining the same stable Repository resource properties.
 - Content deduplication within a snapshot, such as referencing Prompts by key or pruning `tasks`
   output on demand, is a rendering-content optimization and does not alter these lifecycle rules.
   See [`variables.md`](variables.md).
 
 ### Status
 
-Active attempt snapshots are stored outside WorkflowRun State. The first dispatch fixes the snapshot,
-redelivery reuses it, and terminal or superseding transitions remove it. Startup removes orphaned
-snapshots. Arbitration therefore depends on current execution facts instead of payload history.
+Active Task-attempt snapshots are stored outside WorkflowRun State. The first dispatch fixes the
+snapshot, redelivery reuses it, and terminal or superseding transitions remove it. Startup removes
+orphaned snapshots. Check dispatch currently bypasses this store and reconstructs its input; Check
+snapshot persistence and same-attempt redelivery stability above are target behavior. Arbitration
+therefore remains based on current execution facts instead of payload history.
 
 ## Validation Timing
 
@@ -185,4 +200,7 @@ Repository does not enter a WorkflowRun snapshot or Run Variables. Issue stores 
 name of its target repository. Dispatch uses that reference to read the Project Repository
 resource. An incomplete Issue prevents changes to the target Repository's Git URL or base branch,
 so every dispatch in one WorkflowRun reads stable execution properties without requiring the run
-to copy them. See [`../repositories.md`](../repositories.md) for the complete rules.
+to copy them. Runner adds `repository.path` and `repository.branch` only after materialization and
+never copies those values into `workspace` or `vars`. Redelivery on one active attempt reuses the
+same augmented facts; rematerialization creates a later attempt as specified above. See
+[`../repositories.md`](../repositories.md) for the complete rules.

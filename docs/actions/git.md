@@ -2,24 +2,26 @@
 
 Git Action repositories, branches, and remotes are determined by explicit
 `with` inputs. An Action does not read implicit fallback values from Variables,
-and Git commands always use the workspace supplied by the host.
+and Git commands always use the Repository working directory supplied by the
+host.
 
 In these examples, `${{ repository.baseBranch }}` and
-`${{ workspace.branch }}` come from the repository and workspace for the
-current run. `origin` is an explicitly selected remote name. See
+`${{ repository.branch }}` come from the target Repository for the current run.
+Every Git Action explicitly selects `${{ repository.path }}` as its
+`working-directory`. `origin` is an explicitly selected remote name. See
 [Workflow Definition Reference](../workflow-definition.md#template-expressions)
 for the complete expression rules.
 
 ## `mohist/workspace-prepare`
 
-Resets the workspace to the expected branch and removes residual local Git
-state.
+Resets the target Repository checkout to the expected branch and removes
+residual local Git state.
 
 ### Inputs
 
 | Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `expectedBranch` | Yes | - | Expected workspace branch. The value is text. |
+| `expectedBranch` | Yes | - | Expected Repository Workflow branch. The value is text. |
 
 ### Outputs
 
@@ -32,7 +34,7 @@ state.
 | `residual` | Residual-state snapshot after preparation. |
 | `porcelain` | Porcelain status after preparation. |
 | `step` | Step that produced the snapshot on failure. |
-| `workDir` | Workspace directory. |
+| `workDir` | Target Repository checkout directory. |
 
 ### Business Error Codes
 
@@ -46,7 +48,8 @@ state.
 - id: prepare-workspace
   uses: mohist/workspace-prepare
   with:
-    expectedBranch: ${{ workspace.branch }}
+    working-directory: ${{ repository.path }}
+    expectedBranch: ${{ repository.branch }}
 ```
 
 ## `mohist/rebase`
@@ -102,6 +105,7 @@ rebased commits into one commit.
 - id: rebase-onto-base
   uses: mohist/rebase
   with:
+    working-directory: ${{ repository.path }}
     baseBranch: ${{ repository.baseBranch }}
     remote: origin
     squash: false
@@ -146,13 +150,14 @@ Reports the current rebase state of the workspace.
 - id: check-rebase
   uses: mohist/rebase-status
   with:
+    working-directory: ${{ repository.path }}
     baseBranch: ${{ repository.baseBranch }}
     remote: origin
 ```
 
 ## `mohist/merge-ready`
 
-Reports whether the current workspace can merge into the base branch.
+Reports whether the current Repository checkout can merge into the base branch.
 
 ### Inputs
 
@@ -188,14 +193,15 @@ Reports whether the current workspace can merge into the base branch.
 - id: verify-merge-ready
   uses: mohist/merge-ready
   with:
+    working-directory: ${{ repository.path }}
     baseBranch: ${{ repository.baseBranch }}
-    source: ${{ workspace.branch }}
+    source: ${{ repository.branch }}
     remote: origin
 ```
 
 ## `mohist/push`
 
-Pushes the workspace source branch to a target branch.
+Pushes the Repository source branch to a target branch.
 
 ### Inputs
 
@@ -217,7 +223,7 @@ Pushes the workspace source branch to a target branch.
 | `target` | Target branch. |
 | `remote` | Git remote name. |
 | `refspec` | Resolved refspec. |
-| `workDir` | Workspace directory. |
+| `workDir` | Target Repository checkout directory. |
 | `landedCommit` | Tip commit that was pushed. |
 | `pushed` | Whether the push succeeded. |
 | `force` | Whether force mode was used. |
@@ -238,7 +244,8 @@ Pushes the workspace source branch to a target branch.
 - id: push-branch
   uses: mohist/push
   with:
-    source: ${{ workspace.branch }}
+    working-directory: ${{ repository.path }}
+    source: ${{ repository.branch }}
     target: ${{ repository.baseBranch }}
     remote: origin
     force: false

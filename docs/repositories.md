@@ -13,7 +13,11 @@ Repository.
   resources.
 - Each Repository has a resource name that is unique within the Project, such
   as `server` or `web`, plus a Git URL and base branch. The resource name is its
-  stable management reference.
+  stable management reference and its directory name under a Workspace's
+  `REPOS/` directory. It must be a lowercase portable path segment beginning
+  with a letter or number and containing only letters, numbers, `_`, or `-`.
+  The exact reserved names `con`, `prn`, `aux`, `nul`, `com1` through `com9`,
+  and `lpt1` through `lpt9` are invalid.
 - Each Project has exactly one **default Repository**. When there is only one,
   it is naturally the default.
 - Data remains isolated between Projects. Repository declarations are not
@@ -60,6 +64,13 @@ Pull Request all use the Issue's target Repository. Its Git URL and base branch
 remain unchanged while the Issue runs. Runner must be able to access every
 Repository declared by the Project.
 
+For execution, Runner clones the target Repository at
+`${{ workspace.path }}/REPOS/<repository-name>`. Profiles use the resolved
+`${{ repository.path }}` and `${{ repository.branch }}` facts instead of
+constructing that path or treating the branch as a Workspace property. Plans,
+research, and review artifacts remain outside the checkout at the Workspace
+root.
+
 ## Runner Constraint
 
 Runner must be able to access **every** Repository declared by a Project.
@@ -77,6 +88,13 @@ only when a second Repository is added.
 
 - **Release coordination:** Mohist does not coordinate simultaneous deployment
   of changes from several Repositories.
-- **Several Repositories checked out for one Issue:** Integration work that
-  needs two codebases at once is not supported. Evaluate it separately when a
-  real requirement appears.
+- **Several target Repositories for one Issue:** An Issue has exactly one target
+  Repository and one integration branch. Additional Workspace Repository access
+  does not create another PR or integration target.
+
+## Implementation Gap
+
+Repository names are currently validated only as nonempty text, and the Runner
+still places the target checkout at the Workspace root. Portable path-segment
+validation, the `REPOS/<repository-name>/` checkout, and the runtime
+`repository.path` and `repository.branch` facts remain to be implemented.

@@ -29,7 +29,8 @@ Mohist provides these built-in Profiles:
 
 - `mohist/local`: Delivers through a local merge. This is the default and does
   not require a code-hosting platform.
-- `mohist/github-pr`: Delivers through one GitHub pull request.
+- `mohist/github-pr`: Uses Project Agents named `planner`, `coder`, and
+  `reviewer`, then delivers through one GitHub Pull Request and Auto-merge.
 
 Profiles under `mohist/*` are updated with Mohist releases and must not be edited
 or deleted. An update affects an active Workflow at the same point as any other
@@ -112,8 +113,9 @@ template expressions.
 
 The built-in Profiles use the execution Stages `plan`, `build`, `check`, and
 `integrate`. `done` is a terminal state after the Workflow finishes, not a
-configurable Stage with Tasks. By default, the Workflow waits for approval
-after Plan and Check and advances automatically after Build and Integrate.
+configurable Stage with Tasks. `mohist/local` waits for Approval after Plan and
+Check. `mohist/github-pr` waits only after Plan; its named reviewer is the Check
+gate. Both advance automatically after Build and Integrate.
 
 ### Variable References
 
@@ -137,32 +139,58 @@ does not configure a built-in key.
 
 ## GitHub PR Profile
 
-`mohist/github-pr` uses the same Plan -> Build -> Check -> Integrate path and
-approval points as `mohist/local`, but it delivers the result differently:
+`mohist/github-pr` keeps the Plan -> Build -> Check -> Integrate stage model but
+assigns each judgment to a named Project Agent:
 
-- The remote Workflow branch preserves completed work between Stages. A Runner
-  workspace can be rebuilt and is not responsible for preserving completed
-  work.
-- After Plan self-review passes, Mohist publishes the current work and then
-  creates or reuses a draft pull request.
-- After Build validation passes, Mohist publishes the current work.
-- After Check fixes are complete, Mohist publishes the current work and then
-  marks the pull request ready.
-- After Integrate publishes the archived work, Mohist waits for pull request
-  checks and performs a squash merge.
-- Mohist rebases automatically when the base branch advances and applies the
-  declared Profile recovery when pull request checks fail.
-- When automatic recovery is exhausted, Mohist stops and exposes the failure.
-  The user can fix the cause and retry.
+| Stage | Agent | Working directory | Durable result |
+|---|---|---|---|
+| Plan | `planner` | `${{ workspace.path }}` | `PLANS/issue-<number>-DESIGN.md` and `PLANS/issue-<number>-PLAN.md` |
+| Build | `coder` | `${{ repository.path }}` | Commits published to `${{ repository.branch }}` and one draft Pull Request |
+| Check | `reviewer` | `${{ workspace.path }}` | `PLANS/issue-<number>-REVIEW.md` with a `PASS` or `FAIL` decision |
+| Integrate | none | `${{ repository.path }}` | The same Pull Request confirmed as `MERGED` by GitHub |
 
-The pull request is the review surface for the published Workflow branch. It is
-not responsible for publishing code. A publish failure retries only the
-publish. A pull request create or update failure leaves the remote work intact
-and retries only that pull request operation. When approval feedback changes
-the work, Mohist publishes the result before it reaches approval again.
+The Profile requires an active Agent named `planner`, `coder`, and `reviewer` in
+the Project. Their definitions select Runtime, model, Instructions, and Skills.
+The Profile does not fall back to an Inline Agent or let Variables select
+another name. A missing or archived role fails its task with
+`agent_not_found`.
+
+Plan is the only default Approval point. The planner reads the Issue and target
+Repository, writes the design and executable plan at the Workspace root, and
+updates those same files when Plan feedback is rejected. Both files are
+required captures: Approval is not offered until both have been recorded in
+Mohist's Artifact Store. They are not committed to the target Repository merely
+because the Workflow uses GitHub.
+
+Build reads the approved plan, changes only the checkout, runs the Project's
+verification command, publishes the Repository Workflow branch, and creates or
+reuses one draft Pull Request. Check gives the reviewer the Issue, plan,
+checkout, and diff.
+`FAIL` schedules bounded coder repair, verification, and publish work before the
+reviewer runs again. `PASS` marks the Pull Request ready and waits for required
+checks. Check does not add a second human Approval point; the reviewer decision
+is its gate. A review decision is bound to the exact Pull Request head commit.
+Any later push invalidates it and requires the reviewer and required checks to
+pass again before Integrate.
+
+Integrate never pushes directly to the base branch. It enables GitHub Auto-merge
+with squash and remains active until GitHub reports that exact Pull Request as
+`MERGED`. Base movement, conflicts, and failed checks use declared recovery;
+exhausted recovery blocks the Issue with the external state visible. Only a
+confirmed `MERGED` result completes the Workflow. Recovery that changes content
+first cancels queued Auto-merge, then returns through review and required checks
+for the new head.
+
+After its first publish, the remote Workflow branch is the recovery source for
+Repository contents. Before that branch exists, rematerialization recreates the
+local Workflow branch from the target Repository's current locked base branch.
+Successfully recorded files under `PLANS/` are the recovery source for
+Workspace-level artifacts, including a failed review report needed by repair.
+`RESEARCH/` is durable only when a task declares its files as artifacts, and
+`.scratch/` is never a recovery source.
 
 The Runner host must have GitHub CLI installed and authenticated for the target
-repository.
+Repository, and the Repository must allow GitHub Auto-merge.
 
 ## Common Customizations
 
@@ -249,3 +277,9 @@ their purpose and remains stable.
   [Workflow Recovery Design](../design/workflow/recovery.md).
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.
+- The bundled `mohist/github-pr` Definition still uses Inline Agents and
+  OpenSpec artifacts, and still requires human Approval after Check. It has not
+  yet converged on the named-Agent roles, reviewer-only Check gate,
+  Workspace-level plan files, Repository child checkout, or Auto-merge contract
+  specified above. OpenSpec Actions remain available for custom Profiles; this
+  Profile simply does not use them.

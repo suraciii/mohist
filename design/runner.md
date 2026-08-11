@@ -265,10 +265,19 @@ profile to restore presence and registry state without an additional heartbeat.
 Explicit unregister clears the profile. The registry is written only when
 state or info changes, never on each poll.
 
-`runner-lost` is a failure reason, not an owner state. The owner marks affected
-work failed: WorkflowRun enters its existing `Failed` state and projects the
-Issue as `blocked`; AgentJob symmetrically enters its existing `Failed` state.
-There is no `Interrupted` state.
+`runner-lost` is ordinarily a failure reason, not an owner state. The owner
+marks ordinary affected work failed: WorkflowRun enters its existing `Failed`
+state and projects the Issue as `blocked`; AgentJob symmetrically enters its
+existing `Failed` state. There is no `Interrupted` state.
+
+An Action that declares an external reconciliation contract is the exception.
+If its Runner is lost after the Action may have armed an external side effect,
+the owner supersedes that execution attempt but keeps the Task Running and
+creates a reconciliation WorkItem. Reconciliation either proves the intended
+terminal success or neutralizes the external side effect before reporting the
+original failure. This execution fact is separate from WorkflowRun state and
+does not add an `Interrupted` owner state. `mohist/merge-github-pr` uses this
+contract for queued Auto-merge.
 
 ### Failure Handling
 
@@ -283,10 +292,16 @@ There is no `Interrupted` state.
 | report transport fails | retry awaitingAck; it remains reported and is never redelivered |
 | duplicate or late report | owner idempotently returns Stale |
 | work hangs | process timeout produces FAILED |
-| Runner is lost | closeout reports `FAILED("runner-lost")`; owner enters Failed |
+| Runner is lost during ordinary work | closeout reports `FAILED("runner-lost")`; owner enters Failed |
+| Runner is lost during externally reconcilable work | supersede the attempt, keep the Task nonterminal, and dispatch reconciliation before success or failure |
 | Runner returns after closeout | report receives Stale; work is no longer desired and drains naturally |
 | run or job is stopped while work executes | do not cancel; report receives Stale |
 | AgentJob has no available Runner for too long | owner ReadySince timeout produces `FAILED(RunnerUnavailable)` |
+
+The current closeout path applies ordinary `runner-lost` failure to every Action.
+The external reconciliation WorkItem and nonterminal closeout exception are
+target behavior required before `mohist/merge-github-pr` can safely arm
+Auto-merge.
 
 ## Process Contract
 
@@ -323,15 +338,17 @@ phase:
 | Phase | Meaning |
 |---|---|
 | `active` | Runner has not received a current Server grant for reclamation |
-| `eligible` | Server reports the Workspace archived or active with no active bound Session; disk policy may delete the materialization |
+| `eligible` | Server reports the Workspace archived or active with no active bound Session and no nonterminal WorkflowRun; disk policy may delete the materialization |
 | `stuck` | deletion safety checks rejected deterministically; retain the directory and index entry and do not retry automatic deletion |
 
 The Runner periodically asks the Server whether each `active` entry is
 reclaimable. Transport failure or an unknown answer keeps it `active`. An
 archived Workspace is reclaimable. An active Workspace is reclaimable only
-while it has no active bound Session; deletion removes only the local directory,
-and later use rematerializes the same logical Workspace. The Runner never
-derives this grant from WorkflowRun status.
+while it has no active bound Session and no nonterminal WorkflowRun. A Workflow
+waiting for Approval is nonterminal and keeps the materialization. Deletion
+removes only the local directory, and later use rematerializes the same logical
+Workspace. Runner consumes this Server decision and does not infer consumers
+from its own current work list.
 
 One Workspace has two independently reclaimable local resources:
 
@@ -387,7 +404,7 @@ implementation gap for dispatches that still lack a named Workspace. New code
 must not extend that fallback. Removing it does not require a compatibility
 model because Runner materializations are reconstructible.
 
-## Decision Record: One Ledger, No Reconciliation
+## Decision Record: One Dispatch Ledger
 
 AgentJob work was previously delivered over a push channel. AgentJobGrain
 pushed DispatchSnapshot across grains into staging in the Runner aggregate,
@@ -408,3 +425,8 @@ The old push channel's Runner-side staging, reconciliation loop, and dispatch
 retry state machine (`DispatchAttempts`, retry bound, and acceptance fence) are
 deleted together. The owner handles the case of an AgentJob with no available
 Runner through its own ReadySince timeout.
+
+This decision removes reconciliation between duplicate Mohist dispatch ledgers.
+It does not prohibit an Action-specific WorkItem that reconciles an external
+side effect, such as queued GitHub Auto-merge, after execution ownership is
+lost.
