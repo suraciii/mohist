@@ -30,7 +30,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string agentJobId,
         string runnerId,
         string projectId,
-        string expectedSessionId)
+        string? expectedSessionId)
     {
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
             agentJobId,
@@ -68,25 +68,9 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         return dispatch;
     }
 
-    protected async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
-    {
-        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
-            agentJobId,
-            TimeSpan.FromSeconds(5));
-        var dispatch = await PollDispatchOnceAsync(
-            runnerId,
-            expectedSessionId: null,
-            expectedAgentJobId: agentJobId);
-
-        Assert.NotNull(dispatch);
-        Assert.Equal(agentJobId, dispatch.AgentJobId);
-        return dispatch.WorkId;
-    }
-
     private async Task<PollSnapshot?> PollDispatchOnceAsync(
         string runnerId,
-        string? expectedSessionId,
-        string? expectedAgentJobId = null)
+        string expectedSessionId)
     {
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
         var dispatches = await poll.ReadDispatchElementsAsync();
@@ -102,9 +86,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                 && agentJobIdElement.ValueKind != JsonValueKind.Null
                 ? agentJobIdElement.GetString()
                 : null;
-            var matchesSession = expectedSessionId is not null && polledSessionId == expectedSessionId;
-            var matchesAgentJob = expectedAgentJobId is not null && polledAgentJobId == expectedAgentJobId;
-            if (match is null && (matchesSession || matchesAgentJob))
+            if (match is null && polledSessionId == expectedSessionId)
             {
                 var workId = data.GetProperty("workId").GetString() ?? string.Empty;
                 var projectId = data.TryGetProperty("projectId", out var projectIdElement)

@@ -334,11 +334,11 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-route", projectId },
                 });
 
-            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
+            var claim = await ClaimPreparedAgentJobAsync(jobKey, runnerId, projectId, expectedSessionId: null);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
             await jobGrain.ReportResultAsync(
                 runnerId,
-                workId,
+                claim.WorkId,
                 new WorkResult("completed", "ok", JSON.DeserializeElement("{\"hello\":\"world\"}"), 0, ["artifact-a"]));
 
             using var response = await responseTask;
@@ -387,10 +387,10 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-fail", projectId },
                 });
 
-            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
+            var claim = await ClaimPreparedAgentJobAsync(jobKey, runnerId, projectId, expectedSessionId: null);
             await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).ReportResultAsync(
                 runnerId,
-                workId,
+                claim.WorkId,
                 new WorkResult("failed", "runner reported failure", JSON.DeserializeElement("{\"error\":\"x\"}"), 1));
 
             using var response = await responseTask;
@@ -431,13 +431,13 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-http-report", projectId },
                 });
 
-            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
+            var claim = await ClaimPreparedAgentJobAsync(jobKey, runnerId, projectId, expectedSessionId: null);
 
             var reportResponse = await _fixture.Client.PostAsJsonAsync(
                 $"/api/runner/{runnerId}/report",
                 new
                 {
-                    workId,
+                    workId = claim.WorkId,
                     status = "completed",
                     ownerKind = WorkDispatchOwnerKinds.AgentJob,
                     agentJobId = jobKey,
@@ -487,12 +487,15 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-http-poll", projectId },
                 });
 
-            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
+            await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+                jobKey,
+                TimeSpan.FromSeconds(5));
 
             using var httpResponse = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
             var httpBody = await httpResponse.ReadFirstDispatchElementAsync()
                 ?? throw new InvalidOperationException("Expected a dispatch from /poll");
-            Assert.Equal(workId, httpBody.GetProperty("workId").GetString());
+            var workId = httpBody.GetProperty("workId").GetString()!;
+            Assert.False(string.IsNullOrWhiteSpace(workId));
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, httpBody.GetProperty("ownerKind").GetString());
             Assert.Equal(jobKey, httpBody.GetProperty("agentJobId").GetString());
 
