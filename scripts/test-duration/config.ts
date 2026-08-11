@@ -66,6 +66,15 @@ export function validateConfig(config: SuiteConfig): string[] {
 function validateTrack(track: TrackConfig): string[] {
   const errors: string[] = []
   const prefix = `track "${track.id}"`
+  if (track.executionLedger !== undefined && track.kind !== 'dotnet-apphost') {
+    errors.push(`${prefix}: executionLedger requires kind=dotnet-apphost`)
+  }
+  if (track.executionLedger !== undefined && track.reportFormat !== 'trx') {
+    errors.push(`${prefix}: executionLedger requires reportFormat=trx`)
+  }
+  if (track.executionLedger !== undefined && track.executionLedger.length === 0) {
+    errors.push(`${prefix}: executionLedger must be a non-empty path`)
+  }
   if (track.apphostArgs !== undefined && !Array.isArray(track.apphostArgs)) {
     errors.push(`${prefix}: apphostArgs must be an array of strings`)
   } else if (track.apphostArgs?.some((arg) => typeof arg !== 'string')) {
