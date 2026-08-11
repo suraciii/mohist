@@ -1,7 +1,12 @@
-using System.Reflection;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 using Xunit.Runner.Common;
 using Xunit.Sdk;
 
@@ -36,16 +41,77 @@ internal static class ExecutionLedgerEnvironment
     public const string Parallelism = "MOHIST_EXECUTION_LEDGER_PARALLELISM";
 }
 
+internal interface IExecutionLedgerRuntime
+{
+    string AssemblyPath { get; }
+    string? XunitVersion { get; }
+    string? MtpVersion { get; }
+    string? GetEnvironmentVariable(string name);
+}
+
+internal interface IExecutionLedgerArtifactStore
+{
+    byte[] ReadAllBytes(string path);
+    void WriteAllText(string path, string content);
+}
+
+internal sealed class SystemExecutionLedgerRuntime : IExecutionLedgerRuntime
+{
+    public static SystemExecutionLedgerRuntime Instance { get; } = new();
+
+    public string AssemblyPath => typeof(ExecutionLedgerReporter).Assembly.Location;
+    public string? XunitVersion => typeof(ITestResultMessage).Assembly.GetName().Version?.ToString();
+    public string? MtpVersion => AppDomain.CurrentDomain.GetAssemblies()
+        .FirstOrDefault(candidate => string.Equals(candidate.GetName().Name, "Microsoft.Testing.Platform", StringComparison.Ordinal))
+        ?.GetName().Version?.ToString();
+
+    public string? GetEnvironmentVariable(string name) => Environment.GetEnvironmentVariable(name);
+}
+
+internal sealed class PhysicalExecutionLedgerArtifactStore : IExecutionLedgerArtifactStore
+{
+    public static PhysicalExecutionLedgerArtifactStore Instance { get; } = new();
+
+    public byte[] ReadAllBytes(string path)
+    {
+#pragma warning disable RS0030
+        return File.ReadAllBytes(path);
+#pragma warning restore RS0030
+    }
+
+    public void WriteAllText(string path, string content)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(directory)) throw new InvalidOperationException("execution ledger output path has no directory");
+#pragma warning disable RS0030
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(path, content);
+#pragma warning restore RS0030
+    }
+}
+
 public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessageHandler
 {
     private readonly ExecutionLedgerCapture capture;
+    private readonly IExecutionLedgerArtifactStore artifacts;
     private readonly MessageMetadataCache metadata = new();
+    private int cachedMetadataCount;
     private string? error;
 
-    public ExecutionLedgerReporterMessageHandler()
+    public ExecutionLedgerReporterMessageHandler() : this(
+        SystemExecutionLedgerRuntime.Instance,
+        PhysicalExecutionLedgerArtifactStore.Instance)
+    { }
+
+    internal ExecutionLedgerReporterMessageHandler(
+        IExecutionLedgerRuntime runtime,
+        IExecutionLedgerArtifactStore artifacts)
     {
-        capture = ExecutionLedgerCapture.FromEnvironment();
+        this.artifacts = artifacts;
+        capture = ExecutionLedgerCapture.FromEnvironment(runtime, artifacts);
     }
+
+    internal int CachedMetadataCount => Volatile.Read(ref cachedMetadataCount);
 
     public bool OnMessage(IMessageSinkMessage message)
     {
@@ -87,6 +153,17 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
         {
             error ??= exception.ToString();
         }
+        finally
+        {
+            try
+            {
+                ReleaseMetadata(message);
+            }
+            catch (Exception exception)
+            {
+                error ??= exception.ToString();
+            }
+        }
 
         return true;
     }
@@ -98,7 +175,7 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
 
         try
         {
-            capture.WriteToFile();
+            capture.WriteTo(artifacts);
         }
         catch
         {
@@ -110,12 +187,27 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
 
     private void CacheMetadata(IMessageSinkMessage message)
     {
-        if (message is ITestAssemblyStarting assemblyStarting) metadata.Set(assemblyStarting);
-        if (message is ITestCaseStarting caseStarting) metadata.Set(caseStarting);
-        if (message is ITestClassStarting classStarting) metadata.Set(classStarting);
-        if (message is ITestCollectionStarting collectionStarting) metadata.Set(collectionStarting);
-        if (message is ITestMethodStarting methodStarting) metadata.Set(methodStarting);
-        if (message is ITestStarting testStarting) metadata.Set(testStarting);
+        if (message is ITestAssemblyStarting assemblyStarting) { metadata.Set(assemblyStarting); Interlocked.Increment(ref cachedMetadataCount); }
+        if (message is ITestCaseStarting caseStarting) { metadata.Set(caseStarting); Interlocked.Increment(ref cachedMetadataCount); }
+        if (message is ITestClassStarting classStarting) { metadata.Set(classStarting); Interlocked.Increment(ref cachedMetadataCount); }
+        if (message is ITestCollectionStarting collectionStarting) { metadata.Set(collectionStarting); Interlocked.Increment(ref cachedMetadataCount); }
+        if (message is ITestMethodStarting methodStarting) { metadata.Set(methodStarting); Interlocked.Increment(ref cachedMetadataCount); }
+        if (message is ITestStarting testStarting) { metadata.Set(testStarting); Interlocked.Increment(ref cachedMetadataCount); }
+    }
+
+    private void ReleaseMetadata(IMessageSinkMessage message)
+    {
+        object? removed = message switch
+        {
+            ITestAssemblyFinished finished => metadata.TryRemove(finished),
+            ITestCaseFinished finished => metadata.TryRemove(finished),
+            ITestClassFinished finished => metadata.TryRemove(finished),
+            ITestCollectionFinished finished => metadata.TryRemove(finished),
+            ITestMethodFinished finished => metadata.TryRemove(finished),
+            ITestFinished finished => metadata.TryRemove(finished),
+            _ => null,
+        };
+        if (removed is not null) Interlocked.Decrement(ref cachedMetadataCount);
     }
 }
 
@@ -174,24 +266,21 @@ public sealed class ExecutionLedgerCapture
         this.metadata = metadata;
     }
 
-    public static ExecutionLedgerCapture FromEnvironment()
+    internal static ExecutionLedgerCapture FromEnvironment(
+        IExecutionLedgerRuntime runtime,
+        IExecutionLedgerArtifactStore artifacts)
     {
-        static string Required(string name) =>
-            Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
+        string Required(string name) =>
+            runtime.GetEnvironmentVariable(name) is { Length: > 0 } value
                 ? value
                 : throw new InvalidOperationException($"missing execution ledger environment variable {name}");
 
-        var assembly = typeof(ExecutionLedgerReporter).Assembly;
-        var assemblyPath = assembly.Location;
+        var assemblyPath = runtime.AssemblyPath;
         var expectedAssemblyPath = Required(ExecutionLedgerEnvironment.AssemblyPath);
         if (!string.Equals(assemblyPath, expectedAssemblyPath, StringComparison.Ordinal))
             throw new InvalidOperationException("execution ledger assembly path does not match the current test assembly");
 
-        // The reporter is gate-runtime instrumentation, not a test fixture. Its
-        // only physical I/O is the same-run ledger handoff consumed by the guard.
-#pragma warning disable RS0030
-        var assemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(assemblyPath))).ToLowerInvariant();
-#pragma warning restore RS0030
+        var assemblySha256 = Convert.ToHexString(SHA256.HashData(artifacts.ReadAllBytes(assemblyPath))).ToLowerInvariant();
         if (!string.Equals(assemblySha256, Required(ExecutionLedgerEnvironment.AssemblySha256), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("execution ledger assembly hash does not match the current test assembly");
 
@@ -202,12 +291,10 @@ public sealed class ExecutionLedgerCapture
             throw new InvalidOperationException("execution ledger manifest hash is invalid");
         var parallelism = Required(ExecutionLedgerEnvironment.Parallelism);
 
-        var mtpVersion = AppDomain.CurrentDomain.GetAssemblies()
-            .FirstOrDefault(candidate => string.Equals(candidate.GetName().Name, "Microsoft.Testing.Platform", StringComparison.Ordinal))
-            ?.GetName().Version?.ToString();
+        var mtpVersion = runtime.MtpVersion;
         if (string.IsNullOrWhiteSpace(mtpVersion)) throw new InvalidOperationException("Microsoft.Testing.Platform version is unavailable");
 
-        var xunitVersion = typeof(ITestResultMessage).Assembly.GetName().Version?.ToString();
+        var xunitVersion = runtime.XunitVersion;
         if (string.IsNullOrWhiteSpace(xunitVersion)) throw new InvalidOperationException("xUnit version is unavailable");
 
         return new ExecutionLedgerCapture(new ExecutionLedgerMetadata(
@@ -235,6 +322,8 @@ public sealed class ExecutionLedgerCapture
                 throw new InvalidOperationException("execution start identity is empty");
             if (starts.ContainsKey(uid) || results.Any(result => result.Uid == uid))
                 throw new InvalidOperationException($"duplicate execution start for {uid}");
+            if (starts.Values.Any(start => start.Name == name) || results.Any(result => result.Name == name))
+                throw new InvalidOperationException($"duplicate execution test name {name}");
             starts.Add(uid, (name, className, collectionName, startTime));
         }
     }
@@ -261,6 +350,10 @@ public sealed class ExecutionLedgerCapture
         {
             if (starts.Count > 0)
                 throw new InvalidOperationException("execution ledger has tests without results");
+            if (results.Count == 0)
+                throw new InvalidOperationException("execution ledger has no test results");
+            if (results.Count != metadata.ManifestCount)
+                throw new InvalidOperationException("execution ledger result count does not match the discovery manifest");
             return new ExecutionLedgerDocument
             {
                 RunId = metadata.RunId,
@@ -278,13 +371,6 @@ public sealed class ExecutionLedgerCapture
 
     public string ToJson() => JsonSerializer.Serialize(ToDocument(), JsonOptions);
 
-    public void WriteToFile()
-    {
-        var directory = Path.GetDirectoryName(metadata.OutputPath);
-        if (string.IsNullOrWhiteSpace(directory)) throw new InvalidOperationException("execution ledger output path has no directory");
-#pragma warning disable RS0030
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(metadata.OutputPath, ToJson());
-#pragma warning restore RS0030
-    }
+    internal void WriteTo(IExecutionLedgerArtifactStore artifacts) =>
+        artifacts.WriteAllText(metadata.OutputPath, ToJson());
 }
