@@ -327,24 +327,29 @@ test('planTracks isolates configured duration measurements before bounded throug
   const unit: TrackConfig = {
     id: 'server-unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
   }
+  const runner: TrackConfig = {
+    id: 'runner', kind: 'vitest', run: ['npm', 'run', 'test'], report: 'reports/runner.json', reportFormat: 'vitest', deadlineMs: 1000, enforce: false,
+  }
   const web: TrackConfig = {
     id: 'web', kind: 'vitest', run: ['npm', 'run', 'test'], report: 'reports/web.json', reportFormat: 'vitest', deadlineMs: 1000, enforce: false,
   }
   const spec: TrackConfig = {
     id: 'server-spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 1000, enforce: false,
   }
-  const planned = planTracks([cli, unit, web, spec], '/evidence', ['cli', 'server-unit'])
+  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-unit', 'runner'])
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
   assert.ok(byId.get('cli')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('server-unit')?.dependsOn, ['cli'])
   assert.ok(byId.get('server-unit')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('web')?.dependsOn, ['server-unit'])
-  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['server-unit'])
-  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'server-unit'])
+  assert.deepEqual(byId.get('runner')?.dependsOn, ['server-unit'])
+  assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
+  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['runner'])
+  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'runner'])
 
-  const focused = planTracks([unit], '/evidence', ['cli', 'server-unit'])
+  const focused = planTracks([unit], '/evidence', ['cli', 'server-unit', 'runner'])
   assert.deepEqual(focused[0].lane.dependsOn, undefined)
   assert.ok(!focused[0].lane.resources?.includes('duration-measurement'))
 })
