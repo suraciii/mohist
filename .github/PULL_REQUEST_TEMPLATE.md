@@ -57,7 +57,7 @@ baseline and result.
 
 ## Checklist
 
-- [ ] Build passes and tests are green locally (`npm run build`, `npm test`)
+- [ ] Canonical local gate passes (`timeout -k 10s 270s npm run verify`)
 - [ ] No old and new tests coexist for the same behavior
 - [ ] No real time in production code (TimeProvider / fake timers injected)
 - [ ] Spec supports the change; stated gaps when not

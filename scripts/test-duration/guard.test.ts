@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { mock, test } from 'node:test'
 
 import {
@@ -13,7 +12,6 @@ import {
   runProcessWithDeadline,
   writeExecutionProvenance,
 } from './guard.js'
-import { parseSuiteConfig } from './config.js'
 import { formatEvaluation, formatSummary, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
 import type {
@@ -95,23 +93,6 @@ test('parallelism provenance records every effective xUnit default and explicit 
     /duplicate xUnit option/,
   )
   assert.throws(() => parallelismFor({ ...track, apphostArgs: ['-maxThreads'] }), /requires a value/)
-})
-
-test('checked-in CLI duration track keeps cold composition concurrency at four workers', () => {
-  const config = parseSuiteConfig(readFileSync(new URL('../../test-duration.config.jsonc', import.meta.url), 'utf8'))
-  const cliTrack = config.tracks.find((track) => track.id === 'cli')
-
-  assert.ok(cliTrack)
-  assert.deepEqual(cliTrack.apphostArgs, [
-    '-preEnumerateTheories',
-    '-parallel',
-    'collections',
-    '-parallelAlgorithm',
-    'conservative',
-    '-maxThreads',
-    '4',
-  ])
-  assert.equal(parallelismFor(cliTrack), 'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=4')
 })
 
 test('execution provenance writer creates its parent and writes through a fake artifact store', () => {

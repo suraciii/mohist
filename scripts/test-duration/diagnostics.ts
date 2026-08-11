@@ -15,8 +15,12 @@ function describeRule(rule: RuleDiagnosis): string {
 
 export function formatTrackRun(run: TrackRun): string {
   const flag = run.timedOut
-    ? run.timeoutReason === 'suite' ? 'SUITE TIMEOUT' : 'TIMEOUT'
-    : run.exitCode === 0 ? 'ok' : `exit ${run.exitCode}`
+    ? run.timeoutReason === 'suite'
+      ? 'SUITE TIMEOUT'
+      : 'TIMEOUT'
+    : run.exitCode === 0
+      ? 'ok'
+      : `exit ${run.exitCode}`
   const report = run.reportReady ? '' : '  [report missing/stale]'
   const ledger = run.executionLedgerReady === false ? '  [execution ledger missing/stale]' : ''
   return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${ledger}  ${run.command}`
@@ -35,20 +39,24 @@ export function formatEvaluation(eval_: TrackEvaluation): string[] {
     lines.push(`    ${rule.ruleId} (n=${rule.total}): ${describeRule(rule)}`)
     if (rule.percentileViolation) {
       lines.push(
-      `      >> percentile p${rule.percentileViolation.p} ${ms(rule.percentileViolation.valueMs)} exceeds budget ${ms(rule.percentileViolation.budgetMs)}`,
+        `      >> percentile p${rule.percentileViolation.p} ${ms(rule.percentileViolation.valueMs)} exceeds budget ${ms(rule.percentileViolation.budgetMs)}`,
       )
     }
     for (const v of rule.absoluteViolations) {
       lines.push(`      >> OVER BUDGET ${ms(v.durationMs)}: ${v.name}`)
     }
     for (const g of rule.governed) {
-      lines.push(`      governed ${ms(g.durationMs)} (baseline ${ms(g.observedMs)}, by ${g.deadline}, ${g.owner}): ${g.name}  [${g.reason}]`)
+      lines.push(
+        `      governed ${ms(g.durationMs)} (baseline ${ms(g.observedMs)}, by ${g.deadline}, ${g.owner}): ${g.name}  [${g.reason}]`,
+      )
     }
     for (const s of rule.staleAllowlist) {
       lines.push(`      >> STALE allowlist "${s.key}" matched no test  [${s.reason}]`)
     }
     for (const e of rule.expiredAllowlist) {
-      lines.push(`      >> EXPIRED allowlist "${e.key}" past removal deadline ${e.deadline} (${e.owner})  [${e.reason}]`)
+      lines.push(
+        `      >> EXPIRED allowlist "${e.key}" past removal deadline ${e.deadline} (${e.owner})  [${e.reason}]`,
+      )
     }
   }
   for (const failed of eval_.failedTests) {
@@ -78,10 +86,7 @@ export function summarize(
     ...evaluations.filter((e) => !e.passed).map((e) => e.trackId),
     ...runs.filter((r) => r.timedOut || r.exitCode !== 0).map((r) => r.trackId),
   ])
-  const governed = evaluations.reduce(
-    (sum, e) => sum + e.rules.reduce((s, r) => s + r.governed.length, 0),
-    0,
-  )
+  const governed = evaluations.reduce((sum, e) => sum + e.rules.reduce((s, r) => s + r.governed.length, 0), 0)
   const overBudget = evaluations.reduce(
     (sum, e) => sum + e.rules.reduce((s, r) => s + r.absoluteViolations.length, 0),
     0,
@@ -98,9 +103,10 @@ export function summarize(
 }
 
 export function formatSummary(summary: GuardSummary, suiteDeadlineMs: number): string {
-  const suite = summary.suiteDeadlineBreached && summary.suiteElapsedMs !== undefined
-    ? `${ms(suiteDeadlineMs)} BREACHED after ${ms(summary.suiteElapsedMs)}`
-    : ms(suiteDeadlineMs)
+  const suite =
+    summary.suiteDeadlineBreached && summary.suiteElapsedMs !== undefined
+      ? `${ms(suiteDeadlineMs)} BREACHED after ${ms(summary.suiteElapsedMs)}`
+      : ms(suiteDeadlineMs)
   return [
     `test-duration: ${summary.totalTracks} tracks, ${summary.failedTracks} failing, ${summary.timeoutTracks} timed out`,
     `  governed (allowlisted) slow tests: ${summary.governed}  | over-budget (not allowlisted): ${summary.overBudget}`,

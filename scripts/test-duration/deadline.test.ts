@@ -113,7 +113,9 @@ test('runWithDeadline reports only the deadline outcome after bounded best-effor
   let cleanupCalls = 0
   const outcome = await runWithDeadline({
     start: () => new Promise<{ exitCode: number | null }>(() => undefined),
-    kill: async () => { cleanupCalls += 1 },
+    kill: async () => {
+      cleanupCalls += 1
+    },
     timeout,
     now: () => 100,
   })

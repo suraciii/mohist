@@ -13,10 +13,7 @@ import type {
 export function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return 0
   const sorted = [...values].sort((a, b) => a - b)
-  const idx = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil((p / 100) * sorted.length) - 1),
-  )
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))
   return sorted[idx]
 }
 
@@ -76,7 +73,14 @@ export function evaluateRule(rule: BudgetRule, cases: readonly TestCase[], today
       if (entry) {
         governed.push(toGoverned(c, entry))
       } else {
-        absoluteViolations.push({ name: c.name, durationMs: c.durationMs, reason: '', owner: '', deadline: '', observedMs: c.durationMs })
+        absoluteViolations.push({
+          name: c.name,
+          durationMs: c.durationMs,
+          reason: '',
+          owner: '',
+          deadline: '',
+          observedMs: c.durationMs,
+        })
       }
     }
   }
@@ -137,10 +141,23 @@ function toGoverned(c: TestCase, entry: AllowlistEntry): GovernedCase {
   }
 }
 
-export function evaluateTrack(track: TrackConfig, cases: readonly TestCase[], today: Date = new Date()): TrackEvaluation {
+export function evaluateTrack(
+  track: TrackConfig,
+  cases: readonly TestCase[],
+  today: Date = new Date(),
+): TrackEvaluation {
   const failedTests = cases.filter((c) => c.outcome === 'failed').map((c) => c.name)
   if (!track.enforce) {
-    return { trackId: track.id, enforce: false, status: track.status, reason: track.reason, total: cases.length, failedTests, rules: [], passed: failedTests.length === 0 }
+    return {
+      trackId: track.id,
+      enforce: false,
+      status: track.status,
+      reason: track.reason,
+      total: cases.length,
+      failedTests,
+      rules: [],
+      passed: failedTests.length === 0,
+    }
   }
   const rules = track.rules ?? []
   const buckets = classify(cases, rules)

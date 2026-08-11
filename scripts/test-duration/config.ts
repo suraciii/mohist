@@ -123,10 +123,7 @@ function validateRule(rule: BudgetRule, prefix: string): string[] {
   const rp = `${prefix}: rule "${rule.id}"`
   if (!rule.id) errors.push(`${rp}: missing id`)
   if (rule.absoluteMs <= 0) errors.push(`${rp}: absoluteMs must be positive`)
-  if (
-    rule.percentile !== undefined &&
-    (rule.percentileMs === undefined || rule.percentileMs < 0)
-  ) {
+  if (rule.percentile !== undefined && (rule.percentileMs === undefined || rule.percentileMs < 0)) {
     errors.push(`${rp}: percentile set without a valid percentileMs`)
   }
   for (const entry of rule.allowlist ?? []) {

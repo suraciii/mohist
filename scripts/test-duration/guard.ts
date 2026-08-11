@@ -1,6 +1,15 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -20,7 +29,14 @@ import {
 } from './execution-ledger.js'
 import { parseReport } from './reports.js'
 import { parseAssemblyName, resolveApphostPath, resolveDiscoveryCommand, resolveFocusedCommand } from './focused.js'
-import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, SuiteConfig, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import type {
+  CurrentExecutionIdentity,
+  ExecutionLedgerExpectation,
+  SuiteConfig,
+  TrackConfig,
+  TrackEvaluation,
+  TrackRun,
+} from './types.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -57,8 +73,9 @@ function apphostFor(track: TrackConfig): string {
   const csprojDir = dirname(csprojAbs)
   const xml = readCsproj(track.csproj)
   // MSBuild defaults AssemblyName to the project file name when omitted.
-  const assemblyName =
-    track.apphost ? undefined : parseAssemblyName(xml) ?? basename(csprojAbs).replace(/\.csproj$/, '')
+  const assemblyName = track.apphost
+    ? undefined
+    : (parseAssemblyName(xml) ?? basename(csprojAbs).replace(/\.csproj$/, ''))
   return resolve(csprojDir, resolveApphostPath({ csprojXml: xml, projectDir: csprojDir, assemblyName }))
 }
 
@@ -89,8 +106,9 @@ function sourceFiles(root: string): readonly string[] {
 }
 
 function sha256Sources(roots: readonly string[]): string {
-  const files = [...new Set(roots.flatMap(sourceFiles))]
-    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+  const files = [...new Set(roots.flatMap(sourceFiles))].sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  )
   if (files.length === 0) throw new Error('execution source roots contain no files')
 
   const hash = createHash('sha256')
@@ -108,7 +126,7 @@ function assemblyPathFor(apphost: string): string {
 }
 
 function optionValue(args: readonly string[], option: string, fallback: string): string {
-  const indexes = args.flatMap((value, index) => value === option ? [index] : [])
+  const indexes = args.flatMap((value, index) => (value === option ? [index] : []))
   if (indexes.length > 1) throw new Error(`duplicate xUnit option ${option}`)
   if (indexes.length === 0) return fallback
   const value = args[indexes[0] + 1]
@@ -157,10 +175,14 @@ export function commandFor(track: TrackConfig): { command: string; args: readonl
     return {
       command: 'dotnet',
       args: [
-        'test', resolve(repoRoot, track.csproj),
-        '--no-build', '--no-restore',
-        '--logger', `trx;LogFileName=${logName}`,
-        '--results-directory', reportDir,
+        'test',
+        resolve(repoRoot, track.csproj),
+        '--no-build',
+        '--no-restore',
+        '--logger',
+        `trx;LogFileName=${logName}`,
+        '--results-directory',
+        reportDir,
       ],
     }
   }
@@ -230,7 +252,9 @@ function spawnChild(
   })
   let stdout = ''
   child.stdout?.setEncoding('utf8')
-  child.stdout?.on('data', (chunk: string) => { stdout += chunk })
+  child.stdout?.on('data', (chunk: string) => {
+    stdout += chunk
+  })
   const done = new Promise<{ exitCode: number | null; stdout: string }>((resolvePromise) => {
     child.on('exit', (code) => resolvePromise({ exitCode: code, stdout }))
     child.on('error', () => resolvePromise({ exitCode: 1, stdout }))
@@ -243,11 +267,13 @@ export async function runProcessWithDeadline<TimeoutReason>(input: {
   readonly timeout: Promise<TimeoutReason>
   readonly kill: () => Promise<void>
   readonly now: () => number
-}): Promise<Awaited<SpawnedChild['done']> & {
-  readonly status: 'passed' | 'failed' | 'timeout'
-  readonly elapsedMs: number
-  readonly timeoutReason?: TimeoutReason
-}> {
+}): Promise<
+  Awaited<SpawnedChild['done']> & {
+    readonly status: 'passed' | 'failed' | 'timeout'
+    readonly elapsedMs: number
+    readonly timeoutReason?: TimeoutReason
+  }
+> {
   const outcome = await runWithDeadline({
     start: () => input.child.done,
     kill: input.kill,
@@ -300,18 +326,12 @@ async function killTree(child: SpawnedChild, graceMs: number): Promise<void> {
 
   signalTree(child.pid, 'SIGTERM')
   const termGrace = createTimeout(graceMs)
-  const exited = await Promise.race([
-    child.done.then(() => true),
-    termGrace.promise.then(() => false),
-  ])
+  const exited = await Promise.race([child.done.then(() => true), termGrace.promise.then(() => false)])
   termGrace.cancel()
   signalTree(child.pid, 'SIGKILL')
   if (!exited) {
     const killGrace = createTimeout(graceMs)
-    await Promise.race([
-      child.done,
-      killGrace.promise,
-    ])
+    await Promise.race([child.done, killGrace.promise])
     killGrace.cancel()
   }
 }
@@ -335,30 +355,34 @@ async function readTrackCurrentIdentity(
   if (!track.executionSourceRoots || track.executionSourceRoots.length === 0) {
     throw new Error(`track "${track.id}" requires executionSourceRoots for execution ledger evidence`)
   }
-  return readCurrentExecutionIdentity({
-    assemblyPath: plan.assemblyPath,
-    sourceRoots: track.executionSourceRoots,
-    parallelism: parallelismFor(track),
-  }, {
-    readAssemblySha256: sha256File,
-    readSourceSha256: sha256Sources,
-    readDiscovery: async () => {
-      const child = spawnChild(plan.discovery.apphost, plan.discovery.args, undefined, true)
-      const result = await runProcessWithDeadline({
-        child,
-        timeout: deadline,
-        kill: () => killTree(child, graceMs),
-        now: () => Date.now(),
-      })
-      if (result.status !== 'passed') {
-        const message = result.status === 'timeout'
-          ? 'compiled discovery exceeded the track or suite deadline'
-          : `compiled discovery failed with exit ${result.exitCode}`
-        throw new GateProcessError(message, result.status, result.timeoutReason)
-      }
-      return result.stdout
+  return readCurrentExecutionIdentity(
+    {
+      assemblyPath: plan.assemblyPath,
+      sourceRoots: track.executionSourceRoots,
+      parallelism: parallelismFor(track),
     },
-  })
+    {
+      readAssemblySha256: sha256File,
+      readSourceSha256: sha256Sources,
+      readDiscovery: async () => {
+        const child = spawnChild(plan.discovery.apphost, plan.discovery.args, undefined, true)
+        const result = await runProcessWithDeadline({
+          child,
+          timeout: deadline,
+          kill: () => killTree(child, graceMs),
+          now: () => Date.now(),
+        })
+        if (result.status !== 'passed') {
+          const message =
+            result.status === 'timeout'
+              ? 'compiled discovery exceeded the track or suite deadline'
+              : `compiled discovery failed with exit ${result.exitCode}`
+          throw new GateProcessError(message, result.status, result.timeoutReason)
+        }
+        return result.stdout
+      },
+    },
+  )
 }
 
 async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Promise<void>): Promise<TrackRun> {
@@ -377,7 +401,9 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
     let ledgerExpectation: ExecutionLedgerExpectation | undefined
     let ledgerEnvironment: Readonly<Record<string, string>> | undefined
     try {
-      const artifactPaths = [reportPath, ledgerPath, provenancePath].filter((path): path is string => path !== undefined)
+      const artifactPaths = [reportPath, ledgerPath, provenancePath].filter(
+        (path): path is string => path !== undefined,
+      )
       if (new Set(artifactPaths).size !== artifactPaths.length) {
         throw new Error('TRX report, execution ledger, and execution provenance paths must differ')
       }
@@ -412,11 +438,20 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
         writeExecutionProvenance(provenancePath, ledgerExpectation)
         ledgerEnvironment = buildLedgerEnvironment({ ...ledgerExpectation, ledgerPath })
       }
-      ({ command, args } = commandFor(track))
+      ;({ command, args } = commandFor(track))
     } catch (error) {
-      const failed = failedRun(track, 'not started', `could not prepare report ${track.report}: ${(error as Error).message}`)
+      const failed = failedRun(
+        track,
+        'not started',
+        `could not prepare report ${track.report}: ${(error as Error).message}`,
+      )
       return ledgerPath
-        ? { ...failed, elapsedMs: Date.now() - trackStartedAt, executionLedgerReady: false, executionLedgerError: (error as Error).message }
+        ? {
+            ...failed,
+            elapsedMs: Date.now() - trackStartedAt,
+            executionLedgerReady: false,
+            executionLedgerError: (error as Error).message,
+          }
         : { ...failed, elapsedMs: Date.now() - trackStartedAt }
     }
 
@@ -427,7 +462,12 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
     } catch (error) {
       const failed = failedRun(track, cmdString, `could not start track: ${(error as Error).message}`)
       return ledgerPath
-        ? { ...failed, elapsedMs: Date.now() - trackStartedAt, executionLedgerReady: false, executionLedgerError: (error as Error).message }
+        ? {
+            ...failed,
+            elapsedMs: Date.now() - trackStartedAt,
+            executionLedgerReady: false,
+            executionLedgerError: (error as Error).message,
+          }
         : { ...failed, elapsedMs: Date.now() - trackStartedAt }
     }
     const result = await runProcessWithDeadline({
@@ -450,7 +490,8 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
       } catch {
         executionLedgerReady = false
       }
-      if (!executionLedgerReady) executionLedgerError = `execution ledger ${track.executionLedger} was not created or refreshed by the track`
+      if (!executionLedgerReady)
+        executionLedgerError = `execution ledger ${track.executionLedger} was not created or refreshed by the track`
     }
     return {
       trackId: track.id,
@@ -500,7 +541,10 @@ export function evaluateTrackArtifacts(
     return failedEvaluation(track, run.reportError ?? `report ${track.report} was not refreshed`)
   }
   if (track.executionLedger && run && !run.executionLedgerReady) {
-    return failedEvaluation(track, run.executionLedgerError ?? `execution ledger ${track.executionLedger} was not refreshed`)
+    return failedEvaluation(
+      track,
+      run.executionLedgerError ?? `execution ledger ${track.executionLedger} was not refreshed`,
+    )
   }
   try {
     const trxContent = artifacts.readText(track.report)
@@ -513,7 +557,8 @@ export function evaluateTrackArtifacts(
           return failedEvaluation(track, 'saved execution provenance does not match the current run')
         }
       } else {
-        if (!currentIdentity) return failedEvaluation(track, 'current execution identity was not captured for saved evidence')
+        if (!currentIdentity)
+          return failedEvaluation(track, 'current execution identity was not captured for saved evidence')
         const identityErrors = validateCurrentExecutionIdentity(expected, currentIdentity)
         if (identityErrors.length > 0) {
           return failedEvaluation(track, `saved execution provenance is stale: ${identityErrors.join('; ')}`)
@@ -534,9 +579,13 @@ export function evaluateTrackArtifacts(
 }
 
 function evaluateFromFile(track: TrackConfig, run?: TrackRun): TrackEvaluation {
-  return evaluateTrackArtifacts(track, {
-    readText: (path) => readFileSync(resolve(repoRoot, path), 'utf8'),
-  }, run)
+  return evaluateTrackArtifacts(
+    track,
+    {
+      readText: (path) => readFileSync(resolve(repoRoot, path), 'utf8'),
+    },
+    run,
+  )
 }
 
 function focusedFlow(csprojPath: string, className: string): number {
@@ -545,7 +594,10 @@ function focusedFlow(csprojPath: string, className: string): number {
     const assemblyName = parseAssemblyName(xml) ?? basename(csprojPath).replace(/\.csproj$/, '')
     const cmd = resolveFocusedCommand({ csprojXml: xml, className, projectDir: dirname(csprojPath), assemblyName })
     const list = execFileSync(cmd.apphost, cmd.verify as string[], { cwd: repoRoot, encoding: 'utf8' })
-    const classes = list.split('\n').map((line) => line.trim()).filter(Boolean)
+    const classes = list
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
     if (!classes.includes(className)) {
       const suggestion = classes.find((c) => c.endsWith(`.${className}`) || c.includes(className))
       process.stderr.write(
@@ -676,7 +728,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       try {
         evaluations.push(evaluateFromFile(track, runsByTrack.get(track.id)))
       } catch (error) {
-        evaluations.push(failedEvaluation(track, `could not evaluate report ${track.report}: ${(error as Error).message}`))
+        evaluations.push(
+          failedEvaluation(track, `could not evaluate report ${track.report}: ${(error as Error).message}`),
+        )
       }
     }
 
@@ -709,20 +763,34 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       if (track.executionLedger) {
         const trackTimer = createTimeout(track.deadlineMs)
         try {
-          currentIdentity = await readTrackCurrentIdentity(track, graceMs, Promise.race([
-            trackTimer.promise.then(() => 'track' as const),
-            checkSuiteDeadline.then(() => 'suite' as const),
-          ]))
+          currentIdentity = await readTrackCurrentIdentity(
+            track,
+            graceMs,
+            Promise.race([
+              trackTimer.promise.then(() => 'track' as const),
+              checkSuiteDeadline.then(() => 'suite' as const),
+            ]),
+          )
         } catch (error) {
-          evaluations.push(failedEvaluation(track, `could not validate current execution identity: ${(error as Error).message}`))
+          evaluations.push(
+            failedEvaluation(track, `could not validate current execution identity: ${(error as Error).message}`),
+          )
         } finally {
           trackTimer.cancel()
         }
       }
       if (!evaluations.some((evaluation) => evaluation.trackId === track.id)) {
-        evaluations.push(evaluateTrackArtifacts(track, {
-          readText: (path) => readFileSync(resolve(repoRoot, path), 'utf8'),
-        }, undefined, new Date(), currentIdentity))
+        evaluations.push(
+          evaluateTrackArtifacts(
+            track,
+            {
+              readText: (path) => readFileSync(resolve(repoRoot, path), 'utf8'),
+            },
+            undefined,
+            new Date(),
+            currentIdentity,
+          ),
+        )
       }
     }
   } finally {
@@ -742,8 +810,11 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (isMain) {
-  void main().then((code) => process.exit(code), (error) => {
-    console.error(`test-duration: fatal guard error: ${(error as Error).message}`)
-    process.exit(1)
-  })
+  void main().then(
+    (code) => process.exit(code),
+    (error) => {
+      console.error(`test-duration: fatal guard error: ${(error as Error).message}`)
+      process.exit(1)
+    },
+  )
 }
