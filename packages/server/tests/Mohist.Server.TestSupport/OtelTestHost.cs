@@ -55,6 +55,7 @@ public sealed class OtelTestHost : IAsyncDisposable
 
     public RecordingActivityProcessor Recorder { get; }
     public IReadOnlyList<HttpRequestMessage> OtlpExporterRequests => _otlpExporterHandler.Requests;
+    public bool FakeExporterConfigured { get; private set; }
 
     public OtelTestHost(OtelTestHostOptions options)
     {
@@ -122,6 +123,7 @@ public sealed class OtelTestHost : IAsyncDisposable
 
     private void ConfigureFakeExporter(OtlpExporterOptions options)
     {
+        FakeExporterConfigured = true;
         options.ExportProcessorType = ExportProcessorType.Simple;
         options.HttpClientFactory = () => new HttpClient(_otlpExporterHandler, disposeHandler: false);
     }
@@ -148,6 +150,7 @@ public sealed class OtelTestHost : IAsyncDisposable
 public sealed class OtelTestHostOptions
 {
     public bool Enabled { get; init; } = true;
+    public bool ExportEnabled { get; init; } = true;
     public string? Endpoint { get; init; }
     public bool FailExporterRequests { get; init; }
 
@@ -172,6 +175,7 @@ public sealed class OtelTestHostOptions
     public IEnumerable<KeyValuePair<string, string?>> AsConfiguration()
     {
         yield return new KeyValuePair<string, string?>("Mohist:Otel:Enabled", Enabled ? "true" : "false");
+        yield return new KeyValuePair<string, string?>("Mohist:Otel:ExportEnabled", ExportEnabled ? "true" : "false");
         if (Endpoint is not null)
         {
             yield return new KeyValuePair<string, string?>("Mohist:Otel:Endpoint", Endpoint);
