@@ -79,6 +79,7 @@ describe("runCommand timeout", () => {
   })
 
   it("ParentAbortRejectsInsteadOfProducingTimeout", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] })
     const controller = new AbortController()
     const result = runCommand("command", [], "/workspace", controller.signal)
     const child = spawner.children[0]!
@@ -87,6 +88,15 @@ describe("runCommand timeout", () => {
     child.fail(new Error("cancelled"))
 
     await expect(result).rejects.toThrow("cancelled")
+    await vi.advanceTimersByTimeAsync(5_000)
+    if (process.platform === "win32") {
+      expect(child.killSignals).toEqual(["SIGTERM", "SIGKILL"])
+    } else {
+      expect(kills).toEqual([
+        { pid: -child.pid, signal: "SIGTERM" },
+        { pid: -child.pid, signal: "SIGKILL" },
+      ])
+    }
   })
 
   it("FallsBackToDirectChildKillWhenGroupKillFails", () => {

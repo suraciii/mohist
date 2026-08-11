@@ -302,6 +302,14 @@ transient poll failure would remove every held work item from the report and
 cause a redelivery storm. The same critical loop schedules bounded report
 retry; it is not a separate lifecycle loop.
 
+Runner also owns every external command as one process tree. Direct-child
+`exit` records the outcome but does not complete the command result because
+stdout and stderr pipes may still contain unread bytes. Runner terminates any
+remaining members of that process group so inherited pipes cannot stay open,
+then completes exactly once at the child `close` boundary after both streams
+have drained. Timeout and parent abort use the same tree ownership; no command
+may intentionally daemonize descendants through this primitive.
+
 Work lost with a Runner is reported to its owner as
 `FAILED("runner-lost")`. The owner decides what follows. There is no
 `Interrupted` state.

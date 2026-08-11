@@ -50,10 +50,10 @@ export function setProcessKillerForTest(killer: ProcessKiller | null) {
  * dimension. The emitter guarantees no line is lost:
  *
  *   1. A trailing partial line (a final write without `\n`) is flushed
- *      when the direct child exits.
- *   2. A post-exit drain emits any buffered tail once after `exit`,
- *      so any data already buffered at the moment the child exits is
- *      delivered before the promise resolves.
+ *      after the output pipes close.
+ *   2. Direct-child exit terminates any descendants that retained inherited
+ *      pipes; result completion waits for `close`, so bytes delivered between
+ *      `exit` and `close` remain part of the aggregate output.
  *
  * `onClose` (optional) fires once after the drain, with the exit code,
  * and is the only place that observes the process terminator. Callers
@@ -127,7 +127,7 @@ export async function runCommand(
     // so on timeout / parent-abort we can signal the whole group via
     // process.kill(-pid) and reap helper processes (git-remote-http, ...)
     // alongside the direct child. We do NOT unref(): the parent still
-    // awaits the direct child's exit, otherwise we'd race the spawn-error path.
+    // awaits pipe closure, otherwise we'd race output drain and spawn errors.
     const child = processSpawner(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
     if (usesExternalProcessSpawner) registerExternalProcess(child)
     const stdout: Buffer[] = []
@@ -139,14 +139,21 @@ export async function runCommand(
     // We consult it lazily from inside the error / close handlers so we
     // never race Node's internal abort listener.
     const wasTimeout = () => timeoutHandle?.timedOut() === true
+    let completed = false
+    let directExitCode: number | null | undefined
+    let forceKillTimer: NodeJS.Timeout | undefined
     const onAbort = () => {
       killProcess(child)
-      const forceKillTimer = setTimeout(() => killProcess(child, "SIGKILL"), ABORT_FORCE_KILL_GRACE_MS)
+      forceKillTimer = setTimeout(() => killProcess(child, "SIGKILL"), ABORT_FORCE_KILL_GRACE_MS)
       forceKillTimer.unref()
     }
     const cleanup = () => {
       effectiveSignal.removeEventListener("abort", onAbort)
       timeoutHandle?.dispose()
+    }
+    const clearForceKillTimer = () => {
+      if (forceKillTimer) clearTimeout(forceKillTimer)
+      forceKillTimer = undefined
     }
     child.stdout.on("data", (chunk: Buffer) => {
       stdout.push(chunk)
@@ -162,6 +169,8 @@ export async function runCommand(
       //   - timeout fired ⇒ swallow (close resolves with structured timeout)
       //   - parent aborted ⇒ reject (today's behavior, unchanged)
       if (wasTimeout()) return
+      if (completed) return
+      completed = true
       cleanup()
       reject(error)
     })
@@ -169,7 +178,6 @@ export async function runCommand(
     // child. Node's `signal` option only kills the direct child, so an
     // explicit process-group kill is required on both abort paths.
     effectiveSignal.addEventListener("abort", onAbort, { once: true })
-    let completed = false
     const complete = (code: number | null) => {
       if (completed) return
       completed = true
@@ -179,7 +187,7 @@ export async function runCommand(
       if (onLine) {
         emitLines(stdoutState.decoder.end(), stdoutState, onLine)
         emitLines(stderrState.decoder.end(), stderrState, onLine)
-        // Post-exit drain: flush any buffered tail that did not end with a newline.
+        // Post-close drain: flush any buffered tail that did not end with a newline.
         // Single emission per stream so we never duplicate the tail.
         drainTail(stdoutState, onLine)
         drainTail(stderrState, onLine)
@@ -206,8 +214,17 @@ export async function runCommand(
       }
       resolve({ exitCode, stdout: stdoutText, stderr: stderrText })
     }
-    child.once("exit", complete)
-    child.once("close", complete)
+    child.once("exit", (code) => {
+      directExitCode = code
+      // A descendant that inherited stdout/stderr can keep `close` from firing
+      // after the direct child exits. It belongs to this command tree and must
+      // not outlive the command or write into a later work item.
+      killProcess(child, "SIGKILL")
+    })
+    child.once("close", (code) => {
+      clearForceKillTimer()
+      complete(directExitCode ?? code)
+    })
   })
 }
 
