@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { runWithDeadline } from './deadline.js'
+import { externalAbortCleanupDeadlineAt, runWithDeadline, suiteDeadlines, suiteDeadlinesAt } from './deadline.js'
 
 interface Harness {
   startResolve: (result: { exitCode: number | null }) => void
@@ -108,23 +108,33 @@ test('runWithDeadline waits for suite-timeout child cleanup before returning', a
   assert.equal(cleanupCalls, 1)
 })
 
-test('runWithDeadline reports only the deadline outcome after bounded best-effort cleanup', async () => {
-  const timeout = Promise.resolve('track' as const)
-  let cleanupCalls = 0
-  const outcome = await runWithDeadline({
-    start: () => new Promise<{ exitCode: number | null }>(() => undefined),
-    kill: async () => { cleanupCalls += 1 },
-    timeout,
-    now: () => 100,
+test('runWithDeadline treats a child completion at the hard cutoff as timeout and converges it', async () => {
+  const harness = makeHarness()
+  let startRelease!: (result: { exitCode: number | null }) => void
+  const startPromise = new Promise<{ exitCode: number | null }>((resolvePromise) => { startRelease = resolvePromise })
+  const pending = runWithDeadline({
+    ...deps(harness, startPromise, new Promise<void>(() => {})),
+    hardDeadlineAt: 1_200,
   })
 
-  assert.deepEqual(outcome, {
-    status: 'timeout',
-    exitCode: null,
-    elapsedMs: 0,
-    timeoutReason: 'track',
-  })
-  assert.equal(cleanupCalls, 1)
-  assert.equal('cleanupFailed' in outcome, false)
-  assert.equal('cleanupError' in outcome, false)
+  startRelease({ exitCode: 0 })
+  harness.nowValue = 1_200
+
+  const outcome = await pending
+  assert.equal(outcome.status, 'timeout')
+  assert.equal(outcome.exitCode, null)
+  assert.equal(harness.killCalled, true)
+})
+
+test('suite deadlines reserve cleanup and finalization inside one absolute five-minute wall', () => {
+  const deadlines = suiteDeadlines(1_000, 300_000, 5_000)
+
+  assert.deepEqual(deadlines, { hardDeadlineAt: 301_000, executionDeadlineAt: 290_000 })
+  assert.deepEqual(suiteDeadlinesAt(301_000, 5_000), deadlines)
+  assert.throws(() => suiteDeadlines(1_000, 11_000, 5_000), /cleanup and finalization reserve/)
+})
+
+test('external abort cleanup leaves margin before the outer KILL grace while respecting the internal hard wall', () => {
+  assert.equal(externalAbortCleanupDeadlineAt(270_000, 300_000, 5_000), 276_000)
+  assert.equal(externalAbortCleanupDeadlineAt(298_000, 300_000, 5_000), 300_000)
 })
