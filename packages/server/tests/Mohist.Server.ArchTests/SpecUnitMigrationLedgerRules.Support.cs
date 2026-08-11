@@ -9,29 +9,19 @@ public sealed partial class SpecUnitMigrationLedgerRules
 
     private static SpecUnitMigrationInventory CreateBoundedLiveInventory(string source)
     {
-        var assembly = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(
-            new System.Reflection.AssemblyName("SpecUnitMigrationBoundedProof"),
-            System.Reflection.Emit.AssemblyBuilderAccess.Run);
-        var module = assembly.DefineDynamicModule("SpecUnitMigrationBoundedProof");
-        var type = module.DefineType(BoundedProofFqn,
-            System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Sealed);
-        var method = type.DefineMethod("CompiledCase",
-            System.Reflection.MethodAttributes.Public | System.Reflection.MethodAttributes.Static,
-            typeof(void), Type.EmptyTypes);
-        var factConstructor = typeof(FactAttribute).GetConstructor([typeof(string), typeof(int)])
-            ?? throw new InvalidOperationException("xUnit FactAttribute source constructor is unavailable");
-        method.SetCustomAttribute(new System.Reflection.Emit.CustomAttributeBuilder(
-            factConstructor, [BoundedProofPath, 1]));
-        method.GetILGenerator().Emit(System.Reflection.Emit.OpCodes.Ret);
-        _ = type.CreateType();
-
-        var discovery = SpecUnitMigrationCompiledDiscovery.FromAssemblies([BoundedProofFqn], assembly);
-        return SpecUnitMigrationInventory.Create([Source(BoundedProofPath, source)], discovery);
+        return SpecUnitMigrationInventory.Create([Source(BoundedProofPath, source)]).BindSourceDiscovery();
     }
 
     private static string BoundedSource(string body) => $$"""
+        using Xunit;
         namespace Mohist.Server.SpecTests.Specs.Negative;
-        public sealed class BoundedLedgerSpecs { {{body}} }
+        public sealed class BoundedLedgerSpecs
+        {
+            [Fact]
+            public void CompiledCase() { }
+
+            {{body}}
+        }
         """;
 
     private static SpecUnitMigrationLedgerRow BoundCurrentRow(SpecUnitMigrationCandidate candidate)
@@ -97,10 +87,14 @@ public sealed partial class SpecUnitMigrationLedgerRules
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var specAssembly = typeof(Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs).Assembly;
         var unitAssembly = typeof(Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests).Assembly;
-        var scopes = (ledger.Rows ?? []).Where(row => row.Current?.Fqn is not null)
-            .GroupBy(row => row.Current!.Fqn!, StringComparer.Ordinal)
+        var scopes = (ledger.Rows ?? []).Select(row => new
+            {
+                Fqn = row.Executable?.Fqn ?? row.Current?.Fqn ?? row.Target?.Fqn,
+                Symbols = row.Closure?.Symbols ?? [],
+            }).Where(entry => entry.Fqn is not null)
+            .GroupBy(entry => entry.Fqn!, StringComparer.Ordinal)
             .ToDictionary(group => group.Key,
-                group => (IReadOnlyList<string>)group.SelectMany(row => row.Closure?.Symbols ?? [])
+                group => (IReadOnlyList<string>)group.SelectMany(entry => entry.Symbols)
                     .Append(group.Key).Distinct(StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
         var sources = ArchitectureRulesSupport.EmbeddedSources("TestSources/");
         var inventory = SpecUnitMigrationInventory.CreateScoped(sources, scopes);
@@ -112,7 +106,7 @@ public sealed partial class SpecUnitMigrationLedgerRules
             }).OfType<string>())
             .Distinct(StringComparer.Ordinal).ToArray();
         var discovery = SpecUnitMigrationCompiledDiscovery.FromAssemblies(requestedFqns, specAssembly, unitAssembly);
-        var productionInventory = inventory.WithCompiledDiscovery(discovery);
+        var productionInventory = inventory.BindCompiledDiscovery(discovery);
         productionInventory.PrimeProductionProofs();
         return productionInventory;
     }

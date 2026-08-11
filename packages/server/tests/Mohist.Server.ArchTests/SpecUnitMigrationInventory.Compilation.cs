@@ -68,10 +68,9 @@ internal sealed partial class SpecUnitMigrationInventory
               || candidatePath.StartsWith("Mohist.Server.TestSupport/", StringComparison.Ordinal)
               || candidatePath == "eng/TestTime.cs";
 
-    private static CSharpCompilation CreateCompilation(
+    private CSharpCompilation CreateCompilation(
         IReadOnlyList<SyntaxTree> trees,
-        string assemblyName,
-        IReadOnlyList<MetadataReference>? references = null)
+        string assemblyName)
     {
         var globalUsings = CSharpSyntaxTree.ParseText("""
             global using global::System;
@@ -87,22 +86,9 @@ internal sealed partial class SpecUnitMigrationInventory
             global using global::Orleans.Runtime;
             """, path: "GeneratedImplicitUsings.cs", options: ParseOptions);
         return CSharpCompilation.Create(assemblyName, [globalUsings, .. trees],
-            references ?? SpecUnitMigrationReferenceSet.CreateCompilationReferences(),
+            _referenceSet.References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable));
-    }
-
-    private static string ComputeDiscoveryShapeDigest(IEnumerable<SyntaxTree> trees)
-    {
-        var entries = trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
-            .SelectMany(declaration => declaration.Members.OfType<MethodDeclarationSyntax>()
-                .Where(method => method.AttributeLists.SelectMany(list => list.Attributes)
-                    .Any(attribute => NameIs(attribute, "Fact") || NameIs(attribute, "Theory")))
-                .Select(method => string.Join("|",
-                    SyntaxFqn(declaration), method.Identifier.ValueText, method.TypeParameterList?.ToString() ?? "",
-                    method.ParameterList.ToString(), string.Join(";", method.ConstraintClauses.Select(value => value.ToString())),
-                    string.Join(";", method.AttributeLists.Select(value => value.ToString())))));
-        return Digest(entries);
     }
 
     private static string CompilationNameForPath(string path)

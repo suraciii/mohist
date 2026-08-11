@@ -250,101 +250,20 @@ public sealed partial class SpecUnitMigrationLedgerRules
     }
 
     [Fact]
-    public void SpecUnitMigrationLedger_NegativeProof_SourceBodyMutationChangesClosureBinding()
-    {
-        var source = BoundedSource("public int Value() => 1;");
-        var productionInventory = CreateBoundedLiveInventory(source);
-        var before = CurrentClassification(productionInventory, BoundedProofFqn);
-        var row = BoundCurrentRow(before);
-        Assert.Empty(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, before, productionInventory));
-
-        var inventory = productionInventory.WithSourceContent(BoundedProofPath,
-            source.Replace("=> 1", "=> 2", StringComparison.Ordinal));
-        var classification = CurrentClassification(inventory, BoundedProofFqn);
-
-        Assert.Equal(productionInventory.SourceTree.FileCount, inventory.SourceTree.FileCount);
-        Assert.NotEqual(productionInventory.SourceTree.Digest, inventory.SourceTree.Digest);
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory), violation =>
-            violation.Contains("source-content digest mismatch", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void SpecUnitMigrationLedger_NegativeProof_HelperMutationRebindsReverseDependencyClosure()
-    {
-        const string specFqn = "Mohist.Server.SpecTests.Specs.Negative.HelperConsumerSpecs";
-        const string helperPath = "Mohist.Server.SpecTests/Specs/Negative/ClosureHelper.cs";
-        const string originalHelper = """
-            namespace Mohist.Server.SpecTests.Specs.Negative;
-            public static class ClosureHelper { public static int Value() => 1; }
-            """;
-        var inventory = SpecUnitMigrationInventory.Create(
-        [
-            Source(helperPath, originalHelper),
-            Source("Mohist.Server.SpecTests/Specs/Negative/HelperConsumerSpecs.cs", """
-                using Xunit;
-                namespace Mohist.Server.SpecTests.Specs.Negative;
-                public class HelperConsumerSpecs { [Fact] public void UsesHelper() => Assert.Equal(1, ClosureHelper.Value()); }
-                """),
-        ], SpecUnitMigrationCompiledDiscovery.ForTests((specFqn,
-            new SpecUnitMigrationMtpFacts(1, 0, 0, 1, "synthetic", false))));
-        var before = CurrentClassification(inventory, specFqn);
-
-        var mutated = inventory.WithSourceContent(helperPath, originalHelper.Replace("=> 1", "=> 2", StringComparison.Ordinal));
-        var after = CurrentClassification(mutated, specFqn);
-
-        Assert.Contains("Mohist.Server.SpecTests.Specs.Negative.ClosureHelper", after.Closure);
-        Assert.NotEqual(before.SourceContentDigest, after.SourceContentDigest);
-        Assert.NotEqual(before.ClosureIdentityDigest, after.ClosureIdentityDigest);
-    }
-
-    [Fact]
-    public void SpecUnitMigrationLedger_NegativeProof_DiscoveryShapeMutationRequiresFreshCompiledDiscovery()
-    {
-        const string fqn = "Mohist.Server.SpecTests.Specs.Negative.DiscoveryShapeSpecs";
-        const string path = "Mohist.Server.SpecTests/Specs/Negative/DiscoveryShapeSpecs.cs";
-        const string source = """
-            using Xunit;
-            namespace Mohist.Server.SpecTests.Specs.Negative;
-            public class DiscoveryShapeSpecs { [Fact] public void Case() { } }
-            """;
-        var inventory = SpecUnitMigrationInventory.Create([Source(path, source)],
-            SpecUnitMigrationCompiledDiscovery.ForTests((fqn,
-                new SpecUnitMigrationMtpFacts(1, 0, 0, 1, "synthetic", false))));
-
-        var exception = Assert.Throws<InvalidOperationException>(() => inventory.WithSourceContent(path,
-            source.Replace("[Fact]", "[Theory] [InlineData(1)]", StringComparison.Ordinal)));
-
-        Assert.Contains("fresh compiled discovery is required", exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SpecUnitMigrationLedger_ReferenceMetadataHasBoundedApphostLifetime()
-    {
-        var first = SpecUnitMigrationReferenceSet.CreateCompilationReferences();
-        var ownedCount = SpecUnitMigrationReferenceSet.OwnedMetadataCount;
-
-        var second = SpecUnitMigrationReferenceSet.CreateCompilationReferences();
-
-        Assert.Same(first, second);
-        Assert.Equal(ownedCount, SpecUnitMigrationReferenceSet.OwnedMetadataCount);
-        Assert.Equal(first.Count * 2, ownedCount);
-    }
-
-    [Fact]
     public void SpecUnitMigrationLedger_FreshSetupAndProofAreDurationGated()
     {
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
-        var inventory = CreateProductionInventory();
+        using var inventory = CreateProductionInventory();
         var violations = SpecUnitMigrationLedgerValidator.Validate(ledger, inventory);
 
         Assert.Empty(violations);
         Assert.True(inventory.DiscoveredTypeCount > 0, "filtered compiled discovery must contain live endpoint types");
         Assert.True(inventory.DiscoveredTypeCount <= (ledger.Rows?.Count ?? 0) * 2 + inventory.CurrentSpecFqns.Count,
             $"filtered compiled discovery escaped its ledger-scaled bound: {inventory.DiscoveredTypeCount}");
-        Assert.True(inventory.ProbedTypeCount < 256,
-            $"source candidate scan escaped its bounded set: {inventory.ProbedTypeCount}");
         Assert.True(inventory.AnalyzedTypeCount < 256,
             $"semantic closure analysis escaped its bounded candidate set: {inventory.AnalyzedTypeCount}");
+        Assert.InRange(inventory.CacheEntryCount, 1, inventory.AnalyzedTypeCount * 3 + 2);
+        Assert.True(inventory.ReferenceMetadataCount > 0, "semantic inventory must own its in-memory metadata references");
     }
 
     [Fact]

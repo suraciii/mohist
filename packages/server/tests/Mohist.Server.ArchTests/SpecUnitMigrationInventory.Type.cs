@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Xunit.Sdk;
 
 namespace Mohist.Server.ArchTests;
 
@@ -28,6 +29,9 @@ internal sealed partial class SpecUnitMigrationInventory
         internal IReadOnlyList<string> ReferencedTypeNames { get; private set; } = [];
         internal IReadOnlyList<string> DeclaredReferenceNames { get; private set; } = [];
         internal IReadOnlyList<string> Paths => _declarations.Select(value => value.Path).Distinct(StringComparer.Ordinal).ToArray();
+        internal bool HasTestMethods => _declarations.SelectMany(value => value.Declaration.Members)
+            .OfType<MethodDeclarationSyntax>().Any(method => method.AttributeLists.SelectMany(list => list.Attributes)
+                .Any(attribute => NameIs(attribute, "Fact") || NameIs(attribute, "Theory")));
 
         internal void AddDeclaration(string path, ClassDeclarationSyntax declaration, string content)
         {
@@ -125,6 +129,64 @@ internal sealed partial class SpecUnitMigrationInventory
 
         internal SpecUnitMigrationTypeAnalysis DirectAnalysis() => new([], DirectBlockers);
 
+        internal SpecUnitMigrationMtpFacts DiscoverTests(CSharpCompilation compilation)
+        {
+            var identities = new List<string>();
+            var factMethods = 0;
+            var theoryMethods = 0;
+            var inlineDataRows = 0;
+            var incomplete = false;
+            foreach (var (_, declaration) in _declarations)
+            {
+                var model = compilation.GetSemanticModel(declaration.SyntaxTree, ignoreAccessibility: true);
+                foreach (var method in declaration.Members.OfType<MethodDeclarationSyntax>())
+                {
+                    var methodSymbol = model.GetDeclaredSymbol(method);
+                    if (methodSymbol is null)
+                    {
+                        if (method.AttributeLists.Count > 0) incomplete = true;
+                        continue;
+                    }
+
+                    var attributes = methodSymbol.GetAttributes();
+                    if (attributes.Any(attribute => AttributeNameIs(attribute, "Fact")))
+                    {
+                        factMethods++;
+                        identities.Add(string.Join("|", Fqn, methodSymbol.Name, $"{Fqn}.{methodSymbol.Name}"));
+                    }
+
+                    if (!attributes.Any(attribute => AttributeNameIs(attribute, "Theory"))) continue;
+                    theoryMethods++;
+                    var dataAttributes = attributes.Where(attribute => IsDataAttribute(attribute.AttributeClass)).ToArray();
+                    if (dataAttributes.Length == 0 || dataAttributes.Any(attribute => !AttributeNameIs(attribute, "InlineData")))
+                    {
+                        incomplete = true;
+                        continue;
+                    }
+
+                    foreach (var inlineData in dataAttributes)
+                    {
+                        if (!TrySourceArguments(inlineData, methodSymbol, out var arguments))
+                        {
+                            incomplete = true;
+                            continue;
+                        }
+                        inlineDataRows++;
+                        identities.Add(string.Join("|", Fqn, methodSymbol.Name,
+                            $"{Fqn}.{methodSymbol.Name}({string.Join(", ", arguments)})"));
+                    }
+                }
+            }
+
+            var distinctIdentities = identities.OrderBy(value => value, StringComparer.Ordinal)
+                .GroupBy(value => value, StringComparer.Ordinal)
+                .SelectMany(group => group.Select((_, occurrence) => $"{group.Key}|occurrence={occurrence + 1}"))
+                .ToArray();
+            return new SpecUnitMigrationMtpFacts(factMethods, theoryMethods, inlineDataRows,
+                distinctIdentities.Length, Digest(distinctIdentities),
+                incomplete || factMethods + theoryMethods == 0, distinctIdentities);
+        }
+
         internal IReadOnlyList<string> ReadSemanticDiagnostics(CSharpCompilation compilation)
             => _declarations.SelectMany(value => compilation
                     .GetSemanticModel(value.Declaration.SyntaxTree, ignoreAccessibility: true)
@@ -160,11 +222,60 @@ internal sealed partial class SpecUnitMigrationInventory
 
         private static string SymbolDisplay(ISymbol symbol)
             => symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        private static bool TrySourceArguments(
+            AttributeData attribute,
+            IMethodSymbol method,
+            out string[] arguments)
+        {
+            arguments = [];
+            if (attribute.ConstructorArguments.Length != 1
+                || attribute.ConstructorArguments[0].Kind != TypedConstantKind.Array
+                || attribute.ConstructorArguments[0].Values.Length != method.Parameters.Length)
+                return false;
+
+            var formatted = new string[method.Parameters.Length];
+            for (var index = 0; index < formatted.Length; index++)
+            {
+                if (!TrySourceValue(attribute.ConstructorArguments[0].Values[index], out var value)) return false;
+                formatted[index] = $"{method.Parameters[index].Name}: {value}";
+            }
+            arguments = formatted;
+            return true;
+        }
+
+        private static bool TrySourceValue(TypedConstant constant, out string value)
+        {
+            value = "";
+            if (constant.Kind == TypedConstantKind.Error || constant.Type?.TypeKind == TypeKind.Enum) return false;
+            if (constant.Kind == TypedConstantKind.Array)
+            {
+                var values = new string[constant.Values.Length];
+                for (var index = 0; index < values.Length; index++)
+                    if (!TrySourceValue(constant.Values[index], out values[index])) return false;
+                value = $"[{string.Join(", ", values)}]";
+                return true;
+            }
+            if (constant.Kind == TypedConstantKind.Type) return false;
+            value = ArgumentFormatter.Format(constant.Value, 1);
+            return true;
+        }
+
+        private static bool AttributeNameIs(AttributeData attribute, string expected)
+            => attribute.AttributeClass?.Name is var name && (name == expected || name == expected + "Attribute");
+
+        private static bool IsDataAttribute(INamedTypeSymbol? type)
+        {
+            for (var candidate = type; candidate is not null; candidate = candidate.BaseType)
+                if (candidate.Name == "DataAttribute"
+                    && candidate.ContainingNamespace.ToDisplayString().StartsWith("Xunit", StringComparison.Ordinal))
+                    return true;
+            return false;
+        }
     }
 
     internal sealed record SpecUnitMigrationTypeAnalysis(
         IReadOnlyList<string> ReferenceFqns,
         IReadOnlyList<string> Blockers);
 
-    internal sealed record SpecUnitMigrationSourceProbe(bool Blocked, IReadOnlyList<string> ReferenceFqns);
 }

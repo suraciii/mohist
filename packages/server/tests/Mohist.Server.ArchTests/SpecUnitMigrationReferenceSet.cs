@@ -5,7 +5,7 @@ using Microsoft.CodeAnalysis;
 
 namespace Mohist.Server.ArchTests;
 
-internal static class SpecUnitMigrationReferenceSet
+internal sealed class SpecUnitMigrationReferenceSet : IDisposable
 {
     private static readonly HashSet<string> ExcludedAssemblies = new(StringComparer.Ordinal)
     {
@@ -15,23 +15,55 @@ internal static class SpecUnitMigrationReferenceSet
         "Mohist.Server.TestSupport",
     };
 
-    private static readonly Lazy<ReferenceSetOwner> Owner = new(CreateOwner, LazyThreadSafetyMode.ExecutionAndPublication);
+    private readonly ReferenceSetOwner _owner;
+    private bool _disposed;
 
-    internal static IReadOnlyList<MetadataReference> CreateCompilationReferences() => Owner.Value.References;
+    internal SpecUnitMigrationReferenceSet()
+        => _owner = new ReferenceSetOwner();
 
-    internal static int OwnedMetadataCount => Owner.Value.Modules.Count + Owner.Value.Assemblies.Count;
-
-    private static ReferenceSetOwner CreateOwner()
+    private SpecUnitMigrationReferenceSet(ReferenceSetOwner owner)
     {
-        var modules = new List<ModuleMetadata>();
-        var assemblies = new List<AssemblyMetadata>();
-        var references = LoadReferencedAssemblies()
+        _owner = owner;
+        _owner.AddLease();
+    }
+
+    internal SpecUnitMigrationReferenceSet Lease()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return new SpecUnitMigrationReferenceSet(_owner);
+    }
+
+    internal IReadOnlyList<MetadataReference> References
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _owner.References;
+        }
+    }
+
+    internal int OwnedMetadataCount => _owner.OwnedMetadataCount;
+    internal int LeaseCount => _owner.LeaseCount;
+    internal bool OwnerDisposed => _owner.IsDisposed;
+    internal bool IsDisposed => _disposed;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _owner.Release();
+    }
+
+    private static ReferenceData CreateReferences()
+    {
+        var metadata = new List<AssemblyMetadata>();
+        var references = AppDomain.CurrentDomain.GetAssemblies()
             .Where(assembly => !assembly.IsDynamic)
             .Select(assembly => (Assembly: assembly, Name: assembly.GetName().Name))
             .Where(value => !string.IsNullOrWhiteSpace(value.Name) && !ExcludedAssemblies.Contains(value.Name!))
             .GroupBy(value => value.Name!, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(value => value.Assembly.GetName().Version).First().Assembly)
-            .Select(assembly => CreateMetadataReference(assembly, modules, assemblies))
+            .Select(assembly => CreateMetadataReference(assembly, metadata))
             .Where(reference => reference is not null)
             .Cast<MetadataReference>()
             .OrderBy(reference => reference.Display, StringComparer.Ordinal)
@@ -40,44 +72,75 @@ internal static class SpecUnitMigrationReferenceSet
         if (references.Length == 0)
             throw new InvalidOperationException("No in-memory assembly metadata is available for semantic inventory.");
 
-        return new ReferenceSetOwner(references, modules, assemblies);
-    }
-
-    private static IReadOnlyList<Assembly> LoadReferencedAssemblies()
-    {
-        var discovered = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
-        var pending = new Queue<Assembly>(AppDomain.CurrentDomain.GetAssemblies().Where(assembly => !assembly.IsDynamic));
-        pending.Enqueue(Assembly.Load("CloudNative.CloudEvents"));
-        while (pending.Count > 0)
-        {
-            var assembly = pending.Dequeue();
-            var identity = assembly.GetName().FullName;
-            if (string.IsNullOrWhiteSpace(identity) || !discovered.TryAdd(identity, assembly)) continue;
-            foreach (var reference in assembly.GetReferencedAssemblies()) pending.Enqueue(Assembly.Load(reference));
-        }
-        return discovered.Values.ToArray();
+        return new ReferenceData(references, metadata);
     }
 
     private static MetadataReference? CreateMetadataReference(
         Assembly assembly,
-        ICollection<ModuleMetadata> modules,
-        ICollection<AssemblyMetadata> assemblies)
+        ICollection<AssemblyMetadata> metadata)
     {
         unsafe
         {
             if (!assembly.TryGetRawMetadata(out var blob, out var length) || length <= 0) return null;
-            var moduleMetadata = ModuleMetadata.CreateFromMetadata((IntPtr)blob, length);
-            var assemblyMetadata = AssemblyMetadata.Create(moduleMetadata);
-            modules.Add(moduleMetadata);
-            assemblies.Add(assemblyMetadata);
+            var assemblyMetadata = AssemblyMetadata.Create(ModuleMetadata.CreateFromMetadata((IntPtr)blob, length));
+            metadata.Add(assemblyMetadata);
             return assemblyMetadata.GetReference(DocumentationProvider.Default, ImmutableArray<string>.Empty,
                 embedInteropTypes: false, filePath: null, display: assembly.GetName().Name);
         }
     }
 
-    // The metadata owner lives exactly as long as the apphost; the process reclaims the bounded set atomically.
-    private sealed record ReferenceSetOwner(
+    private sealed record ReferenceData(
         IReadOnlyList<MetadataReference> References,
-        IReadOnlyList<ModuleMetadata> Modules,
-        IReadOnlyList<AssemblyMetadata> Assemblies);
+        IReadOnlyList<AssemblyMetadata> Metadata) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var item in Metadata) item.Dispose();
+        }
+    }
+
+    private sealed class ReferenceSetOwner
+    {
+        private readonly Lazy<ReferenceData> _data = new(CreateReferences, LazyThreadSafetyMode.ExecutionAndPublication);
+        private int _leases = 1;
+        private bool _disposed;
+
+        internal IReadOnlyList<MetadataReference> References
+        {
+            get
+            {
+                lock (this)
+                {
+                    ObjectDisposedException.ThrowIf(_disposed, this);
+                }
+                return _data.Value.References;
+            }
+        }
+
+        internal int OwnedMetadataCount => _data.IsValueCreated ? _data.Value.Metadata.Count : 0;
+        internal int LeaseCount { get { lock (this) return _leases; } }
+        internal bool IsDisposed { get { lock (this) return _disposed; } }
+
+        internal void AddLease()
+        {
+            lock (this)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                _leases++;
+            }
+        }
+
+        internal void Release()
+        {
+            ReferenceData? data = null;
+            lock (this)
+            {
+                if (_disposed) return;
+                if (--_leases > 0) return;
+                _disposed = true;
+                if (_data.IsValueCreated) data = _data.Value;
+            }
+            data?.Dispose();
+        }
+    }
 }
