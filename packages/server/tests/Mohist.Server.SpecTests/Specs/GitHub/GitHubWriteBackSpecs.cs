@@ -83,7 +83,7 @@ public sealed class GitHubWriteBackSpecs
     [Fact]
     public async Task Completed_WithDeliveryPullRequest_PostsSummaryCommentWithPrUrlAndCloses()
     {
-        var (projectId, _) = await ConnectNewAsync();
+        var (projectId, connectionId) = await ConnectNewAsync();
         _fixture.Comments.DeliveryPrUrl = "https://github.com/octocat/hello-world/pull/123";
         await SeedIssueAsync(projectId, issue =>
         {
@@ -93,17 +93,21 @@ public sealed class GitHubWriteBackSpecs
 
         await PumpAsync();
 
-        var comment = Assert.Single(_fixture.Comments.Comments, c => c.Body.Contains("已完成"));
+        var comment = Assert.Single(
+            _fixture.Comments.Comments,
+            c => c.ConnectionId == connectionId && c.Body.Contains("已完成"));
         Assert.Contains("https://github.com/octocat/hello-world/pull/123", comment.Body);
-        Assert.Contains(GitHubStateLabels.Done, _fixture.Comments.StateLabels.Select(s => s.StateLabel));
-        var close = Assert.Single(_fixture.Comments.Closes);
+        Assert.Contains(
+            GitHubStateLabels.Done,
+            _fixture.Comments.StateLabels.Where(s => s.ConnectionId == connectionId).Select(s => s.StateLabel));
+        var close = Assert.Single(_fixture.Comments.Closes, c => c.ConnectionId == connectionId);
         Assert.Equal("completed", close.StateReason);
     }
 
     [Fact]
     public async Task Completed_WithoutDeliveryPullRequest_PostsLegalCommentWithoutPrUrl()
     {
-        var (projectId, _) = await ConnectNewAsync();
+        var (projectId, connectionId) = await ConnectNewAsync();
         await SeedIssueAsync(projectId, issue =>
         {
             issue.StartWorkflow("wr_done");
@@ -112,22 +116,26 @@ public sealed class GitHubWriteBackSpecs
 
         await PumpAsync();
 
-        var comment = Assert.Single(_fixture.Comments.Comments, c => c.Body.Contains("已完成"));
+        var comment = Assert.Single(
+            _fixture.Comments.Comments,
+            c => c.ConnectionId == connectionId && c.Body.Contains("已完成"));
         Assert.DoesNotContain("交付 PR", comment.Body);
-        Assert.Single(_fixture.Comments.Closes);
+        Assert.Single(_fixture.Comments.Closes, c => c.ConnectionId == connectionId);
     }
 
     [Fact]
     public async Task Cancelled_WithReason_PostsCancelCommentWithReasonAndClosesNotPlanned()
     {
-        var (projectId, _) = await ConnectNewAsync();
+        var (projectId, connectionId) = await ConnectNewAsync();
         await SeedIssueAsync(projectId, issue => issue.Close("需求方撤回"));
 
         await PumpAsync();
 
-        var comment = Assert.Single(_fixture.Comments.Comments, c => c.Body.Contains("已取消"));
+        var comment = Assert.Single(
+            _fixture.Comments.Comments,
+            c => c.ConnectionId == connectionId && c.Body.Contains("已取消"));
         Assert.Contains("需求方撤回", comment.Body);
-        var close = Assert.Single(_fixture.Comments.Closes);
+        var close = Assert.Single(_fixture.Comments.Closes, c => c.ConnectionId == connectionId);
         Assert.Equal("not_planned", close.StateReason);
     }
 }
