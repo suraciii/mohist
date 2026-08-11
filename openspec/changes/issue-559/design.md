@@ -434,9 +434,11 @@ server-generated terminal transition, such as bounded admission expiry or
 runner loss before a valid report, constructs the same request from the frozen
 WorkflowTaskContract and stable failure reason. For a direct AgentJob it
 remains null and the existing direct-Agent terminal path is unchanged.
-`AgentJobGrain` must reject a Workflow-owned Runner terminal report that does
-not carry the complete finalization request instead of accepting a result that
-cannot be applied to Workflow.
+`AgentJobGrain` must not accept a Workflow-owned Runner terminal report that
+omits or conflicts with the complete finalization request. For the active
+runner/work identity it instead terminalizes the same Job as a stable
+`invalid-workflow-finalization` failure constructed from the frozen contract,
+so a bad report cannot be acknowledged while leaving the Job nonterminal.
 
 Workflow-owned delivery has one operation:
 `IWorkflowGrain.ApplyAgentJobFinalizationAsync(PendingWorkflowTerminalDelivery)`.
@@ -536,15 +538,44 @@ operation. AgentJob validates that a Workflow-owned terminal report contains
 the field, that every lineage id and `finalizerKey` matches its frozen
 `WorkflowTaskContract`, that the typed terminal status agrees with the generic
 status, and that captured outputs, `setVars`, and artifact upload ids have the
-declared JSON shapes before it commits the terminal transition. A missing or
-mismatched envelope returns a stable `invalid-workflow-finalization` rejection
-without changing the Job; a non-null envelope on a direct AgentJob is rejected
-as invalid. The first valid report returns `accepted` only after the typed
-request is durable. A duplicate with the same work identity and payload after
-terminal transition returns `stale` and re-emits the existing pending delivery;
-a different payload under the same Job/finalizer identity returns definitive
-`finalization_conflict` and never rewrites the terminal result. Transport
-timeouts and 5xx responses retry the identical JSON body.
+declared JSON shapes before it commits the requested terminal transition. For
+the active runner/work identity, a missing or mismatched Workflow envelope
+causes AgentJob to persist a terminal `Failed` result with
+`invalid-workflow-finalization`, build the finalization request from its frozen
+contract with no untrusted artifacts or variable effects, release admission,
+and stage the normal Workflow delivery. A non-null Workflow envelope on a
+direct AgentJob similarly becomes the stable direct-Agent failure
+`invalid-agent-job-report`; valid direct reports retain their existing result
+path.
+
+The AgentJob branch of `/report` returns one typed acknowledgement:
+
+```text
+AgentJobReportAck {
+  agentJobId
+  workId
+  disposition = accepted | stale | retry | rejected | conflict
+  reason?
+}
+```
+
+`accepted` means the first terminal result and any Workflow finalization are
+durable. `stale` means this report no longer owns active work or repeats the
+same terminal payload; a same-payload terminal replay also re-emits any pending
+delivery. `rejected` means the active Job was durably terminalized with the
+stable invalid-report failure above. `conflict` means a different payload
+arrived after the Job was already terminal and cannot rewrite it. Those four
+dispositions are settled and remove the Runner's `awaitingAck` entry. `retry`
+means no terminal decision was durably made and the Runner retains the exact
+report. A timeout, 5xx response, malformed/unknown acknowledgement, or missing
+disposition is also treated as `retry`.
+
+`ServerConnection.report` returns the typed acknowledgement and
+`RunnerHost.reportOnce` inspects its disposition; an HTTP 200 alone is not an
+acknowledgement. This extends only AgentJob reporting. The ordinary Workflow
+report response remains unchanged. A duplicate valid report returns `stale`,
+and a different payload under the same terminal Job/finalizer identity returns
+settled `conflict`; neither can rewrite the terminal result or Workflow task.
 
 The AgentJob terminal report carries exactly one
 `WorkflowAgentFinalizationRequest` when the dispatch has a Workflow owner:
