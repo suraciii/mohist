@@ -115,6 +115,64 @@ public sealed class CliResourceOutputSpecs
     }
 
     [Fact]
+    public async Task IssueView_BareJsonReturnsFullViewCatalogWithoutRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["issue", "view", "7", "--json"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            [
+                "number", "title", "body", "status", "health", "projectId", "projectName", "labels", "priority", "risk",
+                "model", "modelVariant", "agentConfig", "stageModels", "stageModelVariants", "createdAt", "updatedAt",
+                "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage",
+                "workflowStatus", "workflowStageProgress", "workflowProfileId", "workflowProfileMode", "prerequisiteNumbers",
+                "comments", "attachments", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName",
+                "repository", "repositoryProblem", "epic", "parentIssueRef", "childIssuesSummary", "children", "feedback",
+                "watching", "muted",
+            ],
+            JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.Empty(error.ToString());
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task IssueView_SelectedJsonProjectsWrappedPayloadInRequestedOrder()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(_ =>
+            RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    number = 7,
+                    title = "Selected",
+                    model = "model-x",
+                    modelVariant = "variant-y",
+                    agentConfig = "config",
+                    stageModels = new { ready = "ready-model" },
+                    extra = "not selected",
+                },
+            }));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["issue", "view", "7", "--json", "number,title,model,modelVariant,agentConfig,stageModels"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var result = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal(
+            ["number", "title", "model", "modelVariant", "agentConfig", "stageModels"],
+            result.Select(property => property.Key).ToArray());
+        Assert.Equal(7, result["number"]!.GetValue<int>());
+        Assert.Equal("Selected", result["title"]!.GetValue<string>());
+        Assert.Null(result["extra"]);
+        Assert.Empty(error.ToString());
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task IssueView_ProjectsSingleResourceWithoutEnvelope()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
