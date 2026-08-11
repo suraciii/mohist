@@ -137,9 +137,33 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
 
     protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateExecutingSessionForCancelAsync()
     {
-        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
-        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
-        return (project, sessionId, turn.Id);
+        var project = await CreateProjectAsync("executing");
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
+            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+        _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+            .Register(_runnerId, $"{_runnerId}-conn");
+
+        var sessionId = $"executing-cancel-{Guid.NewGuid():N}";
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        var workDir = $"/workspaces/{project.Id}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: _runnerId,
+            AgentRuntime: "opencode",
+            WorkDir: workDir,
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                $"agent-{Guid.NewGuid():N}",
+                "cancel-agent"))));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId, workDir));
+        await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            $"input-{Guid.NewGuid():N}",
+            turnId,
+            "before cancel",
+            "user"));
+        await grain.MarkTurnExecutingAsync(turnId);
+        return (project, sessionId, turnId);
     }
 
     protected async Task<(ProjectRef Project, string SessionId, string TurnId, string JobId)> CreateExecutingLaunchSessionForStopAsync()
