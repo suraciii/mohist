@@ -45,6 +45,22 @@ import {
 
 const log = runnerLogger.child("job")
 
+const DEFAULT_MODEL_RETRY_INITIAL_DELAY_MS = 1_000
+const DEFAULT_MODEL_RETRY_MAX_DELAY_MS = 30_000
+const MODEL_UNAVAILABLE_CODES = new Set([
+  "model-unavailable",
+  "model-not-found",
+  "model-not-available",
+])
+
+export type ModelRetryWaiter = (delayMs: number, signal: AbortSignal) => Promise<boolean>
+
+export interface AgentJobExecutorOptions {
+  readonly modelRetryInitialDelayMs?: number
+  readonly modelRetryMaxDelayMs?: number
+  readonly waitForModelRetry?: ModelRetryWaiter
+}
+
 /**
  * Agent-owned execution entry for `ownerKind === "agent-job"` work.
  *
@@ -84,6 +100,7 @@ export class AgentJobExecutor {
     private readonly defaultWorkDir: string = process.cwd(),
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
+    private readonly options: AgentJobExecutorOptions = {},
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -268,12 +285,14 @@ export class AgentJobExecutor {
     // the initial input is already accepted.
     const skipInitialInput = Boolean(work.initialInputId && work.initialTurnId)
     let attachedRuntimeSessionId: string | null = null
+    let attachedInputPublished = false
     const observer: RuntimeTurnObserver | undefined = binding.agentSessionId
       ? {
         onSessionReady: async (session) => {
           attachedRuntimeSessionId = session.runtimeSessionId
           await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
-          if (!skipInitialInput) {
+          if (!skipInitialInput && !attachedInputPublished) {
+            attachedInputPublished = true
             await eventSink.publishSessionInput(composed, session.runtimeSessionId)
           }
         },
@@ -285,7 +304,13 @@ export class AgentJobExecutor {
 
     let result: RuntimeResult<RuntimeTurnResult>
     try {
-      result = await runtime.runTurn(turnRequest, signal, observer)
+      result = await this.runWithModelRetry(work, modelInput, variant, signal, () => runtime.runTurn({
+        ...turnRequest,
+        target: {
+          ...turnRequest.target,
+          runtimeSessionId: attachedRuntimeSessionId ?? selected,
+        },
+      }, signal, observer))
     } catch (error) {
       return failureResult("turn-failed", `AgentJob turn threw: ${errorMessage(error)}`)
     }
@@ -373,7 +398,7 @@ export class AgentJobExecutor {
 
     let result: PiResult<PiTurnResult>
     try {
-      result = await runtime.runTurn(request, signal, observer)
+      result = await this.runWithModelRetry(work, modelInput, variant, signal, () => runtime.runTurn(request, signal, observer))
     } catch (error) {
       return failureResult("turn-failed", `AgentJob turn threw: ${errorMessage(error)}`)
     }
@@ -381,6 +406,76 @@ export class AgentJobExecutor {
     return projectPiTurnToWorkItemResult(result, "pi", modelInput, variant)
   }
 
+  private async runWithModelRetry<T extends ModelTurnResult>(
+    work: DispatchWorkItem,
+    modelInput: string | null,
+    variant: string | null,
+    signal: AbortSignal,
+    attempt: () => Promise<T>,
+  ): Promise<T> {
+    let retryAttempt = 0
+    while (true) {
+      const result = await attempt()
+      if (!modelInput || signal.aborted || !isModelUnavailableResult(result)) return result
+
+      retryAttempt += 1
+      const delayMs = modelRetryDelay(this.options, retryAttempt)
+      log.warn("specified AgentJob model unavailable; retrying same work", {
+        workId: work.workId,
+        model: modelInput,
+        variant,
+        attempt: retryAttempt,
+        delayMs,
+      })
+      const wait = this.options.waitForModelRetry ?? waitForModelRetry
+      if (signal.aborted || !await wait(delayMs, signal) || signal.aborted) return result
+    }
+  }
+}
+
+type ModelTurnResult = RuntimeResult<RuntimeTurnResult> | PiResult<PiTurnResult>
+
+function isModelUnavailableResult(result: ModelTurnResult): boolean {
+  if (result.ok) return false
+  const diagnostics = [...result.error.diagnostics, ...result.diagnostics]
+  if (diagnostics.some((entry) => MODEL_UNAVAILABLE_CODES.has(entry.code.toLowerCase()))) return true
+  const messages = diagnostics.map((entry) => entry.message).concat(result.error.message)
+  return messages.some((message) => /\bmodel\b.{0,80}\b(?:unavailable|not available|not found|does not exist)\b/i.test(message))
+}
+
+function modelRetryDelay(options: AgentJobExecutorOptions, attempt: number): number {
+  const initial = finiteNonNegative(options.modelRetryInitialDelayMs, DEFAULT_MODEL_RETRY_INITIAL_DELAY_MS)
+  const maximum = Math.max(initial, finiteNonNegative(options.modelRetryMaxDelayMs, DEFAULT_MODEL_RETRY_MAX_DELAY_MS))
+  return Math.min(maximum, initial * 2 ** Math.min(attempt - 1, 30))
+}
+
+function finiteNonNegative(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+function waitForModelRetry(delayMs: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(false)
+      return
+    }
+
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort: () => void = () => {}
+    const finish = (ready: boolean) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener("abort", onAbort)
+      resolve(ready)
+    }
+    onAbort = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      finish(false)
+    }
+    timer = setTimeout(() => finish(true), delayMs)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
 }
 
 type BindingResolution = { agentSessionId: string | null; runnerId: string; runtime: string | null; runtimeSessionId: string | null }
