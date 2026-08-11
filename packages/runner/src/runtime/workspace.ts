@@ -200,18 +200,23 @@ export class WorkspaceManager {
   private async bootstrap(operationPath: string, displayPath: string, gitUrl: string, baseBranch: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null, verifyBaseBranch: boolean): Promise<void> {
     const managedPreparationPath = `${operationPath}.preparing`
     if (await pathExists(managedPreparationPath)) await deleteDirectory(managedPreparationPath)
-    await assertNotSymlink(managedPreparationPath, displayPath)
-    if (verifyBaseBranch) await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
-    await this.cloneFresh(managedPreparationPath, displayPath, gitUrl, signal, log)
-    await validateWorkspaceOrigin(managedPreparationPath, gitUrl, signal, log, displayPath)
-    await this.restoreOrCreateRunBranch(managedPreparationPath, baseBranch, expected.runBranch, signal, log)
-    await ensureMarkerExcluded(managedPreparationPath)
-    await writeText(markerPath(managedPreparationPath), JSON.stringify(expected, null, 2))
-    await validateWorkspaceIdentity(managedPreparationPath, expected, gitUrl, signal, log, undefined, displayPath)
-    // Commit the prepared clone through the verified directory handle. The
-    // stable path is display-only here; using it as the rename target would
-    // follow a parent symlink installed after handle acquisition.
-    await rename(managedPreparationPath, operationPath)
+    try {
+      await assertNotSymlink(managedPreparationPath, displayPath)
+      if (verifyBaseBranch) await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
+      await this.cloneFresh(managedPreparationPath, displayPath, gitUrl, signal, log)
+      await validateWorkspaceOrigin(managedPreparationPath, gitUrl, signal, log, displayPath)
+      await this.restoreOrCreateRunBranch(managedPreparationPath, displayPath, baseBranch, expected.runBranch, signal, log)
+      await ensureMarkerExcluded(managedPreparationPath)
+      await writeText(markerPath(managedPreparationPath), JSON.stringify(expected, null, 2))
+      await validateWorkspaceIdentity(managedPreparationPath, expected, gitUrl, signal, log, undefined, displayPath)
+      // Commit the prepared clone through the verified directory handle. The
+      // stable path is display-only here; using it as the rename target would
+      // follow a parent symlink installed after handle acquisition.
+      await rename(managedPreparationPath, operationPath)
+    } catch (error) {
+      await deleteDirectory(managedPreparationPath).catch(() => {})
+      throw error
+    }
   }
 
   // True only when <path> is a git clone that already has <runBranch> —
@@ -228,24 +233,23 @@ export class WorkspaceManager {
     if (exists(workspacePath)) await deleteDirectory(workspacePath)
     await ensureDir(join(workspacePath, ".."))
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["clone", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
+    const result = await runCommand("git", ["clone", "--filter=blob:none", "--no-checkout", "--no-tags", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
     if (result.exitCode !== 0) {
-      // Drop any partial clone git left behind so a retry starts clean.
-      await deleteDirectory(workspacePath).catch(() => {})
-      if (result.status === "timeout") throw workspaceNetworkTimeout("git-clone", `clone ${gitUrl} ${displayPath}`, result, workspacePath, displayPath)
+      if (result.status === "timeout") throw workspaceNetworkTimeout("git-clone", `clone --filter=blob:none --no-checkout --no-tags ${gitUrl} ${displayPath}`, result, workspacePath, displayPath)
       throw new Error(`git clone failed for ${redactWorkspaceDiagnostic(gitUrl)}: ${sanitizeWorkspaceDiagnostic(result.stderr || result.stdout, workspacePath, displayPath)}`)
     }
   }
 
   // Create the run branch off the latest base. A fresh clone already has
   // up-to-date origin/<base> refs, so no separate fetch is needed.
-  private async restoreOrCreateRunBranch(workspacePath: string, baseBranch: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  private async restoreOrCreateRunBranch(workspacePath: string, displayPath: string, baseBranch: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
     const sink = workspacePrepSink(log)
     const branchRef = `refs/remotes/origin/${runBranch}`
     const existing = await runCommand("git", ["-C", workspacePath, "show-ref", "--verify", "--quiet", branchRef], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
     const source = existing.exitCode === 0 ? `origin/${runBranch}` : `origin/${baseBranch}`
-    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-B", runBranch, source], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-B", runBranch, source], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
     if (create.exitCode !== 0) {
+      if (create.status === "timeout") throw workspaceNetworkTimeout("git-checkout", `checkout -B ${runBranch} ${source}`, create, workspacePath, displayPath)
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
   }

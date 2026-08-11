@@ -14,6 +14,7 @@ interface CommandCall {
   command: string
   args: string[]
   cwd: string
+  timeoutMs?: number
 }
 
 class FakeGitRunner {
@@ -23,6 +24,7 @@ class FakeGitRunner {
   remoteOriginResult: CommandResult | null = null
   cloneResult: CommandResult | null = null
   lsRemoteResult: CommandResult | null = null
+  branchCheckoutResult: CommandResult | null = null
   failedCheckouts = 0
   beforeClone: (() => Promise<void>) | null = null
   private readonly branches = new Map<string, Set<string>>()
@@ -35,7 +37,7 @@ class FakeGitRunner {
     _env?: NodeJS.ProcessEnv,
     _options?: CommandLineOptions,
   ): Promise<CommandResult> {
-    this.calls.push({ command, args: [...args], cwd })
+    this.calls.push({ command, args: [...args], cwd, timeoutMs: _options?.timeoutMs })
     if (command !== "git") throw new Error(`Unexpected command: ${command}`)
 
     if (args[0] === "ls-remote") {
@@ -52,7 +54,7 @@ class FakeGitRunner {
         this.beforeClone = null
         await beforeClone()
       }
-      const workspacePath = args[2]
+      const workspacePath = args.at(-1)
       if (!workspacePath) throw new Error("git clone needs a destination")
       if (this.cloneResult) {
         await mkdir(workspacePath, { recursive: true })
@@ -96,6 +98,7 @@ class FakeGitRunner {
     }
 
     if (gitArgs[0] === "checkout" && (gitArgs[1] === "-b" || gitArgs[1] === "-B")) {
+      if (this.branchCheckoutResult) return this.branchCheckoutResult
       const branch = gitArgs[2]
       if (!branch) throw new Error("git checkout -b needs a branch")
       branches.add(branch)
@@ -167,7 +170,7 @@ describe("WorkspaceManager.prepare", () => {
       branch: "mohist/run-wr-1",
     })
     expect(gitRunner.commandArgs()).toContainEqual(["ls-remote", "--heads", "https://example.test/mohist.git", "master"])
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${expectedPath}.preparing`)])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "--filter=blob:none", "--no-checkout", "--no-tags", "https://example.test/mohist.git", managedPath(`${expectedPath}.preparing`)])
     expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(`${expectedPath}.preparing`), "checkout", "-B", "mohist/run-wr-1", "origin/master"])
     expect(await readFile(join(workspace.path, ".mohist", "workspace.json"), "utf8")).toBe(JSON.stringify({
       workflowRunId: "wr-1",
@@ -200,8 +203,8 @@ describe("WorkspaceManager.prepare", () => {
     await new WorkspaceManager(runnerRoot).prepare(work("wr-child-path"), new AbortController().signal)
 
     const clone = gitRunner.commandArgs().find((args) => args[0] === "clone")
-    expect(clone?.[2]).toMatch(new RegExp(`^/proc/${process.pid}/fd/\\d+/`))
-    expect(clone?.[2]).not.toContain("/proc/self/fd")
+    expect(clone?.at(-1)).toMatch(new RegExp(`^/proc/${process.pid}/fd/\\d+/`))
+    expect(clone?.at(-1)).not.toContain("/proc/self/fd")
   })
 
   it("SameRunReentry_ReusesWorkspaceWithoutRecloning", async () => {
@@ -234,7 +237,7 @@ describe("WorkspaceManager.prepare", () => {
     expect(second.path).not.toBe(first.path)
     expect(processModule.exists(join(first.path, "stale.txt"))).toBe(true)
     expect(second.branch).toBe("mohist/run-wr-new")
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${second.path}.preparing`)])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "--filter=blob:none", "--no-checkout", "--no-tags", "https://example.test/mohist.git", managedPath(`${second.path}.preparing`)])
   })
 
   it("MissingBaseBranch_FailsBeforeClone", async () => {
@@ -299,7 +302,7 @@ describe("WorkspaceManager.prepare", () => {
       name: "WorkspaceNetworkTimeoutError",
       step: {
         name: "git-clone",
-        command: `clone https://example.test/mohist.git ${issueWorkspacePath(runnerRoot, "wr-timeout")}`,
+        command: `clone --filter=blob:none --no-checkout --no-tags https://example.test/mohist.git ${issueWorkspacePath(runnerRoot, "wr-timeout")}`,
         exitCode: 124,
         status: "timeout",
         timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
@@ -307,10 +310,46 @@ describe("WorkspaceManager.prepare", () => {
     })
     expect(gitRunner.commandArgs()).toContainEqual([
       "clone",
+      "--filter=blob:none",
+      "--no-checkout",
+      "--no-tags",
       "https://example.test/mohist.git",
       managedPath(`${issueWorkspacePath(runnerRoot, "wr-timeout")}.preparing`),
     ])
-    expect(gitRunner.commandArgs().find((args) => args[0] === "clone")?.[2]).toMatch(/\/proc\/\d+\/fd\/\d+/)
+    const clone = gitRunner.calls.find((call) => call.args[0] === "clone")
+    expect(clone?.args.at(-1)).toMatch(/\/proc\/\d+\/fd\/\d+/)
+    expect(clone?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    const workspacePath = issueWorkspacePath(runnerRoot, "wr-timeout")
+    expect(processModule.exists(workspacePath)).toBe(false)
+    expect(processModule.exists(`${workspacePath}.preparing`)).toBe(false)
+  })
+
+  it("CheckoutTimeout_FailsWithStructuredStepAndDropsPartialWorkspace", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    gitRunner.branchCheckoutResult = {
+      exitCode: 124,
+      stdout: "",
+      stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+      status: "timeout",
+      timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+    }
+
+    await expect(manager.prepare(work("wr-checkout-timeout"), new AbortController().signal)).rejects.toMatchObject({
+      name: "WorkspaceNetworkTimeoutError",
+      step: {
+        name: "git-checkout",
+        command: "checkout -B mohist/run-wr-checkout-timeout origin/master",
+        exitCode: 124,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    })
+    const workspacePath = issueWorkspacePath(runnerRoot, "wr-checkout-timeout")
+    expect(processModule.exists(workspacePath)).toBe(false)
+    expect(processModule.exists(`${workspacePath}.preparing`)).toBe(false)
+    expect(gitRunner.calls.find((call) => call.args.includes("checkout") && call.args.includes("-B"))?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
   it("Preparation_DoesNotUseGitWorktreeCommands", async () => {
@@ -334,7 +373,7 @@ describe("WorkspaceManager.prepare", () => {
 
     expect(result.path).toBe(issueWorkspacePath(runnerRoot, "wr-supplied"))
     expect(result.branch).toBe("mohist/run-wr-supplied")
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${result.path}.preparing`)])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "--filter=blob:none", "--no-checkout", "--no-tags", "https://example.test/mohist.git", managedPath(`${result.path}.preparing`)])
   })
 
   it("SymlinkedWorkspaceParent_IsRejectedBeforeClone", async () => {
@@ -367,7 +406,7 @@ describe("WorkspaceManager.prepare", () => {
     const publicPath = issueWorkspacePath(runnerRoot, "wr-parent-swap")
     expect(processModule.exists(join(outside, basename(publicPath)))).toBe(false)
     expect(processModule.exists(join(heldWorkspaces, basename(publicPath)))).toBe(true)
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${publicPath}.preparing`)])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "--filter=blob:none", "--no-checkout", "--no-tags", "https://example.test/mohist.git", managedPath(`${publicPath}.preparing`)])
   })
 
   it("ExistingMarkerMismatch_IsRejectedBeforeBranchMutation", async () => {
