@@ -2,12 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Api;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Mohist.Server.Workspace.Grains;
-using Orleans;
 using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
@@ -231,11 +228,11 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var runnerId = $"launch-dispatch-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "dispatch-contract-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-        var workspaceName = $"launch-dispatch-{Guid.NewGuid():N}";
-        var workspace = _fixture.Grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(projectId, workspaceName));
-        var now = _fixture.TimeProvider.GetUtcNow();
-        await workspace.CreateManualAsync(workspaceName, [], now);
-        await workspace.EnsureMaterializedOnAsync(runnerId, $"/tmp/{workspaceName}", now);
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            projectId,
+            runnerId,
+            "launch-dispatch");
+        PollSnapshot? polled = null;
 
         try
         {
@@ -249,7 +246,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
             Assert.False(string.IsNullOrWhiteSpace(mintedSessionId));
 
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, mintedSessionId);
+            polled = await PollDispatchForSessionAsync(jobId, runnerId, mintedSessionId);
 
             // Launch-route regression guard: the dispatch envelope the
             // runner picks up must carry the minted AgentSessionId verbatim
@@ -265,7 +262,8 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
+            if (polled is not null && polled.AgentJobId is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, polled.AgentJobId, polled.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }

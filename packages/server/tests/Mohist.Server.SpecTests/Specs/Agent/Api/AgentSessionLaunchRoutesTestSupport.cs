@@ -7,11 +7,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workspace.Grains;
 using Orleans;
 using Xunit;
 using Xunit.Sdk;
@@ -71,6 +73,41 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         Assert.NotNull(dispatch);
         Assert.Equal(agentJobId, dispatch.AgentJobId);
         return dispatch;
+    }
+
+    protected async Task<string> CreateRunnerHomeWorkspaceAsync(
+        string projectId,
+        string runnerId,
+        string prefix)
+    {
+        var workspaceName = $"{prefix}-{Guid.NewGuid():N}";
+        var workspace = _fixture.Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(projectId, workspaceName));
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await workspace.CreateManualAsync(workspaceName, [], now);
+        var home = await workspace.EnsureMaterializedOnAsync(runnerId, $"/tmp/{workspaceName}", now);
+        Assert.NotNull(home);
+        Assert.Equal(runnerId, home.RunnerId);
+        return workspaceName;
+    }
+
+    protected async Task CompleteClaimedAgentJobAsync(
+        string runnerId,
+        string agentJobId,
+        string workId)
+    {
+        var report = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .ReportResultAsync(
+                runnerId,
+                workId,
+                new WorkResult(
+                    Status: "completed",
+                    Message: "test cleanup",
+                    Output: JSON.DeserializeElement("{}"),
+                    ArtifactUploadIds: null,
+                    ExitCode: 0));
+        Assert.True(report.Accepted, "AgentJob rejected completed cleanup report");
     }
 
     private async Task<PollSnapshot?> PollDispatchOnceAsync(
@@ -152,17 +189,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         if (string.IsNullOrWhiteSpace(agentJobId) || string.IsNullOrWhiteSpace(workId))
             return;
 
-        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId!);
-        var report = await jobGrain.ReportResultAsync(
-            runnerId,
-            workId!,
-            new WorkResult(
-                Status: "completed",
-                Message: "drained",
-                Output: JSON.DeserializeElement("{}"),
-                ArtifactUploadIds: null,
-                ExitCode: 0));
-        Assert.True(report.Accepted, "AgentJob rejected drain report");
+        await CompleteClaimedAgentJobAsync(runnerId, agentJobId!, workId!);
     }
 
     protected sealed record PollSnapshot(

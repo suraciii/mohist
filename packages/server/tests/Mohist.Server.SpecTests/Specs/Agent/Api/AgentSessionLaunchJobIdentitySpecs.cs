@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -32,10 +33,18 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         var runnerId = $"launch-job-roundtrip-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "roundtrip-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            projectId,
+            runnerId,
+            "launch-job-roundtrip");
+        ClaimResult? claim = null;
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "roundtrip the job id" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "roundtrip the job id", context = new { workspace = workspaceName } });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var data = launchPayload.GetProperty("data");
@@ -58,10 +67,12 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
             Assert.Equal(jobId, viewData.GetProperty("jobId").GetString());
             var status = viewData.GetProperty("status").GetString();
             Assert.Contains(status, new[] { "pending", "running" });
+            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -73,12 +84,20 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         var runnerId = $"launch-exactly-once-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "exactly-once-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            projectId,
+            runnerId,
+            "launch-exactly-once");
+        PollSnapshot? polled = null;
 
         try
         {
             var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "exactly one of each" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "exactly one of each", context = new { workspace = workspaceName } });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -91,14 +110,15 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
             // Exactly one AgentJob: exactly one dispatch carrying that
             // session id is observable on the runner, and that dispatch
             // references the launched job id verbatim.
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             Assert.Equal(jobId, polled.AgentJobId);
             Assert.Equal(sessionId, polled.AgentSessionId);
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
+            if (polled is not null && polled.AgentJobId is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, polled.AgentJobId, polled.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
