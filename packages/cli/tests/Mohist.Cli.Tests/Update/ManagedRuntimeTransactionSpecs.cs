@@ -1,5 +1,7 @@
+using System.Net;
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli;
+using Mohist.Cli.Tests.Support;
 using System.Text;
 using System.Text.Json;
 using Xunit;
@@ -256,7 +258,66 @@ public sealed class ManagedRuntimeTransactionSpecs
         var runnerUnit = files.Read("/units/mohist-runner.service");
         Assert.Contains("ExecStart=/managed/server/Mohist.Server\n", serverUnit, StringComparison.Ordinal);
         Assert.DoesNotContain("dotnet", serverUnit, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "Environment=\"MOHIST_RUNTIME_IDENTITY_PATH=/managed/server/runtime-identity.json\"",
+            serverUnit,
+            StringComparison.Ordinal);
         Assert.Contains("ExecStart=/usr/bin/node /managed/runner/dist/cli.js\n", runnerUnit, StringComparison.Ordinal);
+        Assert.Contains(
+            "Environment=\"MOHIST_RUNTIME_IDENTITY_PATH=/managed/runner/runtime-identity.json\"",
+            runnerUnit,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ManagedServerUpdate_WhenReportedIdentityMatchesCandidate_Commits()
+    {
+        var fixture = ManagedFixture.Create(0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        var sourceUnit = SeedSourceServerAndVerifiedCli(fixture);
+        var updater = fixture.BuildManagedServerUpdater(BuildManagedServerHandler(fixture, identityMode: "matching"));
+
+        var result = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, result);
+        var verified = Parse(fixture.Files.Read(fixture.VerifiedPath));
+        Assert.Equal("verified", verified.Status);
+        Assert.NotNull(verified.Cli);
+        Assert.NotNull(verified.Server);
+        Assert.Equal(4, verified.Generation);
+        Assert.Null(verified.SourceSnapshot);
+        var managedUnit = fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist.service"));
+        Assert.NotEqual(sourceUnit, managedUnit);
+        Assert.Contains(
+            $"Environment=\"MOHIST_RUNTIME_IDENTITY_PATH={verified.Server!.WorkingDirectory}/runtime-identity.json\"",
+            managedUnit,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("missing-component")]
+    [InlineData("wrong-generation")]
+    public async Task ManagedServerUpdate_WhenReportedIdentityIsInvalid_RollsBackSourceAndKeepsCli(string identityMode)
+    {
+        var fixture = ManagedFixture.Create(0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        var sourceUnit = SeedSourceServerAndVerifiedCli(fixture);
+        var verifiedBefore = fixture.Files.Read(fixture.VerifiedPath);
+        var updater = fixture.BuildManagedServerUpdater(BuildManagedServerHandler(fixture, identityMode));
+
+        var result = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, result);
+        Assert.Equal(sourceUnit, fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist.service")));
+        Assert.Equal(verifiedBefore, fixture.Files.Read(fixture.VerifiedPath));
+        var active = Parse(fixture.Files.Read(fixture.ActivePath));
+        Assert.Equal("verified", active.Status);
+        Assert.NotNull(active.Cli);
+        Assert.Null(active.Server);
+        Assert.Contains(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "systemctl"
+            && command.Args.SequenceEqual(["--user", "daemon-reload"]));
+        Assert.Contains(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "systemctl"
+            && command.Args.SequenceEqual(["--user", "restart", "mohist.service"]));
     }
 
     [Fact]
@@ -488,6 +549,88 @@ public sealed class ManagedRuntimeTransactionSpecs
             generation,
             runnerId);
 
+    private static string SeedSourceServerAndVerifiedCli(ManagedFixture fixture)
+    {
+        const string sourceUnit = "[Unit]\nDescription=Source Server\n\n[Service]\nExecStart=/repo/server\n\n[Install]\nWantedBy=default.target\n";
+        fixture.Files.AddFile(Path.Combine(UpdateTestFactory.UnitDir, "mohist.service"), sourceUnit);
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "is-active", "mohist.service"]),
+            0,
+            "active\n",
+            "");
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "is-enabled", "mohist.service"]),
+            0,
+            "enabled\n",
+            "");
+
+        var cliIdentity = Identity("cli", 3) with { ReleaseId = "mohist-cli-commit" };
+        var previous = new RuntimeTargetSet(
+            "verified",
+            3,
+            "previous-cli",
+            new RuntimeTarget("cli", "/managed/cli/mo", "/managed/cli", [], "linux-x64", cliIdentity),
+            null,
+            null,
+            null);
+        var json = JsonSerializer.Serialize(previous, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        fixture.Files.AddFile(fixture.ActivePath, json);
+        fixture.Files.AddFile(fixture.VerifiedPath, json);
+        return sourceUnit;
+    }
+
+    private static HttpMessageHandler BuildManagedServerHandler(ManagedFixture fixture, string identityMode)
+    {
+        return new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/health")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            if (path == "/")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "<html><script src=\"/assets/app.js\"></script></html>",
+                        Encoding.UTF8,
+                        "text/html"),
+                });
+            }
+            if (path == "/assets/app.js")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+
+            Assert.Equal("/api/system/info", path);
+            var active = Parse(fixture.Files.Read(fixture.ActivePath));
+            var server = Assert.IsType<RuntimeTarget>(active.Server);
+            var manifestPath = Path.Combine(server.WorkingDirectory, "runtime-identity.json").Replace('\\', '/');
+            var identity = RuntimeIdentity.Read(fixture.Files.Read(manifestPath));
+            Assert.NotNull(identity);
+            var running = new Dictionary<string, object?>
+            {
+                ["component"] = identity.Component,
+                ["version"] = identity.Version,
+                ["sourceRevision"] = identity.SourceRevision,
+                ["gitHash"] = identity.SourceRevision,
+                ["treeHash"] = identity.TreeHash,
+                ["artifactDigest"] = identity.ArtifactDigest,
+                ["releaseId"] = identity.ReleaseId,
+                ["generation"] = identity.Generation,
+            };
+            if (identityMode == "missing-component")
+                running.Remove("component");
+            else if (identityMode == "wrong-generation")
+                running["generation"] = identity.Generation - 1;
+
+            var body = JsonSerializer.Serialize(new { success = true, data = new { running } });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+        });
+    }
+
     private static RuntimeTargetSet Parse(string json) =>
         JsonSerializer.Deserialize<RuntimeTargetSet>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))
         ?? throw new InvalidOperationException("runtime target set was not persisted");
@@ -502,13 +645,17 @@ public sealed class ManagedRuntimeTransactionSpecs
             FakeCommandExecutor commands,
             RecordingActivator activator,
             ManagedRuntimeTransaction transaction,
-            string runtimeRoot)
+            string runtimeRoot,
+            MockEnvironmentVariableProvider environment,
+            SystemdServiceInstaller? systemd)
         {
             Files = files;
             Commands = commands;
             Activator = activator;
             Transaction = transaction;
             RuntimeRoot = runtimeRoot;
+            Environment = environment;
+            Systemd = systemd;
         }
 
         public FakeFileSystem Files { get; }
@@ -516,9 +663,28 @@ public sealed class ManagedRuntimeTransactionSpecs
         public RecordingActivator Activator { get; }
         public ManagedRuntimeTransaction Transaction { get; }
         public string RuntimeRoot { get; }
+        public MockEnvironmentVariableProvider Environment { get; }
+        public SystemdServiceInstaller? Systemd { get; }
         public RuntimeTargetSet? LastPreparedTargets => Activator.LastTargets;
         public string ActivePath => Path.Combine(RuntimeRoot, "active.json").Replace('\\', '/');
         public string VerifiedPath => Path.Combine(RuntimeRoot, "verified.json").Replace('\\', '/');
+
+        public SourceCodeUpdater BuildManagedServerUpdater(HttpMessageHandler handler)
+        {
+            var systemd = Systemd ?? throw new InvalidOperationException("managed updater requires systemd");
+            return SourceCodeUpdater.CreateWithDefaults(
+                TextWriter.Null,
+                TextWriter.Null,
+                systemd,
+                Commands,
+                Files,
+                Environment,
+                new HttpClient(handler) { BaseAddress = new Uri(UpdateTestFactory.ServerAddress) },
+                serverReadyTimeout: TimeSpan.FromSeconds(1),
+                getUserHome: () => "/home/test",
+                unitDir: UpdateTestFactory.UnitDir,
+                managedUpdatesEnabled: true);
+        }
 
         public static ManagedFixture Create(int activationCode, bool useSystemd = false, string? unitDir = null)
         {
@@ -615,7 +781,7 @@ public sealed class ManagedRuntimeTransactionSpecs
                 resolver,
                 activator,
                 unitDir);
-            return new ManagedFixture(files, commands, activator, transaction, runtimeRoot);
+            return new ManagedFixture(files, commands, activator, transaction, runtimeRoot, environment, systemd);
         }
     }
 

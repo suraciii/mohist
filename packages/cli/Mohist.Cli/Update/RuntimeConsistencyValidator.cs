@@ -130,9 +130,9 @@ internal sealed class RuntimeConsistencyValidator
         }
 
         var actual = new RuntimeIdentity(
-            "server",
+            running.Component ?? string.Empty,
             running.Version ?? string.Empty,
-            running.SourceRevision ?? running.GitHash ?? string.Empty,
+            running.SourceRevision ?? string.Empty,
             running.TreeHash ?? string.Empty,
             running.ArtifactDigest ?? string.Empty,
             running.ReleaseId ?? string.Empty,
@@ -467,6 +467,9 @@ internal sealed class RuntimeConsistencyValidator
 
     private sealed class SystemInfoRunningSnapshot
     {
+        [System.Text.Json.Serialization.JsonPropertyName("component")]
+        public string? Component { get; set; }
+
         [System.Text.Json.Serialization.JsonPropertyName("gitHash")]
         public string? GitHash { get; set; }
 

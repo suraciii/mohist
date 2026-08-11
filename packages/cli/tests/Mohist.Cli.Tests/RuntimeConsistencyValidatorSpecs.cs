@@ -38,6 +38,46 @@ public class RuntimeConsistencyValidatorSpecs
         new(new RecordingHttpHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound))));
 
+    private static HttpClient BuildSystemInfoClient(string body) =>
+        new(new RecordingHttpHandler((request, _) =>
+        {
+            Assert.Equal("/api/system/info", request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            });
+        }))
+        {
+            BaseAddress = new Uri("http://localhost:0"),
+        };
+
+    private static RuntimeIdentity ManagedServerIdentity() =>
+        new(
+            "server",
+            "0.0.0+candidate",
+            new string('a', 40),
+            new string('b', 40),
+            new string('c', 64),
+            "mohist-server-candidate",
+            4);
+
+    private static string ManagedRunningJson(RuntimeIdentity identity, bool includeComponent = true)
+    {
+        var running = new Dictionary<string, object?>
+        {
+            ["version"] = identity.Version,
+            ["sourceRevision"] = identity.SourceRevision,
+            ["gitHash"] = identity.SourceRevision,
+            ["treeHash"] = identity.TreeHash,
+            ["artifactDigest"] = identity.ArtifactDigest,
+            ["releaseId"] = identity.ReleaseId,
+            ["generation"] = identity.Generation,
+        };
+        if (includeComponent)
+            running["component"] = identity.Component;
+        return System.Text.Json.JsonSerializer.Serialize(new { running });
+    }
+
     private static async Task AssertRequestCountAsync(RecordingHttpHandler handler, int expected)
     {
         await handler.WaitForRequestCountAsync(expected);
@@ -138,6 +178,42 @@ public class RuntimeConsistencyValidatorSpecs
 
         Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Contains("empty git hash", result.Message);
+    }
+
+    [Fact]
+    public async Task VerifyServerRuntimeIdentityAsync_AllCandidateFieldsMatch_ReportsPass()
+    {
+        var expected = ManagedServerIdentity();
+        var validator = BuildValidator(BuildSystemInfoClient(ManagedRunningJson(expected)));
+
+        var result = await validator.VerifyServerRuntimeIdentityAsync(expected, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
+        Assert.Contains(expected.ReleaseId, result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyServerRuntimeIdentityAsync_ComponentMissing_ReportsFail()
+    {
+        var expected = ManagedServerIdentity();
+        var validator = BuildValidator(BuildSystemInfoClient(ManagedRunningJson(expected, includeComponent: false)));
+
+        var result = await validator.VerifyServerRuntimeIdentityAsync(expected, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
+        Assert.Contains("complete managed runtime identity", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyServerRuntimeIdentityAsync_GenerationDiffers_ReportsFail()
+    {
+        var expected = ManagedServerIdentity();
+        var validator = BuildValidator(BuildSystemInfoClient(ManagedRunningJson(expected with { Generation = 3 })));
+
+        var result = await validator.VerifyServerRuntimeIdentityAsync(expected, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
+        Assert.Contains("differs from candidate", result.Message, StringComparison.Ordinal);
     }
 
     [Fact]

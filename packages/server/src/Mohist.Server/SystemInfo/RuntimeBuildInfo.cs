@@ -1,4 +1,5 @@
 using System.Reflection;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.SystemInfo;
@@ -8,6 +9,8 @@ public interface IRuntimeBuildInfo
     string? Version { get; }
     string? GitHash { get; }
     DateTimeOffset StartedAt { get; }
+    string? Component => null;
+    string? SourceRevision => null;
     string? TreeHash => null;
     string? ArtifactDigest => null;
     string? ReleaseId => null;
@@ -21,6 +24,8 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     public string? Version { get; }
     public string? GitHash { get; }
     public DateTimeOffset StartedAt { get; }
+    public string? Component { get; }
+    public string? SourceRevision { get; }
     public string? TreeHash { get; }
     public string? ArtifactDigest { get; }
     public string? ReleaseId { get; }
@@ -36,8 +41,10 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         var managed = ReadManagedIdentity(environment, fileSystem);
         if (managed is not null)
         {
+            Component = managed.Component;
             Version = managed.Version;
-            GitHash = managed.SourceRevision;
+            SourceRevision = managed.SourceRevision;
+            GitHash = SourceRevision;
             TreeHash = managed.TreeHash;
             ArtifactDigest = managed.ArtifactDigest;
             ReleaseId = managed.ReleaseId;
@@ -46,6 +53,8 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         }
 
         (Version, GitHash) = ResolveIdentity(environment, sourceIdentity);
+        Component = null;
+        SourceRevision = null;
         TreeHash = null;
         ArtifactDigest = null;
         ReleaseId = null;
@@ -65,8 +74,8 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         try
         {
             var json = fileSystem is null ? File.ReadAllText(path) : fileSystem.ReadAllText(path);
-            var identity = System.Text.Json.JsonSerializer.Deserialize<RuntimeIdentityMetadata>(json);
-            return identity is { IsComplete: true } ? identity : null;
+            return JSON.Deserialize<RuntimeIdentityMetadata>(json)
+                ?? new RuntimeIdentityMetadata(null, null, null, null, null, null, 0);
         }
         catch
         {
@@ -134,14 +143,4 @@ internal sealed record RuntimeIdentityMetadata(
     string? TreeHash,
     string? ArtifactDigest,
     string? ReleaseId,
-    long Generation)
-{
-    public bool IsComplete =>
-        !string.IsNullOrWhiteSpace(Component)
-        && !string.IsNullOrWhiteSpace(Version)
-        && !string.IsNullOrWhiteSpace(SourceRevision)
-        && !string.IsNullOrWhiteSpace(TreeHash)
-        && !string.IsNullOrWhiteSpace(ArtifactDigest)
-        && !string.IsNullOrWhiteSpace(ReleaseId)
-        && Generation > 0;
-}
+    long Generation);
