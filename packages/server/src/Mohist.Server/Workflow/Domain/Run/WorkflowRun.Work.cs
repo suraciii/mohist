@@ -90,6 +90,125 @@ public static partial class WorkflowRunExtensions
                 : null;
         }
 
+        /// <summary>
+        /// Finds a task attempt that may still accept an authoritative report.
+        /// The persisted task-run, work, and runner tuple is the identity; a
+        /// settlement state never substitutes for any part of that tuple.
+        /// </summary>
+        public WorkflowReportableTaskAttempt? FindReportableTaskAttempt(
+            string taskRunId,
+            string workId,
+            string workerId)
+        {
+            var match = FindTaskAttempt(run, taskRunId, workId, workerId);
+            return match is { } found && found.Task.Status == TaskRunStatus.Running
+                ? new WorkflowReportableTaskAttempt(found.Stage.Id, found.Task.Id, found.Task.WorkId!, found.Task.WorkerId!)
+                : null;
+        }
+
+        public WorkflowActiveWork? FindReportableWork(string workId, string workerId)
+        {
+            if (string.IsNullOrWhiteSpace(workId) || string.IsNullOrWhiteSpace(workerId))
+                return null;
+
+            var active = run.FindActiveWork(workId, workerId);
+            if (active is not null)
+                return active;
+
+            var matches = run.Stages
+                .SelectMany(stage => stage.Tasks.Select(task => (Stage: stage, Task: task)))
+                .Where(candidate =>
+                    candidate.Task.Status == TaskRunStatus.Running
+                    && string.Equals(candidate.Task.WorkId, workId, StringComparison.Ordinal)
+                    && string.Equals(candidate.Task.WorkerId, workerId, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count != 1)
+                return null;
+
+            var match = matches[0];
+            return ActiveTask(match.Stage, match.Task);
+        }
+
+        /// <summary>
+        /// The single aggregate-level predicate for later dispatch and status
+        /// decisions. Task and stage status enums intentionally do not mirror it.
+        /// </summary>
+        public bool HasUnresolvedAgentResult() =>
+            run.Stages.SelectMany(stage => stage.Tasks)
+                .Any(task => task.AgentResultSettlement is not null);
+
+        public AgentExecutionUpdate BindAgentExecution(AgentExecutionBinding binding)
+        {
+            if (!IsValid(binding))
+                return AgentExecutionUpdate.Rejected;
+
+            var match = FindTaskAttempt(run, binding.TaskRunId, binding.WorkId, binding.RunnerId);
+            if (match is not { } found
+                || found.Task.Status != TaskRunStatus.Running
+                || found.Task.AgentResultSettlement is not { } settlement)
+            {
+                return AgentExecutionUpdate.Rejected;
+            }
+
+            if (!MatchesAttempt(settlement, binding) || !MatchesBoundFields(settlement, binding))
+                return AgentExecutionUpdate.Rejected;
+
+            if (HasFullExecutionBinding(settlement))
+                return AgentExecutionUpdate.Unchanged;
+
+            settlement.AgentSessionId = binding.AgentSessionId;
+            settlement.AgentTurnId = binding.AgentTurnId;
+            settlement.Runtime = binding.Runtime;
+            settlement.RuntimeSessionId = binding.RuntimeSessionId;
+            return AgentExecutionUpdate.Updated;
+        }
+
+        public AgentExecutionUpdate ObserveAgentExecution(
+            AgentExecutionObservation observation,
+            DateTimeOffset now)
+        {
+            if (!IsValid(observation.Binding) || string.IsNullOrWhiteSpace(observation.ReasonCode))
+                return AgentExecutionUpdate.Rejected;
+
+            var binding = observation.Binding;
+            var match = FindTaskAttempt(run, binding.TaskRunId, binding.WorkId, binding.RunnerId);
+            if (match is not { } found
+                || found.Task.Status != TaskRunStatus.Running
+                || found.Task.AgentResultSettlement is not { } settlement
+                || !MatchesAttempt(settlement, binding)
+                || !HasFullExecutionBinding(settlement)
+                || !MatchesBoundFields(settlement, binding)
+                || (settlement.StopOperationId is not null
+                    && observation.StopOperationId is not null
+                    && !string.Equals(settlement.StopOperationId, observation.StopOperationId, StringComparison.Ordinal)))
+            {
+                return AgentExecutionUpdate.Rejected;
+            }
+
+            var state = settlement.State == AgentResultSettlementState.AwaitingResult
+                ? AgentResultSettlementState.Unknown
+                : settlement.State;
+            var firstUnknownAt = settlement.FirstUnknownAt ?? now;
+            var stopOperationId = observation.StopOperationId ?? settlement.StopOperationId;
+            if (settlement.State == state
+                && settlement.FirstUnknownAt == firstUnknownAt
+                && settlement.LastObservation == observation.Kind
+                && string.Equals(settlement.ReasonCode, observation.ReasonCode, StringComparison.Ordinal)
+                && string.Equals(settlement.Message, observation.Message, StringComparison.Ordinal)
+                && string.Equals(settlement.StopOperationId, stopOperationId, StringComparison.Ordinal))
+            {
+                return AgentExecutionUpdate.Unchanged;
+            }
+
+            settlement.State = state;
+            settlement.FirstUnknownAt = firstUnknownAt;
+            settlement.LastObservation = observation.Kind;
+            settlement.ReasonCode = observation.ReasonCode;
+            settlement.Message = observation.Message;
+            settlement.StopOperationId = stopOperationId;
+            return AgentExecutionUpdate.Updated;
+        }
+
         public WorkflowPendingWork? CurrentPendingWork()
         {
             if (run.CurrentStageId is null) return null;
@@ -240,4 +359,56 @@ public static partial class WorkflowRunExtensions
 
     private static TaskRun? NextUnclaimedTask(StageRun stage) =>
         stage.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Pending);
+
+    private static (StageRun Stage, TaskRun Task)? FindTaskAttempt(
+        WorkflowRun run,
+        string taskRunId,
+        string workId,
+        string workerId)
+    {
+        if (string.IsNullOrWhiteSpace(taskRunId)
+            || string.IsNullOrWhiteSpace(workId)
+            || string.IsNullOrWhiteSpace(workerId))
+        {
+            return null;
+        }
+
+        foreach (var stage in run.Stages)
+        {
+            var task = stage.Tasks.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, taskRunId, StringComparison.Ordinal)
+                && string.Equals(candidate.WorkId, workId, StringComparison.Ordinal)
+                && string.Equals(candidate.WorkerId, workerId, StringComparison.Ordinal));
+            if (task is not null)
+                return (stage, task);
+        }
+
+        return null;
+    }
+
+    private static bool IsValid(AgentExecutionBinding binding) =>
+        !string.IsNullOrWhiteSpace(binding.TaskRunId)
+        && !string.IsNullOrWhiteSpace(binding.WorkId)
+        && !string.IsNullOrWhiteSpace(binding.RunnerId)
+        && !string.IsNullOrWhiteSpace(binding.AgentSessionId)
+        && !string.IsNullOrWhiteSpace(binding.AgentTurnId)
+        && !string.IsNullOrWhiteSpace(binding.Runtime)
+        && !string.IsNullOrWhiteSpace(binding.RuntimeSessionId);
+
+    private static bool MatchesAttempt(AgentResultSettlement settlement, AgentExecutionBinding binding) =>
+        string.Equals(settlement.TaskRunId, binding.TaskRunId, StringComparison.Ordinal)
+        && string.Equals(settlement.WorkId, binding.WorkId, StringComparison.Ordinal)
+        && string.Equals(settlement.RunnerId, binding.RunnerId, StringComparison.Ordinal);
+
+    private static bool HasFullExecutionBinding(AgentResultSettlement settlement) =>
+        settlement.AgentSessionId is not null
+        && settlement.AgentTurnId is not null
+        && settlement.Runtime is not null
+        && settlement.RuntimeSessionId is not null;
+
+    private static bool MatchesBoundFields(AgentResultSettlement settlement, AgentExecutionBinding binding) =>
+        (settlement.AgentSessionId is null || string.Equals(settlement.AgentSessionId, binding.AgentSessionId, StringComparison.Ordinal))
+        && (settlement.AgentTurnId is null || string.Equals(settlement.AgentTurnId, binding.AgentTurnId, StringComparison.Ordinal))
+        && (settlement.Runtime is null || string.Equals(settlement.Runtime, binding.Runtime, StringComparison.Ordinal))
+        && (settlement.RuntimeSessionId is null || string.Equals(settlement.RuntimeSessionId, binding.RuntimeSessionId, StringComparison.Ordinal));
 }

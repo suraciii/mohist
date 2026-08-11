@@ -4,6 +4,30 @@ namespace Mohist.Server.Workflow.Grains;
 
 public partial class WorkflowGrain
 {
+    public async Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null) return ReportAck.Stale;
+
+        var update = _run.BindAgentExecution(binding);
+        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Updated)
+            await CommitAsync([]);
+        return ReportAck.Accepted;
+    }
+
+    public async Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null) return ReportAck.Stale;
+
+        var update = _run.ObserveAgentExecution(observation, Now());
+        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Updated)
+            await CommitAsync([]);
+        return ReportAck.Accepted;
+    }
+
     public async Task<ReportAck> FailActiveWorkAsync(string workerId, string message)
     {
         RejectIfRunReloadRequired();
@@ -104,7 +128,7 @@ public partial class WorkflowGrain
     {
         RejectIfRunReloadRequired();
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
-        var activeWork = _run.FindActiveWork(workId, workerId);
+        var activeWork = _run.FindReportableWork(workId, workerId);
         if (activeWork is null || !activeWork.IsTask) return ReportAck.Stale;
 
         var task = _run.CurrentStage().RunningTask;

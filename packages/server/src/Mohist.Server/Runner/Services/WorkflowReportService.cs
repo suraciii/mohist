@@ -40,7 +40,7 @@ public sealed class WorkflowReportService : IScopedService
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
         var workerId = runnerId;
 
-        var activeWork = run.FindActiveWork(workId, workerId);
+        var activeWork = run.FindReportableWork(workId, workerId);
         if (activeWork is null)
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 

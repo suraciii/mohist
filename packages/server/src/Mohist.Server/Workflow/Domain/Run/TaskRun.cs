@@ -31,6 +31,7 @@ public sealed class TaskRun
     public DateTimeOffset? FinishedAt { get; set; }
     public string? WorkerId { get; set; }
     public string? WorkId { get; set; }
+    public AgentResultSettlement? AgentResultSettlement { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
     public Dictionary<string, string>? SetVars { get; init; }

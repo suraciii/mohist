@@ -1,0 +1,16 @@
+## Codebase Patterns
+
+- WorkflowRun state is persisted transactionally with Workflow events through WorkflowGrain.CommitAsync. CommitAsync([]) persists a state-only transition without appending events.
+- Task attempts keep their dispatch identity on TaskRun.Id, WorkId, and WorkerId. Reports must not use the mutable current AgentSession metadata as an identity source.
+- IWorkflowGrain test doubles live in RunnerWorkflowStatusRouterSpecs and must be updated when the grain interface grows.
+- Server test source changes require synchronizing the SpecUnitMigration ledger, validator, and provenance source-tree file count and digest.
+
+## T-001
+
+- AgentResultSettlement is optional TaskRun JSON state and is created only for mohist/agent, mohist/opencode, and mohist/pi when StartTask receives the real work and Runner identity.
+- BindAgentExecution and ObserveAgentExecution validate the persisted TaskRun.Id + WorkId + RunnerId tuple before checking the frozen Session, Turn, runtime, and runtime-session identity. Exact replay returns Accepted without writing state or Workflow events; mismatches return Stale.
+- Observations move awaiting-result to unknown and retain physical facts only. They do not use task completion or failure paths. T-002 owns deadlines and blocked transitions; T-003/T-004 own the AgentSession binding and observation ingress; T-005 owns Runner-loss handling.
+- FindReportableTaskAttempt uses the persisted attempt tuple. FindReportableWork is used by report ingress so the original running attempt remains discoverable for later authoritative reports.
+- npm run test:fast passed after npm ci restored missing Node dependencies. The final Server-test source-tree baseline is files=836, digest=b1dd27a9405144bab7fcd9373f9d0a4eca9b4d047f8fa3aff209dcc04455e0f6.
+- FindReportableWork must preserve active checks work before falling back to persisted task attempts; otherwise checks reports are incorrectly classified as stale and stages cannot advance.
+- npm run verify passed: docs check, complete build, 175 workflow-definition tests, 1793 CLI tests, 2621 Server unit tests, 3855 Server spec tests, 69 architecture tests, 4697 Web tests, 1590 Runner tests, and 70 Slack tests.

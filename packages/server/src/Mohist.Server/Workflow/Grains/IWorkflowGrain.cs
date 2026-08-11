@@ -29,6 +29,8 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
     Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
+    Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
+    Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
     Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);

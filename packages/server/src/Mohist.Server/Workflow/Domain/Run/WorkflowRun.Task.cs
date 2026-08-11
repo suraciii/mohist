@@ -19,6 +19,16 @@ public static partial class WorkflowRunExtensions
             task.StartedAt = now;
             task.WorkId = workId;
             task.WorkerId = workerId;
+            if (RequiresAgentResultSettlement(task.Uses))
+            {
+                task.AgentResultSettlement ??= new AgentResultSettlement
+                {
+                    State = AgentResultSettlementState.AwaitingResult,
+                    TaskRunId = task.Id,
+                    WorkId = workId,
+                    RunnerId = workerId
+                };
+            }
             run.Status = WorkflowRunStatus.Running;
             return [new TaskStarted(current.Id, task.Id, workerId)];
         }
@@ -31,6 +41,7 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Completed;
+            task.AgentResultSettlement = null;
             var events = new List<WorkflowEvent>
             {
                 new TaskCompleted(current.Id, task.Id)
@@ -59,6 +70,7 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
+            task.AgentResultSettlement = null;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: result.Reason, Error: result.Error);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
@@ -79,6 +91,7 @@ public static partial class WorkflowRunExtensions
             var message = string.IsNullOrWhiteSpace(reason) ? "stopped" : reason;
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
+            task.AgentResultSettlement = null;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: message);
             run.Failure = current.Failure;
             return [new TaskFailed(current.Id, task.Id, message)];
@@ -110,6 +123,7 @@ public static partial class WorkflowRunExtensions
             task.FinishedAt = null;
             task.WorkerId = null;
             task.WorkId = null;
+            task.AgentResultSettlement = null;
             task.Output = null;
             task.Error = null;
 
@@ -120,4 +134,9 @@ public static partial class WorkflowRunExtensions
             return true;
         }
     }
+
+    private static bool RequiresAgentResultSettlement(string? uses) =>
+        string.Equals(uses, "mohist/agent", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
 }
