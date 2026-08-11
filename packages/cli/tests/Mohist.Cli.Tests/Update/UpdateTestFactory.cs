@@ -75,13 +75,14 @@ internal sealed class UpdateTestFactory
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
         TimeProvider? timeProvider = null,
-        bool managedUpdatesEnabled = false)
+        bool managedUpdatesEnabled = false,
+        IServiceInstaller? serviceInstaller = null)
     {
         var home = userHome ?? Root;
         return SourceCodeUpdater.CreateWithDefaults(
             Stdout,
             Stderr,
-            Installer,
+            serviceInstaller ?? Installer,
             Commands,
             Files,
             withEnvironment ? new MockEnvironmentVariableProvider() : null,
@@ -227,6 +228,21 @@ internal sealed class SequenceHttpHandler : HttpMessageHandler
     {
         var path = request.RequestUri?.PathAndQuery ?? "";
         Paths.Add(path);
+
+        if (request.Method == HttpMethod.Post
+            && path.StartsWith("/api/runner/", StringComparison.Ordinal)
+            && path.EndsWith("/update-interrupt", StringComparison.Ordinal))
+        {
+            Requests++;
+            var runnerId = path["/api/runner/".Length..].Replace("/update-interrupt", "", StringComparison.Ordinal);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $"{{\"success\":true,\"data\":{{\"runnerId\":\"{runnerId}\",\"status\":\"interrupted\",\"interruptedWorkIds\":[],\"interruptedWorkCount\":0}}}}",
+                    System.Text.Encoding.UTF8,
+                    "application/json"),
+            });
+        }
 
         if (string.Equals(path, "/api/system/info", StringComparison.Ordinal))
         {

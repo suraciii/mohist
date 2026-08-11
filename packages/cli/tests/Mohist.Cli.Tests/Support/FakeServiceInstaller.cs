@@ -9,6 +9,7 @@ namespace Mohist.Cli.Tests.Support;
 /// </summary>
 internal sealed class FakeServiceInstaller : IServiceInstaller
 {
+    public bool RunnerInstalled { get; set; }
     public List<string> Calls { get; } = new();
     public List<ServiceInstallOptions> InstallServerCalls { get; } = new();
     public List<ServiceInstallOptions> InstallRunnerCalls { get; } = new();
@@ -115,6 +116,6 @@ internal sealed class FakeServiceInstaller : IServiceInstaller
     public Task<int> UninstallSlackAsync(ServiceCommandOptions options) { Calls.Add(nameof(UninstallSlackAsync)); return Task.FromResult(0); }
 
     public Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
-    public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(false);
+    public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(RunnerInstalled);
     public Task<bool> IsSlackInstalledAsync(string? unitDir = null) => Task.FromResult(false);
 }

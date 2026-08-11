@@ -80,6 +80,21 @@ internal sealed record RunnerIdentityView(
     string ConnectionState,
     string? ConnectionGeneration = null);
 
+internal sealed record RunnerInterruptResult(
+    string? RunnerId,
+    string? Status,
+    IReadOnlyList<string> InterruptedWorkIds,
+    int InterruptedWorkCount,
+    string? Error)
+{
+    public bool Succeeded => Error is null
+        && string.Equals(Status, "interrupted", StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(RunnerId);
+
+    public static RunnerInterruptResult Failed(string error) =>
+        new(null, null, Array.Empty<string>(), 0, error);
+}
+
 /// <summary>
 /// Encapsulates the runner refresh verification flow: poll the authoritative connected runner
 /// identity endpoint and reduce the result to a
@@ -120,6 +135,46 @@ internal sealed class RunnerRefreshVerifier
     public void WriteSkippedSummary(string reason, TextWriter output, TextWriter error)
     {
         new RunnerRefreshOutcome.Skipped(reason).WriteSummary(output, error);
+    }
+
+    public async Task<RunnerInterruptResult> InterruptRunnerAsync(CancellationToken cancellationToken = default)
+    {
+        var hostname = _getLocalHostname();
+        if (string.IsNullOrWhiteSpace(hostname))
+            return RunnerInterruptResult.Failed("local hostname is unavailable; cannot identify local runner");
+
+        var identity = await TryReadRunnerIdentityAsync(hostname, cancellationToken);
+        if (identity is null || string.IsNullOrWhiteSpace(identity.RunnerId))
+        {
+            return RunnerInterruptResult.Failed(
+                $"runner identity is unavailable for hostname '{hostname}'; update interrupt was not confirmed");
+        }
+
+        try
+        {
+            var path = $"/api/runner/{Uri.EscapeDataString(identity.RunnerId)}/update-interrupt";
+            using var response = await _http.PostAsync(path, content: null, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return RunnerInterruptResult.Failed(
+                    $"HTTP {(int)response.StatusCode} {response.ReasonPhrase ?? "request failed"}");
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(body);
+            var data = document.RootElement.TryGetProperty("data", out var envelopeData)
+                ? envelopeData
+                : document.RootElement;
+            return ReadRunnerInterruptResult(data, identity.RunnerId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return RunnerInterruptResult.Failed($"request failed: {ex.Message}");
+        }
     }
 
     public async Task<RunnerRefreshOutcome> VerifyRunnerRuntimeAsync(string repoRoot)
@@ -329,6 +384,51 @@ internal sealed class RunnerRefreshVerifier
         {
             return null;
         }
+    }
+
+    private static RunnerInterruptResult ReadRunnerInterruptResult(JsonElement data, string expectedRunnerId)
+    {
+        if (data.ValueKind != JsonValueKind.Object)
+            return RunnerInterruptResult.Failed("response data is not an object");
+
+        var runnerId = ReadString(data, "runnerId");
+        var status = ReadString(data, "status");
+        if (!string.Equals(runnerId, expectedRunnerId, StringComparison.Ordinal))
+            return RunnerInterruptResult.Failed("response runnerId does not match the identified runner");
+        if (!string.Equals(status, "interrupted", StringComparison.Ordinal))
+            return RunnerInterruptResult.Failed($"response status was '{status ?? "<missing>"}', expected 'interrupted'");
+
+        if (!data.TryGetProperty("interruptedWorkIds", out var workIdsElement)
+            || workIdsElement.ValueKind != JsonValueKind.Array)
+        {
+            return RunnerInterruptResult.Failed("response is missing interruptedWorkIds");
+        }
+
+        var workIds = new List<string>();
+        foreach (var item in workIdsElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+                return RunnerInterruptResult.Failed("response contains an invalid interruptedWorkIds entry");
+            workIds.Add(item.GetString()!);
+        }
+
+        if (!data.TryGetProperty("interruptedWorkCount", out var countElement)
+            || !countElement.TryGetInt32(out var count)
+            || count < 0)
+        {
+            return RunnerInterruptResult.Failed("response is missing a valid interruptedWorkCount");
+        }
+        if (count != workIds.Count)
+            return RunnerInterruptResult.Failed("interruptedWorkCount does not match interruptedWorkIds");
+
+        return new RunnerInterruptResult(runnerId, status, workIds, count, null);
+    }
+
+    private static string? ReadString(JsonElement data, string property)
+    {
+        if (!data.TryGetProperty(property, out var element) || element.ValueKind == JsonValueKind.Null)
+            return null;
+        return element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
     }
 
     private ITimer? StartTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)

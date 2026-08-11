@@ -8,6 +8,141 @@ namespace Mohist.Cli.Tests.Update;
 
 public class UpdateRunnerSpecs
 {
+    private static RecordingHttpHandler CreateIdentityThenNoReconnectHandler(string hash)
+    {
+        var identityRequests = 0;
+        return new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-1",
+                        status = "interrupted",
+                        interruptedWorkIds = Array.Empty<string>(),
+                        interruptedWorkCount = 0,
+                    },
+                }));
+            }
+
+            if (request.Method == HttpMethod.Get && path == "/api/runner/identity"
+                && Interlocked.Increment(ref identityRequests) == 1)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", "test-host", hash, "online"),
+                        System.Text.Encoding.UTF8,
+                        "application/json"),
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+    }
+
+    [Fact]
+    public async Task UpdateRunner_InterruptsRunnerByIdentityBeforeRestart()
+    {
+        var f = new UpdateTestFactory();
+        var installer = new FakeServiceInstaller { RunnerInstalled = true };
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == "/api/runner/identity")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", "test-host", hash, "online"),
+                        System.Text.Encoding.UTF8,
+                        "application/json"),
+                });
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-1",
+                        status = "interrupted",
+                        interruptedWorkIds = new[] { "job-1", "job-2" },
+                        interruptedWorkCount = 2,
+                    },
+                }));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var updater = f.BuildUpdater(
+            handler,
+            unitDir: UpdateTestFactory.UnitDir,
+            getLocalHostname: () => "test-host",
+            serviceInstaller: installer);
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(
+            new[] { "/api/runner/identity", "/api/runner/runner-1/update-interrupt", "/api/runner/identity" },
+            handler.Requests.Select(request => request.RequestUri!.AbsolutePath));
+        Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
+        Assert.Contains("status=interrupted runnerId=runner-1 interruptedWorkCount=2", f.Stdout.ToString());
+        Assert.DoesNotContain("activeWorks", string.Join('\n', handler.Requests.Select(request => request.RequestUri!.PathAndQuery)));
+    }
+
+    [Fact]
+    public async Task UpdateRunner_WhenInterruptIsNotConfirmed_FailsWithoutRestart()
+    {
+        var f = new UpdateTestFactory();
+        var installer = new FakeServiceInstaller { RunnerInstalled = true };
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == "/api/runner/identity")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", "test-host", hash, "online"),
+                        System.Text.Encoding.UTF8,
+                        "application/json"),
+                });
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
+            {
+                return Task.FromResult(RecordingHttpHandler.JsonError(
+                    "runner interrupt unavailable", statusCode: HttpStatusCode.ServiceUnavailable));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var updater = f.BuildUpdater(
+            handler,
+            unitDir: UpdateTestFactory.UnitDir,
+            getLocalHostname: () => "test-host",
+            serviceInstaller: installer);
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, exitCode);
+        Assert.DoesNotContain(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
+        Assert.Contains("status=unconfirmed", f.Stderr.ToString());
+        Assert.Contains("runner service was not restarted", f.Stderr.ToString());
+    }
+
     [Fact]
     public async Task UpdateRunner_BuildsCurrentSourceAndRestarts()
     {
@@ -114,8 +249,7 @@ public class UpdateRunnerSpecs
         f.Files.AddFile("/repo/packages/runner/dist/build-info.json", $"{{\"gitHash\":\"{hash}\",\"builtAt\":1700000000}}");
         f.Commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, hash + "\n", "");
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
-        var handler = new RecordingHttpHandler((_, _) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
+        var handler = CreateIdentityThenNoReconnectHandler(hash);
         var updater = f.BuildUpdater(
             handler,
             unitDir: UpdateTestFactory.UnitDir,
@@ -130,6 +264,7 @@ public class UpdateRunnerSpecs
 
         Assert.Equal(1, exitCode);
         Assert.Contains("runner-not-reconnected", f.Stderr.ToString());
+        Assert.Contains("status=unconfirmed", f.Stderr.ToString());
     }
 
     [Fact]
@@ -143,12 +278,7 @@ public class UpdateRunnerSpecs
         f.Files.AddFile("/repo/packages/runner/dist/build-info.json", $"{{\"gitHash\":\"{staleHash}\",\"builtAt\":1700000000}}");
         f.Commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, repoHead + "\n", "");
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
-        var pendingResponse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = new RecordingHttpHandler(async (_, ct) =>
-        {
-            await pendingResponse.Task.WaitAsync(ct);
-            return new HttpResponseMessage(HttpStatusCode.NotFound);
-        });
+        var handler = CreateIdentityThenNoReconnectHandler(staleHash);
         var updater = f.BuildUpdater(
             handler,
             unitDir: UpdateTestFactory.UnitDir,
@@ -164,5 +294,6 @@ public class UpdateRunnerSpecs
         var actual = f.Stderr.ToString();
         Assert.Equal(1, exitCode);
         Assert.Contains("runner-not-reconnected", actual);
+        Assert.Contains("status=unconfirmed", actual);
     }
 }
