@@ -1,27 +1,32 @@
-import { afterEach, describe, expect, it } from "vitest"
-import {
-  mergeReadyAction,
-  setDeliveryGitRunnerForTest,
-} from "../src/actions/merge-ready.js"
+import { describe, expect, it as vitestIt } from "vitest"
+import { mergeReadyAction } from "../src/actions/merge-ready.js"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
+import type { RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 type WorkspaceCall = { workDir: string; args: string[] }
 
 const WORKSPACE_PATH = "/workspace/issue-217"
 
-afterEach(() => {
-  setDeliveryGitRunnerForTest(null)
-})
+type MergeReadyTestResources = { fileSystem: RunnerFileSystem; deliveryGitRunner?: RunnerGitRunner }
 
-function installGit(respond: (call: WorkspaceCall, history: WorkspaceCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
+function it(name: string, body: (resources: MergeReadyTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: MergeReadyTestResources = { fileSystem: new MemoryFileSystem() }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
+
+function installGit(resources: MergeReadyTestResources, respond: (call: WorkspaceCall, history: WorkspaceCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
   const calls: WorkspaceCall[] = []
-  setDeliveryGitRunnerForTest(async (workDir, args) => {
+  resources.deliveryGitRunner = async (workDir, args) => {
     const record: WorkspaceCall = { workDir, args: [...args] }
     calls.push(record)
     return await respond(record, calls)
-  })
+  }
   return calls
 }
 
@@ -70,8 +75,8 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
 }
 
 describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
-  it("PreparedCandidate_ReportsCanMergeTrue", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("PreparedCandidate_ReportsCanMergeTrue", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -112,8 +117,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).toContain("merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1")
   })
 
-  it("BehindBaseCandidate_ReportsCanMergeFalseAndRebaseRequired", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("BehindBaseCandidate_ReportsCanMergeFalseAndRebaseRequired", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -138,8 +143,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).toContain("merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1")
   })
 
-  it("NoCheckoutOrMergeSquashInWorkspace_BranchStable", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("NoCheckoutOrMergeSquashInWorkspace_BranchStable", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -166,8 +171,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds.has("reset --hard origin/main")).toBe(false)
   })
 
-  it("BaseRefRevParseFails_ReportsCanMergeFalseWithBaseError", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("BaseRefRevParseFails_ReportsCanMergeFalseWithBaseError", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -185,8 +190,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).toEqual(["rev-parse origin/main"])
   })
 
-  it("SourceRevParseFails_ReportsCanMergeFalseWithSourceError", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("SourceRevParseFails_ReportsCanMergeFalseWithSourceError", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -206,8 +211,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).toContain("rev-parse mohist/run-wr-merge-ready-1")
   })
 
-  it("ExplicitSourceOverridesDefault", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ExplicitSourceOverridesDefault", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -241,8 +246,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).not.toContain("rev-parse mohist/run-wr-merge-ready-1")
   })
 
-  it("ExplicitRemoteOverridesDefault", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ExplicitRemoteOverridesDefault", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse upstream/main":
@@ -274,8 +279,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).not.toContain("rev-parse origin/main")
   })
 
-  it("SourceDefaultsToWorkspaceBranchWhenNotProvided", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("SourceDefaultsToWorkspaceBranchWhenNotProvided", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -299,8 +304,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).not.toContain("rev-parse HEAD")
   })
 
-  it("MissingSource_DoesNotUseWorkspaceVariableOrRunGit", async () => {
-    const calls = installGit(async () => { throw new Error("git must not run") })
+  it("MissingSource_DoesNotUseWorkspaceVariableOrRunGit", async (resources) => {
+    const calls = installGit(resources, async () => { throw new Error("git must not run") })
     const result = await callAction(mergeReadyAction, context({ source: null }, {
       workspace: { path: WORKSPACE_PATH, branch: "different-branch", changeDir: null },
     }))
@@ -310,8 +315,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(calls).toEqual([])
   })
 
-  it("PreflightIsRefOnly_NoWorkingTreeMutation", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("PreflightIsRefOnly_NoWorkingTreeMutation", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":
@@ -342,8 +347,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     }
   })
 
-  it("NoLandingWorkspaceCreated_NoCloneIssued", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("NoLandingWorkspaceCreated_NoCloneIssued", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse origin/main":

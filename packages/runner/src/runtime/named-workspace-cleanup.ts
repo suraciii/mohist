@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { isUnderRunnerRoot } from "./workspace-query.js"
 import {
@@ -7,6 +6,7 @@ import {
 } from "./workspace-entity.js"
 import { deleteDirectory } from "../system/process.js"
 import { runnerLogger } from "../system/logger.js"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 import { CleanupLoop, type CleanupEntry, type CleanupRunner } from "./cleanup-loop.js"
 import type { NamedWorkspaceRegistry, NamedWorkspaceRegistryEntry } from "./workspace-registry.js"
 import type { WorkspaceRemovalFence } from "./workspace-removal-fence.js"
@@ -31,7 +31,7 @@ export class NamedWorkspaceCleanupRunner implements CleanupRunner {
   }
 
   pathExists(path: string): boolean {
-    return existsSync(path)
+    return currentRunnerFileSystem().exists(path)
   }
 
   async readWorkspaceIdentity(workspacePath: string): Promise<string | null | undefined> {

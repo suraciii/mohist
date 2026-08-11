@@ -1,7 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import {
   materializeNamedWorkspace,
   namedWorkspaceMarkerPath,
@@ -12,10 +11,38 @@ import {
 } from "../src/runtime/workspace-entity.js"
 import { NamedWorkspaceRegistry } from "../src/runtime/workspace-registry.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import { createTestTempDir } from "./support/temp-dir.js"
+import { mkdir, readFile, rm, stat, symlink, writeFile } from "./support/test-fs.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 async function makeRunnerRoot() {
-  return await mkdtemp(join(tmpdir(), "mohist-named-ws-"))
+  return await createTestTempDir("mohist-named-ws-")
 }
+
+interface TestContext {
+  root: string
+  registry: NamedWorkspaceRegistry
+}
+
+const testContextStorage = new AsyncLocalStorage<TestContext>()
+
+function context(): TestContext {
+  const value = testContextStorage.getStore()
+  if (!value) throw new Error("workspace entity test resource context is not active")
+  return value
+}
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => withTestRunnerResources(async () => {
+    const root = await makeRunnerRoot()
+    const registry = new NamedWorkspaceRegistry(root, { now: () => now })
+    await registry.load()
+    await testContextStorage.run({ root, registry }, async () => await body())
+  })),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
+
+const now = new Date("2026-07-01T08:00:00.000Z")
 
 describe("namedWorkspacePath", () => {
   it("is deterministic per (projectId, workspaceName)", () => {
@@ -37,21 +64,8 @@ describe("namedWorkspacePath", () => {
 })
 
 describe("materializeNamedWorkspace", () => {
-  let root: string
-  let registry: NamedWorkspaceRegistry
-  const now = new Date("2026-07-01T08:00:00.000Z")
-
-  beforeEach(async () => {
-    root = await makeRunnerRoot()
-    registry = new NamedWorkspaceRegistry(root, { now: () => now })
-    await registry.load()
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-
   it("creates an empty persistent directory with an identity marker and an active registry entry", async () => {
+    const { root, registry } = context()
     const result = await materializeNamedWorkspace({
       runnerRoot: root,
       projectId: "mohist",
@@ -81,6 +95,7 @@ describe("materializeNamedWorkspace", () => {
   })
 
   it("keeps an existing directory and reports created=false on re-materialization", async () => {
+    const { root, registry } = context()
     const first = await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
     const second = await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
 
@@ -90,6 +105,7 @@ describe("materializeNamedWorkspace", () => {
   })
 
   it("re-materializes an empty directory after the old one was recycled", async () => {
+    const { root, registry } = context()
     await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
     await rm(namedWorkspacePath(root, "mohist", "pay"), { recursive: true, force: true })
 
@@ -100,36 +116,24 @@ describe("materializeNamedWorkspace", () => {
   })
 
   it("rejects a symlinked directory through the managed-path walk", async () => {
-    await import("node:fs/promises").then((fs) => fs.mkdir(join(root, "workspaces"), { recursive: true }))
+    const { root, registry } = context()
+    await mkdir(join(root, "workspaces"), { recursive: true })
     await writeFile(join(root, "marker-for-symlink"), "x")
-    await import("node:fs/promises").then((fs) => fs.symlink(join(root, "marker-for-symlink"), namedWorkspacePath(root, "mohist", "pay")))
+    await symlink(join(root, "marker-for-symlink"), namedWorkspacePath(root, "mohist", "pay"))
     await expect(materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })).rejects.toThrow(/symlink/i)
   })
 
   it("writes the marker inside .mohist/workspace.json", async () => {
+    const { root, registry } = context()
     await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
-    const raw = JSON.parse(await readFile(namedWorkspaceMarkerPath(namedWorkspacePath(root, "mohist", "pay")), "utf8"))
+    const raw = JSON.parse(await readFile(namedWorkspaceMarkerPath(namedWorkspacePath(root, "mohist", "pay")), "utf8") as string)
     expect(raw).toMatchObject({ projectId: "mohist", workspaceName: "pay" })
   })
 })
 
 describe("NamedWorkspaceManager", () => {
-  let root: string
-  let registry: NamedWorkspaceRegistry
-  const now = new Date("2026-07-01T08:00:00.000Z")
-
-  beforeEach(async () => {
-    root = await makeRunnerRoot()
-    registry = new NamedWorkspaceRegistry(root, { now: () => now })
-    await registry.load()
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-    vi.restoreAllMocks()
-  })
-
   it("reports the materialized path to the server", async () => {
+    const { root, registry } = context()
     const report = vi.fn(async () => ({ runnerId: "runner-1", path: namedWorkspacePath(root, "mohist", "pay") }))
     const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceMaterialized: report } as never)
 
@@ -140,6 +144,7 @@ describe("NamedWorkspaceManager", () => {
   })
 
   it("yields (deleting only a directory it created) when the home is claimed by another runner", async () => {
+    const { root, registry } = context()
     const claimed = new WorkspaceHomeClaimedError("already materialized on runner-2")
     const report = vi.fn(async () => {
       throw claimed
@@ -148,10 +153,11 @@ describe("NamedWorkspaceManager", () => {
 
     await expect(manager.materialize("mohist", "pay", [], new AbortController().signal)).rejects.toBe(claimed)
     expect(registry.get("mohist", "pay")).toBeNull()
-    await expect(import("node:fs/promises").then((fs) => fs.stat(namedWorkspacePath(root, "mohist", "pay")))).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(stat(namedWorkspacePath(root, "mohist", "pay"))).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   it("does not delete a pre-existing directory when yielding a claimed home", async () => {
+    const { root, registry } = context()
     await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
     await registry.remove("ws:mohist:pay")
     const report = vi.fn(async () => {
@@ -165,6 +171,7 @@ describe("NamedWorkspaceManager", () => {
   })
 
   it("propagates non-claim materialization report failures", async () => {
+    const { root, registry } = context()
     const report = vi.fn(async () => {
       throw new Error("workspace materialization failed: 500")
     })

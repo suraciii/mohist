@@ -1,58 +1,59 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { describe, expect, it as vitestIt, vi } from "vitest"
+import { WorkspaceRegistry } from "../src/runtime/workspace-registry.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
-const fakeFiles = vi.hoisted(() => new Map<string, string>())
-const fakeFs = vi.hoisted(() => ({
-  mkdir: vi.fn(async () => undefined),
-  rename: vi.fn(async (from: string, to: string) => {
-    const content = fakeFiles.get(from)
-    if (content !== undefined) fakeFiles.set(to, content)
-    fakeFiles.delete(from)
-  }),
-  writeFile: vi.fn(async (path: string, content: string) => {
-    fakeFiles.set(path, content)
-  }),
-}))
+class RecordingMemoryFileSystem extends MemoryFileSystem {
+  writeCount = 0
 
-vi.mock("node:fs/promises", () => fakeFs)
-vi.mock("../src/system/process.js", () => ({
-  exists: (path: string) => fakeFiles.has(path),
-  readText: async (path: string) => {
-    const content = fakeFiles.get(path)
-    if (content === undefined) throw new Error("missing fake file")
-    return content
-  },
-}))
+  override async writeText(path: string, content: string): Promise<void> {
+    this.writeCount += 1
+    await super.writeText(path, content)
+  }
+}
 
-const { WorkspaceRegistry } = await import("../src/runtime/workspace-registry.js")
+const fileSystemStorage = new AsyncLocalStorage<RecordingMemoryFileSystem>()
 
-describe("WorkspaceRegistry resolved-path index", () => {
-  beforeEach(() => {
-    fakeFiles.clear()
-    fakeFs.mkdir.mockClear()
-    fakeFs.rename.mockClear()
-    fakeFs.writeFile.mockClear()
+function fileSystem(): RecordingMemoryFileSystem {
+  const value = fileSystemStorage.getStore()
+  if (!value) throw new Error("workspace registry test resource context is not active")
+  return value
+}
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => {
+    const resources = new RecordingMemoryFileSystem()
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-07-31T00:00:00.000Z"))
-  })
+    return withTestRunnerResources(
+      async () => await fileSystemStorage.run(resources, async () => {
+        try {
+          return await body()
+        } finally {
+          vi.useRealTimers()
+        }
+      }),
+      { fileSystem: resources },
+    )
+  }),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
 
-  afterEach(() => {
-    vi.useRealTimers()
-    vi.restoreAllMocks()
-  })
-
+describe("WorkspaceRegistry resolved-path index", () => {
   it("rejects a path collision before changing memory or persistence", async () => {
     const registry = new WorkspaceRegistry("/runner", { filePath: "/runner/state.json" })
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-a", workspacePath: "/runner/workspace" })
     const beforeEntries = registry.list()
-    const beforeFile = fakeFiles.get("/runner/state.json")
-    const writes = fakeFs.writeFile.mock.calls.length
+    const beforeFile = await fileSystem().readText("/runner/state.json")
+    const writes = fileSystem().writeCount
 
     await expect(registry.register({ issueNumber: 2, workflowRunId: "wr-b", workspacePath: "/runner/./workspace" })).rejects.toThrow(/already owned by workflowRunId wr-a/)
 
     expect(registry.list()).toEqual(beforeEntries)
-    expect(fakeFiles.get("/runner/state.json")).toBe(beforeFile)
-    expect(fakeFs.writeFile).toHaveBeenCalledTimes(writes)
+    expect(await fileSystem().readText("/runner/state.json")).toBe(beforeFile)
+    expect(fileSystem().writeCount).toBe(writes)
   })
 
   it("updates and removes the secondary index on replacement and remove", async () => {
@@ -68,7 +69,7 @@ describe("WorkspaceRegistry resolved-path index", () => {
   })
 
   it("loads duplicate resolved paths as an empty table", async () => {
-    fakeFiles.set("/runner/state.json", JSON.stringify({
+    await fileSystem().writeText("/runner/state.json", JSON.stringify({
       version: 2,
       entries: {
         "wr-a": {
@@ -98,7 +99,7 @@ describe("WorkspaceRegistry resolved-path index", () => {
   })
 
   it("rebuilds the index from a unique persisted entry without listing", async () => {
-    fakeFiles.set("/runner/state.json", JSON.stringify({
+    await fileSystem().writeText("/runner/state.json", JSON.stringify({
       version: 2,
       entries: {
         "wr-a": {

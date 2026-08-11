@@ -1,10 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionHost } from "../src/actions/host.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
-import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "../src/runtime/workspace.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
@@ -12,17 +11,12 @@ import type { RuntimeResult, RuntimeTurnResult } from "../src/runtime/opencode/t
 import { createTestTempDir } from "./support/temp-dir.js"
 import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
-const nonGitRunner: GitRunner = async () => ({
-  success: false,
-  stdout: "",
-  stderr: "not a git repository",
-  exitCode: 128,
-  combinedOutput: "not a git repository",
-})
-
-beforeEach(() => setExecutorGitRunnerForTest(nonGitRunner))
-afterEach(() => setExecutorGitRunnerForTest(null))
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => withTestRunnerResources(async () => await body())),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
 
 describe("workspace preparation across stages", () => {
   it("skips workspace preparation for agent jobs", async () => {

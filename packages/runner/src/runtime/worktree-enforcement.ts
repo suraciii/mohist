@@ -1,4 +1,3 @@
-import { rm, stat } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import type { ActionHost } from "../actions/host.js"
@@ -7,6 +6,7 @@ import { isActionFailure } from "../actions/action-result.js"
 import { numberInput, objectInput } from "../core/json.js"
 import { errorMessage, isNotFoundError } from "../core/errors.js"
 import { runCommand } from "../system/process.js"
+import { currentRunnerFileSystem, currentRunnerResources } from "../system/filesystem.js"
 import {
   buildCleanupWith,
   isAgentBackedTask,
@@ -45,31 +45,16 @@ export class WorktreeProbeError extends Error {
 
 export type CleanupAgentAction = (host: ActionHost, withInput: JsonObject) => Promise<ActionResult>
 
-type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
+export type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
 
 export type ContextParts = {
   buildHost: (work: DispatchWorkItem, signal: AbortSignal, workDir: string) => ActionHost
 }
 
-let cleanupAgentActionOverride: CleanupAgentAction | null = null
-let lockHolderProbe: LockHolderProbe = defaultLockHolderProbe
 const defaultNow = () => Date.now()
-let now = defaultNow
-
-export function setCleanupAgentActionForTest(handler: CleanupAgentAction | null) {
-  cleanupAgentActionOverride = handler
-}
 
 export function resolveCleanupAgentAction(originalAction: CleanupAgentAction): CleanupAgentAction {
-  return cleanupAgentActionOverride ?? originalAction
-}
-
-export function setExecutorLockHolderProbeForTest(probe: LockHolderProbe | null) {
-  lockHolderProbe = probe ?? defaultLockHolderProbe
-}
-
-export function setWorktreeClockForTest(clock: (() => number) | null) {
-  now = clock ?? defaultNow
+  return currentRunnerResources()?.cleanupAgentAction ?? originalAction
 }
 
 export function resolveStaleIndexLockMs(variables: JsonObject): number {
@@ -94,15 +79,15 @@ export async function recoverStaleIndexLock(workDir: string, variables: JsonObje
   }
 
   const lockPath = isAbsolute(rawLockPath) ? rawLockPath : resolve(workDir, rawLockPath)
-  let info: Awaited<ReturnType<typeof stat>>
+  let info: Awaited<ReturnType<ReturnType<typeof currentRunnerFileSystem>["stat"]>>
   try {
-    info = await stat(lockPath)
+    info = await currentRunnerFileSystem().stat(lockPath)
   } catch (error) {
     if (isNotFoundError(error)) return { status: "ok", lockPath }
     return { status: "blocked", reason: `git index lock stat failed: ${errorMessage(error)}`, lockPath }
   }
 
-  const ageMs = Math.max(0, now() - info.mtimeMs)
+  const ageMs = Math.max(0, (currentRunnerResources()?.worktreeClock ?? defaultNow)() - info.mtimeMs)
   const staleMs = resolveStaleIndexLockMs(variables)
   if (ageMs < staleMs) {
     return {
@@ -113,7 +98,7 @@ export async function recoverStaleIndexLock(workDir: string, variables: JsonObje
     }
   }
 
-  const holder = await lockHolderProbe(workDir, lockPath, signal)
+  const holder = await (currentRunnerResources()?.executorLockHolderProbe ?? defaultLockHolderProbe)(workDir, lockPath, signal)
   if (holder.held) {
     return {
       status: "blocked",
@@ -124,7 +109,7 @@ export async function recoverStaleIndexLock(workDir: string, variables: JsonObje
   }
 
   try {
-    await rm(lockPath, { force: true })
+    await currentRunnerFileSystem().deleteFile(lockPath)
   } catch (error) {
     return { status: "blocked", reason: `failed to remove stale git index lock: ${errorMessage(error)}`, lockPath, ageMs }
   }

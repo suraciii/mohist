@@ -3,21 +3,10 @@ import type { ActionResult, JsonObject } from "../core/types.js"
 import type { ActionHost } from "./host.js"
 import { stringInput } from "../core/json.js"
 import { fail, succeed } from "./action-result.js"
+import { currentRunnerResources, type RunnerGitRunner } from "../system/filesystem.js"
 
 export type ActionHandler = (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>
-type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-}>
-
-let git: GitRunner = defaultGit
-
-export function setDeliveryGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
-}
+type GitRunner = RunnerGitRunner
 
 export async function mergeReadyAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const baseBranch = stringInput(inputs, "baseBranch")
@@ -31,6 +20,7 @@ export async function mergeReadyAction(inputs: JsonObject, host: ActionHost): Pr
   const checkedAt = new Date().toISOString()
   const opts: GitOptions | undefined = host.log ? { sink: { log: host.log, source: "action:merge-ready" } } : undefined
 
+  const git = currentRunnerResources()?.deliveryGitRunner ?? currentRunnerResources()?.gitRunner ?? defaultGit
   const base = await git(workDir, ["rev-parse", baseRef], host.signal, opts)
   if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseRef}'`, base.exitCode, [], checkedAt)
 

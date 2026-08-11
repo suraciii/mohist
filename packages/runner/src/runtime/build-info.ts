@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, resolve } from "node:path"
+import { currentRunnerResources } from "../system/filesystem.js"
 
 export interface BuildInfo {
   gitHash: string | null
@@ -28,6 +29,16 @@ const EMPTY_BUILD_INFO: BuildInfo = {
   runnerId: null,
 }
 
+export interface BuildInfoFileSystem {
+  exists(path: string): boolean
+  readText(path: string): string
+}
+
+const nodeBuildInfoFileSystem: BuildInfoFileSystem = {
+  exists: existsSync,
+  readText: (path) => readFileSync(path, "utf8"),
+}
+
 function candidatesForManifest() {
   const here = dirname(fileURLToPath(import.meta.url))
   return [
@@ -36,11 +47,11 @@ function candidatesForManifest() {
   ]
 }
 
-export function loadBuildInfo(): BuildInfo {
+export function loadBuildInfo(fileSystem: BuildInfoFileSystem = currentRunnerResources()?.buildInfoFileSystem ?? nodeBuildInfoFileSystem): BuildInfo {
   for (const path of candidatesForManifest()) {
-    if (!existsSync(path)) continue
+    if (!fileSystem.exists(path)) continue
     try {
-      const raw = readFileSync(path, "utf8")
+      const raw = fileSystem.readText(path)
       const parsed = JSON.parse(raw) as {
         gitHash?: unknown; builtAt?: unknown; component?: unknown; version?: unknown
         sourceRevision?: unknown; treeHash?: unknown; artifactDigest?: unknown

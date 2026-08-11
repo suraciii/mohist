@@ -1,25 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { ServerConnection } from "../src/server/connection.js"
+import { transportFetch, withFakeTransport } from "./support/fake-transport.js"
 
-const originalFetch = globalThis.fetch
-let fetchMock: ReturnType<typeof vi.fn>
-
-beforeEach(() => {
-  fetchMock = vi.fn()
-  globalThis.fetch = fetchMock as unknown as typeof fetch
-})
-
-afterEach(() => {
-  globalThis.fetch = originalFetch
-  vi.restoreAllMocks()
-})
+const fetchMock = transportFetch
+const it = (name: string, body: () => unknown) => vitestIt(name, () => withFakeTransport(async () => await body()))
 
 function mockResponse({ status, contentType = "application/json", body = "{}" }: { status: number; contentType?: string; body?: string | Buffer }): Response {
   return new Response(typeof body === "string" ? body : new Uint8Array(body), { status, headers: { "content-type": contentType } })
 }
 
 function options() {
-  return { serverUrl: "http://localhost:3456", runnerId: "runner-1", runnerRoot: "/tmp", pollIntervalMs: 100, heartbeatIntervalMs: 60_000, dispatchLivenessProbeIntervalMs: 60_000 }
+  return { serverUrl: "https://runner.test", runnerId: "runner-1", runnerRoot: "/virtual/runner", pollIntervalMs: 100, heartbeatIntervalMs: 60_000, dispatchLivenessProbeIntervalMs: 60_000 }
 }
 
 describe("ServerConnection.getAgentSession (generic)", () => {

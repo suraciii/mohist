@@ -3,32 +3,25 @@ import type { ActionResult, JsonObject } from "../core/types.js"
 import type { ActionHost } from "./host.js"
 import { stringInput } from "../core/json.js"
 import { exists } from "../system/process.js"
+import { currentRunnerResources, type RunnerGitRunner } from "../system/filesystem.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
 import { fail, succeed } from "./action-result.js"
 
-type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-}>
-type ExistsChecker = typeof exists
+type GitRunner = RunnerGitRunner
 type GitResult = Awaited<ReturnType<GitRunner>>
 
 const ACTION_SOURCE = "action:workspace-prepare"
 
-let git: GitRunner = defaultGit
-let pathExists: ExistsChecker = exists
-
 export type WorkspacePrepareGitResult = GitResult
 
-export function setWorkspacePrepareGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
+function git(workDir: string, args: string[], signal: AbortSignal, options?: GitOptions): Promise<GitResult> {
+  return (currentRunnerResources()?.workspacePrepareGitRunner
+    ?? currentRunnerResources()?.gitRunner
+    ?? defaultGit)(workDir, args, signal, options)
 }
 
-export function setWorkspacePrepareExistsCheckerForTest(checker: ExistsChecker | null) {
-  pathExists = checker ?? exists
+function pathExists(path: string): boolean {
+  return (currentRunnerResources()?.workspacePrepareExistsChecker ?? exists)(path)
 }
 
 interface ResidualState {

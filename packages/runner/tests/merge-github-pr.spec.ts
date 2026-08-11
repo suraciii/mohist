@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
-import { mergeGitHubPrAction, setGitHubPrChecksTimingForTest, setGitHubPrGhRunnerForTest } from "../src/actions/github-pr.js"
+import { mergeGitHubPrAction } from "../src/actions/github-pr.js"
 import {
   PR_CHECKS_COMMAND,
   PROJECT_PATH,
@@ -12,9 +12,19 @@ import {
   ghFail,
   ghOk,
   withLog,
+  type MergeGhTestResources,
 } from "./support/merge-github-pr-test-helpers.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
 
-const { ghCalls, installGit, installGh, installMoIssueShow } = createMergeGhTestHarness()
+const { installGit, installGh, installMoIssueShow } = createMergeGhTestHarness()
+
+function it(name: string, body: (resources: MergeGhTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: MergeGhTestResources = { fileSystem: new MemoryFileSystem(), ghCalls: [] }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 describe("mohist/merge-github-pr registry", () => {
   it("registers merge-github-pr and exposes it under the new id only", () => {
@@ -29,11 +39,11 @@ describe("mohist/merge-github-pr registry", () => {
 })
 
 describe("mohist/merge-github-pr action", () => {
-  it("waits for checks, merges via squash, re-queries MERGED, and returns prNumber/prUrl/mergeCommitSha", async () => {
+  it("waits for checks, merges via squash, re-queries MERGED, and returns prNumber/prUrl/mergeCommitSha", async (resources) => {
     const ghCalls: string[] = []
-    const moCalls = installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    const moCalls = installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -86,10 +96,10 @@ describe("mohist/merge-github-pr action", () => {
     })
   })
 
-  it("uses the explicitly declared repository despite different Variables", async () => {
+  it("uses the explicitly declared repository despite different Variables", async (resources) => {
     const commands: string[] = []
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       commands.push(full)
       if (full === "gh --version" || full === "gh auth status") return ghOk("ok\n")
@@ -105,17 +115,17 @@ describe("mohist/merge-github-pr action", () => {
      expect(commands).toContain("gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")
   })
 
-  it("rejects an invalid explicit repository URL", async () => {
+  it("rejects an invalid explicit repository URL", async (resources) => {
     const result = await callAction(mergeGitHubPrAction, context({ repositoryUrl: "not a Git URL", prNumber: 42, method: "squash", subject: "Issue title" }))
     expect(result.error).toMatchObject({ code: "config-error" })
     expect(result.error?.message).toContain("valid GitHub repository URL")
   })
 
-  it("forwards gh command output to the task log sink", async () => {
+  it("forwards gh command output to the task log sink", async (resources) => {
     const writes: Array<{ source: string; text: string }> = []
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    setGitHubPrGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    resources.githubPrGhRunner = async (cmd, args, _cwd, _signal, _env, options) => {
       const full = [cmd, ...args].join(" ")
       options?.onLine?.(`captured ${full}`)
       switch (full) {
@@ -135,7 +145,7 @@ describe("mohist/merge-github-pr action", () => {
         default:
           return ghFail(`unexpected gh call: ${full}`)
       }
-    })
+    }
 
     const result = await callAction(mergeGitHubPrAction, withLog(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }), writes))
 
@@ -143,9 +153,9 @@ describe("mohist/merge-github-pr action", () => {
     expect(writes.some((write) => write.source === "action:merge-github-pr" && write.text.includes("gh pr merge 42"))).toBe(true)
   })
 
-  it("requires an explicit PR number instead of discovering one from source/target", async () => {
-    installMoIssueShow()
-    installGh((cmd, args) => {
+  it("requires an explicit PR number instead of discovering one from source/target", async (resources) => {
+    installMoIssueShow(resources)
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -169,12 +179,12 @@ describe("mohist/merge-github-pr action", () => {
 
     expect(result.error).toMatchObject({ code: "invalid-input" })
     expect(result.error?.message).toContain("prNumber")
-    expect(ghCalls).toEqual([])
+    expect(resources.ghCalls).toEqual([])
   })
 
-  it("fails with errorCode base-moved and includes prNumber/prUrl/message when gh pr merge rejects the merge", async () => {
-    installMoIssueShow()
-    installGh((cmd, args) => {
+  it("fails with errorCode base-moved and includes prNumber/prUrl/message when gh pr merge rejects the merge", async (resources) => {
+    installMoIssueShow(resources)
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -202,11 +212,11 @@ describe("mohist/merge-github-pr action", () => {
     expect(result.error?.message).toContain("gh pr merge 42 --squash failed")
   })
 
-  it("reports base-moved before reading old failing checks when the PR is behind", async () => {
+  it("reports base-moved before reading old failing checks when the PR is behind", async (resources) => {
     const ghCalls: string[] = []
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -237,9 +247,9 @@ describe("mohist/merge-github-pr action", () => {
     expect(ghCalls).not.toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
   })
 
-  it("fails with errorCode pr-checks-failed when a check is FAIL/CANCELLED/ACTION_REQUIRED and skips the merge call", async () => {
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
+  it("fails with errorCode pr-checks-failed when a check is FAIL/CANCELLED/ACTION_REQUIRED and skips the merge call", async (resources) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
 
     const failureCases: string[] = [
       "FAILURE",
@@ -249,7 +259,7 @@ describe("mohist/merge-github-pr action", () => {
 
     for (const conclusion of failureCases) {
       const ghCalls: string[] = []
-      installGh((cmd, args) => {
+      installGh(resources, (cmd, args) => {
         const full = [cmd, ...args].join(" ")
         ghCalls.push(full)
         switch (full) {
@@ -276,16 +286,16 @@ describe("mohist/merge-github-pr action", () => {
     }
   })
 
-  it("treats an empty statusCheckRollup as transient and keeps polling until checks pass", async () => {
+  it("treats an empty statusCheckRollup as transient and keeps polling until checks pass", async (resources) => {
     // Right after a push / force-push, GitHub hasn't registered the workflow
     // run as a check run yet, so the PR statusCheckRollup can be empty. This
     // is transient and must be polled, not failed.
-    setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 60_000 })
+    resources.githubPrChecksTiming = { pollIntervalMs: 1, noChecksGraceMs: 60_000 }
     const ghCalls: string[] = []
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
     let checksCalls = 0
-    installGh((cmd, args) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -330,14 +340,14 @@ describe("mohist/merge-github-pr action", () => {
     })
   })
 
-  it("returns pr-checks-unavailable without merging when the rollup remains empty through the grace period", async () => {
+  it("returns pr-checks-unavailable without merging when the rollup remains empty through the grace period", async (resources) => {
     vi.useFakeTimers()
     try {
-      setGitHubPrChecksTimingForTest({ pollIntervalMs: 10, noChecksGraceMs: 25 })
+      resources.githubPrChecksTiming = { pollIntervalMs: 10, noChecksGraceMs: 25 }
       const ghCalls: string[] = []
-      installMoIssueShow()
-      installGit(() => { throw new Error("git should not be called") })
-      installGh((cmd, args) => {
+      installMoIssueShow(resources)
+      installGit(resources, () => { throw new Error("git should not be called") })
+      installGh(resources, (cmd, args) => {
         const full = [cmd, ...args].join(" ")
         ghCalls.push(full)
         switch (full) {
@@ -370,13 +380,13 @@ describe("mohist/merge-github-pr action", () => {
     }
   })
 
-  it("retries transient pr-checks-unavailable inside the action before merging", async () => {
-    setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 5, unavailableRetryLimit: 3 })
+  it("retries transient pr-checks-unavailable inside the action before merging", async (resources) => {
+    resources.githubPrChecksTiming = { pollIntervalMs: 1, noChecksGraceMs: 5, unavailableRetryLimit: 3 }
     const ghCalls: string[] = []
     let checksCalls = 0
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -415,12 +425,12 @@ describe("mohist/merge-github-pr action", () => {
     expect(output).toMatchObject({ kind: "merge-github-pr", status: "completed", mergeCommitSha: "merge-sha-1" })
   })
 
-  it("fails with pr-checks-unavailable after internal statusCheckRollup retries are exhausted", async () => {
-    setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 60_000, unavailableRetryLimit: 2 })
+  it("fails with pr-checks-unavailable after internal statusCheckRollup retries are exhausted", async (resources) => {
+    resources.githubPrChecksTiming = { pollIntervalMs: 1, noChecksGraceMs: 60_000, unavailableRetryLimit: 2 }
     const ghCalls: string[] = []
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -448,12 +458,12 @@ describe("mohist/merge-github-pr action", () => {
     expect(result.error?.message).toContain("after 3 attempts")
   })
 
-  it("fails with pr-checks-unavailable when gh pr view statusCheckRollup returns invalid JSON", async () => {
-    setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 60_000, unavailableRetryLimit: 1 })
+  it("fails with pr-checks-unavailable when gh pr view statusCheckRollup returns invalid JSON", async (resources) => {
+    resources.githubPrChecksTiming = { pollIntervalMs: 1, noChecksGraceMs: 60_000, unavailableRetryLimit: 1 }
     const ghCalls: string[] = []
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -479,9 +489,9 @@ describe("mohist/merge-github-pr action", () => {
     expect(result.error?.message).toContain("unparseable JSON")
   })
 
-  it("reports pr-state-conflict when the PR is closed", async () => {
-    installMoIssueShow()
-    installGh((cmd, args) => {
+  it("reports pr-state-conflict when the PR is closed", async (resources) => {
+    installMoIssueShow(resources)
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -502,9 +512,9 @@ describe("mohist/merge-github-pr action", () => {
     expect(result.error?.message).toContain("PR #42 is closed")
   })
 
-  it("binds every gh call to the workspace path even when project.path differs", async () => {
+  it("binds every gh call to the workspace path even when project.path differs", async (resources) => {
     const ghCalls: Array<{ cwd: string; command: string }> = []
-    installGh((cmd, args, cwd) => {
+    installGh(resources, (cmd, args, cwd) => {
       const command = [cmd, ...args].join(" ")
       ghCalls.push({ cwd, command })
       switch (command) {
@@ -538,9 +548,9 @@ describe("mohist/merge-github-pr action", () => {
     expect(output.mergeCommitSha).toBe("merge-sha-1")
   })
 
-  it("rejects non-squash methods as config-error before any gh mutation", async () => {
+  it("rejects non-squash methods as config-error before any gh mutation", async (resources) => {
     const ghCalls: string[] = []
-    installGh((cmd, args) => {
+    installGh(resources, (cmd, args) => {
       ghCalls.push([cmd, ...args].join(" "))
       return ghOk("ok\n")
     })
@@ -554,13 +564,13 @@ describe("mohist/merge-github-pr action", () => {
   })
 
   describe("checks-gated merge", () => {
-    it("waits through pending checks and merges once a check passes", async () => {
+    it("waits through pending checks and merges once a check passes", async (resources) => {
       vi.useFakeTimers()
       try {
         const ghCalls: string[] = []
-        installMoIssueShow()
-        installGit(() => { throw new Error("git should not be called") })
-        installGh((cmd, args) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
           const full = [cmd, ...args].join(" ")
           ghCalls.push(full)
           switch (full) {
@@ -622,14 +632,14 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    it("waits through UNKNOWN mergeStateStatus after checks pass instead of returning a retryable failure", async () => {
+    it("waits through UNKNOWN mergeStateStatus after checks pass instead of returning a retryable failure", async (resources) => {
       vi.useFakeTimers()
       try {
         const ghCalls: string[] = []
-        installMoIssueShow()
-        installGit(() => { throw new Error("git should not be called") })
+        installMoIssueShow(resources)
+        installGit(resources, () => { throw new Error("git should not be called") })
         let mergeStateCalls = 0
-        installGh((cmd, args) => {
+        installGh(resources, (cmd, args) => {
           const full = [cmd, ...args].join(" ")
           ghCalls.push(full)
           switch (full) {
@@ -677,13 +687,13 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    it("cancels waiting when the context signal is aborted while checks are still pending", async () => {
+    it("cancels waiting when the context signal is aborted while checks are still pending", async (resources) => {
       vi.useFakeTimers()
       try {
         const ghCalls: string[] = []
-        installMoIssueShow()
-        installGit(() => { throw new Error("git should not be called") })
-        installGh((cmd, args) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
           const full = [cmd, ...args].join(" ")
           ghCalls.push(full)
           switch (full) {
@@ -724,7 +734,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    it("merges when all checks are PASS/SKIP", async () => {
+    it("merges when all checks are PASS/SKIP", async (resources) => {
       const cases: Array<{ checks: unknown[] }> = [
         { checks: [
           { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
@@ -734,8 +744,8 @@ describe("mohist/merge-github-pr action", () => {
 
       for (const scenario of cases) {
         const ghCalls: string[] = []
-        installMoIssueShow()
-        installGh((cmd, args) => {
+        installMoIssueShow(resources)
+        installGh(resources, (cmd, args) => {
           const full = [cmd, ...args].join(" ")
           ghCalls.push(full)
           switch (full) {

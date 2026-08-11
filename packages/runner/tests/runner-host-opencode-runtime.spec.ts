@@ -1,17 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
-import { setPiRuntimeFactoryForTest, type PiRuntime } from "../src/runtime/pi/index.js"
+import type { PiRuntime } from "../src/runtime/pi/index.js"
 import type { ActionDefinition } from "../src/actions/manifest.js"
 import { deferred } from "./support/deferred.js"
 import { capturedLogs } from "./support/logger-test.js"
-import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
+import type { GitRunner } from "../src/runtime/git-probe.js"
 import { UnexpectedConsoleRecorder } from "./support/unexpected-console.js"
 import { FakeTerminalTaskLogDeliveryStore } from "./support/terminal-task-log-delivery.js"
 import {
-  clearOpenCodeRuntimeFactoryForTest,
   installFakeOpenCodeRuntimeFactory,
   installReadyOpenCodeRuntimeFactory,
+  type OpenCodeRuntimeTestResources,
 } from "./support/opencode-runtime-factory.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import type { RunnerFileSystem } from "../src/system/filesystem.js"
+import type { ExternalProcessPolicy } from "../src/system/process-policy.js"
+import type { RunnerLogger } from "../src/system/logger.js"
+import { createLoggerCapture } from "./support/logger-test.js"
 
 const POLL_INTERVAL_MS = 10
 const QUIET_INTERVAL_MS = 60_000
@@ -24,37 +31,51 @@ const nonGitRunner: GitRunner = async () => ({
   combinedOutput: "not a git repository",
 })
 
-const mocks = vi.hoisted(() => ({
-  connect: vi.fn(),
-  heartbeat: vi.fn(),
-  disconnect: vi.fn(),
-  poll: vi.fn(),
-  report: vi.fn(),
-  uploadTaskLog: vi.fn(),
-  fetchConfig: vi.fn(async () => null),
-  startSignalR: vi.fn(),
-  stopSignalR: vi.fn(),
-  getConnectionId: vi.fn(() => "conn-1"),
-  probeLiveness: vi.fn(async () => true),
-  blockingAction: vi.fn(),
-  forceReconnect: vi.fn(async () => undefined),
-}))
+type HostMock = ReturnType<typeof vi.fn>
+type HostMocks = Record<"connect" | "heartbeat" | "disconnect" | "poll" | "report" | "uploadTaskLog" | "fetchConfig" | "startSignalR" | "stopSignalR" | "getConnectionId" | "probeLiveness" | "blockingAction" | "forceReconnect", HostMock>
 
-const {
-  connect,
-  heartbeat,
-  disconnect,
-  poll,
-  report,
-  uploadTaskLog,
-  fetchConfig,
-  startSignalR,
-  stopSignalR,
-  getConnectionId,
-  probeLiveness,
-  blockingAction,
-  forceReconnect,
-} = mocks
+interface HostMockTestState {
+  readonly mocks: HostMocks
+}
+
+const hostMockStorage = new AsyncLocalStorage<HostMockTestState>()
+
+function currentHostMockTestState(): HostMockTestState {
+  const state = hostMockStorage.getStore()
+  if (!state) throw new Error("runner host mock resource context is not active")
+  return state
+}
+
+function scopedMock(name: keyof HostMocks): HostMock {
+  const target = (() => undefined) as (...args: unknown[]) => unknown
+  Object.defineProperty(target, "_isMockFunction", { value: true })
+  return new Proxy(target, {
+    apply(_target, thisArg, args) {
+      return Reflect.apply(currentHostMockTestState().mocks[name], thisArg, args)
+    },
+    get(_target, property) {
+      const value = Reflect.get(currentHostMockTestState().mocks[name], property)
+      return typeof value === "function" ? value.bind(currentHostMockTestState().mocks[name]) : value
+    },
+    set(_target, property, value) {
+      return Reflect.set(currentHostMockTestState().mocks[name], property, value)
+    },
+  }) as unknown as HostMock
+}
+
+const connect = scopedMock("connect")
+const heartbeat = scopedMock("heartbeat")
+const disconnect = scopedMock("disconnect")
+const poll = scopedMock("poll")
+const report = scopedMock("report")
+const uploadTaskLog = scopedMock("uploadTaskLog")
+const fetchConfig = scopedMock("fetchConfig")
+const startSignalR = scopedMock("startSignalR")
+const stopSignalR = scopedMock("stopSignalR")
+const getConnectionId = scopedMock("getConnectionId")
+const probeLiveness = scopedMock("probeLiveness")
+const blockingAction = scopedMock("blockingAction")
+const forceReconnect = scopedMock("forceReconnect")
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -110,10 +131,10 @@ vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runtime/workspace.js")>()
   class FakeWorkspaceManager {
     async prepare() {
-      return { path: "/tmp/mohist-runner-host-opencode-runtime", branch: "main", changeDir: null }
+      return { path: "/virtual/mohist-runner-host-opencode-runtime", branch: "main", changeDir: null }
     }
     async verify() {
-      return { path: "/tmp/mohist-runner-host-opencode-runtime", branch: "main", changeDir: null }
+      return { path: "/virtual/mohist-runner-host-opencode-runtime", branch: "main", changeDir: null }
     }
   }
   return {
@@ -122,36 +143,74 @@ vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
   }
 })
 
-beforeEach(() => {
-  vi.useFakeTimers()
-  setExecutorGitRunnerForTest(nonGitRunner)
-  clearOpenCodeRuntimeFactoryForTest()
-  blockingAction.mockReset()
-  connect.mockReset().mockResolvedValue(undefined)
-  heartbeat.mockReset().mockResolvedValue(undefined)
-  disconnect.mockReset().mockResolvedValue(undefined)
-  poll.mockReset().mockResolvedValue([])
-  report.mockReset().mockResolvedValue({})
-  uploadTaskLog.mockReset().mockResolvedValue({ status: "changed", accepted: 0, truncated: false })
-  startSignalR.mockReset().mockResolvedValue(undefined)
-  stopSignalR.mockReset().mockResolvedValue(undefined)
-  getConnectionId.mockReset().mockReturnValue("conn-1")
-  probeLiveness.mockReset().mockResolvedValue(true)
-  forceReconnect.mockReset().mockResolvedValue(undefined)
-})
+function createHostMocks(): HostMocks {
+  return {
+    connect: vi.fn(async () => undefined),
+    heartbeat: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    poll: vi.fn(async () => []),
+    report: vi.fn(async () => ({})),
+    uploadTaskLog: vi.fn(async () => ({ status: "changed", accepted: 0, truncated: false })),
+    fetchConfig: vi.fn(async () => null),
+    startSignalR: vi.fn(async () => undefined),
+    stopSignalR: vi.fn(async () => undefined),
+    getConnectionId: vi.fn(() => "conn-1"),
+    probeLiveness: vi.fn(async () => true),
+    blockingAction: vi.fn(),
+    forceReconnect: vi.fn(async () => undefined),
+  }
+}
 
-afterEach(() => {
-  setExecutorGitRunnerForTest(null)
-  clearOpenCodeRuntimeFactoryForTest()
-  setPiRuntimeFactoryForTest(null)
-})
+interface HostTestResources extends OpenCodeRuntimeTestResources {
+  fileSystem: RunnerFileSystem
+  gitRunner: GitRunner
+  logger: RunnerLogger
+  externalProcessPolicy: ExternalProcessPolicy
+  piRuntimeFactory?: () => PiRuntime
+}
+
+function it(name: string, body: (resources: HostTestResources) => Promise<void>): void {
+  vitestIt(name, async () => {
+    const resources: HostTestResources = {
+      fileSystem: new MemoryFileSystem(),
+      gitRunner: nonGitRunner,
+      logger: createLoggerCapture(),
+      externalProcessPolicy: {
+        assertAllowed(label) {
+          throw new Error(`external process forbidden in runner host test: ${label}`)
+        },
+        register() {},
+      },
+      piRuntimeFactory: () => ({
+        start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
+        ready: () => true,
+        diagnostic: () => null,
+        catalog: () => ({ models: [] }),
+        createSession: async () => ({ ok: true, value: { runtimeSessionId: "/virtual/pi-session", workDir: "/virtual" }, diagnostics: [] }),
+        runTurn: async () => ({ ok: true, value: { facts: { finalAssistantText: null, runtimeSessionId: "/virtual/pi-session", workDir: "/virtual" }, diagnostics: [] }, diagnostics: [] }),
+        shutdown: async () => {},
+      } as never),
+    }
+    await withTestRunnerResources(async () => {
+      await hostMockStorage.run({ mocks: createHostMocks() }, async () => {
+        vi.useFakeTimers()
+        try {
+          installReadyOpenCodeRuntimeFactory(resources)
+          await body(resources)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+    }, resources)
+  })
+}
 
 function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
   return {
-    serverUrl: "http://localhost:3456",
+    serverUrl: "https://runner.test",
     runnerId: "runner-test",
     projectId: "project-1",
-    runnerRoot: "/tmp/mohist-runner-host-opencode-runtime",
+    runnerRoot: "/virtual/mohist-runner-host-opencode-runtime",
     pollIntervalMs: POLL_INTERVAL_MS,
     heartbeatIntervalMs: QUIET_INTERVAL_MS,
     dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -166,7 +225,7 @@ function workflowVariables(): Record<string, unknown> {
   return {
     repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" },
     issue: { number: 1 },
-    workspace: { path: "/tmp/mohist-runner-host-opencode-runtime" },
+    workspace: { path: "/virtual/mohist-runner-host-opencode-runtime" },
     mohist: { runId: "wr-test" },
   }
 }
@@ -193,8 +252,8 @@ function expectedActionCatalog() {
 }
 
 describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
-  it("keeps polling for new work after an unowned runtime has cooled down", async () => {
-    const installed = installFakeOpenCodeRuntimeFactory()
+  it("keeps polling for new work after an unowned runtime has cooled down", async (resources) => {
+    const installed = installFakeOpenCodeRuntimeFactory(resources)
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     poll.mockResolvedValue([])
@@ -219,8 +278,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("ready-claim: starts the runtime without probing or registering a model catalog", async () => {
-    installFakeOpenCodeRuntimeFactory()
+  it("ready-claim: starts the runtime without probing or registering a model catalog", async (resources) => {
+    installFakeOpenCodeRuntimeFactory(resources)
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
@@ -241,8 +300,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("RunnerRegistration does not read runtime model catalogs", async () => {
-    installFakeOpenCodeRuntimeFactory()
+  it("RunnerRegistration does not read runtime model catalogs", async (resources) => {
+    installFakeOpenCodeRuntimeFactory(resources)
     const piCatalog = {
       models: [
         { provider: "anthropic", id: "claude-sonnet-4", thinkingLevels: ["off"] },
@@ -257,7 +316,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       catalog,
       shutdown: vi.fn(async () => undefined),
     } as unknown as PiRuntime
-    setPiRuntimeFactoryForTest(() => piRuntime)
+    resources.piRuntimeFactory = () => piRuntime
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
@@ -276,8 +335,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("RunnerRegistration omits model catalogs on every heartbeat", async () => {
-    installFakeOpenCodeRuntimeFactory()
+  it("RunnerRegistration omits model catalogs on every heartbeat", async (resources) => {
+    installFakeOpenCodeRuntimeFactory(resources)
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
@@ -302,11 +361,11 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("not-ready-skip: when the runtime flips to not-ready mid-flight, pollOnce stops and the existing report still drains", async () => {
+  it("not-ready-skip: when the runtime flips to not-ready mid-flight, pollOnce stops and the existing report still drains", async (resources) => {
     // Start with a ready runtime; let the first poll dispatch and
     // capture the work item's report; then simulate a server exit
     // and confirm no further polls run until the runtime recovers.
-    const installed = installFakeOpenCodeRuntimeFactory({ rebuildDelayMs: 50 })
+    const installed = installFakeOpenCodeRuntimeFactory(resources, { rebuildDelayMs: 50 })
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()
     let reportAttempts = 0
@@ -365,8 +424,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("server-exit-rebuild-resume: in-flight Workflow turns fail without auto-replay and claiming resumes after rebuild", async () => {
-    const installed = installFakeOpenCodeRuntimeFactory({ rebuildDelayMs: 50 })
+  it("server-exit-rebuild-resume: in-flight Workflow turns fail without auto-replay and claiming resumes after rebuild", async (resources) => {
+    const installed = installFakeOpenCodeRuntimeFactory(resources, { rebuildDelayMs: 50 })
     const firstPollDone = deferred<void>()
     const actionStarted = deferred<void>()
     const actionRelease = deferred<void>()
@@ -423,8 +482,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("Workflow source does not receive the OpenCode runtime handle", async () => {
-    installReadyOpenCodeRuntimeFactory()
+  it("Workflow source does not receive the OpenCode runtime handle", async (resources) => {
+    installReadyOpenCodeRuntimeFactory(resources)
     let observed: { openCodeRuntime: unknown } | null = null
     const actionStarted = deferred<void>()
     const actionRelease = deferred<void>()
@@ -457,8 +516,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("AgentJob path drives the AgentJobExecutor, not the action registry", async () => {
-    installReadyOpenCodeRuntimeFactory()
+  it("AgentJob path drives the AgentJobExecutor, not the action registry", async (resources) => {
+    installReadyOpenCodeRuntimeFactory(resources)
     // Verify the source-keyed dispatch wiring at the executor
     // boundary directly: an AgentJob ownerKind resolves through
     // the AgentJobExecutor entry instead of the action registry.
@@ -481,7 +540,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
         return {
           ok: true,
           value: {
-            facts: { finalAssistantText: "agent done", runtimeSessionId: "ses_x", workDir: "/tmp/agent-job" },
+            facts: { finalAssistantText: "agent done", runtimeSessionId: "ses_x", workDir: "/virtual/agent-job" },
             diagnostics: [],
           },
           diagnostics: [],
@@ -497,7 +556,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       } as never,
       {
         async prepare() {
-          return { path: "/tmp/agent-job", branch: null, changeDir: null }
+          return { path: "/virtual/agent-job", branch: null, changeDir: null }
         },
       } as never,
       {
@@ -508,7 +567,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
           return null
         },
       } as never,
-      "/tmp/agent-job",
+      "/virtual/agent-job",
       undefined,
       fakeRuntime,
       new AgentJobExecutor({} as never, { openCode: fakeRuntime, pi: null }),
@@ -521,7 +580,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
         ownerKind: "agent-job",
         agentJobId: "aj-1",
         with: { prompt: "do the agent-job thing" },
-        variables: { workspace: { path: "/tmp/agent-job", branch: null, changeDir: null } },
+        variables: { workspace: { path: "/virtual/agent-job", branch: null, changeDir: null } },
       },
       new AbortController().signal,
     )
@@ -529,7 +588,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     expect(registryInvoked).toBe(false)
   })
 
-  it("the readiness gate pauses AgentJob claim while runtime is not ready", async () => {
+  it("the readiness gate pauses AgentJob claim while runtime is not ready", async (resources) => {
     // Use a long rebuild delay so the gate stays closed throughout
     // the post-flip observation window — we want to verify pollOnce
     // is skipped during the not-ready window, not that rebuild races
@@ -538,7 +597,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     // can't tight-loop on the same work key (#410 T-001: the
     // AgentJobExecutor closes the work within a few microtasks, so
     // awaitingAck is empty before the next poll tick).
-    const installedHandles = installFakeOpenCodeRuntimeFactory({ rebuildDelayMs: 60_000 })
+    const installedHandles = installFakeOpenCodeRuntimeFactory(resources, { rebuildDelayMs: 60_000 })
     poll.mockResolvedValueOnce([{
       workflowRunId: "",
       workId: "work-agent-job",
@@ -546,7 +605,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       uses: "test/observe",
       ownerKind: "agent-job",
       agentJobId: "aj-1",
-      variables: { workspace: { path: "/tmp/mohist-runner-host-opencode-runtime" } },
+      variables: { workspace: { path: "/virtual/mohist-runner-host-opencode-runtime" } },
     }]).mockResolvedValue([])
     blockingAction.mockReset().mockResolvedValue({ output: { message: "ok" } })
     const controller = new AbortController()

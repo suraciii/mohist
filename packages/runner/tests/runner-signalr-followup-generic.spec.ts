@@ -1,33 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   buildClient,
-  buildRecordingOutbox,
   emitFollowup,
   flush,
   genericPayload,
   invokeFollowup,
   lastBuilder,
-  makeFakeRuntime,
-  resetBuilders,
-  type FakeRuntimeHandles,
-  type RecordingOutbox,
+  followupIt,
 } from "./support/followup-handler-fixture.js"
 
-let runtime: FakeRuntimeHandles
-let recording: RecordingOutbox
-
-beforeEach(() => {
-  resetBuilders()
-  runtime = makeFakeRuntime()
-  recording = buildRecordingOutbox()
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-
 describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
-  it("GenericFollowup_LocatesSessionByGenericKey_AndCallsRuntimeFollowup", async () => {
+  followupIt("GenericFollowup_LocatesSessionByGenericKey_AndCallsRuntimeFollowup", async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string }) => {
       expect(target.kind).toBe("generic")
       return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
@@ -44,7 +27,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(runtime.followupCalls[0].target).toEqual({ runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" })
   })
 
-  it("GenericFollowup_OmittedLegacyWorkDir_StillUsesCachedRuntimeTarget", async () => {
+  followupIt("GenericFollowup_OmittedLegacyWorkDir_StillUsesCachedRuntimeTarget", async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string; binding?: unknown }) => {
       expect(target.kind).toBe("generic")
       expect(target.binding).toEqual({
@@ -76,7 +59,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(runtime.followupCalls[0].prompt).toBe("continue")
   })
 
-  it("GenericFollowup_InputEntersGenericFollowupProducerFamily", async () => {
+  followupIt("GenericFollowup_InputEntersGenericFollowupProducerFamily", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
@@ -100,7 +83,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     })
   })
 
-  it("GenericFollowup_Outcome_EntersSameSequenceKey_AsInput", async () => {
+  followupIt("GenericFollowup_Outcome_EntersSameSequenceKey_AsInput", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
@@ -119,7 +102,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     }
   })
 
-  it("GenericFollowup_AcknowledgesDeliveryBeforeRuntimeCompletion", async () => {
+  followupIt("GenericFollowup_AcknowledgesDeliveryBeforeRuntimeCompletion", async ({ runtime, recording }) => {
     let resolveFollowup!: (value: { ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }) => void
     const promise = new Promise<{ ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }>((resolve) => { resolveFollowup = resolve })
     const followupCalls = runtime.followupCalls
@@ -146,7 +129,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     await flush()
   })
 
-  it("GenericFollowup_DropsUnknownSessionWithoutThrowing", async () => {
+  followupIt("GenericFollowup_DropsUnknownSessionWithoutThrowing", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => null)
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -158,7 +141,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("GenericFollowup_DropsWhenTargetSessionIdMissing", async () => {
+  followupIt("GenericFollowup_DropsWhenTargetSessionIdMissing", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -173,7 +156,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("GenericFollowup_DropsWhenTextMissing", async () => {
+  followupIt("GenericFollowup_DropsWhenTextMissing", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -185,7 +168,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("WorkflowFollowup_InputEntersWorkflowSessionProducerFamily", async () => {
+  followupIt("WorkflowFollowup_InputEntersWorkflowSessionProducerFamily", async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string }) => {
       expect(target.kind).toBe("workflow")
       return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
@@ -210,7 +193,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     })
   })
 
-  it("WorkflowFollowup_LegacyTopLevelFields_StillResolveToWorkflowTarget", async () => {
+  followupIt("WorkflowFollowup_LegacyTopLevelFields_StillResolveToWorkflowTarget", async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string; workflowRunId?: string; sessionName?: string }) => {
       expect(target.kind).toBe("workflow")
       expect(target.workflowRunId).toBe("wr-legacy")

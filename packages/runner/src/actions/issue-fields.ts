@@ -1,17 +1,10 @@
 import { runCommand } from "../system/process.js"
+import { currentRunnerResources } from "../system/filesystem.js"
 export interface IssueFieldLookupContext {
   readonly workDir: string
   readonly signal: AbortSignal
   readonly projectId: string | null
   readonly issueNumber: number | null
-}
-
-type CommandRunner = typeof runCommand
-
-let commandRunner: CommandRunner = runCommand
-
-export function setIssueFieldCommandRunnerForTest(runner: CommandRunner | null) {
-  commandRunner = runner ?? runCommand
 }
 
 export type IssueFieldSource = "issue.title" | "issue.body"
@@ -41,6 +34,7 @@ export async function resolveIssueFields(context: IssueFieldLookupContext): Prom
     throw new Error("issue field source requires a project id")
   }
 
+  const commandRunner = currentRunnerResources()?.issueFieldCommandRunner ?? runCommand
   const result = await commandRunner(
     "mo",
     ["issue", "view", String(issueNumber), "--project", projectId, "--json", "title,body"],

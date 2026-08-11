@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks"
 import type { JsonObject, JsonValue } from "./types.js"
 
 export type StructuredPrompt = JsonObject
@@ -48,14 +49,14 @@ export class PromptLoaderRegistry {
 }
 
 const defaultRegistry = new PromptLoaderRegistry()
-let activeRegistry: PromptLoaderRegistry = defaultRegistry
+const registryStorage = new AsyncLocalStorage<PromptLoaderRegistry>()
 
 export function defaultPromptLoaderRegistry(): PromptLoaderRegistry {
   return defaultRegistry
 }
 
-export function setPromptLoaderRegistryForTest(registry: PromptLoaderRegistry | null): void {
-  activeRegistry = registry ?? defaultRegistry
+export async function withPromptLoaderRegistry<T>(registry: PromptLoaderRegistry, operation: () => Promise<T>): Promise<T> {
+  return await registryStorage.run(registry, operation)
 }
 
 export async function resolvePrompt(
@@ -76,7 +77,7 @@ export async function resolvePrompt(
     if (typeof usesValue !== "string" || !usesValue.trim()) {
       throw new Error("Prompt loader spec 'uses' must be a non-empty string")
     }
-    const loader = activeRegistry.resolve(usesValue)
+    const loader = (registryStorage.getStore() ?? defaultRegistry).resolve(usesValue)
     if (!loader) {
       throw new Error(`Unknown prompt loader: '${usesValue}'`)
     }

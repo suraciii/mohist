@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import {
   CancelOperationJournal,
   type CancelOperationJournalFileSystem,
@@ -21,8 +21,6 @@ class InMemoryJournalFileSystem implements CancelOperationJournalFileSystem {
   }
 }
 
-let fileSystem: InMemoryJournalFileSystem
-
 function request(): CancelAgentSessionPayload {
   return {
     sessionId: "session-1",
@@ -43,11 +41,8 @@ function request(): CancelAgentSessionPayload {
 }
 
 describe("CancelOperationJournal", () => {
-  beforeEach(() => {
-    fileSystem = new InMemoryJournalFileSystem()
-  })
-
   it("persists a completed cancel reply for a restarted runner", async () => {
+    const fileSystem = new InMemoryJournalFileSystem()
     const first = new CancelOperationJournal(root, journalPath, fileSystem)
     await first.load()
     await first.start("session-1", request())
@@ -63,6 +58,7 @@ describe("CancelOperationJournal", () => {
   })
 
   it("retains an unconfirmed cancel across restart", async () => {
+    const fileSystem = new InMemoryJournalFileSystem()
     const first = new CancelOperationJournal(root, journalPath, fileSystem)
     await first.load()
     await first.start("session-1", request())
@@ -74,6 +70,7 @@ describe("CancelOperationJournal", () => {
   })
 
   it("fails closed for corrupt state", async () => {
+    const fileSystem = new InMemoryJournalFileSystem()
     await fileSystem.writeAtomicText(journalPath, "not-json")
     const journal = new CancelOperationJournal(root, journalPath, fileSystem)
     await journal.load()

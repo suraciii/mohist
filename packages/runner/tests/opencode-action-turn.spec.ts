@@ -11,8 +11,6 @@ import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtim
 import type { RuntimeProviderErrorPolicy } from "../src/runtime/opencode/types.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
-import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
-import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
 import { callAction } from "./support/call-action.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
@@ -127,8 +125,6 @@ function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
 }
 
 afterEach(() => {
-  setPromptLoaderRegistryForTest(null)
-  clearOpenCodeRuntimeFactoryForTest()
   vi.useRealTimers()
 })
 

@@ -1,6 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { currentRunnerResources, currentRunnerTransport } from "./filesystem.js"
 
 export const RUNNER_CREDENTIAL_FILE = "credential"
+
+const defaultCredentialFileSystem = { mkdirSync, readFileSync, writeFileSync }
+
+function credentialFileSystem() {
+  return currentRunnerResources()?.runnerCredentialFileSystem ?? defaultCredentialFileSystem
+}
 
 export function runnerCredentialPath(runnerRoot: string): string {
   return `${runnerRoot}/${RUNNER_CREDENTIAL_FILE}`
@@ -15,7 +22,7 @@ export function runnerCredentialPath(runnerRoot: string): string {
  */
 export function loadRunnerCredential(runnerRoot: string): string | null {
   try {
-    const value = readFileSync(runnerCredentialPath(runnerRoot), "utf8").trim()
+    const value = credentialFileSystem().readFileSync(runnerCredentialPath(runnerRoot), "utf8").trim()
     return value.length > 0 ? value : null
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
@@ -30,8 +37,8 @@ export function loadRunnerCredential(runnerRoot: string): string | null {
  * first use never loses it.
  */
 export function writeRunnerCredential(runnerRoot: string, credential: string): void {
-  mkdirSync(runnerRoot, { recursive: true })
-  writeFileSync(runnerCredentialPath(runnerRoot), `${credential}\n`, { mode: 0o600 })
+  credentialFileSystem().mkdirSync(runnerRoot, { recursive: true })
+  credentialFileSystem().writeFileSync(runnerCredentialPath(runnerRoot), `${credential}\n`, { mode: 0o600 })
 }
 
 /**
@@ -47,7 +54,7 @@ export async function registerWithEnrollmentToken(
   enrollmentToken: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const response = await fetch(`${serverUrl.replace(/\/$/, "")}/api/runners/register`, {
+  const response = await currentRunnerTransport()(`${serverUrl.replace(/\/$/, "")}/api/runners/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ token: enrollmentToken, runnerId, hostname }),

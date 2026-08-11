@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 import type { CancelAgentSessionPayload, CancelAgentSessionReply } from "../server/session-target.js"
 
 export const DEFAULT_CANCEL_OPERATION_JOURNAL_FILE = ".mohist/runner-state/cancel-operations.json"
@@ -128,7 +128,7 @@ export class CancelOperationJournal implements CancelOperationJournalStore {
 export class NodeCancelOperationJournalFileSystem implements CancelOperationJournalFileSystem {
   async readText(path: string): Promise<string | null> {
     try {
-      return await readFile(path, "utf8")
+      return await currentRunnerFileSystem().readText(path)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
       throw error
@@ -136,10 +136,11 @@ export class NodeCancelOperationJournalFileSystem implements CancelOperationJour
   }
 
   async writeAtomicText(path: string, body: string): Promise<void> {
-    await mkdir(dirname(path), { recursive: true })
-    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
-    await writeFile(temporary, body)
-    await rename(temporary, path)
+    const fileSystem = currentRunnerFileSystem()
+    await fileSystem.ensureDir(dirname(path))
+    const temporary = `${path}.tmp`
+    await fileSystem.writeText(temporary, body)
+    await fileSystem.rename(temporary, path)
   }
 }
 
