@@ -35,7 +35,7 @@
     // These duration-sensitive tracks run as a short ordered prefix. Every
     // other test lane starts after their samples are complete, then resumes
     // the normal bounded throughput schedule.
-    "durationMeasurementTracks": ["cli", "server-unit"]
+    "durationMeasurementTracks": ["cli", "server-unit", "runner"]
   },
   "tracks": [
     { "id": "mohist-slack", "kind": "vitest", "run": ["npm","run","test:duration","-w","packages/mohist-slack","--","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
