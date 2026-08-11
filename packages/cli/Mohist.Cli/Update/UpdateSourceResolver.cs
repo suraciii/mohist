@@ -57,6 +57,7 @@ internal sealed class UpdateSourceResolver
         var transactionRoot = Path.Combine(runtimeRoot, "transactions", transactionId).Replace('\\', '/');
         var snapshotRoot = Path.Combine(transactionRoot, "snapshot").Replace('\\', '/');
         var buildRoot = Path.Combine(transactionRoot, "build").Replace('\\', '/');
+        var buildSourceRoot = Path.Combine(buildRoot, "source").Replace('\\', '/');
         var candidateRoot = Path.Combine(transactionRoot, "candidate").Replace('\\', '/');
 
         try
@@ -65,6 +66,7 @@ internal sealed class UpdateSourceResolver
             _files.CreateDirectory(transactionRoot);
             _files.CreateDirectory(snapshotRoot);
             _files.CreateDirectory(buildRoot);
+            _files.CreateDirectory(buildSourceRoot);
             _files.CreateDirectory(candidateRoot);
         }
         catch (Exception ex)
@@ -85,6 +87,11 @@ internal sealed class UpdateSourceResolver
             "tar", ["-xf", archivePath, "-C", snapshotRoot], buildRoot, cancellationToken);
         if (extractCode != 0)
             return (null, $"source snapshot could not be extracted at '{snapshotRoot}'{FormatCommandError(extractError)}");
+
+        var (buildExtractCode, _, buildExtractError) = await _commands.ExecuteAsync(
+            "tar", ["-xf", archivePath, "-C", buildSourceRoot], buildRoot, cancellationToken);
+        if (buildExtractCode != 0)
+            return (null, $"writable source build workspace could not be extracted at '{buildSourceRoot}'{FormatCommandError(buildExtractError)}");
 
         var marker = new SourceSnapshotMarker(
             sourceRoot,
@@ -116,7 +123,7 @@ internal sealed class UpdateSourceResolver
         var context = new UpdateSourceContext(
             source,
             snapshotRoot,
-            buildRoot,
+            buildSourceRoot,
             candidateRoot,
             runtimeRoot,
             transactionId,

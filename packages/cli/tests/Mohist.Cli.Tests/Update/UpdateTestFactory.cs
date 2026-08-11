@@ -507,6 +507,7 @@ internal sealed class FakeFileSystem : IFileSystem
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _readOnlyRoots = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private string _currentDirectory = "/";
 
@@ -566,6 +567,14 @@ internal sealed class FakeFileSystem : IFileSystem
         lock (_gate)
         {
             _directories.Add(normalized);
+        }
+    }
+
+    public void MarkReadOnly(string path)
+    {
+        lock (_gate)
+        {
+            _readOnlyRoots.Add(Normalize(path));
         }
     }
 
@@ -629,6 +638,7 @@ internal sealed class FakeFileSystem : IFileSystem
     public void CreateDirectory(string path)
     {
         var normalized = Normalize(path);
+        EnsureWritable(normalized);
         lock (_gate)
         {
             _directories.Add(normalized);
@@ -691,6 +701,7 @@ internal sealed class FakeFileSystem : IFileSystem
     {
         var sourceKey = Normalize(source);
         var destKey = Normalize(destination);
+        EnsureWritable(destKey);
         lock (_gate)
         {
             if (!_files.TryGetValue(sourceKey, out var content))
@@ -707,6 +718,7 @@ internal sealed class FakeFileSystem : IFileSystem
     public void WriteAllText(string path, string contents)
     {
         var normalized = Normalize(path);
+        EnsureWritable(normalized);
         lock (_gate)
         {
             _files[normalized] = contents;
@@ -740,6 +752,15 @@ internal sealed class FakeFileSystem : IFileSystem
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(Read(path)));
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
+
+    private void EnsureWritable(string path)
+    {
+        lock (_gate)
+        {
+            if (_readOnlyRoots.Any(root => path == root || StartsWithDirectory(path, root)))
+                throw new UnauthorizedAccessException($"read-only fake path: {path}");
+        }
+    }
 
     private static string Normalize(string path) =>
         path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
