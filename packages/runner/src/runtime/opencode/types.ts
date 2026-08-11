@@ -226,6 +226,14 @@ export type RuntimeResult<T> =
 export interface RuntimeReadyState {
   readonly ready: boolean
   readonly diagnostic: RuntimeDiagnostic | null
+  readonly ownership: RuntimeOwnershipSnapshot
+}
+
+export interface RuntimeOwnershipSnapshot {
+  readonly ownerIds: readonly string[]
+  readonly idleSince: number | null
+  readonly activeOperations: number
+  readonly generation: number | null
 }
 
 export interface RuntimeHealthCheck {

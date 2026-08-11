@@ -86,6 +86,14 @@ export function resolveCommandRuntime(
   return null
 }
 
+export async function ensureCommandRuntimeReady(handle: CommandRuntimeHandle): Promise<boolean> {
+  if (handle.runtime.ready()) return true
+  if (handle.kind !== "opencode") return false
+  if (typeof handle.runtime.start !== "function") return false
+  const started = await handle.runtime.start()
+  return started.ok
+}
+
 export interface FollowupCallTarget {
   readonly runtime: string
   readonly runtimeSessionId: string

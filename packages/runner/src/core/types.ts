@@ -336,6 +336,9 @@ export interface RunnerOptions {
   // to drive ticks deterministically.
   cleanupLoopIntervalMs?: number
 
+  /** Idle grace before an unowned shared Agent runtime is terminated. */
+  runtimeIdleGraceMs?: number
+
   /**
    * Optional override for the incremental task-log flush interval in
    * milliseconds. Defaults to {@link TASK_LOG_FLUSH_INTERVAL_MS}

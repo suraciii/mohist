@@ -39,6 +39,7 @@ import {
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "./runtime-event-outbox.js"
 import {
   callFollowup,
+  ensureCommandRuntimeReady,
   resolveCommandRuntime,
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
@@ -141,7 +142,7 @@ async function handleFollowup(
     pi: deps.piRuntime,
   })
   if (!handle) return unavailable()
-  if (!handle.runtime.ready()) return unavailable()
+  if (!await ensureCommandRuntimeReady(handle)) return unavailable()
 
   let selectedTarget = target
   const connection = deps.connection ?? null

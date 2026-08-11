@@ -66,6 +66,7 @@ export interface ReportResult {
 interface InFlightEntry {
   /** The execution promise; resolves when the work settles (success or failure). */
   done: Promise<void>
+  readonly work: DispatchWorkItem
 }
 
 interface AwaitingAckEntry {
@@ -87,6 +88,16 @@ function workKey(work: DispatchWorkItem): string {
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
   const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
   return `${ownerKind}:${ownerId}:${work.workId}`
+}
+
+function usesOpenCode(work: DispatchWorkItem): boolean {
+  if (work.ownerKind === "agent-job") {
+    const runtime = typeof work.with?.runtime === "string"
+      ? work.with.runtime
+      : work.agentDefinition?.runtime
+    return runtime?.toLowerCase() === "opencode"
+  }
+  return work.uses?.trim().toLowerCase() === "mohist/opencode"
 }
 
 /**
@@ -461,12 +472,14 @@ export class RunnerHost {
     const factory = getOpenCodeRuntimeFactory()
     this.openCodeRuntime = factory({
       directory: process.cwd(),
+      ...(this.options.runtimeIdleGraceMs !== undefined ? { idleGraceMs: this.options.runtimeIdleGraceMs } : {}),
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const startResult = await this.openCodeRuntime.start(signal)
     if (!startResult.ok) {
       log.error("opencode runtime not ready at startup; claiming gated until it recovers", { reason: startResult.error.message })
     }
+    this.syncOpenCodeWorkOwners()
     this.piRuntime = getPiRuntimeFactory()({ agentDir: this.options.runnerRoot, ...(policy.ok ? { providerErrorPolicy: policy.value } : {}) })
     const piStart = await this.piRuntime.start()
     if (!piStart.ok) {
@@ -538,6 +551,7 @@ export class RunnerHost {
       // reports (the line above) and respects the existing poll
       // cadence so a recovered runtime resumes claiming on the next
       // tick.
+      this.syncOpenCodeWorkOwners()
       if (!this.isReadyForClaim()) {
         if (this.piRuntime && !this.piRuntime.ready()) await this.piRuntime.start().catch(() => {})
         const diagnostic = this.readinessDiagnostic()
@@ -565,6 +579,8 @@ export class RunnerHost {
         continue
       }
 
+      await this.prepareOpenCodeWork(works, signal)
+
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
       // already holds.
@@ -579,7 +595,8 @@ export class RunnerHost {
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
         const done = this.executeAndTransition(work, signal, key)
-        this.inFlight.set(key, { done })
+        this.inFlight.set(key, { done, work })
+        this.syncOpenCodeWorkOwners()
       }
 
       if (signal.aborted) break
@@ -604,10 +621,51 @@ export class RunnerHost {
   }
 
   private isReadyForClaim(): boolean {
+    const runtime = this.openCodeRuntime
     return this.providerPolicyDiagnostic === null
-      && this.isOpenCodeReadyForClaim()
+      && this.agentSessionRuntimeEventOutbox.ready()
       && this.piRuntime !== null
       && this.piRuntime.ready()
+      && (runtime?.ready() === true || runtime?.canPollWhileCold() === true)
+  }
+
+  private syncOpenCodeWorkOwners(): void {
+    const runtime = this.openCodeRuntime
+    if (!runtime) return
+    const owners = [
+      ...[...this.inFlight.values()]
+        .filter((entry) => usesOpenCode(entry.work))
+        .map((entry) => workKey(entry.work)),
+      ...[...this.awaitingAck.values()]
+        .filter((entry) => usesOpenCode(entry.work))
+        .map((entry) => workKey(entry.work)),
+    ]
+    runtime.setWorkOwners(owners)
+  }
+
+  private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
+    const runtime = this.openCodeRuntime
+    const owners = works.filter(usesOpenCode).map(workKey)
+    if (!runtime || owners.length === 0) return
+    runtime.setWorkOwners([
+      ...this.openCodeOwners(),
+      ...owners,
+    ])
+    if (!runtime.ready()) {
+      const started = await runtime.start(signal)
+      if (!started.ok) log.error("opencode runtime could not be recreated for work", { reason: started.error.message })
+    }
+  }
+
+  private openCodeOwners(): string[] {
+    return [
+      ...[...this.inFlight.values()]
+        .filter((entry) => usesOpenCode(entry.work))
+        .map((entry) => workKey(entry.work)),
+      ...[...this.awaitingAck.values()]
+        .filter((entry) => usesOpenCode(entry.work))
+        .map((entry) => workKey(entry.work)),
+    ]
   }
 
   /**
@@ -684,6 +742,7 @@ export class RunnerHost {
     // final verdict (success or the failure captured above).
     this.inFlight.delete(key)
     this.awaitingAck.set(key, { work, entry: { result, attempts: 0, retryAt: null } })
+    this.syncOpenCodeWorkOwners()
 
     try {
       await this.reportOnce(key)
@@ -712,6 +771,7 @@ export class RunnerHost {
       clearTimeout(timeout)
     }
     this.awaitingAck.delete(key)
+    this.syncOpenCodeWorkOwners()
   }
 
   private scheduleReportRetry(key: string): void {
