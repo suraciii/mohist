@@ -42,7 +42,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal("compact", data.GetProperty("operation").GetString());
         Assert.True(data.GetProperty("wasCompacted").GetBoolean());
 
-        var request = AssertSingleSessionCommandInvocation();
+        var request = AssertSingleSessionCommandInvocation(currentSession.Id);
         Assert.Equal(SessionCommandKind.Compact, request.Command);
         Assert.Equal(currentSession.Id, request.SessionId);
         Assert.Equal("opencode", request.Runtime);
@@ -78,7 +78,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
         Assert.Contains("active", doc.RootElement.GetProperty("error").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-        Assert.Empty(RunnerHub.Invocations);
+        AssertNoSessionCommandInvocations(currentSession.Id);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal("reset", data.GetProperty("operation").GetString());
         Assert.False(data.GetProperty("wasCompacted").GetBoolean());
 
-        var request = AssertSingleSessionCommandInvocation();
+        var request = AssertSingleSessionCommandInvocation(currentSession.Id);
         Assert.Equal(SessionCommandKind.Reset, request.Command);
         Assert.Equal(currentSession.Id, request.SessionId);
         Assert.Equal(currentSession.Id, request.RuntimeSessionId);
@@ -162,7 +162,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    var request = AssertSingleSessionCommandInvocation();
+    var request = AssertSingleSessionCommandInvocation(currentSession.Id);
     Assert.Equal(SessionCommandKind.Compact, request.Command);
     Assert.Equal("pi", request.Runtime);
     Assert.Equal(currentSession.Id, request.RuntimeSessionId);
@@ -177,7 +177,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
 
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    var request = AssertSingleSessionCommandInvocation();
+    var request = AssertSingleSessionCommandInvocation(currentSession.Id);
     Assert.Equal(SessionCommandKind.Reset, request.Command);
     Assert.Equal("pi", request.Runtime);
     Assert.Equal(currentSession.Id, request.ExpectedRuntimeSessionId);
@@ -205,6 +205,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
-        Assert.Empty(RunnerHub.Invocations);
+        AssertNoSessionCommandInvocations(currentSession.Id);
     }
 }
