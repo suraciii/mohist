@@ -22,6 +22,8 @@ internal sealed class SpecUnitMigrationInventory
 
     private readonly IReadOnlyDictionary<string, SpecUnitMigrationType> _typesByFqn;
     private readonly IReadOnlyList<string> _diagnostics;
+    private readonly object _compiledDiscoveryGate = new();
+    private bool _compiledDiscoveryBound;
     internal SpecUnitMigrationSourceTreeSnapshot SourceTree { get; }
 
     private SpecUnitMigrationInventory(IReadOnlyList<SpecUnitMigrationType> types, IReadOnlyList<string> diagnostics,
@@ -35,12 +37,17 @@ internal sealed class SpecUnitMigrationInventory
     internal IReadOnlyList<string> Diagnostics => _diagnostics;
 
     internal IReadOnlyList<SpecUnitMigrationCandidate> CurrentStaticLightSpecs
-        => CurrentSpecClassifications.Where(candidate => candidate.Blockers.Count == 0)
+        => PotentialCurrentSpecFqns.Select(fqn => Classify(_typesByFqn[fqn]))
+            .Where(candidate => candidate.Blockers.Count == 0)
             .OrderBy(candidate => candidate.Fqn, StringComparer.Ordinal).ToArray();
 
     internal IReadOnlyList<SpecUnitMigrationCandidate> CurrentSpecClassifications
         => _typesByFqn.Values.Where(type => type.IsCurrentSpec && type.Name.EndsWith("Specs", StringComparison.Ordinal))
             .Select(Classify).OrderBy(candidate => candidate.Fqn, StringComparer.Ordinal).ToArray();
+
+    internal IReadOnlyList<string> PotentialCurrentSpecFqns
+        => _typesByFqn.Values.Where(type => type.IsCurrentSpec && type.Name.EndsWith("Specs", StringComparison.Ordinal))
+            .Where(IsPotentialStaticLight).Select(type => type.Fqn).OrderBy(fqn => fqn, StringComparer.Ordinal).ToArray();
 
     internal bool TryGetCurrentSpecClassification(string fqn, out SpecUnitMigrationCandidate candidate)
     {
@@ -107,12 +114,23 @@ internal sealed class SpecUnitMigrationInventory
         var sourceTree = SpecUnitMigrationSourceTree.Capture(sourceList, SpecUnitMigrationLedgerValidator.ValidationHead,
             SpecUnitMigrationLedgerValidator.ValidationTree);
         var inventory = new SpecUnitMigrationInventory(types.Values.ToArray(), diagnostics, sourceTree);
-        foreach (var type in types.Values) type.ResolveReferences(inventory);
-        inventory._compiledDiscovery = compiledDiscovery ?? SpecUnitMigrationCompiledDiscovery.Empty;
+        if (compiledDiscovery is not null) inventory.BindCompiledDiscovery(compiledDiscovery);
         return inventory;
     }
 
     private SpecUnitMigrationCompiledDiscovery _compiledDiscovery = SpecUnitMigrationCompiledDiscovery.Empty;
+
+    internal SpecUnitMigrationInventory BindCompiledDiscovery(SpecUnitMigrationCompiledDiscovery compiledDiscovery)
+    {
+        lock (_compiledDiscoveryGate)
+        {
+            if (_compiledDiscoveryBound)
+                throw new InvalidOperationException("Compiled discovery is already bound to this migration inventory.");
+            _compiledDiscovery = compiledDiscovery;
+            _compiledDiscoveryBound = true;
+            return this;
+        }
+    }
 
     private SpecUnitMigrationCandidate Classify(SpecUnitMigrationType root)
     {
@@ -124,6 +142,7 @@ internal sealed class SpecUnitMigrationInventory
         {
             var type = pending.Pop();
             if (!visited.Add(type.Fqn)) continue;
+            type.EnsureReferencesResolved(this);
             closure.Add(type);
             foreach (var reference in type.ResolvedReferences)
             {
@@ -152,6 +171,21 @@ internal sealed class SpecUnitMigrationInventory
             facts.CaseIdentities ?? [],
             new ReadOnlyCollection<string>(closureNames), new ReadOnlyCollection<string>(blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray()),
             Digest(distinctEdges));
+    }
+
+    private bool IsPotentialStaticLight(SpecUnitMigrationType root)
+    {
+        var pending = new Stack<SpecUnitMigrationType>([root]);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (pending.Count > 0)
+        {
+            var type = pending.Pop();
+            if (!visited.Add(type.Fqn)) continue;
+            type.EnsureReferencesResolved(this);
+            if (type.Blockers.Count > 0) return false;
+            foreach (var reference in type.ResolvedReferences) pending.Push(reference);
+        }
+        return true;
     }
 
     internal bool TryGetCandidate(string fqn, out SpecUnitMigrationCandidate candidate)
@@ -221,6 +255,8 @@ internal sealed class SpecUnitMigrationInventory
         private readonly List<(string Path, ClassDeclarationSyntax Declaration, CSharpCompilation Compilation)> _declarations = [];
         private readonly HashSet<string> _blockers = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _sourceContentDigests = new(StringComparer.Ordinal);
+        private readonly object _referencesGate = new();
+        private bool _referencesResolved;
 
         internal SpecUnitMigrationType(string fqn, string name, string path, bool isCurrentSpec,
             IReadOnlyList<string> diagnostics)
@@ -248,54 +284,58 @@ internal sealed class SpecUnitMigrationInventory
             if (string.CompareOrdinal(path, PrimaryPath) < 0) PrimaryPath = path;
         }
 
-        internal void ResolveReferences(SpecUnitMigrationInventory inventory)
+        internal void EnsureReferencesResolved(SpecUnitMigrationInventory inventory)
         {
-            var references = new HashSet<SpecUnitMigrationType>();
-            var blockers = new HashSet<string>(_blockers, StringComparer.Ordinal);
-            foreach (var (path, declaration, compilation) in _declarations)
+            lock (_referencesGate)
             {
-                var model = compilation.GetSemanticModel(declaration.SyntaxTree, ignoreAccessibility: true);
-                foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>())
+                if (_referencesResolved) return;
+                var references = new HashSet<SpecUnitMigrationType>();
+                var blockers = new HashSet<string>(_blockers, StringComparer.Ordinal);
+                foreach (var (path, declaration, compilation) in _declarations)
                 {
-                    var name = identifier.Identifier.ValueText;
-                    if (name == "var") continue;
-                    if (BlockingNames.Contains(name)) blockers.Add($"external boundary symbol {name}");
-                    var info = GetSymbolInfo(model, identifier);
-                    if (info.CandidateSymbols.Length > 1)
+                    var model = compilation.GetSemanticModel(declaration.SyntaxTree, ignoreAccessibility: true);
+                    foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>())
                     {
-                        blockers.Add($"ambiguous symbol {name}: {string.Join(", ", info.CandidateSymbols.Select(SymbolDisplay))}");
-                        continue;
-                    }
-                    var resolvedSymbol = info.Symbol ?? info.CandidateSymbols.SingleOrDefault();
-                    if (resolvedSymbol is null)
-                    {
-                        blockers.Add($"unresolved symbol {name} at {path}:{identifier.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
-                        continue;
-                    }
+                        var name = identifier.Identifier.ValueText;
+                        if (name == "var") continue;
+                        if (BlockingNames.Contains(name)) blockers.Add($"external boundary symbol {name}");
+                        var info = GetSymbolInfo(model, identifier);
+                        if (info.CandidateSymbols.Length > 1)
+                        {
+                            blockers.Add($"ambiguous symbol {name}: {string.Join(", ", info.CandidateSymbols.Select(SymbolDisplay))}");
+                            continue;
+                        }
+                        var resolvedSymbol = info.Symbol ?? info.CandidateSymbols.SingleOrDefault();
+                        if (resolvedSymbol is null)
+                        {
+                            blockers.Add($"unresolved symbol {name} at {path}:{identifier.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
+                            continue;
+                        }
 
-                    var referencedType = EmbeddedContainingType(resolvedSymbol, inventory);
-                    if (referencedType is not null && !ReferenceEquals(referencedType, this)) references.Add(referencedType);
+                        var referencedType = EmbeddedContainingType(resolvedSymbol, inventory);
+                        if (referencedType is not null && !ReferenceEquals(referencedType, this)) references.Add(referencedType);
+                    }
+                    if (declaration.AttributeLists.SelectMany(list => list.Attributes)
+                        .Any(attribute => NameIs(attribute, "Collection") || NameIs(attribute, "CollectionDefinition")))
+                        blockers.Add("collection fixture attribute");
+                    if (declaration.BaseList is not null)
+                    {
+                        foreach (var baseType in declaration.BaseList.Types)
+                        {
+                            var baseName = baseType.Type.ToString();
+                            if (baseName.Contains("IClassFixture", StringComparison.Ordinal) || baseName.Contains("ICollectionFixture", StringComparison.Ordinal))
+                                blockers.Add("fixture interface");
+                            if (baseName.EndsWith("Fixture", StringComparison.Ordinal) || baseName.EndsWith("Specs", StringComparison.Ordinal))
+                                blockers.Add($"fixture/spec base {baseName}");
+                        }
+                    }
+                    if (path.StartsWith("Mohist.Server.SpecTests/Support/", StringComparison.Ordinal)) blockers.Add("SpecTests-only support");
                 }
 
-                if (declaration.AttributeLists.SelectMany(list => list.Attributes)
-                    .Any(attribute => NameIs(attribute, "Collection") || NameIs(attribute, "CollectionDefinition")))
-                    blockers.Add("collection fixture attribute");
-                if (declaration.BaseList is not null)
-                {
-                    foreach (var baseType in declaration.BaseList.Types)
-                    {
-                        var baseName = baseType.Type.ToString();
-                        if (baseName.Contains("IClassFixture", StringComparison.Ordinal) || baseName.Contains("ICollectionFixture", StringComparison.Ordinal))
-                            blockers.Add("fixture interface");
-                        if (baseName.EndsWith("Fixture", StringComparison.Ordinal) || baseName.EndsWith("Specs", StringComparison.Ordinal))
-                            blockers.Add($"fixture/spec base {baseName}");
-                    }
-                }
-                if (path.StartsWith("Mohist.Server.SpecTests/Support/", StringComparison.Ordinal)) blockers.Add("SpecTests-only support");
+                ResolvedReferences = references.OrderBy(reference => reference.Fqn, StringComparer.Ordinal).ToArray();
+                Blockers = blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+                _referencesResolved = true;
             }
-
-            ResolvedReferences = references.OrderBy(reference => reference.Fqn, StringComparer.Ordinal).ToArray();
-            Blockers = blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray();
         }
 
         private static SymbolInfo GetSymbolInfo(SemanticModel model, IdentifierNameSyntax identifier)
