@@ -22,13 +22,21 @@ internal sealed class SpecUnitMigrationInventory
 
     private readonly IReadOnlyDictionary<string, SpecUnitMigrationType> _typesByFqn;
     private readonly IReadOnlyList<string> _diagnostics;
+    private readonly SpecUnitMigrationCompiledDiscovery _compiledDiscovery;
+    private readonly IReadOnlyDictionary<string, SyntaxTree> _treesByPath;
+    private readonly IReadOnlyDictionary<string, CSharpCompilation> _compilations;
     internal SpecUnitMigrationSourceTreeSnapshot SourceTree { get; }
 
     private SpecUnitMigrationInventory(IReadOnlyList<SpecUnitMigrationType> types, IReadOnlyList<string> diagnostics,
-        SpecUnitMigrationSourceTreeSnapshot sourceTree)
+        SpecUnitMigrationSourceTreeSnapshot sourceTree, SpecUnitMigrationCompiledDiscovery compiledDiscovery,
+        IReadOnlyDictionary<string, SyntaxTree> treesByPath,
+        IReadOnlyDictionary<string, CSharpCompilation> compilations)
     {
         _typesByFqn = types.ToDictionary(type => type.Fqn, StringComparer.Ordinal);
         _diagnostics = diagnostics;
+        _compiledDiscovery = compiledDiscovery;
+        _treesByPath = treesByPath;
+        _compilations = compilations;
         SourceTree = sourceTree;
     }
 
@@ -106,13 +114,56 @@ internal sealed class SpecUnitMigrationInventory
 
         var sourceTree = SpecUnitMigrationSourceTree.Capture(sourceList, SpecUnitMigrationLedgerValidator.ValidationHead,
             SpecUnitMigrationLedgerValidator.ValidationTree);
-        var inventory = new SpecUnitMigrationInventory(types.Values.ToArray(), diagnostics, sourceTree);
+        var inventory = new SpecUnitMigrationInventory(types.Values.ToArray(), diagnostics, sourceTree,
+            compiledDiscovery ?? SpecUnitMigrationCompiledDiscovery.Empty,
+            trees.ToDictionary(tree => tree.FilePath, StringComparer.Ordinal), compilations);
         foreach (var type in types.Values) type.ResolveReferences(inventory);
-        inventory._compiledDiscovery = compiledDiscovery ?? SpecUnitMigrationCompiledDiscovery.Empty;
         return inventory;
     }
 
-    private SpecUnitMigrationCompiledDiscovery _compiledDiscovery = SpecUnitMigrationCompiledDiscovery.Empty;
+    internal SpecUnitMigrationInventory WithSourceContent(string path, string content)
+    {
+        var originalType = _typesByFqn.Values.SingleOrDefault(type => type.HasPath(path));
+        if (originalType is null)
+            throw new ArgumentException($"source path is not in the live inventory: {path}", nameof(path));
+
+        if (!_treesByPath.TryGetValue(path, out var originalTree))
+            throw new InvalidOperationException($"source path is not backed by a live syntax tree: {path}");
+
+        var compilationName = CompilationNameForPath(path);
+        var originalCompilation = _compilations[compilationName];
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var mutatedTree = CSharpSyntaxTree.ParseText(content, path: path, options: parseOptions);
+        var mutatedCompilation = originalCompilation.ReplaceSyntaxTree(originalTree, mutatedTree);
+        var semanticModel = mutatedCompilation.GetSemanticModel(mutatedTree, ignoreAccessibility: true);
+        var mutatedDeclarations = mutatedTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>()
+            .Where(declaration => semanticModel.GetDeclaredSymbol(declaration)?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                .Replace("global::", "", StringComparison.Ordinal) == originalType.Fqn)
+            .ToArray();
+        if (mutatedDeclarations.Length == 0)
+            throw new InvalidOperationException($"source mutation removed the live type {originalType.Fqn} from {path}");
+
+        var liveParseDiagnostics = mutatedTree.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Select(FormatParseDiagnostic);
+        var liveSemanticDiagnostics = semanticModel.GetDiagnostics(mutatedTree.GetRoot().FullSpan)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Select(FormatDiagnostic);
+        var liveDiagnostics = liveParseDiagnostics.Concat(liveSemanticDiagnostics)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var diagnostics = _diagnostics.Where(diagnostic => DiagnosticPath(diagnostic) != path)
+            .Concat(liveDiagnostics)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        var mutatedType = originalType.CloneWithSourceContent(path, mutatedDeclarations, mutatedCompilation, content, diagnostics);
+        var types = _typesByFqn.Values.Select(type => ReferenceEquals(type, originalType) ? mutatedType : type).ToArray();
+        var inventory = new SpecUnitMigrationInventory(types, diagnostics, SourceTree, _compiledDiscovery,
+            _treesByPath.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal), _compilations);
+        mutatedType.ResolveReferences(inventory);
+        return inventory;
+    }
 
     private SpecUnitMigrationCandidate Classify(SpecUnitMigrationType root)
     {
@@ -200,6 +251,25 @@ internal sealed class SpecUnitMigrationInventory
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
     }
 
+    private static string CompilationNameForPath(string path)
+        => path.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+            ? "Mohist.Server.SpecTests"
+            : "Mohist.Server.UnitTests";
+
+    private static string FormatDiagnostic(Diagnostic diagnostic)
+        => $"SEMANTIC|{diagnostic.Location.SourceTree?.FilePath ?? "<compilation>"}: {diagnostic.GetMessage()}";
+
+    private static string FormatParseDiagnostic(Diagnostic diagnostic)
+        => $"PARSE|{diagnostic.Location.SourceTree?.FilePath ?? "<compilation>"}: {diagnostic.GetMessage()}";
+
+    private static string? DiagnosticPath(string diagnostic)
+    {
+        var separator = diagnostic.IndexOf('|');
+        var value = separator < 0 ? diagnostic : diagnostic[(separator + 1)..];
+        var colon = value.IndexOf(':');
+        return colon < 0 ? null : value[..colon];
+    }
+
     private static bool IsTestSource(ArchitectureRules.EmbeddedSource source)
         => source.Path.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
         || source.Path.StartsWith("Mohist.Server.UnitTests/", StringComparison.Ordinal)
@@ -245,6 +315,27 @@ internal sealed class SpecUnitMigrationInventory
         {
             _declarations.Add((path, declaration, compilation));
             _sourceContentDigests[path] = Digest([content]);
+            if (string.CompareOrdinal(path, PrimaryPath) < 0) PrimaryPath = path;
+        }
+
+        internal SpecUnitMigrationType CloneWithSourceContent(string path,
+            IReadOnlyList<ClassDeclarationSyntax> declarations, CSharpCompilation compilation, string content,
+            IReadOnlyList<string> diagnostics)
+        {
+            var clone = new SpecUnitMigrationType(Fqn, Name, PrimaryPath, IsCurrentSpec, diagnostics);
+            foreach (var declaration in _declarations.Where(value => value.Path != path))
+                clone.AddDeclarationDigest(declaration.Path, declaration.Declaration, declaration.Compilation,
+                    _sourceContentDigests[declaration.Path]);
+            foreach (var declaration in declarations)
+                clone.AddDeclaration(path, declaration, compilation, content);
+            return clone;
+        }
+
+        private void AddDeclarationDigest(string path, ClassDeclarationSyntax declaration,
+            CSharpCompilation compilation, string digest)
+        {
+            _declarations.Add((path, declaration, compilation));
+            _sourceContentDigests[path] = digest;
             if (string.CompareOrdinal(path, PrimaryPath) < 0) PrimaryPath = path;
         }
 
