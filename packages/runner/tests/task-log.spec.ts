@@ -315,6 +315,14 @@ describe("TaskLogCollector incremental drain and sent-sequence watermark", () =>
     expect(collector.pendingSinceWatermark()).toBe(0)
   })
 
+  it("SnapshotDoesNotAdvanceWatermark", () => {
+    const collector = new TaskLogCollector()
+    collector.append("a", "1")
+
+    expect(collector.snapshot().entries.map((entry) => entry.seq)).toEqual([1])
+    expect(collector.drain()!.entries.map((entry) => entry.seq)).toEqual([1])
+  })
+
   it("SecondDrainExcludesLinesAlreadySent", () => {
     const collector = new TaskLogCollector()
     collector.append("a", "1")

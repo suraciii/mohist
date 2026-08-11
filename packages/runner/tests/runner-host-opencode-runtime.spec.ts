@@ -6,6 +6,7 @@ import { deferred } from "./support/deferred.js"
 import { capturedLogs } from "./support/logger-test.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { UnexpectedConsoleRecorder } from "./support/unexpected-console.js"
+import { FakeTerminalTaskLogDeliveryStore } from "./support/terminal-task-log-delivery.js"
 import {
   clearOpenCodeRuntimeFactoryForTest,
   installFakeOpenCodeRuntimeFactory,
@@ -131,7 +132,7 @@ beforeEach(() => {
   disconnect.mockReset().mockResolvedValue(undefined)
   poll.mockReset().mockResolvedValue([])
   report.mockReset().mockResolvedValue({})
-  uploadTaskLog.mockReset().mockResolvedValue({ accepted: 0, truncated: false })
+  uploadTaskLog.mockReset().mockResolvedValue({ status: "changed", accepted: 0, truncated: false })
   startSignalR.mockReset().mockResolvedValue(undefined)
   stopSignalR.mockReset().mockResolvedValue(undefined)
   getConnectionId.mockReset().mockReturnValue("conn-1")
@@ -155,6 +156,10 @@ function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
     heartbeatIntervalMs: QUIET_INTERVAL_MS,
     dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
   }
+}
+
+function hostWithFakeTerminalDelivery(): RunnerHost {
+  return new RunnerHost(hostOptions(), undefined, { terminalTaskLogDelivery: new FakeTerminalTaskLogDeliveryStore() })
 }
 
 function workflowVariables(): Record<string, unknown> {
@@ -219,7 +224,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
+    const host = hostWithFakeTerminalDelivery()
     const run = host.run(controller.signal)
     try {
       await connected.promise
@@ -256,7 +261,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
+    const host = hostWithFakeTerminalDelivery()
     const run = host.run(controller.signal)
     try {
       await connected.promise
@@ -276,7 +281,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
+    const host = hostWithFakeTerminalDelivery()
     const run = host.run(controller.signal)
     try {
       await connected.promise
@@ -323,7 +328,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       variables: workflowVariables(),
     }]).mockResolvedValue([])
     const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
+    const host = hostWithFakeTerminalDelivery()
     // Capture the readiness-diagnostic warn so it doesn't trip the
     // unexpected-console recorder — the diagnostic IS the expected
     // signal the test verifies.
@@ -387,7 +392,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       return { output: { message: "ok" } }
     })
     const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
+    const host = hostWithFakeTerminalDelivery()
     const run = host.run(controller.signal)
     try {
       await firstPollDone.promise
@@ -438,7 +443,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       variables: workflowVariables(),
     }]).mockResolvedValue([])
     const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
+    const host = hostWithFakeTerminalDelivery()
     const run = host.run(controller.signal)
     try {
       await actionStarted.promise
@@ -545,7 +550,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }]).mockResolvedValue([])
     blockingAction.mockReset().mockResolvedValue({ output: { message: "ok" } })
     const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
+    const host = hostWithFakeTerminalDelivery()
     const run = host.run(controller.signal)
     try {
       const runtime = await installedHandles.runtimeCreated

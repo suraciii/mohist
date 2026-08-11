@@ -102,7 +102,7 @@ beforeEach(() => {
   installReadyRuntimeFactory()
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
-  uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
+  uploadTaskLog.mockResolvedValue({ status: "changed", accepted: 0, truncated: false })
   blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
     const aborted = deferred<{ error: { code: string; message: string } }>()
     if (signal.aborted) {
@@ -445,6 +445,8 @@ describe("RunnerHost", () => {
     const secondSignalRStarted = deferred<void>()
     const secondSignalRRelease = deferred<void>()
     const disconnectedAfterFailure = deferred<void>()
+    const retryWaitStarted = deferred<number>()
+    const retryWaitRelease = deferred<void>()
     const firstPollStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
     probeLiveness.mockResolvedValue(true)
@@ -469,6 +471,11 @@ describe("RunnerHost", () => {
         await secondSignalRRelease.promise
       })
     stopSignalR.mockResolvedValue(undefined)
+    const waitForConnectionRetry = vi.fn(async (delayMs: number, signal: AbortSignal) => {
+      retryWaitStarted.resolve(delayMs)
+      await retryWaitRelease.promise
+      if (signal.aborted) throw signal.reason
+    })
     const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
@@ -477,13 +484,15 @@ describe("RunnerHost", () => {
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    }, undefined, { waitForConnectionRetry })
 
     const run = host.run(controller.signal)
     try {
       await firstSignalRStarted.promise
       await disconnectedAfterFailure.promise
-      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await expect(retryWaitStarted.promise).resolves.toBe(POLL_INTERVAL_MS)
+      expect(waitForConnectionRetry).toHaveBeenCalledWith(POLL_INTERVAL_MS, controller.signal)
+      retryWaitRelease.resolve()
       await secondSignalRStarted.promise
       expect(poll).not.toHaveBeenCalled()
       expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
@@ -499,6 +508,7 @@ describe("RunnerHost", () => {
         expect.objectContaining({ level: "ERROR", message: "runner connection failed; retrying", fields: expect.objectContaining({ exception: signalRUnavailable }) }),
       ]))
     } finally {
+      retryWaitRelease.resolve()
       secondSignalRRelease.resolve()
       controller.abort()
       await run.catch(() => undefined)
