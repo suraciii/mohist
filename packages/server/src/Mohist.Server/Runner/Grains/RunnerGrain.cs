@@ -147,6 +147,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             SetRunnerInfo(InfoForRegister(info));
             _status = RunnerStatus.Online;
+            // A successful registration is the reconnect boundary for an
+            // update interruption. The new process may now reconcile the
+            // durable AgentJob ledger and receive the preserved work again.
+            _draining = false;
             _lastPresenceAt = _timeProvider.GetUtcNow();
             _pendingBuildGitHash = null;
             _pendingRuntimeIdentity = null;
@@ -269,6 +273,23 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
+    public async Task<RunnerRuntimeState?> BeginUpdateInterruptAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_status != RunnerStatus.Online || _info is null)
+                return null;
+
+            _draining = true;
+            return await BuildRuntimeStateAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
     public async Task CancelDrainAsync()
     {
         await _lifecycleGate.WaitAsync();
@@ -366,6 +387,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     }
 
     public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
+    {
+        return await BuildRuntimeStateAsync();
+    }
+
+    private async Task<RunnerRuntimeState> BuildRuntimeStateAsync()
     {
         // Both owner ledgers are projected into the unified runtime view.
         var activeWorks = new List<RunnerActiveWorkItem>();
