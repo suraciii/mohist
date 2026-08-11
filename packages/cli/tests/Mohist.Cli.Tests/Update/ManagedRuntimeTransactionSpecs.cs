@@ -76,6 +76,126 @@ public sealed class ManagedRuntimeTransactionSpecs
     }
 
     [Fact]
+    public async Task PrepareServer_PreparesNodeDependenciesOnceBeforePublish()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "server",
+            "tx-server-node-deps",
+            null);
+
+        Assert.NotNull(prepared.Session);
+        var npm = Assert.Single(fixture.Commands.ExecutedCommands, command => command.FileName == "npm");
+        Assert.Equal(["ci", "--include=dev"], npm.Args);
+        Assert.Equal(
+            Path.Combine(fixture.RuntimeRoot, "transactions", "tx-server-node-deps", "build", "source").Replace('\\', '/'),
+            npm.WorkingDirectory);
+
+        var npmIndex = fixture.Commands.ExecutedCommands.IndexOf(npm);
+        var publishIndex = fixture.Commands.ExecutedCommands.FindIndex(command =>
+            command.FileName == "dotnet" && command.Args.Contains("publish"));
+        Assert.True(npmIndex >= 0 && npmIndex < publishIndex);
+    }
+
+    [Fact]
+    public async Task PrepareFull_PreparesNodeDependenciesOnceBeforeEveryBuild()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "full",
+            "tx-full-node-deps",
+            null);
+
+        Assert.NotNull(prepared.Session);
+        var npmCi = Assert.Single(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "npm" && command.Args.SequenceEqual(["ci", "--include=dev"]));
+        var npmCiIndex = fixture.Commands.ExecutedCommands.IndexOf(npmCi);
+        var cliPublishIndex = fixture.Commands.ExecutedCommands.FindIndex(command =>
+            command.FileName == "dotnet"
+            && command.Args.Any(argument => argument.EndsWith(
+                Path.Combine("packages", "cli", "Mohist.Cli", "Mohist.Cli.csproj"),
+                StringComparison.Ordinal)));
+        var serverPublishIndex = fixture.Commands.ExecutedCommands.FindIndex(command =>
+            command.FileName == "dotnet"
+            && command.Args.Any(argument => argument.EndsWith(
+                Path.Combine("packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj"),
+                StringComparison.Ordinal)));
+        var runnerBuildIndex = fixture.Commands.ExecutedCommands.FindIndex(command =>
+            command.FileName == "npm"
+            && command.Args.SequenceEqual(["run", "build", "-w", "packages/runner"]));
+
+        Assert.True(npmCiIndex >= 0);
+        Assert.True(cliPublishIndex > npmCiIndex);
+        Assert.True(serverPublishIndex > npmCiIndex);
+        Assert.True(runnerBuildIndex > npmCiIndex);
+        Assert.Equal(1, fixture.Activator.ApplyCalls);
+    }
+
+    [Fact]
+    public async Task PrepareRunner_PreparesNodeDependenciesOnceBeforeBuild()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-node-deps",
+            null);
+
+        Assert.NotNull(prepared.Session);
+        var npmCi = Assert.Single(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "npm" && command.Args.SequenceEqual(["ci", "--include=dev"]));
+        var runnerBuild = Assert.Single(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "npm" && command.Args.SequenceEqual(["run", "build", "-w", "packages/runner"]));
+        Assert.Equal(2, fixture.Commands.ExecutedCommands.Count(command => command.FileName == "npm"));
+        Assert.True(
+            fixture.Commands.ExecutedCommands.IndexOf(npmCi)
+            < fixture.Commands.ExecutedCommands.IndexOf(runnerBuild));
+        Assert.DoesNotContain(fixture.Commands.ExecutedCommands, command => command.FileName == "dotnet");
+    }
+
+    [Fact]
+    public async Task PrepareFull_WhenNodeDependenciesFail_StopsBeforeBuildAndActivation()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+        fixture.Commands.SetResultFor(
+            "npm",
+            args => args.SequenceEqual(["ci", "--include=dev"]),
+            127,
+            "",
+            "sh: tsc: not found");
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "full",
+            "tx-full-node-deps-failure",
+            null);
+
+        Assert.Null(prepared.Session);
+        Assert.Contains("Node dependencies", prepared.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(fixture.Commands.ExecutedCommands, command => command.FileName == "npm");
+        Assert.DoesNotContain(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "dotnet" || command.Args.SequenceEqual(["run", "build", "-w", "packages/runner"]));
+        Assert.Equal(0, fixture.Activator.ApplyCalls);
+        Assert.False(fixture.Files.HasFile(fixture.ActivePath));
+        Assert.False(fixture.Files.HasFile(fixture.VerifiedPath));
+        Assert.False(fixture.Files.DirectoryExists(Path.Combine(
+            fixture.RuntimeRoot,
+            "transactions",
+            "tx-full-node-deps-failure",
+            "snapshot",
+            "packages",
+            "server",
+            "src",
+            "Mohist.Server",
+            "obj")));
+    }
+
+    [Fact]
     public async Task Prepare_WhenActivationFails_RestoresFailClosedState()
     {
         var fixture = ManagedFixture.Create(activationCode: 17);
@@ -178,6 +298,27 @@ public sealed class ManagedRuntimeTransactionSpecs
                     return;
                 }
 
+                if (fileName == "cp" && args.Length == 3 && args[0] == "-RL")
+                {
+                    var source = args[1];
+                    var target = args[2];
+                    if (source.EndsWith("/dist", StringComparison.Ordinal))
+                    {
+                        files.AddDirectory(target);
+                        files.AddFile(Path.Combine(target, "cli.js"), "runner payload");
+                    }
+                    else if (source.EndsWith("/package.json", StringComparison.Ordinal))
+                    {
+                        files.AddFile(target, "{}");
+                    }
+                    else if (source.EndsWith("/node_modules", StringComparison.Ordinal))
+                    {
+                        files.AddDirectory(target);
+                        files.AddFile(Path.Combine(target, "typescript", "bin", "tsc"), "tsc");
+                    }
+                    return;
+                }
+
                 if (fileName != "dotnet" || !args.Contains("publish"))
                     return;
 
@@ -188,7 +329,10 @@ public sealed class ManagedRuntimeTransactionSpecs
                     return;
                 var output = args[outputIndex + 1];
                 files.AddDirectory(output);
-                files.AddFile(Path.Combine(output, "Mohist.Server"), "immutable server payload");
+                var entryName = project.Contains("Mohist.Cli", StringComparison.Ordinal)
+                    ? "Mohist.Cli"
+                    : "Mohist.Server";
+                files.AddFile(Path.Combine(output, entryName), $"immutable {entryName} payload");
             };
 
             var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
