@@ -24,9 +24,11 @@ public static class WorkflowRunWorkProjectionBuilder
             .ToList();
 
         var assignedWorkerId = run.Assignment?.WorkerId;
-        var active = string.IsNullOrWhiteSpace(assignedWorkerId)
-            ? null
-            : run.CurrentActiveWorkFor(assignedWorkerId);
+            var active = string.IsNullOrWhiteSpace(assignedWorkerId)
+                ? null
+                : run.CurrentActiveWorkFor(assignedWorkerId);
+            if (run.HasUnresolvedAgentResult())
+                active = null;
         var activeWorkId = active is null
             ? null
             : EffectiveWorkId(active.WorkId, active.TaskRunId);
@@ -169,7 +171,7 @@ public sealed class WorkflowRunWorkProjection : IWorkflowRunWorkProjection
         if (run.Status == WorkflowRunStatus.Stopped)
         {
             var interruptedTasks = currentStage.Tasks.Where(task =>
-                task.Status == TaskRunStatus.Running
+                task.Status is TaskRunStatus.Running or TaskRunStatus.Cancelled
                 && !string.IsNullOrWhiteSpace(task.WorkerId)
                 && (!string.IsNullOrWhiteSpace(task.WorkId) || !string.IsNullOrWhiteSpace(task.Id)))
                 .Take(2)
@@ -178,7 +180,7 @@ public sealed class WorkflowRunWorkProjection : IWorkflowRunWorkProjection
         }
 
         return currentStage.Tasks.LastOrDefault(task =>
-            (task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed)
+            (task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled)
             && !string.IsNullOrWhiteSpace(task.WorkerId)
             && (!string.IsNullOrWhiteSpace(task.WorkId) || !string.IsNullOrWhiteSpace(task.Id)));
     }

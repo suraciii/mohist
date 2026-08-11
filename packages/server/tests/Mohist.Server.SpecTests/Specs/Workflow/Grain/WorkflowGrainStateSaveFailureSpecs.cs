@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -210,12 +212,114 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         Assert.NotNull(await snapshotStore.LoadJsonAsync(workflowRunId, workId));
     }
 
+    [Fact]
+    public async Task UnknownObservation_ReminderRegistrationFailureIsRepairedOnActivation()
+    {
+        const string workflowRunId = "wr-settlement-register-recovery";
+        const string projectId = "proj-settlement-register-recovery";
+        const string workerId = "worker-settlement-register-recovery";
+        var calls = new ReminderCalls { FailNextEnsure = true };
+
+        await SeedWorkflowTemplateAsync(projectId, AgentWorkflowDefinition());
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var failing = CreateReminderGrain(scope.ServiceProvider, store, workflowRunId, calls);
+        await failing.OnActivateAsync(CancellationToken.None);
+        var binding = await StartAgentWorkAsync(failing, store, workflowRunId, projectId, workerId);
+        var observation = new AgentExecutionObservation(
+            binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            failing.ObserveAgentExecutionAsync(observation));
+
+        var persisted = await store.LoadAsync(workflowRunId);
+        var settlement = Assert.IsType<AgentResultSettlement>(Assert.Single(persisted!.CurrentStage().Tasks).AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.Unknown, settlement.State);
+        Assert.NotNull(settlement.DeadlineAt);
+        Assert.Equal(1, calls.EnsureAttempts);
+
+        Assert.Equal(ReportAck.Accepted, await failing.ObserveAgentExecutionAsync(observation));
+        var retried = await store.LoadAsync(workflowRunId);
+        var retriedSettlement = Assert.IsType<AgentResultSettlement>(
+            Assert.Single(retried!.CurrentStage().Tasks).AgentResultSettlement);
+        Assert.Equal(settlement.DeadlineAt, retriedSettlement.DeadlineAt);
+        Assert.Equal(2, calls.EnsureAttempts);
+
+        var recovered = CreateReminderGrain(scope.ServiceProvider, store, workflowRunId, calls);
+        await recovered.OnActivateAsync(CancellationToken.None);
+
+        Assert.Equal(3, calls.EnsureAttempts);
+        Assert.Equal(0, calls.RemoveAttempts);
+    }
+
+    [Fact]
+    public async Task ExplicitStop_ReminderRemovalFailureIsRepairedOnActivation()
+    {
+        const string workflowRunId = "wr-settlement-remove-recovery";
+        const string projectId = "proj-settlement-remove-recovery";
+        const string workerId = "worker-settlement-remove-recovery";
+        var calls = new ReminderCalls { FailNextRemove = true };
+
+        await SeedWorkflowTemplateAsync(projectId, AgentWorkflowDefinition());
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var failing = CreateReminderGrain(scope.ServiceProvider, store, workflowRunId, calls);
+        await failing.OnActivateAsync(CancellationToken.None);
+        var binding = await StartAgentWorkAsync(failing, store, workflowRunId, projectId, workerId);
+        await failing.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+            binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => failing.StopAsync("operator stop"));
+
+        var stopped = await store.LoadAsync(workflowRunId);
+        Assert.Equal(WorkflowRunStatus.Stopped, stopped!.Status);
+        Assert.Equal(TaskRunStatus.Cancelled, Assert.Single(stopped.CurrentStage().Tasks).Status);
+        Assert.Equal(1, calls.RemoveAttempts);
+
+        var recovered = CreateReminderGrain(scope.ServiceProvider, store, workflowRunId, calls);
+        await recovered.OnActivateAsync(CancellationToken.None);
+
+        Assert.Equal(2, calls.RemoveAttempts);
+    }
+
+    private static WorkflowDefinition AgentWorkflowDefinition() => new([
+        new StageDefinition("plan", [new("agent", "Agent", "mohist/opencode")], []),
+    ]);
+
+    private static async Task<AgentExecutionBinding> StartAgentWorkAsync(
+        WorkflowGrain grain,
+        IWorkflowRunStore store,
+        string workflowRunId,
+        string projectId,
+        string workerId)
+    {
+        await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
+        await grain.AssignWorkerAsync(workerId);
+        var work = await grain.ClaimNextAsync(workerId);
+        Assert.NotNull(work);
+        var run = await store.LoadAsync(workflowRunId);
+        var task = Assert.Single(
+            run!.Stages.SelectMany(stage => stage.Tasks),
+            candidate => candidate.Status == TaskRunStatus.Running
+                && candidate.AgentResultSettlement is not null);
+        var binding = new AgentExecutionBinding(
+            task.Id,
+            work!.Id!,
+            workerId,
+            "agent-session",
+            "agent-turn",
+            "opencode",
+            "runtime-session");
+        Assert.Equal(ReportAck.Accepted, await grain.BindAgentExecutionAsync(binding));
+        return binding;
+    }
+
     private static WorkflowGrain CreateGrain(
         IServiceProvider services,
         IWorkflowRunStore store,
         string workflowRunId)
     {
-        var identity = GrainTestContext.Create(workflowRunId, new StubProfileCoordinatorGrainFactory());
+        var identity = GrainTestContext.Create(workflowRunId, new WorkflowGrainTestProfileCoordinatorFactory());
         return new WorkflowGrain(
             identity.Context,
             identity.Runtime,
@@ -223,30 +327,71 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             services.GetRequiredService<IDispatchSnapshotStore>(),
             services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowVariableResolver>(),
+            Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
     }
 
-    private async Task SeedWorkflowTemplateAsync(string projectId)
+    private static ReminderWorkflowGrain CreateReminderGrain(
+        IServiceProvider services,
+        IWorkflowRunStore store,
+        string workflowRunId,
+        ReminderCalls calls)
+    {
+        var identity = GrainTestContext.Create(workflowRunId, new WorkflowGrainTestProfileCoordinatorFactory());
+        return new ReminderWorkflowGrain(
+            identity.Context,
+            identity.Runtime,
+            store,
+            services.GetRequiredService<IDispatchSnapshotStore>(),
+            services.GetRequiredService<WorkflowDefinitionResolver>(),
+            services.GetRequiredService<WorkflowVariableResolver>(),
+            Options.Create(new WorkflowOptions()),
+            TimeProvider,
+            NullLogger<WorkflowGrain>.Instance,
+            calls);
+    }
+
+    private async Task SeedWorkflowTemplateAsync(string projectId, WorkflowDefinition? definition = null)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
-        var definition = new WorkflowDefinition( [
+        definition ??= new WorkflowDefinition([
             new StageDefinition("plan", [new("draft", "Draft", "spec/task")], []),
         ]);
-        const string templateId = "spec/workflow";
-        db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+        const string profileId = "spec/workflow";
+        var profile = await db.WorkflowProfileRecords.FindAsync(projectId, profileId);
+        if (profile is null)
         {
-            ProjectId = projectId,
-            TemplateId = templateId,
-            Template = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId),
-        });
-        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            db.WorkflowProfileRecords.Add(new WorkflowProfileRecordRow
+            {
+                ProjectId = projectId,
+                ProfileId = profileId,
+                Name = profileId,
+                DefinitionSource = WorkflowYamlSerializer.ToYaml(definition),
+                SourceProvenance = nameof(WorkflowProfileSourceProvenance.Verbatim),
+            });
+        }
+        else
         {
-            ProjectId = projectId,
-            DefaultWorkflowProfileId = "mohist/local",
-        });
+            profile.DefinitionSource = WorkflowYamlSerializer.ToYaml(definition);
+            profile.UpdatedAt = FixedTime;
+        }
+
+        var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
+        if (projectProfile is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                DefaultWorkflowProfileId = profileId,
+            });
+        }
+        else
+        {
+            projectProfile.DefaultWorkflowProfileId = profileId;
+        }
         await db.SaveChangesAsync();
     }
 
@@ -287,103 +432,58 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             _inner.DeleteAsync(workflowRunId, ct);
     }
 
-    /// <summary>
-    /// Minimal <see cref="IGrainFactory"/> that returns a stub
-    /// <see cref="IWorkflowProfileReferenceCoordinatorGrain"/> for any string
-    /// key. The stub yields an <see cref="WorkflowProfileReferenceResultCode.Applied"/>
-    /// result for any bind request, mirroring the pre-removal
-    /// <c>BindProfileForTest</c> behaviour these specs depended on, but via
-    /// the production grain call site — no override hook on
-    /// <see cref="WorkflowGrain"/>.
-    /// </summary>
-    private sealed class StubProfileCoordinatorGrainFactory : IGrainFactory
+    private sealed class ReminderCalls
     {
-        private static readonly IWorkflowProfileReferenceCoordinatorGrain Stub = new StubCoordinatorGrain();
+        public bool FailNextEnsure { get; set; }
+        public bool FailNextRemove { get; set; }
+        public int EnsureAttempts { get; set; }
+        public int RemoveAttempts { get; set; }
+    }
 
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
+    private sealed class ReminderWorkflowGrain : WorkflowGrain
+    {
+        private readonly ReminderCalls _calls;
+
+        public ReminderWorkflowGrain(
+            Orleans.Runtime.IGrainContext context,
+            Orleans.Runtime.IGrainRuntime runtime,
+            IWorkflowRunStore runStore,
+            IDispatchSnapshotStore dispatchSnapshotStore,
+            WorkflowDefinitionResolver definitionResolver,
+            WorkflowVariableResolver variableResolver,
+            IOptions<WorkflowOptions> options,
+            TimeProvider timeProvider,
+            ILogger<WorkflowGrain> log,
+            ReminderCalls calls)
+            : base(context, runtime, runStore, dispatchSnapshotStore, definitionResolver, variableResolver,
+                options, timeProvider, log)
         {
-            if (typeof(TGrainInterface) == typeof(IWorkflowProfileReferenceCoordinatorGrain))
-                return (TGrainInterface)(object)Stub;
-            throw new NotSupportedException(
-                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+            _calls = calls;
         }
 
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException(
-                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+        protected override Task EnsureAgentResultSettlementReminderAsync(DateTimeOffset deadline)
+        {
+            _calls.EnsureAttempts++;
+            if (_calls.FailNextEnsure)
+            {
+                _calls.FailNextEnsure = false;
+                throw new InvalidOperationException("simulated reminder registration failure");
+            }
 
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException(
-                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+            return Task.CompletedTask;
+        }
 
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException(
-                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+        protected override Task RemoveAgentResultSettlementReminderAsync()
+        {
+            _calls.RemoveAttempts++;
+            if (_calls.FailNextRemove)
+            {
+                _calls.FailNextRemove = false;
+                throw new InvalidOperationException("simulated reminder removal failure");
+            }
 
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException(
-                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
-
-        TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
-            => throw new NotSupportedException();
+            return Task.CompletedTask;
+        }
     }
 
-    private sealed class StubCoordinatorGrain : IWorkflowProfileReferenceCoordinatorGrain
-    {
-        public Task<WorkflowProfileReferenceResult> SetProjectDefaultAsync(
-            WorkflowProfileCommandPayload.SetProjectDefault payload,
-            string commandId,
-            long? expectedRevision) =>
-            throw new NotSupportedException(
-                $"{nameof(StubCoordinatorGrain)} only supports BindWorkflowRunAsync");
-
-        public Task<WorkflowProfileReferenceResult> BindWorkflowRunAsync(
-            WorkflowProfileCommandPayload.BindWorkflowRun payload,
-            string commandId,
-            long? expectedRevision) =>
-            Task.FromResult(new WorkflowProfileReferenceResult(
-                WorkflowProfileReferenceResultCode.Applied,
-                payload.ProfileId,
-                expectedRevision ?? 1L));
-
-        public Task<WorkflowProfileReferenceResult> DeleteProfileAsync(
-            WorkflowProfileCommandPayload.DeleteProfile payload,
-            string commandId,
-            long? expectedRevision) =>
-            throw new NotSupportedException(
-                $"{nameof(StubCoordinatorGrain)} only supports BindWorkflowRunAsync");
-    }
 }

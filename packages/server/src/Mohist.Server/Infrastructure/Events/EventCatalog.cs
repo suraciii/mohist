@@ -29,6 +29,11 @@ public static class EventCatalog
         ReverseDns.TaskStarted,
         ReverseDns.TaskCompleted,
         ReverseDns.TaskFailed,
+        ReverseDns.TaskCancelled,
+        ReverseDns.AgentTaskResultUnconfirmed,
+        ReverseDns.TaskBlocked,
+        ReverseDns.StageBlocked,
+        ReverseDns.WorkflowRunBlocked,
         ReverseDns.CheckPassed,
         ReverseDns.CheckFailed,
         ReverseDns.CheckPending,
@@ -162,6 +167,11 @@ public static class EventCatalog
         public const string TaskStarted = "com.mohist.workflow.task.started";
         public const string TaskCompleted = "com.mohist.workflow.task.completed";
         public const string TaskFailed = "com.mohist.workflow.task.failed";
+        public const string TaskCancelled = "com.mohist.workflow.task.cancelled";
+        public const string AgentTaskResultUnconfirmed = "com.mohist.workflow.agent-result-unconfirmed";
+        public const string TaskBlocked = "com.mohist.workflow.task.blocked";
+        public const string StageBlocked = "com.mohist.workflow.stage.blocked";
+        public const string WorkflowRunBlocked = "com.mohist.workflow.run.blocked";
         public const string CheckPassed = "com.mohist.workflow.check.passed";
         public const string CheckFailed = "com.mohist.workflow.check.failed";
         public const string CheckPending = "com.mohist.workflow.check.pending";

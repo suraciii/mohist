@@ -36,6 +36,10 @@ public sealed record WorkflowPendingWork(
     string Stage,
     string Title);
 
+public sealed record WorkflowAgentResultSettlementTask(
+    string Stage,
+    TaskRun Task);
+
 public static partial class WorkflowRunExtensions
 {
     public static string ChecksWorkIdFor(string stage) => $"checks-{stage}";
@@ -44,6 +48,8 @@ public static partial class WorkflowRunExtensions
     {
         public WorkflowWork? NextWork()
         {
+            if (run.HasUnresolvedAgentResult()) return null;
+
             var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
             if (current is null) return null;
 
@@ -135,7 +141,35 @@ public static partial class WorkflowRunExtensions
         /// </summary>
         public bool HasUnresolvedAgentResult() =>
             run.Stages.SelectMany(stage => stage.Tasks)
-                .Any(task => task.AgentResultSettlement is not null);
+                .Any(task => task.Status == TaskRunStatus.Running
+                    && task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
+
+        public WorkflowAgentResultSettlementTask? FindAgentResultSettlementTask(
+            AgentExecutionBinding binding)
+        {
+            var found = FindTaskAttempt(run, binding.TaskRunId, binding.WorkId, binding.RunnerId);
+            return found is { } match && match.Task.AgentResultSettlement is not null
+                ? new WorkflowAgentResultSettlementTask(match.Stage.Id, match.Task)
+                : null;
+        }
+
+        public WorkflowAgentResultSettlementTask? FindUnresolvedAgentResultSettlementTask() =>
+            run.Stages
+                .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentResultSettlementTask(stage.Id, task)))
+                .SingleOrDefault(candidate => candidate.Task.Status == TaskRunStatus.Running
+                    && candidate.Task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
+
+        public WorkflowAgentResultSettlementTask? FindCancelledAgentResultSettlementTask() =>
+            run.Stages
+                .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentResultSettlementTask(stage.Id, task)))
+                .SingleOrDefault(candidate => candidate.Task.Status == TaskRunStatus.Cancelled
+                    && candidate.Task.AgentResultSettlement is not null);
+
+        public WorkflowAgentResultSettlementTask? FindTerminalAgentResultSettlementTask() =>
+            run.Stages
+                .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentResultSettlementTask(stage.Id, task)))
+                .SingleOrDefault(candidate => candidate.Task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed
+                    && candidate.Task.AgentResultSettlement is not null);
 
         public AgentExecutionUpdate BindAgentExecution(AgentExecutionBinding binding)
         {
@@ -165,8 +199,11 @@ public static partial class WorkflowRunExtensions
 
         public AgentExecutionUpdate ObserveAgentExecution(
             AgentExecutionObservation observation,
-            DateTimeOffset now)
+            DateTimeOffset now,
+            TimeSpan settlementTimeout)
         {
+            if (settlementTimeout <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(settlementTimeout));
             if (!IsValid(observation.Binding) || string.IsNullOrWhiteSpace(observation.ReasonCode))
                 return AgentExecutionUpdate.Rejected;
 
@@ -189,9 +226,13 @@ public static partial class WorkflowRunExtensions
                 ? AgentResultSettlementState.Unknown
                 : settlement.State;
             var firstUnknownAt = settlement.FirstUnknownAt ?? now;
+            var deadlineAt = state == AgentResultSettlementState.Unknown
+                ? settlement.DeadlineAt ?? firstUnknownAt + settlementTimeout
+                : settlement.DeadlineAt;
             var stopOperationId = observation.StopOperationId ?? settlement.StopOperationId;
             if (settlement.State == state
                 && settlement.FirstUnknownAt == firstUnknownAt
+                && settlement.DeadlineAt == deadlineAt
                 && settlement.LastObservation == observation.Kind
                 && string.Equals(settlement.ReasonCode, observation.ReasonCode, StringComparison.Ordinal)
                 && string.Equals(settlement.Message, observation.Message, StringComparison.Ordinal)
@@ -202,6 +243,7 @@ public static partial class WorkflowRunExtensions
 
             settlement.State = state;
             settlement.FirstUnknownAt = firstUnknownAt;
+            settlement.DeadlineAt = deadlineAt;
             settlement.LastObservation = observation.Kind;
             settlement.ReasonCode = observation.ReasonCode;
             settlement.Message = observation.Message;
@@ -209,14 +251,37 @@ public static partial class WorkflowRunExtensions
             return AgentExecutionUpdate.Updated;
         }
 
+        public IReadOnlyList<WorkflowEvent> BlockUnresolvedAgentResult(DateTimeOffset now)
+        {
+            var unresolved = run.FindUnresolvedAgentResultSettlementTask();
+            var settlement = unresolved?.Task.AgentResultSettlement;
+            if (unresolved is null
+                || settlement?.State != AgentResultSettlementState.Unknown
+                || settlement.DeadlineAt is not { } deadline
+                || deadline > now)
+            {
+                return [];
+            }
+
+            settlement.State = AgentResultSettlementState.Blocked;
+            const string reason = "agent-result-unconfirmed";
+            return
+            [
+                new TaskBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline),
+                new StageBlocked(unresolved.Stage, unresolved.Task.Id, reason),
+                new WorkflowRunBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline)
+            ];
+        }
+
         public WorkflowPendingWork? CurrentPendingWork()
         {
+            if (run.HasUnresolvedAgentResult()) return null;
             if (run.CurrentStageId is null) return null;
             if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running)) return null;
 
             var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
             if (current is null) return null;
-            var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
+            var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
             if (task is not null)
                 return new WorkflowPendingWork(task.Id, WorkItemTypes.Task, current.Id, task.Title);
 
@@ -241,6 +306,8 @@ public static partial class WorkflowRunExtensions
             bool invalidateChecks = false,
             string? causedByFeedbackId = null)
         {
+            if (run.HasUnresolvedAgentResult())
+                throw new InvalidOperationException("agent_result_unresolved");
             var current = run.CurrentStage();
             if (!current.Initialized)
                 throw new InvalidOperationException($"Cannot add runtime task: stage {current.Id} is not initialized");
@@ -248,7 +315,7 @@ public static partial class WorkflowRunExtensions
                 throw new InvalidOperationException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
 
             var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0
@@ -289,9 +356,11 @@ public static partial class WorkflowRunExtensions
             IReadOnlyList<(TaskDefinition Definition, int? RecoveryRemaining)> tasks,
             DateTimeOffset now)
         {
+            if (run.HasUnresolvedAgentResult())
+                throw new InvalidOperationException("agent_result_unresolved");
             var current = run.CurrentStage();
             var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0

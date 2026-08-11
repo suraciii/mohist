@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -84,6 +85,7 @@ public sealed class WorkflowGrainProductionContractSpecs
             scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>(),
             definitionResolver,
             variableResolver,
+            Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
         await grain.OnActivateAsync(CancellationToken.None);

@@ -21,10 +21,25 @@ public partial class WorkflowGrain
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
 
-        var update = _run.ObserveAgentExecution(observation, Now());
+        var existing = _run.FindAgentResultSettlementTask(observation.Binding);
+        var wasAwaitingResult = existing?.Task.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult;
+        var update = _run.ObserveAgentExecution(observation, Now(), _agentResultSettlementTimeout);
         if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
         if (update == AgentExecutionUpdate.Updated)
-            await CommitAsync([]);
+        {
+            var settlement = _run.FindAgentResultSettlementTask(observation.Binding)?.Task.AgentResultSettlement;
+            IReadOnlyList<WorkflowEvent> events = wasAwaitingResult && settlement?.DeadlineAt is { } deadline
+                ? [new AgentTaskResultUnconfirmed(
+                    existing!.Stage,
+                    existing.Task.Id,
+                    settlement.WorkId,
+                    observation.ReasonCode,
+                    deadline)]
+                : [];
+            await CommitAsync(events);
+        }
+
+        await ReconcileAgentResultSettlementAsync();
         return ReportAck.Accepted;
     }
 
@@ -34,6 +49,8 @@ public partial class WorkflowGrain
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var activeWork = _run.CurrentActiveWorkFor(workerId);
         if (activeWork is null) return ReportAck.Stale;
+        if (activeWork.IsTask && _run.CurrentStage().RunningTask?.AgentResultSettlement is not null)
+            return ReportAck.Stale;
 
         var now = Now();
         IReadOnlyList<WorkflowEvent> events;
@@ -67,6 +84,8 @@ public partial class WorkflowGrain
 
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null) return ReportAck.Stale;
+        if (activeWork.IsTask && _run.CurrentStage().RunningTask?.AgentResultSettlement is not null)
+            return ReportAck.Stale;
 
         await _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
 
@@ -152,6 +171,7 @@ public partial class WorkflowGrain
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
+        var hadAgentResultSettlement = _run.CurrentStage().RunningTask?.AgentResultSettlement is not null;
 
         _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
             GrainKey, workId, report.Status, report.Detail ?? "(none)");
@@ -159,7 +179,10 @@ public partial class WorkflowGrain
         var events = await _workLifecycle.ApplyTaskReportAsync(_run, report, activeWork.TaskRunId);
 
         await CommitAsync(events);
-        await DeleteSnapshotBestEffortAsync(workId);
+        if (hadAgentResultSettlement)
+            await ReconcileAgentResultSettlementAsync();
+        else
+            await DeleteSnapshotBestEffortAsync(workId);
         return ReportAck.Accepted;
     }
 

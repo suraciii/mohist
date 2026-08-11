@@ -41,7 +41,6 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Completed;
-            task.AgentResultSettlement = null;
             var events = new List<WorkflowEvent>
             {
                 new TaskCompleted(current.Id, task.Id)
@@ -70,7 +69,6 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
-            task.AgentResultSettlement = null;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: result.Reason, Error: result.Error);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
@@ -91,10 +89,24 @@ public static partial class WorkflowRunExtensions
             var message = string.IsNullOrWhiteSpace(reason) ? "stopped" : reason;
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
-            task.AgentResultSettlement = null;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: message);
             run.Failure = current.Failure;
             return [new TaskFailed(current.Id, task.Id, message)];
+        }
+
+        public IReadOnlyList<WorkflowEvent> CancelUnresolvedAgentTaskForStop(DateTimeOffset now)
+        {
+            var current = run.CurrentStage();
+            var task = current.RunningTask;
+            if (task?.AgentResultSettlement?.State is not
+                (AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked))
+            {
+                return [];
+            }
+
+            task.FinishedAt = now;
+            task.Status = TaskRunStatus.Cancelled;
+            return [new TaskCancelled(current.Id, task.Id)];
         }
 
         /// <summary>

@@ -171,6 +171,7 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task ResumeAsync() => Task.CompletedTask;
         public Task PauseAsync(string? reason = null) => Task.CompletedTask;
         public Task StopAsync(string? reason = null) => Task.CompletedTask;
+        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
         public Task ApproveAsync(string? decidedBy = null, string? displayName = null) => Task.CompletedTask;
         public Task<string> RequestChangesAsync(string body, string? decidedBy = null, string? displayName = null) => Task.FromResult(string.Empty);
         public Task RetryAsync() => Task.CompletedTask;

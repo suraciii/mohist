@@ -9,6 +9,7 @@ namespace Mohist.Server.UnitTests.Workflow.Domain;
 public sealed class AgentResultSettlementTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 12, 0, 0, 0, TimeSpan.Zero);
+    private static readonly TimeSpan SettlementTimeout = TimeSpan.FromMinutes(5);
 
     [Theory]
     [InlineData("mohist/agent")]
@@ -25,7 +26,7 @@ public sealed class AgentResultSettlementTests
         Assert.Equal(task.Id, settlement.TaskRunId);
         Assert.Equal("agent-work", settlement.WorkId);
         Assert.Equal("runner-1", settlement.RunnerId);
-        Assert.True(run.HasUnresolvedAgentResult());
+        Assert.False(run.HasUnresolvedAgentResult());
     }
 
     [Fact]
@@ -86,13 +87,14 @@ public sealed class AgentResultSettlementTests
 
         var observation = new AgentExecutionObservation(binding, kind, "physical-fact", "physical detail", "stop-1");
 
-        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(observation, Now));
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(observation, Now, SettlementTimeout));
 
         var settlement = Assert.IsType<AgentResultSettlement>(task.AgentResultSettlement);
         Assert.Equal(AgentResultSettlementState.Unknown, settlement.State);
         Assert.Equal(kind, settlement.LastObservation);
         Assert.Equal("physical-fact", settlement.ReasonCode);
         Assert.Equal(Now, settlement.FirstUnknownAt);
+        Assert.Equal(Now + SettlementTimeout, settlement.DeadlineAt);
         Assert.Equal(TaskRunStatus.Running, task.Status);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
         Assert.Null(run.Failure);
@@ -108,14 +110,14 @@ public sealed class AgentResultSettlementTests
         var binding = Binding(task);
         var observation = new AgentExecutionObservation(binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed", StopOperationId: "stop-1");
         Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(binding));
-        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(observation, Now));
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(observation, Now, SettlementTimeout));
         var before = JSON.Serialize(task.AgentResultSettlement);
 
-        Assert.Equal(AgentExecutionUpdate.Unchanged, run.ObserveAgentExecution(observation, Now.AddMinutes(1)));
+        Assert.Equal(AgentExecutionUpdate.Unchanged, run.ObserveAgentExecution(observation, Now.AddMinutes(1), SettlementTimeout));
         Assert.Equal(AgentExecutionUpdate.Unchanged, run.ObserveAgentExecution(
-            observation with { StopOperationId = null }, Now.AddMinutes(1)));
+            observation with { StopOperationId = null }, Now.AddMinutes(1), SettlementTimeout));
         Assert.Equal(AgentExecutionUpdate.Rejected, run.ObserveAgentExecution(
-            observation with { Binding = binding with { AgentTurnId = "reused-session-new-turn" } }, Now));
+            observation with { Binding = binding with { AgentTurnId = "reused-session-new-turn" } }, Now, SettlementTimeout));
 
         Assert.Equal(before, JSON.Serialize(task.AgentResultSettlement));
     }
@@ -130,7 +132,7 @@ public sealed class AgentResultSettlementTests
 
         AssertReportable(run, task);
         Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(
-            new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected"), Now));
+            new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected"), Now, SettlementTimeout));
         AssertReportable(run, task);
 
         task.AgentResultSettlement!.State = AgentResultSettlementState.Blocked;
@@ -161,7 +163,7 @@ public sealed class AgentResultSettlementTests
         Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(secondBinding));
 
         Assert.Equal(AgentExecutionUpdate.Rejected, run.ObserveAgentExecution(
-            new AgentExecutionObservation(firstBinding, AgentExecutionObservationKind.Idle, "old-turn-idle"), Now));
+            new AgentExecutionObservation(firstBinding, AgentExecutionObservationKind.Idle, "old-turn-idle"), Now, SettlementTimeout));
         Assert.Equal(AgentResultSettlementState.AwaitingResult, second.AgentResultSettlement!.State);
         Assert.Equal(TaskRunStatus.Completed, first.Status);
         Assert.Equal(TaskRunStatus.Running, second.Status);
@@ -184,6 +186,81 @@ public sealed class AgentResultSettlementTests
             @event => Assert.IsType<TaskFailed>(WorkflowEventSerializer.Unwrap(@event)),
             @event => Assert.IsType<StageFailed>(WorkflowEventSerializer.Unwrap(@event)),
             @event => Assert.IsType<WorkflowRunFailed>(WorkflowEventSerializer.Unwrap(@event)));
+    }
+
+    [Fact]
+    public void UnknownSettlement_UsesOneFixedDeadlineAndBlocksWithoutFailure()
+    {
+        var run = BuildRun(new TaskDefinition("agent", "Agent", "mohist/agent"));
+        var task = StartTask(run, "agent-work");
+        var binding = Binding(task);
+        var observation = new AgentExecutionObservation(binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed");
+        Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(binding));
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(observation, Now, SettlementTimeout));
+
+        var deadline = task.AgentResultSettlement!.DeadlineAt;
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(
+            observation with { Message = "replayed after reconnect" },
+            Now.AddMinutes(4),
+            SettlementTimeout));
+        Assert.Equal(deadline, task.AgentResultSettlement.DeadlineAt);
+        Assert.Empty(run.BlockUnresolvedAgentResult(Now.AddMinutes(4).AddSeconds(59)));
+
+        var events = run.BlockUnresolvedAgentResult(deadline!.Value);
+
+        Assert.Equal(AgentResultSettlementState.Blocked, task.AgentResultSettlement.State);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Null(run.Failure);
+        Assert.Null(run.CurrentStage().Failure);
+        Assert.Collection(
+            events,
+            @event => Assert.IsType<TaskBlocked>(WorkflowEventSerializer.Unwrap(@event)),
+            @event => Assert.IsType<StageBlocked>(WorkflowEventSerializer.Unwrap(@event)),
+            @event => Assert.IsType<WorkflowRunBlocked>(WorkflowEventSerializer.Unwrap(@event)));
+    }
+
+    [Fact]
+    public void ExplicitStop_DoesNotCancelAwaitingAgentResult()
+    {
+        var run = BuildRun(new TaskDefinition("agent", "Agent", "mohist/opencode"));
+        var task = StartTask(run, "agent-work");
+        var binding = Binding(task);
+        Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(binding));
+
+        var cancellation = run.CancelUnresolvedAgentTaskForStop(Now.AddMinutes(1));
+
+        Assert.Empty(cancellation);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(AgentResultSettlementState.AwaitingResult, task.AgentResultSettlement!.State);
+    }
+
+    [Fact]
+    public void ExplicitStop_CancelsUnresolvedTaskWithoutDiscardingItsExecutionIdentity()
+    {
+        var run = BuildRun(new TaskDefinition("agent", "Agent", "mohist/pi"));
+        var task = StartTask(run, "agent-work");
+        var binding = Binding(task);
+        Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(binding));
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(
+            new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected"),
+            Now,
+            SettlementTimeout));
+
+        var cancellation = run.CancelUnresolvedAgentTaskForStop(Now.AddMinutes(1));
+        var stop = run.Stop();
+
+        Assert.Equal(TaskRunStatus.Cancelled, task.Status);
+        Assert.Equal(WorkflowRunStatus.Stopped, run.Status);
+        Assert.Equal("agent-work", task.WorkId);
+        Assert.Equal("runner-1", task.WorkerId);
+        Assert.NotNull(task.AgentResultSettlement);
+        Assert.False(run.HasUnresolvedAgentResult());
+        Assert.Null(run.FindReportableTaskAttempt(task.Id, task.WorkId!, task.WorkerId!));
+        Assert.IsType<TaskCancelled>(WorkflowEventSerializer.Unwrap(Assert.Single(cancellation)));
+        Assert.IsType<WorkflowRunStopped>(WorkflowEventSerializer.Unwrap(Assert.Single(stop)));
+        Assert.Null(run.Failure);
+        Assert.Null(run.CurrentStage().Failure);
     }
 
     private static WorkflowRun BuildRun(params TaskDefinition[] tasks)

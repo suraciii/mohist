@@ -5,7 +5,7 @@ using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
 
-public interface IWorkflowGrain : IGrainWithStringKey
+public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
 {
     Task StartAsync(WorkflowStartInput? input = null);
     Task EnsureStartedAsync(WorkflowIssueContext context);

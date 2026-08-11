@@ -14,3 +14,16 @@
 - npm run test:fast passed after npm ci restored missing Node dependencies. The final Server-test source-tree baseline is files=836, digest=b1dd27a9405144bab7fcd9373f9d0a4eca9b4d047f8fa3aff209dcc04455e0f6.
 - FindReportableWork must preserve active checks work before falling back to persisted task attempts; otherwise checks reports are incorrectly classified as stale and stages cannot advance.
 - npm run verify passed: docs check, complete build, 175 workflow-definition tests, 1793 CLI tests, 2621 Server unit tests, 3855 Server spec tests, 69 architecture tests, 4697 Web tests, 1590 Runner tests, and 70 Slack tests.
+
+## T-002
+
+- The first unknown Agent result observation persists its absolute deadline with the injected TimeProvider and emits an observable unconfirmed-result event. The `agent-result-settlement` reminder reconciles persisted unknown, blocked, terminal, and explicitly stopped settlement states on both ticks and activation.
+- Unknown and blocked work is fenced from new dispatch, desired redelivery, retries, stage reruns, and runtime task insertion while the Runner's reported in-flight or awaiting-ack key continues to consume capacity.
+- Expiry writes blocked task, stage, and run events without a failure transition. An authoritative report remains eligible for the original running attempt and clears the settlement only after snapshot and reminder cleanup succeeds, so failed cleanup is repairable on activation.
+- Explicit stop commits task cancellation and run stop together, then retries snapshot deletion, reminder removal, and stage-lock release through idempotent stop replay or activation. Later reports and observations for that cancelled attempt are stale.
+- Reminder registration and removal failure specs use an overridden grain seam to prove the committed settlement is repaired on activation. The final Server-test source-tree baseline is files=836, digest=4e8fb8268b1cb7cfc56489f7a76eb018616572df11876392a5e8243669d3d687.
+
+### Interrupted Handoff
+
+- Focused Agent settlement, state-save recovery, and domain specs passed. The isolated Web suite also passed all 4,697 tests; the concurrent `npm run test:fast` run timed out two Web navigation tests under contention, then stopped its sibling jobs.
+- The architecture suite then rejected `WorkflowGrainStateSaveFailureSpecs.cs` at 26,143 bytes. Its reusable profile-coordinator fake was extracted to `WorkflowGrainTestProfileCoordinator.cs`, but this adds a Server test source file. The migration source-tree baseline is now stale again and must be recalculated before rerunning the architecture and full fast gates.

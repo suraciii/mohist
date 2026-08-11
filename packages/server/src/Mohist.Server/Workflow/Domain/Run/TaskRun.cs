@@ -15,7 +15,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 /// (e.g. a <c>WorkflowRun</c> may be <c>Running</c> while no <c>TaskRun</c>
 /// is <c>Running</c>).
 /// </summary>
-public enum TaskRunStatus { Pending, Running, Completed, Failed }
+public enum TaskRunStatus { Pending, Running, Completed, Failed, Cancelled }
 
 public sealed class TaskRun
 {
