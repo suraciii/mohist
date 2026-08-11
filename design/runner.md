@@ -323,6 +323,16 @@ the durable environment identity or changing which Sessions belong to it. The
 identity, Origin, Home, and reclamation rules are authoritative in
 [`workspace.md`](workspace.md).
 
+Dispatches that still use the per-WorkflowRun fallback materialize a standalone
+partial clone. The clone retains the commit graph and every remote branch ref,
+omits tags, and defers blob transfer until checkout so recovery can still find
+an existing run branch without transferring unrelated file contents. Clone and
+checkout use the same bounded network-command contract. Preparation happens at
+a private `.preparing` path that is removed after any failure and becomes the
+published Workspace only by atomic rename. Each WorkflowRun has its own clone;
+the fallback does not use a shared cache, Git alternates, or an operator
+checkout.
+
 The Runner records each materialization in a reconstructible
 `NamedWorkspaceRegistry`, keyed by `(ProjectId, WorkspaceName)`. The registry is
 a local maintenance index, not a second Workspace store. Every entry has one

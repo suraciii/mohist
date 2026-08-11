@@ -88,6 +88,12 @@ Runner owns the complete process tree for every host command it starts. A
 command result includes output produced before the command exits; leftover
 subprocesses cannot keep the result open or write into later work.
 
+When a Workflow workspace is first materialized, Runner transfers only the
+repository data needed to establish its base and run branches. Later stages can
+still rebase and integrate that branch normally. Repository transfers remain
+bounded, and a failed materialization does not publish or retain a partial
+workspace.
+
 ## Workspace Location
 
 An Issue uses a named Workspace such as `issue-42`. Runner materializes it under
