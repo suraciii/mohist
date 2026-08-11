@@ -2,7 +2,23 @@ import type { ReportFormat, TestCase, TestOutcome } from './types.js'
 
 function attr(block: string, name: string): string | undefined {
   const m = block.match(new RegExp(`\\b${name}="([^"]*)"`))
-  return m ? m[1] : undefined
+  return m ? decodeXmlAttribute(m[1]) : undefined
+}
+
+function decodeXmlAttribute(value: string): string {
+  return value.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|(quot|apos|lt|gt|amp));/gi, (entity, hex, decimal, named) => {
+    if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16))
+    if (decimal !== undefined) return String.fromCodePoint(Number.parseInt(decimal, 10))
+    return named.toLowerCase() === 'quot' ? '"'
+      : named.toLowerCase() === 'apos' ? "'"
+        : named.toLowerCase() === 'lt' ? '<'
+          : named.toLowerCase() === 'gt' ? '>'
+            : '&'
+  })
+}
+
+function normalizeXunitTrxDisplayName(value: string): string {
+  return value.replace(/\\"/g, '"').replace(/\\\\/g, '\\')
 }
 
 function parseDurationHHMMSS(value: string): number {
@@ -34,7 +50,7 @@ export function parseTrx(xml: string): TestCase[] {
     const duration = attr(attrs, 'duration')
     if (!testName || !duration) continue
     cases.push({
-      name: testName,
+      name: normalizeXunitTrxDisplayName(testName),
       durationMs: parseDurationHHMMSS(duration),
       outcome: normalizeTrxOutcome(attr(attrs, 'outcome')),
     })

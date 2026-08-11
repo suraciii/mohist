@@ -64,6 +64,61 @@ test('validateConfig rejects non-string apphostArgs items', () => {
   assert.ok(validateConfig(config).some((e) => e.includes('apphostArgs must contain only strings')))
 })
 
+test('validateConfig keeps execution ledgers on dotnet apphost tracks', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'reports/cli-ledger.json', executionProvenance: 'reports/cli-provenance.json', executionSourceRoots: ['packages/cli'],
+      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.deepEqual(validateConfig(config), [])
+})
+
+test('validateConfig requires source roots for execution-ledger freshness', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'ledger.json', executionProvenance: 'provenance.json',
+      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.ok(validateConfig(config).some((e) => e.includes('requires non-empty executionSourceRoots')))
+})
+
+test('validateConfig rejects execution ledgers on non-apphost tracks', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'unit', kind: 'report-only', executionLedger: 'ledger.json',
+      report: 'reports/unit.json', reportFormat: 'vitest', deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.ok(validateConfig(config).some((e) => e.includes('executionLedger requires kind=dotnet-apphost')))
+})
+
+test('validateConfig requires paired execution ledger provenance', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'ledger.json',
+      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.ok(validateConfig(config).some((e) => e.includes('executionLedger requires executionProvenance')))
+})
+
+test('validateConfig rejects execution ledgers without a TRX report', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'ledger.json',
+      report: 'reports/cli.json', reportFormat: 'vitest', deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.ok(validateConfig(config).some((e) => e.includes('executionLedger requires reportFormat=trx')))
+})
+
 test('validateConfig rejects enforce=true without rules', () => {
   const config = parseSuiteConfig(
     JSON.stringify({

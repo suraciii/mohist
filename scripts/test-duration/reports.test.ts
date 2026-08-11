@@ -42,6 +42,16 @@ test('parseTrx parses result blocks that carry child elements (failed test outpu
   assert.equal(cases[0].outcome, 'failed')
 })
 
+test('parseTrx decodes XML entities in parameterized test display names', () => {
+  const xml = '<TestRun><Results><UnitTestResult testName="Ns.Theory(value: \\&quot;a &amp; b\\&quot;, symbol: &#x3C;)" outcome="Passed" duration="00:00:00.0010000"/></Results></TestRun>'
+  assert.equal(parseTrx(xml)[0].name, 'Ns.Theory(value: "a & b", symbol: <)')
+})
+
+test('parseTrx removes the extra TRX escaping layer from string arguments', () => {
+  const xml = String.raw`<TestRun><Results><UnitTestResult testName="Ns.Theory(value: \&quot;line\\nquote: \\\&quot;x\\\&quot;\&quot;)" outcome="Passed" duration="00:00:00.0010000"/></Results></TestRun>`
+  assert.equal(parseTrx(xml)[0].name, 'Ns.Theory(value: "line\\nquote: \\"x\\"")')
+})
+
 const VITEST = JSON.stringify({
   numTotalTests: 2,
   testResults: [

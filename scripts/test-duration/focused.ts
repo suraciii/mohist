@@ -24,6 +24,11 @@ export interface FocusedCommand {
   readonly report: (trxFile: string) => readonly string[]
 }
 
+export interface DiscoveryCommand {
+  readonly apphost: string
+  readonly args: readonly string[]
+}
+
 export function parseTargetFramework(csprojXml: string): string | undefined {
   const single = csprojXml.match(/<TargetFramework>\s*([^<]+?)\s*<\/TargetFramework>/)
   if (single) return single[1]
@@ -56,5 +61,12 @@ export function resolveFocusedCommand(request: FocusedRequest): FocusedCommand {
     args: base,
     verify: ['-list', 'classes', '-noColor', '-noLogo'],
     report: (trxFile: string) => [...base, '-trx', trxFile],
+  }
+}
+
+export function resolveDiscoveryCommand(request: ApphostInput): DiscoveryCommand {
+  return {
+    apphost: resolveApphostPath(request),
+    args: ['-list', 'full/json', '-preEnumerateTheories', '-noColor', '-noLogo'],
   }
 }
