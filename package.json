@@ -21,7 +21,7 @@
     "test:fast:arch": "dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-restore",
     "test:fast:wf": "dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-restore",
     "test:fast:cli": "dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-restore",
-    "verify": "npm run docs:check && npm run check:filesizes && npm run format:check && npm run build && npm test",
+    "verify": "npm run check:filesizes && npm run test:canonical",
     "check:filesizes": "tsx scripts/check-file-sizes.ts",
     "format": "tsx scripts/check-format.ts --write",
     "format:check": "tsx scripts/check-format.ts",

@@ -88,9 +88,10 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 ### 4. Fast and concise
 
 The duration budget is enforced by the test-duration guard
-(`scripts/test-duration/`, `npm run test:budget`) locally; CI does not run the
-guard, it runs the suites directly. The guard is two hard constraints, both
-FAIL — never a warning:
+(`scripts/test-duration/`, `npm run test:budget`) through the canonical gate in
+both local and CI execution. CI never substitutes independent suite jobs plus a
+later report-only check for the scheduler. The guard is two hard constraints,
+both FAIL — never a warning:
 
 | Constraint | What it proves | Threshold |
 |---|---|---|
@@ -133,12 +134,203 @@ readable; do not compress statements onto one line to satisfy the counter.
 
 ### Repository CI time budget
 
-The whole suite must finish within five minutes. The test-duration guard
-enforces a hard five-minute deadline (cross-platform Node-spawned kill; never
-the Linux `timeout` binary as the only executor) plus the per-track deadlines
-above. CI and local run the same guard, so the budget is identical in both.
-Reaching any deadline is an abnormal condition to diagnose, not a normal way to
-finish a test run.
+The whole CI job and the local canonical gate must each finish within five
+minutes. The test-duration guard enforces one absolute five-minute deadline
+(cross-platform Node-spawned kill; never the Linux `timeout` binary as the only
+executor) plus the per-track deadlines above. CI and local run the same guard.
+Their outer process walls reserve different setup and cleanup margins, but both
+are stricter than the guard's deadline. Reaching any deadline is an abnormal
+condition to diagnose, not a normal way to finish a test run.
+
+### Canonical local gate
+
+`npm run verify` is the one final local acceptance command. Its outer command
+contract is:
+
+```bash
+timeout -k 10s 270s npm run verify
+```
+
+CI applies a five-minute job deadline to checkout, setup, install, the gate, and
+diagnostic upload together. Its gate step uses `timeout -k 10s 240s npm run
+verify`, leaving the rest of the job wall for those non-gate phases and for
+bounded process-tree convergence.
+
+It is not followed by `npm test` or `npm run test:budget -- --all`: the
+canonical gate already covers their controlled work. Focused commands,
+including direct compiled-apphost `-class` runs and `npm run test:budget --
+--track <id>`, remain development tools and do not claim final acceptance.
+
+The gate owns one unique run directory in the operating system's temporary
+directory, never below the repository. An explicit `--artifact-root` is an
+absolute external parent directory, not a reusable run directory: every run
+creates a unique child below it. The canonical entry passes its exact child as
+an internal run root only after writing matching run metadata. A report-only
+`--check` reads an existing root and never creates, removes, or refreshes a
+report. These rules prevent concurrent invocations from deleting one another's
+reports or accepting a build stamp from a different run.
+
+The gate first creates its unique directory, then completes exactly one fresh
+repository build and writes a build stamp carrying that run identity. Test
+lanes may start only after that matching stamp exists. Every report,
+stdout/stderr log, temporary directory, and Spec partition manifest is rooted
+below the same run directory; a report from an older run therefore cannot
+become evidence for the current source. Before a report-producing lane starts,
+the gate creates the report parent and removes the declared report target. A
+lane is successful only when its process exits zero and writes a fresh,
+non-empty report at that exact path.
+
+The gate retains the temporary run directory for success, ordinary failure, and
+deadline failure, and prints its absolute path before returning. It never
+removes diagnostics automatically and never relies on `.gitignore` to hide
+them. This keeps a failed run inspectable without leaving Git-visible generated
+files in the worktree; callers may remove the printed directory after they have
+collected the evidence.
+
+The retained directory contains `run.json` and `build-stamp.json` provenance,
+`plan.json` with the selected tracks and resource/dependency claims, raw lane
+logs and reports, and `summary.json` with every lane result, every parsed track
+count, cleanup status, deadline result, and the first failure. Failure to write
+the plan or final summary is itself a gate failure.
+
+The DAG is deliberately small:
+
+```text diagram
+docs check
+    |
+    +--> fresh build
+             |
+             +--> script type/boundary check
+                      |
+                      +--> ordered duration-measurement lanes
+                               |
+                               +--> bounded throughput lanes
+                                        |
+                                        +--> Spec partition coverage check
+                                                  |
+                                                  +--> shared report and duration evaluation
+```
+
+The full 300-second absolute deadline starts before the build and is shared by
+build, script checks, lane execution, process-tree cleanup, report parsing, and
+summary formatting. It is never rebased as a later phase's relative timeout.
+Duration logic receives a `now` seam and the canonical absolute deadline; only
+the CLI composition adapter binds that seam to process-monotonic time. No guard,
+scheduler, lane, or duration test reads `Date.now()` directly.
+The scheduler stops new execution early enough to reserve two existing
+kill-grace intervals for TERM/KILL tree termination and a final bounded report
+window; it does not start a lane once that execution cutoff has passed. Every
+child cleanup waits for process-tree termination only until the same absolute
+deadline, so a killed build or lane cannot make the final command run beyond
+the wall. On external `SIGTERM` or `SIGINT`, the same abort signal reaches the
+current phase and scheduler; it uses one TERM grace plus the finalization
+reserve, leaving margin inside the outer command's ten-second KILL window. Each
+existing track deadline remains a separate hard cap.
+
+The duration policy itself is unchanged: every configured track, including
+`baseline-pending`, must produce `Total > 0`; failed, skipped, or not-run cases
+fail the gate; enforced tracks retain their existing p95 and single-test caps.
+`enforce: false` is valid only with the exact explicit
+`status: baseline-pending` and a non-empty reason; it is a temporary baseline
+state, never a way to silently downgrade a controlled track. No retry, sleep,
+skip, allowlist, threshold change, timeout increase, or global serialization is
+a gate recovery mechanism.
+
+The scheduler has explicit lane ownership rather than opening every command at
+once. `test-duration.config.jsonc` declares the reproducible host limits. The
+default is four host lanes, with at most three .NET lanes and two Node lanes;
+this preserves the repository's active four-thread Spec bound while allowing a
+Node lane to overlap a compatible .NET lane. A lane starts only when its
+dependencies and all claimed resources are available, and an already-aborted
+schedule admits none. Node duration commands place reporter arguments on their
+terminal `vitest run` invocation, and execute TypeScript boundary checks through
+`node --import tsx` rather than the `tsx` CLI IPC server. Each lane owns its
+`TMPDIR`, `TEMP`, `TMP`, HOME, and runtime IPC directory. The four concurrent
+Server Spec lanes additionally own their main SQLite path, OTel SQLite path, and
+OTLP endpoint/port scope; unit lanes retain their product-default configuration
+so their default-value assertions remain meaningful. The Spec lanes use a
+Node-hosted deterministic partition executor on every platform. Each owns a
+distinct report path, temporary directory, and manifest directory; the fixtures
+allocate their physical silo/gateway ports through `TestClusterPortAllocator`,
+never from a fixed shared port. xUnit v3 lanes use their compiled apphost
+reporter; the legacy xUnit v2 workflow-definition lane reuses its build through
+`dotnet test --no-build --no-restore` and its VSTest TRX reporter.
+
+`canonical.durationMeasurementTracks` is an ordered, small set of tracks whose
+per-test duration policy must not share CPU or I/O with another test executor.
+Every member claims the `duration-measurement` resource and depends on the
+previous member. All other test lanes depend on the final member, then resume
+the normal bounded host/.NET/Node/Spec concurrency. The current set is the CLI
+and Server unit tracks: it keeps their p95 and absolute-cap samples comparable
+without changing their test behavior, thresholds, or internal test-runner
+settings. This is not global serialization: only those two measurement lanes
+form the short ordered prefix, and the remaining lanes still fan out. The phase
+is applied only when the complete configured set is selected, so focused
+`--track` execution has no hidden prerequisite work.
+
+#### Host exclusivity for duration evidence
+
+The canonical scheduler owns resources inside one gate invocation. It does not
+claim to arbitrate arbitrary processes from another worktree on the same host:
+a repository lock file cannot do that safely across platforms, and a crashed
+owner can leave either a stale permanent block or an unsafe PID-reuse cleanup.
+The gate neither scans for nor kills unrelated processes, and it never waits,
+polls, retries, or silently loosens duration policy to recover from them.
+
+Duration acceptance therefore requires a host lease supplied by the invoking
+coordinator, outside the repository. The coordinator records the holder in its
+own cross-platform worker session and invalidates the lease when that session
+ends, rather than relying on a local stale-lock timeout. While that lease is
+held, no other Mohist test apphost, Roslyn-heavy architecture test, or
+comparable CPU/IO test executor may run on the host. If that condition is not
+met, the run is marked contaminated and its duration numbers are not used for a
+gate-regression conclusion or a baseline update.
+
+On the first lane failure or deadline, the scheduler stops admitting queued
+lanes, terminates active lane process trees, and waits for their cleanup through
+the shared absolute cutoff. POSIX lanes use their detached process group;
+Windows lanes use `taskkill /T /F` and wait for the launched process tree's
+terminal event. Neither path waits without a bound. It never deletes completed
+evidence. The final report includes each started or cancelled lane's command,
+original exit status, elapsed time, raw-log paths, report state, and all
+parseable real test totals. It reports the triggering failure separately from
+lanes cancelled or not started by fail-fast; cancelled lanes are not recast as
+independent report-production failures. A completed lane with a missing, stale,
+empty, failed, skipped, or not-run report is a failure, not a green omission.
+
+CI invokes `npm run verify` once in one job after one dependency install. That
+job runs the same canonical scheduler, fresh build, resources, duration
+measurement prefix, four Spec partitions, coverage lane, report parser, and
+failure semantics as local execution. CI uploads that one external diagnostic
+run directory after success or failure; it does not reconstruct a gate by
+downloading reports from separately built jobs. The CI machine boundary supplies
+the host-exclusive precondition for that invocation.
+
+#### Host-exclusive performance measurements
+
+The local gate owns only the child process trees it starts. Its lane resources
+are deliberately per-run claims: they prevent this gate from oversubscribing
+itself, but cannot reserve CPU, Orleans scheduling, or ports from an arbitrary
+direct apphost, build, or test loop in another worktree. A local duration
+acceptance run therefore has a host-exclusive precondition: before starting
+`timeout -k 10s 270s npm run verify`, its operator obtains a host with no other
+Mohist build or Server Spec host running. A result captured while that condition
+is false remains useful raw failure evidence, but is not a valid performance
+baseline or a basis for changing the p95 policy. The foreign process is stopped
+by its owner; the canonical gate never waits for, polls, retries, or terminates
+it. CI satisfies this condition through the job machine boundary.
+
+The gate intentionally has neither an OS-wide process scanner nor a
+cross-worktree lock. Process enumeration is not a reliable cross-platform
+contract and cannot identify every descendant of an arbitrary apphost. A lock
+would coordinate only cooperative callers while direct apphosts would still
+evade it; it would also turn independent worktrees into a global serial queue
+and threaten the five-minute deadline. If cooperative admission is ever needed
+for a developer tool, it must be an opt-in, host-local lease implemented with
+portable atomic directory creation, owner/run metadata, immediate conflict
+failure (never waiting), `finally` release, and a bounded-expiry stale-lease
+reclamation path. Such a lease must never signal a foreign PID, and it cannot
+replace the host-exclusive precondition for non-cooperating commands.
 
 The lowest useful layer owns the behavior matrix. API/integration specs assert route, binding, status code, JSON shape, parameter parsing, and one success path per endpoint; state and calculation permutations belong to the querier/grain/domain specs below. Never repeat the lower layer's scenario matrix through HTTP — one behavior change must touch one test file, not two layers.
 

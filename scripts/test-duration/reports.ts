@@ -33,8 +33,13 @@ function normalizeTrxOutcome(outcome?: string): TestOutcome {
       return 'passed'
     case 'Failed':
       return 'failed'
-    case 'NotExecuted':
+    case 'Error':
+      return 'error'
+    case 'Skipped':
       return 'skipped'
+    case 'NotExecuted':
+    case 'NotRun':
+      return 'not-run'
     default:
       return 'other'
   }
