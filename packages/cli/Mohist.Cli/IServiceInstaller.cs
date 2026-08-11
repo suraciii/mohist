@@ -2,17 +2,24 @@ namespace Mohist.Cli;
 
 internal interface IManagedRuntimeActivator
 {
-    Task<int> ApplyManagedRuntimeAsync(
-        RuntimeTargetSet targets,
+    Task<ManagedRuntimeSnapshot?> CaptureManagedRuntimeSnapshotAsync(
         string scope,
         string? unitDir,
         CancellationToken cancellationToken = default);
 
-    Task<int> RestoreManagedRuntimeAsync(
+    Task<int> ApplyManagedRuntimeAsync(
+        RuntimeTargetSet targets,
+        string scope,
+        string? unitDir,
+        CancellationToken cancellationToken = default,
+        ManagedRuntimeSnapshot? snapshot = null);
+
+    Task<ManagedRuntimeRestoreResult> RestoreManagedRuntimeAsync(
         RuntimeTargetSet? targets,
         string scope,
         string? unitDir,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        ManagedRuntimeSnapshot? snapshot = null);
 }
 
 internal interface IServiceInstaller

@@ -123,7 +123,8 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         RuntimeTargetSet targets,
         string scope,
         string? unitDir,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ManagedRuntimeSnapshot? snapshot = null)
     {
         if (!EnsureSystemdSupported(dryRun: false))
             return 1;
@@ -171,14 +172,36 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         return 0;
     }
 
-    public async Task<int> RestoreManagedRuntimeAsync(
-        RuntimeTargetSet? targets,
+    public async Task<ManagedRuntimeSnapshot?> CaptureManagedRuntimeSnapshotAsync(
         string scope,
         string? unitDir,
         CancellationToken cancellationToken = default)
     {
         if (!EnsureSystemdSupported(dryRun: false))
-            return 1;
+            throw new InvalidOperationException("managed systemd runtime is unavailable");
+
+        var resolvedUnitDir = ResolveUnitDir(unitDir);
+        var server = Includes(scope, "server")
+            ? await CaptureUnitSnapshotAsync(resolvedUnitDir, ServerUnit, cancellationToken)
+            : null;
+        var runner = Includes(scope, "runner")
+            ? await CaptureUnitSnapshotAsync(resolvedUnitDir, RunnerUnit, cancellationToken)
+            : null;
+        return new ManagedRuntimeSnapshot(server, runner);
+    }
+
+    public async Task<ManagedRuntimeRestoreResult> RestoreManagedRuntimeAsync(
+        RuntimeTargetSet? targets,
+        string scope,
+        string? unitDir,
+        CancellationToken cancellationToken = default,
+        ManagedRuntimeSnapshot? snapshot = null)
+    {
+        if (!EnsureSystemdSupported(dryRun: false))
+            return ManagedRuntimeRestoreResult.FromExitCode(1, scope, "managed systemd runtime is unavailable");
+
+        if (snapshot is not null)
+            return await RestoreSnapshotAsync(snapshot, scope, unitDir, cancellationToken);
 
         if (targets is null)
         {
@@ -190,10 +213,11 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
                 var serverStop = await StopAsync(ServerUnit, new ServiceCommandOptions(false, unitDir, 100, false));
                 if (stopCode == 0) stopCode = serverStop;
             }
-            return stopCode;
+            return ManagedRuntimeRestoreResult.FromExitCode(stopCode, scope);
         }
 
-        return await ApplyManagedRuntimeAsync(targets, scope, unitDir, cancellationToken);
+        var applyCode = await ApplyManagedRuntimeAsync(targets, scope, unitDir, cancellationToken);
+        return ManagedRuntimeRestoreResult.FromExitCode(applyCode, scope);
     }
 
     private async Task WriteManagedUnitAsync(
@@ -214,9 +238,9 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         if (target.Component == "runner")
             environment["SERVER_URL"] = _environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://127.0.0.1:3456";
 
-        var executable = target.Component == "runner"
+        var executable = target.LaunchMode == RuntimeLaunchMode.Node
             ? $"{ShellQuote(target.NodeExecutable!)} {ShellQuote(target.Entrypoint)}"
-            : $"{ShellQuote(ResolveExecutable("dotnet"))} {ShellQuote(target.Entrypoint)}";
+            : ShellQuote(target.Entrypoint);
         if (target.Arguments.Length > 0)
             executable += " " + string.Join(' ', target.Arguments.Select(ShellQuote));
 
@@ -236,6 +260,203 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
     private static bool Includes(string scope, string component) =>
         string.Equals(scope, "full", StringComparison.Ordinal)
         || string.Equals(scope, component, StringComparison.Ordinal);
+
+    private async Task<ManagedUnitSnapshot> CaptureUnitSnapshotAsync(
+        string unitDir,
+        string unitName,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(unitDir, unitName).Replace('\\', '/');
+        var exists = _fileSystem.Exists(path);
+        var contents = exists ? ReadBytes(path) : null;
+        var active = await IsUnitActiveAsync(unitName, cancellationToken);
+        var enabled = await IsUnitEnabledAsync(unitName, cancellationToken);
+        return new ManagedUnitSnapshot(unitName, exists, contents, active, enabled);
+    }
+
+    private async Task<ManagedRuntimeRestoreResult> RestoreSnapshotAsync(
+        ManagedRuntimeSnapshot snapshot,
+        string scope,
+        string? unitDir,
+        CancellationToken cancellationToken)
+    {
+        var resolvedUnitDir = ResolveUnitDir(unitDir);
+        var units = new[]
+        {
+            (Component: "server", Snapshot: snapshot.Server),
+            (Component: "runner", Snapshot: snapshot.Runner),
+        };
+        var failures = new List<string>();
+        var exitCode = 0;
+        var serverState = ManagedRuntimeRestoreState.NotAttempted;
+        var runnerState = ManagedRuntimeRestoreState.NotAttempted;
+        void MarkFailed(string component)
+        {
+            if (component == "server") serverState = ManagedRuntimeRestoreState.Failed;
+            if (component == "runner") runnerState = ManagedRuntimeRestoreState.Failed;
+        }
+
+        void MarkRestored(string component)
+        {
+            if (component == "server") serverState = ManagedRuntimeRestoreState.Restored;
+            if (component == "runner") runnerState = ManagedRuntimeRestoreState.Restored;
+        }
+
+        async Task AttemptAsync(string operation, Func<Task<int>> action)
+        {
+            try
+            {
+                var result = await action();
+                if (result != 0)
+                {
+                    failures.Add($"{operation} exited with code {result}");
+                    if (exitCode == 0) exitCode = result;
+                }
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{operation} failed: {ex.Message}");
+                if (exitCode == 0) exitCode = 1;
+            }
+        }
+
+        foreach (var (component, unit) in units)
+        {
+            if (!Includes(scope, component) || unit is null)
+                continue;
+
+            var path = Path.Combine(resolvedUnitDir, unit.UnitName).Replace('\\', '/');
+            try
+            {
+                if (unit.Exists)
+                {
+                    var temp = $"{path}.restore.tmp";
+                    using (var stream = _fileSystem.OpenWrite(temp))
+                    {
+                        stream.Write(unit.Contents ?? []);
+                    }
+                    _fileSystem.MoveFile(temp, path);
+                }
+                else if (_fileSystem.Exists(path))
+                {
+                    _fileSystem.Delete(path);
+                }
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"restore {unit.UnitName} failed: {ex.Message}");
+                MarkFailed(component);
+                if (exitCode == 0) exitCode = 1;
+            }
+        }
+
+        var reloadFailed = false;
+        try
+        {
+            var reload = await ExecuteSystemctlAsync(["--user", "daemon-reload"], cancellationToken);
+            if (reload != 0)
+            {
+                reloadFailed = true;
+                failures.Add($"daemon-reload exited with code {reload}");
+                if (exitCode == 0) exitCode = reload;
+            }
+        }
+        catch (Exception ex)
+        {
+            reloadFailed = true;
+            failures.Add($"daemon-reload failed: {ex.Message}");
+            if (exitCode == 0) exitCode = 1;
+        }
+
+        foreach (var (component, unit) in units)
+        {
+            if (!Includes(scope, component) || unit is null)
+                continue;
+
+            var stateCommand = unit.WasEnabled ? "enable" : "disable";
+            await AttemptAsync(
+                $"{stateCommand} {unit.UnitName}",
+                () => ExecuteSystemctlAsync(["--user", stateCommand, unit.UnitName], cancellationToken));
+
+            var lifecycleCommand = unit.WasActive ? "restart" : "stop";
+            await AttemptAsync(
+                $"{lifecycleCommand} {unit.UnitName}",
+                () => ExecuteSystemctlAsync(["--user", lifecycleCommand, unit.UnitName], cancellationToken));
+
+            await AttemptAsync(
+                $"verify enabled {unit.UnitName}",
+                async () => (await IsUnitEnabledAsync(unit.UnitName, cancellationToken)) == unit.WasEnabled ? 0 : 1);
+            await AttemptAsync(
+                $"verify active {unit.UnitName}",
+                async () => (await IsUnitActiveAsync(unit.UnitName, cancellationToken)) == unit.WasActive ? 0 : 1);
+
+            if (reloadFailed)
+            {
+                MarkFailed(component);
+            }
+            else if (!failures.Any(failure => failure.Contains(unit.UnitName, StringComparison.Ordinal)))
+            {
+                MarkRestored(component);
+            }
+            else
+            {
+                MarkFailed(component);
+            }
+        }
+
+        if (failures.Count > 0)
+            _err.WriteLine($"Managed runtime source restore failed: {string.Join("; ", failures)}");
+        return new ManagedRuntimeRestoreResult(
+            exitCode,
+            serverState,
+            runnerState,
+            failures.Count == 0 ? null : string.Join("; ", failures));
+    }
+
+    private async Task<bool> IsUnitActiveAsync(string unitName, CancellationToken cancellationToken)
+    {
+        var result = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            ["--user", "is-active", unitName],
+            cancellationToken: cancellationToken);
+        var state = result.Stdout.Trim().ToLowerInvariant();
+        if (result.ExitCode == 0 && state == "active")
+            return true;
+        if (result.ExitCode != 0 && state is "inactive" or "failed" or "dead" or "unknown" or "not-found")
+            return false;
+        throw new InvalidOperationException($"systemctl is-active {unitName} returned unrecognized state '{result.Stdout.Trim()}' with exit code {result.ExitCode}");
+    }
+
+    private async Task<bool> IsUnitEnabledAsync(string unitName, CancellationToken cancellationToken)
+    {
+        var result = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            ["--user", "is-enabled", unitName],
+            cancellationToken: cancellationToken);
+        var state = result.Stdout.Trim().ToLowerInvariant();
+        if (result.ExitCode == 0 && state is "enabled" or "enabled-runtime" or "linked" or "linked-runtime")
+            return true;
+        if (result.ExitCode != 0 && state is "disabled" or "static" or "indirect" or "generated" or "transient" or "masked" or "not-found")
+            return false;
+        throw new InvalidOperationException($"systemctl is-enabled {unitName} returned unrecognized state '{result.Stdout.Trim()}' with exit code {result.ExitCode}");
+    }
+
+    private async Task<int> ExecuteSystemctlAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var result = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            args,
+            cancellationToken: cancellationToken);
+        return result.ExitCode;
+    }
+
+    private byte[] ReadBytes(string path)
+    {
+        using var stream = _fileSystem.OpenRead(path);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
 
     public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default)
     {

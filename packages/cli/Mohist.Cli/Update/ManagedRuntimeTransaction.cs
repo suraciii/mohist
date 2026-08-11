@@ -9,7 +9,8 @@ internal sealed record ManagedUpdateSession(
     RuntimeTargetSet Targets,
     RuntimeTargetSet? PreviousTargets,
     string ReleaseRoot,
-    string Scope);
+    string Scope,
+    ManagedRuntimeSnapshot? SourceSnapshot);
 
 /// <summary>
 /// Owns the source snapshot to installed release boundary. A service target is only changed after
@@ -73,6 +74,7 @@ internal sealed class ManagedRuntimeTransaction
         var generation = previous?.Generation is > 0 ? previous.Generation + 1 : 1;
         var built = new Dictionary<string, BuiltRuntime>(StringComparer.Ordinal);
         RuntimeTargetSet? activatedTargets = null;
+        ManagedRuntimeSnapshot? sourceSnapshot = null;
         var activePointerWritten = false;
 
         try
@@ -146,6 +148,12 @@ internal sealed class ManagedRuntimeTransaction
             if (targets.Runner is not null && !targets.Runner.IsAbsoluteTarget)
                 return (null, "candidate Runner target is not absolute");
 
+            sourceSnapshot = await _activator.CaptureManagedRuntimeSnapshotAsync(
+                scope,
+                _unitDir,
+                cancellationToken);
+            targets = targets with { SourceSnapshot = sourceSnapshot };
+
             var transactionPath = Path.Combine(
                 context.RuntimeRoot,
                 "transactions",
@@ -162,26 +170,27 @@ internal sealed class ManagedRuntimeTransaction
                 targets,
                 scope,
                 _unitDir,
-                cancellationToken);
+                cancellationToken,
+                sourceSnapshot);
             if (activation != 0)
             {
-                await RestoreAfterFailureAsync(context, previous, scope, activation, "service activation failed", CancellationToken.None);
+                await RestoreAfterFailureAsync(context, activatedTargets, previous, sourceSnapshot, scope, activation, "service activation failed", CancellationToken.None);
                 return (null, $"managed service activation failed with exit code {activation}");
             }
 
             _out.WriteLine($"Staged managed {scope} release {releaseId} from source {context.Source.GitCommit}.");
-            return (new ManagedUpdateSession(context, targets, previous, releaseRoot, scope), null);
+            return (new ManagedUpdateSession(context, targets, previous, releaseRoot, scope, sourceSnapshot), null);
         }
         catch (OperationCanceledException)
         {
             if (activePointerWritten && activatedTargets is not null)
-                await RestoreAfterFailureAsync(context, previous, scope, 1, "managed update was cancelled", CancellationToken.None);
+                await RestoreAfterFailureAsync(context, activatedTargets, previous, sourceSnapshot, scope, 1, "managed update was cancelled", CancellationToken.None);
             return (null, "managed update was cancelled before activation completed");
         }
         catch (Exception ex)
         {
             if (activePointerWritten && activatedTargets is not null)
-                await RestoreAfterFailureAsync(context, previous, scope, 1, "managed update staging failed", CancellationToken.None);
+                await RestoreAfterFailureAsync(context, activatedTargets, previous, sourceSnapshot, scope, 1, "managed update staging failed", CancellationToken.None);
             _err.WriteLine($"Managed update staging failed: {ex.Message}");
             return (null, "managed update staging failed");
         }
@@ -191,7 +200,14 @@ internal sealed class ManagedRuntimeTransaction
     {
         try
         {
-            var committed = session.Targets with { Status = "verified", Previous = null };
+            var committed = session.Targets with
+            {
+                Status = "verified",
+                Previous = null,
+                SourceSnapshot = null,
+                RecoveryDiagnostic = null,
+                Recovery = null,
+            };
             WriteAtomic(
                 Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
                 committed);
@@ -218,25 +234,32 @@ internal sealed class ManagedRuntimeTransaction
     {
         try
         {
-            var restoreCode = await _activator.RestoreManagedRuntimeAsync(
+            var restoreResult = await _activator.RestoreManagedRuntimeAsync(
                 session.PreviousTargets,
                 session.Scope,
                 _unitDir,
-                cancellationToken);
-            if (restoreCode != 0)
+                cancellationToken,
+                session.SourceSnapshot);
+            if (restoreResult.ExitCode != 0)
             {
-                WriteAtomic(
-                    Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
-                    NoneTargets(session));
-                _err.WriteLine($"Managed runtime rollback failed with exit code {restoreCode}; no runtime is trusted. Reason: {reason}");
-                return restoreCode;
+                var diagnostic = $"Managed runtime rollback failed with exit code {restoreResult.ExitCode}; affected scope={session.Scope}. Reason: {reason}";
+                PersistRecoveryFailure(session.Context, session.Targets, session.PreviousTargets, session.Scope, restoreResult, diagnostic);
+                _err.WriteLine(diagnostic);
+                return restoreResult.ExitCode;
             }
 
             WriteAtomic(
                 Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
                 session.PreviousTargets is null
                     ? NoneTargets(session)
-                    : session.PreviousTargets with { Status = "verified", Previous = null });
+                    : session.PreviousTargets with
+                    {
+                        Status = "verified",
+                        Previous = null,
+                        SourceSnapshot = null,
+                        RecoveryDiagnostic = null,
+                        Recovery = null,
+                    });
             WriteAtomic(
                 Path.Combine(session.Context.RuntimeRoot, "transactions", session.Context.TransactionId, "state.json").Replace('\\', '/'),
                 session.Targets with { Status = "rolled-back", Previous = session.PreviousTargets });
@@ -245,10 +268,15 @@ internal sealed class ManagedRuntimeTransaction
         }
         catch (Exception ex)
         {
-            WriteAtomic(
-                Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
-                NoneTargets(session));
-            _err.WriteLine($"Managed runtime rollback could not be proven: {ex.Message}");
+            var diagnostic = $"Managed runtime rollback could not be proven: {ex.Message}";
+            PersistRecoveryFailure(
+                session.Context,
+                session.Targets,
+                session.PreviousTargets,
+                session.Scope,
+                ManagedRuntimeRestoreResult.FromExitCode(1, session.Scope, diagnostic),
+                diagnostic);
+            _err.WriteLine(diagnostic);
             return 1;
         }
     }
@@ -462,7 +490,8 @@ internal sealed class ManagedRuntimeTransaction
                 UpdateOperations.RuntimeIdentifier(),
                 runtime.Identity,
                 node,
-                component == "runner" ? working : null);
+                component == "runner" ? working : null,
+                component == "runner" ? RuntimeLaunchMode.Node : RuntimeLaunchMode.SelfContained);
         }
 
         return new RuntimeTargetSet(
@@ -477,7 +506,9 @@ internal sealed class ManagedRuntimeTransaction
 
     private async Task RestoreAfterFailureAsync(
         UpdateSourceContext context,
+        RuntimeTargetSet? candidate,
         RuntimeTargetSet? previous,
+        ManagedRuntimeSnapshot? sourceSnapshot,
         string scope,
         int activationCode,
         string reason,
@@ -485,13 +516,17 @@ internal sealed class ManagedRuntimeTransaction
     {
         try
         {
-            var restoreCode = await _activator.RestoreManagedRuntimeAsync(previous, scope, _unitDir, cancellationToken);
-            if (restoreCode != 0)
+            var restoreResult = await _activator.RestoreManagedRuntimeAsync(
+                previous,
+                scope,
+                _unitDir,
+                cancellationToken,
+                sourceSnapshot);
+            if (restoreResult.ExitCode != 0)
             {
-                WriteAtomic(
-                    Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
-                    new RuntimeTargetSet("none", 0, context.TransactionId, null, null, null, null));
-                _err.WriteLine($"Recovery after activation exit {activationCode} failed with exit code {restoreCode}; no runtime is trusted.");
+                var diagnostic = $"Recovery after activation exit {activationCode} failed with exit code {restoreResult.ExitCode}; affected scope={scope}.";
+                PersistRecoveryFailure(context, candidate, previous, scope, restoreResult, diagnostic);
+                _err.WriteLine(diagnostic);
                 return;
             }
 
@@ -499,15 +534,27 @@ internal sealed class ManagedRuntimeTransaction
                 Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
                 previous is null
                     ? new RuntimeTargetSet("none", 0, context.TransactionId, null, null, null, null)
-                    : previous with { Status = "verified", Previous = null });
+                    : previous with
+                    {
+                        Status = "verified",
+                        Previous = null,
+                        SourceSnapshot = null,
+                        RecoveryDiagnostic = null,
+                        Recovery = null,
+                    });
         }
         catch (Exception ex)
         {
             try
             {
-                WriteAtomic(
-                    Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
-                    new RuntimeTargetSet("none", 0, context.TransactionId, null, null, null, null));
+                var diagnostic = $"Recovery after activation exit {activationCode} failed: {ex.Message}; no success was emitted.";
+                PersistRecoveryFailure(
+                    context,
+                    candidate,
+                    previous,
+                    scope,
+                    ManagedRuntimeRestoreResult.FromExitCode(1, scope, diagnostic),
+                    diagnostic);
             }
             catch
             {
@@ -520,6 +567,74 @@ internal sealed class ManagedRuntimeTransaction
 
     private RuntimeTargetSet NoneTargets(ManagedUpdateSession session) =>
         new("none", session.Targets.Generation, session.Context.TransactionId, null, null, null, null);
+
+    private void PersistRecoveryFailure(
+        UpdateSourceContext context,
+        RuntimeTargetSet? candidate,
+        RuntimeTargetSet? previous,
+        string scope,
+        ManagedRuntimeRestoreResult restoreResult,
+        string diagnostic)
+    {
+        var active = FailClosedTargets(
+            previous,
+            scope,
+            context.TransactionId,
+            candidate?.Generation ?? previous?.Generation ?? 0,
+            restoreResult,
+            diagnostic);
+        WriteAtomic(
+            Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
+            active);
+        if (candidate is not null)
+        {
+            WriteAtomic(
+                Path.Combine(context.RuntimeRoot, "transactions", context.TransactionId, "state.json").Replace('\\', '/'),
+                candidate with
+                {
+                    Status = "recovery-failed",
+                    Previous = previous,
+                    RecoveryDiagnostic = diagnostic,
+                    Recovery = restoreResult.ToRecovery(diagnostic),
+                });
+        }
+    }
+
+    private static RuntimeTargetSet FailClosedTargets(
+        RuntimeTargetSet? previous,
+        string scope,
+        string transactionId,
+        long generation,
+        ManagedRuntimeRestoreResult restoreResult,
+        string diagnostic)
+    {
+        if (previous is null)
+            return new RuntimeTargetSet(
+                "recovery-failed",
+                generation,
+                transactionId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                diagnostic,
+                restoreResult.ToRecovery(diagnostic));
+
+        return previous with
+        {
+            Status = "recovery-failed",
+            TransactionId = transactionId,
+            Cli = previous.Cli,
+            Server = Includes(scope, "server") && restoreResult.Server != ManagedRuntimeRestoreState.Restored ? null : previous.Server,
+            Runner = Includes(scope, "runner") && restoreResult.Runner != ManagedRuntimeRestoreState.Restored ? null : previous.Runner,
+            Previous = null,
+            SourceSnapshot = null,
+            RecoveryDiagnostic = diagnostic,
+            Recovery = restoreResult.ToRecovery(diagnostic),
+        };
+    }
 
     private void WriteAtomic(string path, RuntimeTargetSet value)
     {
