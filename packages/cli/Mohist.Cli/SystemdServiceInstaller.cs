@@ -21,19 +21,22 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
     private readonly IFileSystem _fileSystem;
     private readonly ICommandExecutor _commandExecutor;
     private readonly IEnvironmentVariableProvider _environment;
+    private readonly Func<string?> _getLocalHostname;
 
     public SystemdServiceInstaller(
         TextWriter output,
         TextWriter error,
         IFileSystem? fileSystem = null,
         ICommandExecutor? commandExecutor = null,
-        IEnvironmentVariableProvider? environment = null)
+        IEnvironmentVariableProvider? environment = null,
+        Func<string?>? getLocalHostname = null)
     {
         _out = output;
         _err = error;
         _fileSystem = fileSystem ?? RealFileSystem.Instance;
         _commandExecutor = commandExecutor ?? new SystemCommandExecutor();
         _environment = environment ?? SystemEnvironmentVariableProvider.Instance;
+        _getLocalHostname = getLocalHostname ?? (() => Environment.MachineName);
     }
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
@@ -118,6 +121,36 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
     public Task<int> StatusSlackAsync(ServiceCommandOptions options) => StatusAsync(SlackUnit, options);
     public Task<int> LogsSlackAsync(ServiceCommandOptions options) => LogsAsync(SlackUnit, options);
     public Task<int> UninstallSlackAsync(ServiceCommandOptions options) => UninstallAsync(SlackUnit, options);
+
+    public Task<(RunnerLaunchIdentity? Identity, string? Error)> ResolveRunnerLaunchIdentityAsync(
+        string? unitDir,
+        CancellationToken cancellationToken = default)
+    {
+        if (!EnsureSystemdSupported(dryRun: false))
+            return Task.FromResult<(RunnerLaunchIdentity?, string?)>((null, "managed systemd runtime is unavailable"));
+
+        var path = Path.Combine(ResolveUnitDir(unitDir), RunnerUnit).Replace('\\', '/');
+        if (!_fileSystem.Exists(path))
+        {
+            return Task.FromResult<(RunnerLaunchIdentity?, string?)>(
+                (null, "runner launch configuration is unavailable"));
+        }
+
+        var setting = SystemdUnitParser.ReadRunnerIdSetting(_fileSystem.ReadAllText(path));
+        if (setting.Error is not null)
+            return Task.FromResult<(RunnerLaunchIdentity?, string?)>((null, setting.Error));
+        if (setting.RunnerId is { Length: > 0 } configured)
+            return Task.FromResult<(RunnerLaunchIdentity?, string?)>((new RunnerLaunchIdentity(configured), null));
+
+        var hostname = _getLocalHostname()?.Trim();
+        if (string.IsNullOrWhiteSpace(hostname))
+        {
+            return Task.FromResult<(RunnerLaunchIdentity?, string?)>(
+                (null, "runner launch identity is unavailable because the local hostname is unavailable"));
+        }
+
+        return Task.FromResult<(RunnerLaunchIdentity?, string?)>((new RunnerLaunchIdentity($"runner-{hostname}"), null));
+    }
 
     public async Task<int> ApplyManagedRuntimeAsync(
         RuntimeTargetSet targets,
@@ -236,7 +269,12 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
             : target.WorkingDirectory;
         environment["MOHIST_RUNTIME_IDENTITY_PATH"] = Path.Combine(identityRoot, "runtime-identity.json").Replace('\\', '/');
         if (target.Component == "runner")
+        {
+            if (target.Identity.RunnerId is not { Length: > 0 } runnerId)
+                throw new InvalidOperationException("managed Runner target does not declare an instance identity");
+            environment["RUNNER_ID"] = runnerId;
             environment["SERVER_URL"] = _environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://127.0.0.1:3456";
+        }
 
         var executable = target.LaunchMode == RuntimeLaunchMode.Node
             ? $"{ShellQuote(target.NodeExecutable!)} {ShellQuote(target.Entrypoint)}"

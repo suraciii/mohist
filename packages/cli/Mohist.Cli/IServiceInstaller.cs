@@ -2,6 +2,10 @@ namespace Mohist.Cli;
 
 internal interface IManagedRuntimeActivator
 {
+    Task<(RunnerLaunchIdentity? Identity, string? Error)> ResolveRunnerLaunchIdentityAsync(
+        string? unitDir,
+        CancellationToken cancellationToken = default);
+
     Task<ManagedRuntimeSnapshot?> CaptureManagedRuntimeSnapshotAsync(
         string scope,
         string? unitDir,
