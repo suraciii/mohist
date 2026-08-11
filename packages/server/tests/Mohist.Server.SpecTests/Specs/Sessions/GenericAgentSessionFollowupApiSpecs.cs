@@ -203,7 +203,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     [Fact]
     public async Task GenericFollowupEndpoint_MissingBindingBeforeRunnerOpens_ReturnsRuntimeSessionMissing()
     {
-        var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-inactive");
+        var (project, sessionId) = await CreateUnboundGenericLaunchSessionAsync("gen-followup-inactive");
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
 
@@ -220,7 +220,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     {
         // The route group resolves a project from the URL; passing the
         // session id from a different project must not leak the session.
-        var (projectA, _, sessionIdInA, _) = await LaunchGenericSessionAsync("gen-followup-isolation-a");
+        var (projectA, sessionIdInA) = await CreateUnboundGenericLaunchSessionAsync("gen-followup-isolation-a");
         var projectB = await CreateProjectAsync("gen-followup-isolation-b");
 
         using var response = await PostGenericFollowupAsync(projectB.Id, sessionIdInA, new { text = "cross-project" });

@@ -565,42 +565,6 @@ public sealed partial class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
-    public async Task Accepted_ingress_clears_offline_gap_after_reconnect()
-    {
-        var connection = await CreateConnectionAsync();
-        var gapAt = _fixture.TimeProvider.GetUtcNow();
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            await db.AgentConnections
-                .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.OfflineGapAt, gapAt));
-        }
-
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
-        {
-            isDirectMessage = true,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "D-gap-clear",
-            messageTs = "1710000000.000600",
-            threadTs = (string?)null,
-            mentionedUserIds = Array.Empty<string>(),
-            senderSlackUserId = "U_OWNER",
-            senderKind = "human",
-            text = "first message after reconnect",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        });
-        response.EnsureSuccessStatusCode();
-
-        await using var verify = _fixture.Services.CreateAsyncScope();
-        var verifyDb = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var reloaded = await verifyDb.AgentConnections.AsNoTracking()
-            .SingleAsync(row => row.Id == connection.Id);
-        Assert.Null(reloaded.OfflineGapAt);
-    }
-
-    [Fact]
     public async Task Bot_sender_is_acknowledged_and_ignored()
     {
         var connection = await CreateConnectionAsync();

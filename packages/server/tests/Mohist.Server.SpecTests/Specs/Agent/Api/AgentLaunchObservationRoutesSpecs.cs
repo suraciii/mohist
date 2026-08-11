@@ -108,13 +108,11 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-            await AgentJobConvergence.WaitForAssignmentPreparedAsync(jobGrain);
-            var claim = await jobGrain.ClaimNextAsync(runnerId);
-            Assert.NotNull(claim);
+            var claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain.ReportResultAsync(
                 runnerId,
-                claim!.WorkId,
+                claim.WorkId,
                 new WorkResult(
                     Status: "completed",
                     Message: "all done",
@@ -142,7 +140,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
-    public async Task Observation_AfterReportTimeout_ReportsJobUnknownWithoutCreatingNewInputsOrTurns()
+    public async Task Observation_AfterUnknownTransition_ReportsJobUnknownWithoutCreatingNewInputsOrTurns()
     {
         var projectId = await CreateProjectAsync("obs-unknown");
         var runnerId = $"obs-unknown-runner-{Guid.NewGuid():N}";
@@ -160,13 +158,12 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var originalTurnId = launchPayload.GetProperty("data").GetProperty("turnId").GetString()!;
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-            await AgentJobConvergence.WaitForAssignmentPreparedAsync(jobGrain);
-            var claim = await jobGrain.ClaimNextAsync(runnerId);
-            Assert.NotNull(claim);
+            await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
 
-            // Drive past the configured 8s timeout via fake time.
-            _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
-            await jobGrain.CheckTimeoutsAsync();
+            // This route owns the Unknown projection, not the clock-driven
+            // timeout transition. Enter Unknown through its production boundary.
+            await jobGrain.MarkUnknownAsync(
+                $"{AgentJobFailureReasons.ReportTimeout}: observation projection");
             var terminal = await jobGrain.GetTerminalResultAsync();
             Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
 
@@ -264,18 +261,11 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
 
             var jobGrain = await FindAgentJobGrainAsync(sessionId);
             Assert.NotNull(jobGrain);
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            var claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
 
-            // Force the Job into Unknown via the report-timeout path.
-            await WaitForJobTerminalAsync(
-                jobGrain!,
-                AgentJobStatus.Unknown,
-                TimeSpan.FromSeconds(30),
-                async () =>
-                {
-                    _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
-                    await jobGrain!.CheckTimeoutsAsync();
-                });
+            await jobGrain!.MarkUnknownAsync(
+                $"{AgentJobFailureReasons.ReportTimeout}: observation reconciliation");
+            Assert.Equal(AgentJobStatus.Unknown, await jobGrain.GetStatusAsync());
 
             // Reconciliation: an authoritative terminal report from
             // the original Runner resolves the same Job and Turn to
@@ -283,7 +273,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain!.ReportResultAsync(
                 runnerId,
-                polled.WorkId,
+                claim.WorkId,
                 new WorkResult(
                     Status: "completed",
                     Message: "reconciled",
@@ -329,12 +319,12 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            var claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             await jobGrain.ReportResultAsync(
                 runnerId,
-                polled.WorkId,
+                claim.WorkId,
                 new WorkResult(
                     Status: "completed",
                     Message: "ok",

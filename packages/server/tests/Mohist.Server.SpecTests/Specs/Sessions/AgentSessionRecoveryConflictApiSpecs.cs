@@ -28,7 +28,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     [Fact]
     public async Task ResetEndpoint_ActiveSession_ReturnsConflict()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-active", sessionName: "build", attachAndStart: true);
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-active", sessionName: "build", attach: true);
         // Under the activity model (issue-484) attaching the runtime no
         // longer flips the session to active; a session.activity record
         // does. Mark the session active so the idle boundary rejects Reset.
@@ -72,12 +72,11 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         var (project, issue, _, workflowSession) = await CreateAndStartSessionAsync(
             $"{operation}-source-parity",
             sessionName: "plan",
-            attachIdle: true);
+            attach: true);
         var agentSession = await CreateAgentLaunchSessionAsync(
             project,
             $"{operation}-source-parity",
-            attach: true,
-            idle: true);
+            attach: true);
         Assert.Equal("idle", agentSession.Status);
 
         using var agentResponse = await _client.PostAsync(
@@ -99,7 +98,6 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
             wasCompacted);
         Assert.Equal(workflowShape, agentShape);
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         using var canonicalWorkflowResponse = await _client.PostAsync(
             $"/api/projects/{project.Id}/agent-sessions/{workflowSession.Id}/{operation}",
             content: null);
@@ -127,8 +125,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         var session = await CreateAgentLaunchSessionAsync(
             project,
             $"{operation}-agent-active",
-            attach: true,
-            idle: false);
+            attach: true);
         // Under the activity model (issue-484) attaching the runtime no
         // longer flips the session to active; a session.activity record
         // does. Mark the session active so the idle boundary rejects the
@@ -162,8 +159,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         var session = await CreateAgentLaunchSessionAsync(
             project,
             $"{operation}-agent-missing",
-            attach: false,
-            idle: false);
+            attach: false);
 
         using var response = await _client.PostAsync(
             $"/api/projects/{project.Id}/agent-sessions/{session.Id}/{operation}",
@@ -199,8 +195,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         var session = await CreateAgentLaunchSessionAsync(
             sourceProject,
             $"{operation}-agent-project-a",
-            attach: true,
-            idle: true);
+            attach: true);
         var (otherProject, _) = await CreateProjectAndIssueAsync($"{operation}-agent-project-b");
 
         using var response = await _client.PostAsync(
@@ -213,7 +208,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     [Fact]
     public async Task SessionMetadataEndpoint_AfterCompact_ExposesContextUsagePercent()
     {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-dto", sessionName: "plan", attachIdle: true);
+        var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-dto", sessionName: "plan", attach: true);
 
         using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
         Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
@@ -227,7 +222,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     [Fact]
     public async Task CompactEndpoint_AfterClosedSession_EmitsContextExhaustionCategoryOnMetadata()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-after-close", sessionName: "plan", attachIdle: true);
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-after-close", sessionName: "plan", attach: true);
 
         using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
         Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
@@ -251,7 +246,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
             $"{operation}-legacy-missing",
             sessionName: "plan",
-            attachIdle: true);
+            attach: true);
         var transcriptPath = $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript";
         var transcriptBefore = await _client.GetStringAsync(transcriptPath);
 

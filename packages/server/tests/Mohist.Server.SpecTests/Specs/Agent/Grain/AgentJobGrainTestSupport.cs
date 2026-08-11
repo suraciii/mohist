@@ -67,6 +67,13 @@ public abstract class AgentJobGrainTestSupport
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
 
+    protected async Task ClaimPreparedAgentJobAsync(string runnerId)
+    {
+        await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync();
+        await PollRunnerAsync(runnerId);
+        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
+    }
+
     private async Task<string> WaitForAssignedRunnerAsync(IAgentJobGrain job)
     {
         await WaitForAsync(

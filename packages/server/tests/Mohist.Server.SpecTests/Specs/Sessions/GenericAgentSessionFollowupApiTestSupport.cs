@@ -97,6 +97,26 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
         return (project, agent, sessionId, info);
     }
 
+    protected async Task<(ProjectRef Project, string SessionId)> CreateUnboundGenericLaunchSessionAsync(string name)
+    {
+        var project = await CreateProjectAsync(name);
+        var sessionId = $"generic-followup-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: $"input-{Guid.NewGuid():N}",
+            TurnId: $"turn-{Guid.NewGuid():N}",
+            Prompt: $"hello from {name}",
+            Source: "agent-launch",
+            JobId: $"job-{Guid.NewGuid():N}",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                $"agent-{Guid.NewGuid():N}",
+                $"gen-followup-agent-{name}")),
+            Runtime: "opencode"));
+
+        return (project, sessionId);
+    }
+
     protected async Task<(ProjectRef Project, AgentRef Agent, string SessionId, AgentSessionInfo Info)> LaunchAndOpenGenericSessionAsync(string name)
     {
         var launched = await LaunchGenericSessionAsync(name);

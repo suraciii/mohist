@@ -25,7 +25,8 @@ public class AgentGrainSpecs
         await using var database = CreateModelSchemaDatabase();
         await using var context = database.CreateDbContext();
         var factory = database.Factory;
-        var grain = CreateGrain(factory, "project_1", "agent_1");
+        var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+        var grain = CreateGrain(factory, timeProvider, "project_1", "agent_1");
 
         var instructions = "Review literally {{issue.title}} and ${MODEL}\nDo not render.";
         var config = JsonDocument.Parse("{\"type\":\"opencode\",\"model\":\"openai/gpt-5.5\"}").RootElement.Clone();
@@ -52,6 +53,8 @@ public class AgentGrainSpecs
         Assert.NotNull(shown);
         Assert.Equal(created, shown);
 
+        var createdAt = DateTimeOffset.Parse(created.UpdatedAt);
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
         var updatedInstructions = "Keep ${literal} unchanged";
         var updated = await grain.UpdateAsync(new AgentUpdateData(
             "principal-reviewer",
@@ -71,6 +74,11 @@ public class AgentGrainSpecs
         Assert.Equal(["fsd"], updated.Skills);
         Assert.Equal(3, updated.MaxConcurrentRuns);
         Assert.Equal(created.CreatedAt, updated.CreatedAt);
+        var updatedAt = DateTimeOffset.Parse(updated.UpdatedAt);
+        Assert.True(updatedAt > createdAt);
+        var persisted = await factory.CreateDbContext().Agents.FindAsync(GrainKey.Agent("project_1", "agent_1"));
+        Assert.NotNull(persisted);
+        Assert.Equal(updatedAt, AgentStore.Deserialize(persisted.State)!.UpdatedAt);
 
         var archived = await grain.ArchiveAsync();
         Assert.NotNull(archived);

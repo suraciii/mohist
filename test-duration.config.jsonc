@@ -35,7 +35,8 @@
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
-    { "id": "cli", "kind": "dotnet-apphost", "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "apphostArgs": ["-preEnumerateTheories", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "default"], "report": "reports/cli.trx", "executionLedger": "reports/cli.execution-ledger.json", "executionProvenance": "reports/cli.execution-provenance.json", "executionSourceRoots": ["packages/cli", "Directory.Build.props", "Directory.Packages.props", "global.json"], "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    // Bounding concurrent cold command-tree construction prevents runner-induced CPU/JIT contention from dominating native test execution time.
+    { "id": "cli", "kind": "dotnet-apphost", "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "apphostArgs": ["-preEnumerateTheories", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "8"], "report": "reports/cli.trx", "executionLedger": "reports/cli.execution-ledger.json", "executionProvenance": "reports/cli.execution-provenance.json", "executionSourceRoots": ["packages/cli", "Directory.Build.props", "Directory.Packages.props", "global.json"], "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "spec", "namePattern": "Specs\\.", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] },
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]

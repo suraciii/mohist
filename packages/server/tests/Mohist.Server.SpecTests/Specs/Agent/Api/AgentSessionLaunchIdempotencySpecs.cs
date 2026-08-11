@@ -139,13 +139,29 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync($"launch-fence-{gate}");
         var agent = await CreateAgentAsync(projectId, "fence-agent");
         var idempotencyKey = $"fence-{gate}-{Guid.NewGuid():N}";
-        var body = new { prompt = "recover across the fence" };
         var runnerId = gate == LaunchParticipantGate.SubmitJob
             ? $"launch-fence-submit-runner-{Guid.NewGuid():N}"
             : null;
+        string? workspaceName = null;
+        LaunchReferences? original = null;
+        ClaimResult? claim = null;
 
         if (runnerId is not null)
+        {
             await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+            workspaceName = await CreateRunnerHomeWorkspaceAsync(
+                projectId,
+                runnerId,
+                "launch-fence-submit");
+        }
+
+        object body = workspaceName is null
+            ? new { prompt = "recover across the fence" }
+            : new
+            {
+                prompt = "recover across the fence",
+                context = new { workspace = workspaceName },
+            };
 
         try
         {
@@ -159,7 +175,7 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
 
             using var recovered = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
             Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
-            var original = await LaunchReferencesAsync(recovered);
+            original = await LaunchReferencesAsync(recovered);
 
             // The fence no longer fails, so a resume with the same key must
             // return the persisted outcome rather than a new launch.
@@ -175,12 +191,18 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
                 original,
                 inputAcceptance: AgentSessionInputAcceptance.Accepted,
                 turnStatus: AgentTurnStatus.Queued);
+
+            if (runnerId is not null)
+                claim = await ClaimPreparedAgentJobAsync(original.JobId, runnerId, projectId, original.SessionId);
         }
         finally
         {
             if (runnerId is not null)
             {
-                await DrainDispatchAsync(runnerId);
+                if (claim is null && original is not null)
+                    claim = await ClaimPreparedAgentJobAsync(original.JobId, runnerId, projectId, original.SessionId);
+                if (claim is not null)
+                    await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.WorkId);
                 await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
             }
         }

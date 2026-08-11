@@ -137,9 +137,33 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
 
     protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateExecutingSessionForCancelAsync()
     {
-        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
-        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
-        return (project, sessionId, turn.Id);
+        var project = await CreateProjectAsync("executing");
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
+            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+        _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+            .Register(_runnerId, $"{_runnerId}-conn");
+
+        var sessionId = $"executing-cancel-{Guid.NewGuid():N}";
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        var workDir = $"/workspaces/{project.Id}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: _runnerId,
+            AgentRuntime: "opencode",
+            WorkDir: workDir,
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                $"agent-{Guid.NewGuid():N}",
+                "cancel-agent"))));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId, workDir));
+        await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            $"input-{Guid.NewGuid():N}",
+            turnId,
+            "before cancel",
+            "user"));
+        await grain.MarkTurnExecutingAsync(turnId);
+        return (project, sessionId, turnId);
     }
 
     protected async Task<(ProjectRef Project, string SessionId, string TurnId, string JobId)> CreateExecutingLaunchSessionForStopAsync()
@@ -168,8 +192,14 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
             sessionId, inputId, turnId, "stop this launch", WorkspaceName: null, ProjectId: project.Id, Runtime: "pi", AgentId: "launch-stop-agent"));
         await job.SubmitPreparedLaunchAsync();
-        using var poll = await _fixture.Client.PostAsync($"/api/runner/{_runnerId}/poll", content: null);
-        poll.EnsureSuccessStatusCode();
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobId, TimeSpan.FromSeconds(5));
+        var assignment = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(_runnerId, assignment.RunnerId);
+        var claim = await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
+            .TryClaimAgentJobAsync(jobId, project.Id);
+        Assert.NotNull(claim);
+        Assert.Equal(jobId, claim.AgentJobId);
+        Assert.Equal(sessionId, claim.Dispatch.AgentSessionId);
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
         await grain.MarkInitialTurnExecutingAsync(jobId);
         return (project, sessionId, turnId, jobId);
