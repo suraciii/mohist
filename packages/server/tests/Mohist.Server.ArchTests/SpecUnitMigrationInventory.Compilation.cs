@@ -11,49 +11,9 @@ internal sealed partial class SpecUnitMigrationInventory
         var compilationKey = CompilationNameForPath(root.PrimaryPath);
         return _scopeCompilations.GetOrAdd(compilationKey, _ => new Lazy<CSharpCompilation>(() =>
         {
-            IReadOnlyList<SyntaxTree> trees;
-            if (_fullProjectScopes)
-            {
-                trees = _treesByPath.Values.Where(tree => InCompilation(root.PrimaryPath, tree.FilePath)).ToArray();
-            }
-            else
-            {
-                var scopedFqns = BuildProjectScope(root.PrimaryPath);
-                trees = scopedFqns.SelectMany(fqn => _typesByFqn.TryGetValue(fqn, out var type) ? type.Paths : [])
-                    .Distinct(StringComparer.Ordinal).Select(path => _treesByPath[path]).ToArray();
-            }
+            var trees = _treesByPath.Values.Where(tree => InCompilation(root.PrimaryPath, tree.FilePath)).ToArray();
             return CreateCompilation(trees, CompilationNameForPath(root.PrimaryPath));
         }, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
-    }
-
-    private string[] BuildProjectScope(string rootPath)
-    {
-        var scopedFqns = _analysisScopes.Where(entry => _typesByFqn.TryGetValue(entry.Key, out var root)
-                && CompilationNameForPath(root.PrimaryPath) == CompilationNameForPath(rootPath))
-            .SelectMany(entry => entry.Value.Append(entry.Key)).ToHashSet(StringComparer.Ordinal);
-        if (rootPath.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal))
-            foreach (var candidate in CurrentSpecTypes()) scopedFqns.UnionWith(BuildAutomaticScope(candidate));
-        return scopedFqns.OrderBy(value => value, StringComparer.Ordinal).ToArray();
-    }
-
-    private string[] BuildAutomaticScope(SpecUnitMigrationType root)
-    {
-        var pending = new Stack<SpecUnitMigrationType>([root]);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        while (pending.Count > 0)
-        {
-            var type = pending.Pop();
-            if (!visited.Add(type.Fqn)) continue;
-            foreach (var name in type.ReferencedTypeNames)
-            {
-                if (!_typesByName.TryGetValue(name, out var candidates)) continue;
-                var local = candidates.Where(candidate => candidate.Fqn.StartsWith(type.Fqn + ".", StringComparison.Ordinal)
-                    || type.Fqn.StartsWith(candidate.Fqn + ".", StringComparison.Ordinal)).ToArray();
-                var resolved = local.Length == 1 ? local[0] : candidates.Count == 1 ? candidates[0] : null;
-                if (resolved is not null) pending.Push(resolved);
-            }
-        }
-        return visited.OrderBy(value => value, StringComparer.Ordinal).ToArray();
     }
 
     private static string CacheKey(SpecUnitMigrationType root, SpecUnitMigrationType type)

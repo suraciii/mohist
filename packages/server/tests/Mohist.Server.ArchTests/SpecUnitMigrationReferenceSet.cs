@@ -57,7 +57,7 @@ internal sealed class SpecUnitMigrationReferenceSet : IDisposable
     private static ReferenceData CreateReferences()
     {
         var metadata = new List<AssemblyMetadata>();
-        var references = AppDomain.CurrentDomain.GetAssemblies()
+        var references = RequiredAssemblies().Concat(AppDomain.CurrentDomain.GetAssemblies())
             .Where(assembly => !assembly.IsDynamic)
             .Select(assembly => (Assembly: assembly, Name: assembly.GetName().Name))
             .Where(value => !string.IsNullOrWhiteSpace(value.Name) && !ExcludedAssemblies.Contains(value.Name!))
@@ -73,6 +73,34 @@ internal sealed class SpecUnitMigrationReferenceSet : IDisposable
             throw new InvalidOperationException("No in-memory assembly metadata is available for semantic inventory.");
 
         return new ReferenceData(references, metadata);
+    }
+
+    private static IEnumerable<Assembly> RequiredAssemblies()
+    {
+        yield return typeof(object).Assembly;
+        yield return typeof(Enumerable).Assembly;
+        yield return typeof(System.Diagnostics.Process).Assembly;
+        yield return typeof(System.Net.Http.HttpClient).Assembly;
+        yield return typeof(System.Net.Http.Json.JsonContent).Assembly;
+        yield return typeof(System.Security.Claims.ClaimsPrincipal).Assembly;
+        yield return typeof(System.Text.Json.JsonSerializer).Assembly;
+        yield return typeof(System.Threading.Channels.Channel).Assembly;
+        yield return typeof(EnvironmentAbstractions.IEnvironmentVariableProvider).Assembly;
+        yield return typeof(EnvironmentAbstractions.TestHelpers.MockEnvironmentVariableProvider).Assembly;
+        yield return typeof(Microsoft.AspNetCore.Hosting.IWebHostBuilder).Assembly;
+        yield return typeof(Microsoft.AspNetCore.Http.DefaultHttpContext).Assembly;
+        yield return typeof(Microsoft.AspNetCore.Http.Connections.Features.IHttpContextFeature).Assembly;
+        yield return typeof(Microsoft.AspNetCore.Http.Features.IFeatureCollection).Assembly;
+        yield return typeof(Microsoft.AspNetCore.Http.Json.JsonOptions).Assembly;
+        yield return typeof(Microsoft.AspNetCore.SignalR.Hub).Assembly;
+        yield return typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly;
+        yield return typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly;
+        yield return typeof(Microsoft.Extensions.DependencyInjection.ServiceCollection).Assembly;
+        yield return typeof(Microsoft.Extensions.Hosting.IHost).Assembly;
+        yield return typeof(Microsoft.Extensions.Time.Testing.FakeTimeProvider).Assembly;
+        yield return typeof(Orleans.IGrain).Assembly;
+        yield return typeof(Orleans.TestingHost.InProcessTestCluster).Assembly;
+        yield return typeof(Xunit.FactAttribute).Assembly;
     }
 
     private static MetadataReference? CreateMetadataReference(

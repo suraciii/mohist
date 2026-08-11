@@ -256,7 +256,8 @@ public sealed partial class SpecUnitMigrationLedgerRules
         using var inventory = CreateProductionInventory();
         var violations = SpecUnitMigrationLedgerValidator.Validate(ledger, inventory);
 
-        Assert.Empty(violations);
+        Assert.True(violations.Count == 0,
+            $"fresh semantic inventory violations:\n{string.Join('\n', violations.OrderBy(value => value, StringComparer.Ordinal))}");
         Assert.True(inventory.DiscoveredTypeCount > 0, "filtered compiled discovery must contain live endpoint types");
         Assert.True(inventory.DiscoveredTypeCount <= (ledger.Rows?.Count ?? 0) * 2 + inventory.CurrentSpecFqns.Count,
             $"filtered compiled discovery escaped its ledger-scaled bound: {inventory.DiscoveredTypeCount}");
