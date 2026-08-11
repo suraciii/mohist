@@ -24,7 +24,7 @@ namespace Mohist.Server.Runner.Grains;
 /// <list type="bullet">
 ///   <item><description>presence: lastSeen — poll IS the heartbeat (online/offline).</description></item>
 ///   <item><description>slots: capacity configuration (control-plane owned).</description></item>
-///   <item><description>closeout: on presence loss, fail active work in both owner ledgers.</description></item>
+///   <item><description>closeout: on presence loss, fail workflow work while retaining active AgentJob ledgers for reconnect redelivery.</description></item>
 /// </list>
 /// No work-completion wall clock — work liveness is the runner process's
 /// poll report; the only server-side timer is presence expiry.
@@ -684,21 +684,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             }
         }
 
-        var agentJobs = await _agentJobStore.ListRunningForRunnerAsync(RunnerId);
-        foreach (var entry in agentJobs)
-        {
-            try
-            {
-                await GrainFactory.GetGrain<IAgentJobGrain>(entry.JobKey)
-                    .MarkUnknownAsync("runner-lost");
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex,
-                    "runner {runner} failed to synthesize failed report for job {job} work {work}",
-                    RunnerId, entry.JobKey, entry.WorkId);
-            }
-        }
+        // An AgentJob's running ledger is the durable recovery record. Keep
+        // it intact so the same work identity is redelivered after this
+        // runner reconnects; its normal timeout remains the final
+        // fail-closed outcome when no runner returns.
     }
 
     private void SetRunnerInfo(RunnerInfo? info)
