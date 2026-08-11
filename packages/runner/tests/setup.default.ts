@@ -1,6 +1,5 @@
 import { afterEach, beforeEach } from "vitest"
 import { setExternalProcessPolicyForTest, type ExternalProcessPolicy } from "../src/system/process-policy.js"
-import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models.js"
 import { setPiRuntimeFactoryForTest } from "../src/runtime/pi/index.js"
 
 const denyExternalProcess: ExternalProcessPolicy = {
@@ -11,7 +10,6 @@ const denyExternalProcess: ExternalProcessPolicy = {
 }
 
 setExternalProcessPolicyForTest(denyExternalProcess)
-setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {}, complete: true }))
 setPiRuntimeFactoryForTest(() => ({
   start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
   ready: () => true,
@@ -23,7 +21,6 @@ setPiRuntimeFactoryForTest(() => ({
 } as never))
 beforeEach(() => {
   setExternalProcessPolicyForTest(denyExternalProcess)
-  setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {}, complete: true }))
   setPiRuntimeFactoryForTest(() => ({
     start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
     ready: () => true,
@@ -36,6 +33,5 @@ beforeEach(() => {
 })
 afterEach(() => {
   setExternalProcessPolicyForTest(denyExternalProcess)
-  setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {}, complete: true }))
   setPiRuntimeFactoryForTest(null)
 })

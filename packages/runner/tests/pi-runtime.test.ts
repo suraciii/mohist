@@ -62,9 +62,13 @@ class FakeClock implements PiClock {
   advance(ms: number): void { const target = this.time + ms; while (true) { const due = [...this.timers.entries()].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0]; if (!due) break; this.time = due[1].at; this.timers.delete(due[0]); due[1].callback() } this.time = target }
 }
 
-function factory(session: FakeSession, catalog = [{ provider: "fake", id: "model", thinkingLevels: ["high"] }]): PiSdkFactory {
+function factory(
+  session: FakeSession,
+  catalog = [{ provider: "fake", id: "model", thinkingLevels: ["high"] }],
+  catalogReads: { count: number } = { count: 0 },
+): PiSdkFactory {
   const services: PiSdkServices = {
-    catalog: async () => catalog,
+    catalog: async () => { catalogReads.count += 1; return catalog },
     createSession: async () => session,
     openSession: async (path) => { expect(path).toBe(session.sessionFile); return session },
     model: (provider, id) => ({ provider, id }),
@@ -74,16 +78,19 @@ function factory(session: FakeSession, catalog = [{ provider: "fake", id: "model
 }
 
 describe("PiRuntime", () => {
-  it("gates readiness, permits an empty catalog with a warning, and retries failure", async () => {
+  it("gates readiness without reading a model catalog, and retries startup failure", async () => {
     const failing: PiSdkFactory = { create: async () => { throw new Error("credential boundary failed") } }
     const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: failing })
     expect((await runtime.start()).ok).toBe(false)
     expect(runtime.ready()).toBe(false)
     const session = new FakeSession()
-    const empty = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session, []) })
+    const catalogReads = { count: 0 }
+    const empty = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session, [], catalogReads) })
     const result = await empty.start()
     expect(result.ok).toBe(true)
-    expect(empty.diagnostic()?.severity).toBe("warning")
+    expect(empty.diagnostic()).toBeNull()
+    expect(empty.catalog()).toBeNull()
+    expect(catalogReads.count).toBe(0)
   })
 
   it.each([
