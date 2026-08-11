@@ -71,28 +71,34 @@ public static class MohistOpenTelemetryRegistration
                 .AddSource(OrleansActivitySourceNames[3])
                 .AddHttpClientInstrumentation(o => o.FilterHttpRequestMessage = msg =>
                     !IsExporterSelfFeedback(msg.RequestUri, traceExportEndpoint))
-                .AddEntityFrameworkCoreInstrumentation()
-                .AddOtlpExporter("tracing", configure: null);
-            tracing.ConfigureServices(services => services.PostConfigure<OtlpExporterOptions>("tracing", otlp =>
+                .AddEntityFrameworkCoreInstrumentation();
+            if (options.ExportEnabled)
             {
-                otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-                otlp.Endpoint = traceExportEndpoint;
-                configureExporter?.Invoke(otlp);
-            }));
+                tracing.AddOtlpExporter("tracing", configure: null);
+                tracing.ConfigureServices(services => services.PostConfigure<OtlpExporterOptions>("tracing", otlp =>
+                {
+                    otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+                    otlp.Endpoint = traceExportEndpoint;
+                    configureExporter?.Invoke(otlp);
+                }));
+            }
         });
 
         builder.WithMetrics(metrics =>
         {
             metrics
                 .ConfigureResource(resource => resource.AddService(ServiceName))
-                .AddMeter(EventDispatcherService.MeterName)
-                .AddOtlpExporter("metrics", configure: null);
-            metrics.ConfigureServices(services => services.PostConfigure<OtlpExporterOptions>("metrics", otlp =>
+                .AddMeter(EventDispatcherService.MeterName);
+            if (options.ExportEnabled)
             {
-                otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-                otlp.Endpoint = metricsExportEndpoint;
-                configureExporter?.Invoke(otlp);
-            }));
+                metrics.AddOtlpExporter("metrics", configure: null);
+                metrics.ConfigureServices(services => services.PostConfigure<OtlpExporterOptions>("metrics", otlp =>
+                {
+                    otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+                    otlp.Endpoint = metricsExportEndpoint;
+                    configureExporter?.Invoke(otlp);
+                }));
+            }
         });
     }
 

@@ -77,6 +77,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
         builder.UseSetting("Mohist:ArtifactStorage:Root", "/mohist-tests/otel/artifacts");
+        builder.UseSetting("Mohist:Otel:ExportEnabled", "false");
         if (_otelEnabled is { } otelEnabled)
             builder.UseSetting("Mohist:Otel:Enabled", otelEnabled ? "true" : "false");
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
@@ -92,6 +93,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
+                ["Mohist:Otel:ExportEnabled"] = "false",
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),

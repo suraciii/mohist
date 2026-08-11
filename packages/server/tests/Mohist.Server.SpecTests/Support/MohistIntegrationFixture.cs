@@ -232,6 +232,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:ArtifactStorage:Root", ArtifactStorageRoot);
         builder.UseSetting("Mohist:LogsPath", _logsPath);
         builder.UseSetting("Mohist:Otel:Enabled", _otelEnabled ? "true" : "false");
+        builder.UseSetting("Mohist:Otel:ExportEnabled", "false");
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
@@ -251,6 +252,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:ArtifactStorage:Root"] = ArtifactStorageRoot,
                 ["Mohist:LogsPath"] = _logsPath,
                 ["Mohist:Otel:Enabled"] = _otelEnabled ? "true" : "false",
+                ["Mohist:Otel:ExportEnabled"] = "false",
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",

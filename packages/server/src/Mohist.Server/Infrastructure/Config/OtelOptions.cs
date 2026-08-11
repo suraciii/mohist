@@ -37,6 +37,8 @@ public sealed class OtelOptions
     /// </summary>
     public bool Enabled { get; set; } = true;
 
+    public bool ExportEnabled { get; set; } = true;
+
     /// <summary>
     /// OTLP HTTP endpoint the trace exporter posts to. Overridable via
     /// <c>MOHIST__Otel__Endpoint</c>. The OTLP HTTP exporter appends
