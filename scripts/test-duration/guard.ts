@@ -314,6 +314,7 @@ function withLaneConstraints(
 function applyDurationMeasurementPhase(
   planned: readonly PlannedLane[],
   durationMeasurementTracks: readonly string[],
+  durationIsolationTrack?: string,
 ): PlannedLane[] {
   if (durationMeasurementTracks.length === 0) return [...planned]
   if (new Set(durationMeasurementTracks).size !== durationMeasurementTracks.length) return [...planned]
@@ -326,6 +327,9 @@ function applyDurationMeasurementPhase(
   }
 
   const finalMeasurementLaneId = measurementLaneIds[measurementLaneIds.length - 1]
+  const isolationLaneId = durationIsolationTrack === undefined
+    ? undefined
+    : planned.find((plan) => plan.policyTrack?.id === durationIsolationTrack)?.lane.id
   return planned.map((plan) => {
     const measurementIndex = plan.policyTrack === undefined
       ? -1
@@ -334,7 +338,11 @@ function applyDurationMeasurementPhase(
       const predecessor = measurementIndex === 0 ? [] : [measurementLaneIds[measurementIndex - 1]]
       return withLaneConstraints(plan, predecessor, ['duration-measurement'])
     }
-    return withLaneConstraints(plan, [finalMeasurementLaneId])
+    const dependencies = isolationLaneId !== undefined && plan.lane.id !== isolationLaneId && plan.policyTrack?.kind === 'vitest'
+      ? [isolationLaneId]
+      : [finalMeasurementLaneId]
+    const resources = plan.lane.id === isolationLaneId ? ['duration-measurement'] : []
+    return withLaneConstraints(plan, dependencies, resources)
   })
 }
 
@@ -342,6 +350,7 @@ export function planTracks(
   selected: readonly TrackConfig[],
   artifactRoot: string,
   durationMeasurementTracks: readonly string[] = [],
+  durationIsolationTrack?: string,
 ): PlannedLane[] {
   const planned: PlannedLane[] = []
   for (const track of selected) {
@@ -381,7 +390,7 @@ export function planTracks(
       deadlineMs: track.deadlineMs,
     })
   }
-  return applyDurationMeasurementPhase(planned, durationMeasurementTracks)
+  return applyDurationMeasurementPhase(planned, durationMeasurementTracks, durationIsolationTrack)
 }
 
 function evidenceFor(artifactRoot: string, laneId: string): RawEvidence {
@@ -900,7 +909,12 @@ export async function main(
     return 1
   }
 
-  const planned = planTracks(selected, artifactRoot, config.canonical?.durationMeasurementTracks)
+  const planned = planTracks(
+    selected,
+    artifactRoot,
+    config.canonical?.durationMeasurementTracks,
+    config.canonical?.durationIsolationTrack,
+  )
   const plansByPolicy = new Map<string, PlannedLane[]>()
   for (const plan of planned) {
     if (!plan.policyTrack) continue

@@ -183,6 +183,19 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
       }
     }
   }
+  if (config.durationIsolationTrack !== undefined) {
+    if (config.durationMeasurementTracks === undefined) {
+      errors.push('canonical.durationIsolationTrack requires canonical.durationMeasurementTracks')
+    }
+    if (typeof config.durationIsolationTrack !== 'string' || !config.durationIsolationTrack) {
+      errors.push('canonical.durationIsolationTrack must be a non-empty track id')
+    } else {
+      const track = new Map(tracks.map((candidate) => [candidate.id, candidate])).get(config.durationIsolationTrack)
+      if (!track) errors.push(`canonical.durationIsolationTrack references unknown track: ${config.durationIsolationTrack}`)
+      else if (track.partitions !== undefined) errors.push(`canonical.durationIsolationTrack cannot include partitioned track: ${config.durationIsolationTrack}`)
+      else if (track.kind !== 'vitest') errors.push(`canonical.durationIsolationTrack must reference a vitest track: ${config.durationIsolationTrack}`)
+    }
+  }
   return errors
 }
 
