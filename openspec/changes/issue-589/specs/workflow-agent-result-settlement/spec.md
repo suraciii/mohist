@@ -22,13 +22,33 @@ For a Workflow-owned Agent task, the WorkflowRun SHALL be the sole authority tha
 
 ### Requirement: Unknown settlement preserves one execution identity
 
-An unknown settlement SHALL durably retain the original WorkflowRun, task attempt and work identity, bound AgentSession and AgentTurn identity, applicable physical target, stop-operation identity, unresolved reason, and settlement deadline. Repeated observations for that identity MUST resolve to the same settlement and MUST NOT create replacement work, a replacement Agent turn, a replacement deadline, or a second task outcome.
+An unknown settlement SHALL durably retain the original WorkflowRun, task attempt and work identity, bound AgentSession and AgentTurn identity, applicable physical target, stop-operation identity, unresolved reason, and settlement deadline. The turn-opening input SHALL have a stable delivery identity, and the Agent runtime MUST NOT start until the Server acknowledges that both the AgentSession turn binding and Workflow execution binding are durable. Every later runtime event SHALL retain that immutable execution identity; events from different executions MUST NOT be delivered as one identity. Repeated inputs or observations for the same identity MUST resolve to the same turn and settlement and MUST NOT create replacement work, a replacement Agent turn, a replacement deadline, or a second task outcome.
+
+#### Scenario: Runtime waits for durable Server binding
+
+- **WHEN** the Runner has persisted the turn-opening input locally but has not received the matching Server acknowledgement
+- **THEN** the Agent runtime MUST NOT be invoked
+- **AND** the Server MUST issue that acknowledgement only after the AgentSession turn binding and Workflow execution binding are both durable
+- **AND** the acknowledgement SHALL identify the created or reused AgentTurn for every later runtime event
+
+#### Scenario: Input acknowledgement is lost after durable binding
+
+- **WHEN** the Server durably binds a turn-opening input but its acknowledgement is lost before the Runner receives it
+- **THEN** replay of the same input delivery identity SHALL reuse the existing Agent input, AgentTurn, and Workflow settlement
+- **AND** the runtime MAY start only after the replay receives the matching acknowledgement
+
+#### Scenario: A runtime-event batch contains different execution identities
+
+- **WHEN** queued runtime events belong to different work attempts, Agent turns, Runners, or runtime Sessions
+- **THEN** the delivery path SHALL partition them by full execution identity or reject the mixed batch
+- **AND** it MUST NOT serialize all events using metadata taken from only one event in the batch
 
 #### Scenario: The same stop operation is delivered repeatedly
 
-- **WHEN** the same stop operation is delivered again for an execution that already has an unknown settlement and no new authoritative reconciliation fact
+- **WHEN** the same stop operation is delivered again for an execution that already has an unknown settlement
 - **THEN** the system SHALL return or continue the existing settlement for that execution identity
-- **AND** it MUST NOT perform the physical stop again or create another Workflow task outcome
+- **AND** it MUST NOT create a new stop-operation identity or another Workflow task outcome
+- **AND** it MAY redeliver the recorded stop operation only after positive reconciliation proves that the exact recorded target is still active
 
 #### Scenario: Duplicate unknown observations arrive
 
@@ -76,7 +96,7 @@ Recovery SHALL first reconcile the recorded execution identity with any authorit
 
 ### Requirement: Unknown settlement reaches a bounded blocked state
 
-The first unknown settlement SHALL have a fixed, durable deadline that MUST NOT be extended by redelivery, reconnect, recovery replay, Server restart, or another observation of the same unresolved execution. If the deadline expires without an authoritative Agent result, the Workflow task SHALL become `blocked`, not completed or failed. Workflow task and run status projections SHALL expose the blocked state and an actionable reason identifying the unconfirmed Agent result and available recovery path; they MUST NOT expose `TaskFailed` as the reason for that settlement.
+The first unknown settlement SHALL have a fixed, durable deadline computed from a configured timeout whose default is five minutes. The deadline MUST NOT be extended by redelivery, reconnect, recovery replay, Server restart, or another observation of the same unresolved execution. If the deadline expires without an authoritative Agent result, the Workflow task SHALL become `blocked`, not completed or failed. Workflow task and run status projections SHALL expose the blocked state and an actionable reason identifying the unconfirmed Agent result and available recovery path; they MUST NOT expose `TaskFailed` as the reason for that settlement.
 
 #### Scenario: Deadline expires without an authoritative result
 
@@ -95,10 +115,29 @@ The first unknown settlement SHALL have a fixed, durable deadline that MUST NOT 
 - **WHEN** API, event, CLI, or Web Workflow status surfaces read a task whose unknown-result deadline has expired
 - **THEN** each surface SHALL represent the task and Workflow attention as blocked rather than failed or completed
 - **AND** each surface SHALL expose the persisted actionable reason without requiring inference from AgentSession activity
+- **AND** Issue and Inbox SHALL project blocked attention while blocked events MUST NOT be routed to failure-only GitHub, Hermes, or Agent subscribers
+
+### Requirement: Explicit Workflow stop cancels unresolved work without failure
+
+An explicit operator stop SHALL be the only control operation that abandons an unresolved Workflow Agent execution. The stop state commit SHALL atomically cancel the unresolved task, stop the WorkflowRun, and retain the execution identity in history. Dispatch snapshot deletion, settlement reminder removal, and stage-lock release SHALL occur only after that commit through an idempotent cleanup operation. A cleanup interruption MUST be repairable by stop replay or grain activation without changing the committed stop outcome. The stop MUST NOT write task, stage, or run failure fields or events. Any later result or observation for the cancelled execution SHALL be acknowledged as stale without side effects.
+
+#### Scenario: Operator stops a Workflow with an unresolved Agent result
+
+- **WHEN** an operator explicitly stops a Workflow whose Agent result settlement is unknown or blocked
+- **THEN** the task SHALL become cancelled and the WorkflowRun SHALL become stopped without a failure outcome
+- **AND** the original execution identity SHALL remain available in history
+- **AND** the dispatch snapshot, settlement reminder, and stage locks SHALL be released only after the stop state commits
+- **AND** any later report or observation for that execution SHALL be stale and side-effect free
+
+#### Scenario: Cleanup is interrupted after the stop commit
+
+- **WHEN** the Workflow stop state commits but snapshot deletion, reminder removal, or stage-lock release fails
+- **THEN** the Workflow SHALL remain stopped with its task cancelled and no failure outcome
+- **AND** stop replay or grain activation SHALL retry the same cleanup idempotently until the resources are released
 
 ### Requirement: An authoritative Agent result settles exactly once
 
-An authoritative Agent result matching the recorded execution identity SHALL settle an unknown or blocked Workflow task exactly once according to the reported success or failure. A successful result SHALL use the normal task-completion and Workflow-advancement semantics; a failed result SHALL use the normal task-failure semantics. Duplicate matching reports SHALL return the existing settlement without duplicating events, while stale stop observations or conflicting later reports MUST NOT overwrite the accepted authoritative result.
+An authoritative Agent result matching the recorded execution identity SHALL settle an unknown or blocked Workflow task exactly once according to the reported success or failure. A successful result SHALL use the normal task-completion and Workflow-advancement semantics; a failed result SHALL use the normal task-failure semantics. After the first authoritative result wins, every later report for that execution identity SHALL receive a stale acknowledgement without events or other side effects; implementations MUST NOT claim duplicate-versus-conflict discrimination unless they persist a result fingerprint. Stale stop observations MUST NOT overwrite the accepted authoritative result.
 
 #### Scenario: Authoritative result arrives before the deadline
 
@@ -120,9 +159,9 @@ An authoritative Agent result matching the recorded execution identity SHALL set
 
 #### Scenario: Authoritative result is delivered more than once
 
-- **WHEN** the same authoritative Agent result is delivered repeatedly for the recorded execution identity
-- **THEN** each replay SHALL resolve to the existing settlement
-- **AND** the Workflow MUST NOT append a second terminal task outcome or advance the Workflow twice
+- **WHEN** any additional authoritative result is delivered for an execution identity whose task already accepted an authoritative result
+- **THEN** each later report SHALL receive a stale acknowledgement
+- **AND** the Workflow MUST NOT bind artifacts, mutate output, append another terminal task outcome, or advance the Workflow again
 
 ### Requirement: Conclusive failures retain normal Workflow semantics
 

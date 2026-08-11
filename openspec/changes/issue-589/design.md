@@ -63,7 +63,7 @@ AgentResultSettlement
 
 The first record is `awaiting-result`; it has no uncertainty deadline because ordinary execution is still in progress. The first inconclusive observation changes the same record to `unknown`, stamps `firstUnknownAt`, and stores `deadlineAt = firstUnknownAt + AgentResultSettlementTimeout`. Later observations may update the latest reason or fill previously unknown physical identity fields, but cannot replace the execution identity or deadline.
 
-The settlement is cleared when an authoritative result wins. The terminal `TaskRun` retains `WorkId` and `WorkerId`, which are sufficient to recognize duplicate reports without retaining a second historical result record. Traceable settlement transitions remain in Workflow events and AgentSession history.
+The settlement is cleared when an authoritative result wins. The terminal `TaskRun` retains `WorkId` and `WorkerId`, which are sufficient to classify every later report for that execution as stale without retaining a result fingerprint or attempting content-level duplicate/conflict discrimination. An explicit Workflow stop retains the invalidated execution identity in task history. Traceable settlement transitions remain in Workflow events and AgentSession history.
 
 The settlement belongs inside `WorkflowRun` state rather than a new table. Task outcome, settlement arbitration, status, and emitted events then commit in one existing `WorkflowRunStore.SaveAsync(run, events)` transaction. A separate row would require a cross-write protocol between the settlement and task outcome and would allow both to win after a partial failure.
 
@@ -73,7 +73,7 @@ The settlement belongs inside `WorkflowRun` state rather than a new table. Task 
 
 ### B. Freeze the Session/Turn binding before Agent execution
 
-The runtime-event HTTP request already carries `workId`, `workType`, and `stage`, but `RunnerRoutes` currently drops those fields before calling AgentSession. Preserve them in `AppendAgentSessionRuntimeEventsCommand`. When AgentSession accepts the turn-opening `session.input`, it freezes a `SessionWorkflowExecutionBinding` on that `AgentTurnRecord`:
+The runtime-event HTTP request already carries `workId`, `workType`, and `stage`, but `RunnerRoutes` currently drops those fields before calling AgentSession. Add a stable delivery identity to the turn-opening `session.input` and preserve the full Workflow execution identity on every runtime-event record and command. When AgentSession accepts the input, it replay-idempotently creates or reuses the same `AgentTurnRecord` and freezes a `SessionWorkflowExecutionBinding` on it:
 
 ```text
 workflowRunId + taskRun/workId + runnerId
@@ -81,7 +81,9 @@ agentSessionId + agentTurnId
 runtime + runtimeSessionId
 ```
 
-AgentSession then calls a narrow Workflow port operation, `BindAgentExecutionAsync`, before acknowledging the turn-opening input. Workflow accepts an exact duplicate as a no-op and rejects a mismatch for the same `workId`. The Runner already waits for the durable input receipt before invoking the runtime, so a failed Workflow binding leaves the input in the Runner runtime-event outbox and prevents execution until replay succeeds.
+AgentSession then calls a narrow Workflow port operation, `BindAgentExecutionAsync`, before acknowledging the turn-opening input. Workflow accepts an exact duplicate as a no-op and rejects a mismatch for the same `workId`. The Server returns the matching input receipt, including the created or reused `AgentTurnId`, only after both the AgentSession turn binding and Workflow settlement binding are durable. The Runner must wait for that Server receipt, not merely local outbox persistence, before invoking the runtime, and it adds the returned Turn identity to every later event. A transport or Workflow-binding failure leaves the same delivery identity in the Runner outbox; replay reuses the existing turn and retries the missing binding before acknowledgement.
+
+The outbox sequence key includes the complete execution identity, including `workId`, Runner, runtime Session, and stable input/turn identity. Production batch delivery validates that every record shares that key and rejects a mixed batch. Batch envelopes never borrow work metadata from only the head record, so a reused named Session cannot attach delayed events to later work.
 
 Every later AgentSession observation is built from the frozen Turn binding, never from the Session's current `work-id` label. The observation may add the current stop-operation identity, but it cannot change the bound task, turn, Runner, or physical runtime target.
 
@@ -104,7 +106,7 @@ Runner work results gain an explicit `unknown` status for Agent execution whose 
 
 `RunnerGrain.CloseoutLostAsync` also becomes type-sensitive. Running checks and non-Agent tasks keep the existing conclusive `runner-lost` failure. A Workflow Agent task receives a `runner-disconnected` observation against its existing settlement and does not emit `TaskFailed`.
 
-Repeated observations are no-ops after identity validation. An observation for a terminal task, a superseded attempt, a different Runner, or a different Turn cannot reopen or overwrite the task.
+Repeated observations are no-ops after identity validation, but every matching unknown observation still calls `EnsureReminder` from the persisted absolute deadline. An observation for a terminal task, a superseded attempt, a different Runner, or a different Turn cannot reopen or overwrite the task.
 
 ### D. Use explicit unresolved and blocked state-machine transitions
 
@@ -118,12 +120,12 @@ unknown         + deadline                      -> blocked
 unknown         + authoritative result          -> normal terminal task transition
 blocked         + authoritative result          -> normal terminal task transition
 blocked         + observation                   -> blocked
-terminal task   + any observation/report         -> no-op acknowledgement
+terminal task   + any observation/report         -> stale acknowledgement
 ```
 
-Add internal `AwaitingAgentResult` and visible `Blocked` values to `TaskRunStatus`, `StageRunStatus`, and `WorkflowRunStatus`. On the first unknown observation, all three move to `AwaitingAgentResult`. Wire status remains `running` during this bounded reconciliation window, while the task's settlement view explicitly exposes `state: unknown`, its reason, and deadline. At expiry, all three move to wire status `blocked`.
+`TaskRun.AgentResultSettlement.State` is the single persisted authority for awaiting, unknown, and blocked arbitration. `TaskRun.Status` remains nonterminal while settlement is unresolved. `HasUnresolvedAgentResult` derives task/stage views and every dispatch, control, lock, and redelivery predicate from that settlement instead of copying the state into three competing enums. Wire status remains `running` during the bounded unknown window and becomes `blocked` at expiry. Persist only the minimum run-level blocked value required by indexed run queries; stage and task projections derive blocked from the settlement.
 
-`Blocked` is nonterminal and non-dispatchable. `WorkflowRunStatus.IsTerminal` remains true only for `Stopped` and `Completed`; assignment, workspace, task attempt, work identity, and profile binding remain intact. `FailureDetails` stays null because blocked is not a failure.
+The blocked settlement is nonterminal and non-dispatchable. `WorkflowRunStatus.IsTerminal` remains true only for `Stopped` and `Completed`; assignment, workspace, task attempt, work identity, and profile binding remain intact. `FailureDetails` stays null because blocked is not a failure.
 
 Dispatch and control predicates must treat both unresolved states explicitly:
 
@@ -131,11 +133,11 @@ Dispatch and control predicates must treat both unresolved states explicitly:
 - `WorkflowRunWorkProjection` retains the task map for late lookup but no longer publishes the unresolved task as desired active work, so an empty Runner report cannot cause redelivery after a process restart.
 - A key still reported by a connected Runner as `inFlight` or `awaitingAck` continues to consume a Runner slot, even though the Server no longer desires redelivery for it.
 - Retry, rerun, rerun-from-stage, and runtime task insertion reject with `agent_result_unresolved`; they cannot create replacement work to settle uncertainty.
-- Explicit Workflow stop remains the operator escape hatch. It invalidates the unresolved settlement, makes later reports stale, and releases normal Workflow resources without writing `TaskFailed` for the missing Agent result.
+- Explicit Workflow stop remains the operator escape hatch. In one state commit it cancels the unresolved task, stops the run, retains execution identity in history, and writes no task/stage/run failure fields or events. After that commit, one idempotent `ReconcileAgentSettlementCleanupAsync` operation deletes the dispatch snapshot, unregisters the settlement reminder, and releases stage locks. Stop replay for the already-stopped unresolved identity and grain activation both rerun cleanup, so a crash between the commit and any external release converges without reopening the run. Every later report or observation is stale.
 
 Sequential stage locks remain held through `unknown` and `blocked`. Releasing a lock while the physical target may still be active would permit overlapping effects on the protected resource. A matching result releases the lock through the normal `StageCompleted` or `StageFailed` event path; explicit Workflow stop releases it through the existing stop path.
 
-**Alternative considered: keep all domain statuses `Running` and derive blocked only in views.** Rejected because scheduler, redelivery, retry, lock, and control decisions would continue to treat the task as ordinary running work.
+**Alternative considered: derive blocked only in read views while leaving existing control predicates unchanged.** Rejected because scheduler, redelivery, retry, lock, and control decisions would continue to treat the task as ordinary running work. The chosen design derives those decisions from `HasUnresolvedAgentResult` as well.
 
 **Alternative considered: release the stage lock at the blocked deadline.** Rejected because the deadline bounds Workflow uncertainty; it does not prove that the physical target stopped.
 
@@ -143,14 +145,14 @@ Sequential stage locks remain held through `unknown` and `blocked`. Releasing a 
 
 Report lookup changes from `FindActiveWork(workId, workerId)` to an identity lookup over the persisted task attempts. A report is eligible when exactly one task has the supplied `workId`, its stored Runner matches the authenticated route Runner, and it is either ordinary active work or has a matching `unknown` / `blocked` settlement.
 
-`WorkflowReportService` performs only pure envelope validation and translation before entering the grain. Artifact binding, follow-up task projection, output mutation, event creation, and task advancement occur only after the Workflow grain has selected the report as the winner. This prevents two concurrent duplicate or conflicting late reports from performing durable side effects before grain arbitration. Existing artifact upload/bind idempotency remains the retry boundary if a grain save fails after binding.
+`WorkflowReportService` performs only pure envelope validation and translation before entering the grain. Artifact binding, follow-up task projection, output mutation, event creation, and task advancement occur only after the Workflow grain has selected the report as the winner. This prevents two concurrent late reports from performing durable side effects before grain arbitration. New bound artifact rows persist `SourceUploadId` under a unique filtered index; historical rows may leave it null because their consumed upload identity cannot be reconstructed. Binding returns the existing row on replay and records the real `TaskRun.Id`. This is the retry boundary if a grain save fails after binding.
 
 A matching result applies the existing completion or failure behavior to the original `TaskRun.Id` rather than `CurrentTask()`:
 
-- success records output/artifacts, completes that task, clears settlement, restores the stage from `Blocked` or `AwaitingAgentResult`, and runs normal advancement;
+- success records output/artifacts, completes that task, clears settlement-derived unknown/blocked attention, and runs normal advancement;
 - failure records output/error, fails that task, clears settlement, and emits the existing `TaskFailed`, `StageFailed`, and `WorkflowRunFailed` events;
-- a duplicate matching the already terminal task returns the existing acknowledgement without events or side effects;
-- a conflicting later result or stale physical observation is acknowledged stale and changes nothing.
+- every report received after the task is terminal is acknowledged `Stale` without artifact, follow-up, output, event, or advancement side effects;
+- stale physical observations are also acknowledged stale and change nothing.
 
 The dispatch snapshot is deleted on the first unknown transition. Reconciliation preserves the minimal execution identity in WorkflowRun state and never redispatches the payload; retaining a potentially large snapshot through an indefinitely blocked state would violate the WorkflowRun storage boundary.
 
@@ -158,7 +160,7 @@ The dispatch snapshot is deleted on the first unknown transition. Reconciliation
 
 `WorkflowGrain` implements `IRemindable` with one `agent-result-settlement` reminder. At most one Workflow task can be unresolved, so the grain does not need per-task reminder names or a polling scanner.
 
-The first unknown transition persists the absolute UTC deadline using the injected `TimeProvider`, then registers or updates the reminder for that deadline. Redelivery always reads the stored deadline and cannot extend it. On activation, the grain repairs reminder registration from the persisted settlement. A reminder tick before the deadline re-registers for the remaining duration; a due tick atomically writes `Blocked` statuses and blocked events, then unregisters the reminder. A result or explicit stop also unregisters it after the state commit.
+The first unknown transition persists the absolute UTC deadline using the injected `TimeProvider`, then calls `EnsureReminder` for that deadline. Every duplicate unknown observation calls the same operation after committing its no-op state decision, so a commit-success/register-failure/retry sequence repairs the missing reminder without waiting for grain reactivation. Redelivery always reads the stored deadline and cannot extend it. On activation, the grain reconciles reminder state: unknown ensures registration from the persisted deadline, while blocked or terminal settlement ensures removal. A reminder tick before the deadline re-registers for the remaining duration; a due tick atomically writes the blocked settlement and blocked events, then idempotently unregisters. If removal fails, reminder replay or activation retries it. A result or explicit stop also unregisters it only after the state commit through the same cleanup path.
 
 The initial `AgentResultSettlementTimeout` is five minutes, matching the existing AgentSession stop-recovery bound. It is Server configuration, but each settlement stores its computed absolute deadline so later configuration changes do not alter in-flight work. Tests inject `TimeProvider` and use Orleans reminder entry points; they do not wait on wall clock or poll.
 
@@ -171,19 +173,19 @@ Add Workflow events for the two observable settlement milestones:
 - `AgentTaskResultUnconfirmed(stage, taskId, workId, reason, deadlineAt)` records the first unknown transition.
 - `TaskBlocked`, `StageBlocked`, and `WorkflowRunBlocked` record expiry without reusing any failure event.
 
-The blocked events enter `WorkflowEventSerializer`, `EventCatalog`, lineage, event query, and Web canonical-event handling. Failure-only subscribers must not consume them as `WorkflowRunFailed`. Issue, Inbox, notification, and GitHub projections may present blocked attention, but cannot offer failed-task retry or infer `FailureReason.TaskFailed`.
+The blocked events enter `WorkflowEventSerializer`, `EventCatalog`, lineage, event query, and Web canonical-event handling. Project blocked attention to Issue, Inbox, Web, and CLI. Failure-only GitHub, Hermes, and Agent subscribers do not consume blocked events, and no surface may offer failed-task retry or infer `FailureReason.TaskFailed`.
 
 Add an `AgentResultSettlementView` to the task status view with `state`, stable reason code, message, deadline, and next action. A blocked run also projects the same actionable details at the top level so CLI and Web status headers do not need to search task history. The stable blocked reason is `agent-result-unconfirmed`; its next action tells the operator to restore the original Runner and allow result replay, inspect the bound AgentSession/Turn, or explicitly stop the run after confirming the physical target is no longer active.
 
-`WorkflowStatusMapper` maps all three blocked enums to `blocked`. CLI and Web status unions, pills, stage icons, task rows, logs, and issue projections add a blocked presentation. Blocked is not added to CLI terminal-run polling because a late authoritative result can still settle it. Run and stage `Failure` fields remain null; clients read the settlement reason rather than inventing a failure from AgentSession activity.
+`WorkflowStatusMapper` derives task and stage `blocked` from the settlement and maps the minimum persisted run-level blocked value required for indexed queries. CLI and Web status unions, pills, stage icons, task rows, logs, and issue projections add a blocked presentation. Blocked is not added to CLI terminal-run polling because a late authoritative result can still settle it. Run and stage `Failure` fields remain null; clients read the settlement reason rather than inventing a failure from AgentSession activity.
 
 ## Risks / Trade-offs
 
 - [Every Workflow Agent turn may briefly enter unknown because Session close can arrive before its result report] -> The transition is idempotent and normally short-lived; it is the honest state between the two independently delivered facts. Only the fixed deadline becomes user-blocking.
 - [A Session binding replay could target a later task through mutable labels] -> Freeze Workflow work identity on the AgentTurn at input acceptance and build every observation from that record.
 - [A stale Runner could submit a late result after assignment or status changed] -> Match the authenticated Runner, persisted work id, task attempt, and settlement; reject any identity mismatch before side effects.
-- [Artifact binding occurs outside the WorkflowRun database transaction] -> Run it only after serialized grain arbitration and retain its existing idempotent upload identity so a failed Workflow save can replay without duplicate artifacts.
-- [Reminder registration is not in the WorkflowRun transaction] -> Persist the absolute deadline as authority, surface registration failure to the observation caller, and repair registration on grain activation. Reminder replay rechecks state and time before changing status.
+- [Artifact binding occurs outside the WorkflowRun database transaction] -> Run it only after serialized grain arbitration, persist `SourceUploadId` for every new row under a unique filtered index, return the existing binding on replay, and store the real `TaskRun.Id` so a failed Workflow save cannot duplicate or misattribute artifacts.
+- [Reminder registration is not in the WorkflowRun transaction] -> Persist the absolute deadline as authority, surface registration failure to the observation caller, and call `EnsureReminder` on every duplicate observation as well as activation. Reminder replay rechecks state and time before changing status.
 - [Blocked work can hold a sequential stage lock indefinitely] -> This is intentional while physical effects are unconfirmed. The actionable recovery path is result reconciliation or explicit Workflow stop after the operator verifies the target.
 - [Removing unresolved work from desired dispatch could free Runner capacity too early] -> Count the Runner's reported `inFlight` and `awaitingAck` keys for capacity while connected, but never use them as authority to redispatch the Workflow task.
 - [New enum values break exhaustive consumers] -> Update Server wire mappers, event serializers, CLI, Web unions, and exhaustive tests in the same coordinated release.
@@ -194,13 +196,13 @@ Add an `AgentResultSettlementView` to the task status view with `state`, stable 
 1. Add settlement models, state-machine transitions, reminder handling, blocked events, and domain tests. Split active-work lookup from reportable-settlement lookup and split desired-dispatch counting from reported Runner capacity.
 2. Preserve runtime-event work metadata, freeze AgentTurn bindings, replace AgentSession abandonment with observation commands, and make Runner loss Agent-aware. Add replay, stop-operation, Session-reuse, and Runner-reconnect tests.
 3. Emit Runner `unknown` results for inconclusive Agent outcomes, route them outside `TaskReportStatus`, and move report side effects behind Workflow arbitration. Add before/after-deadline, duplicate, conflicting-result, artifact, and process-restart tests.
-4. Add blocked API/event projections and update Issue, CLI, Web, notification, Inbox, and GitHub consumers. Pin that blocked is visible, actionable, nonterminal, and never represented by failure fields or events.
-5. Before deployment, drain or explicitly stop running Workflow Agent tasks so every new execution obtains a frozen Turn binding. No EF schema migration is required because settlement lives in WorkflowRun JSON state; no historical failed run is reopened automatically.
+4. Add blocked API/event projections and update Issue, CLI, Web, notification, and Inbox consumers while fencing failure-only GitHub, Hermes, and Agent subscribers. Pin that blocked is visible, actionable, nonterminal, and never represented by failure fields or events.
+5. Add the artifact replay-key migration required to persist `uploadId` identity on bound artifacts. Settlement itself needs no new table because it lives in WorkflowRun JSON state. Before deployment, drain or explicitly stop running Workflow Agent tasks so every new execution obtains a frozen Turn binding; no historical failed run is reopened automatically.
 6. Run `npm run test:fast`, then the full `npm run verify` gate with fake time and fake external dependencies.
 
 **Rollback:** take the normal consistent SQLite backup before deployment. Once any run writes the new enum values or blocked event types, rollback to an older binary requires restoring that pre-deployment backup; no live reverse conversion is provided. Before the first new-state write, the release can be reverted normally.
 
-## Open Questions
+## Resolved Parameters
 
-- Is five minutes the desired production default for `AgentResultSettlementTimeout`, or should operations choose a longer reconnect window? The persisted absolute-deadline model and tests do not depend on the default.
-- Should `WorkflowRunBlocked` trigger an immediate user notification in every channel, or only update Issue/Inbox/Web attention until the existing notification policy is extended? It must be available on the event bus either way.
+- `AgentResultSettlementTimeout` has a configured five-minute default. Each settlement persists its absolute deadline, so later configuration changes do not alter in-flight work.
+- `WorkflowRunBlocked` is available on the event bus and projects attention to Issue, Inbox, Web, and CLI. It is not routed through failure-only GitHub, Hermes, or Agent subscribers.
