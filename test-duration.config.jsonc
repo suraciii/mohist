@@ -32,10 +32,9 @@
       "server-spec": 3,
       "duration-measurement": 1
     },
-    // These duration-sensitive .NET tracks run as a short ordered prefix.
-    // Runner then gates only the remaining Node lanes while .NET fan-out stays
-    // bounded and concurrent.
-    "durationMeasurementTracks": ["cli", "server-unit"],
+    // The CLI sample is a short ordered prefix. Runner then gates only the
+    // remaining Node lanes while all .NET fan-out stays bounded and concurrent.
+    "durationMeasurementTracks": ["cli"],
     "durationIsolationTrack": "runner"
   },
   "tracks": [

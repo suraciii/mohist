@@ -258,11 +258,13 @@ Every member claims the `duration-measurement` resource and depends on the
 previous member. The optional `canonical.durationIsolationTrack` is admitted
 after that prefix and gates only other Vitest lanes; .NET and Spec lanes resume
 the normal bounded fan-out immediately after the measurement prefix. The
-current measurement set is the CLI and Server unit tracks, with Runner as the
-isolated Node track. This keeps duration samples comparable without changing
-test behavior, thresholds, or internal test-runner settings, while avoiding
-global serialization. The phase is applied only when the complete configured
-set is selected, so focused `--track` execution has no hidden prerequisite work.
+current measurement set is the CLI track, with Runner as the isolated Node
+track. Server Unit remains fully budgeted but is admitted with the bounded
+.NET fan-out to keep the complete gate within its existing wall. This changes
+neither test behavior, thresholds, nor internal test-runner settings, and does
+not globally serialize the suite. The phase is applied only when the complete
+configured set is selected, so focused `--track` execution has no hidden
+prerequisite work.
 
 #### Host exclusivity for duration evidence
 
