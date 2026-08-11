@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain.Run;
 
@@ -46,6 +47,7 @@ public interface IWorkflowRunWorkProjection
     Task<string?> ResolveWorkIdAsync(string workflowRunId, string taskId, CancellationToken ct = default);
     Task<string?> ResolveTaskIdAsync(string workflowRunId, string workId, CancellationToken ct = default);
     Task<bool> IsActiveWorkAsync(string workflowRunId, string workId, string runnerId, CancellationToken ct = default);
+    Task<bool> IsTerminalWorkAsync(string workflowRunId, string workId, string runnerId, CancellationToken ct = default);
     Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default);
 }
 
@@ -105,12 +107,80 @@ public sealed class WorkflowRunWorkProjection : IWorkflowRunWorkProjection
         var active = await db.WorkflowRuns
             .AsNoTracking()
             .Where(row => row.WorkflowRunId == workflowRunId)
-            .Select(row => new { row.ActiveWorkId, row.ActiveWorkerId })
+            .Select(row => new { row.ActiveWorkId, row.ActiveWorkerId, row.Status })
             .SingleOrDefaultAsync(ct);
 
         return active is not null
+            && !IsTerminalStatus(active.Status)
             && string.Equals(active.ActiveWorkId, workId, StringComparison.Ordinal)
             && string.Equals(active.ActiveWorkerId, runnerId, StringComparison.Ordinal);
+    }
+
+    private static bool IsTerminalStatus(string? status) =>
+        status is not null
+        && Enum.TryParse<WorkflowRunStatus>(status, ignoreCase: true, out var parsed)
+        && parsed.IsTerminal();
+
+    public async Task<bool> IsTerminalWorkAsync(
+        string workflowRunId,
+        string workId,
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId)
+            || string.IsNullOrWhiteSpace(workId)
+            || string.IsNullOrWhiteSpace(runnerId))
+            return false;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var state = await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.WorkflowRunId == workflowRunId)
+            .Select(row => row.State)
+            .SingleOrDefaultAsync(ct);
+        if (state is null)
+            return false;
+
+        var run = JSON.Deserialize<WorkflowRun>(state);
+        if (run is null)
+            return false;
+
+        var settledTask = FindSettledTask(run);
+        if (settledTask is null)
+            return false;
+
+        var settledWorkId = string.IsNullOrWhiteSpace(settledTask.WorkId)
+            ? settledTask.Id
+            : settledTask.WorkId;
+        return string.Equals(settledWorkId, workId, StringComparison.Ordinal)
+            && string.Equals(settledTask.WorkerId, runnerId, StringComparison.Ordinal);
+    }
+
+    private static TaskRun? FindSettledTask(WorkflowRun run)
+    {
+        if (!run.Status.IsTerminal() || string.IsNullOrWhiteSpace(run.CurrentStageId))
+            return null;
+
+        var currentStage = run.Stages.FirstOrDefault(
+            stage => string.Equals(stage.Id, run.CurrentStageId, StringComparison.Ordinal));
+        if (currentStage is null)
+            return null;
+
+        if (run.Status == WorkflowRunStatus.Stopped)
+        {
+            var interruptedTasks = currentStage.Tasks.Where(task =>
+                task.Status == TaskRunStatus.Running
+                && !string.IsNullOrWhiteSpace(task.WorkerId)
+                && (!string.IsNullOrWhiteSpace(task.WorkId) || !string.IsNullOrWhiteSpace(task.Id)))
+                .Take(2)
+                .ToArray();
+            return interruptedTasks.Length == 1 ? interruptedTasks[0] : null;
+        }
+
+        return currentStage.Tasks.LastOrDefault(task =>
+            (task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed)
+            && !string.IsNullOrWhiteSpace(task.WorkerId)
+            && (!string.IsNullOrWhiteSpace(task.WorkId) || !string.IsNullOrWhiteSpace(task.Id)));
     }
 
     public async Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default)
