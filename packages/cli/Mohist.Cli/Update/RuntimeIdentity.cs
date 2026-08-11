@@ -34,7 +34,8 @@ internal sealed record RuntimeIdentity(
     string ReleaseId,
     long Generation,
     string? RunnerId = null,
-    string? ConnectionGeneration = null)
+    string? ConnectionGeneration = null,
+    string? BuildGitHash = null)
 {
     public bool IsComplete =>
         !string.IsNullOrWhiteSpace(Component)
@@ -50,16 +51,33 @@ internal sealed record RuntimeIdentity(
         if (!IsComplete || !expected.IsComplete)
             return false;
 
-        return string.Equals(Component, expected.Component, StringComparison.Ordinal)
-            && string.Equals(Version, expected.Version, StringComparison.Ordinal)
-            && string.Equals(SourceRevision, expected.SourceRevision, StringComparison.Ordinal)
-            && string.Equals(TreeHash, expected.TreeHash, StringComparison.Ordinal)
-            && string.Equals(ArtifactDigest, expected.ArtifactDigest, StringComparison.Ordinal)
-            && string.Equals(ReleaseId, expected.ReleaseId, StringComparison.Ordinal)
-            && Generation == expected.Generation
-            && (expected.RunnerId is null || string.Equals(RunnerId, expected.RunnerId, StringComparison.Ordinal))
-            && (expected.ConnectionGeneration is null
-                || string.Equals(ConnectionGeneration, expected.ConnectionGeneration, StringComparison.Ordinal));
+        return Differences(expected).Count == 0;
+    }
+
+    public IReadOnlyList<RuntimeIdentityDifference> Differences(RuntimeIdentity expected)
+    {
+        var differences = new List<RuntimeIdentityDifference>();
+        Add(differences, "component", expected.Component, Component);
+        Add(differences, "version", expected.Version, Version);
+        Add(differences, "buildGitHash", expected.BuildGitHash, BuildGitHash, expected.BuildGitHash is not null);
+        Add(differences, "sourceRevision", expected.SourceRevision, SourceRevision);
+        Add(differences, "treeHash", expected.TreeHash, TreeHash);
+        Add(differences, "artifactDigest", expected.ArtifactDigest, ArtifactDigest);
+        Add(differences, "releaseId", expected.ReleaseId, ReleaseId);
+        Add(differences, "generation", expected.Generation.ToString(), Generation.ToString());
+        Add(differences, "runnerId", expected.RunnerId, RunnerId, expected.RunnerId is not null);
+        return differences;
+    }
+
+    private static void Add(
+        ICollection<RuntimeIdentityDifference> differences,
+        string field,
+        string? expected,
+        string? actual,
+        bool required = true)
+    {
+        if (required && !string.Equals(expected, actual, StringComparison.Ordinal))
+            differences.Add(new RuntimeIdentityDifference(field, expected, actual));
     }
 
     public static RuntimeIdentity? Read(string json)
@@ -81,6 +99,12 @@ internal sealed record RuntimeIdentity(
     {
         WriteIndented = true,
     };
+}
+
+internal sealed record RuntimeIdentityDifference(string Field, string? Expected, string? Actual)
+{
+    public override string ToString() =>
+        $"{Field} expected='{Expected ?? "<null>"}' actual='{Actual ?? "<null>"}'";
 }
 
 internal static class ManagedRuntimeLayout

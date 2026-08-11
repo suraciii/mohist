@@ -50,10 +50,30 @@ internal abstract record RunnerRefreshOutcome
     }
 
     /// <summary>Runner is online but reported build identity differs from the current source.</summary>
-    public sealed record StaleRunnerRuntime(string? ReportedHash, string? RepoHeadHash, string Reason) : RunnerRefreshOutcome
+    public sealed record StaleRunnerRuntime(
+        string? ReportedHash,
+        string? RepoHeadHash,
+        string Reason,
+        IReadOnlyList<RuntimeIdentityDifference>? Differences = null) : RunnerRefreshOutcome
     {
         public override void WriteSummary(TextWriter output, TextWriter error)
-            => error.WriteLine($"Runner runtime verification: stale-runner-runtime (runner buildGitHash {ReportedHash ?? "<null>"} != repo HEAD {RepoHeadHash ?? "<unavailable>"}).");
+        {
+            if (Differences is { Count: > 0 })
+            {
+                error.WriteLine(
+                    $"Runner runtime verification: stale-runner-runtime ({Reason}; {string.Join(", ", Differences)}).");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(Reason)
+                && !string.Equals(Reason, "reported buildGitHash differs from repo HEAD", StringComparison.Ordinal))
+            {
+                error.WriteLine($"Runner runtime verification: stale-runner-runtime ({Reason}).");
+                return;
+            }
+
+            error.WriteLine($"Runner runtime verification: stale-runner-runtime (runner buildGitHash {ReportedHash ?? "<null>"} != repo HEAD {RepoHeadHash ?? "<unavailable>"}).");
+        }
     }
 
     /// <summary>Runner refresh was intentionally skipped before build/restart.</summary>
@@ -250,12 +270,25 @@ internal sealed class RunnerRefreshVerifier
 
         using var cts = new CancellationTokenSource();
         using var timeoutTimer = StartTimeoutTimer(cts, _runnerIdentityTimeout);
-        RunnerIdentityView? identity = null;
+        RunnerIdentityView? lastIdentity = null;
+        RuntimeIdentity? lastRuntimeIdentity = null;
+        IReadOnlyList<RuntimeIdentityDifference>? lastDifferences = null;
         while (!cts.IsCancellationRequested)
         {
-            identity = await TryReadRunnerIdentityAsync(hostname, cts.Token);
+            var identity = await TryReadRunnerIdentityAsync(hostname, cts.Token);
             if (identity is not null)
-                break;
+            {
+                lastIdentity = identity;
+                if (IsCandidateConnection(identity, expected))
+                {
+                    var candidateRuntimeIdentity = ToRuntimeIdentity(identity);
+                    lastRuntimeIdentity = candidateRuntimeIdentity;
+                    var candidateDifferences = candidateRuntimeIdentity.Differences(expected);
+                    lastDifferences = candidateDifferences;
+                    if (candidateRuntimeIdentity.IsComplete && candidateDifferences.Count == 0)
+                        return RunnerRefreshOutcome.Current.Instance;
+                }
+            }
             try
             {
                 await Task.Delay(_runnerIdentityPollInterval, _timeProvider, cts.Token);
@@ -266,43 +299,40 @@ internal sealed class RunnerRefreshVerifier
             }
         }
 
-        if (identity is null)
+        if (lastIdentity is null)
             return RunnerRefreshOutcome.NotReconnected.Instance;
-        if (!string.Equals(identity.Status, "online", StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(identity.ConnectionState, "connected", StringComparison.OrdinalIgnoreCase))
-        {
-            return new RunnerRefreshOutcome.StaleRunnerRuntime(
-                identity.BuildGitHash,
-                expected.SourceRevision,
-                $"runner status/connection was {identity.Status}/{identity.ConnectionState}");
-        }
 
-        if (string.IsNullOrWhiteSpace(identity.ConnectionGeneration))
-            return new RunnerRefreshOutcome.UnknownIdentity(
-                "connected runner did not report a connection generation");
+        var actual = lastRuntimeIdentity ?? ToRuntimeIdentity(lastIdentity);
+        var differences = lastDifferences ?? actual.Differences(expected);
+        var reason = IsCandidateConnection(lastIdentity, expected)
+            ? "connected runner identity differs from the candidate release"
+            : $"runner did not report connected candidate generation {expected.Generation}";
+        return new RunnerRefreshOutcome.StaleRunnerRuntime(
+            actual.BuildGitHash ?? actual.SourceRevision,
+            expected.BuildGitHash ?? expected.SourceRevision,
+            reason,
+            differences);
+    }
 
-        var actual = new RuntimeIdentity(
-            "runner",
+    private static bool IsCandidateConnection(RunnerIdentityView identity, RuntimeIdentity expected) =>
+        string.Equals(identity.Status, "online", StringComparison.OrdinalIgnoreCase)
+        &&
+        string.Equals(identity.ConnectionState, "connected", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(identity.ConnectionGeneration)
+        && identity.Generation == expected.Generation;
+
+    private static RuntimeIdentity ToRuntimeIdentity(RunnerIdentityView identity) =>
+        new(
+            identity.Component ?? string.Empty,
             identity.Version ?? string.Empty,
-            identity.SourceRevision ?? identity.BuildGitHash ?? string.Empty,
+            identity.SourceRevision ?? string.Empty,
             identity.TreeHash ?? string.Empty,
             identity.ArtifactDigest ?? string.Empty,
             identity.ReleaseId ?? string.Empty,
             identity.Generation ?? 0,
             string.IsNullOrWhiteSpace(identity.RunnerId) ? null : identity.RunnerId,
-            identity.ConnectionGeneration);
-        if (!actual.IsComplete)
-            return new RunnerRefreshOutcome.UnknownIdentity("connected runner did not report a complete managed identity");
-        if (!actual.Matches(expected))
-        {
-            return new RunnerRefreshOutcome.StaleRunnerRuntime(
-                actual.SourceRevision,
-                expected.SourceRevision,
-                "connected runner identity differs from the candidate release");
-        }
-
-        return RunnerRefreshOutcome.Current.Instance;
-    }
+            identity.ConnectionGeneration,
+            identity.BuildGitHash);
 
     private async Task<RunnerRefreshOutcome> VerifyRunnerDistManifestAsync(
         string repoRoot,

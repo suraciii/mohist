@@ -434,7 +434,8 @@ internal sealed class ManagedRuntimeTransaction
             artifactDigest,
             context.Source.ReleaseId(context.Scope),
             generation,
-            component == "runner" ? ResolveRunnerId() : null);
+            component == "runner" ? ResolveRunnerId() : null,
+            BuildGitHash: component == "runner" ? context.Source.GitCommit : null);
         if (!identity.IsComplete)
             return null;
 
