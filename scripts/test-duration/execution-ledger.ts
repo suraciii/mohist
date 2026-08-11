@@ -8,6 +8,7 @@ import type {
   ExecutionLedgerProvenance,
   ExecutionLedgerValidation,
   ExecutionManifest,
+  ExecutionManifestCase,
   TestCase,
 } from './types.js'
 
@@ -62,8 +63,8 @@ export function validateCurrentExecutionIdentity(
 ): readonly string[] {
   const errors: string[] = []
   if (saved.manifest.hash !== current.manifest.hash ||
-      saved.manifest.names.length !== current.manifest.names.length ||
-      saved.manifest.names.some((name, index) => name !== current.manifest.names[index])) {
+      saved.manifest.cases.length !== current.manifest.cases.length ||
+      saved.manifest.cases.some((item, index) => JSON.stringify(item) !== JSON.stringify(current.manifest.cases[index]))) {
     errors.push('saved execution provenance discovery does not match the current executable')
   }
   if (saved.assemblyPath !== current.assemblyPath) {
@@ -85,22 +86,26 @@ function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex')
 }
 
-function stableNames(names: readonly string[]): string[] {
-  const unique = new Set<string>()
-  for (const name of names) {
-    const normalized = name.trim()
-    if (normalized) unique.add(normalized)
+function manifestFromCases(cases: readonly ExecutionManifestCase[]): ExecutionManifest {
+  if (cases.length === 0) throw new Error('compiled discovery returned no test cases')
+  const ordered = [...cases].sort((left, right) => left.uid < right.uid ? -1 : left.uid > right.uid ? 1 : 0)
+  const uids = new Set<string>()
+  for (const item of ordered) {
+    if (!/^[0-9a-f]{64}$/i.test(item.uid)) throw new Error(`compiled discovery returned invalid test case UID ${item.uid}`)
+    if (uids.has(item.uid)) throw new Error(`compiled discovery returned duplicate test case UID ${item.uid}`)
+    if (!item.name || !item.className || !item.methodName) throw new Error(`compiled discovery returned incomplete metadata for ${item.uid}`)
+    uids.add(item.uid)
   }
-  return [...unique].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return { cases: ordered, hash: sha256(JSON.stringify(ordered)) }
 }
 
 function provenanceFromExpectation(expected: ExecutionLedgerExpectation): ExecutionLedgerProvenance {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: expected.runId,
     manifestHash: expected.manifest.hash,
-    manifestCount: expected.manifest.names.length,
-    manifestNames: expected.manifest.names,
+    manifestCount: expected.manifest.cases.length,
+    manifestCases: expected.manifest.cases,
     assemblyPath: expected.assemblyPath,
     assemblySha256: expected.assemblySha256,
     sourceSha256: expected.sourceSha256,
@@ -121,17 +126,29 @@ export function parseExecutionProvenance(json: string): ExecutionLedgerExpectati
   }
   if (!isRecord(raw)) throw new Error('execution provenance root must be an object')
   const errors: string[] = []
-  if (raw.schemaVersion !== 1) errors.push('schemaVersion must be 1')
+  if (raw.schemaVersion !== 2) errors.push('schemaVersion must be 2')
   const runId = requiredString(raw, 'runId', errors)
   const manifestHash = requiredString(raw, 'manifestHash', errors)
   const manifestCount = raw.manifestCount
   if (typeof manifestCount !== 'number' || !Number.isInteger(manifestCount) || manifestCount <= 0) {
     errors.push('manifestCount must be a positive integer')
   }
-  if (!Array.isArray(raw.manifestNames) || raw.manifestNames.some((name) => typeof name !== 'string')) {
-    errors.push('manifestNames must be an array of strings')
+  const manifestCases: ExecutionManifestCase[] = []
+  if (!Array.isArray(raw.manifestCases)) {
+    errors.push('manifestCases must be an array')
+  } else {
+    for (const [index, value] of raw.manifestCases.entries()) {
+      if (!isRecord(value)) {
+        errors.push(`manifest case ${index} must be an object`)
+        continue
+      }
+      const uid = requiredString(value, 'uid', errors)
+      const name = requiredString(value, 'name', errors)
+      const className = requiredString(value, 'className', errors)
+      const methodName = requiredString(value, 'methodName', errors)
+      manifestCases.push({ uid, name, className, methodName })
+    }
   }
-  const manifestNames = Array.isArray(raw.manifestNames) ? raw.manifestNames as string[] : []
   const assemblyPath = requiredString(raw, 'assemblyPath', errors)
   const assemblySha256 = requiredString(raw, 'assemblySha256', errors)
   const sourceSha256 = requiredString(raw, 'sourceSha256', errors)
@@ -141,23 +158,36 @@ export function parseExecutionProvenance(json: string): ExecutionLedgerExpectati
   if (sourceSha256 && !/^[0-9a-f]{64}$/i.test(sourceSha256)) errors.push('sourceSha256 must be a SHA-256 hex digest')
   let manifest: ExecutionManifest | undefined
   try {
-    manifest = manifestFromDiscovery(manifestNames.join('\n'))
+    manifest = manifestFromCases(manifestCases)
   } catch (error) {
     errors.push((error as Error).message)
   }
-  if (manifest && manifest.hash !== manifestHash) errors.push('manifestHash does not match manifestNames')
-  if (manifest && manifest.names.length !== manifestCount) errors.push('manifestCount does not match manifestNames')
+  if (manifest && manifest.hash !== manifestHash) errors.push('manifestHash does not match manifestCases')
+  if (manifest && manifest.cases.length !== manifestCount) errors.push('manifestCount does not match manifestCases')
   if (errors.length > 0 || !manifest) throw new Error(`execution provenance contract failed: ${errors.join('; ')}`)
   return { runId, manifest, assemblyPath, assemblySha256, sourceSha256, parallelism }
 }
 
 export function manifestFromDiscovery(output: string): ExecutionManifest {
-  const names = stableNames(output.split(/\r?\n/))
-  if (names.length === 0) throw new Error('compiled discovery returned no test cases')
-  if (names.length !== output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length) {
-    throw new Error('compiled discovery returned duplicate test cases')
+  let raw: unknown
+  try {
+    raw = JSON.parse(output) as unknown
+  } catch (error) {
+    throw new Error(`compiled discovery is not valid JSON: ${(error as Error).message}`)
   }
-  return { names, hash: sha256(names.join('\n')) }
+  if (!Array.isArray(raw)) throw new Error('compiled discovery root must be an array')
+  const cases: ExecutionManifestCase[] = raw.map((value, index) => {
+    if (!isRecord(value)) throw new Error(`compiled discovery case ${index} must be an object`)
+    const uid = value.ID
+    const name = value.DisplayName
+    const className = value.Class
+    const methodName = value.Method
+    if (typeof uid !== 'string' || typeof name !== 'string' || typeof className !== 'string' || typeof methodName !== 'string') {
+      throw new Error(`compiled discovery case ${index} has unsupported metadata`)
+    }
+    return { uid, name, className, methodName }
+  })
+  return manifestFromCases(cases)
 }
 
 export function discoverManifest(process: DiscoveryProcess): ExecutionManifest {
@@ -200,7 +230,10 @@ function parseCase(value: unknown, index: number, errors: string[]): ExecutionLe
     return undefined
   }
   const uid = requiredString(value, 'uid', errors)
+  const testCaseUid = requiredString(value, 'testCaseUid', errors)
   const name = requiredString(value, 'name', errors)
+  const className = requiredString(value, 'className', errors)
+  const collectionName = requiredString(value, 'collectionName', errors)
   const outcome = value.outcome
   if (outcome !== 'passed' && outcome !== 'failed' && outcome !== 'skipped' && outcome !== 'not-run') {
     errors.push(`ledger case ${index} has unsupported outcome`)
@@ -222,11 +255,14 @@ function parseCase(value: unknown, index: number, errors: string[]): ExecutionLe
   if (errors.some((error) => error.includes(`ledger case ${index}`))) return undefined
   return {
     uid,
+    testCaseUid,
     name,
     outcome: outcome as ExecutionLedgerCase['outcome'],
     executionTimeMs,
     startTime,
     finishTime,
+    className,
+    collectionName,
   }
 }
 
@@ -240,7 +276,7 @@ export function parseExecutionLedger(json: string): ExecutionLedgerValidation & 
   }
   if (!isRecord(raw)) return { cases: [], errors: ['ledger root must be an object'] }
 
-  if (raw.schemaVersion !== 1) errors.push('ledger schemaVersion must be 1')
+  if (raw.schemaVersion !== 2) errors.push('ledger schemaVersion must be 2')
   if (raw.durationSource !== EXECUTION_TIME_SOURCE) errors.push(`ledger durationSource must be ${EXECUTION_TIME_SOURCE}`)
   if (raw.durationUnit !== EXECUTION_TIME_UNIT) errors.push(`ledger durationUnit must be ${EXECUTION_TIME_UNIT}`)
   const runId = requiredString(raw, 'runId', errors)
@@ -278,7 +314,6 @@ export function parseExecutionLedger(json: string): ExecutionLedgerValidation & 
     uids.add(item.uid)
     names.add(item.name)
   }
-  if (manifestCount !== cases.length) errors.push(`ledger manifestCount ${manifestCount} does not match case count ${cases.length}`)
   if (errors.length > 0) return { cases: [], errors }
 
   return {
@@ -290,7 +325,7 @@ export function parseExecutionLedger(json: string): ExecutionLedgerValidation & 
     })),
     errors,
     ledger: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       manifestHash,
       manifestCount,
@@ -318,39 +353,43 @@ export function validateExecutionEvidence(
 
   if (ledger.runId !== expected.runId) errors.push('execution ledger run ID does not match the current run')
   if (ledger.manifestHash !== expected.manifest.hash) errors.push('execution ledger manifest hash does not match compiled discovery')
-  if (ledger.manifestCount !== expected.manifest.names.length) errors.push('execution ledger manifest count does not match compiled discovery')
+  if (ledger.manifestCount !== expected.manifest.cases.length) errors.push('execution ledger manifest count does not match compiled discovery')
   if (ledger.assemblyPath !== expected.assemblyPath) errors.push('execution ledger assembly path does not match the current build')
   if (ledger.assemblySha256 !== expected.assemblySha256) errors.push('execution ledger assembly hash does not match the current build')
   if (ledger.sourceSha256 !== expected.sourceSha256) errors.push('execution ledger source hash does not match the current source tree')
   if (ledger.parallelism !== expected.parallelism) errors.push('execution ledger parallelism does not match the current invocation')
 
-  const manifestNames = new Set(expected.manifest.names)
+  const manifestByUid = new Map(expected.manifest.cases.map((item) => [item.uid, item]))
+  const coveredManifestUids = new Set<string>()
   const trxByName = new Map<string, TestCase>()
   for (const item of trxCases) {
     if (trxByName.has(item.name)) errors.push(`TRX contains duplicate test name ${item.name}`)
     trxByName.set(item.name, item)
   }
   const ledgerByName = new Map(ledger.cases.map((item) => [item.name, item]))
-  if (trxByName.size !== expected.manifest.names.length) errors.push('TRX test count does not match compiled discovery')
-  if (ledgerByName.size !== expected.manifest.names.length) errors.push('execution ledger test count does not match compiled discovery')
+  if (trxByName.size !== ledger.cases.length) errors.push('TRX test count does not match execution ledger')
+  if (ledgerByName.size !== ledger.cases.length) errors.push('execution ledger test names are not unique')
 
-  for (const name of manifestNames) {
-    const trx = trxByName.get(name)
-    const ledgerCase = ledgerByName.get(name)
-    if (!trx) {
-      errors.push(`TRX is missing discovered test ${name}`)
+  for (const ledgerCase of ledger.cases) {
+    const manifestCase = manifestByUid.get(ledgerCase.testCaseUid)
+    if (!manifestCase) {
+      errors.push(`execution ledger contains undiscovered test case UID ${ledgerCase.testCaseUid}`)
       continue
     }
-    if (!ledgerCase) {
-      errors.push(`execution ledger is missing discovered test ${name}`)
-      continue
+    coveredManifestUids.add(ledgerCase.testCaseUid)
+    if (ledgerCase.className !== manifestCase.className) {
+      errors.push(`execution ledger class does not match discovery for test case UID ${ledgerCase.testCaseUid}`)
     }
+    const trx = trxByName.get(ledgerCase.name)
+    if (!trx) errors.push(`TRX is missing executed test ${ledgerCase.name}`)
     const expectedOutcome = ledgerCase.outcome === 'passed' ? 'passed' : ledgerCase.outcome === 'failed' ? 'failed' : 'skipped'
-    if (trx.outcome !== expectedOutcome) errors.push(`TRX and execution ledger outcome mismatch for ${name}`)
-    if (ledgerCase.outcome === 'skipped' || ledgerCase.outcome === 'not-run') errors.push(`CLI execution ledger contains non-executed test ${name}`)
+    if (trx && trx.outcome !== expectedOutcome) errors.push(`TRX and execution ledger outcome mismatch for ${ledgerCase.name}`)
+    if (ledgerCase.outcome === 'skipped' || ledgerCase.outcome === 'not-run') errors.push(`CLI execution ledger contains non-executed test ${ledgerCase.name}`)
   }
-  for (const name of trxByName.keys()) if (!manifestNames.has(name)) errors.push(`TRX contains undiscovered test ${name}`)
-  for (const name of ledgerByName.keys()) if (!manifestNames.has(name)) errors.push(`execution ledger contains undiscovered test ${name}`)
+  for (const item of expected.manifest.cases) {
+    if (!coveredManifestUids.has(item.uid)) errors.push(`execution ledger is missing discovered test case UID ${item.uid}`)
+  }
+  for (const name of trxByName.keys()) if (!ledgerByName.has(name)) errors.push(`TRX contains test missing from execution ledger ${name}`)
 
   return errors.length > 0 ? { cases: [], errors } : { cases: parsed.cases, errors: [] }
 }
@@ -368,7 +407,7 @@ export function buildLedgerEnvironment(input: {
     MOHIST_EXECUTION_LEDGER_PATH: input.ledgerPath,
     MOHIST_EXECUTION_LEDGER_RUN_ID: input.runId,
     MOHIST_EXECUTION_LEDGER_MANIFEST_HASH: input.manifest.hash,
-    MOHIST_EXECUTION_LEDGER_MANIFEST_COUNT: String(input.manifest.names.length),
+    MOHIST_EXECUTION_LEDGER_MANIFEST_COUNT: String(input.manifest.cases.length),
     MOHIST_EXECUTION_LEDGER_ASSEMBLY_PATH: input.assemblyPath,
     MOHIST_EXECUTION_LEDGER_ASSEMBLY_SHA256: input.assemblySha256,
     MOHIST_EXECUTION_LEDGER_SOURCE_SHA256: input.sourceSha256,

@@ -128,6 +128,7 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
                 var (className, collectionName) = GetMetadata(message);
                 capture.RecordStarting(
                     testMessage.TestUniqueID,
+                    testMessage.TestCaseUniqueID,
                     testMetadata.TestDisplayName,
                     className,
                     collectionName,
@@ -246,6 +247,7 @@ public sealed record ExecutionLedgerMetadata(
 
 public sealed record ExecutionLedgerCase(
     string Uid,
+    string TestCaseUid,
     string Name,
     string Outcome,
     decimal ExecutionTimeSeconds,
@@ -256,7 +258,7 @@ public sealed record ExecutionLedgerCase(
 
 public sealed class ExecutionLedgerDocument
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
     public string RunId { get; init; } = string.Empty;
     public string ManifestHash { get; init; } = string.Empty;
     public int ManifestCount { get; init; }
@@ -281,7 +283,7 @@ public sealed class ExecutionLedgerCapture
 
     private readonly object gate = new();
     private readonly ExecutionLedgerMetadata metadata;
-    private readonly Dictionary<string, (string Name, string? ClassName, string? CollectionName, DateTimeOffset StartTime)> starts = [];
+    private readonly Dictionary<string, (string TestCaseUid, string Name, string? ClassName, string? CollectionName, DateTimeOffset StartTime)> starts = [];
     private readonly List<ExecutionLedgerCase> results = [];
 
     public ExecutionLedgerCapture(ExecutionLedgerMetadata metadata)
@@ -338,6 +340,7 @@ public sealed class ExecutionLedgerCapture
 
     public void RecordStarting(
         string uid,
+        string testCaseUid,
         string name,
         string? className,
         string? collectionName,
@@ -345,13 +348,13 @@ public sealed class ExecutionLedgerCapture
     {
         lock (gate)
         {
-            if (string.IsNullOrWhiteSpace(uid) || string.IsNullOrWhiteSpace(name))
+            if (string.IsNullOrWhiteSpace(uid) || string.IsNullOrWhiteSpace(testCaseUid) || string.IsNullOrWhiteSpace(name))
                 throw new InvalidOperationException("execution start identity is empty");
             if (starts.ContainsKey(uid) || results.Any(result => result.Uid == uid))
                 throw new InvalidOperationException($"duplicate execution start for {uid}");
             if (starts.Values.Any(start => start.Name == name) || results.Any(result => result.Name == name))
                 throw new InvalidOperationException($"duplicate execution test name {name}");
-            starts.Add(uid, (name, className, collectionName, startTime));
+            starts.Add(uid, (testCaseUid, name, className, collectionName, startTime));
         }
     }
 
@@ -367,7 +370,7 @@ public sealed class ExecutionLedgerCapture
                 throw new InvalidOperationException($"execution time is negative for {uid}");
             if (start.StartTime == DateTimeOffset.MinValue || finishTime == DateTimeOffset.MinValue || finishTime < start.StartTime)
                 throw new InvalidOperationException($"execution timestamps are invalid for {uid}");
-            results.Add(new ExecutionLedgerCase(uid, start.Name, outcome, executionTimeSeconds, start.StartTime, finishTime, start.ClassName, start.CollectionName));
+            results.Add(new ExecutionLedgerCase(uid, start.TestCaseUid, start.Name, outcome, executionTimeSeconds, start.StartTime, finishTime, start.ClassName, start.CollectionName));
         }
     }
 
@@ -379,8 +382,6 @@ public sealed class ExecutionLedgerCapture
                 throw new InvalidOperationException("execution ledger has tests without results");
             if (results.Count == 0)
                 throw new InvalidOperationException("execution ledger has no test results");
-            if (results.Count != metadata.ManifestCount)
-                throw new InvalidOperationException("execution ledger result count does not match the discovery manifest");
             return new ExecutionLedgerDocument
             {
                 RunId = metadata.RunId,

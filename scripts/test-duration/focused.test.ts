@@ -52,6 +52,6 @@ test('resolveFocusedCommand emits apphost -class, never dotnet --filter', () => 
 test('resolveDiscoveryCommand uses the compiled apphost and emits a nonzero-list request', () => {
   const cmd = resolveDiscoveryCommand({ csprojXml: CSPROJ })
   assert.equal(cmd.apphost, 'bin/Debug/net11.0/Mohist.Cli.Tests')
-  assert.deepEqual(cmd.args, ['-list', 'tests', '-noColor', '-noLogo'])
+  assert.deepEqual(cmd.args, ['-list', 'full/json', '-preEnumerateTheories', '-noColor', '-noLogo'])
   assert.equal(cmd.args.includes('--filter'), false)
 })

@@ -12,15 +12,18 @@ export interface TestCase {
 
 export interface ExecutionLedgerCase {
   readonly uid: string
+  readonly testCaseUid: string
   readonly name: string
   readonly outcome: ExecutionLedgerOutcome
   readonly executionTimeMs: number
   readonly startTime: string
   readonly finishTime: string
+  readonly className: string
+  readonly collectionName: string
 }
 
 export interface ExecutionLedger {
-  readonly schemaVersion: 1
+  readonly schemaVersion: 2
   readonly runId: string
   readonly manifestHash: string
   readonly manifestCount: number
@@ -37,7 +40,14 @@ export interface ExecutionLedger {
 
 export interface ExecutionManifest {
   readonly hash: string
-  readonly names: readonly string[]
+  readonly cases: readonly ExecutionManifestCase[]
+}
+
+export interface ExecutionManifestCase {
+  readonly uid: string
+  readonly name: string
+  readonly className: string
+  readonly methodName: string
 }
 
 export interface ExecutionLedgerExpectation {
@@ -52,11 +62,11 @@ export interface ExecutionLedgerExpectation {
 export type CurrentExecutionIdentity = Omit<ExecutionLedgerExpectation, 'runId'>
 
 export interface ExecutionLedgerProvenance {
-  readonly schemaVersion: 1
+  readonly schemaVersion: 2
   readonly runId: string
   readonly manifestHash: string
   readonly manifestCount: number
-  readonly manifestNames: readonly string[]
+  readonly manifestCases: readonly ExecutionManifestCase[]
   readonly assemblyPath: string
   readonly assemblySha256: string
   readonly sourceSha256: string

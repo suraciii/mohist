@@ -4,14 +4,25 @@ import { mock, test } from 'node:test'
 import {
   commandFor,
   createTimeout,
+  DEFAULT_XUNIT_PARALLELISM,
   evaluateTrackArtifacts,
   main,
   parseArgs,
+  parallelismFor,
   runProcessWithDeadline,
+  writeExecutionProvenance,
 } from './guard.js'
 import { formatEvaluation, formatSummary, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
 import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+
+const fastCaseUid = '1'.repeat(64)
+
+function fastManifest() {
+  return manifestFromDiscovery(JSON.stringify([
+    { ID: fastCaseUid, DisplayName: 'Ns.Cli.Fast', Class: 'Ns.Cli', Method: 'Fast' },
+  ]))
+}
 
 function captureStderr(): { calls: () => string; restore: () => void } {
   const stderrMock = mock.method(process.stderr, 'write', () => true)
@@ -41,6 +52,39 @@ test('commandFor appends dotnet apphost arguments after the default report argum
   }
   const command = commandFor(track)
   assert.deepEqual(command.args.slice(-6), ['-noColor', '-noLogo', '-trx', `${process.cwd()}/reports/unit.trx`, '-parallel', 'none'])
+})
+
+test('parallelism provenance records every effective xUnit default and explicit override', () => {
+  const track: TrackConfig = {
+    id: 'cli', kind: 'dotnet-apphost', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
+  }
+  assert.equal(parallelismFor(track), DEFAULT_XUNIT_PARALLELISM)
+  assert.equal(
+    parallelismFor({ ...track, apphostArgs: ['-parallel', 'none', '-parallelAlgorithm', 'aggressive', '-maxThreads', '2'] }),
+    'xunit-v3:parallel=none;parallelAlgorithm=aggressive;maxThreads=2',
+  )
+  assert.throws(() => parallelismFor({ ...track, apphostArgs: ['-parallel', 'collections', '-parallel', 'none'] }), /duplicate xUnit option/)
+  assert.throws(() => parallelismFor({ ...track, apphostArgs: ['-maxThreads'] }), /requires a value/)
+})
+
+test('execution provenance writer creates its parent and writes through a fake artifact store', () => {
+  const manifest = fastManifest()
+  const calls: string[] = []
+  writeExecutionProvenance('/virtual/reports/cli.execution-provenance.json', {
+    runId: 'run-1',
+    manifest,
+    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+    assemblySha256: 'a'.repeat(64),
+    sourceSha256: 'b'.repeat(64),
+    parallelism: DEFAULT_XUNIT_PARALLELISM,
+  }, {
+    ensureDirectory: (path) => calls.push(`mkdir:${path}`),
+    writeText: (path, content) => calls.push(`write:${path}:${JSON.parse(content).runId}`),
+  })
+  assert.deepEqual(calls, [
+    'mkdir:/virtual/reports',
+    'write:/virtual/reports/cli.execution-provenance.json:run-1',
+  ])
 })
 
 test('createTimeout can be cancelled so completed tracks do not retain deadline timers', () => {
@@ -84,14 +128,14 @@ test('compiled discovery timeout uses the existing deadline path without reporti
 })
 
 test('--check evaluates authoritative saved provenance and ledger without an in-memory run', () => {
-  const manifest = manifestFromDiscovery('Ns.Cli.Fast')
+  const manifest = fastManifest()
   const expected: ExecutionLedgerExpectation = {
     runId: 'saved-run',
     manifest,
     assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
     assemblySha256: 'a'.repeat(64),
     sourceSha256: 'b'.repeat(64),
-    parallelism: 'xunit-default',
+    parallelism: DEFAULT_XUNIT_PARALLELISM,
   }
   const track: TrackConfig = {
     id: 'cli',
@@ -110,7 +154,7 @@ test('--check evaluates authoritative saved provenance and ledger without an in-
     [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
     [track.executionProvenance!, serializeExecutionProvenance(expected)],
     [track.executionLedger!, JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: expected.runId,
       manifestHash: manifest.hash,
       manifestCount: 1,
@@ -122,7 +166,7 @@ test('--check evaluates authoritative saved provenance and ledger without an in-
       parallelism: expected.parallelism,
       durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
       durationUnit: 'seconds',
-      cases: [{ uid: 'fast', name: 'Ns.Cli.Fast', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T00:00:00Z', finishTime: '2026-08-11T00:00:01Z' }],
+      cases: [{ uid: 'fast', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli', collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T00:00:00Z', finishTime: '2026-08-11T00:00:01Z' }],
     })],
   ])
 
@@ -151,14 +195,14 @@ function savedExecutionFixture(): {
   readonly current: CurrentExecutionIdentity
   readonly artifacts: Map<string, string>
 } {
-  const manifest = manifestFromDiscovery('Ns.Cli.Fast')
+  const manifest = fastManifest()
   const expected: ExecutionLedgerExpectation = {
     runId: 'saved-run',
     manifest,
     assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
     assemblySha256: 'a'.repeat(64),
     sourceSha256: 'b'.repeat(64),
-    parallelism: 'xunit-default',
+    parallelism: DEFAULT_XUNIT_PARALLELISM,
   }
   const track: TrackConfig = {
     id: 'cli',
@@ -188,7 +232,7 @@ function savedExecutionFixture(): {
       [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
       [track.executionProvenance!, serializeExecutionProvenance(expected)],
       [track.executionLedger!, JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         runId: expected.runId,
         manifestHash: manifest.hash,
         manifestCount: 1,
@@ -200,7 +244,7 @@ function savedExecutionFixture(): {
         parallelism: expected.parallelism,
         durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
         durationUnit: 'seconds',
-        cases: [{ uid: 'fast', name: 'Ns.Cli.Fast', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T00:00:00Z', finishTime: '2026-08-11T00:00:01Z' }],
+        cases: [{ uid: 'fast', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli', collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T00:00:00Z', finishTime: '2026-08-11T00:00:01Z' }],
       })],
     ]),
   }
@@ -224,7 +268,7 @@ test('--check rejects an empty TRX with Total=0', () => {
 
   assert.equal(result.total, 0)
   assert.equal(result.passed, false)
-  assert.match(result.reportError ?? '', /TRX test count does not match compiled discovery/)
+  assert.match(result.reportError ?? '', /TRX test count does not match execution ledger/)
 })
 
 test('--check rejects a TRX-ledger outcome mismatch', () => {

@@ -49,6 +49,7 @@ public sealed class ExecutionLedgerCaptureTests
         await handler.DisposeAsync();
 
         var result = Assert.Single(ReadDocument(artifacts).Cases);
+        Assert.Equal(CaseId, result.TestCaseUid);
         Assert.Equal(0.01m, result.ExecutionTimeSeconds);
         Assert.Equal(startedAt, result.StartTime);
         Assert.Equal(finishedAt, result.FinishTime);
@@ -82,20 +83,31 @@ public sealed class ExecutionLedgerCaptureTests
     }
 
     [Fact]
-    public void Capture_FailsClosedForDuplicateNamesMissingPartialAndZeroResults()
+    public void Capture_FailsClosedForDuplicateNamesAndZeroResults()
     {
         var start = new DateTimeOffset(2026, 8, 11, 6, 0, 0, TimeSpan.Zero);
         var duplicate = CreateCapture(2);
-        duplicate.RecordStarting("one", TestName, null, null, start);
+        duplicate.RecordStarting("one", "case-one", TestName, null, null, start);
         Assert.Throws<InvalidOperationException>(() =>
-            duplicate.RecordStarting("two", TestName, null, null, start));
-
-        var partial = CreateCapture(2);
-        partial.RecordStarting("one", TestName, null, null, start);
-        partial.RecordResult("one", "passed", 0.01m, start.AddMilliseconds(10));
-        Assert.Throws<InvalidOperationException>(() => partial.ToDocument());
+            duplicate.RecordStarting("two", "case-two", TestName, null, null, start));
 
         Assert.Throws<InvalidOperationException>(() => CreateCapture(1).ToDocument());
+    }
+
+    [Fact]
+    public void Capture_AllowsRuntimeTheoryRowsToShareOneDiscoveredTestCase()
+    {
+        var start = new DateTimeOffset(2026, 8, 11, 6, 0, 0, TimeSpan.Zero);
+        var capture = CreateCapture(1);
+        capture.RecordStarting("test-one", CaseId, $"{TestName}(value: 1)", null, null, start);
+        capture.RecordResult("test-one", "passed", 0.01m, start.AddMilliseconds(10));
+        capture.RecordStarting("test-two", CaseId, $"{TestName}(value: 2)", null, null, start);
+        capture.RecordResult("test-two", "passed", 0.02m, start.AddMilliseconds(20));
+
+        var rows = capture.ToDocument().Cases;
+
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, row => Assert.Equal(CaseId, row.TestCaseUid));
     }
 
     [Fact]
@@ -106,11 +118,11 @@ public sealed class ExecutionLedgerCaptureTests
         Assert.Throws<InvalidOperationException>(() =>
             capture.RecordResult("missing", "passed", 0.001m, start));
 
-        capture.RecordStarting(TestId, TestName, null, null, start);
+        capture.RecordStarting(TestId, CaseId, TestName, null, null, start);
         Assert.Throws<InvalidOperationException>(() => capture.ToDocument());
 
         var reversed = CreateCapture(1);
-        reversed.RecordStarting(TestId, TestName, null, null, start);
+        reversed.RecordStarting(TestId, CaseId, TestName, null, null, start);
         Assert.Throws<InvalidOperationException>(() =>
             reversed.RecordResult(TestId, "passed", 0.001m, start.AddMilliseconds(-1)));
     }
@@ -157,7 +169,7 @@ public sealed class ExecutionLedgerCaptureTests
             [ExecutionLedgerEnvironment.AssemblyPath] = "/virtual/Mohist.Cli.Tests.dll",
             [ExecutionLedgerEnvironment.AssemblySha256] = assemblyHash,
             [ExecutionLedgerEnvironment.SourceSha256] = new string('b', 64),
-            [ExecutionLedgerEnvironment.Parallelism] = "xunit-default",
+            [ExecutionLedgerEnvironment.Parallelism] = "xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=default",
         });
         var artifacts = new MemoryArtifactStore(assemblyBytes);
         return (new ExecutionLedgerReporterMessageHandler(runtime, artifacts), artifacts);
@@ -165,7 +177,7 @@ public sealed class ExecutionLedgerCaptureTests
 
     private static ExecutionLedgerCapture CreateCapture(int manifestCount) => new(new ExecutionLedgerMetadata(
         "run-1", new string('a', 64), manifestCount, "/virtual/test.dll", new string('b', 64),
-        new string('c', 64), "3.2.2.0", "1.9.1.0", "xunit-default", "/virtual/ledger.json"));
+        new string('c', 64), "3.2.2.0", "1.9.1.0", "xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=default", "/virtual/ledger.json"));
 
     private static void StartEveryMetadataLevel(ExecutionLedgerReporterMessageHandler handler, DateTimeOffset start)
     {

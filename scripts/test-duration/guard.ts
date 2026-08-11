@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -23,6 +23,28 @@ import { parseAssemblyName, resolveApphostPath, resolveDiscoveryCommand, resolve
 import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, SuiteConfig, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+export const DEFAULT_XUNIT_PARALLELISM =
+  'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=default'
+
+export interface ExecutionProvenanceWriter {
+  readonly ensureDirectory: (path: string) => void
+  readonly writeText: (path: string, content: string) => void
+}
+
+const physicalExecutionProvenanceWriter: ExecutionProvenanceWriter = {
+  ensureDirectory: (path) => mkdirSync(path, { recursive: true }),
+  writeText: (path, content) => writeFileSync(path, content, 'utf8'),
+}
+
+export function writeExecutionProvenance(
+  path: string,
+  expectation: ExecutionLedgerExpectation,
+  writer: ExecutionProvenanceWriter = physicalExecutionProvenanceWriter,
+): void {
+  writer.ensureDirectory(dirname(path))
+  writer.writeText(path, serializeExecutionProvenance(expectation))
+}
 
 function readCsproj(csprojPath: string): string {
   return readFileSync(resolve(repoRoot, csprojPath), 'utf8')
@@ -85,10 +107,21 @@ function assemblyPathFor(apphost: string): string {
   return apphost.endsWith('.exe') ? `${apphost.slice(0, -4)}.dll` : `${apphost}.dll`
 }
 
-function parallelismFor(track: TrackConfig): string {
+function optionValue(args: readonly string[], option: string, fallback: string): string {
+  const indexes = args.flatMap((value, index) => value === option ? [index] : [])
+  if (indexes.length > 1) throw new Error(`duplicate xUnit option ${option}`)
+  if (indexes.length === 0) return fallback
+  const value = args[indexes[0] + 1]
+  if (!value || value.startsWith('-')) throw new Error(`xUnit option ${option} requires a value`)
+  return value
+}
+
+export function parallelismFor(track: TrackConfig): string {
   const args = track.apphostArgs ?? []
-  const index = args.indexOf('-parallel')
-  return index >= 0 && args[index + 1] ? `xunit-${args[index + 1]}` : 'xunit-default'
+  const parallel = optionValue(args, '-parallel', 'collections')
+  const parallelAlgorithm = optionValue(args, '-parallelAlgorithm', 'conservative')
+  const maxThreads = optionValue(args, '-maxThreads', 'default')
+  return `xunit-v3:parallel=${parallel};parallelAlgorithm=${parallelAlgorithm};maxThreads=${maxThreads}`
 }
 
 function executionLedgerPlan(track: TrackConfig): {
@@ -376,7 +409,7 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
           runId: createExecutionRunId({ now: () => Date.now() }, randomUUID),
           ...currentIdentity,
         }
-        writeFileSync(provenancePath, serializeExecutionProvenance(ledgerExpectation), 'utf8')
+        writeExecutionProvenance(provenancePath, ledgerExpectation)
         ledgerEnvironment = buildLedgerEnvironment({ ...ledgerExpectation, ledgerPath })
       }
       ({ command, args } = commandFor(track))

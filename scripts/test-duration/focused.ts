@@ -67,6 +67,6 @@ export function resolveFocusedCommand(request: FocusedRequest): FocusedCommand {
 export function resolveDiscoveryCommand(request: ApphostInput): DiscoveryCommand {
   return {
     apphost: resolveApphostPath(request),
-    args: ['-list', 'tests', '-noColor', '-noLogo'],
+    args: ['-list', 'full/json', '-preEnumerateTheories', '-noColor', '-noLogo'],
   }
 }
