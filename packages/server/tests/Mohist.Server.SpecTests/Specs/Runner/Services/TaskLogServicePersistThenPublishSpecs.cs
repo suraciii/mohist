@@ -524,10 +524,14 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
                 && active.WorkId == workId
                 && active.RunnerId == runnerId);
 
+        public Task<bool> IsTerminalWorkAsync(string workflowRunId, string workId, string runnerId, CancellationToken ct = default) =>
+            Task.FromResult(false);
+
         public Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default)
         {
             ProjectIdLookups++;
             return Task.FromResult(_projectIds.TryGetValue(workflowRunId, out var projectId) ? projectId : null);
         }
+
     }
 }

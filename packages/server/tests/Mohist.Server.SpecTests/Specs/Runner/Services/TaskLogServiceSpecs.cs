@@ -10,6 +10,8 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Services;
@@ -71,6 +73,230 @@ public class TaskLogServiceSpecs : IAsyncLifetime
             "work",
             entries,
             truncated: false));
+    }
+
+    [Fact]
+    public async Task AppendAsync_WorkflowTerminalSnapshotSurvivesSettledRunAndIsIdempotent()
+    {
+        const string workflowRunId = "wr-terminal-task-log";
+        const string workId = "work-terminal-task-log";
+        const string runnerId = "runner-terminal-task-log";
+        await InsertTerminalWorkflowRunAsync(workflowRunId, workId, runnerId);
+
+        var publisher = new RecordingTaskLogDeltaPublisher();
+        var service = NewService(publisher);
+        IReadOnlyList<TaskLogLine> entries = [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "complete")];
+
+        var changed = await service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            workId,
+            entries,
+            truncated: false,
+            terminal: true);
+        var duplicate = await service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            workId,
+            entries,
+            truncated: false,
+            terminal: true);
+        var conflict = await service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            workId,
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "different")],
+            truncated: false,
+            terminal: true);
+        var nonterminal = await service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            workId,
+            entries,
+            truncated: false,
+            terminal: false);
+        var wrongRunner = await service.AppendAsync(
+            "runner-other",
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            workId,
+            entries,
+            truncated: false,
+            terminal: true);
+        var wrongWork = await service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            "work-other",
+            entries,
+            truncated: false,
+            terminal: true);
+        var previousWork = await service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            "work-previous",
+            entries,
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.Changed, changed);
+        Assert.Equal(TaskLogAppendResult.Duplicate, duplicate);
+        Assert.Equal(TaskLogAppendResult.Conflict, conflict);
+        Assert.Equal(TaskLogAppendResult.NotFound, nonterminal);
+        Assert.Equal(TaskLogAppendResult.NotFound, wrongRunner);
+        Assert.Equal(TaskLogAppendResult.NotFound, wrongWork);
+        Assert.Equal(TaskLogAppendResult.NotFound, previousWork);
+        Assert.Single(publisher.Published);
+
+        await using var db = new MohistDbContext(_database.Options);
+        var run = await db.WorkflowRuns.AsNoTracking()
+            .SingleAsync(row => row.WorkflowRunId == workflowRunId);
+        Assert.Null(run.ActiveWorkId);
+        Assert.Null(run.ActiveWorkerId);
+        Assert.Equal(WorkflowRunStatus.Completed, JSON.Deserialize<WorkflowRun>(run.State)!.Status);
+    }
+
+    [Fact]
+    public async Task AppendAsync_WorkflowTerminalSnapshotRequiresAuthoritativeTerminalTask()
+    {
+        const string workflowRunId = "wr-active-terminal-task-log";
+        const string workId = "work-active-terminal-task-log";
+        const string runnerId = "runner-active-terminal-task-log";
+        await InsertActiveWorkflowRunAsync(workflowRunId, workId, runnerId);
+
+        var result = await _service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            workId,
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "too-early")],
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.NotFound, result);
+    }
+
+    private TaskLogService NewService(ITaskLogDeltaPublisher publisher) => new(
+        new TaskLogStore(new TestDbContextFactory(_database.Options), _timeProvider),
+        new AgentJobStore(new TestDbContextFactory(_database.Options), NullLogger<AgentJobStore>.Instance, _timeProvider),
+        new WorkflowRunWorkProjection(new TestDbContextFactory(_database.Options)),
+        publisher,
+        NullLogger<TaskLogService>.Instance);
+
+    private async Task InsertTerminalWorkflowRunAsync(string workflowRunId, string workId, string runnerId)
+    {
+        await using var db = new MohistDbContext(_database.Options);
+        db.WorkflowRuns.Add(new WorkflowRunRow
+        {
+            WorkflowRunId = workflowRunId,
+            State = JSON.Serialize(new WorkflowRun
+            {
+                Id = workflowRunId,
+                Metadata = new WorkflowRunMetadata("terminal", _timeProvider.GetUtcNow()),
+                Status = WorkflowRunStatus.Completed,
+                CurrentStageId = "build",
+                Assignment = new WorkflowAssignment(runnerId, _timeProvider.GetUtcNow()),
+                Stages =
+                [
+                    new StageRun
+                    {
+                        Id = "build",
+                        Attempt = 1,
+                        RequiresApproval = false,
+                        Status = StageRunStatus.Completed,
+                        Tasks =
+                        [
+                            new TaskRun
+                            {
+                                Id = "task-previous",
+                                DefinitionId = "task-previous",
+                                Attempt = 1,
+                                Title = "Previous task",
+                                Uses = "core/script",
+                                WorkId = "work-previous",
+                                WorkerId = runnerId,
+                                Status = TaskRunStatus.Completed,
+                                Classification = TaskClassification.Orchestration,
+                            },
+                            new TaskRun
+                            {
+                                Id = "task-terminal",
+                                DefinitionId = "task-terminal",
+                                Attempt = 1,
+                                Title = "Terminal task",
+                                Uses = "core/script",
+                                WorkId = workId,
+                                WorkerId = runnerId,
+                                Status = TaskRunStatus.Completed,
+                                Classification = TaskClassification.Orchestration,
+                            },
+                        ],
+                    },
+                ],
+            }),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task InsertActiveWorkflowRunAsync(string workflowRunId, string workId, string runnerId)
+    {
+        await using var db = new MohistDbContext(_database.Options);
+        db.WorkflowRuns.Add(new WorkflowRunRow
+        {
+            WorkflowRunId = workflowRunId,
+            State = JSON.Serialize(new WorkflowRun
+            {
+                Id = workflowRunId,
+                Metadata = new WorkflowRunMetadata("active", _timeProvider.GetUtcNow()),
+                Status = WorkflowRunStatus.Running,
+                CurrentStageId = "build",
+                Assignment = new WorkflowAssignment(runnerId, _timeProvider.GetUtcNow()),
+                Stages =
+                [
+                    new StageRun
+                    {
+                        Id = "build",
+                        Attempt = 1,
+                        RequiresApproval = false,
+                        Status = StageRunStatus.Running,
+                        Tasks =
+                        [
+                            new TaskRun
+                            {
+                                Id = "task-active",
+                                DefinitionId = "task-active",
+                                Attempt = 1,
+                                Title = "Active task",
+                                Uses = "core/script",
+                                WorkId = workId,
+                                WorkerId = runnerId,
+                                Status = TaskRunStatus.Running,
+                                Classification = TaskClassification.Orchestration,
+                            },
+                        ],
+                    },
+                ],
+            }),
+            ActiveWorkId = workId,
+            ActiveWorkerId = runnerId,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private sealed class RecordingTaskLogDeltaPublisher : ITaskLogDeltaPublisher
+    {
+        public List<TaskLogDeltaEnvelope> Published { get; } = [];
+
+        public Task PublishAsync(TaskLogDeltaEnvelope envelope, CancellationToken ct = default)
+        {
+            Published.Add(envelope);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class NoopTaskLogDeltaPublisher : ITaskLogDeltaPublisher

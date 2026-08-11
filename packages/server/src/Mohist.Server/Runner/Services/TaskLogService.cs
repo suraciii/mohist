@@ -166,7 +166,12 @@ public sealed class TaskLogService : IScopedService
         CancellationToken ct)
     {
         if (string.Equals(ownerKind, TaskLogOwnershipKinds.Workflow, StringComparison.Ordinal))
+        {
+            if (terminal)
+                return await _workProjection.IsTerminalWorkAsync(ownerId, workId, runnerId, ct);
+
             return await _workProjection.IsActiveWorkAsync(ownerId, workId, runnerId, ct);
+        }
 
         if (!string.Equals(ownerKind, TaskLogOwnershipKinds.AgentJob, StringComparison.Ordinal))
             return false;
