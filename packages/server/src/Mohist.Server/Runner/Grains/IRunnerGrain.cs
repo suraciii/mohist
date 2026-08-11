@@ -22,6 +22,12 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task EndPollAsync();
     /// <summary>Atomically rejects new poll and work claims until cancelled.</summary>
     Task BeginDrainAsync();
+    /// <summary>
+    /// Atomically closes update admission and captures the active work that
+    /// the caller must interrupt before restarting this runner. Returns null
+    /// when the runner is not currently registered and online.
+    /// </summary>
+    Task<RunnerRuntimeState?> BeginUpdateInterruptAsync();
     /// <summary>Atomically reopens poll and work claim admission.</summary>
     Task CancelDrainAsync();
     /// <summary>

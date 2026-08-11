@@ -95,6 +95,26 @@ public static class RunnerRoutes
             return Results.Ok();
         });
 
+        group.MapPost("/update-interrupt", async (string runnerId, IGrainFactory grains) =>
+        {
+            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            var runtime = await runner.BeginUpdateInterruptAsync();
+            if (runtime is null)
+                return ApiResults.NotFound($"Runner '{runnerId}' not found");
+
+            var interruptedWorkIds = runtime.ActiveWorks
+                .Select(work => work.WorkId)
+                .Where(workId => !string.IsNullOrWhiteSpace(workId))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            return ApiResults.Ok(new RunnerUpdateInterruptResponse(
+                runnerId,
+                "interrupted",
+                interruptedWorkIds,
+                interruptedWorkIds.Length));
+        });
+
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
         {
             if (req is null || req.Slots <= 0)
@@ -919,6 +939,11 @@ public record RunnerRegisterRequest(
     long? Generation = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
+public record RunnerUpdateInterruptResponse(
+    string RunnerId,
+    string Status,
+    IReadOnlyList<string> InterruptedWorkIds,
+    int InterruptedWorkCount);
 public record RunnerHeartbeatRequest(
     string[]? Capabilities = null,
     string? ProjectId = null,
