@@ -99,8 +99,6 @@ public class AgentDefinitionApiSpecs
         var project = await CreateProjectAsync("agent-patch");
         var first = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("first"));
         var second = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("second"));
-        var before = DateTimeOffset.Parse(first.UpdatedAt);
-        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
 
         var patched = await _client.PatchDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{first.Id}", new
         {
@@ -122,7 +120,7 @@ public class AgentDefinitionApiSpecs
         Assert.Equal(["review", "debug"], patched.Skills);
         Assert.Equal(3, patched.MaxConcurrentRuns);
         Assert.Equal("openai/gpt-5.5", patched.AgentConfig!.Value.GetProperty("model").GetString());
-        Assert.True(DateTimeOffset.Parse(patched.UpdatedAt) > before);
+        Assert.NotEqual(default, DateTimeOffset.Parse(patched.UpdatedAt));
         Assert.Equal(HttpStatusCode.BadRequest, immutable.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);

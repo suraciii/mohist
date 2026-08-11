@@ -7,11 +7,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workspace.Grains;
 using Orleans;
 using Xunit;
 using Xunit.Sdk;
@@ -26,58 +28,92 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         _fixture = fixture;
     }
 
-    protected static async Task WaitForJobTerminalAsync(
-        IAgentJobGrain job,
-        AgentJobStatus expected,
-        TimeSpan timeout,
-        Func<Task>? advance = null)
-        => await TestWait.ForAsync(
-            () => job.GetTerminalResultAsync(),
-            t => t.Status == expected,
-            timeout,
-            TimeSpan.FromMilliseconds(200),
-            $"Agent job to reach {expected}",
-            advance);
+    protected async Task<ClaimResult> ClaimPreparedAgentJobAsync(
+        string agentJobId,
+        string runnerId,
+        string projectId,
+        string? expectedSessionId)
+    {
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            agentJobId,
+            TimeSpan.FromSeconds(5));
+
+        var assignment = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, assignment.RunnerId);
+
+        var claim = await _fixture.Grains
+            .GetGrain<IRunnerGrain>(runnerId)
+            .TryClaimAgentJobAsync(agentJobId, projectId);
+
+        Assert.NotNull(claim);
+        Assert.Equal(agentJobId, claim.AgentJobId);
+        Assert.Equal(runnerId, claim.RunnerId);
+        Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claim.Dispatch.OwnerKind);
+        return claim;
+    }
 
     protected async Task<PollSnapshot> PollDispatchForSessionAsync(
         string agentJobId,
         string runnerId,
         string expectedSessionId)
     {
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
-            _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId));
-        // Assignment-prepared does not guarantee the dispatch has propagated to
-        // the runner's poll endpoint; retry over a window (as PollAgentJobDispatchAsync
-        // does) instead of a fixed two attempts, which flaked on slower CI runners.
-        var dispatch = (await TestWait.ForAsync(
-            () => PollDispatchOnceAsync(runnerId, expectedSessionId),
-            candidate => candidate is not null,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to return AgentJob '{agentJobId}' for AgentSessionId '{expectedSessionId}'"))!;
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            agentJobId,
+            TimeSpan.FromSeconds(5));
+        var assignment = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, assignment.RunnerId);
 
+        var dispatch = await PollDispatchOnceAsync(runnerId, agentJobId);
+
+        Assert.NotNull(dispatch);
         Assert.Equal(agentJobId, dispatch.AgentJobId);
+        Assert.Equal(expectedSessionId, dispatch.AgentSessionId);
         return dispatch;
     }
 
-    protected async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
+    protected async Task<string> CreateRunnerHomeWorkspaceAsync(
+        string projectId,
+        string runnerId,
+        string prefix)
     {
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
-            _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId));
-        var dispatch = (await TestWait.ForAsync(
-            () => PollDispatchOnceAsync(runnerId, expectedSessionId: null, expectedAgentJobId: agentJobId),
-            candidate => candidate is not null,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"an AgentJob dispatch for '{agentJobId}' on runner '{runnerId}'"))!;
-        Assert.Equal(agentJobId, dispatch.AgentJobId);
-        return dispatch.WorkId;
+        var workspaceName = $"{prefix}-{Guid.NewGuid():N}";
+        var workspace = _fixture.Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(projectId, workspaceName));
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await workspace.CreateManualAsync(workspaceName, [], now);
+        var home = await workspace.EnsureMaterializedOnAsync(runnerId, $"/tmp/{workspaceName}", now);
+        Assert.NotNull(home);
+        Assert.Equal(runnerId, home.RunnerId);
+        return workspaceName;
+    }
+
+    protected async Task CompleteClaimedAgentJobAsync(
+        string runnerId,
+        string agentJobId,
+        string workId)
+    {
+        var report = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .ReportResultAsync(
+                runnerId,
+                workId,
+                new WorkResult(
+                    Status: "completed",
+                    Message: "test cleanup",
+                    Output: JSON.DeserializeElement("{}"),
+                    ArtifactUploadIds: null,
+                    ExitCode: 0));
+        Assert.True(report.Accepted, "AgentJob rejected completed cleanup report");
     }
 
     private async Task<PollSnapshot?> PollDispatchOnceAsync(
         string runnerId,
-        string? expectedSessionId,
-        string? expectedAgentJobId = null)
+        string expectedAgentJobId)
     {
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
         var dispatches = await poll.ReadDispatchElementsAsync();
@@ -93,9 +129,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                 && agentJobIdElement.ValueKind != JsonValueKind.Null
                 ? agentJobIdElement.GetString()
                 : null;
-            var matchesSession = expectedSessionId is not null && polledSessionId == expectedSessionId;
-            var matchesAgentJob = expectedAgentJobId is not null && polledAgentJobId == expectedAgentJobId;
-            if (match is null && (matchesSession || matchesAgentJob))
+            if (match is null && polledAgentJobId == expectedAgentJobId)
             {
                 var workId = data.GetProperty("workId").GetString() ?? string.Empty;
                 var projectId = data.TryGetProperty("projectId", out var projectIdElement)
@@ -156,17 +190,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         if (string.IsNullOrWhiteSpace(agentJobId) || string.IsNullOrWhiteSpace(workId))
             return;
 
-        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId!);
-        var report = await jobGrain.ReportResultAsync(
-            runnerId,
-            workId!,
-            new WorkResult(
-                Status: "completed",
-                Message: "drained",
-                Output: JSON.DeserializeElement("{}"),
-                ArtifactUploadIds: null,
-                ExitCode: 0));
-        Assert.True(report.Accepted, "AgentJob rejected drain report");
+        await CompleteClaimedAgentJobAsync(runnerId, agentJobId!, workId!);
     }
 
     protected sealed record PollSnapshot(

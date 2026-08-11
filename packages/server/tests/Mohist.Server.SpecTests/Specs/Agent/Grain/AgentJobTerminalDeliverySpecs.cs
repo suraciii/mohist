@@ -307,12 +307,11 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             AgentSessionId: sessionId,
             AgentId: "agent-test"));
 
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        await ClaimPreparedAgentJobAsync(runnerId);
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
         await job.CheckTimeoutsAsync();
-
-        await WaitForStatusAsync(job, AgentJobStatus.Unknown, TimeSpan.FromSeconds(5));
 
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Unknown, terminal.Status);

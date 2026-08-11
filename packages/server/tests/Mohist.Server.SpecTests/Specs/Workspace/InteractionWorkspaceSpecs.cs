@@ -97,8 +97,7 @@ public sealed class InteractionWorkspaceSpecs
         var connection = await CreateConnectionAsync();
         const string conversationId = "C-interaction-archive";
 
-        var first = await PostChannelAsync(connection, conversationId, "1710000000.010301", "<@U123> first task");
-        var firstWorkspaceName = await SessionWorkspaceNameAsync(first.GetProperty("sessionId").GetString()!);
+        var firstWorkspaceName = await EnsureSlackWorkspaceAsync(connection, conversationId);
         Assert.Equal($"slack-{conversationId}", firstWorkspaceName);
 
         var archive = await ArchiveChannelAsync(connection, conversationId);
@@ -370,6 +369,17 @@ public sealed class InteractionWorkspaceSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return doc.RootElement.GetProperty("data").Clone();
+    }
+
+    private async Task<string> EnsureSlackWorkspaceAsync(AgentConnection connection, string conversationId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<InteractionWorkspaceProvisioner>()
+            .EnsureSlackWorkspaceAsync(
+                connection.ProjectId,
+                connection.WorkspaceTeamId,
+                conversationId,
+                _fixture.TimeProvider.GetUtcNow());
     }
 
     private async Task<WorkspaceState?> FindWorkspaceAsync(string projectId, string name)

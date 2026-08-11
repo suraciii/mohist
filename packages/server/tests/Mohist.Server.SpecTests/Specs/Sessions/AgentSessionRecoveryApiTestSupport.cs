@@ -151,8 +151,7 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
     protected async Task<AgentSessionInfo> CreateAgentLaunchSessionAsync(
         ProjectDto project,
         string name,
-        bool attach,
-        bool idle)
+        bool attach)
     {
         var sessionId = $"agent-recovery-{Guid.NewGuid():N}";
         var workDir = $"/workspaces/{project.Id}";
@@ -177,9 +176,6 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
                 ProcessPid: 1234));
         }
 
-        if (idle)
-            _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
-
         return await grain.GetAsync()
             ?? throw new InvalidOperationException($"Agent session {sessionId} was not created.");
     }
@@ -187,8 +183,7 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
     protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateAndStartSessionAsync(
         string name,
         string sessionName = "plan",
-        bool attachAndStart = false,
-        bool attachIdle = false)
+        bool attach = false)
     {
         var (project, issue) = await CreateProjectAndIssueAsync(name);
         var work = new WorkDispatch(
@@ -205,15 +200,8 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, sessionName, work, $"Session api {name}");
 
-        if (attachAndStart)
-        {
+        if (attach)
             await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
-        }
-        else if (attachIdle)
-        {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
-            _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
-        }
 
         return (project, issue, work, currentSession);
     }
