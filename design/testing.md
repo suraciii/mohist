@@ -259,14 +259,14 @@ reporter; the legacy xUnit v2 workflow-definition lane reuses its build through
 `canonical.durationMeasurementTracks` is an ordered, small set of tracks whose
 per-test duration policy must not share CPU or I/O with another test executor.
 Every member claims the `duration-measurement` resource and depends on the
-previous member. All other test lanes depend on the final member, then resume
-the normal bounded host/.NET/Node/Spec concurrency. The current set is the CLI,
-Server unit, and Runner tracks: it keeps their p95 and absolute-cap samples
-comparable without changing their test behavior, thresholds, or internal
-test-runner settings. This is not global serialization: only those three
-measurement lanes form the short ordered prefix, and the remaining lanes still
-fan out. The phase is applied only when the complete configured set is
-selected, so focused `--track` execution has no hidden prerequisite work.
+previous member. The optional `canonical.durationIsolationTrack` is admitted
+after that prefix and gates only other Vitest lanes; .NET and Spec lanes resume
+the normal bounded fan-out immediately after the measurement prefix. The
+current measurement set is the CLI and Server unit tracks, with Runner as the
+isolated Node track. This keeps duration samples comparable without changing
+test behavior, thresholds, or internal test-runner settings, while avoiding
+global serialization. The phase is applied only when the complete configured
+set is selected, so focused `--track` execution has no hidden prerequisite work.
 
 #### Host exclusivity for duration evidence
 
