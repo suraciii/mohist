@@ -24,9 +24,6 @@ jobs:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
       DOTNET_GENERATE_ASPNET_CERT: false
-      TMPDIR: ${{ runner.temp }}
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
 
     steps:
       - name: Checkout
@@ -61,6 +58,10 @@ jobs:
         # TERM starts at 240s and KILL follows after ten seconds. The remaining
         # job wall belongs to checkout, setup, install, and diagnostic upload.
         timeout-minutes: 5
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: timeout -k 10s 240s npm run verify
 
       - name: Upload canonical diagnostics
