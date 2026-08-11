@@ -35,6 +35,7 @@ import {
 } from "./session-target.js"
 import {
   callCancel,
+  ensureCommandRuntimeReady,
   readCancelFacts,
   resolveCommandRuntime,
   type CancelCallTarget,
@@ -127,7 +128,7 @@ async function handleCancel(
     pi: deps.piRuntime,
   })
   if (!handle) return { state: "not-cancellable" }
-  if (!handle.runtime.ready()) {
+  if (!await ensureCommandRuntimeReady(handle)) {
     return { state: "unavailable" }
   }
 

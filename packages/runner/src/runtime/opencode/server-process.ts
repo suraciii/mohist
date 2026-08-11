@@ -25,6 +25,7 @@ export interface OpencodeServerHandle {
   readonly directory: string
   readonly client: OpencodeClient
   close(): Promise<void>
+  terminateTree?(): Promise<void>
 }
 
 export type OpencodeServerFactory = (directory: string, signal: AbortSignal) => Promise<OpencodeServerHandle>
@@ -36,18 +37,23 @@ export function createOpenCodeFetch(dispatcher: Dispatcher, fetchImpl: typeof fe
 export const createSpawnedOpencodeServer: OpencodeServerFactory = async (directory, signal) => {
   const server = await createOpencodeServer({ signal, port: 0 })
   const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
+  let terminated = false
   const client = createOpencodeClient({
     baseUrl: server.url,
     directory,
     fetch: createOpenCodeFetch(dispatcher),
   })
+  const terminateTree = async () => {
+    if (terminated) return
+    terminated = true
+    server.close()
+    await dispatcher.close()
+  }
   return {
     url: server.url,
     directory,
     client,
-    async close() {
-      server.close()
-      await dispatcher.close()
-    },
+    close: terminateTree,
+    terminateTree,
   }
 }

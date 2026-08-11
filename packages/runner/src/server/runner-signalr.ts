@@ -49,6 +49,7 @@ import type { BuildInfo } from "../runtime/build-info.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
 import {
   callSessionCommand,
+  ensureCommandRuntimeReady,
   resolveAccessor,
   resolveCommandRuntime,
   type CommandRuntimeAccessors,
@@ -297,6 +298,9 @@ export class RunnerSignalRClient {
       { openCode: this.openCodeRuntime, pi: this.piRuntime },
     )
     if (!handle) {
+      return { ok: false, error: "unavailable" }
+    }
+    if (!await ensureCommandRuntimeReady(handle)) {
       return { ok: false, error: "unavailable" }
     }
     const runtimeSessionId = request.runtimeSessionId

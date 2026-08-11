@@ -125,8 +125,10 @@ function installStubRuntimeFactory(_options: StubRuntimeOptions = {}): OpenCodeR
   const stub: OpenCodeRuntime = {
     ready: () => ready,
     diagnostic: () => null,
+    setWorkOwners() {},
+    canPollWhileCold: () => !ready,
     async start() {
-      return { ok: true, value: { ready: true, diagnostic: null }, diagnostics: [] }
+      return { ok: true, value: { ready: true, diagnostic: null, ownership: { ownerIds: [], idleSince: null, activeOperations: 0, generation: null } }, diagnostics: [] }
     },
     async shutdown() {
       // noop
