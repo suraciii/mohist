@@ -351,21 +351,14 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected async Task RegisterRunnerAndAwaitOnlineAsync(string runnerId, string projectId)
     {
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = $"{runnerId}-host",
-            projectId,
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
-
+        // Launch route specs need authoritative runner state, not a second HTTP route workflow.
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await TestWait.ForAsync(
-            () => runnerGrain.GetRuntimeStateAsync(),
-            s => s.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
+        await runnerGrain.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            $"{runnerId}-host",
+            projectId));
+        await runnerGrain.UpdateAsync(2);
     }
 
     protected async Task<int> CountAgentLaunchSessionsAsync(string projectId)
