@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
-import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models.js"
 import { setPiRuntimeFactoryForTest, type PiRuntime } from "../src/runtime/pi/index.js"
 import type { ActionDefinition } from "../src/actions/manifest.js"
 import { deferred } from "./support/deferred.js"
@@ -126,7 +125,6 @@ beforeEach(() => {
   vi.useFakeTimers()
   setExecutorGitRunnerForTest(nonGitRunner)
   clearOpenCodeRuntimeFactoryForTest()
-  setOpencodeModelDiscoveryForTest(async () => ({ models: ["openai/gpt-5.5"], variants: {}, complete: true }))
   blockingAction.mockReset()
   connect.mockReset().mockResolvedValue(undefined)
   heartbeat.mockReset().mockResolvedValue(undefined)
@@ -190,13 +188,8 @@ function expectedActionCatalog() {
 }
 
 describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
-  it("ready-claim: starts the OpenCode runtime and registers the independently discovered models", async () => {
+  it("ready-claim: starts the runtime without probing or registering a model catalog", async () => {
     installFakeOpenCodeRuntimeFactory()
-    setOpencodeModelDiscoveryForTest(async () => ({
-      models: ["openai/gpt-5", "anthropic/claude-sonnet-4"],
-      variants: { "openai/gpt-5": ["low", "high"] },
-      complete: true,
-    }))
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
@@ -205,8 +198,9 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     try {
       await connected.promise
       const connectArg = connect.mock.calls[0]?.[0] as Record<string, unknown>
-      expect(connectArg?.coderModels).toEqual(["openai/gpt-5", "anthropic/claude-sonnet-4"])
-      expect(connectArg?.coderModelVariants).toEqual({ "openai/gpt-5": ["low", "high"] })
+      expect(connectArg).not.toHaveProperty("coderModels")
+      expect(connectArg).not.toHaveProperty("coderModelVariants")
+      expect(connectArg).not.toHaveProperty("runtimeCatalogs")
       expect(connectArg?.actionCatalog).toEqual(expectedActionCatalog())
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("run")
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("private")
@@ -216,24 +210,20 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("RunnerRegistration reports runtime-tagged OpenCode and Pi catalogs", async () => {
+  it("RunnerRegistration does not read runtime model catalogs", async () => {
     installFakeOpenCodeRuntimeFactory()
-    setOpencodeModelDiscoveryForTest(async () => ({
-      models: ["openai/gpt-5"],
-      variants: { "openai/gpt-5": ["low", "high"] },
-      complete: true,
-    }))
     const piCatalog = {
       models: [
         { provider: "anthropic", id: "claude-sonnet-4", thinkingLevels: ["off"] },
         { provider: "openai", id: "gpt-5.5", thinkingLevels: ["low", "high"] },
       ],
     }
+    const catalog = vi.fn(() => piCatalog)
     const piRuntime = {
       start: vi.fn(async () => ({ ok: true as const, value: { ready: true, diagnostic: null, catalog: piCatalog }, diagnostics: [] })),
       ready: () => true,
       diagnostic: () => null,
-      catalog: () => piCatalog,
+      catalog,
       shutdown: vi.fn(async () => undefined),
     } as unknown as PiRuntime
     setPiRuntimeFactoryForTest(() => piRuntime)
@@ -245,33 +235,18 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     try {
       await connected.promise
       const registration = connect.mock.calls[0]?.[0] as Record<string, unknown>
-      expect(registration.runtimeCatalogs).toEqual({
-        opencode: {
-          models: ["openai/gpt-5"],
-          variants: { "openai/gpt-5": ["low", "high"] },
-        },
-        pi: {
-          models: ["anthropic/claude-sonnet-4", "openai/gpt-5.5"],
-          variants: {
-            "anthropic/claude-sonnet-4": ["off"],
-            "openai/gpt-5.5": ["low", "high"],
-          },
-        },
-      })
-      expect(registration.runtimeCatalogs).not.toHaveProperty("pi.models", expect.arrayContaining(["google/gemini"]))
+      expect(registration).not.toHaveProperty("coderModels")
+      expect(registration).not.toHaveProperty("coderModelVariants")
+      expect(registration).not.toHaveProperty("runtimeCatalogs")
+      expect(catalog).not.toHaveBeenCalled()
     } finally {
       controller.abort()
       await run.catch(() => undefined)
     }
   })
 
-  it("RunnerRegistration reports the host-owned discovered snapshot on every heartbeat", async () => {
+  it("RunnerRegistration omits model catalogs on every heartbeat", async () => {
     installFakeOpenCodeRuntimeFactory()
-    setOpencodeModelDiscoveryForTest(async () => ({
-      models: ["openai/gpt-5"],
-      variants: { "openai/gpt-5": ["low"] },
-      complete: true,
-    }))
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
@@ -285,8 +260,9 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       const heartbeatBodies = heartbeat.mock.calls.map((call) => call[0] as Record<string, unknown>)
       expect(heartbeatBodies.length).toBeGreaterThan(0)
       for (const body of heartbeatBodies) {
-        expect(body.coderModels).toEqual(["openai/gpt-5"])
-        expect(body.coderModelVariants).toEqual({ "openai/gpt-5": ["low"] })
+        expect(body).not.toHaveProperty("coderModels")
+        expect(body).not.toHaveProperty("coderModelVariants")
+        expect(body).not.toHaveProperty("runtimeCatalogs")
         expect(body.actionCatalog).toEqual(expectedActionCatalog())
       }
     } finally {

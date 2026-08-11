@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
-import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import type { FollowupTargetResolution } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
@@ -101,7 +100,6 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
 beforeEach(() => {
   vi.useFakeTimers()
   installReadyRuntimeFactory()
-  setOpencodeModelDiscoveryForTest(async () => ({ models: ["openai/gpt-5.5"], variants: {}, complete: true }))
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
   uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
@@ -164,16 +162,17 @@ describe("RunnerHost", () => {
       expect(connect).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: "project-1",
-          coderModels: ["openai/gpt-5.5"],
         }),
         expect.any(AbortSignal),
       )
       const registration = connect.mock.calls[0][0]
       expect(registration).toMatchObject({
         projectId: "project-1",
-        coderModels: ["openai/gpt-5.5"],
         runnerId: "runner-test",
       })
+      expect(registration).not.toHaveProperty("coderModels")
+      expect(registration).not.toHaveProperty("coderModelVariants")
+      expect(registration).not.toHaveProperty("runtimeCatalogs")
       for (const identityField of [
         "buildGitHash",
         "component",

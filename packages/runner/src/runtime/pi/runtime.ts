@@ -539,12 +539,11 @@ export class PiRuntime {
     this.state.ready = false
     try {
       const services = await (this.deps.sdkFactory ?? realPiSdkFactory).create({ cwd: process.cwd(), agentDir: this.deps.agentDir })
-      const models = await services.catalog()
       this.state.services = services
-      this.state.catalog = { models: models.map((model) => ({ provider: model.provider, id: model.id, thinkingLevels: model.thinkingLevels ?? [] })) }
-      this.state.diagnostic = this.state.catalog.models.length === 0 ? diagnostic("empty-catalog", "Pi model catalog is empty; model validity will be decided at turn time", "warning") : null
+      this.state.catalog = null
+      this.state.diagnostic = null
       this.state.ready = true
-      return { ok: true, value: this.readyState(), diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [] }
+      return { ok: true, value: this.readyState(), diagnostics: [] }
     } catch (cause) { this.state.services = null; this.state.diagnostic = diagnostic("pi-start-failed", this.mask(message(cause))); return this.unavailable() }
   }
 

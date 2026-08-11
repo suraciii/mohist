@@ -29,14 +29,7 @@ import {
   type OpenCodeRuntime,
 } from "./opencode/index.js"
 import { formatDirectoryReclaimSummary } from "./opencode/reclaim-summary.js"
-import {
-  getOpencodeModelDiscovery,
-  mergeOpencodeModelCatalogs,
-  opencodeModelSetsEqual,
-  type DiscoveredOpencodeModels,
-  type OpencodeModelCatalog,
-} from "./opencode-models.js"
-import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiCatalog, type PiRuntime } from "./pi/index.js"
+import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from "./pi/index.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
 import { FollowupOperationJournal } from "./followup-operation-journal.js"
 import { CancelOperationJournal } from "./cancel-operation-journal.js"
@@ -55,7 +48,6 @@ import {
 
 const log = runnerLogger.child("host")
 const cleanupLog = runnerLogger.child("cleanup")
-const modelLog = runnerLogger.child("models")
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -106,16 +98,6 @@ export function getRunnerBuildGitHash(): string | null {
   return loadBuildInfo().gitHash
 }
 
-function piCatalogToRuntimeCatalog(catalog: PiCatalog): { models: string[]; variants: Record<string, string[]> } {
-  const models = catalog.models.map((model) => `${model.provider}/${model.id}`)
-  const variants = Object.fromEntries(
-    catalog.models
-      .filter((model) => model.thinkingLevels.length > 0)
-      .map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]),
-  )
-  return { models, variants }
-}
-
 export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly signalR: RunnerSignalRClient
@@ -134,12 +116,9 @@ export class RunnerHost {
   private readonly cleanupLoopIntervalMs: number
   private cleanupInFlight: Promise<void> | null = null
   private lastCleanupPolicy: CleanupPolicy | null = null
-  private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
   private readonly buildInfo: ReturnType<typeof loadBuildInfo>
-  private coderModels: string[] = []
-  private coderModelVariants: Record<string, string[]> = {}
 
   /**
    * Shared OpenCode runtime handle. Constructed in
@@ -186,7 +165,6 @@ export class RunnerHost {
   ) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
-    this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
     const build = loadBuildInfo()
     this.buildInfo = build
     this.buildGitHash = build.gitHash
@@ -307,11 +285,7 @@ export class RunnerHost {
       // never replaced with empty state — the outbox loads itself once
       // a successful read happens and stays unhealthy otherwise.
       await this.loadAgentSessionRuntimeEventOutbox(signal)
-      // OpenCode execution health and CLI model discovery are independent.
-      // Discovery is best-effort, but it completes before the first
-      // registration so that registration reports one host-owned snapshot.
       await this.initializeSharedConnection(signal)
-      this.replaceCoderModels(await this.discoverModels(signal))
       await this.connectRunner(signal)
       // Kick a non-blocking drain: an unavailable server does not gate
       // startup; records stay durable and re-drain on reconnect.
@@ -328,7 +302,6 @@ export class RunnerHost {
       const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
       const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
       const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
-      const rediscoveryTimer = setInterval(() => void this.runModelRediscoveryOnce(signal).catch((error) => modelLog.error("model rediscovery failed", { exception: error })), this.modelRediscoveryIntervalMs)
       try {
         await this.runWorkerPool(signal)
       } finally {
@@ -336,7 +309,6 @@ export class RunnerHost {
         clearInterval(selfCheck)
         clearInterval(convergenceTimer)
         clearInterval(cleanupTimer)
-        clearInterval(rediscoveryTimer)
         await this.shutdownSharedConnection()
         await this.shutdownConnection()
       }
@@ -361,37 +333,6 @@ export class RunnerHost {
     } catch (error) {
       log.error("agent-session binding convergence pass failed", { exception: error, session: "binding" })
     }
-  }
-
-  private async runModelRediscoveryOnce(signal: AbortSignal): Promise<void> {
-    const discovered = await this.discoverModels(signal)
-    if (discovered.models.length === 0) return
-    const previous = {
-      models: this.coderModels,
-      variants: this.coderModelVariants,
-    }
-    const next = discovered.complete
-      ? discovered
-      : mergeOpencodeModelCatalogs(previous, discovered)
-    if (opencodeModelSetsEqual(previous, next)) return
-    this.replaceCoderModels(next)
-    await this.sendImmediateHeartbeat()
-  }
-
-  private async discoverModels(signal: AbortSignal): Promise<DiscoveredOpencodeModels> {
-    try {
-      return await getOpencodeModelDiscovery()(signal)
-    } catch (error) {
-      modelLog.error("failed to discover opencode models", { exception: error })
-      return { models: [], variants: {}, complete: false }
-    }
-  }
-
-  private replaceCoderModels(discovered: OpencodeModelCatalog): void {
-    this.coderModels = [...discovered.models]
-    this.coderModelVariants = Object.fromEntries(
-      Object.entries(discovered.variants).map(([model, variants]) => [model, [...variants]]),
-    )
   }
 
   private runCleanupOnce(signal: AbortSignal): Promise<void> {
@@ -507,12 +448,9 @@ export class RunnerHost {
 
   private async initializeSharedConnection(signal: AbortSignal) {
     if (this.workExecutor !== null) return
-    // Construct the shared OpenCode runtime. The factory seam returns a
-    // real `OpenCodeRuntime` (production) or a fake the test injected
-    // via `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
-    // check + catalog load and only flips `ready()` true after both
-    // pass; until then the host's `pollOnce` gate keeps the runner
-    // from claiming work.
+    // Construct the shared runtimes. The factory seam returns real
+    // runtimes in production or fakes in tests. Readiness is limited to
+    // runtime health; model validity is decided by the requested work.
     const policy = parseProviderErrorPolicy(process.env as Record<string, string | undefined>)
     if (!policy.ok) {
       this.providerPolicyDiagnostic = `provider error policy invalid (${policy.error.code}): ${policy.error.message}`
@@ -969,22 +907,10 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
-    const runtimeCatalogs: NonNullable<RunnerRegistration["runtimeCatalogs"]> = {
-      opencode: {
-        models: this.coderModels,
-        variants: this.coderModelVariants,
-      },
-    }
-    const piCatalog = this.piRuntime?.catalog()
-    if (piCatalog) runtimeCatalogs.pi = piCatalogToRuntimeCatalog(piCatalog)
-
     return {
       capabilities: [],
       actionCatalog: this.actions.catalog(),
       projectId: this.options.projectId,
-      coderModels: this.coderModels,
-      coderModelVariants: this.coderModelVariants,
-      runtimeCatalogs,
       connectionId: this.signalR.getConnectionId(),
     }
   }
