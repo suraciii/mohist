@@ -12,7 +12,15 @@ public class SystemInfoServiceTests
     [Fact]
     public async Task GetSystemInfo_ReturnsAllSections()
     {
-        var runtime = new FakeRuntimeBuildInfo("1.0.0", "abc123");
+        var runtime = new FakeRuntimeBuildInfo(
+            "1.0.0",
+            "abc123",
+            component: "server",
+            sourceRevision: "abc123",
+            treeHash: "tree123",
+            artifactDigest: "digest123",
+            releaseId: "release123",
+            generation: 4);
         var fs = new FakeFileSystem();
         var unitDir = "/units";
         var repoDir = "/repo";
@@ -40,6 +48,12 @@ public class SystemInfoServiceTests
         Assert.NotNull(info.Paths);
         Assert.Equal("Detected local-source systemd user install from mohist.service", info.Install.Reason);
         Assert.NotEqual(default, info.Running.StartedAt);
+        Assert.Equal("server", info.Running.Component);
+        Assert.Equal("abc123", info.Running.SourceRevision);
+        Assert.Equal("tree123", info.Running.TreeHash);
+        Assert.Equal("digest123", info.Running.ArtifactDigest);
+        Assert.Equal("release123", info.Running.ReleaseId);
+        Assert.Equal(4, info.Running.Generation);
     }
 
     [Fact]
@@ -329,11 +343,31 @@ public class SystemInfoServiceTests
         public string? Version { get; }
         public string? GitHash { get; }
         public DateTimeOffset StartedAt { get; }
+        public string? Component { get; }
+        public string? SourceRevision { get; }
+        public string? TreeHash { get; }
+        public string? ArtifactDigest { get; }
+        public string? ReleaseId { get; }
+        public long Generation { get; }
 
-        public FakeRuntimeBuildInfo(string? version, string? gitHash)
+        public FakeRuntimeBuildInfo(
+            string? version,
+            string? gitHash,
+            string? component = null,
+            string? sourceRevision = null,
+            string? treeHash = null,
+            string? artifactDigest = null,
+            string? releaseId = null,
+            long generation = 0)
         {
             Version = version;
             GitHash = gitHash;
+            Component = component;
+            SourceRevision = sourceRevision;
+            TreeHash = treeHash;
+            ArtifactDigest = artifactDigest;
+            ReleaseId = releaseId;
+            Generation = generation;
             StartedAt = TestTime.UtcNow;
         }
     }

@@ -7,7 +7,9 @@ public sealed record RunningInfo(
     string? TreeHash = null,
     string? ArtifactDigest = null,
     string? ReleaseId = null,
-    long Generation = 0);
+    long Generation = 0,
+    string? Component = null,
+    string? SourceRevision = null);
 
 public sealed record SourceInfo(
     string? Path,

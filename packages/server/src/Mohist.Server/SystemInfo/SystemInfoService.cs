@@ -52,7 +52,9 @@ public sealed class SystemInfoService : ISingletonService
                 _runtimeBuildInfo.TreeHash,
                 _runtimeBuildInfo.ArtifactDigest,
                 _runtimeBuildInfo.ReleaseId,
-                _runtimeBuildInfo.Generation),
+                _runtimeBuildInfo.Generation,
+                _runtimeBuildInfo.Component,
+                _runtimeBuildInfo.SourceRevision),
             Source: source,
             Install: new InstallInfo(
                 install.Mode,
