@@ -272,7 +272,7 @@ internal sealed class ManagedRuntimeTransaction
     {
         var root = Path.Combine(context.CandidateRoot, component).Replace('\\', '/');
         _files.CreateDirectory(root);
-        var project = Path.Combine(context.SnapshotRoot, projectRelativePath).Replace('\\', '/');
+        var project = Path.Combine(context.BuildWorkspaceRoot, projectRelativePath).Replace('\\', '/');
         var args = new[]
         {
             "publish",
@@ -302,14 +302,14 @@ internal sealed class ManagedRuntimeTransaction
         long generation,
         CancellationToken cancellationToken)
     {
-        var runnerSource = Path.Combine(context.SnapshotRoot, "packages", "runner").Replace('\\', '/');
+        var runnerSource = Path.Combine(context.BuildWorkspaceRoot, "packages", "runner").Replace('\\', '/');
         var runnerRoot = Path.Combine(context.CandidateRoot, "runner").Replace('\\', '/');
         var distRoot = Path.Combine(runnerRoot, "dist").Replace('\\', '/');
         _files.CreateDirectory(runnerRoot);
         _files.CreateDirectory(distRoot);
 
         var (install, installOut, installErr) = await _commands.ExecuteAsync(
-            "npm", ["ci", "--ignore-scripts"], context.SnapshotRoot, cancellationToken);
+            "npm", ["ci", "--ignore-scripts"], context.BuildWorkspaceRoot, cancellationToken);
         if (install != 0)
         {
             WriteCommandFailure(installOut, installErr);
@@ -317,7 +317,7 @@ internal sealed class ManagedRuntimeTransaction
         }
 
         var (build, buildOut, buildErr) = await _commands.ExecuteAsync(
-            "npm", ["run", "build", "-w", "packages/runner"], context.SnapshotRoot, cancellationToken);
+            "npm", ["run", "build", "-w", "packages/runner"], context.BuildWorkspaceRoot, cancellationToken);
         if (build != 0)
         {
             WriteCommandFailure(buildOut, buildErr);
@@ -328,7 +328,7 @@ internal sealed class ManagedRuntimeTransaction
         {
             (Path.Combine(runnerSource, "dist").Replace('\\', '/'), distRoot),
             (Path.Combine(runnerSource, "package.json").Replace('\\', '/'), Path.Combine(runnerRoot, "package.json").Replace('\\', '/')),
-            (Path.Combine(context.SnapshotRoot, "node_modules").Replace('\\', '/'), Path.Combine(runnerRoot, "node_modules").Replace('\\', '/')),
+            (Path.Combine(context.BuildWorkspaceRoot, "node_modules").Replace('\\', '/'), Path.Combine(runnerRoot, "node_modules").Replace('\\', '/')),
         };
         foreach (var (source, target) in copies)
         {

@@ -44,6 +44,38 @@ public sealed class ManagedRuntimeTransactionSpecs
     }
 
     [Fact]
+    public async Task Prepare_BuildsFromWritableWorkspaceWithoutWritingToReadOnlySnapshot()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "server",
+            "tx-read-only-snapshot",
+            null);
+
+        Assert.NotNull(prepared.Session);
+        var publish = Assert.Single(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "dotnet" && command.Args.Contains("publish"));
+        var snapshotRoot = Path.Combine(
+            fixture.RuntimeRoot,
+            "transactions",
+            "tx-read-only-snapshot",
+            "snapshot").Replace('\\', '/');
+        var buildRoot = Path.Combine(
+            fixture.RuntimeRoot,
+            "transactions",
+            "tx-read-only-snapshot",
+            "build",
+            "source").Replace('\\', '/');
+
+        Assert.StartsWith(buildRoot + "/", publish.Args[1], StringComparison.Ordinal);
+        Assert.Equal(buildRoot, publish.WorkingDirectory);
+        Assert.False(fixture.Files.DirectoryExists(Path.Combine(snapshotRoot, "packages", "server", "src", "Mohist.Server", "obj")));
+        Assert.True(fixture.Files.DirectoryExists(Path.Combine(buildRoot, "packages", "server", "src", "Mohist.Server", "obj")));
+    }
+
+    [Fact]
     public async Task Prepare_WhenActivationFails_RestoresFailClosedState()
     {
         var fixture = ManagedFixture.Create(activationCode: 17);
@@ -123,9 +155,34 @@ public sealed class ManagedRuntimeTransactionSpecs
                 "");
             commands.OnExecute = (fileName, args) =>
             {
+                if (fileName == "tar")
+                {
+                    var extractIndex = Array.IndexOf(args, "-C");
+                    if (extractIndex >= 0 && extractIndex + 1 < args.Length)
+                    {
+                        var extractRoot = args[extractIndex + 1];
+                        files.AddFile(Path.Combine(extractRoot, "Mohist.sln"), "solution");
+                        files.AddFile(
+                            Path.Combine(extractRoot, "packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj"),
+                            "project");
+                    }
+                    return;
+                }
+
+                if (fileName == "chmod"
+                    && args.Length == 3
+                    && args[0] == "-R"
+                    && args[1] == "a-w")
+                {
+                    files.MarkReadOnly(args[2]);
+                    return;
+                }
+
                 if (fileName != "dotnet" || !args.Contains("publish"))
                     return;
 
+                var project = args[1];
+                files.CreateDirectory(Path.Combine(Path.GetDirectoryName(project)!, "obj"));
                 var outputIndex = Array.IndexOf(args, "-o");
                 if (outputIndex < 0 || outputIndex + 1 >= args.Length)
                     return;
