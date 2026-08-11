@@ -1,4 +1,5 @@
 using Mohist.Server.Epic.Grains;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -45,6 +46,9 @@ public abstract class EpicApiTestSupport
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(projectId, "Epic API Test", RepositoryBaseBranch: "main"));
         await grain.CompleteWorkAsync(wrId);
     }
+
+    protected Task DispatchPendingEventsAsync() =>
+        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     protected sealed record ProjectDto(string Id);
     protected sealed record EpicDto(int Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
