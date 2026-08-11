@@ -626,28 +626,76 @@ same-fingerprint replay returns the stored bound ids, while a conflicting
 payload returns `artifact_bind_conflict`. It does not require active Workflow
 work or derive TaskRun identity from `workId`.
 
-The Server finalizer then records a
-`WorkflowAgentFinalizationReceipt` containing the request fingerprint, the bind
-receipt key, bound artifact ids, and variable-patch fingerprint. If the process
-fails after the bind transaction commits but before this finalizer receipt is
-written, a replay reads the durable bind receipt, completes the finalizer
-receipt, and does not create another artifact row or delete unrelated pending
-data. If the bind transaction fails before commit, all artifact rows, the bind
-receipt, and pending-upload deletion roll back together and the same request is
-safe to retry.
-It applies `setVars` only through a keyed
-`WorkflowRunVariablesStore.PatchVariablesIfNewAsync(workflowRunId,
-finalizerKey, vars)` operation and applies the existing Workflow completion or
-recovery boundary once.
+The Workflow grain owns a durable finalization process, separate from the final
+receipt:
 
-The same `finalizerKey` and payload replay the existing receipt as `Accepted`
-or `Stale` without repeating artifact binding, variable mutation, or task
-application. A conflicting payload is rejected as `finalization_conflict`; a
-transient storage or Workflow failure returns `Retry` and leaves the delivery
-obligation pending. The finalizer never derives facts from Session events and
-never changes the AgentJob terminal result. A Runner-side postcondition failure
-is reported as the stable failed `WorkflowAgentResult`, so Workflow recovery
-sees the same failure boundary as an ordinary Action.
+```text
+WorkflowAgentFinalizationProgress {
+  finalizerKey
+  requestFingerprint
+  phase = pending | artifacts_bound | variables_applied
+  artifactBindReceiptKey?
+  boundArtifactIds?
+  variablePatchReceiptKey?
+  variablePatchFingerprint?
+}
+
+WorkflowAgentFinalizationReceipt {
+  finalizerKey
+  requestFingerprint
+  artifactBindReceiptKey
+  boundArtifactIds
+  variablePatchReceiptKey
+  variablePatchFingerprint
+  taskApplicationFingerprint
+}
+```
+
+`ApplyAgentJobFinalizationAsync` first verifies all lineage and that the current
+TaskRun can accept this finalizer, then persists `pending` progress before
+calling an external store. A replay with the same fingerprint resumes the
+stored phase; a different fingerprint returns `Conflict` without changing the
+first process. Intermediate progress is not a terminal receipt and cannot
+return `Accepted` or `Stale`.
+
+The artifact step calls `BindAgentInvocationAsync`. After its durable bind
+receipt is returned, Workflow persists `artifacts_bound` with the receipt key
+and bound ids. If the process fails after the bind transaction but before that
+phase write, replay reads the same bind receipt and writes the missing phase; it
+does not create another artifact or delete unrelated pending data. If the bind
+transaction fails, artifact rows, its receipt, and pending-upload deletion roll
+back together.
+
+The variable step calls
+`WorkflowRunVariablesStore.PatchVariablesIfNewAsync(workflowRunId,
+finalizerKey, vars)`. That operation writes the variable mutation and a durable
+`WorkflowVariablePatchReceipt` keyed by `(workflowRunId, finalizerKey)` in one
+database transaction. Its fingerprint is canonical JSON of the variable patch,
+and it writes a receipt even for an empty patch. A same-fingerprint replay
+returns the existing receipt; a different patch returns
+`variable_patch_conflict`. After the receipt is returned, Workflow persists
+`variables_applied` with its key and fingerprint. A crash between the database
+commit and phase write therefore replays the variable receipt instead of
+patching variables twice.
+
+Only from `variables_applied` may Workflow apply the existing task completion
+or recovery transition. It writes those TaskRun/Workflow events and the final
+`WorkflowAgentFinalizationReceipt` in the same Workflow grain commit. The final
+receipt is therefore proof that artifact binding, variable mutation, and task
+application all completed; it is never written before them. If that commit
+fails, neither task application nor the final receipt is visible, progress
+remains `variables_applied`, and replay retries the same atomic commit. A lost
+response after a successful commit replays the final receipt as `Stale`. A
+same-payload replay at an intermediate phase resumes work and returns
+`Accepted` only after the final commit. A transient failure at any phase returns
+`Retry` and leaves AgentJob's delivery obligation pending. An artifact,
+variable, progress, or final-receipt fingerprint conflict returns definitive
+`Conflict` and cannot replace the first process.
+
+The finalizer never derives facts from Session events and never changes the
+AgentJob terminal result. A Runner-side postcondition failure is reported as
+the stable failed `WorkflowAgentResult`, so Workflow recovery sees the same
+failure boundary as an ordinary Action.
 
 ### 7. Make uncertain work recovering and non-replayable
 
@@ -732,8 +780,9 @@ inventing a success or failure.
 - [Workflow `expect`, artifact, and variable side effects cross from a
   Workflow owner to an AgentJob owner] -> Freeze a separate Workflow task
   contract, let the Runner completion adapter prepare workspace facts, and let
-  the Server-side WorkflowAgentFinalizer bind invocation-keyed artifacts and
-  apply all Workflow effects under the durable `finalizerKey` receipt.
+  the Server-side WorkflowAgentFinalizer resume durable progress through keyed
+  artifact and variable receipts, then atomically commit TaskRun application
+  with the final `finalizerKey` receipt.
 - [Workflow and Agent read surfaces could disagree during terminal delivery] ->
   AgentJob remains the sole execution authority; Workflow stores only lineage
   and application acknowledgement. Assemblers expose both the Job terminal
