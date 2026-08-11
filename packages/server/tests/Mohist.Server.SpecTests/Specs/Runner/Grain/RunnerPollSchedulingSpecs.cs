@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -33,6 +34,84 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainSpecs
 {
     public RunnerPollSchedulingSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task DrainFence_BlocksNewPollAndClaims_AndCancelRestoresAdmission()
+    {
+        await ClearBacklogAsync();
+        var projectId = $"runner-drain-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"runner-drain-{Guid.NewGuid():N}",
+            maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var workflowId = $"runner-drain-workflow-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
+
+        var jobId = $"runner-drain-job-{Guid.NewGuid():N}";
+        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.SubmitAsync(new AgentJobInput(
+            "drain admission",
+            WorkspacePath: "/tmp/runner-drain",
+            ProjectId: projectId,
+            AgentId: "agent-test"));
+        var pendingJob = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Pending, pendingJob.Status);
+        Assert.Equal(runnerId, pendingJob.RunnerId);
+
+        await runner.BeginDrainAsync();
+
+        var draining = await runner.GetRuntimeStateAsync();
+        Assert.True(draining.Draining);
+        Assert.False((await runner.TryBeginPollAsync()).Admitted);
+        Assert.Null(await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true));
+        Assert.Null(await runner.TryClaimAgentJobAsync(jobId, projectId));
+        Assert.Null(await workflow.GetCurrentWorkIdAsync());
+        Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
+
+        await runner.CancelDrainAsync();
+
+        var resumed = await runner.GetRuntimeStateAsync();
+        Assert.False(resumed.Draining);
+        var poll = await runner.TryBeginPollAsync();
+        Assert.True(poll.Admitted);
+        Assert.Equal(2, poll.Slots);
+        await runner.EndPollAsync();
+        Assert.NotNull(await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true));
+        Assert.NotNull(await runner.TryClaimAgentJobAsync(jobId, projectId));
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task BeginDrain_PreservesExistingActiveWork()
+    {
+        await ClearBacklogAsync();
+        var projectId = $"runner-drain-active-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"runner-drain-active-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var workflowId = $"runner-drain-active-workflow-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
+
+        var work = await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true);
+        Assert.NotNull(work);
+
+        await runner.BeginDrainAsync();
+
+        var state = await runner.GetRuntimeStateAsync();
+        Assert.True(state.Draining);
+        var active = Assert.Single(state.ActiveWorks);
+        Assert.Equal(workflowId, active.OwnerId);
+        Assert.Equal(work!.Id, active.WorkId);
+
+        await runner.CancelDrainAsync();
+    }
 
     [Fact]
     public async Task PollAsync_ReadyWorkflowIsDispatchedDirectly()

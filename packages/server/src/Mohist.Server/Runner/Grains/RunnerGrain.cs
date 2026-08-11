@@ -39,6 +39,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly IPersistentState<LegacyRunnerRegistrationState> _legacyState;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private bool _pollAdmitted;
+    private bool _draining;
     private DateTimeOffset _lastPresenceAt;
     private IDisposable? _presenceTimer;
 
@@ -229,7 +230,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_pollAdmitted)
+            if (_draining || _pollAdmitted)
                 return new RunnerPollAdmission(false, 0);
 
             _pollAdmitted = true;
@@ -255,6 +256,32 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     }
 
+    public async Task BeginDrainAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            _draining = true;
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async Task CancelDrainAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            _draining = false;
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
     public async Task<WorkItem?> TryClaimWorkflowAsync(
         string workflowRunId,
         string? projectId,
@@ -263,7 +290,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_status != RunnerStatus.Online
+            if (_draining
+                || _status != RunnerStatus.Online
                 || _info is null
                 || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
             {
@@ -300,7 +328,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_status != RunnerStatus.Online
+            if (_draining
+                || _status != RunnerStatus.Online
                 || _info is null
                 || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
             {
@@ -394,7 +423,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 TakenAt: w.RunningSince));
         }
 
-        return new RunnerRuntimeState(_status, _lastPresenceAt, activeWorks);
+        return new RunnerRuntimeState(_status, _lastPresenceAt, activeWorks, _draining);
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)
