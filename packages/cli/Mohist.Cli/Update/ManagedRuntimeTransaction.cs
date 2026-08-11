@@ -77,6 +77,13 @@ internal sealed class ManagedRuntimeTransaction
 
         try
         {
+            var nodeDependencyError = await PrepareNodeDependenciesAsync(
+                context,
+                scope,
+                cancellationToken);
+            if (nodeDependencyError is not null)
+                return (null, nodeDependencyError);
+
             if (Includes(scope, "cli"))
             {
                 var cli = await PublishDotnetAsync(
@@ -263,6 +270,26 @@ internal sealed class ManagedRuntimeTransaction
         }
     }
 
+    private async Task<string?> PrepareNodeDependenciesAsync(
+        UpdateSourceContext context,
+        string scope,
+        CancellationToken cancellationToken)
+    {
+        if (!Includes(scope, "server") && !Includes(scope, "runner"))
+            return null;
+
+        var (exitCode, stdout, stderr) = await _commands.ExecuteAsync(
+            "npm",
+            ["ci", "--include=dev"],
+            context.BuildWorkspaceRoot,
+            cancellationToken);
+        if (exitCode == 0)
+            return null;
+
+        WriteCommandFailure(stdout, stderr);
+        return $"managed update could not prepare Node dependencies: npm ci exited with code {exitCode}; verify the committed package-lock.json and npm registry access, then retry";
+    }
+
     private async Task<BuiltRuntime?> PublishDotnetAsync(
         UpdateSourceContext context,
         string component,
@@ -307,14 +334,6 @@ internal sealed class ManagedRuntimeTransaction
         var distRoot = Path.Combine(runnerRoot, "dist").Replace('\\', '/');
         _files.CreateDirectory(runnerRoot);
         _files.CreateDirectory(distRoot);
-
-        var (install, installOut, installErr) = await _commands.ExecuteAsync(
-            "npm", ["ci", "--ignore-scripts"], context.BuildWorkspaceRoot, cancellationToken);
-        if (install != 0)
-        {
-            WriteCommandFailure(installOut, installErr);
-            return null;
-        }
 
         var (build, buildOut, buildErr) = await _commands.ExecuteAsync(
             "npm", ["run", "build", "-w", "packages/runner"], context.BuildWorkspaceRoot, cancellationToken);
