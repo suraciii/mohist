@@ -18,33 +18,65 @@ using Mohist.Server.Sessions.Services;
 using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-public abstract class AgentSessionRecoveryApiTestSupport
+public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
 {
     protected readonly MohistIntegrationFixture _fixture;
     protected readonly HttpClient _client;
     protected readonly string _runnerId = $"recovery-api-{Guid.NewGuid():N}";
+    private readonly string _connectionId;
+    protected readonly RecordingRunnerHubOwner RunnerHub;
 
     protected AgentSessionRecoveryApiTestSupport(MohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;
+        _connectionId = $"connection-{_runnerId}";
 
         var runnerHub = fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
-        runnerHub.Clear();
-        runnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        RunnerHub = runnerHub.CreateOwner(_connectionId);
+        var tracker = fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var registered = false;
+        try
         {
-            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
-            return request.Command switch
+            RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
             {
-                SessionCommandKind.Compact => new SessionCommandResult(Ok: true),
-                SessionCommandKind.Reset => new SessionCommandResult(
-                    Ok: true,
-                    RuntimeSessionId: $"{request.RuntimeSessionId ?? "new"}-replacement"),
-                _ => new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable),
-            };
-        });
-        fixture.Services.GetRequiredService<RunnerConnectionTracker>()
-            .Register(_runnerId, $"connection-{_runnerId}");
+                var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+                return request.Command switch
+                {
+                    SessionCommandKind.Compact => new SessionCommandResult(Ok: true),
+                    SessionCommandKind.Reset => new SessionCommandResult(
+                        Ok: true,
+                        RuntimeSessionId: $"{request.RuntimeSessionId ?? "new"}-replacement"),
+                    _ => new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable),
+                };
+            });
+            tracker.Register(_runnerId, _connectionId);
+            registered = true;
+        }
+        catch
+        {
+            if (registered)
+                tracker.Unregister(_runnerId, _connectionId);
+            RunnerHub.Dispose();
+            throw;
+        }
+    }
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+                .Unregister(_runnerId, _connectionId);
+        }
+        finally
+        {
+            RunnerHub.Dispose();
+        }
+
+        return ValueTask.CompletedTask;
     }
 
     protected async Task SetPersistedRuntimeAsync(string sessionId, string? runtimeName)
@@ -100,9 +132,6 @@ public abstract class AgentSessionRecoveryApiTestSupport
             .Order(StringComparer.Ordinal)
             .ToArray();
     }
-
-    protected RecordingRunnerHubContext RunnerHub =>
-        _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
 
     protected SessionCommandRequest AssertSingleSessionCommandInvocation()
     {
