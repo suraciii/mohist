@@ -84,6 +84,10 @@ Server. It validates declared output expectations before reporting success and
 reclaims the workspace when the Workflow no longer needs it. The complete
 Action contract is in [Action Contracts](actions/README.md).
 
+Runner owns the complete process tree for every host command it starts. A
+command result includes output produced before the command exits; leftover
+subprocesses cannot keep the result open or write into later work.
+
 ## Workspace Location
 
 An Issue uses a named Workspace such as `issue-42`. Runner materializes it under
