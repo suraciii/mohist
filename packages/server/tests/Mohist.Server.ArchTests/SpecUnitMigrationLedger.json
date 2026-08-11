@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
-  "validationSourceFileCount": 834,
-  "validationSourceTreeDigest": "d576615baac9638927128f99785ed59e4e15cd0feeb71a25177263449da4f4f8",
+  "validationSourceFileCount": 841,
+  "validationSourceTreeDigest": "1750ff25eb141ec08bd942f7e90395171e0b77b06177d912d1869df7c4fa75d7",
   "validationBaselineDigest": "03cad8aca4e8ddf9688d7b3532d03cb1b93c039e8a9ec4e0e38ee73e5b403c62",
   "validationHeadMeaning": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8 with tree ff159609b97df5b1fac6d6404a6d1811f6bda99a is the exact current master baseline used to interpret the checked-in migration ledger; it is not the final validation commit. Planned Unit targets are contracts only, while PR #388 history remains 602efa6abd6fca3efcd43b66b47ba10a80d9faba.",
   "history": {
@@ -2554,6 +2554,59 @@
         "theoryMethods": 0,
         "inlineDataRows": 0,
         "mtpCases": 7
+      }
+    },
+    {
+      "id": "current-recording-background-task-launcher",
+      "kind": "current",
+      "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/RecordingBackgroundTaskLauncherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.RecordingBackgroundTaskLauncherTests"
+      },
+      "discovered": {
+        "factMethods": 8,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 8
+      },
+      "status": "REVIEW",
+      "closure": {
+        "classification": "static-light-fake-seam",
+        "symbols": [
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncher",
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncher.PokeWork",
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+        ],
+        "digest": "f02a3d9fe44c24850861f38c5a0e08bff0ba6d2d693de4439a043c601fd5f7fe",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs case-digest=86d2ed9013b027cb54cd7ba12c551c477c0c14af1ea768fbc7f3a0d7f9042e24 source-content-digest=9a2feb4f106be1902414c7488bafd552ca534e96b67908ac251c47010fa17203 executable-closure-digest=f02a3d9fe44c24850861f38c5a0e08bff0ba6d2d693de4439a043c601fd5f7fe edges-digest=509a4ec7bfc6122e015248429deb373d726ba0f31d08c632c1393aca04111764"
+      },
+      "owner": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+      "history": {
+        "operation": "current-inventory",
+        "pr": "#423",
+        "commit": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+        "note": "Current compiled static-light spec added by #429; explicit REVIEW keeps the server-spec owner until a separate Unit migration is implemented.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+        "sourceContentDigest": "9a2feb4f106be1902414c7488bafd552ca534e96b67908ac251c47010fa17203"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+        "caseCount": 8,
+        "caseIdentityDigest": "86d2ed9013b027cb54cd7ba12c551c477c0c14af1ea768fbc7f3a0d7f9042e24",
+        "closureIdentityDigest": "f02a3d9fe44c24850861f38c5a0e08bff0ba6d2d693de4439a043c601fd5f7fe",
+        "sourceContentDigest": "9a2feb4f106be1902414c7488bafd552ca534e96b67908ac251c47010fa17203"
       }
     }
   ]

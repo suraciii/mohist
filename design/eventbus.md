@@ -114,6 +114,25 @@ from at most `ReminderPeriod` later to the next dispatcher scheduling yield. A
 lost poke, failed process, or reminder that ticks before the event cannot lose
 the row. The reminder later finds it and delivers in FIFO order.
 
+### Test observation boundary
+
+Tests must observe this same real chain. A fixture may replace
+`IBackgroundTaskLauncher`, but the fake must still execute the production poke
+work and provide independent `enqueued`, `started`, and `completed` signals for
+each launch. A real registered handler provides a delivery acknowledgment bound
+to `EventId`. The fake does not use an uncontrolled `Task.Run`: `Launch` places
+the callback in a test-owned queue. After the producer commits and the spec
+observes the unique pending event row for the expected source and type, it
+registers the row's `EventId` acknowledgment and explicitly starts that work.
+The spec then waits for `producer commit -> poke enqueued -> exact event
+acknowledgment registered -> poke work started -> handler delivery acknowledgment
+-> poke work completed`. Queued and running work belong to the fake; cancellation,
+failure, and fixture teardown must settle or drain their signals. This boundary
+belongs only to tests: it adds no acknowledgment contract to the production poke
+and does not change `EventDispatcherGrain` or `EventDispatcherService`. It
+replaces causal-less cluster-turn pings, polling, retries, and fixed waits. A
+lost-poke test still verifies reminder recovery separately.
+
 ### Backoff
 
 Use custom exponential backoff, with no third-party retry or resilience

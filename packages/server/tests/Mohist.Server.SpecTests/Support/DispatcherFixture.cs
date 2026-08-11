@@ -48,6 +48,8 @@ public sealed class CapturingEventStore : IEventStore
     private long _nextId;
     private readonly object _gate = new();
 
+    internal Action<UndeliveredEvent>? SettlementObserver { get; set; }
+
     public Func<CloudEvent, bool>? ThrowOnAppend { get; set; }
 
     public Task AppendAsync(CloudEvent envelope, CancellationToken ct = default)
@@ -102,9 +104,29 @@ public sealed class CapturingEventStore : IEventStore
         DateTimeOffset dispatchedAt,
         CancellationToken ct = default)
     {
-        lock (_gate) { _rows.RemoveAll(r => r.Origin == origin && r.Source == source && r.Id == id); }
+        ct.ThrowIfCancellationRequested();
+        var settled = RemoveUndelivered(origin, source, id);
+        NotifySettlement(settled);
         return Task.CompletedTask;
     }
+
+    internal UndeliveredEvent RemoveUndelivered(EventOrigin origin, string source, long id)
+    {
+        lock (_gate)
+        {
+            var matches = _rows
+                .Where(r => r.Origin == origin && r.Source == source && r.Id == id)
+                .ToArray();
+            if (matches.Length != 1)
+                throw new InvalidOperationException(
+                    $"Expected exactly one event settlement for {origin}/{source}/{id}, found {matches.Length}.");
+            var settled = matches[0];
+            _rows.Remove(settled);
+            return settled;
+        }
+    }
+
+    internal void NotifySettlement(UndeliveredEvent settled) => SettlementObserver?.Invoke(settled);
 
     public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default)
     {
@@ -122,6 +144,12 @@ public sealed class CapturingEventStore : IEventStore
     public int PendingCount
     {
         get { lock (_gate) { return _rows.Count; } }
+    }
+
+    internal void AddUndeliveredShadow(UndeliveredEvent row)
+    {
+        lock (_gate)
+            _rows.Add(row);
     }
 
     public void Reset()
@@ -191,8 +219,18 @@ public sealed class CapturingEventStore : IEventStore
         if (source.StartsWith("/mohist/issues/", StringComparison.Ordinal)) return EventOrigin.Issue;
         if (source.StartsWith("/mohist/epics/", StringComparison.Ordinal)) return EventOrigin.Epic;
         if (source.StartsWith("/mohist/agent-session/", StringComparison.Ordinal)) return EventOrigin.AgentSession;
-        if (source.StartsWith("/mohist/inbox", StringComparison.Ordinal)) return EventOrigin.WorkflowRun;
-        return EventOrigin.WorkflowRun;
+        if (source.StartsWith("/mohist/agent-job/", StringComparison.Ordinal)) return EventOrigin.AgentJob;
+        if (source.StartsWith("/mohist/projects/", StringComparison.Ordinal))
+        {
+            if (source.Contains("/issues/", StringComparison.Ordinal)) return EventOrigin.Issue;
+            if (source.Contains("/epics/", StringComparison.Ordinal)) return EventOrigin.Epic;
+            if (source.Contains("/workspaces/", StringComparison.Ordinal)) return EventOrigin.Workspace;
+            if (source.Contains("/github-connections/", StringComparison.Ordinal)) return EventOrigin.Ingress;
+        }
+        if (source == "/mohist/inbox"
+            || source.StartsWith("/mohist/inbox/", StringComparison.Ordinal))
+            return EventOrigin.WorkflowRun;
+        throw new InvalidOperationException($"Unknown event source '{source}'.");
     }
 
     private static EventOrigin ParseOriginName(string origin) => origin switch
@@ -201,6 +239,9 @@ public sealed class CapturingEventStore : IEventStore
         nameof(EventOrigin.Issue) => EventOrigin.Issue,
         nameof(EventOrigin.Epic) => EventOrigin.Epic,
         nameof(EventOrigin.AgentSession) => EventOrigin.AgentSession,
+        nameof(EventOrigin.AgentJob) => EventOrigin.AgentJob,
+        nameof(EventOrigin.Ingress) => EventOrigin.Ingress,
+        nameof(EventOrigin.Workspace) => EventOrigin.Workspace,
         _ => throw new InvalidOperationException($"Unknown event origin '{origin}'."),
     };
 }
@@ -262,6 +303,7 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         var eventSnapshot = _events.CaptureState();
         List<DeadLetterRow> rowSnapshot;
         long nextIdSnapshot;
+        UndeliveredEvent settled;
         lock (_gate)
         {
             rowSnapshot = _rows.Select(Clone).ToList();
@@ -270,12 +312,10 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
 
         try
         {
-            await _events.MarkDispatchedAsync(
+            settled = _events.RemoveUndelivered(
                 sourceEvent.Origin,
                 sourceEvent.Source,
-                sourceEvent.Id,
-                dispatchedAt,
-                ct);
+                sourceEvent.Id);
             if (ThrowAfterSourceMark)
                 throw new InvalidOperationException("simulated post-mark settlement failure");
             foreach (var row in rows)
@@ -292,6 +332,8 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
             }
             throw;
         }
+
+        _events.NotifySettlement(settled);
     }
 
     public Task<IReadOnlyList<DeadLetterRow>> QueryAsync(string? failingHandler, int limit, CancellationToken ct = default)
@@ -403,9 +445,12 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
 
     public Task DeleteAsync(long deadLetterId, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            _rows.RemoveAll(row => row.DeadLetterId == deadLetterId);
+            var removed = _rows.RemoveAll(row => row.DeadLetterId == deadLetterId);
+            if (removed != 1)
+                throw new InvalidOperationException($"Dead-letter row '{deadLetterId}' was not found.");
         }
         return Task.CompletedTask;
     }
@@ -462,6 +507,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public FakeRunnerWorkspaceClient RunnerWorkspace { get; private set; } = null!;
     public SharedReminderTable ReminderTable { get; } = new();
     public RecordingBackgroundTaskLauncher BackgroundTasks { get; } = new();
+    internal DispatcherDeliverySignals DeliverySignals { get; } = new();
 
     public IEventDispatcherGrain EventDispatcher => Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
 
@@ -478,23 +524,16 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public List<string> SpecificInvocations { get; } = [];
     private readonly Dictionary<string, TaskCompletionSource> _specificDeliverySignals = new(StringComparer.Ordinal);
     private readonly object _specificDeliverySignalsGate = new();
-
-    // Count-gated delivery signals: a waiter registers a target invocation
-    // count for a handler list; each handler invocation bumps the count and
-    // resolves the waiter once the target is reached. Deterministic — no
-    // wall-clock timeout, the signal fires exactly when the dispatcher has
-    // delivered the awaited event.
-    private int _catchAllTarget;
-    private TaskCompletionSource? _catchAllSignal;
-    private int _specificTarget;
-    private TaskCompletionSource? _specificSignal;
-    private readonly object _countSignalGate = new();
+    private readonly Dictionary<string, TaskCompletionSource> _catchAllDeliverySignals = new(StringComparer.Ordinal);
+    private readonly object _catchAllDeliverySignalsGate = new();
 
     private SqliteConnection _keeper = null!;
 
     public DispatcherFixture()
     {
         DeadLetterStore = new CapturingDeadLetterStore(EventStore);
+        EventStore.SettlementObserver = row =>
+            EventDispatcherImmediateTriggerTestSupport.RecordEventSettlement(this, row);
     }
 
     public async ValueTask InitializeAsync()
@@ -537,13 +576,19 @@ public sealed class DispatcherFixture : IAsyncLifetime
             SpecificInvocations.Clear();
         lock (_specificDeliverySignalsGate)
             _specificDeliverySignals.Clear();
-        lock (_countSignalGate)
-        {
-            _catchAllTarget = 0;
-            _catchAllSignal = null;
-            _specificTarget = 0;
-            _specificSignal = null;
-        }
+        lock (_catchAllDeliverySignalsGate)
+            _catchAllDeliverySignals.Clear();
+        EventDispatcherImmediateTriggerTestSupport.ResetHandlerDeliveries(this);
+    }
+
+    public async Task<IAgentJobGrain> DeactivateAndReactivateAgentJobAsync(string jobKey)
+    {
+        var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
+        await TestLifecycle.Deactivate(job);
+
+        var reactivated = Grains.GetGrain<IAgentJobGrain>(jobKey);
+        await reactivated.GetStatusAsync();
+        return reactivated;
     }
 
     public Task WaitForSpecificInvocationAsync(string eventId)
@@ -554,41 +599,11 @@ public sealed class DispatcherFixture : IAsyncLifetime
         }
     }
 
-    /// <summary>
-    /// Returns a task that completes once the catch-all handler has been
-    /// invoked enough times to exceed <paramref name="baseline"/>. The
-    /// baseline is captured before the producer commits, so the awaited
-    /// signal corresponds to the new event's delivery rather than any
-    /// earlier one. Deterministic: resolves from the handler's own
-    /// invocation, never from a wall-clock timeout.
-    /// </summary>
-    public Task WaitForCatchAllBeyondAsync(int baseline)
+    public Task WaitForCatchAllInvocationAsync(string eventId)
     {
-        lock (_countSignalGate)
+        lock (_catchAllDeliverySignalsGate)
         {
-            _catchAllTarget = baseline + 1;
-            _catchAllSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (CatchAllInvocations.Count >= _catchAllTarget)
-                _catchAllSignal.TrySetResult();
-            return _catchAllSignal.Task;
-        }
-    }
-
-    /// <summary>
-    /// Count-gated counterpart of <see cref="WaitForCatchAllBeyondAsync"/>
-    /// for the specific (WorkflowRunCompleted) handler. Used by the poke
-    /// specs in place of the per-eventId signal when the producer mints a
-    /// fresh envelope id the test cannot predict.
-    /// </summary>
-    public Task WaitForSpecificBeyondAsync(int baseline)
-    {
-        lock (_countSignalGate)
-        {
-            _specificTarget = baseline + 1;
-            _specificSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (SpecificInvocations.Count >= _specificTarget)
-                _specificSignal.TrySetResult();
-            return _specificSignal.Task;
+            return GetCatchAllDeliverySignal(eventId).Task;
         }
     }
 
@@ -598,33 +613,19 @@ public sealed class DispatcherFixture : IAsyncLifetime
             SpecificInvocations.Add(eventId);
         lock (_specificDeliverySignalsGate)
             GetSpecificDeliverySignal(eventId).TrySetResult();
-        lock (_countSignalGate)
-        {
-            if (_specificSignal is not null && SpecificInvocations.Count >= _specificTarget)
-                _specificSignal.TrySetResult();
-        }
     }
 
-    /// <summary>
-    /// Bumps the catch-all count and resolves any
-    /// <see cref="WaitForCatchAllBeyondAsync"/> waiter that has reached its
-    /// target. Called by <see cref="DispatcherCatchAllHandler"/> on every
-    /// delivered event.
-    /// </summary>
-    public void RecordCatchAllInvocation()
+    public void RecordCatchAllInvocation(string eventId)
     {
-        lock (_countSignalGate)
-        {
-            if (_catchAllSignal is not null && CatchAllInvocations.Count >= _catchAllTarget)
-                _catchAllSignal.TrySetResult();
-        }
+        lock (_catchAllDeliverySignalsGate)
+            GetCatchAllDeliverySignal(eventId).TrySetResult();
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        await BackgroundTasks.DisposeAsync();
         Cluster?.Dispose();
         _keeper?.Dispose();
-        return ValueTask.CompletedTask;
     }
 
     private void ConfigureDispatcherSilo(ISiloBuilder siloBuilder, string connectionString)
@@ -713,158 +714,9 @@ public sealed class DispatcherFixture : IAsyncLifetime
         _specificDeliverySignals.TryGetValue(eventId, out var signal)
             ? signal
             : _specificDeliverySignals[eventId] = new(TaskCreationOptions.RunContinuationsAsynchronously);
-}
 
-/// <summary>
-/// Minimal <see cref="IEventPublisher"/> that forwards every published
-/// envelope to a single sink (the fixture's <see cref="CapturingEventStore"/>).
-/// Lets spec tests assert that an event published through the bus is
-/// visible to the dispatcher's pull on the next tick.
-/// </summary>
-public sealed class CapturingEventPublisher : IEventPublisher
-{
-    private readonly List<CloudEvent> _published = [];
-    private IEventStore? _sink;
-    private readonly object _gate = new();
-
-    public void RegisterSink(IEventStore sink)
-    {
-        lock (_gate) { _sink = sink; }
-    }
-
-    public IReadOnlyList<CloudEvent> Published
-    {
-        get { lock (_gate) { return _published.ToList(); } }
-    }
-
-    public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default)
-    {
-        lock (_gate)
-        {
-            _published.Add(envelope);
-            return _sink?.AppendAsync(envelope, ct) ?? Task.CompletedTask;
-        }
-    }
-
-    public async Task PublishAsync<TData>(
-        TData data,
-        string type,
-        string source,
-        string? subject = null,
-        IReadOnlyDictionary<string, string>? extensions = null,
-        CancellationToken ct = default)
-    {
-        var dataJson = System.Text.Json.JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions);
-        var extDict = extensions is null
-            ? null
-            : new Dictionary<string, string>(extensions, StringComparer.Ordinal);
-        var envelope = new CloudEvent(
-            id: Guid.NewGuid().ToString(),
-            source: new Uri(source, UriKind.RelativeOrAbsolute),
-            type: type,
-            time: DateTimeOffset.UnixEpoch,
-            data: dataJson,
-            subject: subject,
-            extensions: extDict);
-        await PublishAsync(envelope, ct).ConfigureAwait(false);
-    }
-}
-
-/// <summary>
-/// Closed-generic <see cref="ICloudEventHandler{TData}"/> used by the
-/// dispatcher integration specs to assert that the closed-generic
-/// discovery fix lands the handler in the fan-out set. Subscribes to
-/// the same <c>com.mohist.issue.completed</c> type the production
-/// <c>EpicAutoDoneHandler</c> uses; tests publish a matching
-/// <see cref="IssueCompleted"/> event and observe this handler being
-/// invoked via the dispatcher's pull–fan-out cycle.
-/// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueCompleted)]
-public sealed class DispatcherClosedGenericHandler : ICloudEventHandler<IssueCompleted>
-{
-    private readonly DispatcherFixture _fixture;
-
-    public DispatcherClosedGenericHandler(DispatcherFixture fixture) => _fixture = fixture;
-
-    public bool Filter(CloudEvent<IssueCompleted> evt) => true;
-
-    public Task HandleAsync(CloudEvent<IssueCompleted> evt, CancellationToken ct)
-    {
-        lock (_fixture.ClosedGenericInvocations)
-        {
-            _fixture.ClosedGenericInvocations.Add(evt.Id);
-        }
-        return Task.CompletedTask;
-    }
-}
-
-/// <summary>
-/// Catch-all subscription used to assert the wildcard type matcher
-/// ("*") still receives every event the dispatcher pulls. The
-/// pattern; this test handler is its pure-DI stand-in.
-/// </summary>
-[Subscription(Type = "*")]
-public sealed class DispatcherCatchAllHandler : ICloudEventHandler
-{
-    private readonly DispatcherFixture _fixture;
-
-    public DispatcherCatchAllHandler(DispatcherFixture fixture) => _fixture = fixture;
-
-    public bool Filter(CloudEvent evt) => true;
-
-    public Task HandleAsync(CloudEvent evt, CancellationToken ct)
-    {
-        lock (_fixture.CatchAllInvocations)
-        {
-            _fixture.CatchAllInvocations.Add(evt.Id);
-        }
-        _fixture.RecordCatchAllInvocation();
-        return Task.CompletedTask;
-    }
-}
-
-/// <summary>
-/// Concrete-type subscription used to assert the non-generic path
-/// (a handler implementing <see cref="ICloudEventHandler"/> directly)
-/// also receives the dispatched event alongside the closed-generic
-/// handler when both subscribe to the same type.
-/// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.WorkflowRunCompleted)]
-public sealed class DispatcherSpecificHandler : ICloudEventHandler
-{
-    private readonly DispatcherFixture _fixture;
-
-    public DispatcherSpecificHandler(DispatcherFixture fixture) => _fixture = fixture;
-
-    public bool Filter(CloudEvent evt) => true;
-
-    public Task HandleAsync(CloudEvent evt, CancellationToken ct)
-    {
-        _fixture.RecordSpecificInvocation(evt.Id);
-        return Task.CompletedTask;
-    }
-}
-
-/// <summary>
-/// Local stand-in for the GrainTestConfig.NoopTranscriptEventPublisher —
-/// the dispatcher fixture doesn't pull in the larger workflow test
-/// infrastructure, so it ships its own transcript sink.
-/// </summary>
-public sealed class TestNoopTranscriptEventPublisher : ITranscriptEventPublisher
-{
-    public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
-}
-
-/// <summary>
-/// Poison-message handler used by the dead-letter spec test to exercise
-/// the grain → service → dead-letter wiring. Subscribes to a test-only
-/// type and always throws, forcing retry exhaustion and dead-lettering.
-/// </summary>
-[Subscription(Type = "test.poison")]
-public sealed class DispatcherPoisonHandler : ICloudEventHandler
-{
-    public bool Filter(CloudEvent evt) => true;
-
-    public Task HandleAsync(CloudEvent evt, CancellationToken ct) =>
-        throw new InvalidOperationException("poison test handler");
+    private TaskCompletionSource GetCatchAllDeliverySignal(string eventId) =>
+        _catchAllDeliverySignals.TryGetValue(eventId, out var signal)
+            ? signal
+            : _catchAllDeliverySignals[eventId] = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

@@ -204,6 +204,13 @@ public class DispatcherGrainSpecs
             var afterTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_after");
             await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
             await AwaitSignalAsync(afterTick, "dispatcher reminder delivery after silo loss");
+            await EventDispatcherImmediateTriggerTestSupport.WaitForHandlerSettlementAsync(
+                _fixture,
+                new DispatcherDeliveryKey(
+                    "/mohist/issues/issue_reminder_after",
+                    EventCatalog.ReverseDns.WorkflowRunCompleted,
+                    "evt_reminder_after",
+                    DispatcherHandler.Specific));
 
             Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
             Assert.Equal(0, _fixture.EventStore.PendingCount);
