@@ -67,16 +67,31 @@ interface InternalState {
   diagnostic: RuntimeDiagnostic | null
   server: OpencodeServerHandle | null
   events: RuntimeEventSubscription | null
+  generation: RuntimeGeneration | null
   exitWatcher: Promise<void> | null
   rebuildTriggered: boolean
+}
+
+interface RuntimeGeneration {
+  readonly id: number
+  readonly server: OpencodeServerHandle
+  readonly events: RuntimeEventSubscription
+  readonly drained: Promise<void>
+  readonly resolveDrained: () => void
+  activeTurns: number
+  quarantined: boolean
+  closed: boolean
+  drainResolved: boolean
 }
 
 export class OpenCodeRuntime {
   private readonly deps: OpenCodeRuntimeDeps
   private readonly state: InternalState
   private startInFlight: Promise<RuntimeResult<RuntimeReadyState>> | null = null
+  private rebuildInFlight: Promise<RuntimeResult<RuntimeReadyState>> | null = null
   private inFlight: ReturnType<typeof bindTurnInFlightTracker> | null = null
   private readonly directoryInstances: OpenCodeDirectoryInstances
+  private nextGenerationId = 1
 
   constructor(deps: OpenCodeRuntimeDeps) {
     this.deps = deps
@@ -85,6 +100,7 @@ export class OpenCodeRuntime {
       diagnostic: null,
       server: null,
       events: null,
+      generation: null,
       exitWatcher: null,
       rebuildTriggered: false,
     }
@@ -113,6 +129,7 @@ export class OpenCodeRuntime {
     if (this.state.ready) {
       return { ok: true, value: this.readyState(), diagnostics: [] }
     }
+    if (this.rebuildInFlight) return this.rebuildInFlight
     if (this.startInFlight) {
       return this.startInFlight
     }
@@ -279,13 +296,15 @@ export class OpenCodeRuntime {
     signal: AbortSignal,
     observer?: RuntimeTurnObserver,
   ): Promise<RuntimeResult<RuntimeTurnResult>> {
-    if (!this.state.server || !this.state.ready || !this.state.events) {
+    const generation = this.acquireReadyGeneration()
+    if (!generation) {
       const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
     const inFlight = this.ensureInFlightTracker()
     const sessionKey = request.target.runtimeSessionId ?? `${request.target.workDir}::pending`
     if (!inFlight.start(sessionKey)) {
+      this.releaseGeneration(generation)
       const error = normalizeUnavailableRuntime([{
         severity: "error",
         code: "in-flight",
@@ -295,12 +314,8 @@ export class OpenCodeRuntime {
     }
     try {
       return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
-        const server = this.state.server
-        const events = this.state.events
-        if (!server || !this.state.ready || !events) {
-          const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
-          return { ok: false, error, diagnostics: error.diagnostics }
-        }
+        const server = generation.server
+        const events = generation.events
         const deps: TurnExecutionDeps = {
           client: server.client,
           events,
@@ -322,6 +337,7 @@ export class OpenCodeRuntime {
       })
     } finally {
       inFlight.end(sessionKey)
+      this.releaseGeneration(generation)
     }
   }
 
@@ -457,11 +473,16 @@ export class OpenCodeRuntime {
    * place so callers can still inspect it).
    */
   async shutdown(options: { clearDiagnostic?: boolean } = {}): Promise<void> {
-    const { events, server } = this.state
+    const { events, server, generation } = this.state
     this.directoryInstances.resetGeneration()
     this.state.events = null
     this.state.server = null
+    this.state.generation = null
     this.state.ready = false
+    if (generation) {
+      generation.closed = true
+      this.resolveGenerationDrain(generation)
+    }
     if (options.clearDiagnostic ?? true) {
       this.state.diagnostic = null
     }
@@ -538,6 +559,8 @@ export class OpenCodeRuntime {
     }
 
     const events = eventSubscriptionFactory(server.client)
+    const generation = newRuntimeGeneration(this.nextGenerationId++, server, events)
+    this.state.generation = generation
     this.state.events = events
     this.watchExit(events, server)
 
@@ -564,31 +587,88 @@ export class OpenCodeRuntime {
     if (this.state.rebuildTriggered) return
     if (!this.state.ready) return
     if (this.state.server !== server) return
+    const generation = this.state.generation
+    if (!generation || generation.server !== server || generation.quarantined) return
     this.state.rebuildTriggered = true
-    this.directoryInstances.resetGeneration()
+    generation.quarantined = true
     this.state.ready = false
     this.state.diagnostic = diagnostic ?? {
       severity: "error",
       code: "server-exit",
       message: "OpenCode server exited; rebuilding runtime",
     }
-    this.scheduleRebuild()
+    if (generation.activeTurns === 0) {
+      this.resolveGenerationDrain(generation)
+    }
+    const rebuild = this.scheduleRebuild(generation)
+    this.rebuildInFlight = rebuild
+    void rebuild.then(
+      () => {
+        if (this.rebuildInFlight === rebuild) this.rebuildInFlight = null
+      },
+      () => {
+        if (this.rebuildInFlight === rebuild) this.rebuildInFlight = null
+      },
+    )
   }
 
-  private scheduleRebuild(): void {
+  private scheduleRebuild(generation: RuntimeGeneration): Promise<RuntimeResult<RuntimeReadyState>> {
     const delay = this.deps.rebuildDelayMs ?? 0
-    const fire = async () => {
+    return (async () => {
+      await generation.drained
       if (delay > 0) {
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, delay)
           timer.unref?.()
         })
       }
+      if (this.state.generation === generation) {
+        await this.shutdown({ clearDiagnostic: false }).catch(() => {})
+      }
       this.state.rebuildTriggered = false
-      await this.shutdown({ clearDiagnostic: false }).catch(() => {})
-      await this.start().catch(() => {})
+      this.rebuildInFlight = null
+      return await this.start()
+    })()
+  }
+
+  private acquireReadyGeneration(): RuntimeGeneration | null {
+    const generation = this.state.generation
+    if (!this.state.ready || !generation || generation.quarantined || this.state.server !== generation.server || this.state.events !== generation.events) {
+      return null
     }
-    void fire()
+    generation.activeTurns += 1
+    return generation
+  }
+
+  private releaseGeneration(generation: RuntimeGeneration): void {
+    generation.activeTurns -= 1
+    if (generation.activeTurns !== 0 || !generation.quarantined || generation.closed) return
+    if (this.state.generation === generation) this.directoryInstances.resetGeneration()
+    this.resolveGenerationDrain(generation)
+  }
+
+  private resolveGenerationDrain(generation: RuntimeGeneration): void {
+    if (generation.drainResolved) return
+    generation.drainResolved = true
+    generation.resolveDrained()
+  }
+}
+
+function newRuntimeGeneration(id: number, server: OpencodeServerHandle, events: RuntimeEventSubscription): RuntimeGeneration {
+  let resolveDrained!: () => void
+  const drained = new Promise<void>((resolve) => {
+    resolveDrained = resolve
+  })
+  return {
+    id,
+    server,
+    events,
+    drained,
+    resolveDrained,
+    activeTurns: 0,
+    quarantined: false,
+    closed: false,
+    drainResolved: false,
   }
 }
 

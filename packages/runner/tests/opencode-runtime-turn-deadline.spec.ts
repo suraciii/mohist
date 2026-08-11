@@ -614,6 +614,78 @@ describe("OpenCodeRuntime.runTurn — deadline abort", () => {
       vi.useRealTimers()
     }
   })
+
+  it("drains a quarantined generation without tearing down two other active turns", async () => {
+    vi.useFakeTimers()
+    let runtime: OpenCodeRuntime | null = null
+    try {
+      const { deps, client, server, serverFactory } = buildRuntime({ abortHangs: true })
+      const close = vi.spyOn(server, "close")
+      const secondPrompt = deferred<unknown>()
+      const thirdPrompt = deferred<unknown>()
+      client.sessionPrompt
+        .mockImplementationOnce(() => new Promise<never>(() => {}))
+        .mockImplementationOnce(() => secondPrompt.promise)
+        .mockImplementationOnce(() => thirdPrompt.promise)
+
+      runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+
+      const first = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "cleanup cannot be confirmed",
+        deadlineMs: 1_000,
+      }, new AbortController().signal)
+      const second = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projB" },
+        prompt: "keep running B",
+      }, new AbortController().signal)
+      const third = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projC" },
+        prompt: "keep running C",
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(client.sessionPrompt).toHaveBeenCalledTimes(3)
+
+      await vi.advanceTimersByTimeAsync(1_000 + CLEANUP_OPERATION_TIMEOUT_MS)
+      const firstResult = await first
+      expect(firstResult.ok).toBe(false)
+      expect(runtime.ready()).toBe(false)
+      expect(runtime.diagnostic()).toMatchObject({ code: "cleanup-unconfirmed" })
+
+      const blocked = await runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projD" },
+        prompt: "must wait for the old generation",
+      }, new AbortController().signal)
+      expect(blocked.ok).toBe(false)
+      if (blocked.ok) throw new Error("expected the quarantined runtime to reject new work")
+      expect(blocked.error.kind).toBe("unavailable-runtime")
+      expect(client.sessionPrompt).toHaveBeenCalledTimes(3)
+      expect(serverFactory).toHaveBeenCalledTimes(1)
+      expect(close).not.toHaveBeenCalled()
+
+      secondPrompt.resolve({ data: { parts: [{ type: "text", text: "B completed" }] } })
+      thirdPrompt.resolve({ data: { parts: [{ type: "text", text: "C completed" }] } })
+      const [secondResult, thirdResult] = await Promise.all([second, third])
+      expect(secondResult.ok).toBe(true)
+      expect(thirdResult.ok).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(close).toHaveBeenCalledTimes(1)
+      expect(serverFactory).toHaveBeenCalledTimes(2)
+      expect(runtime.ready()).toBe(true)
+
+      const recovered = await runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projD" },
+        prompt: "run after the old generation drained",
+      }, new AbortController().signal)
+      expect(recovered.ok).toBe(true)
+      expect(client.sessionPrompt).toHaveBeenCalledTimes(4)
+    } finally {
+      await runtime?.shutdown()
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe("OpenCodeRuntime.runTurn — warning injection failure is non-fatal", () => {
