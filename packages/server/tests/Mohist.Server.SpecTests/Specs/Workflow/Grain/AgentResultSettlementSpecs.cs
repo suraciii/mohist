@@ -165,6 +165,21 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Null(await workflow.ClaimNextAsync(runnerId));
         Assert.Empty((await Services.GetRequiredService<DispatchService>()
             .PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        var pendingWorkflowId = $"{_workflowId}-pending";
+        var projectId = TestProjectId(_workflowId!);
+        var pendingWorkflow = Grains.GetGrain<IWorkflowGrain>(pendingWorkflowId);
+        await SeedWorkflowTemplateAsync(pendingWorkflowId, SingleStage(checks: []), projectId);
+        await pendingWorkflow.StartAsync(TestInput(projectId));
+        var workKey = $"{WorkDispatchOwnerKinds.Workflow}:{_workflowId}:{work.WorkId}";
+        var dispatch = Services.GetRequiredService<DispatchService>();
+        Assert.Empty((await dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([workKey], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], [workKey]))).Dispatches);
+
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RetryAsync());
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RerunAsync());
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.AddTaskAsync(
@@ -217,5 +232,58 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(EventCatalog.ReverseDns.TaskFailed, eventTypes);
         Assert.DoesNotContain(EventCatalog.ReverseDns.StageFailed, eventTypes);
         Assert.DoesNotContain(EventCatalog.ReverseDns.WorkflowRunFailed, eventTypes);
+    }
+
+    [Fact]
+    public async Task UnknownAndBlockedSettlement_HoldsSequentialStageLockUntilExplicitStop()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var resource = $"agent-settlement-{suffix}";
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
+        [
+            new StageDefinition(
+                "build",
+                [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+                [],
+                LockBehavior: "sequential",
+                Resources: [resource])
+        ]), id: $"wf-agent-settlement-lock-{suffix}");
+        var projectId = TestProjectId(_workflowId!);
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var run = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            "session-lock",
+            "turn-lock",
+            "opencode",
+            "runtime-session-lock");
+        var lockGrain = Grains.GetGrain<IWorkflowStageLockGrain>(
+            WorkflowStageLockKeys.ForProjectResource(projectId, resource));
+
+        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
+            new AgentExecutionObservation(
+                binding,
+                AgentExecutionObservationKind.Disconnected,
+                "runner-disconnected")));
+        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
+
+        var unknown = await LoadRunAsync(_workflowId!);
+        var deadline = Assert.IsType<DateTimeOffset>(
+            Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        Assert.Equal(AgentResultSettlementState.Blocked,
+            Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks).AgentResultSettlement!.State);
+        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
+
+        await workflow.StopAsync("operator stop");
+
+        Assert.Null((await lockGrain.GetStateAsync())?.Owner);
     }
 }
