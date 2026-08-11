@@ -145,8 +145,9 @@ internal sealed class RuntimeConsistencyValidator
 
         if (!actual.Matches(expected))
         {
+            var differences = string.Join(", ", actual.Differences(expected));
             return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
-                $"Server identity differs from candidate {expected.SourceRevision}/{expected.ArtifactDigest}");
+                $"Server identity differs from candidate: {differences}");
         }
 
         return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Pass,

@@ -186,6 +186,7 @@ public sealed class ManagedRuntimeTransactionSpecs
         Assert.True(runner.IsAbsoluteTarget);
         Assert.True(runner.UsesCanonicalEntrypoint);
         Assert.Equal(RuntimeLaunchMode.Node, runner.LaunchMode);
+        Assert.Equal(runner.Identity.SourceRevision, runner.Identity.BuildGitHash);
         Assert.True(Path.IsPathRooted(runner.NodeExecutable!));
         Assert.True(fixture.Files.HasFile(runner.Entrypoint));
         Assert.True(fixture.Files.HasFile(
