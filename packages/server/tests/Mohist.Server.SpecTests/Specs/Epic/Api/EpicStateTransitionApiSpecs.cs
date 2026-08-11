@@ -82,13 +82,6 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Done epic", projectId = project.Id });
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Number}/issues", new { issueNumber = issue.Number });
         await CompleteIssueAsync(project.Id, issue);
-        // The dispatcher's auto-mark-done handler recomputes the epic when
-        // every linked issue is terminal; wait for that eventual transition
-        // instead of racing it with an explicit /done call.
-        await _client.WaitForStatusAsync<EpicDetailFullDto>(
-            $"/api/projects/{project.Id}/epics/{created.Number}",
-            dto => dto.Status,
-            "done");
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{created.Number}/start", null);
 
@@ -183,10 +176,7 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Done then pause", projectId = project.Id });
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Number}/issues", new { issueNumber = issue.Number });
         await CompleteIssueAsync(project.Id, issue);
-        await _client.WaitForStatusAsync<EpicDetailFullDto>(
-            $"/api/projects/{project.Id}/epics/{created.Number}",
-            dto => dto.Status,
-            "done");
+        await DispatchPendingEventsAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{created.Number}/pause", null);
 
@@ -248,10 +238,7 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Done then resume", projectId = project.Id });
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Number}/issues", new { issueNumber = issue.Number });
         await CompleteIssueAsync(project.Id, issue);
-        await _client.WaitForStatusAsync<EpicDetailFullDto>(
-            $"/api/projects/{project.Id}/epics/{created.Number}",
-            dto => dto.Status,
-            "done");
+        await DispatchPendingEventsAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{created.Number}/resume", null);
 

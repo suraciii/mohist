@@ -238,6 +238,20 @@ public class EpicGrain : Grain, IEpicGrain
         // EpicAlreadyTerminalException) propagate so the HTTP layer can
         // surface them as 409 EPIC_START_REQUIRES_IDLE / 409 EPIC_ALREADY_TERMINAL.
         var now = Now();
+        if (row.Status == EpicStatusName.Idle && links.Count > 0)
+        {
+            var open = await ComputeOpenLinkedNumbersAsync(db, projectId, links);
+            if (open.Count == 0)
+            {
+                domain.MarkDone(open, now.UtcDateTime);
+                MapToRow(domain, row, now);
+                var terminalPending = DrainPendingEvents(domain);
+                await PersistEpicEventsAsync(db, domain, terminalPending, now);
+                await SaveEpicChangesAsync(db, terminalPending);
+                throw new EpicAlreadyTerminalException(EpicStatusName.Done, EpicStatusName.Running);
+            }
+        }
+
         var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);

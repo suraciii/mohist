@@ -39,6 +39,26 @@ public class EpicProgressionSpecs : EpicProgressionTestSupport
     }
 
     [Fact]
+    public async Task StartAsync_IdleEpicWithTerminalLinkedIssue_MarksDoneAndRejectsBeforeIssueStart()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "idle");
+        await SeedIssueAsync(database, projectId: "project_1", epicNumber: 1, issueNumber: 1, status: IssueStatus.Done);
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain("project_1:1");
+
+        var ex = await Assert.ThrowsAsync<EpicAlreadyTerminalException>(() => grain.StartAsync());
+
+        Assert.Equal("done", ex.CurrentStatus);
+        Assert.Equal("running", ex.RequestedStatus);
+        Assert.Empty(grains.IssueStartCalls);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("done", stored.Status);
+    }
+
+    [Fact]
     public async Task StartAsync_IdleEpicWithoutStartableIssue_BecomesRunningButIdle()
     {
         var database = CreateDatabase();
