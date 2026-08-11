@@ -70,4 +70,47 @@ public class BuiltInPromptStructureTests
         Assert.Contains("gh pr view", template.Body);
         Assert.Contains("gh run view", template.Body);
     }
+
+    [Fact]
+    public void DefaultPromptRoot_UsesInjectedApplicationRoot()
+    {
+        var applicationRoot = Path.Combine(Path.DirectorySeparatorChar.ToString(), "single-file-app");
+        var files = new RecordingPromptFileStore();
+        var loader = new FilePromptLoader(files: files, applicationRoot: applicationRoot);
+
+        loader.LoadAllTemplates();
+
+        Assert.Equal(
+            Path.Combine(applicationRoot, "Workflow", "Services", "Prompts", "builtins"),
+            files.DirectoryChecked);
+    }
+
+    [Fact]
+    public void MissingPromptRoot_FailsClosed()
+    {
+        var applicationRoot = Path.Combine(Path.DirectorySeparatorChar.ToString(), "missing-single-file-app");
+        var loader = new FilePromptLoader(
+            files: new RecordingPromptFileStore { DirectoryExistsResult = false },
+            applicationRoot: applicationRoot);
+
+        var exception = Assert.Throws<DirectoryNotFoundException>(() => loader.LoadAllTemplates());
+
+        Assert.Contains("builtins", exception.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class RecordingPromptFileStore : IPromptFileStore
+    {
+        public bool DirectoryExistsResult { get; init; } = true;
+        public string? DirectoryChecked { get; private set; }
+
+        public bool DirectoryExists(string path)
+        {
+            DirectoryChecked = path;
+            return DirectoryExistsResult;
+        }
+
+        public IEnumerable<string> EnumeratePromptFiles(string path) => [];
+
+        public string ReadAllText(string path) => throw new InvalidOperationException();
+    }
 }
