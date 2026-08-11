@@ -690,7 +690,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             try
             {
                 await GrainFactory.GetGrain<IAgentJobGrain>(entry.JobKey)
-                    .ReportResultAsync(RunnerId, entry.WorkId!, new WorkResult("failed", "runner-lost"));
+                    .MarkUnknownAsync("runner-lost");
             }
             catch (Exception ex)
             {
