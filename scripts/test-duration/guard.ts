@@ -11,7 +11,6 @@ import { runWithDeadline } from './deadline.js'
 import {
   buildLedgerEnvironment,
   createExecutionRunId,
-  manifestFromDiscovery,
   parseExecutionLedger,
   parseExecutionProvenance,
   readCurrentExecutionIdentity,
