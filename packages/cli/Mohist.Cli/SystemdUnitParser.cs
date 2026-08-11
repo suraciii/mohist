@@ -19,6 +19,8 @@ internal static class SystemdUnitParser
 
     internal sealed record SystemdUnitFields(string? WorkingDirectory, string? ExecStart);
 
+    internal sealed record RunnerIdSetting(string? RunnerId, string? Error);
+
     internal static SystemdUnitFields ParseSystemdUnit(string content)
     {
         string? workingDir = null;
@@ -92,6 +94,90 @@ internal static class SystemdUnitParser
             }
         }
         return map;
+    }
+
+    internal static RunnerIdSetting ReadRunnerIdSetting(string content)
+    {
+        var values = new HashSet<string>(StringComparer.Ordinal);
+        var found = false;
+        foreach (var raw in content.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (!line.StartsWith("Environment=", StringComparison.Ordinal))
+                continue;
+
+            foreach (var value in ReadRunnerIdAssignments(line["Environment=".Length..]))
+            {
+                found = true;
+                if (value.Length == 0)
+                    return new RunnerIdSetting(null, "runner launch identity is empty");
+                values.Add(value);
+            }
+        }
+
+        if (!found)
+            return new RunnerIdSetting(null, null);
+        if (values.Count != 1)
+            return new RunnerIdSetting(null, "runner launch identity is ambiguous");
+        return new RunnerIdSetting(values.Single(), null);
+    }
+
+    private static IEnumerable<string> ReadRunnerIdAssignments(string value)
+    {
+        var values = new List<string>();
+        var name = new StringBuilder();
+        StringBuilder? runnerId = null;
+        var readingName = true;
+        var inSingle = false;
+        var inDouble = false;
+
+        void CompleteAssignment()
+        {
+            if (runnerId is not null)
+                values.Add(runnerId.ToString());
+            name.Clear();
+            runnerId = null;
+            readingName = true;
+        }
+
+        foreach (var ch in value)
+        {
+            if (ch == '\'' && !inDouble)
+            {
+                inSingle = !inSingle;
+                continue;
+            }
+            if (ch == '"' && !inSingle)
+            {
+                inDouble = !inDouble;
+                continue;
+            }
+            if (char.IsWhiteSpace(ch) && !inSingle && !inDouble)
+            {
+                CompleteAssignment();
+                continue;
+            }
+
+            if (readingName)
+            {
+                if (ch == '=')
+                {
+                    readingName = false;
+                    if (name.ToString() is "RUNNER_ID" or "RunnerId")
+                        runnerId = new StringBuilder();
+                    continue;
+                }
+
+                name.Append(ch);
+            }
+            else
+            {
+                runnerId?.Append(ch);
+            }
+        }
+
+        CompleteAssignment();
+        return values;
     }
 
     internal static IEnumerable<string> TokenizeEnvironmentAssignments(string value)
