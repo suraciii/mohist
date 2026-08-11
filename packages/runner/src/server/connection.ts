@@ -267,7 +267,15 @@ export class ServerConnection {
       throw error
     }
     const data = readObject(payload, ["data"]) ?? payload ?? {}
+    const status = readString(data, ["status"])
+    if (status !== "changed" && status !== "duplicate") {
+      const error = new Error("task-log upload returned no terminal acknowledgement") as Error & { code?: string; status: number }
+      error.code = "terminal_ack_missing"
+      error.status = response.status
+      throw error
+    }
     return {
+      status,
       accepted: readNumber(data, ["accepted"]) ?? batch.entries.length,
       truncated: readBoolean(data, ["truncated"]) ?? batch.truncated,
     }
@@ -653,6 +661,7 @@ export interface ArtifactUploadResponse {
 }
 
 export interface TaskLogUploadResult {
+  status: "changed" | "duplicate"
   accepted: number
   truncated: boolean
 }

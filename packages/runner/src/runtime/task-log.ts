@@ -333,6 +333,13 @@ export class TaskLogCollector {
     return count
   }
 
+  snapshot(): TaskLogBatch {
+    return {
+      entries: this.entries.map((entry) => ({ ...entry })),
+      truncated: this.truncated,
+    }
+  }
+
   /**
    * Incremental-batch primitive. Returns the entries whose `seq` is
    * strictly greater than the current sent-seq watermark, in `seq`

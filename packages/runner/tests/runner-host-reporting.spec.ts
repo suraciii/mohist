@@ -93,7 +93,7 @@ beforeEach(() => {
   installReadyRuntimeFactory()
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
-  uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
+  uploadTaskLog.mockResolvedValue({ status: "changed", accepted: 0, truncated: false })
   blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
     const aborted = deferred<{ error: { code: string; message: string } }>()
     if (signal.aborted) {

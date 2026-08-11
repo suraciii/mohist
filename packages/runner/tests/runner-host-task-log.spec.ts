@@ -4,6 +4,7 @@ import type { SessionTarget } from "../src/server/session-target.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { deferred, type Deferred } from "./support/deferred.js"
 import { capturedLogs } from "./support/logger-test.js"
+import { FakeTerminalTaskLogDeliveryStore } from "./support/terminal-task-log-delivery.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
@@ -171,7 +172,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     disconnect.mockResolvedValue(undefined)
     uploadTaskLog.mockImplementation(async () => {
       uploadStarted.resolve()
-      return { accepted: 1, truncated: false }
+      return { status: "changed", accepted: 1, truncated: false }
     })
     report.mockImplementation(async () => {
       reportStarted.resolve()
@@ -230,7 +231,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     disconnect.mockResolvedValue(undefined)
     uploadTaskLog.mockImplementation(async (_ownerId: string, workId: string) => {
       uploadsStarted.get(workId)?.resolve()
-      return { accepted: 1, truncated: false }
+      return { status: "changed", accepted: 1, truncated: false }
     })
     report.mockImplementation(async (work: { workId: string }) => {
       reportsStarted.get(work.workId)?.resolve()
@@ -307,7 +308,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     disconnect.mockResolvedValue(undefined)
     uploadTaskLog.mockImplementation(async () => {
       uploadStarted.resolve()
-      return { accepted: 2, truncated: false }
+      return { status: "changed", accepted: 2, truncated: false }
     })
     report.mockImplementation(async () => {
       reportStarted.resolve()
@@ -339,7 +340,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     expect(rebaseEntries.map((e) => e.text)).toContain("rebasing commit a1b2c3")
   })
 
-  it("FailedUploadIsLoggedAndSwallowed_ReportStillSucceeds", async () => {
+  it("FailedTerminalUploadIsDurable_ReportStillSucceeds", async () => {
     vi.clearAllMocks()
     const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
@@ -348,12 +349,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    // With incremental flushing the FIRST upload may be the increment
-    // (depending on the trigger fire ordering); the test mocks a
-    // rejection on the first call and the terminal call resolves via
-    // the default mock. Both failures / successes are best-effort and
-    // never block the report (design D1 / D6).
-    uploadTaskLog.mockRejectedValueOnce(new Error("server returned 500"))
+    uploadTaskLog
+      .mockRejectedValueOnce(new Error("server returned 500"))
+      .mockResolvedValue({ status: "changed", accepted: 1, truncated: false })
     report.mockImplementation(async () => {
       reportStarted.resolve()
       return {}
@@ -379,11 +377,11 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
     expect(capturedLogs()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ level: "ERROR", message: "task-log upload failed" }),
+      expect.objectContaining({ level: "WARN", message: "terminal task-log delivery will recover" }),
     ]))
   })
 
-  it("PendingUploadIsTimedOut_ReportStillSucceeds", async () => {
+  it("PendingTerminalUploadIsTimedOut_ReportStillSucceeds", async () => {
     vi.clearAllMocks()
     const uploadStarted = deferred<void>()
     const pendingUpload = deferred<void>()
@@ -418,7 +416,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
     expect(capturedLogs()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ level: "ERROR", message: "task-log upload failed" }),
+      expect.objectContaining({ level: "WARN", message: "terminal task-log delivery will recover" }),
     ]))
   })
 
@@ -431,7 +429,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
+    uploadTaskLog.mockResolvedValue({ status: "changed", accepted: 1, truncated: false })
     report.mockImplementation(async () => {
       reportStarted.resolve()
       return {}
@@ -462,6 +460,94 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     expect(reportCall[1].status).toBe("failed")
     expect(reportCall[1].message).toBe("boom")
   })
+
+  it("PersistsTerminalSnapshotBeforeUploadAndRemovesItOnlyAfterAck", async () => {
+    vi.clearAllMocks()
+    const store = new FakeTerminalTaskLogDeliveryStore()
+    const uploadStarted = deferred<void>()
+    const reportStarted = deferred<void>()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockImplementation(async (_ownerId: string, workId: string, batch: { entries: Array<{ text: string }> }, _signal: AbortSignal, _ownerKind: string, terminal: boolean) => {
+      expect(terminal).toBe(true)
+      expect(workId).toBe("work-durable")
+      expect(store.records.size).toBe(1)
+      expect(batch.entries.length).toBeGreaterThan(0)
+      uploadStarted.resolve()
+      return { status: "changed", accepted: batch.entries.length, truncated: false }
+    })
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      return {}
+    })
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-durable", workId: "work-durable" })]).mockImplementation(async () => [])
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-durable",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }, undefined, { terminalTaskLogDelivery: store })
+    const run = host.run(controller.signal)
+    await uploadStarted.promise
+    await reportStarted.promise
+    expect(store.records.size).toBe(0)
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("ConflictIsTerminalForOneWorkAndDoesNotBlockAnotherPendingDelivery", async () => {
+    vi.clearAllMocks()
+    const store = new FakeTerminalTaskLogDeliveryStore()
+    await store.load()
+    const batch = { entries: [{ seq: 1, timestamp: new Date("2026-08-11T00:00:00.000Z"), source: "action", text: "terminal" }], truncated: false }
+    await store.putPending({ identity: { ownerKind: "workflow", ownerId: "wf-conflict", workId: "work-conflict" }, batch })
+    await store.putPending({ identity: { ownerKind: "workflow", ownerId: "wf-other", workId: "work-other" }, batch })
+    const allUploads = deferred<void>()
+    let calls = 0
+    uploadTaskLog.mockImplementation(async (_ownerId: string, workId: string) => {
+      calls += 1
+      if (calls === 2) allUploads.resolve()
+      if (workId === "work-conflict") {
+        const error = new Error("sealed content differs") as Error & { status: number; code: string }
+        error.status = 409
+        error.code = "terminal_snapshot_conflict"
+        throw error
+      }
+      return { status: "duplicate", accepted: 1, truncated: false }
+    })
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll.mockResolvedValue([])
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-conflict",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }, undefined, { terminalTaskLogDelivery: store })
+    const run = host.run(controller.signal)
+    await allUploads.promise
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(calls).toBe(2)
+    expect(store.records.get("workflow:wf-conflict:work-conflict")?.state).toBe("failed")
+    expect(store.records.has("workflow:wf-other:work-other")).toBe(false)
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
 })
 
 describe("TaskLogCollector incremental flush through RunnerHost", () => {
@@ -476,7 +562,7 @@ describe("TaskLogCollector incremental flush through RunnerHost", () => {
     const uploadBatches: Array<Array<{ seq: number }>> = []
     uploadTaskLog.mockImplementation(async (_ownerId: string, _workId: string, batch: { entries: Array<{ seq: number }> }) => {
       uploadBatches.push(batch.entries.map((e) => ({ seq: e.seq })))
-      return { accepted: batch.entries.length, truncated: false }
+      return { status: "changed", accepted: batch.entries.length, truncated: false }
     })
 
     // Drive the trigger manually with a real collector + a fake

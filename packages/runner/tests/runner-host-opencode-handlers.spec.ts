@@ -152,7 +152,7 @@ beforeEach(() => {
   disconnect.mockReset().mockResolvedValue(undefined)
   poll.mockReset().mockResolvedValue([])
   report.mockReset().mockResolvedValue({})
-  uploadTaskLog.mockReset().mockResolvedValue({ accepted: 0, truncated: false })
+  uploadTaskLog.mockReset().mockResolvedValue({ status: "changed", accepted: 0, truncated: false })
   startSignalR.mockReset().mockResolvedValue(undefined)
   stopSignalR.mockReset().mockResolvedValue(undefined)
   getConnectionId.mockReset().mockReturnValue("conn-1")

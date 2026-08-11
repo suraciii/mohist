@@ -43,11 +43,12 @@ function sampleBatch(): TaskLogBatch {
 
 describe("ServerConnection.uploadTaskLog", () => {
   it("PostsJsonBodyToWorkflowRunTaskLogEndpoint", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 2, truncated: false } }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { status: "changed", accepted: 2, truncated: false } }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.uploadTaskLog("wf-1", "work-1", sampleBatch(), new AbortController().signal)
 
+    expect(result.status).toBe("changed")
     expect(result.accepted).toBe(2)
     expect(result.truncated).toBe(false)
 
@@ -69,7 +70,7 @@ describe("ServerConnection.uploadTaskLog", () => {
   })
 
   it("RoutesToAgentJobTaskLogEndpointWhenOwnerKindIsAgentJob", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 1, truncated: true } }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { status: "duplicate", accepted: 1, truncated: true } }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.uploadTaskLog(
@@ -80,6 +81,7 @@ describe("ServerConnection.uploadTaskLog", () => {
       "agent-job",
     )
 
+    expect(result.status).toBe("duplicate")
     expect(result.accepted).toBe(1)
     expect(result.truncated).toBe(true)
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -88,7 +90,7 @@ describe("ServerConnection.uploadTaskLog", () => {
   })
 
   it("DefaultsToWorkflowOwnerKindWhenNotSpecified", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 0, truncated: false } }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { status: "changed", accepted: 0, truncated: false } }) }))
     const connection = new ServerConnection(options())
 
     await connection.uploadTaskLog("wf-1", "work-1", { truncated: false, entries: [] }, new AbortController().signal)
@@ -98,7 +100,7 @@ describe("ServerConnection.uploadTaskLog", () => {
   })
 
   it("EncodesOwnerIdAndWorkIdInUrl", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 0 } }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { status: "changed", accepted: 0 } }) }))
     const connection = new ServerConnection(options())
 
     await connection.uploadTaskLog("wf with space", "work/slash", { truncated: false, entries: [] }, new AbortController().signal)
@@ -108,7 +110,7 @@ describe("ServerConnection.uploadTaskLog", () => {
   })
 
   it("SerializesTimestampAsIso8601", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 1 } }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { status: "changed", accepted: 1 } }) }))
     const connection = new ServerConnection(options())
 
     await connection.uploadTaskLog(
@@ -152,7 +154,7 @@ describe("ServerConnection.uploadTaskLog", () => {
   })
 
   it("CarriesTruncatedFlagThroughToRequestBody", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 1, truncated: true } }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { status: "changed", accepted: 1, truncated: true } }) }))
     const connection = new ServerConnection(options())
 
     await connection.uploadTaskLog(
@@ -168,11 +170,21 @@ describe("ServerConnection.uploadTaskLog", () => {
   })
 
   it("EmptyEntriesArraySucceeds", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 0, truncated: false } }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { status: "changed", accepted: 0, truncated: false } }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.uploadTaskLog("wf-1", "work-1", { truncated: false, entries: [] }, new AbortController().signal)
+    expect(result.status).toBe("changed")
     expect(result.accepted).toBe(0)
+  })
+
+  it("RejectsSuccessWithoutExplicitTerminalAcknowledgement", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ data: { accepted: 1 } }) }))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.uploadTaskLog("wf-1", "work-1", sampleBatch(), new AbortController().signal),
+    ).rejects.toMatchObject({ code: "terminal_ack_missing", status: 200 })
   })
 
   it("PropagatesAbortSignal", async () => {
