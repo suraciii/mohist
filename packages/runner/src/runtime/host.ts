@@ -23,7 +23,13 @@ import { BindingRecoveryCoordinator } from "./binding-recovery.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { AgentJobExecutor } from "./agent-job-executor.js"
-import { TaskLogCollector } from "./task-log.js"
+import { TaskLogCollector, type TaskLogBatch } from "./task-log.js"
+import {
+  TerminalTaskLogDeliveryStoreImpl,
+  type TerminalTaskLogDeliveryIdentity,
+  type TerminalTaskLogDeliveryRecord,
+  type TerminalTaskLogDeliveryStore,
+} from "./terminal-task-log-delivery.js"
 import {
   getOpenCodeRuntimeFactory,
   type OpenCodeRuntime,
@@ -52,6 +58,11 @@ const cleanupLog = runnerLogger.child("cleanup")
 export interface ReportResult {
   workflowRunId?: string | null
   workflowStatus?: string | null
+}
+
+export interface RunnerHostDependencies {
+  terminalTaskLogDelivery?: TerminalTaskLogDeliveryStore
+  waitForConnectionRetry?: (delayMs: number, signal: AbortSignal) => Promise<void>
 }
 
 /**
@@ -150,6 +161,8 @@ export class RunnerHost {
   private readonly sessionCommandJournal: SessionCommandJournal
   private readonly followupOperationJournal: FollowupOperationJournal
   private readonly cancelOperationJournal: CancelOperationJournal
+  private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
+  private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
 
   // The active outer-run signal. The onReconnected callback fires from
@@ -169,10 +182,12 @@ export class RunnerHost {
   // The keys of both Maps together form the process's full poll report.
   private readonly inFlight = new Map<string, InFlightEntry>()
   private readonly awaitingAck = new Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>()
+  private readonly terminalTaskLogDeliveryInFlight = new Set<string>()
 
   constructor(
     private readonly options: RunnerOptions,
     private readonly actions: ActionRegistry = createDefaultRegistry(),
+    dependencies: RunnerHostDependencies = {},
   ) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
@@ -229,6 +244,8 @@ export class RunnerHost {
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
     this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
+    this.terminalTaskLogDelivery = dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
+    this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? delay
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
@@ -290,6 +307,14 @@ export class RunnerHost {
         await this.namedWorkspaceRegistry.load()
       } catch (error) {
         log.error("failed to load named workspace registry; starting empty", { exception: error })
+      }
+      try {
+        await this.terminalTaskLogDelivery.load()
+      } catch (error) {
+        log.error("failed to load terminal task-log delivery store", { exception: error })
+      }
+      if (!this.terminalTaskLogDelivery.ready()) {
+        log.warn("terminal task-log delivery store unavailable; runner admission gated")
       }
       // Load the AgentSession runtime-event outbox BEFORE accepting
       // SignalR commands or claiming work. An unreadable snapshot is
@@ -434,12 +459,13 @@ export class RunnerHost {
 
   private onDispatchReconnected() {
     void this.sendImmediateHeartbeat()
+    const signal = this.activeSignal
+    if (signal) void this.retryPendingTerminalTaskLogs(signal)
     // Convergence on every reconnect: the SignalR transport just
     // recovered, which is the cheapest moment to ask the server for the
     // truth about every active registry entry. Push may also have queued
     // events during the disconnect window; this catch-all reconciles
     // whatever push did not cover.
-    const signal = this.activeSignal
     if (signal) {
       void this.runConvergenceOnce(signal)
       void this.runBindingConvergenceOnce(signal)
@@ -543,6 +569,7 @@ export class RunnerHost {
     let lastReadinessDiagnostic: string | null = null
     let lastReadinessLoggedAt = 0
     while (!signal.aborted) {
+      void this.retryPendingTerminalTaskLogs(signal)
       await this.retryDueReports()
 
       // OpenCode readiness gate. While the runtime is not ready, the
@@ -623,6 +650,7 @@ export class RunnerHost {
   private isReadyForClaim(): boolean {
     const runtime = this.openCodeRuntime
     return this.providerPolicyDiagnostic === null
+      && this.terminalTaskLogDelivery.ready()
       && this.agentSessionRuntimeEventOutbox.ready()
       && this.piRuntime !== null
       && this.piRuntime.ready()
@@ -736,6 +764,7 @@ export class RunnerHost {
       log.error("work failed before report", { work: work.workId, exception: error })
       result = { status: "failed", message: String(error) }
     }
+    if (signal.aborted) return
 
     // Move to awaitingAck regardless of outcome. A transport failure on
     // the first attempt is retried by the reconciliation loop; the result is the
@@ -820,6 +849,92 @@ export class RunnerHost {
     }
   }
 
+  private terminalTaskLogIdentity(work: DispatchWorkItem): TerminalTaskLogDeliveryIdentity {
+    const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
+    const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+    if (!ownerId) throw new Error(`terminal task-log work ${work.workId} has no owner identity`)
+    return { ownerKind, ownerId, workId: work.workId }
+  }
+
+  private async persistTerminalTaskLog(work: DispatchWorkItem, batch: TaskLogBatch): Promise<TerminalTaskLogDeliveryRecord> {
+    return await this.terminalTaskLogDelivery.putPending({
+      identity: this.terminalTaskLogIdentity(work),
+      batch,
+    })
+  }
+
+  private async retryPendingTerminalTaskLogs(signal: AbortSignal): Promise<void> {
+    if (signal.aborted || !this.terminalTaskLogDelivery.ready()) return
+    let pending: TerminalTaskLogDeliveryRecord[]
+    try {
+      pending = await this.terminalTaskLogDelivery.listPending()
+    } catch (error) {
+      log.error("failed to read pending terminal task-log deliveries", { exception: error })
+      return
+    }
+    await Promise.all(pending.map((record) => this.deliverTerminalTaskLog(record, signal)))
+  }
+
+  private async deliverTerminalTaskLog(record: TerminalTaskLogDeliveryRecord, signal: AbortSignal): Promise<void> {
+    if (record.state !== "pending" || signal.aborted) return
+    const key = `${record.identity.ownerKind}:${record.identity.ownerId}:${record.identity.workId}`
+    if (this.terminalTaskLogDeliveryInFlight.has(key)) return
+    this.terminalTaskLogDeliveryInFlight.add(key)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), TASK_LOG_UPLOAD_TIMEOUT_MS)
+    timeout.unref?.()
+    let uploadDeadline: ReturnType<typeof setTimeout> | null = null
+    const abortUpload = () => controller.abort()
+    signal.addEventListener("abort", abortUpload, { once: true })
+    try {
+      let result: Awaited<ReturnType<ServerConnection["uploadTaskLog"]>>
+      try {
+        result = await Promise.race([
+          this.connection.uploadTaskLog(
+            record.identity.ownerId,
+            record.identity.workId,
+            record.batch,
+            controller.signal,
+            record.identity.ownerKind,
+            true,
+          ),
+          new Promise<never>((_resolve, reject) => {
+            uploadDeadline = setTimeout(() => reject(new Error(`task-log terminal upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`)), TASK_LOG_UPLOAD_TIMEOUT_MS)
+          }),
+        ])
+      } catch (error) {
+        const failure = terminalDeliveryFailure(error)
+        if (failure) {
+          try {
+            await this.terminalTaskLogDelivery.markFailed(record.identity, failure)
+          } catch (persistError) {
+            log.error("failed to persist terminal task-log failure", { work: record.identity.workId, exception: persistError })
+          }
+          log.error("terminal task-log delivery reached a terminal error", { work: record.identity.workId, failure })
+        } else {
+          log.warn("terminal task-log delivery will recover", { work: record.identity.workId, exception: error })
+        }
+        return
+      }
+
+      if (result.status !== "changed" && result.status !== "duplicate") {
+        log.error("terminal task-log delivery returned an invalid acknowledgement", { work: record.identity.workId, status: result.status })
+        return
+      }
+
+      try {
+        await this.terminalTaskLogDelivery.acknowledge(record.identity)
+      } catch (error) {
+        log.error("terminal task-log acknowledgement could not be persisted", { work: record.identity.workId, exception: error })
+      }
+    } finally {
+      clearTimeout(timeout)
+      if (uploadDeadline) clearTimeout(uploadDeadline)
+      signal.removeEventListener("abort", abortUpload)
+      this.terminalTaskLogDeliveryInFlight.delete(key)
+    }
+  }
+
   /**
    * Executes a single work item to completion, flushing its task log, and
    * returns the resulting {@link WorkItemResult}. Does NOT report — the
@@ -841,19 +956,13 @@ export class RunnerHost {
     const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
 
     /**
-     * Upload a pre-built task-log batch via the independent task-log
-     * channel. Best-effort: a failed upload is logged and swallowed; the
-     * report (which carries the verdict) is NEVER blocked or failed by
-     * a flush failure.
-     *
-     * The terminal batch always uploads; incremental batches skip the
-     * network round-trip when there is nothing to send (drain returned
-     * `null`).
+     * Incremental delivery is best effort. Terminal delivery uses the
+     * durable outbox below and is never sent through this helper.
      */
     const uploadTaskLogBatch = async (
-      batch: import("./task-log.js").TaskLogBatch,
+      batch: TaskLogBatch,
       timeoutMs: number,
-      label: "terminal" | "incremental",
+      label: "incremental",
     ) => {
       const uploadController = new AbortController()
       let timeout: ReturnType<typeof setTimeout> | null = null
@@ -865,7 +974,7 @@ export class RunnerHost {
             batch,
             uploadController.signal,
             ownerKind,
-            label === "terminal",
+            false,
           ),
           new Promise<never>((_resolve, reject) => {
             timeout = setTimeout(() => {
@@ -880,20 +989,6 @@ export class RunnerHost {
       } finally {
         if (timeout) clearTimeout(timeout)
       }
-    }
-
-    /**
-     * Terminal reconciliation batch. Phase 1 retained behaviour: the
-     * full snapshot is uploaded via the terminal-timeout constant and
-     * the server dedups by `seq` so a failed incremental upload is
-     * recovered.
-     * The collector may be `null` when work failed before any phase
-     * ran; even an empty batch is allowed to flow through.
-     */
-    const flushTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
-      if (!collector) return
-      const batch = collector.flush()
-      await uploadTaskLogBatch(batch, TASK_LOG_UPLOAD_TIMEOUT_MS, "terminal")
     }
 
     /**
@@ -943,23 +1038,33 @@ export class RunnerHost {
     // firing and leaves the trigger with no append notifications.
     const collector = new TaskLogCollector()
     const flushTrigger = startIncrementalFlushForCollector(collector)
+    let terminalPersistenceAttempted = false
     try {
       const execution = await this.workExecutor.executeWithLog(work, signal, collector)
       // Detach the listener before stopping the timer so a stale
       // tick can never re-fire against a collector that the executor
       // has handed back to us for terminal flushing.
       execution.collector.setAppendListener(null)
+      terminalPersistenceAttempted = true
+      const persisted = await this.persistTerminalTaskLog(work, execution.collector.snapshot())
       // Stop the trigger before the terminal flush and wait for any
       // in-flight incremental upload to settle so terminal
       // reconciliation cannot overlap it.
       await flushTrigger.stop()
       if (signal.aborted) return execution.result
-      // Flush BEFORE the caller reports so the report carries the verdict
-      // while the (best-effort) upload runs in parallel with the verdict
-      // round-trip. Errors are logged and swallowed — they never block
-      // or fail the result.
-      await flushTaskLog(execution.collector)
+      await this.deliverTerminalTaskLog(persisted, signal)
       return execution.result
+    } catch (error) {
+      if (!terminalPersistenceAttempted) {
+        terminalPersistenceAttempted = true
+        try {
+          const persisted = await this.persistTerminalTaskLog(work, collector.snapshot())
+          if (!signal.aborted) await this.deliverTerminalTaskLog(persisted, signal)
+        } catch (persistError) {
+          log.error("terminal task-log snapshot could not be persisted", { work: work.workId, exception: persistError })
+        }
+      }
+      throw error
     } finally {
       collector.setAppendListener(null)
       await flushTrigger.stop()
@@ -995,7 +1100,7 @@ export class RunnerHost {
       } catch (error) {
       log.error("runner connection failed; retrying", { reason: `in ${this.options.pollIntervalMs}ms`, exception: error })
         await this.disconnectForReconnect()
-        await delay(this.options.pollIntervalMs, signal)
+        await this.waitForConnectionRetry(this.options.pollIntervalMs, signal)
       }
     }
   }
@@ -1067,6 +1172,18 @@ const TASK_LOG_FLUSH_INTERVAL_MS = 1_500
  * interval to see its tail in the web view.
  */
 const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
+
+function terminalDeliveryFailure(error: unknown): { kind: "conflict" | "not-found" | "local"; status?: number; code?: string; message: string } | null {
+  const candidate = error as { status?: unknown; code?: unknown; message?: unknown } | null
+  const status = typeof candidate?.status === "number" ? candidate.status : undefined
+  const code = typeof candidate?.code === "string" ? candidate.code : undefined
+  const message = typeof candidate?.message === "string" ? candidate.message : String(error)
+  if (status === 409 || code === "terminal_snapshot_conflict") return { kind: "conflict", ...(status === undefined ? {} : { status }), ...(code ? { code } : {}), message }
+  if (status === 404 || code === "not_found") return { kind: "not-found", ...(status === undefined ? {} : { status }), ...(code ? { code } : {}), message }
+  if (status !== undefined && status >= 400 && status < 500) return { kind: "local", status, ...(code ? { code } : {}), message }
+  if (code === "terminal_ack_missing") return { kind: "local", ...(status === undefined ? {} : { status }), code, message }
+  return null
+}
 
 /**
  * Create an incremental flush trigger. The returned handle exposes
