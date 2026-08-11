@@ -145,8 +145,9 @@ internal sealed class ManagedRuntimeTransaction
                 return (null, "candidate CLI target is not absolute");
             if (targets.Server is not null && !targets.Server.IsAbsoluteTarget)
                 return (null, "candidate Server target is not absolute");
-            if (targets.Runner is not null && !targets.Runner.IsAbsoluteTarget)
-                return (null, "candidate Runner target is not absolute");
+            if (targets.Runner is not null
+                && (!targets.Runner.IsAbsoluteTarget || !targets.Runner.UsesCanonicalEntrypoint))
+                return (null, "candidate Runner target does not use the canonical entrypoint");
 
             sourceSnapshot = await _activator.CaptureManagedRuntimeSnapshotAsync(
                 scope,
@@ -348,7 +349,7 @@ internal sealed class ManagedRuntimeTransaction
             return null;
         }
 
-        var entryName = component == "cli" ? "Mohist.Cli" : "Mohist.Server";
+        var entryName = ManagedRuntimeLayout.EntrypointFor(component);
         return await CompleteArtifactAsync(context, component, root, entryName, generation, cancellationToken);
     }
 
@@ -360,6 +361,8 @@ internal sealed class ManagedRuntimeTransaction
         var runnerSource = Path.Combine(context.BuildWorkspaceRoot, "packages", "runner").Replace('\\', '/');
         var runnerRoot = Path.Combine(context.CandidateRoot, "runner").Replace('\\', '/');
         var distRoot = Path.Combine(runnerRoot, "dist").Replace('\\', '/');
+        if (_files.DirectoryExists(runnerRoot))
+            _files.DeleteDirectory(runnerRoot);
         _files.CreateDirectory(runnerRoot);
         _files.CreateDirectory(distRoot);
 
@@ -373,7 +376,7 @@ internal sealed class ManagedRuntimeTransaction
 
         var copies = new[]
         {
-            (Path.Combine(runnerSource, "dist").Replace('\\', '/'), distRoot),
+            ($"{Path.Combine(runnerSource, "dist").Replace('\\', '/')}/.", distRoot),
             (Path.Combine(runnerSource, "package.json").Replace('\\', '/'), Path.Combine(runnerRoot, "package.json").Replace('\\', '/')),
             (Path.Combine(context.BuildWorkspaceRoot, "node_modules").Replace('\\', '/'), Path.Combine(runnerRoot, "node_modules").Replace('\\', '/')),
         };
@@ -388,7 +391,13 @@ internal sealed class ManagedRuntimeTransaction
             }
         }
 
-        return await CompleteArtifactAsync(context, "runner", runnerRoot, "dist/cli.js", generation, cancellationToken);
+        return await CompleteArtifactAsync(
+            context,
+            "runner",
+            runnerRoot,
+            ManagedRuntimeLayout.RunnerEntrypoint,
+            generation,
+            cancellationToken);
     }
 
     private async Task<BuiltRuntime?> CompleteArtifactAsync(
@@ -443,7 +452,7 @@ internal sealed class ManagedRuntimeTransaction
         if (component == "runner")
         {
             _files.WriteAllText(
-                Path.Combine(root, "dist", "build-info.json").Replace('\\', '/'),
+                Path.Combine(root, ManagedRuntimeLayout.RunnerBuildInfo).Replace('\\', '/'),
                 JsonSerializer.Serialize(new
                 {
                     component = "runner",
@@ -459,7 +468,7 @@ internal sealed class ManagedRuntimeTransaction
         }
 
         await Task.CompletedTask;
-        return new BuiltRuntime(component, root, entry, identity);
+        return new BuiltRuntime(component, root, entry, entryRelativePath, identity);
     }
 
     private RuntimeTargetSet BuildTargetSet(
@@ -469,7 +478,7 @@ internal sealed class ManagedRuntimeTransaction
         RuntimeTargetSet? previous,
         IReadOnlyDictionary<string, BuiltRuntime> built)
     {
-        RuntimeTarget? Target(string component, string relativeEntry, string relativeWorkingDirectory) {
+        RuntimeTarget? Target(string component) {
             if (!built.TryGetValue(component, out var runtime))
                 return previous is null ? null : component switch
                 {
@@ -479,8 +488,8 @@ internal sealed class ManagedRuntimeTransaction
                     _ => null,
                 };
 
-            var working = Path.Combine(releaseRoot, component, relativeWorkingDirectory).Replace('\\', '/');
-            var entry = Path.Combine(releaseRoot, component, relativeEntry).Replace('\\', '/');
+            var working = Path.Combine(releaseRoot, component).Replace('\\', '/');
+            var entry = Path.Combine(releaseRoot, component, runtime.EntrypointRelativePath).Replace('\\', '/');
             var node = component == "runner" ? ResolveExecutable("node") : null;
             return new RuntimeTarget(
                 component,
@@ -498,9 +507,9 @@ internal sealed class ManagedRuntimeTransaction
             "candidate-staged",
             generation,
             context.TransactionId,
-            Target("cli", "Mohist.Cli", ""),
-            Target("server", "Mohist.Server", ""),
-            Target("runner", "dist/cli.js", ""),
+            Target("cli"),
+            Target("server"),
+            Target("runner"),
             previous);
     }
 
@@ -652,7 +661,7 @@ internal sealed class ManagedRuntimeTransaction
             return false;
         return (value.Cli is null || value.Cli.IsAbsoluteTarget && value.Cli.Identity.IsComplete)
             && (value.Server is null || value.Server.IsAbsoluteTarget && value.Server.Identity.IsComplete)
-            && (value.Runner is null || value.Runner.IsAbsoluteTarget && value.Runner.Identity.IsComplete);
+            && (value.Runner is null || value.Runner.IsAbsoluteTarget && value.Runner.UsesCanonicalEntrypoint && value.Runner.Identity.IsComplete);
     }
 
     private static bool Includes(string scope, string component) =>
@@ -721,6 +730,7 @@ internal sealed class ManagedRuntimeTransaction
         string Component,
         string Root,
         string Entrypoint,
+        string EntrypointRelativePath,
         RuntimeIdentity Identity);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)

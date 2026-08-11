@@ -154,6 +154,8 @@ internal sealed class FakeCommandExecutor : ICommandExecutor
     private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode, string Stdout, string Stderr)> _resultRules = new();
     private readonly List<(string FileName, Func<string[], bool> Match, Queue<(int ExitCode, string Stdout, string Stderr)> Results)> _resultQueues = new();
 
+    public bool RunnerCopyCreatesEntrypoint { get; set; } = true;
+    public bool RunnerCopyCreatesNestedEntrypoint { get; set; }
     public Action<string, string[]>? OnExecute { get; set; }
 
     public void SetNextExitCode(int code) => _exitCodes.Enqueue(code);

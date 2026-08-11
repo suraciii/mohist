@@ -72,7 +72,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
             Name: RunnerUnit,
             Description: "Mohist Runner",
             WorkingDirectory: repoRoot,
-            ExecStart: $"{ResolveExecutable("node")} packages/runner/dist/cli.js",
+            ExecStart: $"{ResolveExecutable("node")} packages/runner/{ManagedRuntimeLayout.RunnerEntrypoint}",
             Environment: environment);
 
         return await InstallAsync(unit, options);
@@ -227,7 +227,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         RuntimeTarget target,
         CancellationToken cancellationToken)
     {
-        if (!target.IsAbsoluteTarget || !target.Identity.IsComplete)
+        if (!target.IsAbsoluteTarget || !target.UsesCanonicalEntrypoint || !target.Identity.IsComplete)
             throw new InvalidOperationException($"managed target {target.Component} is not trusted");
 
         var environment = BuildServiceEnvironment();
