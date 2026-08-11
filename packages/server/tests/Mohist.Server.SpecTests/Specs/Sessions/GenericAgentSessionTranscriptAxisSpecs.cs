@@ -29,16 +29,8 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         var project = await CreateProjectAsync("transcript-axis-launch");
         var agent = await CreateAgentAsync(project.Id, "transcript-axis-agent");
 
-        await _fixture.Client.PostOkAsync($"/api/runner/{_runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = $"{_runnerId}-host",
-            projectId = project.Id,
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
-        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+        var workspaceName = await RegisterRunnerWithHomeWorkspaceAsync(
             project.Id,
-            _runnerId,
             "transcript-axis-launch");
 
         try
@@ -73,16 +65,8 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         var project = await CreateProjectAsync("transcript-axis-transcript");
         var agent = await CreateAgentAsync(project.Id, "transcript-axis-events-agent");
 
-        await _fixture.Client.PostOkAsync($"/api/runner/{_runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = $"{_runnerId}-host",
-            projectId = project.Id,
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
-        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+        var workspaceName = await RegisterRunnerWithHomeWorkspaceAsync(
             project.Id,
-            _runnerId,
             "transcript-axis-events");
 
         try
@@ -218,16 +202,8 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         var project = await CreateProjectAsync("transcript-axis-followup");
         var agent = await CreateAgentAsync(project.Id, "transcript-axis-followup-agent");
 
-        await _fixture.Client.PostOkAsync($"/api/runner/{_runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = $"{_runnerId}-host",
-            projectId = project.Id,
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
-        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+        var workspaceName = await RegisterRunnerWithHomeWorkspaceAsync(
             project.Id,
-            _runnerId,
             "transcript-axis-followup");
 
         try

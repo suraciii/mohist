@@ -188,6 +188,20 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         return workspaceName;
     }
 
+    protected async Task<string> RegisterRunnerWithHomeWorkspaceAsync(
+        string projectId,
+        string workspacePrefix)
+    {
+        await _fixture.Client.PostOkAsync($"/api/runner/{_runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = $"{_runnerId}-host",
+            projectId,
+        });
+        await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
+        return await CreateRunnerHomeWorkspaceAsync(projectId, _runnerId, workspacePrefix);
+    }
+
     protected async Task<PollResult> PollOnceAsync(
         string agentJobId,
         string runnerId,
