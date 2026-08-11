@@ -20,7 +20,16 @@ test('parseTrx reads testName, outcome and HH:MM:SS.fffffff duration', () => {
   assert.equal(byName.get('Ns.ATests.Fails_Slow')!.durationMs, 1500)
   assert.equal(byName.get('Ns.ATests.Passes_Fast')!.outcome, 'passed')
   assert.equal(byName.get('Ns.ATests.Fails_Slow')!.outcome, 'failed')
-  assert.equal(byName.get('Ns.ATests.Skipped')!.outcome, 'skipped')
+  assert.equal(byName.get('Ns.ATests.Skipped')!.outcome, 'not-run')
+})
+
+test('parseTrx keeps skipped, not-run, and error outcomes distinct', () => {
+  const cases = parseTrx(`<TestRun><Results>
+    <UnitTestResult testName="Ns.Skip" outcome="Skipped" duration="00:00:00.0000000" />
+    <UnitTestResult testName="Ns.NotRun" outcome="NotRun" duration="00:00:00.0000000" />
+    <UnitTestResult testName="Ns.Error" outcome="Error" duration="00:00:00.1000000" />
+  </Results></TestRun>`)
+  assert.deepEqual(cases.map((case_) => case_.outcome), ['skipped', 'not-run', 'error'])
 })
 
 test('parseTrx ignores UnitTest definitions and only reads UnitTestResult', () => {

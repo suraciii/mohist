@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:run": "vitest run",
     "test:ci": "npm run typecheck:tests && npm run test:run",
+    "test:duration": "npm run typecheck:tests && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },
