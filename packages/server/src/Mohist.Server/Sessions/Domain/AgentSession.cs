@@ -625,7 +625,27 @@ public sealed record AgentTurnRecord(
 public sealed record AgentSessionStopClaim(
     [property: Id(0)] string TurnId,
     [property: Id(1)] string OperationId,
-    [property: Id(2)] bool DispatchStarted = false);
+    [property: Id(2)] bool DispatchStarted = false,
+    [property: Id(3)] DateTimeOffset? DeadlineAt = null,
+    [property: Id(4)] AgentSessionStopDisposition Disposition = AgentSessionStopDisposition.Pending,
+    [property: Id(5)] string? Reason = null)
+{
+    public bool IsActive => Disposition is AgentSessionStopDisposition.Pending
+        or AgentSessionStopDisposition.StopRequested;
+}
+
+[GenerateSerializer]
+public enum AgentSessionStopDisposition
+{
+    Pending,
+    StopRequested,
+    Stopped,
+    Unknown,
+    NotCancellable,
+    Ended,
+    Blocked,
+    Unavailable,
+}
 
 public enum AgentTurnStatus
 {
@@ -670,7 +690,9 @@ public sealed record AgentTurnStopResult(
 public sealed record AgentTurnStopClaimResult(
     [property: Id(0)] AgentTurnControlState? Control,
     [property: Id(1)] bool CanDispatch,
-    [property: Id(2)] string? OperationId);
+    [property: Id(2)] string? OperationId,
+    [property: Id(3)] AgentSessionStopDisposition? Disposition = null,
+    [property: Id(4)] string? Reason = null);
 
 [GenerateSerializer]
 public enum AgentTurnControlClassification

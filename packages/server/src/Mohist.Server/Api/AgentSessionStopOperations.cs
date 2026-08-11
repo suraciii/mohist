@@ -1,6 +1,4 @@
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -16,6 +14,7 @@ internal enum TurnControlResultKind
     Stopped,
     Unknown,
     NotCancellable,
+    Blocked,
     RunnerUnavailable,
 }
 
@@ -31,8 +30,7 @@ internal static class AgentSessionStopOperations
     public static async Task<TurnControlResult> StopAsync(
         string projectId,
         IGrainFactory grains,
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker connections,
+        ISessionStopDelivery delivery,
         SessionStopTarget target,
         string turnId,
         CancellationToken ct,
@@ -73,87 +71,62 @@ internal static class AgentSessionStopOperations
         if (!claim.CanDispatch || string.IsNullOrWhiteSpace(claim.OperationId))
             return new(TurnControlResultKind.StopRequested, control.Status);
 
-        var connectionId = connections.GetConnectionId(target.RunnerId);
-        if (string.IsNullOrWhiteSpace(connectionId)
-            || string.IsNullOrWhiteSpace(target.Runtime)
-            || string.IsNullOrWhiteSpace(target.RuntimeSessionId)
-            || string.IsNullOrWhiteSpace(target.WorkDir))
-        {
-            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: false);
-        }
-
-        object binding = new
-        {
-            runtime = target.Runtime,
-            runtimeSessionId = target.RuntimeSessionId,
-            runnerId = target.RunnerId,
-            workDir = target.WorkDir,
-        };
-        object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
-            ? new
-            {
-                kind = "workflow",
-                projectId,
-                workflowRunId = target.WorkflowRunId,
-                sessionName = target.SessionName,
-                binding,
-            }
-            : new
-            {
-                kind = "generic",
-                projectId,
-                sessionId = target.SessionId,
-                binding,
-            };
-
         await session.MarkTurnStopDispatchedAsync(control.TurnId, claim.OperationId);
+        var result = SessionStopDeliveryArbitration.Interpret(await delivery.DispatchAsync(
+            new SessionStopDeliveryRequest(
+                projectId,
+                target.SessionId,
+                control.TurnId,
+                claim.OperationId,
+                target.RunnerId,
+                target.SourceKind,
+                target.WorkflowRunId,
+                target.SessionName,
+                target.Runtime,
+                target.RuntimeSessionId,
+                target.WorkDir),
+            ct));
 
-        RunnerStopReply? reply;
-        try
+        if (result.Disposition == AgentSessionStopDisposition.Unavailable)
+            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: result.DispatchStarted);
+
+        await session.ApplyStopDeliveryAsync(
+            control.TurnId,
+            claim.OperationId,
+            result.Disposition);
+
+        return result.Disposition switch
         {
-            reply = await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerStopReply?>(
-                "CancelAgentSession",
-                new { target = wireTarget, sessionId = target.SessionId, turnId, operationId = claim.OperationId },
-                ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: true);
-        }
-
-        if (reply is null)
-            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: true);
-
-        if (string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            if (control.IsLaunchTurn && control.JobId is not null)
-            {
-                await grains.GetGrain<IAgentJobGrain>(control.JobId).MarkUnknownAsync("stop-unconfirmed");
-            }
-            else
-            {
-                await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Unknown, null);
-            }
-
-            return new(TurnControlResultKind.Unknown, AgentTurnStatus.Unknown, reply.InterruptUnconfirmed);
-        }
-
-        if (string.Equals(reply.State, "stopped", StringComparison.OrdinalIgnoreCase))
-        {
-            await session.CompleteTurnStopAsync(control.TurnId, claim.OperationId);
-            return new(TurnControlResultKind.Stopped, AgentTurnStatus.Cancelled, reply.InterruptUnconfirmed);
-        }
-
-        if (string.Equals(reply.State, "not-cancellable", StringComparison.OrdinalIgnoreCase))
-        {
-            await session.ReleaseTurnStopAsync(control.TurnId, claim.OperationId);
-            return new(TurnControlResultKind.NotCancellable, AgentTurnStatus.Executing, reply.InterruptUnconfirmed);
-        }
-
-        return new(TurnControlResultKind.StopRequested, control.Status, reply.InterruptUnconfirmed);
+            AgentSessionStopDisposition.Stopped => new(
+                TurnControlResultKind.Stopped,
+                AgentTurnStatus.Cancelled,
+                result.InterruptUnconfirmed,
+                DispatchStarted: result.DispatchStarted),
+            AgentSessionStopDisposition.Unknown => new(
+                TurnControlResultKind.Unknown,
+                AgentTurnStatus.Unknown,
+                result.InterruptUnconfirmed,
+                DispatchStarted: result.DispatchStarted),
+            AgentSessionStopDisposition.NotCancellable => new(
+                TurnControlResultKind.NotCancellable,
+                AgentTurnStatus.Executing,
+                result.InterruptUnconfirmed,
+                DispatchStarted: result.DispatchStarted),
+            AgentSessionStopDisposition.Ended => new(
+                TurnControlResultKind.AlreadyEnded,
+                control.Status,
+                result.InterruptUnconfirmed,
+                DispatchStarted: result.DispatchStarted),
+            AgentSessionStopDisposition.Blocked => new(
+                TurnControlResultKind.Blocked,
+                AgentTurnStatus.Unknown,
+                result.InterruptUnconfirmed,
+                DispatchStarted: result.DispatchStarted),
+            _ => new(
+                TurnControlResultKind.StopRequested,
+                control.Status,
+                result.InterruptUnconfirmed,
+                DispatchStarted: result.DispatchStarted),
+        };
     }
 }

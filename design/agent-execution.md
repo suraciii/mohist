@@ -317,6 +317,11 @@ selects the mechanism from Turn state; each frozen target uses the same canonica
   target identity for query or bounded retry;
 - a later Turn or changed Binding is outside the target and cannot be stopped by stale work.
 
+Stop delivery and reply arbitration have exactly one implementation, shared by the request path
+and the recovery path; an unconfirmed result behaves identically on both, including bound-work
+abandonment at settlement. Recovery redelivery is bounded by the operation deadline: exhausting it
+settles the operation `blocked` with a stable reason instead of retrying without limit.
+
 Stopping a Turn does not terminate AgentSession. Stopping the initial Turn may settle its AgentJob;
 stopping a later Turn never rewrites an already terminal AgentJob.
 
@@ -553,10 +558,14 @@ model yet.
 - Some direct launch payloads still carry the legacy `workspacePath` context field. The named
   Workspace is the target identity; caller-supplied materialization paths are not part of the
   target contract.
-- End-work control is still split into `cancel` and `stop` verbs gated by Turn state, and a
-  confirmed stop of a non-initial Turn is recorded `Completed` instead of `Cancelled`
-  (`AgentSessionTurnControlOperations.cs`). The single-verb stop with uniform `Cancelled`
-  recording above is the target.
+- Stop recovery coordination still deviates from the rules above and from
+  [`issue-coordination.md`](workflow/issue-coordination.md): Session-to-AgentJob stop-unknown
+  propagation closes a synchronous cycle back into the same Session activation; stop delivery and
+  reply arbitration are implemented twice (request path and recovery path) with divergent
+  unconfirmed-result behavior; recovery redelivery has no deadline. The one-way, single-owner,
+  deadline-bounded rules are the target.
+- `IAgentJobGrain.ReconcileRunningAsync` is a public reconcile entry that was never wired: it is a
+  default no-op with no caller. Removing it is the target.
 
 Every Follow-up requires a non-empty caller `requestId`. Compact, Reset, recovery, handoff, rebind,
 and force-reset require a caller `operationId`; steer reuses its Follow-up `requestId`. Some current

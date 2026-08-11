@@ -1,9 +1,6 @@
 using Mohist.Server.Sessions.Domain;
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Api;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Runner.Services;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Infrastructure.Hosting;
@@ -12,8 +9,7 @@ namespace Mohist.Server.Agent.Services;
 
 public sealed class SessionTreeStopTargetAdapter(
     IGrainFactory grains,
-    IHubContext<RunnerHub> runnerHub,
-    RunnerConnectionTracker connections) : ISessionTreeStopTargetAdapter, IScopedService
+    ISessionStopDelivery stopDelivery) : ISessionTreeStopTargetAdapter, IScopedService
 {
     public async Task<SessionTreeStopTargetResult> StopAsync(
         string projectId,
@@ -41,8 +37,7 @@ public sealed class SessionTreeStopTargetAdapter(
         var stopped = await AgentSessionStopOperations.StopAsync(
             projectId,
             grains,
-            runnerHub,
-            connections,
+            stopDelivery,
             new SessionStopTarget(
                 target.RunnerId ?? string.Empty,
                 target.SessionId,
@@ -67,6 +62,8 @@ public sealed class SessionTreeStopTargetAdapter(
 
         if (stopped.Kind == TurnControlResultKind.Unknown)
             return Result(target, SessionTreeStopTargetOutcome.Unknown, "runner could not confirm stop");
+        if (stopped.Kind == TurnControlResultKind.Blocked)
+            return Result(target, SessionTreeStopTargetOutcome.Unknown, "stop recovery deadline exhausted");
         if (stopped.Kind == TurnControlResultKind.StopRequested)
             return Result(target, SessionTreeStopTargetOutcome.StopRequested, "stop request accepted for delivery");
         if (stopped.Kind == TurnControlResultKind.RunnerUnavailable)

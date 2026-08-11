@@ -109,7 +109,6 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// </summary>
     Task MarkUnknownAsync(string reason) => Task.CompletedTask;
 
-    Task ReconcileRunningAsync(string runnerId, string workId) => Task.CompletedTask;
     Task ConcurrencyPermitGrantedAsync(
         string? token = null,
         string? permitId = null,
@@ -269,6 +268,20 @@ public sealed record PendingSessionClose(
     [property: Id(5)] DateTimeOffset RecordedAt);
 
 /// <summary>
+/// Durable asynchronous obligation for the initial launch turn after its Job
+/// reached an unconfirmed terminal state. The Session owns the turn fact; the
+/// Job records this delivery first so the opposite-direction call never runs
+/// inside the Session-to-Job stop command stack.
+/// </summary>
+[GenerateSerializer]
+public sealed record PendingInitialTurnTerminalDelivery(
+    [property: Id(0)] string DeliveryId,
+    [property: Id(1)] string SessionId,
+    [property: Id(2)] string TurnId,
+    [property: Id(3)] AgentTurnStatus Status,
+    [property: Id(4)] AgentTurnResult Result);
+
+/// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
 /// failed-terminal CloudEvent append. The AgentJob writes a
 /// <c>com.mohist.agent.job.failed</c> event exactly once for every
@@ -289,6 +302,9 @@ public static class AgentJobSessionDeliveryIds
 {
     public static string TerminalDeliveryId(string jobKey) =>
         $"agent-job:{jobKey}:terminal";
+
+    public static string InitialTurnUnknownDeliveryId(string jobKey) =>
+        $"agent-job:{jobKey}:initial-turn-unknown";
 
     public static string FailureEventId(string jobKey) =>
         $"agent-job:{jobKey}:failed";

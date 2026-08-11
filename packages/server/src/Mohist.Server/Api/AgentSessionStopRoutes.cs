@@ -1,13 +1,10 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Primitives;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Project.Services;
-using Mohist.Server.Runner.Services;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -29,8 +26,7 @@ public static class AgentSessionStopRoutes
             string sessionId,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
-            IHubContext<RunnerHub> runnerHub,
-            RunnerConnectionTracker connections,
+            ISessionStopDelivery stopDelivery,
             SessionTreeStopOrchestrator cascadeStop,
             CancellationToken ct) =>
         {
@@ -91,8 +87,7 @@ public static class AgentSessionStopRoutes
                 request,
                 sessions,
                 grains,
-                runnerHub,
-                connections,
+                stopDelivery,
                 directValues.ToString(),
                 ct);
         });
@@ -125,8 +120,7 @@ public static class AgentSessionStopRoutes
         SessionStopRequest? request,
         AgentSessionQuerier sessions,
         IGrainFactory grains,
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker connections,
+        ISessionStopDelivery stopDelivery,
         string operationId,
         CancellationToken ct)
     {
@@ -138,7 +132,7 @@ public static class AgentSessionStopRoutes
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
         var result = await AgentSessionStopOperations.StopAsync(
-            projectId, grains, runnerHub, connections, target, request.TurnId, ct, operationId);
+            projectId, grains, stopDelivery, target, request.TurnId, ct, operationId);
         return result.Kind switch
         {
             TurnControlResultKind.NotFound => ApiResults.NotFound($"Turn {request.TurnId} not found"),
@@ -151,6 +145,8 @@ public static class AgentSessionStopRoutes
             TurnControlResultKind.StopRequested => ApiResults.Ok(new { state = "stop-requested" }),
             TurnControlResultKind.RunnerUnavailable => ApiResults.Fail(
                 "Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId }),
+            TurnControlResultKind.Blocked => ApiResults.Conflict(
+                "Stop recovery deadline was exhausted", "stop_recovery_deadline_exhausted"),
             _ => ApiResults.Ok(new
             {
                 state = result.Kind switch

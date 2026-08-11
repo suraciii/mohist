@@ -783,7 +783,11 @@ public static partial class AgentSessionExtensions
             return new AgentTurnStopResult(session.ResolveTurnControl(turnId), true);
         }
 
-        public AgentTurnStopClaimResult ClaimTurnStop(string turnId, string? operationId = null)
+        public AgentTurnStopClaimResult ClaimTurnStop(
+            string turnId,
+            string? operationId,
+            DateTimeOffset now,
+            TimeSpan deadline)
         {
             var control = session.ResolveTurnControl(turnId);
             var pending = session.Status.PendingStop;
@@ -791,24 +795,37 @@ public static partial class AgentSessionExtensions
                 && pending is not null
                 && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
             {
-                return new AgentTurnStopClaimResult(control, true, pending.OperationId);
+                return new AgentTurnStopClaimResult(
+                    control,
+                    pending.IsActive,
+                    pending.OperationId,
+                    pending.Disposition,
+                    pending.Reason);
             }
 
             if (control?.Classification != AgentTurnControlClassification.Executing)
                 return new AgentTurnStopClaimResult(control, false, null);
 
-            if (pending is not null && !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
+            if (pending is not null
+                && pending.IsActive
+                && !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
                 return new AgentTurnStopClaimResult(control, false, null);
 
-            if (pending is null)
+            if (pending is null || !pending.IsActive)
             {
                 pending = new AgentSessionStopClaim(
                     turnId,
-                    string.IsNullOrWhiteSpace(operationId) ? Guid.NewGuid().ToString("N") : operationId);
+                    string.IsNullOrWhiteSpace(operationId) ? Guid.NewGuid().ToString("N") : operationId,
+                    DeadlineAt: now.Add(deadline));
                 session.Status = session.Status with { PendingStop = pending };
             }
 
-            return new AgentTurnStopClaimResult(control, true, pending.OperationId);
+            return new AgentTurnStopClaimResult(
+                control,
+                true,
+                pending.OperationId,
+                pending.Disposition,
+                pending.Reason);
         }
 
         public void MarkTurnStopDispatched(string turnId, string operationId)
@@ -817,6 +834,7 @@ public static partial class AgentSessionExtensions
             if (pending is not null
                 && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
                 && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal)
+                && pending.IsActive
                 && !pending.DispatchStarted)
             {
                 session.Status = session.Status with
@@ -828,9 +846,29 @@ public static partial class AgentSessionExtensions
 
         public void CompleteTurnStop(string turnId, string operationId)
         {
-            if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal)
-                && string.Equals(session.Status.PendingStop?.OperationId, operationId, StringComparison.Ordinal))
-                session.Status = session.Status with { PendingStop = null };
+            session.SettleTurnStop(turnId, operationId, AgentSessionStopDisposition.Ended);
+        }
+
+        public void SettleTurnStop(
+            string turnId,
+            string operationId,
+            AgentSessionStopDisposition disposition,
+            string? reason = null)
+        {
+            var pending = session.Status.PendingStop;
+            if (pending is { IsActive: true }
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal))
+            {
+                session.Status = session.Status with
+                {
+                    PendingStop = pending with
+                    {
+                        Disposition = disposition,
+                        Reason = reason,
+                    },
+                };
+            }
         }
 
         public IReadOnlyList<AgentSessionEvent> AbandonFollowupTurn(string inputId, string turnId, DateTime now)

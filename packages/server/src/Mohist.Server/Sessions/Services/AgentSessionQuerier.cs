@@ -975,7 +975,7 @@ public class AgentSessionQuerier : IScopedService
     private static bool IsRecoveryAvailable(AgentSession session) =>
         session.Status.Activity == AgentSessionActivity.Idle
         && session.Status.PendingReset is null
-        && session.Status.PendingStop is null
+        && session.Status.PendingStop is not { IsActive: true }
         && session.Status.PendingFollowup is null
         && (session.Status.PendingFollowups is null || session.Status.PendingFollowups.Count == 0)
         && !(session.Status.Turns ?? [])

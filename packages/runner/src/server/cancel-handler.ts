@@ -85,24 +85,75 @@ async function handleJournaledCancel(
   const journal = deps.cancelOperationJournal ?? null
   const sessionId = payload.sessionId ?? ""
   const operationId = payload.operationId ?? ""
-  const outbox = deps.agentSessionRuntimeEventOutbox ?? null
-  if (!journal || !sessionId || !operationId || !outbox?.ready()) return { state: "unavailable" }
+  if (!journal || !sessionId || !operationId) return { state: "unavailable" }
 
   try {
     const existing = await journal.get(sessionId, operationId)
     if (existing) {
       if (!samePayload(existing.request, payload)) return { state: "unavailable" }
       if (existing.state === "completed") return existing.reply!
+
+      const reconciliation = await reconcileStartedStop(payload, deps)
+      if (reconciliation === "ended") {
+        const reply = { state: "ended" } as const
+        await journal.complete(sessionId, payload, reply)
+        return reply
+      }
+      if (reconciliation === "indeterminate") return { state: "stop-requested" }
     } else {
       await journal.start(sessionId, payload)
     }
     const reply = await handleCancel(payload, deps)
     if (reply.state === "stop-requested" || reply.state === "unavailable") return reply
+    if (existing?.state === "started" && reply.state === "not-cancellable") {
+      return { state: "stop-requested" }
+    }
     await journal.complete(sessionId, payload, reply)
     return reply
   } catch (error) {
     log.error("cancel operation journal failed", { exception: error, session: "cancel" })
     return { state: "unavailable" }
+  }
+}
+
+async function reconcileStartedStop(
+  payload: CancelAgentSessionPayload,
+  deps: CancelHandlerDeps,
+): Promise<"present" | "ended" | "indeterminate"> {
+  const sessionTarget = payload.target ? sessionTargetFromWireTarget(payload.target) : null
+  const binding = sessionTarget?.binding
+  if (!binding || !binding.workDir) return "indeterminate"
+
+  const handle = resolveCommandRuntime(binding, {
+    openCode: deps.openCodeRuntime,
+    pi: deps.piRuntime,
+  })
+  if (!handle || !handle.runtime.ready()) return "indeterminate"
+
+  try {
+    const result = handle.kind === "opencode"
+      ? await handle.runtime.resolveSession({
+        target: {
+          runtime: "opencode",
+          runtimeSessionId: binding.runtimeSessionId,
+          workDir: binding.workDir,
+        },
+      })
+      : await handle.runtime.resolveSession({
+        target: {
+          runtime: "pi",
+          runtimeSessionId: binding.runtimeSessionId,
+          workDir: binding.workDir,
+        },
+      })
+    if (result.ok) return "present"
+    return readErrorKind(result) === "missing-session" ? "ended" : "indeterminate"
+  } catch (error) {
+    log.error("cancel stop reconciliation probe threw", {
+      exception: error,
+      session: binding.runtimeSessionId,
+    })
+    return "indeterminate"
   }
 }
 

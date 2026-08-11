@@ -172,8 +172,14 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         Assert.Equal("unknown", data.GetProperty("state").GetString());
         Assert.True(data.GetProperty("interruptUnconfirmed").GetBoolean());
         Assert.Single(hub.Invocations);
-        Assert.Equal(AgentJobStatus.Unknown, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
         var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
+        Assert.Equal(AgentTurnStatus.Executing, turn.Status);
+
+        await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
+        turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
         Assert.Equal(AgentTurnStatus.Unknown, turn.Status);
         Assert.Equal("unknown", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())!.Status);
     }

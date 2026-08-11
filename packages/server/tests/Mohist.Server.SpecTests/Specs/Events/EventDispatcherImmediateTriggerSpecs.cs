@@ -9,7 +9,6 @@ using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
@@ -68,33 +67,18 @@ public class EventDispatcherImmediateTriggerSpecs
             await runStore.SaveAsync(run, [new WorkflowRunCompleted()]);
         }
 
-        // Cross cluster turns so the dispatcher's DispatchNowAsync (queued
-        // by the producer's poke) runs to completion. The signal resolves
-        // the moment the specific handler records the delivery.
-        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        await RunPokeAndAwaitDeliveryAsync(delivered);
     }
 
     /// <summary>
-    /// Drives cluster turns until <paramref name="signal"/> completes. Each
-    /// turn pings a grain so the in-process silo scheduler processes queued
-    /// messages (the dispatcher's DispatchNowAsync from the producer's poke,
-    /// or the reminder tick's fan-out). Awaiting the signal is the
-    /// deterministic completion — it resolves from the handler's own
-    /// invocation, never from a wall-clock timeout. The bounded loop only
-    /// guards against an indefinite hang if the scheduler ever stalls.
+    /// Runs the producer's captured background poke and then observes the
+    /// handler boundary. This keeps the test independent of thread-pool and
+    /// Orleans scheduler timing while exercising the same dispatched work.
     /// </summary>
-    private async Task AdvanceClusterTurnUntilSettledAsync(Task signal)
+    private async Task RunPokeAndAwaitDeliveryAsync(Task signal)
     {
-        // The signal may already be resolved (handler ran synchronously
-        // during the producer's commit).
-        for (var i = 0; i < 200 && !signal.IsCompleted; i++)
-        {
-            await _fixture.Grains
-                .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
-                .ListRunnerIdsAsync();
-        }
-
-        Assert.True(signal.IsCompleted, "Event delivery did not settle after 200 cluster turns");
+        await _fixture.BackgroundTasks.RunNextAsync();
+        Assert.True(signal.IsCompleted, "Event dispatcher poke completed without delivering the expected event");
         await signal;
     }
 
@@ -121,7 +105,7 @@ public class EventDispatcherImmediateTriggerSpecs
                 [new IssueCreated("poke", "p2", new Dictionary<string, string>(), null, null)]);
         }
 
-        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        await RunPokeAndAwaitDeliveryAsync(delivered);
     }
 
     [Fact]
@@ -149,7 +133,7 @@ public class EventDispatcherImmediateTriggerSpecs
         Assert.True(_fixture.EventStore.PendingCount > beforePending,
             $"Expected PendingCount to grow after AgentSessionStore.SaveAsync; was {beforePending}, now {_fixture.EventStore.PendingCount}");
 
-        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        await RunPokeAndAwaitDeliveryAsync(delivered);
     }
 
     [Fact]
@@ -166,7 +150,7 @@ public class EventDispatcherImmediateTriggerSpecs
             GrainKey.Epic(new EpicKey(projectId, epicNumber)));
 
         await epic.StartAsync();
-        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        await RunPokeAndAwaitDeliveryAsync(delivered);
         Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
 
         _fixture.BackgroundTasks.Reset();
@@ -186,7 +170,7 @@ public class EventDispatcherImmediateTriggerSpecs
 
         await job.FailAsync("runner-lost", "agent-test");
 
-        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        await RunPokeAndAwaitDeliveryAsync(delivered);
         Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
     }
 
@@ -209,7 +193,7 @@ public class EventDispatcherImmediateTriggerSpecs
         await TestLifecycle.DeactivateAndWait(job, _fixture.Grains);
         await job.GetStatusAsync();
 
-        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        await RunPokeAndAwaitDeliveryAsync(delivered);
         Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
     }
 
@@ -394,16 +378,37 @@ public class EventDispatcherImmediateTriggerSpecs
 
 public sealed class RecordingBackgroundTaskLauncher : IBackgroundTaskLauncher
 {
-    private readonly BackgroundTaskLauncher _inner = new();
+    private readonly object _gate = new();
+    private readonly Queue<(Func<CancellationToken, Task> Work, CancellationToken CancellationToken)> _pending = [];
     private int _launchCount;
 
     public int LaunchCount => Volatile.Read(ref _launchCount);
 
     public void Launch(Func<CancellationToken, Task> work, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(work);
         Interlocked.Increment(ref _launchCount);
-        _inner.Launch(work, cancellationToken);
+        lock (_gate)
+            _pending.Enqueue((work, cancellationToken));
     }
 
-    public void Reset() => Interlocked.Exchange(ref _launchCount, 0);
+    public async Task RunNextAsync()
+    {
+        (Func<CancellationToken, Task> Work, CancellationToken CancellationToken) pending;
+        lock (_gate)
+        {
+            if (_pending.Count == 0)
+                throw new InvalidOperationException("No captured background task is available.");
+            pending = _pending.Dequeue();
+        }
+
+        await pending.Work(pending.CancellationToken);
+    }
+
+    public void Reset()
+    {
+        Interlocked.Exchange(ref _launchCount, 0);
+        lock (_gate)
+            _pending.Clear();
+    }
 }
