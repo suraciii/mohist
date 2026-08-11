@@ -152,6 +152,7 @@ internal sealed class FakeCommandExecutor : ICommandExecutor
     private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode)> _exitCodeRules = new();
     private readonly List<(string FileName, Func<string[], bool> Match, string Stdout)> _stdoutRules = new();
     private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode, string Stdout, string Stderr)> _resultRules = new();
+    private readonly List<(string FileName, Func<string[], bool> Match, Queue<(int ExitCode, string Stdout, string Stderr)> Results)> _resultQueues = new();
 
     public Action<string, string[]>? OnExecute { get; set; }
 
@@ -167,12 +168,29 @@ internal sealed class FakeCommandExecutor : ICommandExecutor
     public void SetStdoutFor(string fileName, Func<string[], bool> match, string stdout) => _stdoutRules.Add((fileName, match, stdout));
     public void SetResultFor(string fileName, Func<string[], bool> match, int exitCode, string stdout, string stderr)
         => _resultRules.Add((fileName, match, exitCode, stdout, stderr));
+    public void QueueResultFor(string fileName, Func<string[], bool> match, int exitCode, string stdout, string stderr)
+    {
+        var queue = _resultQueues.FirstOrDefault(rule => rule.FileName == fileName && rule.Match == match).Results;
+        if (queue is null)
+        {
+            queue = new Queue<(int ExitCode, string Stdout, string Stderr)>();
+            _resultQueues.Add((fileName, match, queue));
+        }
+        queue.Enqueue((exitCode, stdout, stderr));
+    }
 
     public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
         string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
         ExecutedCommands.Add((fileName, args, workingDirectory));
         OnExecute?.Invoke(fileName, args);
+        var queued = _resultQueues.FirstOrDefault(rule =>
+            rule.FileName == fileName && rule.Results.Count > 0 && rule.Match(args));
+        if (queued.Match is not null)
+        {
+            var result = queued.Results.Dequeue();
+            return Task.FromResult(result);
+        }
         var resultRule = _resultRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
         if (resultRule.Match is not null)
             return Task.FromResult((resultRule.ExitCode, resultRule.Stdout, resultRule.Stderr));
