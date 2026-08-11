@@ -68,10 +68,11 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             .GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
 
-        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
+        var dispatch = await PollDispatchOnceAsync(runnerId, agentJobId);
 
         Assert.NotNull(dispatch);
         Assert.Equal(agentJobId, dispatch.AgentJobId);
+        Assert.Equal(expectedSessionId, dispatch.AgentSessionId);
         return dispatch;
     }
 
@@ -112,7 +113,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     private async Task<PollSnapshot?> PollDispatchOnceAsync(
         string runnerId,
-        string expectedSessionId)
+        string expectedAgentJobId)
     {
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
         var dispatches = await poll.ReadDispatchElementsAsync();
@@ -128,7 +129,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                 && agentJobIdElement.ValueKind != JsonValueKind.Null
                 ? agentJobIdElement.GetString()
                 : null;
-            if (match is null && polledSessionId == expectedSessionId)
+            if (match is null && polledAgentJobId == expectedAgentJobId)
             {
                 var workId = data.GetProperty("workId").GetString() ?? string.Empty;
                 var projectId = data.TryGetProperty("projectId", out var projectIdElement)

@@ -149,14 +149,29 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var runnerId = $"launch-read-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "readable-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            projectId,
+            runnerId,
+            "launch-read");
+        ClaimResult? claim = null;
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "open product transcript" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                projectId,
+                agent.Id,
+                new
+                {
+                    prompt = "open product transcript",
+                    context = new { workspace = workspaceName },
+                });
 
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var launchData = launchPayload.GetProperty("data");
+            var sessionId = launchData.GetProperty("sessionId").GetString()!;
+            var jobId = launchData.GetProperty("jobId").GetString()!;
+            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
 
             var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-launch-read"));
@@ -188,6 +203,8 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         }
         finally
         {
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
