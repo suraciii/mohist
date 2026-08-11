@@ -24,8 +24,11 @@ public class IssueOwnedEpicMembershipSpecs
         var grains = new RecordingGrainFactory();
         var grain = CreateGrain(database.Factory, $"{ProjectId}:1", new NoopEventStore(), new FakeTimeProvider(), grains);
 
-        await grain.LinkIssueAsync(1, ProjectId);
+        var outcome = await grain.LinkIssueAsync(1, ProjectId);
 
+        Assert.Equal("linked", outcome.Status);
+        Assert.Equal(1, outcome.OwningEpicNumber);
+        Assert.Equal("Epic 1", outcome.OwningEpicTitle);
         var call = Assert.Single(grains.AffiliationCalls);
         Assert.Equal(GrainKey.Issue(new IssueKey(ProjectId, 1)), call.IssueKey);
         Assert.Equal(1, call.EpicNumber);
@@ -58,8 +61,11 @@ public class IssueOwnedEpicMembershipSpecs
         var grains = new RecordingGrainFactory();
         var grain = CreateGrain(database.Factory, $"{ProjectId}:1", new NoopEventStore(), new FakeTimeProvider(), grains);
 
-        await grain.LinkIssueAsync(1, ProjectId);
+        var outcome = await grain.LinkIssueAsync(1, ProjectId);
 
+        Assert.Equal("already-linked", outcome.Status);
+        Assert.Equal(1, outcome.OwningEpicNumber);
+        Assert.Equal("Epic 1", outcome.OwningEpicTitle);
         Assert.Empty(grains.AffiliationCalls);
     }
 
@@ -93,10 +99,11 @@ public class IssueOwnedEpicMembershipSpecs
     }
 
     [Fact]
-    public async Task LinkIssuesAsync_ReportsCurrentIssueStateAndCommandsOnlyNewAssignments()
+    public async Task LinkIssuesAsync_ReportsCurrentIssueStateAndRejectsExistingOwner()
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database);
+        await SeedEpicAsync(database, epicNumber: 7);
         await SeedIssueAsync(database, issueNumber: 1, epicNumber: 1);
         await SeedIssueAsync(database, issueNumber: 2, epicNumber: 7);
         var grains = new RecordingGrainFactory();
@@ -110,11 +117,24 @@ public class IssueOwnedEpicMembershipSpecs
         ], ProjectId);
 
         Assert.Collection(outcomes,
-            result => Assert.Equal(("already", "already-linked", 1), (result.Identifier, result.Status, result.IssueNumber)),
-            result => Assert.Equal(("move", "linked", 2), (result.Identifier, result.Status, result.IssueNumber)),
-            result => Assert.Equal(("missing", "not-found", (int?)null), (result.Identifier, result.Status, result.IssueNumber)));
-        var call = Assert.Single(grains.AffiliationCalls);
-        Assert.Equal(GrainKey.Issue(new IssueKey(ProjectId, 2)), call.IssueKey);
-        Assert.Equal(1, call.EpicNumber);
+            result =>
+            {
+                Assert.Equal(("already", "already-linked", 1), (result.Identifier, result.Status, result.IssueNumber));
+                Assert.Equal(1, result.OwningEpicNumber);
+                Assert.Equal("Epic 1", result.OwningEpicTitle);
+            },
+            result =>
+            {
+                Assert.Equal(("move", "conflict", 2), (result.Identifier, result.Status, result.IssueNumber));
+                Assert.Equal(7, result.OwningEpicNumber);
+                Assert.Equal("Epic 7", result.OwningEpicTitle);
+            },
+            result =>
+            {
+                Assert.Equal(("missing", "not-found", (int?)null), (result.Identifier, result.Status, result.IssueNumber));
+                Assert.Null(result.OwningEpicNumber);
+                Assert.Null(result.OwningEpicTitle);
+            });
+        Assert.Empty(grains.AffiliationCalls);
     }
 }

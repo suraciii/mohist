@@ -87,7 +87,7 @@ public class EpicGrain : Grain, IEpicGrain
         return ToDto(row);
     }
 
-    public async Task LinkIssueAsync(int issueNumber, string projectId)
+    public async Task<BatchMembershipOutcome> LinkIssueAsync(int issueNumber, string projectId)
     {
         var (scopedProjectId, epicNumber) = ParseGrainKey();
         EnsureProjectScope(scopedProjectId, projectId);
@@ -98,13 +98,23 @@ public class EpicGrain : Grain, IEpicGrain
 
         var issue = await db.Issues.AsNoTracking()
             .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == issueNumber);
-        if (issue?.EpicNumber == epicNumber) return;
+        if (issue?.EpicNumber == epicNumber)
+            return BatchMembershipOutcome.AlreadyLinked(issueNumber.ToString(), issueNumber, epicNumber, epic.Title);
+        if (issue?.EpicNumber is { } owningEpicNumber)
+        {
+            var owningEpic = await db.Epics.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == owningEpicNumber);
+            if (owningEpic is not null)
+                return BatchMembershipOutcome.Conflict(
+                    issueNumber.ToString(), issueNumber, owningEpic.Number, owningEpic.Title);
+        }
         if (epic.Status == EpicStatusName.Closed)
             throw new EpicClosedCannotLinkException(epicNumber);
 
         var target = _grains.GetGrain<IIssueGrain>(
             Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, issueNumber)));
         await target.AssignEpicAsync(epicNumber);
+        return BatchMembershipOutcome.Linked(issueNumber.ToString(), issueNumber, epicNumber, epic.Title);
     }
 
     public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
@@ -131,8 +141,19 @@ public class EpicGrain : Grain, IEpicGrain
             }
             if (issue.EpicNumber == epicNumber)
             {
-                results.Add(BatchMembershipOutcome.AlreadyLinked(item.Identifier, item.IssueNumber));
+                results.Add(BatchMembershipOutcome.AlreadyLinked(item.Identifier, item.IssueNumber, epicNumber, epic.Title));
                 continue;
+            }
+            if (issue.EpicNumber is { } owningEpicNumber)
+            {
+                var owningEpic = await db.Epics.AsNoTracking()
+                    .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == owningEpicNumber);
+                if (owningEpic is not null)
+                {
+                    results.Add(BatchMembershipOutcome.Conflict(
+                        item.Identifier, item.IssueNumber, owningEpic.Number, owningEpic.Title));
+                    continue;
+                }
             }
             if (epic.Status == EpicStatusName.Closed)
                 throw new EpicClosedCannotLinkException(epicNumber);
@@ -140,7 +161,7 @@ public class EpicGrain : Grain, IEpicGrain
             var target = _grains.GetGrain<IIssueGrain>(
                 Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, item.IssueNumber)));
             await target.AssignEpicAsync(epicNumber);
-            results.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueNumber));
+            results.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueNumber, epicNumber, epic.Title));
         }
         return results;
     }
