@@ -17,8 +17,6 @@ internal static class SpecUnitMigrationSourceTree
         string validationTree)
     {
         var files = sources
-            .AsParallel()
-            .WithDegreeOfParallelism(SpecUnitMigrationInventory.ProofParallelism)
             .Where(source => source.Path.EndsWith(".cs", StringComparison.Ordinal)
                 && (source.Path.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
                     || source.Path.StartsWith("Mohist.Server.UnitTests/", StringComparison.Ordinal)

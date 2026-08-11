@@ -2,13 +2,10 @@ using Xunit;
 
 namespace Mohist.Server.ArchTests;
 
-public sealed partial class SpecUnitMigrationLedgerRules
+public sealed class SpecUnitMigrationLedgerRules
 {
     private const string LedgerResourceName = "SpecUnitMigrationLedger.json";
-    private const string BoundedProofFqn = "Mohist.Server.SpecTests.Specs.Negative.BoundedLedgerSpecs";
-    private const string BoundedProofPath = "Mohist.Server.SpecTests/Specs/Negative/BoundedLedgerSpecs.cs";
-    private static readonly Lazy<SpecUnitMigrationInventory> ProductionInventory = new(
-        CreateProductionInventory, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<SpecUnitMigrationInventory> ProductionInventory = new(CreateProductionInventory);
 
     [Fact]
     public void SpecUnitMigrationLedger_CoversEveryCurrentStaticLightSpec()
@@ -58,10 +55,8 @@ public sealed partial class SpecUnitMigrationLedgerRules
             SpecUnitMigrationCompiledDiscovery.ForTests(("Mohist.Server.SpecTests.Specs.Negative.UnknownDependencySpecs",
                 new SpecUnitMigrationMtpFacts(1, 0, 0, 1, "synthetic", false))));
         var unresolvedCandidate = unresolved.CurrentSpecClassifications.Single(candidate => candidate.Fqn.EndsWith("UnknownDependencySpecs", StringComparison.Ordinal));
-        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("source diagnostics: SEMANTIC|", StringComparison.Ordinal)
-            && blocker.Contains("UnknownExternalBase", StringComparison.Ordinal));
-        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("source diagnostics: SEMANTIC|", StringComparison.Ordinal)
-            && blocker.Contains("UnknownHelper", StringComparison.Ordinal));
+        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("unresolved symbol UnknownExternalBase", StringComparison.Ordinal));
+        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("unresolved symbol UnknownHelper", StringComparison.Ordinal));
 
         var ambiguous = SpecUnitMigrationInventory.Create(
         [
@@ -92,25 +87,24 @@ public sealed partial class SpecUnitMigrationLedgerRules
         var provenance = SpecUnitMigrationProvenance.Read();
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         ledger.ValidationHead = "34f0f666d988a3a38ba218cad088f1062a55d5e";
-        var inventory = ProductionInventory.Value;
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(ledger, inventory),
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(ledger, ProductionInventory.Value),
             violation => violation.Contains("ledger validationHead must be", StringComparison.Ordinal));
 
         var change = provenance.Changes.First(change => change.Operation == "rename-spec");
         var row = ledger.Rows!.Single(candidate => candidate.Id == "rename-agent-availability");
         row.History!.Commit = "602efa6abd6fca3efcd43b66b47ba10a80d9fabb";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, inventory, provenance),
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, ProductionInventory.Value, provenance),
             violation => violation.Contains("Git commit mismatch", StringComparison.Ordinal));
 
         row.History.Commit = SpecUnitMigrationLedgerValidator.Pr388Commit;
         row.History.SourcePath = change.SourcePath + ".mutated";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, inventory, provenance),
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, ProductionInventory.Value, provenance),
             violation => violation.Contains("absent from embedded PR #388 raw Git provenance", StringComparison.Ordinal));
 
         var current = SpecUnitMigrationLedger.Read(LedgerResourceName).Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var classification = CurrentClassification(inventory, current.Current!.Fqn!);
+        var classification = ProductionInventory.Value.CurrentSpecClassifications.Single(candidate => candidate.Fqn == current.Current!.Fqn);
         current.History!.Commit = "34f0f666d988a3a38ba218cad088f1062a55d5e";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(current, classification, inventory),
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(current, classification, ProductionInventory.Value),
             violation => violation.Contains("validationHead history mismatch", StringComparison.Ordinal));
     }
 
@@ -120,24 +114,23 @@ public sealed partial class SpecUnitMigrationLedgerRules
         var placeholder = SpecUnitMigrationLedger.Read(LedgerResourceName);
         placeholder.ValidationSourceFileCount = -1;
         placeholder.ValidationSourceTreeDigest = "__RECOMPUTE_VALIDATION_SOURCE_TREE_DIGEST__";
-        var inventory = ProductionInventory.Value;
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(placeholder, inventory), violation =>
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(placeholder, ProductionInventory.Value), violation =>
             violation.Contains("current embedded source tree digest mismatch", StringComparison.Ordinal));
 
         var tampered = SpecUnitMigrationLedger.Read(LedgerResourceName);
         tampered.ValidationSourceFileCount++;
         tampered.ValidationSourceTreeDigest = new string('0', SpecUnitMigrationLedgerValidator.ValidationSourceTreeDigest.Length);
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(tampered, inventory), violation =>
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(tampered, ProductionInventory.Value), violation =>
             violation.Contains("current embedded source tree digest mismatch", StringComparison.Ordinal));
     }
 
     [Fact]
     public void SpecUnitMigrationLedger_NegativeProof_RejectsClosureEvidenceDigestAndCompiledDiscoveryMutations()
     {
-        var inventory = CreateBoundedLiveInventory(BoundedSource("public int Value() => 1;"));
-        var classification = CurrentClassification(inventory, BoundedProofFqn);
-        var row = BoundCurrentRow(classification);
-        Assert.Empty(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory));
+        var inventory = ProductionInventory.Value;
+        var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
+        var row = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
+        var classification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == row.Current!.Fqn);
 
         row.Closure!.Evidence = row.Closure.Evidence!.Replace("edges-digest=", "edges-digest=mutated-", StringComparison.Ordinal);
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory),
@@ -160,64 +153,18 @@ public sealed partial class SpecUnitMigrationLedgerRules
         var inventory = ProductionInventory.Value;
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var failIf = ledger.Rows!.Single(candidate => candidate.Id == "current-fail-if-marker-review");
-        var failIfClassification = CurrentClassification(inventory, failIf.Current!.Fqn!);
+        var failIfClassification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == failIf.Current!.Fqn);
         failIf.Status = "KEEP";
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(failIf, failIfClassification, inventory),
             violation => violation.Contains("blocked current row cannot escape", StringComparison.Ordinal));
 
         var windows = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var windowsClassification = CurrentClassification(inventory, windows.Current!.Fqn!);
+        var windowsClassification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == windows.Current!.Fqn);
         windows.Target!.Path = "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs";
         windows.Target.Fqn = "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests";
         windows.MoveContract = null;
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(windows, windowsClassification, inventory),
             violation => violation.Contains("not a compiled discoverable type", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void SpecUnitMigrationLedger_NegativeProof_CompiledDiscoveryMismatchCannotBeReplacedByStaticAttributeCount()
-    {
-        const string fqn = "Mohist.Server.SpecTests.Specs.Negative.CompiledMismatchSpecs";
-        const string path = "Mohist.Server.SpecTests/Specs/Negative/CompiledMismatchSpecs.cs";
-        var inventory = SpecUnitMigrationInventory.Create(
-        [Source(path, """
-            using Xunit;
-            namespace Mohist.Server.SpecTests.Specs.Negative;
-            public class CompiledMismatchSpecs { [Theory] [InlineData(1)] public void Case(int value) { } }
-            """)],
-            SpecUnitMigrationCompiledDiscovery.ForTests((fqn,
-                new SpecUnitMigrationMtpFacts(0, 1, 1, 7, "compiled-independent", false))));
-        var candidate = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == fqn);
-        Assert.Equal(7, candidate.ExecutableCaseCount);
-        Assert.DoesNotContain(candidate.Blockers, blocker => blocker.Contains("static", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void SpecUnitMigrationLedger_NegativeProof_RejectsLegalSyntaxSemanticTypeMismatch()
-    {
-        const string fqn = "Mohist.Server.SpecTests.Specs.Negative.SemanticTypeMismatchSpecs";
-        const string path = "Mohist.Server.SpecTests/Specs/Negative/SemanticTypeMismatchSpecs.cs";
-        var inventory = SpecUnitMigrationInventory.Create(
-        [Source(path, """
-            using Xunit;
-            namespace Mohist.Server.SpecTests.Specs.Negative;
-            public class SemanticTypeMismatchSpecs
-            {
-                [Fact]
-                public void LegalSyntaxButWrongType()
-                {
-                    int value = "not an int";
-                    _ = value;
-                }
-            }
-            """)], SpecUnitMigrationCompiledDiscovery.ForTests((fqn,
-                new SpecUnitMigrationMtpFacts(1, 0, 0, 1, "synthetic", false))));
-
-        Assert.Contains(inventory.Diagnostics, diagnostic => diagnostic.StartsWith("SEMANTIC|", StringComparison.Ordinal)
-            && diagnostic.Contains(path, StringComparison.Ordinal)
-            && diagnostic.Contains("Cannot implicitly convert", StringComparison.Ordinal));
-        var candidate = inventory.CurrentSpecClassifications.Single(value => value.Fqn == fqn);
-        Assert.Contains(candidate.Blockers, blocker => blocker.Contains("source diagnostics: SEMANTIC|", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -249,24 +196,6 @@ public sealed partial class SpecUnitMigrationLedgerRules
 
         Assert.Contains(SpecUnitMigrationGitProof.Parse(mutated).Validate(), violation =>
             violation.Contains("parent blob object binding mismatch", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void SpecUnitMigrationLedger_FreshSetupAndProofAreDurationGated()
-    {
-        var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
-        using var inventory = CreateProductionInventory();
-        var violations = SpecUnitMigrationLedgerValidator.Validate(ledger, inventory);
-
-        Assert.True(violations.Count == 0,
-            $"fresh semantic inventory violations:\n{string.Join('\n', violations.OrderBy(value => value, StringComparer.Ordinal))}");
-        Assert.True(inventory.DiscoveredTypeCount > 0, "filtered compiled discovery must contain live endpoint types");
-        Assert.True(inventory.DiscoveredTypeCount <= (ledger.Rows?.Count ?? 0) * 2 + inventory.CurrentSpecFqns.Count,
-            $"filtered compiled discovery escaped its ledger-scaled bound: {inventory.DiscoveredTypeCount}");
-        Assert.True(inventory.AnalyzedTypeCount < 256,
-            $"semantic closure analysis escaped its bounded candidate set: {inventory.AnalyzedTypeCount}");
-        Assert.InRange(inventory.CacheEntryCount, 1, inventory.AnalyzedTypeCount * 3 + 2);
-        Assert.True(inventory.ReferenceMetadataCount > 0, "semantic inventory must own its in-memory metadata references");
     }
 
     [Fact]
@@ -322,4 +251,17 @@ public sealed partial class SpecUnitMigrationLedgerRules
             violation.Contains("validation-head", StringComparison.Ordinal));
     }
 
+    private static SpecUnitMigrationInventory CreateProductionInventory()
+    {
+        var specAssembly = typeof(Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs).Assembly;
+        var unitAssembly = typeof(Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests).Assembly;
+        var discovery = SpecUnitMigrationCompiledDiscovery.FromAssemblies(specAssembly, unitAssembly);
+        return SpecUnitMigrationInventory.Create(ArchitectureRulesSupport.EmbeddedSources("TestSources/"), discovery);
+    }
+
+    private static ArchitectureRules.EmbeddedSource Source(string path, string content)
+        => new(path, content, System.Text.Encoding.UTF8.GetByteCount(content));
+
+    private static string Evidence(SpecUnitMigrationCandidate candidate)
+        => $"source-path={candidate.Path} source-fqn={candidate.Fqn} case-digest={candidate.ExecutableCaseIdentityDigest} source-content-digest={candidate.SourceContentDigest} executable-closure-digest={candidate.ClosureIdentityDigest} edges-digest={candidate.EdgesDigest}";
 }

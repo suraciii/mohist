@@ -1,14 +1,16 @@
-using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Xunit.Sdk;
+using Xunit.v3;
 
 namespace Mohist.Server.ArchTests;
 
-internal sealed partial class SpecUnitMigrationInventory : IDisposable
+internal sealed class SpecUnitMigrationInventory
 {
     private static readonly HashSet<string> BlockingNames = new(StringComparer.Ordinal)
     {
@@ -18,85 +20,27 @@ internal sealed partial class SpecUnitMigrationInventory : IDisposable
         "Sqlite", "SQLite", "HttpClient", "TcpClient", "Socket", "FileStream", "PhysicalFileProvider",
     };
 
-    private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Preview);
-    internal static int ProofParallelism { get; } = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
     private readonly IReadOnlyDictionary<string, SpecUnitMigrationType> _typesByFqn;
-    private readonly IReadOnlyList<string> _parseDiagnostics;
-    private SpecUnitMigrationCompiledDiscovery _compiledDiscovery;
-    private readonly IReadOnlyDictionary<string, ArchitectureRules.EmbeddedSource> _sourcesByPath;
-    private readonly IReadOnlyDictionary<string, SyntaxTree> _treesByPath;
-    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _analysisScopes;
-    private readonly IReadOnlySet<string> _embeddedReferenceNames;
-    private readonly SpecUnitMigrationReferenceSet _referenceSet;
-    private readonly ConcurrentDictionary<string, Lazy<CSharpCompilation>> _scopeCompilations;
-    private readonly ConcurrentDictionary<string, Lazy<SpecUnitMigrationTypeAnalysis>> _analyses;
-    private readonly ConcurrentDictionary<string, Lazy<IReadOnlyList<string>>> _semanticDiagnostics;
-    private readonly ConcurrentDictionary<string, Lazy<SpecUnitMigrationCandidate>> _classifications;
-    private bool _discoveryBound;
-    private bool _disposed;
+    private readonly IReadOnlyList<string> _diagnostics;
+    internal SpecUnitMigrationSourceTreeSnapshot SourceTree { get; }
 
-    private SpecUnitMigrationInventory(
-        IReadOnlyList<SpecUnitMigrationType> types,
-        IReadOnlyList<string> parseDiagnostics,
-        SpecUnitMigrationSourceTreeSnapshot sourceTree,
-        SpecUnitMigrationCompiledDiscovery compiledDiscovery,
-        IReadOnlyDictionary<string, ArchitectureRules.EmbeddedSource> sourcesByPath,
-        IReadOnlyDictionary<string, SyntaxTree> treesByPath,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> analysisScopes,
-        SpecUnitMigrationReferenceSet referenceSet,
-        bool discoveryBound,
-        IReadOnlyDictionary<string, CSharpCompilation>? projectCompilations = null)
+    private SpecUnitMigrationInventory(IReadOnlyList<SpecUnitMigrationType> types, IReadOnlyList<string> diagnostics,
+        SpecUnitMigrationSourceTreeSnapshot sourceTree)
     {
         _typesByFqn = types.ToDictionary(type => type.Fqn, StringComparer.Ordinal);
-        _parseDiagnostics = parseDiagnostics;
-        _compiledDiscovery = compiledDiscovery;
-        _sourcesByPath = sourcesByPath;
-        _treesByPath = treesByPath;
-        _analysisScopes = analysisScopes;
-        _referenceSet = referenceSet;
-        _embeddedReferenceNames = types.SelectMany(type => type.DeclaredReferenceNames).ToHashSet(StringComparer.Ordinal);
-        _scopeCompilations = new ConcurrentDictionary<string, Lazy<CSharpCompilation>>(StringComparer.Ordinal);
-        foreach (var (key, compilation) in projectCompilations ?? new Dictionary<string, CSharpCompilation>())
-            _scopeCompilations[key] = new Lazy<CSharpCompilation>(() => compilation,
-                LazyThreadSafetyMode.ExecutionAndPublication);
-        _analyses = new ConcurrentDictionary<string, Lazy<SpecUnitMigrationTypeAnalysis>>(StringComparer.Ordinal);
-        _semanticDiagnostics = new ConcurrentDictionary<string, Lazy<IReadOnlyList<string>>>(StringComparer.Ordinal);
-        _classifications = new ConcurrentDictionary<string, Lazy<SpecUnitMigrationCandidate>>(StringComparer.Ordinal);
-        _discoveryBound = discoveryBound;
+        _diagnostics = diagnostics;
         SourceTree = sourceTree;
     }
 
-    internal SpecUnitMigrationSourceTreeSnapshot SourceTree { get; }
-    internal string DiscoveryBindingIdentity => _compiledDiscovery.BindingIdentity;
-    internal int AnalyzedTypeCount => _analyses.Values.Count(value => value.IsValueCreated);
-    internal int DiscoveredTypeCount => _compiledDiscovery.Fqns.Count;
-    internal int CacheEntryCount => _scopeCompilations.Count + _analyses.Count
-        + _semanticDiagnostics.Count + _classifications.Count;
-    internal int ReferenceMetadataCount => _referenceSet.OwnedMetadataCount;
-    internal int ReferenceLeaseCount => _referenceSet.LeaseCount;
-    internal bool ReferencesDisposed => _referenceSet.OwnerDisposed;
-
-    internal IReadOnlyList<string> Diagnostics
-    {
-        get
-        {
-            PrimeProofs();
-            return _parseDiagnostics.Concat(_semanticDiagnostics.Values.Where(value => value.IsValueCreated)
-                    .SelectMany(value => value.Value))
-                .Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
-        }
-    }
-
-    internal IReadOnlyList<string> CurrentSpecFqns
-        => CurrentSpecTypes().Select(type => type.Fqn).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+    internal IReadOnlyList<string> Diagnostics => _diagnostics;
 
     internal IReadOnlyList<SpecUnitMigrationCandidate> CurrentStaticLightSpecs
-        => CurrentSpecTypes().Where(type => type.DirectBlockers.Count == 0).Select(Classify)
-            .Where(candidate => candidate.Blockers.Count == 0)
+        => CurrentSpecClassifications.Where(candidate => candidate.Blockers.Count == 0)
             .OrderBy(candidate => candidate.Fqn, StringComparer.Ordinal).ToArray();
 
     internal IReadOnlyList<SpecUnitMigrationCandidate> CurrentSpecClassifications
-        => CurrentSpecTypes().Select(Classify).OrderBy(candidate => candidate.Fqn, StringComparer.Ordinal).ToArray();
+        => _typesByFqn.Values.Where(type => type.IsCurrentSpec && type.Name.EndsWith("Specs", StringComparison.Ordinal))
+            .Select(Classify).OrderBy(candidate => candidate.Fqn, StringComparer.Ordinal).ToArray();
 
     internal bool TryGetCurrentSpecClassification(string fqn, out SpecUnitMigrationCandidate candidate)
     {
@@ -110,147 +54,67 @@ internal sealed partial class SpecUnitMigrationInventory : IDisposable
         return false;
     }
 
-    internal void PrimeProductionProofs()
-        => PrimeProofs();
-
-    private void PrimeProofs()
-    {
-        ThrowIfDisposed();
-        var roots = CurrentSpecTypes().Where(type => type.DirectBlockers.Count == 0).Concat(_analysisScopes.Keys
-                .Select(fqn => _typesByFqn.GetValueOrDefault(fqn)).Where(type => type is not null).Cast<SpecUnitMigrationType>())
-            .DistinctBy(type => type.Fqn, StringComparer.Ordinal).ToArray();
-        var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = ProofParallelism };
-        Parallel.ForEach(roots, parallelOptions, root => _ = Classify(root));
-    }
-
     internal static SpecUnitMigrationInventory Create(
         IEnumerable<ArchitectureRules.EmbeddedSource> sources,
         SpecUnitMigrationCompiledDiscovery? compiledDiscovery = null)
     {
-        var sourceList = sources.Where(IsTestSource).OrderBy(source => source.Path, StringComparer.Ordinal).ToArray();
-        var trees = ParseTrees(sourceList);
-        var treesByPath = trees.ToDictionary(tree => tree.FilePath, StringComparer.Ordinal);
-        return CreateSnapshot(sourceList, treesByPath, compiledDiscovery ?? SpecUnitMigrationCompiledDiscovery.Empty,
-            new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal),
-            referenceSet: new SpecUnitMigrationReferenceSet(), discoveryBound: compiledDiscovery is not null);
-    }
-
-    internal static SpecUnitMigrationInventory CreateScoped(
-        IEnumerable<ArchitectureRules.EmbeddedSource> sources,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> analysisScopes,
-        SpecUnitMigrationCompiledDiscovery? compiledDiscovery = null)
-    {
-        var sourceList = sources.Where(IsTestSource).OrderBy(source => source.Path, StringComparer.Ordinal).ToArray();
-        var trees = ParseTrees(sourceList);
-        return CreateSnapshot(sourceList, trees.ToDictionary(tree => tree.FilePath, StringComparer.Ordinal),
-            compiledDiscovery ?? SpecUnitMigrationCompiledDiscovery.Empty, analysisScopes,
-            referenceSet: new SpecUnitMigrationReferenceSet(), discoveryBound: compiledDiscovery is not null);
-    }
-
-    internal SpecUnitMigrationInventory BindCompiledDiscovery(SpecUnitMigrationCompiledDiscovery compiledDiscovery)
-    {
-        ThrowIfDisposed();
-        if (_discoveryBound || !_classifications.IsEmpty)
-            throw new InvalidOperationException("compiled discovery must be bound exactly once before classification");
-        _compiledDiscovery = compiledDiscovery;
-        _discoveryBound = true;
-        return this;
-    }
-
-    internal SpecUnitMigrationInventory BindSourceDiscovery()
-        => BindCompiledDiscovery(SpecUnitMigrationCompiledDiscovery.ForSource(
-            _typesByFqn.Values.Where(type => type.IsCurrentSpec || type.HasTestMethods)
-                .Select(type => (type.Fqn, type.DiscoverTests(CompilationFor(type)))), SourceTree.Digest));
-
-    internal SpecUnitMigrationInventory WithSourceContent(string path, string content)
-    {
-        ThrowIfDisposed();
-        if (!_sourcesByPath.TryGetValue(path, out _))
-            throw new ArgumentException($"source path is not in the live inventory: {path}", nameof(path));
-        if (!_treesByPath.ContainsKey(path))
-            throw new InvalidOperationException($"source path is not backed by a live syntax tree: {path}");
-
-        var mutatedSource = new ArchitectureRules.EmbeddedSource(path, content, Encoding.UTF8.GetByteCount(content));
-        var sources = _sourcesByPath.Values.Select(source => source.Path == path ? mutatedSource : source)
-            .OrderBy(source => source.Path, StringComparer.Ordinal).ToArray();
-        var mutatedTree = CSharpSyntaxTree.ParseText(content, path: path, options: ParseOptions);
-        var treesByPath = _treesByPath.ToDictionary(entry => entry.Key,
-            entry => entry.Key == path ? (SyntaxTree)mutatedTree : entry.Value, StringComparer.Ordinal);
-        var projectCompilations = _scopeCompilations.Where(entry => entry.Value.IsValueCreated)
-            .ToDictionary(entry => entry.Key, entry => entry.Value.Value.ContainsSyntaxTree(_treesByPath[path])
-                ? entry.Value.Value.ReplaceSyntaxTree(_treesByPath[path], mutatedTree)
-                : entry.Value.Value, StringComparer.Ordinal);
-        var mutated = CreateSnapshot(sources, treesByPath, SpecUnitMigrationCompiledDiscovery.Empty,
-            _analysisScopes, _referenceSet.Lease(), discoveryBound: false, projectCompilations);
-        try
-        {
-            return mutated.BindSourceDiscovery();
-        }
-        catch
-        {
-            mutated.Dispose();
-            throw;
-        }
-    }
-
-    private static SpecUnitMigrationInventory CreateSnapshot(
-        IReadOnlyList<ArchitectureRules.EmbeddedSource> sources,
-        IReadOnlyDictionary<string, SyntaxTree> treesByPath,
-        SpecUnitMigrationCompiledDiscovery compiledDiscovery,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> analysisScopes,
-        SpecUnitMigrationReferenceSet referenceSet,
-        bool discoveryBound,
-        IReadOnlyDictionary<string, CSharpCompilation>? projectCompilations = null)
-    {
-        var diagnostics = treesByPath.Values.SelectMany(tree => tree.GetDiagnostics())
+        var sourceList = sources.Where(IsTestSource).ToArray();
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var trees = sourceList.Select(source => CSharpSyntaxTree.ParseText(source.Content, path: source.Path, options: parseOptions)).ToArray();
+        var parseDiagnostics = trees.SelectMany(tree => tree.GetDiagnostics())
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .Select(FormatParseDiagnostic).Distinct(StringComparer.Ordinal)
-            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
-        var types = BuildTypes(sources, treesByPath);
-        var sourceTree = SpecUnitMigrationSourceTree.Capture(sources, SpecUnitMigrationLedgerValidator.ValidationHead,
-            SpecUnitMigrationLedgerValidator.ValidationTree);
-        return new SpecUnitMigrationInventory(types, diagnostics, sourceTree, compiledDiscovery,
-            sources.ToDictionary(source => source.Path, StringComparer.Ordinal), treesByPath, analysisScopes,
-            referenceSet, discoveryBound, projectCompilations);
-    }
-
-    private static IReadOnlyList<SpecUnitMigrationType> BuildTypes(
-        IReadOnlyList<ArchitectureRules.EmbeddedSource> sources,
-        IReadOnlyDictionary<string, SyntaxTree> treesByPath)
-    {
-        var types = new Dictionary<string, SpecUnitMigrationType>(StringComparer.Ordinal);
-        foreach (var source in sources)
+            .Select(diagnostic => $"PARSE|{diagnostic.Location.SourceTree?.FilePath}: {diagnostic.GetMessage()}")
+            .Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var specTrees = trees.Where(tree => tree.FilePath.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+            || tree.FilePath.StartsWith("Mohist.Server.TestSupport/", StringComparison.Ordinal)
+            || tree.FilePath == "eng/TestTime.cs").ToArray();
+        var unitTrees = trees.Where(tree => tree.FilePath.StartsWith("Mohist.Server.UnitTests/", StringComparison.Ordinal)
+            || tree.FilePath.StartsWith("Mohist.Server.TestSupport/", StringComparison.Ordinal)
+            || tree.FilePath == "eng/TestTime.cs").ToArray();
+        var compilations = new Dictionary<string, CSharpCompilation>(StringComparer.Ordinal)
         {
-            var tree = treesByPath[source.Path];
+            ["Mohist.Server.SpecTests"] = CreateCompilation(specTrees, "Mohist.Server.SpecTests"),
+            ["Mohist.Server.UnitTests"] = CreateCompilation(unitTrees, "Mohist.Server.UnitTests"),
+        };
+        var semanticDiagnostics = compilations.Values.SelectMany(compilation => compilation.GetDiagnostics())
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Select(diagnostic => $"SEMANTIC|{diagnostic.Location.SourceTree?.FilePath ?? "<compilation>"}: {diagnostic.GetMessage()}")
+            .Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var diagnostics = parseDiagnostics.Concat(semanticDiagnostics).Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var types = new Dictionary<string, SpecUnitMigrationType>(StringComparer.Ordinal);
+        foreach (var source in sourceList)
+        {
+            var compilation = source.Path.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+                ? compilations["Mohist.Server.SpecTests"] : compilations["Mohist.Server.UnitTests"];
+            var tree = trees.Single(candidate => candidate.FilePath == source.Path);
             foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
             {
-                var fqn = SyntaxFqn(declaration);
+                var symbol = compilation.GetSemanticModel(tree, ignoreAccessibility: true).GetDeclaredSymbol(declaration);
+                var fqn = symbol?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", "", StringComparison.Ordinal)
+                    ?? SyntaxFqn(declaration);
                 if (string.IsNullOrWhiteSpace(fqn)) continue;
                 if (!types.TryGetValue(fqn, out var type))
                 {
                     type = new SpecUnitMigrationType(fqn, declaration.Identifier.ValueText, source.Path,
-                        IsCurrentSpecPath(source.Path));
+                        IsCurrentSpecPath(source.Path), diagnostics);
                     types.Add(fqn, type);
                 }
-                type.AddDeclaration(source.Path, declaration, source.Content);
+                type.AddDeclaration(source.Path, declaration, compilation, source.Content);
             }
         }
 
-        Parallel.ForEach(types.Values, new ParallelOptions { MaxDegreeOfParallelism = ProofParallelism },
-            type => type.Complete());
-        return types.Values.ToArray();
+        var sourceTree = SpecUnitMigrationSourceTree.Capture(sourceList, SpecUnitMigrationLedgerValidator.ValidationHead,
+            SpecUnitMigrationLedgerValidator.ValidationTree);
+        var inventory = new SpecUnitMigrationInventory(types.Values.ToArray(), diagnostics, sourceTree);
+        foreach (var type in types.Values) type.ResolveReferences(inventory);
+        inventory._compiledDiscovery = compiledDiscovery ?? SpecUnitMigrationCompiledDiscovery.Empty;
+        return inventory;
     }
 
-    private static SyntaxTree[] ParseTrees(IReadOnlyList<ArchitectureRules.EmbeddedSource> sources)
-        => sources.AsParallel().AsOrdered().WithDegreeOfParallelism(ProofParallelism)
-            .Select(source => (SyntaxTree)CSharpSyntaxTree.ParseText(source.Content, path: source.Path, options: ParseOptions))
-            .ToArray();
+    private SpecUnitMigrationCompiledDiscovery _compiledDiscovery = SpecUnitMigrationCompiledDiscovery.Empty;
 
     private SpecUnitMigrationCandidate Classify(SpecUnitMigrationType root)
-        => _classifications.GetOrAdd(root.Fqn, _ => new Lazy<SpecUnitMigrationCandidate>(
-            () => ClassifyCore(root), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
-
-    private SpecUnitMigrationCandidate ClassifyCore(SpecUnitMigrationType root)
     {
         var closure = new List<SpecUnitMigrationType>();
         var pending = new Stack<SpecUnitMigrationType>([root]);
@@ -261,23 +125,15 @@ internal sealed partial class SpecUnitMigrationInventory : IDisposable
             var type = pending.Pop();
             if (!visited.Add(type.Fqn)) continue;
             closure.Add(type);
-            var analysis = Analyze(root, type);
-            foreach (var referenceFqn in analysis.ReferenceFqns)
+            foreach (var reference in type.ResolvedReferences)
             {
-                if (!_typesByFqn.TryGetValue(referenceFqn, out var reference)) continue;
                 edges.Add($"{type.Fqn}->{reference.Fqn}");
                 pending.Push(reference);
             }
         }
 
-        var blockers = closure.SelectMany(type => Analyze(root, type).Blockers.Select(blocker => $"{type.Fqn}: {blocker}"))
+        var blockers = closure.SelectMany(type => type.Blockers.Select(blocker => $"{type.Fqn}: {blocker}"))
             .ToHashSet(StringComparer.Ordinal);
-        if (blockers.Count == 0)
-        {
-            foreach (var type in closure)
-                foreach (var diagnostic in SemanticDiagnostics(root, type))
-                    blockers.Add($"{type.Fqn}: source diagnostics: {diagnostic}");
-        }
         var closureNames = closure.Select(type => type.Fqn).OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var distinctEdges = edges.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var facts = _compiledDiscovery.ForType(root.Fqn);
@@ -294,28 +150,9 @@ internal sealed partial class SpecUnitMigrationInventory : IDisposable
         return new SpecUnitMigrationCandidate(root.Fqn, root.PrimaryPath, facts.FactMethods, facts.TheoryMethods,
             facts.InlineDataRows, facts.CaseCount, facts.CaseIdentityDigest, closureDigest, sourceContentDigest,
             facts.CaseIdentities ?? [],
-            new ReadOnlyCollection<string>(closureNames),
-            new ReadOnlyCollection<string>(blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray()),
+            new ReadOnlyCollection<string>(closureNames), new ReadOnlyCollection<string>(blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray()),
             Digest(distinctEdges));
     }
-
-    private SpecUnitMigrationTypeAnalysis Analyze(SpecUnitMigrationType root, SpecUnitMigrationType type)
-        => _analyses.GetOrAdd(CacheKey(root, type), _ => new Lazy<SpecUnitMigrationTypeAnalysis>(
-            () => type.RequiresSemanticAnalysis(this)
-                ? type.Analyze(this, CompilationFor(root))
-                : type.DirectAnalysis(),
-            LazyThreadSafetyMode.ExecutionAndPublication)).Value;
-
-    private IReadOnlyList<string> SemanticDiagnostics(SpecUnitMigrationType root, SpecUnitMigrationType type)
-        => _semanticDiagnostics.GetOrAdd(CacheKey(root, type), _ => new Lazy<IReadOnlyList<string>>(
-            () => type.ReadSemanticDiagnostics(CompilationFor(root)),
-            LazyThreadSafetyMode.ExecutionAndPublication)).Value;
-
-    internal bool RequiresSemanticBinding(string name)
-        => _embeddedReferenceNames.Contains(name);
-
-    private IEnumerable<SpecUnitMigrationType> CurrentSpecTypes()
-        => _typesByFqn.Values.Where(type => type.IsCurrentSpec && type.Name.EndsWith("Specs", StringComparison.Ordinal));
 
     internal bool TryGetCandidate(string fqn, out SpecUnitMigrationCandidate candidate)
     {
@@ -344,19 +181,166 @@ internal sealed partial class SpecUnitMigrationInventory : IDisposable
         return false;
     }
 
-    internal static string Digest(IEnumerable<string> values)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", values.OrderBy(value => value, StringComparer.Ordinal))))).ToLowerInvariant();
-
-    public void Dispose()
+    private static CSharpCompilation CreateCompilation(IReadOnlyList<SyntaxTree> trees, string assemblyName)
     {
-        if (_disposed) return;
-        _disposed = true;
-        _scopeCompilations.Clear();
-        _analyses.Clear();
-        _semanticDiagnostics.Clear();
-        _classifications.Clear();
-        _referenceSet.Dispose();
+        var globalUsings = CSharpSyntaxTree.ParseText("""
+            global using global::System;
+            global using global::System.Collections.Generic;
+            global using global::System.IO;
+            global using global::System.Linq;
+            global using global::System.Net.Http;
+            global using global::System.Net.Http.Json;
+            global using global::System.Threading;
+            global using global::System.Threading.Tasks;
+            global using global::Orleans;
+            global using global::Orleans.Hosting;
+            global using global::Orleans.Runtime;
+            """, path: "GeneratedImplicitUsings.cs", options: new CSharpParseOptions(LanguageVersion.Preview));
+        return CSharpCompilation.Create(assemblyName, [globalUsings, .. trees], SpecUnitMigrationReferenceSet.CreateCompilationReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
     }
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+    private static bool IsTestSource(ArchitectureRules.EmbeddedSource source)
+        => source.Path.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+        || source.Path.StartsWith("Mohist.Server.UnitTests/", StringComparison.Ordinal)
+        || source.Path.StartsWith("Mohist.Server.TestSupport/", StringComparison.Ordinal)
+        || source.Path == "eng/TestTime.cs";
+
+    private static bool IsCurrentSpecPath(string path) => path.StartsWith("Mohist.Server.SpecTests/Specs/", StringComparison.Ordinal);
+
+    private static string SyntaxFqn(ClassDeclarationSyntax declaration)
+    {
+        var namespaces = declaration.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse()
+            .Select(namespaceNode => namespaceNode.Name.ToString()).Where(value => !string.IsNullOrWhiteSpace(value));
+        var containingTypes = declaration.Ancestors().OfType<TypeDeclarationSyntax>().Reverse().Select(type => type.Identifier.ValueText);
+        return string.Join('.', namespaces.Concat(containingTypes).Append(declaration.Identifier.ValueText));
+    }
+
+    internal sealed class SpecUnitMigrationType
+    {
+        private readonly List<(string Path, ClassDeclarationSyntax Declaration, CSharpCompilation Compilation)> _declarations = [];
+        private readonly HashSet<string> _blockers = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _sourceContentDigests = new(StringComparer.Ordinal);
+
+        internal SpecUnitMigrationType(string fqn, string name, string path, bool isCurrentSpec,
+            IReadOnlyList<string> diagnostics)
+        {
+            Fqn = fqn;
+            Name = name;
+            PrimaryPath = path;
+            IsCurrentSpec = isCurrentSpec;
+            _blockers.UnionWith(diagnostics.Where(value => DiagnosticPath(value) == path)
+                .Select(value => $"source diagnostics: {value}"));
+        }
+
+        internal string Fqn { get; }
+        internal string Name { get; }
+        internal string PrimaryPath { get; private set; }
+        internal bool IsCurrentSpec { get; }
+        internal string SourceContentDigest => Digest(_sourceContentDigests.Select(entry => $"{entry.Key}|{entry.Value}"));
+        internal IReadOnlyList<SpecUnitMigrationType> ResolvedReferences { get; private set; } = [];
+        internal IReadOnlyList<string> Blockers { get; private set; } = [];
+
+        internal void AddDeclaration(string path, ClassDeclarationSyntax declaration, CSharpCompilation compilation, string content)
+        {
+            _declarations.Add((path, declaration, compilation));
+            _sourceContentDigests[path] = Digest([content]);
+            if (string.CompareOrdinal(path, PrimaryPath) < 0) PrimaryPath = path;
+        }
+
+        internal void ResolveReferences(SpecUnitMigrationInventory inventory)
+        {
+            var references = new HashSet<SpecUnitMigrationType>();
+            var blockers = new HashSet<string>(_blockers, StringComparer.Ordinal);
+            foreach (var (path, declaration, compilation) in _declarations)
+            {
+                var model = compilation.GetSemanticModel(declaration.SyntaxTree, ignoreAccessibility: true);
+                foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>())
+                {
+                    var name = identifier.Identifier.ValueText;
+                    if (name == "var") continue;
+                    if (BlockingNames.Contains(name)) blockers.Add($"external boundary symbol {name}");
+                    var info = GetSymbolInfo(model, identifier);
+                    if (info.CandidateSymbols.Length > 1)
+                    {
+                        blockers.Add($"ambiguous symbol {name}: {string.Join(", ", info.CandidateSymbols.Select(SymbolDisplay))}");
+                        continue;
+                    }
+                    var resolvedSymbol = info.Symbol ?? info.CandidateSymbols.SingleOrDefault();
+                    if (resolvedSymbol is null)
+                    {
+                        blockers.Add($"unresolved symbol {name} at {path}:{identifier.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
+                        continue;
+                    }
+
+                    var referencedType = EmbeddedContainingType(resolvedSymbol, inventory);
+                    if (referencedType is not null && !ReferenceEquals(referencedType, this)) references.Add(referencedType);
+                }
+
+                if (declaration.AttributeLists.SelectMany(list => list.Attributes)
+                    .Any(attribute => NameIs(attribute, "Collection") || NameIs(attribute, "CollectionDefinition")))
+                    blockers.Add("collection fixture attribute");
+                if (declaration.BaseList is not null)
+                {
+                    foreach (var baseType in declaration.BaseList.Types)
+                    {
+                        var baseName = baseType.Type.ToString();
+                        if (baseName.Contains("IClassFixture", StringComparison.Ordinal) || baseName.Contains("ICollectionFixture", StringComparison.Ordinal))
+                            blockers.Add("fixture interface");
+                        if (baseName.EndsWith("Fixture", StringComparison.Ordinal) || baseName.EndsWith("Specs", StringComparison.Ordinal))
+                            blockers.Add($"fixture/spec base {baseName}");
+                    }
+                }
+                if (path.StartsWith("Mohist.Server.SpecTests/Support/", StringComparison.Ordinal)) blockers.Add("SpecTests-only support");
+            }
+
+            ResolvedReferences = references.OrderBy(reference => reference.Fqn, StringComparer.Ordinal).ToArray();
+            Blockers = blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        }
+
+        private static SymbolInfo GetSymbolInfo(SemanticModel model, IdentifierNameSyntax identifier)
+        {
+            if (identifier.Parent is MemberAccessExpressionSyntax memberAccess
+                && memberAccess.Name == identifier
+                && memberAccess.Parent is InvocationExpressionSyntax invocation)
+                return model.GetSymbolInfo(invocation);
+            if (identifier.Parent is InvocationExpressionSyntax directInvocation)
+                return model.GetSymbolInfo(directInvocation);
+            return model.GetSymbolInfo(identifier);
+        }
+
+        internal bool HasPath(string path) => _declarations.Any(declaration => declaration.Path == path);
+
+        private static string? DiagnosticPath(string diagnostic)
+        {
+            var separator = diagnostic.IndexOf('|');
+            var value = separator < 0 ? diagnostic : diagnostic[(separator + 1)..];
+            var colon = value.IndexOf(':');
+            return colon < 0 ? null : value[..colon];
+        }
+
+        private static SpecUnitMigrationType? EmbeddedContainingType(ISymbol symbol, SpecUnitMigrationInventory inventory)
+        {
+            var type = symbol switch
+            {
+                INamedTypeSymbol namedType => namedType,
+                _ => symbol.ContainingType,
+            };
+            if (type is null) return null;
+            var fqn = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", "", StringComparison.Ordinal);
+            return inventory._typesByFqn.GetValueOrDefault(fqn);
+        }
+
+        private static string SymbolDisplay(ISymbol symbol)
+            => symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        private static bool NameIs(AttributeSyntax attribute, string expected)
+        {
+            var name = attribute.Name.ToString();
+            return name == expected || name == expected + "Attribute" || name.EndsWith("." + expected, StringComparison.Ordinal);
+        }
+    }
+
+    internal static string Digest(IEnumerable<string> values)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", values.OrderBy(value => value, StringComparer.Ordinal))))).ToLowerInvariant();
 }

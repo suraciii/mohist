@@ -66,8 +66,24 @@ internal static class SpecUnitMigrationLedgerValidator
         return violations;
     }
 
+    internal static IReadOnlyList<string> ValidateCurrentRowForTests(
+        SpecUnitMigrationLedgerRow row,
+        SpecUnitMigrationCandidate classification,
+        SpecUnitMigrationExecutableFacts executable)
+    {
+        var violations = new List<string>();
+        ValidateCurrentRowCore(row, classification, (endpoint, targetViolations) =>
+            ValidateExecutableAndClosure(row, endpoint, executable, classification, targetViolations, "current"), violations);
+        return violations;
+    }
+
     private static void ValidateCurrentRow(SpecUnitMigrationLedgerRow row, SpecUnitMigrationCandidate classification,
         SpecUnitMigrationInventory inventory, ICollection<string> violations)
+        => ValidateCurrentRowCore(row, classification, (endpoint, targetViolations) =>
+            ValidateExecutableAndClosure(row, endpoint, inventory, targetViolations, "current"), violations);
+
+    private static void ValidateCurrentRowCore(SpecUnitMigrationLedgerRow row, SpecUnitMigrationCandidate classification,
+        Action<SpecUnitMigrationEndpoint?, ICollection<string>> validateExecutable, ICollection<string> violations)
     {
         if (row.Status is not ("MOVE" or "REVIEW" or "KEEP" or "BLOCKED"))
             violations.Add($"{row.Id}: invalid status {row.Status}");
@@ -85,7 +101,7 @@ internal static class SpecUnitMigrationLedgerValidator
         var expectedOwner = plannedTarget || row.Status == "MOVE" ? row.Target?.Fqn : row.Current?.Fqn;
         if (row.Owner != expectedOwner) violations.Add($"{row.Id}: owner binding mismatch; owner={row.Owner}, expected={expectedOwner}");
         var expectedEndpoint = plannedTarget || row.Status != "MOVE" ? row.Current : row.Target;
-        ValidateExecutableAndClosure(row, expectedEndpoint, inventory, violations, "current");
+        validateExecutable(expectedEndpoint, violations);
         ValidateCurrentHistory(row, classification, violations);
         ValidateRequiredRowFields(row, violations);
     }
@@ -128,6 +144,19 @@ internal static class SpecUnitMigrationLedgerValidator
             violations.Add($"{row.Id}: executable {bindingKind} target endpoint is not a compiled discoverable type: {expectedEndpoint.Path}/{expectedEndpoint.Fqn}");
             return;
         }
+        if (!inventory.TryGetCandidate(actualTarget.Fqn, out var candidate))
+        {
+            ValidateExecutableAndClosure(row, expectedEndpoint, actualTarget, null, violations, bindingKind);
+            return;
+        }
+        ValidateExecutableAndClosure(row, expectedEndpoint, actualTarget, candidate, violations, bindingKind);
+    }
+
+    private static void ValidateExecutableAndClosure(SpecUnitMigrationLedgerRow row, SpecUnitMigrationEndpoint? expectedEndpoint,
+        SpecUnitMigrationExecutableFacts actualTarget, SpecUnitMigrationCandidate? candidate,
+        ICollection<string> violations, string bindingKind)
+    {
+        if (row.Executable is null || expectedEndpoint is null) return;
         if (row.Executable.Path != expectedEndpoint.Path || row.Executable.Fqn != expectedEndpoint.Fqn)
         {
             violations.Add($"{row.Id}: executable {bindingKind} endpoint mismatch");
@@ -140,7 +169,7 @@ internal static class SpecUnitMigrationLedgerValidator
             violations.Add($"{row.Id}: executable case identity digest mismatch; ledger={row.Executable.CaseIdentityDigest}, actual={actual.CaseIdentityDigest}");
         if (row.Executable.SourceContentDigest != actual.SourceContentDigest)
             violations.Add($"{row.Id}: executable source-content digest mismatch; ledger={row.Executable.SourceContentDigest}, actual={actual.SourceContentDigest}");
-        if (!inventory.TryGetCandidate(actual.Fqn, out var candidate))
+        if (candidate is null)
         {
             violations.Add($"{row.Id}: executable closure cannot classify {actual.Fqn}");
             return;

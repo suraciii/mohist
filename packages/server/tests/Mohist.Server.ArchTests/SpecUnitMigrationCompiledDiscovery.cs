@@ -1,5 +1,6 @@
 using System.Reflection;
 using Xunit.Sdk;
+using Xunit.v3;
 
 namespace Mohist.Server.ArchTests;
 
@@ -7,137 +8,67 @@ internal sealed class SpecUnitMigrationCompiledDiscovery
 {
     private readonly IReadOnlyDictionary<string, SpecUnitMigrationMtpFacts> _facts;
 
-    private SpecUnitMigrationCompiledDiscovery(
-        IReadOnlyDictionary<string, SpecUnitMigrationMtpFacts> facts,
-        string bindingIdentity)
+    private SpecUnitMigrationCompiledDiscovery(IReadOnlyDictionary<string, SpecUnitMigrationMtpFacts> facts) => _facts = facts;
+
+    internal static SpecUnitMigrationCompiledDiscovery Empty { get; } = new(new Dictionary<string, SpecUnitMigrationMtpFacts>(StringComparer.Ordinal));
+
+    internal static SpecUnitMigrationCompiledDiscovery ForTests(params (string Fqn, SpecUnitMigrationMtpFacts Facts)[] entries)
+        => new(entries.ToDictionary(entry => entry.Fqn, entry => entry.Facts, StringComparer.Ordinal));
+
+    internal static SpecUnitMigrationCompiledDiscovery FromAssemblies(params Assembly[] assemblies)
     {
-        _facts = facts;
-        BindingIdentity = bindingIdentity;
-    }
+        var cases = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var assembly in assemblies)
+        {
+            var discoverer = ((ITestFramework)new XunitTestFramework()).GetDiscoverer(assembly);
+            var options = new InMemoryDiscoveryOptions();
+            options.SetValue(TestOptionsNames.Discovery.PreEnumerateTheories, true);
+            discoverer.Find(testCase =>
+            {
+                var fqn = testCase.TestClassName;
+                if (!string.IsNullOrWhiteSpace(fqn))
+                {
+                    if (!cases.TryGetValue(fqn!, out var identities)) cases.Add(fqn!, identities = []);
+                    identities.Add(string.Join("|", fqn, testCase.TestMethodName, testCase.TestCaseDisplayName));
+                }
+                return new ValueTask<bool>(true);
+            }, options, null, null).GetAwaiter().GetResult();
+            (discoverer as IDisposable)?.Dispose();
+        }
 
-    internal static SpecUnitMigrationCompiledDiscovery Empty { get; } = new(
-        new Dictionary<string, SpecUnitMigrationMtpFacts>(StringComparer.Ordinal),
-        SpecUnitMigrationInventory.Digest(["empty"]));
+        var facts = new Dictionary<string, SpecUnitMigrationMtpFacts>(StringComparer.Ordinal);
+        foreach (var group in cases)
+        {
+            var type = assemblies.Select(assembly => assembly.GetType(group.Key, false)).FirstOrDefault(type => type is not null);
+            var methods = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly) ?? [];
+            var attributes = methods.SelectMany(method => method.GetCustomAttributesData());
+            var factMethods = methods.Count(method => method.GetCustomAttributesData().Any(attribute => attribute.AttributeType.Name is "FactAttribute" or "Fact"));
+            var theoryMethods = methods.Count(method => method.GetCustomAttributesData().Any(attribute => attribute.AttributeType.Name is "TheoryAttribute" or "Theory"));
+            var inlineDataRows = attributes.Count(attribute => attribute.AttributeType.Name is "InlineDataAttribute" or "InlineData");
+            var identities = group.Value.OrderBy(value => value, StringComparer.Ordinal)
+                .GroupBy(value => value, StringComparer.Ordinal)
+                .SelectMany(grouping => grouping.Select((_, occurrence) => $"{grouping.Key}|occurrence={occurrence + 1}"))
+                .ToArray();
+            facts.Add(group.Key, new SpecUnitMigrationMtpFacts(factMethods, theoryMethods, inlineDataRows, identities.Length,
+                SpecUnitMigrationInventory.Digest(identities), false, identities));
+        }
 
-    internal static SpecUnitMigrationCompiledDiscovery ForTests(
-        params (string Fqn, SpecUnitMigrationMtpFacts Facts)[] entries)
-        => Create(entries, SpecUnitMigrationInventory.Digest(entries.Select(entry =>
-            $"test|{entry.Fqn}|{entry.Facts.CaseIdentityDigest}|{entry.Facts.Missing}")));
-
-    internal static SpecUnitMigrationCompiledDiscovery ForSource(
-        IEnumerable<(string Fqn, SpecUnitMigrationMtpFacts Facts)> entries,
-        string sourceIdentity)
-        => Create(entries, SpecUnitMigrationInventory.Digest(["source", sourceIdentity]));
-
-    private static SpecUnitMigrationCompiledDiscovery Create(
-        IEnumerable<(string Fqn, SpecUnitMigrationMtpFacts Facts)> entries,
-        string bindingIdentity)
-        => new(entries.ToDictionary(entry => entry.Fqn, entry => entry.Facts, StringComparer.Ordinal), bindingIdentity);
-
-    internal static SpecUnitMigrationCompiledDiscovery FromAssemblies(
-        IEnumerable<string> requestedFqns,
-        params Assembly[] assemblies)
-    {
-        var requested = requestedFqns.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
-        var facts = requested.Select(fqn => DiscoverAssemblyType(fqn, assemblies))
-            .Where(entry => entry is not null).Cast<(string Fqn, SpecUnitMigrationMtpFacts Facts)>().ToArray();
-        var bindingIdentity = SpecUnitMigrationInventory.Digest(
-        [
-            .. requested.Select(fqn => $"type|{fqn}"),
-            .. assemblies.Select(assembly =>
-                $"assembly|{assembly.GetName().FullName}|{assembly.ManifestModule.ModuleVersionId}"),
-        ]);
-        return Create(facts, bindingIdentity);
+        return new SpecUnitMigrationCompiledDiscovery(facts);
     }
 
     internal SpecUnitMigrationMtpFacts ForType(string fqn)
-        => _facts.GetValueOrDefault(fqn)
-            ?? new SpecUnitMigrationMtpFacts(0, 0, 0, 0, SpecUnitMigrationInventory.Digest([]), true, []);
-
-    internal IReadOnlyCollection<string> Fqns => _facts.Keys.ToArray();
-    internal string BindingIdentity { get; }
+        => _facts.GetValueOrDefault(fqn) ?? new SpecUnitMigrationMtpFacts(0, 0, 0, 0, SpecUnitMigrationInventory.Digest([]), true, []);
 
     internal IEnumerable<(string Fqn, string Identity)> CaseIdentities
         => _facts.SelectMany(entry => entry.Value.CaseIdentities?.Select(identity => (entry.Key, identity)) ?? []);
 
-    private static (string Fqn, SpecUnitMigrationMtpFacts Facts)? DiscoverAssemblyType(
-        string fqn,
-        IReadOnlyList<Assembly> assemblies)
+    private sealed class InMemoryDiscoveryOptions : ITestFrameworkDiscoveryOptions
     {
-        var type = assemblies.Select(assembly => assembly.GetType(fqn, throwOnError: false))
-            .FirstOrDefault(value => value is not null);
-        if (type is null) return null;
-
-        var identities = new List<string>();
-        var factMethods = 0;
-        var theoryMethods = 0;
-        var inlineDataRows = 0;
-        var incomplete = false;
-        foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic
-                     | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
-        {
-            var attributes = method.GetCustomAttributesData();
-            if (attributes.Any(attribute => AttributeNameIs(attribute, "Fact")))
-            {
-                factMethods++;
-                identities.Add(string.Join("|", fqn, method.Name, $"{fqn}.{method.Name}"));
-            }
-
-            if (!attributes.Any(attribute => AttributeNameIs(attribute, "Theory"))) continue;
-            theoryMethods++;
-            var dataAttributes = attributes.Where(attribute => typeof(Xunit.v3.DataAttribute)
-                .IsAssignableFrom(attribute.AttributeType)).ToArray();
-            if (dataAttributes.Length == 0 || dataAttributes.Any(attribute => !AttributeNameIs(attribute, "InlineData")))
-            {
-                incomplete = true;
-                continue;
-            }
-
-            foreach (var inlineData in dataAttributes)
-            {
-                if (!TryInlineDataValues(inlineData, out var values) || values.Length != method.GetParameters().Length)
-                {
-                    incomplete = true;
-                    continue;
-                }
-                inlineDataRows++;
-                var arguments = method.GetParameters().Select((parameter, index) =>
-                    $"{parameter.Name}: {ArgumentFormatter.Format(values[index], 1)}");
-                identities.Add(string.Join("|", fqn, method.Name,
-                    $"{fqn}.{method.Name}({string.Join(", ", arguments)})"));
-            }
-        }
-
-        var distinctIdentities = identities.OrderBy(value => value, StringComparer.Ordinal)
-            .GroupBy(value => value, StringComparer.Ordinal)
-            .SelectMany(group => group.Select((_, occurrence) => $"{group.Key}|occurrence={occurrence + 1}"))
-            .ToArray();
-        return (fqn, new SpecUnitMigrationMtpFacts(factMethods, theoryMethods, inlineDataRows,
-            distinctIdentities.Length, SpecUnitMigrationInventory.Digest(distinctIdentities),
-            incomplete || factMethods + theoryMethods == 0, distinctIdentities));
+        private readonly Dictionary<string, object?> _values = new(StringComparer.Ordinal);
+        public TValue? GetValue<TValue>(string name) => _values.TryGetValue(name, out var value) ? (TValue?)value : default;
+        public void SetValue<TValue>(string name, TValue value) => _values[name] = value;
+        public string ToJson() => "{}";
     }
-
-    private static bool TryInlineDataValues(CustomAttributeData attribute, out object?[] values)
-    {
-        values = [];
-        if (attribute.ConstructorArguments.Count != 1
-            || attribute.ConstructorArguments[0].Value is not IReadOnlyCollection<CustomAttributeTypedArgument> arguments)
-            return false;
-        values = arguments.Select(Value).ToArray();
-        return true;
-    }
-
-    private static object? Value(CustomAttributeTypedArgument argument)
-    {
-        if (argument.Value is IReadOnlyCollection<CustomAttributeTypedArgument> values)
-            return values.Select(Value).ToArray();
-        if (argument.ArgumentType.IsEnum && argument.Value is not null)
-            return Enum.ToObject(argument.ArgumentType, argument.Value);
-        return argument.Value;
-    }
-
-    private static bool AttributeNameIs(CustomAttributeData attribute, string expected)
-        => attribute.AttributeType.Name is var name && (name == expected || name == expected + "Attribute");
 }
 
 internal sealed record SpecUnitMigrationMtpFacts(
