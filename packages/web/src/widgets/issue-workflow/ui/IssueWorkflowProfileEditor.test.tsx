@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ComponentProps } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import { useEffect, useState, type ComponentProps } from 'react'
+import { act, fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import {
   IssueWorkflowProfileEditor as IssueWorkflowProfileEditorView,
   type IssueWorkflowProfileEditorHooks,
@@ -62,10 +62,47 @@ const testHooks = {
     }),
 } as unknown as IssueWorkflowProfileEditorHooks
 
+function createDeferredProfileHooks() {
+  let resolveProfile!: (data: IssueWorkflowProfileYamlResponse) => void
+  const profileResource = new Promise<IssueWorkflowProfileYamlResponse>((resolve) => {
+    resolveProfile = resolve
+  })
+
+  const hooks = {
+    ...testHooks,
+    useProfile: () => {
+      const [data, setData] = useState<IssueWorkflowProfileYamlResponse | null>(null)
+      useEffect(() => {
+        let active = true
+        void profileResource.then((nextData) => {
+          if (active) setData(nextData)
+        })
+        return () => {
+          active = false
+        }
+      }, [])
+      return {
+        data,
+        isLoading: data === null,
+        error: null,
+        refetch,
+      }
+    },
+  } as unknown as IssueWorkflowProfileEditorHooks
+
+  return {
+    hooks,
+    resolve: async (data: IssueWorkflowProfileYamlResponse) => {
+      resolveProfile(data)
+      await profileResource
+    },
+  }
+}
+
 function IssueWorkflowProfileEditor(
-  props: Omit<ComponentProps<typeof IssueWorkflowProfileEditorView>, 'hooks'>,
+  props: ComponentProps<typeof IssueWorkflowProfileEditorView>,
 ) {
-  return <IssueWorkflowProfileEditorView {...props} hooks={testHooks} />
+  return <IssueWorkflowProfileEditorView {...props} hooks={props.hooks ?? testHooks} />
 }
 
 describe('IssueWorkflowProfileEditor', () => {
@@ -84,8 +121,13 @@ describe('IssueWorkflowProfileEditor', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows unsaved state after backlog editing', () => {
-    render(<IssueWorkflowProfileEditor issueNumber={1} />)
+  it('shows unsaved state after backlog editing', async () => {
+    const deferredProfile = createDeferredProfileHooks()
+    render(<IssueWorkflowProfileEditor issueNumber={1} hooks={deferredProfile.hooks} />)
+
+    await act(async () => {
+      await deferredProfile.resolve(customData())
+    })
 
     fireEvent.change(screen.getByRole('textbox'), {
       target: { value: `${state.data!.yaml}# edited\n` },
@@ -93,6 +135,50 @@ describe('IssueWorkflowProfileEditor', () => {
 
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
+  it('discards an edited draft when the profile resource changes to another issue', async () => {
+    const view = render(<IssueWorkflowProfileEditor issueNumber={1} />)
+    const editedYaml = `${state.data!.yaml}# edited\n`
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: editedYaml } })
+
+    state.data = { ...customData(), yaml: 'id: late-old\n', issueNumber: 1 }
+    await act(async () => {
+      view.rerender(<IssueWorkflowProfileEditor issueNumber={2} />)
+    })
+    expect(screen.getByTestId('workflow-profile-loading')).toBeInTheDocument()
+
+    state.data = { ...customData(), issueNumber: 2, yaml: 'id: current\n' }
+    await act(async () => {
+      view.rerender(<IssueWorkflowProfileEditor issueNumber={2} />)
+    })
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('id: current\n')
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+  })
+
+  it('does not apply a profile resource that resolves after the editor unmounts', async () => {
+    const deferredProfile = createDeferredProfileHooks()
+    const view = render(<IssueWorkflowProfileEditor issueNumber={1} hooks={deferredProfile.hooks} />)
+    view.unmount()
+
+    await act(async () => {
+      await deferredProfile.resolve(customData())
+    })
+  })
+
+  it('does not apply a save response after the editor unmounts', () => {
+    let onSuccess: ((response: IssueWorkflowProfileYamlResponse) => void) | undefined
+    state.mutate.mockImplementation((_variables, options) => {
+      onSuccess = options.onSuccess
+    })
+
+    const view = render(<IssueWorkflowProfileEditor issueNumber={1} />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: `${state.data!.yaml}# edited\n` } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    view.unmount()
+
+    expect(() => onSuccess?.(customData())).not.toThrow()
   })
 
   it('shows pending save state until save resolves', async () => {
