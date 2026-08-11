@@ -205,7 +205,8 @@ handoff request
   -> EnsureInitialLaunchAsync on provisional AgentSession
   -> promote and verify both participants as handoff-ready and nonclaimable
   -> accept lineage on WorkflowRun
-  -> activate the verified participants and submit AgentJob to canonical admission
+  -> accept the AgentSession for the Workflow lineage without opening a Runtime
+  -> atomically activate AgentJob as the final command and enter canonical admission
   -> await AgentJob terminal delivery to WorkflowRun
 ```
 
@@ -226,16 +227,36 @@ permit, or external Runtime work is created.
 
 Workflow acceptance is idempotent and is attempted only from
 `participants_ready`. After it succeeds, the coordinator enters
-`activation_pending` and resumes the same activation commands after a lost
-response. Activation makes the Job claimable and submits it to canonical
-admission only after the accepted Workflow invocation and all four participant
-identities are present. If activation cannot complete, the durable coordinator
-phase remains recoverable and invokes the guarded
-`IWorkflowGrain.ApplyAgentHandoffActivationFailureAsync` operation with the
-accepted invocation and Job identities. That operation applies the existing
-Workflow failure/recovery boundary exactly once and records the stable reason;
-it cannot turn a missing participant into accepted execution or leave a Running
-TaskRun without a claimable or recoverable Job.
+`activation_pending` and persists one pending participant command at a time.
+It first calls the idempotent Session acceptance command, which makes the
+pre-existing Session/Input/Turn lineage queryable for the accepted Workflow
+invocation but cannot open a Runtime or create claimable work. Only after that
+acknowledgement does it issue the final
+`IAgentJobGrain.ActivateWorkflowLaunchAsync(commandId)` command.
+
+`ActivateWorkflowLaunchAsync` owns the complete nonclaimable-to-admission
+transition. It returns `Activated`, `AlreadyActivated`, `Retry`, or
+`RejectedBeforeActivation`. `Activated` and `AlreadyActivated` mean the Job's
+durable launch-ready/admission obligation exists; after either response the
+command can never become rejected. The operation must not return
+`RejectedBeforeActivation` after it has made the Job claimable, acquired an
+Agent permit, or written an admission/dispatch ledger entry. A lost response,
+including one after the Job was claimed, remains `activation_pending` and
+replays the same command until AgentJob returns `AlreadyActivated`; it never
+applies a Workflow failure by inference.
+
+A definitive Session acceptance failure or `RejectedBeforeActivation` is
+recorded under the coordinator command fence. The coordinator then calls
+idempotent participant failure commands: AgentSession makes the accepted
+lineage queryable with the stable activation failure, and AgentJob enters the
+terminal `Failed` state with `workflow_agent_activation_failed`, confirms that
+no claimable ledger or external execution exists, releases any provisional
+admission resource, and stages the normal
+`PendingWorkflowTerminalDelivery` from the frozen Workflow task contract. That
+terminal delivery, not a separate Workflow activation-failure operation,
+applies the TaskRun failure/recovery boundary. Once Workflow has accepted the
+lineage, every success or failure therefore remains authoritative on the same
+AgentJob and cannot leave a failed TaskRun beside a live Job.
 
 **Alternative considered:** resolve the Agent in
 `WorkflowItemTranslator` and continue sending `mohist/opencode` or
