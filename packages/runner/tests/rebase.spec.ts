@@ -1,22 +1,47 @@
-import { afterEach, describe, expect, it } from "vitest"
-import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
+import { describe, expect, it as vitestIt } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
-import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
+import { rebaseAction } from "../src/actions/rebase.js"
+import type { RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
 
-afterEach(() => {
-  setRebaseGitRunnerForTest(null)
-  setRebaseExistsCheckerForTest(null)
-  setIssueFieldCommandRunnerForTest(null)
-})
+type RebaseTestResources = {
+  fileSystem: RunnerFileSystem
+  rebaseGitRunner?: RunnerGitRunner
+  rebaseExistsChecker?: (path: string) => boolean
+  issueFieldCommandRunner?: (command: string, args: string[], cwd: string, signal: AbortSignal) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+}
+
+function it(name: string, body: (resources: RebaseTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: RebaseTestResources = { fileSystem: new MemoryFileSystem() }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
+
+function useRebaseExistsChecker(resources: RebaseTestResources, checker: (path: string) => boolean): void {
+  resources.rebaseExistsChecker = checker
+}
+
+function installRebaseGitRunner(resources: RebaseTestResources, runner: RunnerGitRunner): void {
+  resources.rebaseGitRunner = runner
+}
+
+function installIssueFieldCommandRunner(
+  resources: RebaseTestResources,
+  runner: (command: string, args: string[], cwd: string, signal: AbortSignal) => Promise<{ exitCode: number; stdout: string; stderr: string }>,
+): void {
+  resources.issueFieldCommandRunner = runner
+}
 
 describe("mohist/rebase", () => {
-  it("LocalBasePath_RebasesOntoLocalBaseBranch", async () => {
+  it("LocalBasePath_RebasesOntoLocalBaseBranch", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -68,10 +93,10 @@ describe("mohist/rebase", () => {
     })
   })
 
-  it("RemoteOption_FetchesAndRebasesOntoRemoteBaseRef", async () => {
+  it("RemoteOption_FetchesAndRebasesOntoRemoteBaseRef", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -122,11 +147,11 @@ describe("mohist/rebase", () => {
     })
   })
 
-  it("MessageFrom_IsIgnoredWhenSquashIsFalse", async () => {
+  it("MessageFrom_IsIgnoredWhenSquashIsFalse", async (resources) => {
     const calls: string[] = []
     const moCalls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installIssueFieldCommandRunner(resources, async (cmd, args) => {
       moCalls.push([cmd, ...args].join(" "))
       return {
         exitCode: 1,
@@ -134,7 +159,7 @@ describe("mohist/rebase", () => {
         stderr: "should not run",
       }
     })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -168,10 +193,10 @@ describe("mohist/rebase", () => {
     expect(calls).not.toContain("commit -m")
   })
 
-  it("SquashOption_FoldsMultipleCommitsIntoOneOnRunBranch", async () => {
+  it("SquashOption_FoldsMultipleCommitsIntoOneOnRunBranch", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -239,11 +264,11 @@ describe("mohist/rebase", () => {
     })
   })
 
-  it("SquashOption_MessageFromIssueTitle_ResolvesTitleWithMoIssueShow", async () => {
+  it("SquashOption_MessageFromIssueTitle_ResolvesTitleWithMoIssueShow", async (resources) => {
     const calls: string[] = []
     const moCalls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installIssueFieldCommandRunner(resources, async (cmd, args) => {
       moCalls.push([cmd, ...args].join(" "))
       return {
         exitCode: 0,
@@ -251,7 +276,7 @@ describe("mohist/rebase", () => {
         stderr: "",
       }
     })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -293,11 +318,11 @@ describe("mohist/rebase", () => {
     expect(calls).toContain("commit -m Use issue title for squash")
   })
 
-  it("SquashOption_MessageFromIssueTitleFailure_ReturnsStructuredFailure", async () => {
+  it("SquashOption_MessageFromIssueTitleFailure_ReturnsStructuredFailure", async (resources) => {
     const calls: string[] = []
     const moCalls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installIssueFieldCommandRunner(resources, async (cmd, args) => {
       moCalls.push([cmd, ...args].join(" "))
       return {
         exitCode: 1,
@@ -305,7 +330,7 @@ describe("mohist/rebase", () => {
         stderr: "issue not found",
       }
     })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       return fail(`unexpected git call: ${args.join(" ")}`)
     })
@@ -329,11 +354,11 @@ describe("mohist/rebase", () => {
     expect(moCalls).toEqual(["mo issue view 217 --project proj_1 --json title,body"])
   })
 
-  it("SquashOption_UnsupportedMessageFrom_ReturnsStructuredFailure", async () => {
+  it("SquashOption_UnsupportedMessageFrom_ReturnsStructuredFailure", async (resources) => {
     const calls: string[] = []
     const moCalls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installIssueFieldCommandRunner(resources, async (cmd, args) => {
       moCalls.push([cmd, ...args].join(" "))
       return {
         exitCode: 0,
@@ -341,7 +366,7 @@ describe("mohist/rebase", () => {
         stderr: "",
       }
     })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       return fail(`unexpected git call: ${args.join(" ")}`)
     })
@@ -362,10 +387,10 @@ describe("mohist/rebase", () => {
     expect(moCalls).toEqual([])
   })
 
-  it("SquashOptionWithoutMessage_FailsBeforeSquash", async () => {
+  it("SquashOptionWithoutMessage_FailsBeforeSquash", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -393,10 +418,10 @@ describe("mohist/rebase", () => {
     expect(result.error?.message).toContain("non-empty commit 'message'")
   })
 
-  it("RemoteFetchFails_ReportsRetrySafe", async () => {
+  it("RemoteFetchFails_ReportsRetrySafe", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -422,10 +447,10 @@ describe("mohist/rebase", () => {
     expect(result.error?.message).toContain("Rebase was not started")
   })
 
-  it("BaseRefRevParseFails_ReportsRetrySafe", async () => {
+  it("BaseRefRevParseFails_ReportsRetrySafe", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -447,10 +472,10 @@ describe("mohist/rebase", () => {
     expect(result.error).toMatchObject({ code: "fetch-failed" })
   })
 
-  it("DirtyWorktreeBeforeRebase_CommitsPendingChangesThenRebases", async () => {
+  it("DirtyWorktreeBeforeRebase_CommitsPendingChangesThenRebases", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -496,10 +521,10 @@ describe("mohist/rebase", () => {
     })
   })
 
-  it("StaleRebaseStateBeforeRebase_AbortsBeforeStartingFreshRebase", async () => {
+  it("StaleRebaseStateBeforeRebase_AbortsBeforeStartingFreshRebase", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest((path) => path === "/fake/worktree/.git/rebase-merge")
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, (path) => path === "/fake/worktree/.git/rebase-merge")
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -528,10 +553,10 @@ describe("mohist/rebase", () => {
     expect(calls.indexOf("rebase --abort")).toBeLessThan(calls.indexOf("rebase master"))
   })
 
-  it("Conflict_NoRecovery_AbortsAndReportsConflict", async () => {
+  it("Conflict_NoRecovery_AbortsAndReportsConflict", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -562,10 +587,10 @@ describe("mohist/rebase", () => {
     expect(result.error?.message).toContain("unresolved conflicts")
   })
 
-  it("Conflict_WithRecovery_LeavesRebaseInProgressAndReturnsConflict", async () => {
+  it("Conflict_WithRecovery_LeavesRebaseInProgressAndReturnsConflict", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -593,10 +618,10 @@ describe("mohist/rebase", () => {
     expect(calls).not.toContain("rebase --abort")
   })
 
-  it("Conflict_WithRecoveryOnlyInWith_AbortsBecauseRecoveryIsDispatchMetadata", async () => {
+  it("Conflict_WithRecoveryOnlyInWith_AbortsBecauseRecoveryIsDispatchMetadata", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -628,13 +653,13 @@ describe("mohist/rebase", () => {
     expect(calls).not.toContain("rebase --abort")
   })
 
-  it("Conflict_WithRecovery_RerunAfterAbandonedInProgress_AbortsPriorRebaseThenStartsFresh", async () => {
+  it("Conflict_WithRecovery_RerunAfterAbandonedInProgress_AbortsPriorRebaseThenStartsFresh", async (resources) => {
     const calls: string[] = []
     let rebaseStatePresent = true
-    setRebaseExistsCheckerForTest((path) =>
+    useRebaseExistsChecker(resources, (path) =>
       path === "/fake/worktree/.git/rebase-merge" && rebaseStatePresent,
     )
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -665,10 +690,10 @@ describe("mohist/rebase", () => {
     expect(result.error).toMatchObject({ code: "conflict" })
   })
 
-  it("Conflict_WithRecovery_SuccessfulRebase_ReportsNormal", async () => {
+  it("Conflict_WithRecovery_SuccessfulRebase_ReportsNormal", async (resources) => {
     const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -698,11 +723,11 @@ describe("mohist/rebase", () => {
     })
   })
 
-  it("NetworkFetch_ReceivesTimeoutMsAndLocalProbesDoNot", async () => {
+  it("NetworkFetch_ReceivesTimeoutMsAndLocalProbesDoNot", async (resources) => {
     type GitCall = { command: string; timeoutMs: number | undefined }
     const calls: GitCall[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args, _signal, options) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args, _signal, options) => {
       const command = args.join(" ")
       calls.push({ command, timeoutMs: options?.timeoutMs })
       switch (command) {
@@ -739,9 +764,9 @@ describe("mohist/rebase", () => {
     expect(rebaseCall?.timeoutMs).toBeUndefined()
   })
 
-  it("FetchTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
+  it("FetchTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async (resources) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
       const command = args.join(" ")
       switch (command) {
         case "rev-parse --git-path rebase-merge":
@@ -770,11 +795,11 @@ describe("mohist/rebase", () => {
     expect(result.error?.message).toContain("Rebase operation timed out")
   })
 
-  it("LocalBasePath_RebaseDoesNotCarryTimeoutMs", async () => {
+  it("LocalBasePath_RebaseDoesNotCarryTimeoutMs", async (resources) => {
     type GitCall = { command: string; timeoutMs: number | undefined }
     const calls: GitCall[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args, _signal, options) => {
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args, _signal, options) => {
       const command = args.join(" ")
       calls.push({ command, timeoutMs: options?.timeoutMs })
       switch (command) {

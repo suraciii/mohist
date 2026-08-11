@@ -1,9 +1,16 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { BindingConvergence, type BindingConvergenceConnection } from "../src/runtime/binding-convergence.js"
 import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import type { AgentSessionReconcileBinding } from "../src/server/connection.js"
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
 import { capturedLogs } from "./support/logger-test.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+
+function it(name: string, body: () => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    await withTestRunnerResources(async () => await body())
+  })
+}
 
 const FIXED_DATE = new Date("2026-07-24T00:00:00.000Z")
 
@@ -141,18 +148,20 @@ describe("Runner reconnect AgentSession binding convergence", () => {
     expect(JSON.stringify(reconcileMissing.mock.calls)).not.toContain("input")
   })
 
-  it.each(["deadline-exceeded", "turn-failed", "unavailable-runtime", "incompatible-runtime"])(
+  vitestIt.each(["deadline-exceeded", "turn-failed", "unavailable-runtime", "incompatible-runtime"])(
     "preserves unknown and does not recover after %s",
     async (kind) => {
-      const records: RuntimeEventRecord[] = []
-      const handle = runtime({ resolve: () => ({ ok: false, kind }) })
-      const server = connection(() => [binding()])
+      await withTestRunnerResources(async () => {
+        const records: RuntimeEventRecord[] = []
+        const handle = runtime({ resolve: () => ({ ok: false, kind }) })
+        const server = connection(() => [binding()])
 
-      await convergence(handle, server, records).runOnce(new AbortController().signal)
+        await convergence(handle, server, records).runOnce(new AbortController().signal)
 
-      expect(handle.createSession).not.toHaveBeenCalled()
-      expect(server.reconcileMissingAgentSession).not.toHaveBeenCalled()
-      expect(records).toEqual([])
+        expect(handle.createSession).not.toHaveBeenCalled()
+        expect(server.reconcileMissingAgentSession).not.toHaveBeenCalled()
+        expect(records).toEqual([])
+      })
     },
   )
 

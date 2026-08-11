@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { isUnderRunnerRoot, resolveWorkspaceQuery, RunnerSignalRClient, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { isUnderRunnerRoot, resolveWorkspaceQuery, RunnerSignalRClient } from "../src/server/runner-signalr.js"
 import type { CommandResult } from "../src/system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
+import type { RunnerFileSystem, RunnerResourceContext } from "../src/system/filesystem.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { currentSignalRTestState, withSignalRTestResources } from "./support/signalr-test-resources.js"
 
 interface CapturedBuilder {
   url?: string
@@ -13,23 +16,31 @@ interface CapturedBuilder {
   connection: FakeConnection
 }
 
-const builders: CapturedBuilder[] = []
-let nextConnectionId = 0
+type SignalRResources = {
+  fileSystem: RunnerFileSystem
+  signalRGitRunner?: NonNullable<RunnerResourceContext["signalRGitRunner"]>
+  signalRExistsChecker?: (path: string) => boolean
+}
 
-afterEach(() => {
-  vi.restoreAllMocks()
-  builders.length = 0
-  nextConnectionId = 0
-  setRunnerSignalRGitRunnerForTest(null)
-  setRunnerSignalRExistsCheckerForTest(null)
-})
+function it(name: string, body: (resources: SignalRResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: SignalRResources = { fileSystem: new MemoryFileSystem() }
+    await withSignalRTestResources(resources, async () => await body(resources))
+  })
+}
 
 function findHandler(name: string): (...args: unknown[]) => unknown {
-  const conn = builders.at(-1)!.connection
+  const conn = currentBuilder().connection
   const call = conn.on.mock.calls.find(([event]) => event === name)
   const handler = call?.[1]
   if (typeof handler !== "function") throw new Error(`handler not registered: ${name}`)
   return (...args) => handler(...args)
+}
+
+function currentBuilder(): CapturedBuilder {
+  const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
+  if (!builder) throw new Error("no captured builder; construct a RunnerSignalRClient first")
+  return builder
 }
 
 function runOk(stdout = ""): CommandResult {
@@ -63,7 +74,7 @@ function makeFakeConnection(): FakeConnection {
   }
   conn.start.mockImplementation(async () => {
     conn.state = signalR.HubConnectionState.Connected
-    conn.connectionId = `conn-${++nextConnectionId}`
+    conn.connectionId = `conn-${++currentSignalRTestState().nextConnectionId}`
   })
   conn.stop.mockImplementation(async () => {
     conn.state = signalR.HubConnectionState.Disconnected
@@ -83,11 +94,11 @@ vi.mock("@microsoft/signalr", () => {
       private _connection: FakeConnection = makeFakeConnection()
       withUrl(url: string, options?: { accessTokenFactory?: () => string }) {
         this._url = url
-        builders.push({ url, accessTokenFactory: options?.accessTokenFactory, handlers: this._handlers, connection: this._connection })
+        currentSignalRTestState().builders.push({ url, accessTokenFactory: options?.accessTokenFactory, handlers: this._handlers, connection: this._connection })
         return this
       }
       withAutomaticReconnect(reconnectPolicy: number[]) {
-        const builder = builders.at(-1)
+        const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
         if (builder) builder.reconnectPolicy = reconnectPolicy
         return this
       }
@@ -112,13 +123,13 @@ vi.mock("@microsoft/signalr", () => {
 describe("RunnerSignalRClient workspace queries", () => {
   it("WorkspaceQuery_ParsesIdentityLessRequestButHandlersRejectIt", () => {
     const query = resolveWorkspaceQuery({
-      workspacePath: "/tmp/mohist/workspaces/issue-25",
+      workspacePath: "/virtual/workspaces/issue-25",
       branch: "mohist/run-wr-25",
       baseBranch: "master",
     })
 
     expect(query).toEqual({
-      workDir: "/tmp/mohist/workspaces/issue-25",
+      workDir: "/virtual/workspaces/issue-25",
       baseBranch: "master",
       head: "mohist/run-wr-25",
     })
@@ -126,7 +137,7 @@ describe("RunnerSignalRClient workspace queries", () => {
 
   it("WorkspaceQuery_RejectsMissingBaseBranchInsteadOfGuessingMain", () => {
     const query = resolveWorkspaceQuery({
-      workspacePath: "/tmp/mohist/workspaces/issue-25",
+      workspacePath: "/virtual/workspaces/issue-25",
       branch: "mohist/run-wr-25",
     })
 
@@ -138,7 +149,7 @@ describe("RunnerSignalRClient workspace queries", () => {
     // the runner; the dispatch must supply the per-run head ref.
     const query = resolveWorkspaceQuery({
       issueNumber: 25,
-      workspacePath: "/tmp/mohist/workspaces/issue-25",
+      workspacePath: "/virtual/workspaces/issue-25",
       baseBranch: "master",
     })
 
@@ -169,16 +180,16 @@ describe("RunnerSignalRClient workspace queries", () => {
   })
 
   it("WorkspaceRemoval_OnlyAllowsPathsUnderRunnerRoot", () => {
-    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects/app/workspaces/issue-1")).toBe(true)
-    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects")).toBe(false)
-    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/other/issue-1")).toBe(false)
+    expect(isUnderRunnerRoot("/virtual/projects", "/virtual/projects/app/workspaces/issue-1")).toBe(true)
+    expect(isUnderRunnerRoot("/virtual/projects", "/virtual/projects")).toBe(false)
+    expect(isUnderRunnerRoot("/virtual/projects", "/virtual/other/issue-1")).toBe(false)
   })
 
-  it("GetWorkspaceStatus_RejectsIdentityLessRequestBeforeGit", async () => {
-    builders.length = 0
+  it("GetWorkspaceStatus_RejectsIdentityLessRequestBeforeGit", async (resources) => {
+    currentSignalRTestState().builders.length = 0
     const calls: Array<{ command: string; timeoutMs: number | undefined }> = []
-    setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd, _signal, _env, options) => {
+    resources.signalRExistsChecker = () => true
+    resources.signalRGitRunner = async (_cmd, args, _cwd, _signal, _env, options) => {
       calls.push({ command: args.join(" "), timeoutMs: options?.timeoutMs })
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
@@ -194,9 +205,9 @@ describe("RunnerSignalRClient workspace queries", () => {
         default:
           return runFail(`unexpected git call: ${args.join(" ")}`)
       }
-    })
+    }
 
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/runner-root", null)
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/runner-root", null)
     const handler = findHandler("GetWorkspaceStatus")
     const status = await handler({
       workspacePath: "/runner-root/workspace",
@@ -208,11 +219,11 @@ describe("RunnerSignalRClient workspace queries", () => {
     expect(calls).toEqual([])
   })
 
-  it("GetWorkspaceStatus_RejectsIdentityLessRequestWithoutFetching", async () => {
-    builders.length = 0
+  it("GetWorkspaceStatus_RejectsIdentityLessRequestWithoutFetching", async (resources) => {
+    currentSignalRTestState().builders.length = 0
     const calls: Array<{ command: string; timeoutMs: number | undefined }> = []
-    setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd, _signal, _env, options) => {
+    resources.signalRExistsChecker = () => true
+    resources.signalRGitRunner = async (_cmd, args, _cwd, _signal, _env, options) => {
       calls.push({ command: args.join(" "), timeoutMs: options?.timeoutMs })
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
@@ -228,9 +239,9 @@ describe("RunnerSignalRClient workspace queries", () => {
         default:
           return runFail(`unexpected git call: ${args.join(" ")}`)
       }
-    })
+    }
 
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/runner-root", null)
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/runner-root", null)
     const handler = findHandler("GetWorkspaceStatus")
     const status = await handler({
       workspacePath: "/runner-root/workspace",
@@ -245,47 +256,47 @@ describe("RunnerSignalRClient workspace queries", () => {
 
 describe("RunnerSignalRClient handshake", () => {
   it("IncludesBuildGitHashInQueryStringWhenProvided", () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const hash = "abcdef1234567890abcdef1234567890abcdef12"
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", hash)
-    const last = builders.at(-1)
-    expect(last?.url).toBe(`http://localhost:3456/hubs/runner?runnerId=runner-1&buildGitHash=${hash}`)
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", hash)
+    const last = currentBuilder()
+    expect(last?.url).toBe(`https://runner.test/hubs/runner?runnerId=runner-1&buildGitHash=${hash}`)
   })
 
   it("OmitsBuildGitHashWhenNull", () => {
-    builders.length = 0
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const last = builders.at(-1)
-    expect(last?.url).toBe("http://localhost:3456/hubs/runner?runnerId=runner-1")
+    currentSignalRTestState().builders.length = 0
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const last = currentBuilder()
+    expect(last?.url).toBe("https://runner.test/hubs/runner?runnerId=runner-1")
   })
 
   it("OmitsBuildGitHashWhenNotProvided", () => {
-    builders.length = 0
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects")
-    const last = builders.at(-1)
-    expect(last?.url).toBe("http://localhost:3456/hubs/runner?runnerId=runner-1")
+    currentSignalRTestState().builders.length = 0
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects")
+    const last = currentBuilder()
+    expect(last?.url).toBe("https://runner.test/hubs/runner?runnerId=runner-1")
   })
 
   it("ConfiguresFixedAutomaticReconnectIntervals", () => {
-    builders.length = 0
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const last = builders.at(-1)
+    currentSignalRTestState().builders.length = 0
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const last = currentBuilder()
     expect(last?.reconnectPolicy).toEqual([0, 2000, 5000, 10000, 30000])
   })
 
   it("PresentsTheMachineCredentialAsTheAccessToken", () => {
-    builders.length = 0
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    currentSignalRTestState().builders.length = 0
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       credential: "moh_runner_abc",
     })
-    const last = builders.at(-1)
+    const last = currentBuilder()
     expect(last?.accessTokenFactory?.()).toBe("moh_runner_abc")
   })
 
   it("OmitsTheAccessTokenWithoutACredential", () => {
-    builders.length = 0
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const last = builders.at(-1)
+    currentSignalRTestState().builders.length = 0
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const last = currentBuilder()
     expect(last?.accessTokenFactory?.()).toBe("")
   })
 })
@@ -306,14 +317,14 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   }
 
   it("GetConnectionId_IsNullBeforeStart", () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
     expect(client.getConnectionId()).toBeNull()
   })
 
   it("GetConnectionId_IsAssignedAfterStart", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
     await client.start()
     const id = client.getConnectionId()
     expect(id).not.toBeNull()
@@ -322,9 +333,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("Start_RecoversRuntimeEventOutbox", async () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const recover = vi.fn(async () => {})
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       agentSessionRuntimeEventOutbox: recoveryOutbox(recover),
     })
 
@@ -335,9 +346,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("Disconnect_DoesNotStopRuntimeEventOutbox", async () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const stopOutbox = vi.fn(async () => {})
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       agentSessionRuntimeEventOutbox: {
         ...recoveryOutbox(),
         stop: stopOutbox,
@@ -346,22 +357,22 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
 
     await client.disconnect()
 
-    expect(builders.at(-1)?.connection.stop).toHaveBeenCalledTimes(1)
+    expect(currentBuilder().connection.stop).toHaveBeenCalledTimes(1)
     expect(stopOutbox).not.toHaveBeenCalled()
   })
 
   it("ProbeLiveness_ReturnsFalse_WhenNotConnected", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
     // state is Disconnected (never started)
     const result = await client.probeLiveness(new AbortController().signal)
     expect(result).toBe(false)
   })
 
   it("ProbeLiveness_ReturnsTrue_OnSuccessfulPing", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const conn = builders.at(-1)!.connection
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-1"
     conn.invoke.mockResolvedValue("conn-1")
@@ -371,9 +382,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ProbeLiveness_ReturnsFalse_OnInvokeRejection", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const conn = builders.at(-1)!.connection
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-1"
     conn.invoke.mockRejectedValue(new Error("invoke failed"))
@@ -383,9 +394,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
 
   it("ProbeLiveness_ReturnsFalse_OnTimeout", async () => {
     vi.useFakeTimers()
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const conn = builders.at(-1)!.connection
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-1"
     let resolveInvoke: (value: unknown) => void = () => undefined
@@ -393,8 +404,8 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
       resolveInvoke = resolve
     }))
     // Re-construct with a tiny probe timeout
-    const tight = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, { probeTimeoutMs: 5 })
-    const tightConn = builders.at(-1)!.connection
+    const tight = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, { probeTimeoutMs: 5 })
+    const tightConn = currentBuilder().connection
     tightConn.state = signalR.HubConnectionState.Connected
     tightConn.connectionId = "conn-1"
     let resolveTight: (value: unknown) => void = () => undefined
@@ -413,9 +424,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ProbeLiveness_ReturnsFalse_OnAbortSignal", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, { probeTimeoutMs: 5_000 })
-    const conn = builders.at(-1)!.connection
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, { probeTimeoutMs: 5_000 })
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-1"
     let resolveInvoke: (value: unknown) => void = () => undefined
@@ -431,9 +442,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ForceReconnect_StopsThenStarts_WhenConnected", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const conn = builders.at(-1)!.connection
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-old"
     await client.forceReconnect(new AbortController().signal)
@@ -443,12 +454,12 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ForceReconnect_NotifiesCallbackAfterManualReconnect", async () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const seen: string[] = []
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       onReconnected: (id) => seen.push(id),
     })
-    const conn = builders.at(-1)!.connection
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-old"
 
@@ -461,12 +472,12 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ForceReconnect_RecoversRuntimeEventOutbox", async () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const recover = vi.fn(async () => {})
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       agentSessionRuntimeEventOutbox: recoveryOutbox(recover),
     })
-    const conn = builders.at(-1)!.connection
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
 
     await client.forceReconnect(new AbortController().signal)
@@ -475,9 +486,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ForceReconnect_StartsDirectly_WhenDisconnected", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const conn = builders.at(-1)!.connection
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const conn = currentBuilder().connection
     // initial state is Disconnected
     await client.forceReconnect(new AbortController().signal)
     expect(conn.stop).not.toHaveBeenCalled()
@@ -485,9 +496,9 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ForceReconnect_SwallowsStopError_AndStillStarts", async () => {
-    builders.length = 0
-    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
-    const conn = builders.at(-1)!.connection
+    currentSignalRTestState().builders.length = 0
+    const client = new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null)
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-old"
     conn.stop.mockRejectedValueOnce(new Error("stop failed"))
@@ -496,12 +507,12 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("OnReconnected_FiresHostCallback_WithNewConnectionId", async () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const seen: string[] = []
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       onReconnected: (id) => seen.push(id),
     })
-    const conn = builders.at(-1)!.connection
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-old"
     expect(conn.onreconnected).toBeDefined()
@@ -512,12 +523,12 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("OnReconnected_RecoversRuntimeEventOutbox", async () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const recover = vi.fn(async () => {})
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       agentSessionRuntimeEventOutbox: recoveryOutbox(recover),
     })
-    const conn = builders.at(-1)!.connection
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-new"
 
@@ -528,12 +539,12 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("OnReconnected_UsesConnectionConnectionId_WhenCallbackArgMissing", async () => {
-    builders.length = 0
+    currentSignalRTestState().builders.length = 0
     const seen: string[] = []
-    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+    new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, {
       onReconnected: (id) => seen.push(id),
     })
-    const conn = builders.at(-1)!.connection
+    const conn = currentBuilder().connection
     conn.state = signalR.HubConnectionState.Connected
     conn.connectionId = "conn-old"
     conn.connectionId = "conn-new"

@@ -1,3 +1,5 @@
+import { currentRunnerResources } from "../system/filesystem.js"
+
 /**
  * Single sink for ops command output. The runner exposes ONE capture
  * funnel (`ActionHost.log.write(source, text)`) so every ops output
@@ -106,7 +108,9 @@ export class CredentialMasker {
 const REDACTED = "***"
 const SECRET_ENV_NAME = /(?:TOKEN|PASSWORD|SECRET|API_KEY|ACCESS_KEY|AUTH)$/i
 
-export function createCredentialMaskerFromEnvironment(env: NodeJS.ProcessEnv = process.env): CredentialMasker {
+export function createCredentialMaskerFromEnvironment(
+  env: Readonly<Record<string, string | undefined>> = currentRunnerResources()?.environment ?? process.env,
+): CredentialMasker {
   const masker = new CredentialMasker()
   for (const [name, value] of Object.entries(env)) {
     if (!SECRET_ENV_NAME.test(name)) continue

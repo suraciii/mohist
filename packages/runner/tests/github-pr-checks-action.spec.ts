@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
-import { setGitHubPrChecksTimingForTest, setGitHubPrGhRunnerForTest } from "../src/actions/github-pr.js"
 import { githubPrChecksAction } from "../src/actions/github-pr-checks-action.js"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
@@ -11,13 +10,19 @@ import {
   ghFail,
   ghOk,
   type CommandResult,
+  type MergeGhTestResources,
 } from "./support/merge-github-pr-test-helpers.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
 
-const { ghCalls, installGh } = createMergeGhTestHarness()
+const { installGh } = createMergeGhTestHarness()
 
-afterEach(() => {
-  ghCalls.length = 0
-})
+function it(name: string, body: (resources: MergeGhTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: MergeGhTestResources = { fileSystem: new MemoryFileSystem(), ghCalls: [] }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 const WORKSPACE_PATH = "/workspace"
 
@@ -39,16 +44,16 @@ function prChecksContext(withOverrides: JsonObject = {}): ActionContext {
   }
 }
 
-function installGhFlat(responses: Record<string, () => CommandResult>): string[] {
+function installGhFlat(resources: MergeGhTestResources, responses: Record<string, () => CommandResult>): string[] {
   const calls: string[] = []
-  setGitHubPrGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
+  resources.githubPrGhRunner = async (cmd, args, _cwd, _signal, _env, options) => {
     const full = [cmd, ...args].join(" ")
     calls.push(full)
-    ghCalls.push({ command: full, timeoutMs: options?.timeoutMs })
+    resources.ghCalls.push({ command: full, timeoutMs: options?.timeoutMs })
     const responder = responses[full]
     if (!responder) return ghFail(`unexpected gh call: ${full}`)
     return responder()
-  })
+  }
   return calls
 }
 
@@ -64,8 +69,8 @@ describe("mohist/github-pr-checks registry", () => {
 })
 
 describe("mohist/github-pr-checks action", () => {
-  it("verifies and returns status verified when all checks pass", async () => {
-    const calls = installGhFlat({
+  it("verifies and returns status verified when all checks pass", async (resources) => {
+    const calls = installGhFlat(resources, {
       "gh --version": () => ghOk("gh version 2.40.0\n"),
       "gh auth status": () => ghOk("Logged in to github.com\n"),
       "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () =>
@@ -85,9 +90,9 @@ describe("mohist/github-pr-checks action", () => {
     expect(result.output).not.toBeNull()
   })
 
-  it("fails with errorCode pr-checks-failed when a check is FAILURE/CANCELLED/ACTION_REQUIRED", async () => {
+  it("fails with errorCode pr-checks-failed when a check is FAILURE/CANCELLED/ACTION_REQUIRED", async (resources) => {
     for (const conclusion of ["FAILURE", "CANCELLED", "ACTION_REQUIRED"]) {
-      installGhFlat({
+      installGhFlat(resources, {
         "gh --version": () => ghOk("ok\n"),
         "gh auth status": () => ghOk("ok\n"),
         "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () =>
@@ -102,10 +107,10 @@ describe("mohist/github-pr-checks action", () => {
     }
   })
 
-  it("polls while checks are pending, then verifies once they pass", async () => {
-    setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 5_000, unavailableRetryLimit: 3 })
+  it("polls while checks are pending, then verifies once they pass", async (resources) => {
+    resources.githubPrChecksTiming = { pollIntervalMs: 1, noChecksGraceMs: 5_000, unavailableRetryLimit: 3 }
     let polls = 0
-    installGhFlat({
+    installGhFlat(resources, {
       "gh --version": () => ghOk("ok\n"),
       "gh auth status": () => ghOk("ok\n"),
       "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () => {
@@ -123,12 +128,12 @@ describe("mohist/github-pr-checks action", () => {
     expect(polls).toBe(3)
   })
 
-  it("polls an initially empty rollup until passing checks appear", async () => {
+  it("polls an initially empty rollup until passing checks appear", async (resources) => {
     vi.useFakeTimers()
     try {
-      setGitHubPrChecksTimingForTest({ pollIntervalMs: 10, noChecksGraceMs: 100 })
+      resources.githubPrChecksTiming = { pollIntervalMs: 10, noChecksGraceMs: 100 }
       let polls = 0
-      installGhFlat({
+      installGhFlat(resources, {
         "gh --version": () => ghOk("ok\n"),
         "gh auth status": () => ghOk("ok\n"),
         "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () => {
@@ -152,12 +157,12 @@ describe("mohist/github-pr-checks action", () => {
     }
   })
 
-  it("returns pr-checks-unavailable when the rollup remains empty through the grace period", async () => {
+  it("returns pr-checks-unavailable when the rollup remains empty through the grace period", async (resources) => {
     vi.useFakeTimers()
     try {
-      setGitHubPrChecksTimingForTest({ pollIntervalMs: 10, noChecksGraceMs: 25 })
+      resources.githubPrChecksTiming = { pollIntervalMs: 10, noChecksGraceMs: 25 }
       let polls = 0
-      installGhFlat({
+      installGhFlat(resources, {
         "gh --version": () => ghOk("ok\n"),
         "gh auth status": () => ghOk("ok\n"),
         "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () => {
@@ -184,8 +189,8 @@ describe("mohist/github-pr-checks action", () => {
     expect(result.error).toMatchObject({ code: "invalid-input" })
   })
 
-  it("fails with config-error when gh precheck fails", async () => {
-    installGhFlat({
+  it("fails with config-error when gh precheck fails", async (resources) => {
+    installGhFlat(resources, {
       "gh --version": () => ghOk("ok\n"),
       "gh auth status": () => ghFail("not logged in"),
     })

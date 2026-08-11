@@ -2,14 +2,6 @@ export { createGitHubPrAction } from "./create-github-pr.js"
 export { mergeGitHubPrAction } from "./merge-github-pr.js"
 export { markGitHubPrReadyAction } from "./mark-github-pr-ready.js"
 
-export {
-  setGitHubPrGhRunnerForTest,
-  setGitHubPrGitRunnerForTest,
-} from "./github-pr-runtime.js"
-export {
-  setGitHubPrChecksTimingForTest,
-  setGitHubPrTransientRetryForTest,
-} from "./github-pr-checks-wait.js"
 
 export {
   classifyGhFailure,

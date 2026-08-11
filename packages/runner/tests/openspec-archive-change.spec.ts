@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { JsonObject } from "../src/core/types.js"
 import {
   archiveChangeAction,
-  setArchiveFileSystemForTest,
-  setOpenSpecGitRunnerForTest,
   type ArchiveFileSystem,
+  type OpenSpecGitRunner,
 } from "../src/actions/openspec.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 const ARCHIVE_TEST_TIME = new Date("2026-07-11T12:00:00.000Z")
 
@@ -19,18 +19,15 @@ describe("mohist/archive-change", () => {
   })
 
   afterEach(() => {
-    setArchiveFileSystemForTest(null)
-    setOpenSpecGitRunnerForTest(null)
     vi.useRealTimers()
   })
 
   it("absent hint: computes a dated destination, moves, commits, and writes the destination", async () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "abc1234" }))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "abc1234" }), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir)))
 
     expect(result.error).toBeUndefined()
     const output = result.output as Record<string, unknown>
@@ -48,10 +45,9 @@ describe("mohist/archive-change", () => {
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events, /* withSource */ false)
     // The prior archive already moved source -> destination; seed the destination.
     fileSystem.writeFile(join(workDir, destinationRel, "proposal.md"), "proposal\n")
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel }))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel })))
 
     expect(result.error).toBeUndefined()
     const output = result.output as Record<string, unknown>
@@ -65,10 +61,9 @@ describe("mohist/archive-change", () => {
   it("stale hint with source still present re-archives and overwrites the var", async () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`] }))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: "openspec/changes/archive/2025-12-31-issue-127" }))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`] }), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: "openspec/changes/archive/2025-12-31-issue-127" })))
 
     expect(result.error).toBeUndefined()
     expect(result.effects?.writeVars).toEqual({ archive: destinationRel })
@@ -78,10 +73,9 @@ describe("mohist/archive-change", () => {
   it("stale hint with neither source nor destination present fails missing-source", async () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events, /* withSource */ false)
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel }))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel })))
 
     expect(result.error?.code).toBe("missing-source")
     expect(events.some((event) => event.startsWith("rename:"))).toBe(false)
@@ -90,10 +84,9 @@ describe("mohist/archive-change", () => {
   it("no hint and no source fails missing-source (first-time archive without a change directory)", async () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events, /* withSource */ false)
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir)))
 
     expect(result.error?.code).toBe("missing-source")
   })
@@ -102,10 +95,9 @@ describe("mohist/archive-change", () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
     fileSystem.writeFile(join(workDir, destinationRel, "archive.md"), "archive\n")
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel }))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel })))
 
     expect(result.error?.code).toBe("partial-archive")
     expect(events.some((event) => event.startsWith("rename:"))).toBe(false)
@@ -115,10 +107,9 @@ describe("mohist/archive-change", () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
     let failCommit = true
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], commitFailure: () => failCommit }))
 
-    const first = await callAction(archiveChangeAction, context(workDir, changeDir))
+    const git = fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], commitFailure: () => failCommit })
+    const first = await withArchiveResources(fileSystem, git, () => callAction(archiveChangeAction, context(workDir, changeDir)))
     expect(first.error?.code).toBe("retry-safe")
     expect((first.error?.message ?? "")).toContain("git commit archive change failed")
     // Rollback moved the directory back to source.
@@ -128,7 +119,7 @@ describe("mohist/archive-change", () => {
     expect(first.effects?.writeVars).toBeUndefined()
 
     failCommit = false
-    const retry = await callAction(archiveChangeAction, context(workDir, changeDir))
+    const retry = await withArchiveResources(fileSystem, git, () => callAction(archiveChangeAction, context(workDir, changeDir)))
     expect(retry.error).toBeUndefined()
     expect(retry.effects?.writeVars).toEqual({ archive: destinationRel })
   })
@@ -138,10 +129,9 @@ describe("mohist/archive-change", () => {
     const { fileSystem, workDir, changeDir, baseDestinationRel } = fixture(events)
     const destinationRel = `${baseDestinationRel}-v2`
     fileSystem.writeFile(join(workDir, baseDestinationRel, "old.md"), "old\n")
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "v2sha" }))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "v2sha" }), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir)))
 
     expect(result.error).toBeUndefined()
     const output = result.output as Record<string, unknown>
@@ -152,10 +142,9 @@ describe("mohist/archive-change", () => {
   it("no-change commit (already committed on a prior attempt) persists the var without a new commit", async () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [] }))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
+    const result = await withArchiveResources(fileSystem, fakeGit(events, destinationRel, { changedFiles: [] }), () =>
+      callAction(archiveChangeAction, context(workDir, changeDir)))
 
     expect(result.error).toBeUndefined()
     const output = result.output as Record<string, unknown>
@@ -172,6 +161,14 @@ function fixture(events: string[] = [], withSource = true) {
   const fileSystem = new MemoryArchiveFileSystem(events)
   if (withSource) fileSystem.writeFile(join(changeDir, "proposal.md"), "proposal\n")
   return { fileSystem, workDir, changeDir, destinationRel, baseDestinationRel: destinationRel }
+}
+
+async function withArchiveResources<T>(
+  fileSystem: ArchiveFileSystem,
+  git: OpenSpecGitRunner,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return await withTestRunnerResources(operation, { archiveFileSystem: fileSystem, openSpecGitRunner: git })
 }
 
 function fakeGit(events: string[], destinationRel: string, options: { changedFiles?: string[]; sha?: string; commitFailure?: () => boolean } = {}) {

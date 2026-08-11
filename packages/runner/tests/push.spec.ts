@@ -1,27 +1,39 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { createDefaultRegistry } from "../src/actions/registry.js"
-import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
+import { pushAction } from "../src/actions/push.js"
+import type { RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { callAction } from "./support/call-action.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
 
 type GitCall = { workDir: string; args: string[]; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
 const PROJECT_PATH = "/project-checkout"
 
-afterEach(() => {
-  setPushGitRunnerForTest(null)
-})
+type PushTestResources = {
+  fileSystem: RunnerFileSystem
+  pushGitRunner?: RunnerGitRunner
+}
 
-function installGit(respond: (call: GitCall, history: GitCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number }>) {
+function it(name: string, body: (resources: PushTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: PushTestResources = { fileSystem: new MemoryFileSystem() }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
+
+function installGit(resources: PushTestResources, respond: (call: GitCall, history: GitCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number }>) {
   const calls: GitCall[] = []
-  setPushGitRunnerForTest(async (workDir, args, _signal, options) => {
+  const runner: RunnerGitRunner = async (workDir, args, _signal, options) => {
     const record: GitCall = { workDir, args: [...args], timeoutMs: options?.timeoutMs }
     calls.push(record)
     return await respond(record, calls)
-  })
+  }
+  resources.pushGitRunner = runner
   return calls
 }
 
@@ -78,8 +90,8 @@ describe("mohist/push", () => {
     expect(resolved.kind === "definition" ? resolved.definition.manifest.name : null).toBe("mohist/push")
   })
 
-  it("MissingSource_FailsWithoutVariableFallback", async () => {
-    const calls = installGit(async () => { throw new Error("git must not run") })
+  it("MissingSource_FailsWithoutVariableFallback", async (resources) => {
+    const calls = installGit(resources, async () => { throw new Error("git must not run") })
     const result = await callAction(pushAction, context({ source: null }, {
       project: { path: WORKSPACE_PATH, defaultBranch: "main" },
       repository: { name: "web", gitUrl: "https://example.com/web.git", baseBranch: null },
@@ -90,8 +102,8 @@ describe("mohist/push", () => {
     expect(calls).toHaveLength(0)
   })
 
-  it("CheckpointPush_PublishesHeadToAuthoritativeWorkflowBranch", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("CheckpointPush_PublishesHeadToAuthoritativeWorkflowBranch", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse HEAD":
@@ -125,8 +137,8 @@ describe("mohist/push", () => {
     })
   })
 
-  it("FastForwardPush_AdvancesRemoteTargetViaRefspec", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("FastForwardPush_AdvancesRemoteTargetViaRefspec", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -158,8 +170,8 @@ describe("mohist/push", () => {
     })
   })
 
-  it("ProjectPathDiffers_UsesBoundWorkspacePath", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ProjectPathDiffers_UsesBoundWorkspacePath", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -180,8 +192,8 @@ describe("mohist/push", () => {
     expect(output.workDir).toBe(WORKSPACE_PATH)
   })
 
-  it("FastForwardPush_NoCheckoutOrCloneOrWorktreeMutation", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("FastForwardPush_NoCheckoutOrCloneOrWorktreeMutation", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -215,8 +227,8 @@ describe("mohist/push", () => {
     }
   })
 
-  it("NonFastForwardRejection_ClassifiesAsBaseMoved", async () => {
-    installGit(async (_call, history) => {
+  it("NonFastForwardRejection_ClassifiesAsBaseMoved", async (resources) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -233,8 +245,8 @@ describe("mohist/push", () => {
     expect(result.error?.message).toContain("target branch moved")
   })
 
-  it("RejectedWithFetchFirstHint_ClassifiesAsBaseMoved", async () => {
-    installGit(async (_call, history) => {
+  it("RejectedWithFetchFirstHint_ClassifiesAsBaseMoved", async (resources) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -250,8 +262,8 @@ describe("mohist/push", () => {
     expect(result.error).toMatchObject({ code: "base-moved" })
   })
 
-  it("TransientAuthError_ClassifiesAsRetrySafe", async () => {
-    installGit(async (_call, history) => {
+  it("TransientAuthError_ClassifiesAsRetrySafe", async (resources) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -267,8 +279,8 @@ describe("mohist/push", () => {
     expect(result.error).toMatchObject({ code: "push-failed" })
   })
 
-  it("SourceResolveFails_ClassifiesAsRetrySafeWithNullCommit", async () => {
-    installGit(async (_call, history) => {
+  it("SourceResolveFails_ClassifiesAsRetrySafeWithNullCommit", async (resources) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -282,8 +294,8 @@ describe("mohist/push", () => {
     expect(result.error).toMatchObject({ code: "push-failed" })
   })
 
-  it("ExplicitRemoteOption_PushesAgainstConfiguredRemote", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ExplicitRemoteOption_PushesAgainstConfiguredRemote", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -311,8 +323,8 @@ describe("mohist/push", () => {
     })
   })
 
-  it("ExplicitInputs_WinOverConflictingDeliveryVariables", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ExplicitInputs_WinOverConflictingDeliveryVariables", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       if (command === "rev-parse other") return ok("explicit-sha\n")
       if (command === "push upstream other:release") return ok("pushed")
@@ -334,8 +346,8 @@ describe("mohist/push", () => {
     expect(workspaceCalls(calls)).toEqual(["rev-parse other", "push upstream other:release"])
   })
 
-  it("ExplicitSourceOption_PushesThatRefAsSource", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ExplicitSourceOption_PushesThatRefAsSource", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse custom-source":
@@ -363,9 +375,9 @@ describe("mohist/push", () => {
     })
   })
 
-  it("NoLandingClone_CreatesNone", async () => {
+  it("NoLandingClone_CreatesNone", async (resources) => {
     let landingCloneAttempted = false
-    installGit(async (_call, history) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -383,8 +395,8 @@ describe("mohist/push", () => {
     expect(landingCloneAttempted).toBe(false)
   })
 
-  it("PushResult_RecordsLandedCommitAndPushOccurred", async () => {
-    installGit(async (_call, history) => {
+  it("PushResult_RecordsLandedCommitAndPushOccurred", async (resources) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -407,8 +419,8 @@ describe("mohist/push", () => {
     expect(result.error).toBeUndefined()
   })
 
-  it("ForceWithLease_UsesExplicitLeaseAgainstResolvedRemoteTip", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceWithLease_UsesExplicitLeaseAgainstResolvedRemoteTip", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -440,8 +452,8 @@ describe("mohist/push", () => {
     })
   })
 
-  it("ForceWithLease_RemoteBranchAbsent_PushesWithoutForceToCreateIt", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceWithLease_RemoteBranchAbsent_PushesWithoutForceToCreateIt", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -466,8 +478,8 @@ describe("mohist/push", () => {
     expect(workspaceCalls(calls).some((cmd) => cmd.includes("--force-with-lease"))).toBe(false)
   })
 
-  it("ForceWithLease_RemoteProbeFails_FallsBackToBareLease", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceWithLease_RemoteProbeFails_FallsBackToBareLease", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -488,8 +500,8 @@ describe("mohist/push", () => {
     expect(workspaceCalls(calls)).toContain("push --force-with-lease origin mo/issue-99:master")
   })
 
-  it("ForceWithLease_AcceptsTruthyStringAndRejectsAbsent", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceWithLease_AcceptsTruthyStringAndRejectsAbsent", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -524,8 +536,8 @@ describe("mohist/push", () => {
     expect(workspaceCalls(calls).some((cmd) => cmd.startsWith("push --force-with-lease") || cmd.startsWith("ls-remote"))).toBe(false)
   })
 
-  it("ForceWithLease_ExplicitLeaseRejected_ClassifiesAsBaseMoved", async () => {
-    installGit(async (_call, history) => {
+  it("ForceWithLease_ExplicitLeaseRejected_ClassifiesAsBaseMoved", async (resources) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -543,8 +555,8 @@ describe("mohist/push", () => {
     expect(result.error).toMatchObject({ code: "base-moved" })
   })
 
-  it("ForceTrue_EmitsBareForceAndSkipsLsRemoteProbe", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceTrue_EmitsBareForceAndSkipsLsRemoteProbe", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -574,8 +586,8 @@ describe("mohist/push", () => {
     })
   })
 
-  it("ForceTrue_WinsOverForceWithLease", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceTrue_WinsOverForceWithLease", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -603,8 +615,8 @@ describe("mohist/push", () => {
     })
   })
 
-  it("ForceFalse_PreservesForceWithLeaseBehavior", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceFalse_PreservesForceWithLeaseBehavior", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -631,8 +643,8 @@ describe("mohist/push", () => {
     })
   })
 
-  it("NetworkCommands_ReceiveTimeoutMsAndLocalProbesDoNot", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("NetworkCommands_ReceiveTimeoutMsAndLocalProbesDoNot", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -652,8 +664,8 @@ describe("mohist/push", () => {
     expect(push?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
-  it("ForceWithLease_LsRemoteProbeAndPushReceiveNetworkTimeout", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceWithLease_LsRemoteProbeAndPushReceiveNetworkTimeout", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -677,8 +689,8 @@ describe("mohist/push", () => {
     expect(push?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
-  it("PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
-    installGit(async (_call, history) => {
+  it("PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async (resources) => {
+    installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
@@ -707,8 +719,8 @@ describe("mohist/push", () => {
     expect(result.error?.message).not.toContain("base branch moved")
   })
 
-  it("ForceWithLease_LsRemoteTimeoutFailsRetrySafeAndSurfacesDuration", async () => {
-    const calls = installGit(async (_call, history) => {
+  it("ForceWithLease_LsRemoteTimeoutFailsRetrySafeAndSurfacesDuration", async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":

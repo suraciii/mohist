@@ -1,25 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import {
-  runCommand,
-  setProcessKillerForTest,
-  setProcessSpawnerForTest,
-} from "../src/system/process.js"
+import { describe, expect, it as vitestIt } from "vitest"
+import { runCommand } from "../src/system/process.js"
 import { FakeProcessSpawner } from "./support/fake-process.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 describe("runCommand output", () => {
-  let spawner: FakeProcessSpawner
-
-  beforeEach(() => {
-    spawner = new FakeProcessSpawner()
-    setProcessSpawnerForTest(spawner.spawn)
+  const it = (name: string, body: (spawner: FakeProcessSpawner) => Promise<void>) => vitestIt(name, () => {
+    const spawner = new FakeProcessSpawner()
+    return withTestRunnerResources(() => body(spawner), { processSpawner: spawner.spawn })
   })
 
-  afterEach(() => {
-    setProcessSpawnerForTest(null)
-    setProcessKillerForTest(null)
-  })
-
-  it("StreamsLinesAndPreservesAggregateOutput", async () => {
+  it("StreamsLinesAndPreservesAggregateOutput", async (spawner) => {
     const lines: string[] = []
     const result = runCommand("command", ["--flag"], "/workspace", new AbortController().signal, undefined, {
       onLine: (line) => lines.push(line),
@@ -39,7 +29,7 @@ describe("runCommand output", () => {
     expect(spawner.calls).toHaveLength(1)
   })
 
-  it("DecodesSplitUtf8AndFlushesTrailingLinesBeforeClose", async () => {
+  it("DecodesSplitUtf8AndFlushesTrailingLinesBeforeClose", async (spawner) => {
     const lines: string[] = []
     const closes: number[] = []
     const result = runCommand("command", [], "/workspace", new AbortController().signal, undefined, {

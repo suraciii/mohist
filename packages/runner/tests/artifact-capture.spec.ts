@@ -1,6 +1,6 @@
-import { mkdir, symlink, writeFile, readFile } from "node:fs/promises"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { join } from "node:path"
-import { beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import {
   actionProducedArtifacts,
   captureArtifacts,
@@ -14,6 +14,8 @@ import {
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
 import type { JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import { createTestTempDir } from "./support/temp-dir.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { currentRunnerFileSystem } from "../src/system/filesystem.js"
 
 class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact"> {
   public uploads: CapturedArtifact[] = []
@@ -55,13 +57,29 @@ class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact"> {
   }
 }
 
-let workDir: string
-let outsideDir: string
+interface ArtifactTestPaths {
+  workDir: string
+  outsideDir: string
+}
 
-beforeEach(async () => {
-  workDir = await createTestTempDir("mohist-artifact-capture-")
-  outsideDir = await createTestTempDir("mohist-artifact-capture-outside-")
-})
+const testPathStorage = new AsyncLocalStorage<ArtifactTestPaths>()
+
+function paths(): ArtifactTestPaths {
+  const value = testPathStorage.getStore()
+  if (!value) throw new Error("artifact test resource context is not active")
+  return value
+}
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => withTestRunnerResources(async () => {
+    const testPaths: ArtifactTestPaths = {
+      workDir: await createTestTempDir("mohist-artifact-capture-"),
+      outsideDir: await createTestTempDir("mohist-artifact-capture-outside-"),
+    }
+    await testPathStorage.run(testPaths, async () => await body())
+  })),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
 
 function workItem(artifacts: JsonObject | null): DispatchWorkItem {
   return {
@@ -116,9 +134,9 @@ describe("actionProducedArtifacts", () => {
 
 describe("captureOne", () => {
   it("capturesFileWithSha256HashAndContentType", async () => {
-    const path = join(workDir, "review.md")
-    await writeFile(path, "this is the review\n", "utf8")
-    const capture = await captureOne(workDir, { path: "review.md", source: "declared" })
+    const path = join(paths().workDir, "review.md")
+    await currentRunnerFileSystem().writeText(path, "this is the review\n")
+    const capture = await captureOne(paths().workDir, { path: "review.md", source: "declared" })
     expect(capture.kind).toBe("file")
     expect(capture.source).toBe("declared")
     expect(capture.path).toBe("review.md")
@@ -129,79 +147,79 @@ describe("captureOne", () => {
   })
 
   it("capturesDirectoryWithFileManifestAndLimits", async () => {
-    const specsDir = join(workDir, "specs")
-    await mkdir(join(specsDir, "sub"), { recursive: true })
-    await writeFile(join(specsDir, "a.md"), "alpha", "utf8")
-    await writeFile(join(specsDir, "sub", "b.md"), "beta", "utf8")
-    const capture = await captureOne(workDir, { path: "specs", source: "declared" })
+    const specsDir = join(paths().workDir, "specs")
+    await currentRunnerFileSystem().ensureDir(join(specsDir, "sub"))
+    await currentRunnerFileSystem().writeText(join(specsDir, "a.md"), "alpha")
+    await currentRunnerFileSystem().writeText(join(specsDir, "sub", "b.md"), "beta")
+    const capture = await captureOne(paths().workDir, { path: "specs", source: "declared" })
     expect(capture.kind).toBe("directory")
     expect(capture.fileCount).toBe(2)
     const manifest = JSON.parse(new TextDecoder().decode(capture.content))
     expect(manifest.kind).toBe("directory")
-    const paths = manifest.files.map((f: { path: string }) => f.path).sort()
-    expect(paths).toEqual(["a.md", "sub/b.md"])
+    const manifestPaths = manifest.files.map((f: { path: string }) => f.path).sort()
+    expect(manifestPaths).toEqual(["a.md", "sub/b.md"])
   })
 
   it("refusesPathsEscapingWorkspace", async () => {
-    await expect(captureOne(workDir, { path: "../escape.md", source: "declared" })).rejects.toThrow(/escapes the workspace/)
-    await expect(captureOne(workDir, { path: "/etc/passwd", source: "declared" })).rejects.toThrow(/escapes the workspace/)
+    await expect(captureOne(paths().workDir, { path: "../escape.md", source: "declared" })).rejects.toThrow(/escapes the workspace/)
+    await expect(captureOne(paths().workDir, { path: "/etc/passwd", source: "declared" })).rejects.toThrow(/escapes the workspace/)
   })
 
   it("refusesSymlinkedTargetAtTopLevel", async () => {
-    const target = join(workDir, "real.md")
-    await writeFile(target, "real content", "utf8")
-    const linkPath = join(workDir, "link.md")
-    await symlink(target, linkPath)
-    await expect(captureOne(workDir, { path: "link.md", source: "declared" })).rejects.toThrow(/symlink/)
+    const target = join(paths().workDir, "real.md")
+    await currentRunnerFileSystem().writeText(target, "real content")
+    const linkPath = join(paths().workDir, "link.md")
+    await currentRunnerFileSystem().symlink(target, linkPath)
+    await expect(captureOne(paths().workDir, { path: "link.md", source: "declared" })).rejects.toThrow(/symlink/)
   })
 
   it("refusesSymlinkedFileInsideDirectoryArtifact", async () => {
-    const specsDir = join(workDir, "specs")
-    await mkdir(specsDir, { recursive: true })
-    const target = join(outsideDir, "outside.md")
-    await writeFile(target, "outside", "utf8")
-    await symlink(target, join(specsDir, "link.md"))
-    await expect(captureOne(workDir, { path: "specs", source: "declared" })).rejects.toThrow(/symlink/)
+    const specsDir = join(paths().workDir, "specs")
+    await currentRunnerFileSystem().ensureDir(specsDir)
+    const target = join(paths().outsideDir, "outside.md")
+    await currentRunnerFileSystem().writeText(target, "outside")
+    await currentRunnerFileSystem().symlink(target, join(specsDir, "link.md"))
+    await expect(captureOne(paths().workDir, { path: "specs", source: "declared" })).rejects.toThrow(/symlink/)
   })
 
   it("enforcesFileCountLimitForDirectory", async () => {
-    const specsDir = join(workDir, "specs")
-    await mkdir(specsDir, { recursive: true })
+    const specsDir = join(paths().workDir, "specs")
+    await currentRunnerFileSystem().ensureDir(specsDir)
     for (let i = 0; i < 3; i += 1) {
-      await writeFile(join(specsDir, `f${i}.md`), `file ${i}`, "utf8")
+      await currentRunnerFileSystem().writeText(join(specsDir, `f${i}.md`), `file ${i}`)
     }
     const limits: ArtifactCaptureLimits = { ...DEFAULT_ARTIFACT_CAPTURE_LIMITS, maxDirectoryFileCount: 2 }
-    await expect(captureOne(workDir, { path: "specs", source: "declared" }, limits)).rejects.toThrow(/file limit/)
+    await expect(captureOne(paths().workDir, { path: "specs", source: "declared" }, limits)).rejects.toThrow(/file limit/)
   })
 
   it("enforcesTotalSizeLimitForDirectory", async () => {
-    const specsDir = join(workDir, "specs")
-    await mkdir(specsDir, { recursive: true })
-    await writeFile(join(specsDir, "big.md"), "x".repeat(200), "utf8")
+    const specsDir = join(paths().workDir, "specs")
+    await currentRunnerFileSystem().ensureDir(specsDir)
+    await currentRunnerFileSystem().writeText(join(specsDir, "big.md"), "x".repeat(200))
     const limits: ArtifactCaptureLimits = { ...DEFAULT_ARTIFACT_CAPTURE_LIMITS, maxDirectoryTotalSize: 100 }
-    await expect(captureOne(workDir, { path: "specs", source: "declared" }, limits)).rejects.toThrow(/total size limit/)
+    await expect(captureOne(paths().workDir, { path: "specs", source: "declared" }, limits)).rejects.toThrow(/total size limit/)
   })
 
   it("enforcesSingleFileSizeLimit", async () => {
-    const path = join(workDir, "big.bin")
-    await writeFile(path, "y".repeat(2048), "utf8")
+    const path = join(paths().workDir, "big.bin")
+    await currentRunnerFileSystem().writeText(path, "y".repeat(2048))
     const limits: ArtifactCaptureLimits = { ...DEFAULT_ARTIFACT_CAPTURE_LIMITS, maxFileSize: 100 }
-    await expect(captureOne(workDir, { path: "big.bin", source: "declared" }, limits)).rejects.toThrow(/single-file limit/)
+    await expect(captureOne(paths().workDir, { path: "big.bin", source: "declared" }, limits)).rejects.toThrow(/single-file limit/)
   })
 
   it("missingDeclaredFile_IsReportedAsFailure", async () => {
-    await expect(captureOne(workDir, { path: "missing.md", source: "declared" })).rejects.toThrow()
+    await expect(captureOne(paths().workDir, { path: "missing.md", source: "declared" })).rejects.toThrow()
   })
 })
 
 describe("captureArtifacts", () => {
   it("collectsDeclaredAndDynamicArtifactsWithoutDuplicates", async () => {
-    await writeFile(join(workDir, "review.md"), "first review", "utf8")
-    await writeFile(join(workDir, "diagnostic.log"), "diagnostic", "utf8")
+    await currentRunnerFileSystem().writeText(join(paths().workDir, "review.md"), "first review")
+    await currentRunnerFileSystem().writeText(join(paths().workDir, "diagnostic.log"), "diagnostic")
     const work = workItem({ files: [{ path: "review.md" }] })
     const outcome = await captureArtifacts({
       work,
-      workDir,
+      workDir: paths().workDir,
       dynamicArtifacts: [{ path: "review.md" }, { path: "diagnostic.log" }],
     })
     expect(outcome.failures).toEqual([])
@@ -212,7 +230,7 @@ describe("captureArtifacts", () => {
 
   it("missingDeclaredArtifact_ProducesFailureWithDeclaredSource", async () => {
     const work = workItem({ files: [{ path: "review.md" }] })
-    const outcome = await captureArtifacts({ work, workDir, dynamicArtifacts: [] })
+    const outcome = await captureArtifacts({ work, workDir: paths().workDir, dynamicArtifacts: [] })
     expect(outcome.captures).toEqual([])
     expect(outcome.failures).toEqual([
       expect.objectContaining({ path: "review.md", source: "declared" }),
@@ -222,11 +240,11 @@ describe("captureArtifacts", () => {
 
 describe("uploadCapturedArtifacts", () => {
   it("uploadsEachCaptureAndReturnsUploadIds", async () => {
-    await writeFile(join(workDir, "a.md"), "alpha", "utf8")
-    await writeFile(join(workDir, "b.md"), "beta", "utf8")
+    await currentRunnerFileSystem().writeText(join(paths().workDir, "a.md"), "alpha")
+    await currentRunnerFileSystem().writeText(join(paths().workDir, "b.md"), "beta")
     const outcome = await captureArtifacts({
       work: workItem({ files: [{ path: "a.md" }, { path: "b.md" }] }),
-      workDir,
+      workDir: paths().workDir,
     })
     const connection = new FakeServerConnection()
     const result = await uploadCapturedArtifacts(connection, "wf-1", "work-1", outcome.captures, new AbortController().signal)
@@ -237,10 +255,10 @@ describe("uploadCapturedArtifacts", () => {
   })
 
   it("uploadFailureForDeclaredArtifact_PropagatesAsFailure", async () => {
-    await writeFile(join(workDir, "a.md"), "alpha", "utf8")
+    await currentRunnerFileSystem().writeText(join(paths().workDir, "a.md"), "alpha")
     const outcome = await captureArtifacts({
       work: workItem({ files: [{ path: "a.md" }] }),
-      workDir,
+      workDir: paths().workDir,
     })
     const connection = new FakeServerConnection()
     connection.failure = new Error("network down")
@@ -252,12 +270,12 @@ describe("uploadCapturedArtifacts", () => {
   })
 
   it("directoryArtifact_IsUploadedAsDirectoryContent", async () => {
-    const specsDir = join(workDir, "specs")
-    await mkdir(specsDir, { recursive: true })
-    await writeFile(join(specsDir, "a.md"), "alpha", "utf8")
+    const specsDir = join(paths().workDir, "specs")
+    await currentRunnerFileSystem().ensureDir(specsDir)
+    await currentRunnerFileSystem().writeText(join(specsDir, "a.md"), "alpha")
     const outcome = await captureArtifacts({
       work: workItem({ files: [{ path: "specs" }] }),
-      workDir,
+      workDir: paths().workDir,
     })
     const connection = new FakeServerConnection()
     const result = await uploadCapturedArtifacts(connection, "wf-1", "work-1", outcome.captures, new AbortController().signal)

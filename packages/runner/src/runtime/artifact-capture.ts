@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto"
-import { stat, readFile, readdir, realpath, lstat } from "node:fs/promises"
-import { realpathSync } from "node:fs"
 import { isAbsolute, normalize, relative, resolve, sep } from "node:path"
 import type { ArtifactUploadRequest, ArtifactUploadResponse } from "../server/connection.js"
 import type { ActionResult, JsonObject, JsonValue, DispatchWorkItem } from "../core/types.js"
 import { isObject } from "../core/json.js"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 
 export interface ArtifactUploader {
   uploadArtifact(
@@ -152,7 +151,7 @@ export async function captureOne(
   declaration: DeclaredArtifactDeclaration,
   limits: ArtifactCaptureLimits = DEFAULT_ARTIFACT_CAPTURE_LIMITS,
 ): Promise<CapturedArtifact> {
-  const safePath = resolveArtifactPath(workDir, declaration.path)
+  const safePath = await resolveArtifactPath(workDir, declaration.path)
   const stat = await lstatSafe(safePath)
   if (stat.isSymbolicLink()) {
     throw new Error(`artifact path '${declaration.path}' is a symlink; refusing to follow it`)
@@ -167,7 +166,7 @@ export async function captureOne(
 }
 
 function captureFile(absolutePath: string, declaration: DeclaredArtifactDeclaration, limits: ArtifactCaptureLimits): Promise<CapturedArtifact> {
-  return readFile(absolutePath).then((buffer) => {
+  return currentRunnerFileSystem().readBinary(absolutePath).then((buffer) => {
     if (buffer.byteLength > limits.maxFileSize) {
       throw new Error(`artifact file '${declaration.path}' exceeds the ${limits.maxFileSize}-byte single-file limit`)
     }
@@ -217,7 +216,7 @@ async function collectDirectoryFiles(absoluteRoot: string, sourceLabel: string, 
     const current = stack.pop()!
     let entries
     try {
-      entries = await readdir(current, { withFileTypes: true })
+      entries = await currentRunnerFileSystem().readdir(current)
     } catch (error) {
       throw new Error(`artifact directory '${sourceLabel}' could not be read: ${(error as Error).message}`)
     }
@@ -233,7 +232,7 @@ async function collectDirectoryFiles(absoluteRoot: string, sourceLabel: string, 
       if (!entry.isFile()) {
         throw new Error(`artifact directory '${sourceLabel}' contains a non-file entry at '${entry.name}'`)
       }
-      const data = await readFile(entryAbsolute)
+      const data = await currentRunnerFileSystem().readBinary(entryAbsolute)
       if (data.byteLength > limits.maxFileSize) {
         throw new Error(`artifact directory '${sourceLabel}' contains a file exceeding the ${limits.maxFileSize}-byte single-file limit at '${entry.name}'`)
       }
@@ -263,7 +262,7 @@ function encodeDirectoryArchive(entries: DirectoryFileEntry[]): Uint8Array {
   return new TextEncoder().encode(json)
 }
 
-function resolveArtifactPath(workDir: string, rawPath: string): string {
+async function resolveArtifactPath(workDir: string, rawPath: string): Promise<string> {
   if (!rawPath || typeof rawPath !== "string") {
     throw new Error("artifact path is required")
   }
@@ -272,8 +271,8 @@ function resolveArtifactPath(workDir: string, rawPath: string): string {
 
   const candidate = isAbsolute(trimmed) ? trimmed : resolve(workDir, trimmed)
   const workDirAbsolute = resolve(workDir)
-  const workReal = safeRealpath(workDirAbsolute) ?? workDirAbsolute
-  const candidateReal = safeRealpath(candidate) ?? candidate
+  const workReal = await safeRealpath(workDirAbsolute) ?? workDirAbsolute
+  const candidateReal = await safeRealpath(candidate) ?? candidate
   const relativePath = relative(workReal, candidateReal)
   if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
     throw new Error(`artifact path '${rawPath}' escapes the workspace`)
@@ -290,19 +289,16 @@ function resolveArtifactPath(workDir: string, rawPath: string): string {
   return candidate
 }
 
-function safeRealpath(path: string): string | null {
+async function safeRealpath(path: string): Promise<string | null> {
   try {
-    // realpath is synchronous resolution; use the sync variant wrapped
-    // in a try so an unreachable file is treated as "no symlink target
-    // to verify" rather than a fatal error.
-    return realpathSync(path)
+    return await currentRunnerFileSystem().realpath(path)
   } catch {
     return null
   }
 }
 
 function lstatSafe(path: string) {
-  return lstat(path)
+  return currentRunnerFileSystem().lstat(path)
 }
 
 function guessContentType(path: string): string {
@@ -361,9 +357,9 @@ export function summarizeCaptureFailures(failures: ReadonlyArray<ArtifactCapture
 }
 
 export async function ensureWorkspaceDirectoryExists(workDir: string) {
-  await stat(workDir)
+  await currentRunnerFileSystem().stat(workDir)
 }
 
 export function readRealpath(path: string): Promise<string> {
-  return realpath(path)
+  return currentRunnerFileSystem().realpath(path)
 }

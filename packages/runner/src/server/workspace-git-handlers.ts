@@ -2,6 +2,7 @@ import { existsSync as defaultExistsSync } from "node:fs"
 import * as signalR from "@microsoft/signalr"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { runCommand as defaultRunCommand, type CommandLineOptions } from "../system/process.js"
+import { currentRunnerResources } from "../system/filesystem.js"
 import {
   resolveWorkspaceQuery,
   type WorkspaceQuery,
@@ -15,40 +16,6 @@ import {
   parseNumstatTotal,
 } from "./git-parsers.js"
 
-// The five git workspace
-// query handlers (`GetDiff` / `GetCommits` / `GetCommitDiff` /
-// `GetWorkspaceStatus` / `GetFileContent`) are registered through the
-// free-function `registerWorkspaceGitHandlers(conn, deps)` so the cluster's
-// dependency surface is explicit and tests can wire up direct
-// dependency injection without going through module-level setters.
-//
-// Behaviour is byte-identical to the inline implementation:
-//   - worktree probe (`pathExists` + `rev-parse --is-inside-work-tree`)
-//   - head-ref probe for `GetDiff` / `GetWorkspaceStatus`
-//   - mergeBase fallback to baseBranch on non-zero exit
-//   - commitCount fallback to 0 on non-zero exit
-//   - numstat / ahead-behind / log parser toleration
-//   - not-found sentinels (`null` / `{ exists: false }` / `{ base: null, head: null }`)
-//   - per-handler `new AbortController()` local pattern (kept
-//     to minimise behaviour drift even though the signal is never fired)
-//
-// Test seams: `setRunnerSignalRGitRunnerForTest` and
-// `setRunnerSignalRExistsCheckerForTest` mutate the module-level
-// `runGitCommand` / `pathExists` bindings here (the
-// setter lives where the binding lives). The handlers read those
-// bindings on every invocation through the closures below; that is
-// what keeps the existing `findHandler` tests working.
-// `runner-signalr.ts` re-exports both setters so the
-// existing `from "../src/server/runner-signalr.js"` test imports stay
-// zero-diff.
-//
-// Deps precedence: `runner-signalr.ts` passes only `{ resolveQuery }`,
-// so the handlers always fall through to the module-level bindings —
-// which are exactly what the test setters mutate. `runCommand` /
-// `pathExists` are still on the deps surface so a future direct unit
-// test (e.g. one that constructs a fake connection without
-// `RunnerSignalRClient`) can wire up its own runner / exists-checker
-// without going through the module-level setters at all.
 export interface WorkspaceGitHandlerDeps {
   resolveQuery: typeof resolveWorkspaceQuery
   runnerRoot?: string
@@ -57,27 +24,14 @@ export interface WorkspaceGitHandlerDeps {
   allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
-let runGitCommand: typeof defaultRunCommand = defaultRunCommand
-let pathExists: typeof defaultExistsSync = defaultExistsSync
-
-export function setRunnerSignalRGitRunnerForTest(
-  runner: typeof defaultRunCommand | null,
-) {
-  runGitCommand = runner ?? defaultRunCommand
-}
-
-export function setRunnerSignalRExistsCheckerForTest(
-  checker: typeof defaultExistsSync | null,
-) {
-  pathExists = checker ?? defaultExistsSync
-}
-
 export async function git(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
-  return runGitCommand("git", args, workDir, signal, undefined, options)
+  const runner = currentRunnerResources()?.signalRGitRunner ?? defaultRunCommand
+  return runner("git", args, workDir, signal, undefined, options)
 }
 
 export async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
-  if (!pathExists(workDir)) return false
+  const checker = currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
+  if (!checker(workDir)) return false
   const result = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
   return result.exitCode === 0 && result.stdout.trim() === "true"
 }
@@ -88,19 +42,13 @@ export function registerWorkspaceGitHandlers(
 ): void {
   const resolveQuery = deps.resolveQuery
 
-  // Module-level bindings are read on every invocation so the test
-  // setters' mutations take effect at call time (rather than being
-  // captured at registration time). `deps.runCommand` / `deps.pathExists`
-  // are honored only when the caller provides them, which `runner-signalr.ts`
-  // does NOT — it always passes the bare defaults, leaving the module-level
-  // bindings as the test seam.
   async function runGit(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
-    if (deps.runCommand) return deps.runCommand("git", args, workDir, signal, undefined, options)
-    return runGitCommand("git", args, workDir, signal, undefined, options)
+    const runner = deps.runCommand ?? currentRunnerResources()?.signalRGitRunner ?? defaultRunCommand
+    return runner("git", args, workDir, signal, undefined, options)
   }
 
   async function isWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
-    const checker = deps.pathExists ?? pathExists
+    const checker = deps.pathExists ?? currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
     if (!checker(workDir)) return false
     const result = await runGit(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
     return result.exitCode === 0 && result.stdout.trim() === "true"

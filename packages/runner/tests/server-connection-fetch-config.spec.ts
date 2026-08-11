@@ -1,5 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { ServerConnection } from "../src/server/connection.js"
+import { transportFetch, withFakeTransport } from "./support/fake-transport.js"
+
+const fetchMock = transportFetch
+const it = (name: string, body: () => unknown) => vitestIt(name, () => withFakeTransport(async () => await body()))
 
 // Coverage for the dedicated runner config channel
 // `GET /api/runner/{runnerId}/config`. The
@@ -18,18 +22,12 @@ import { ServerConnection } from "../src/server/connection.js"
 //     existing poll / report / workflowRunsStatus helpers.
 
 describe("ServerConnection.fetchConfig", () => {
-  const originalFetch = globalThis.fetch
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-  })
-
   function makeConnection(runnerId = "runner-test") {
     return new ServerConnection({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId,
       projectId: "project-1",
-      runnerRoot: "/tmp/runner-test",
+      runnerRoot: "/virtual/runner-test",
       pollIntervalMs: 1000,
       heartbeatIntervalMs: 15_000,
       dispatchLivenessProbeIntervalMs: 10_000,
@@ -38,7 +36,7 @@ describe("ServerConnection.fetchConfig", () => {
 
   it("SendsPlainGetToRunnerConfigEndpoint_NoRequestBody", async () => {
     const calls: Array<{ url: string; method: string; body: unknown; headers: Record<string, string> }> = []
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString()
       const method = init?.method ?? "GET"
       const body = init?.body ? JSON.parse(init.body as string) : null
@@ -50,12 +48,12 @@ describe("ServerConnection.fetchConfig", () => {
       }
       calls.push({ url, method, body, headers })
       return new Response(JSON.stringify({ cleanupPolicy: null }), { status: 200, headers: { "content-type": "application/json" } })
-    }) as typeof fetch
+    })
 
     await makeConnection("runner-cfg-1").fetchConfig(new AbortController().signal)
 
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe("http://localhost:3456/api/runner/runner-cfg-1/config")
+    expect(calls[0].url).toBe("https://runner.test/api/runner/runner-cfg-1/config")
     expect(calls[0].method).toBe("GET")
     expect(calls[0].body).toBeNull()
     // No conditional-fetch headers leaked into the request.
@@ -64,9 +62,9 @@ describe("ServerConnection.fetchConfig", () => {
   })
 
   it("ReturnsUnwrappedCleanupPolicy_FromResponseBody", async () => {
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
       cleanupPolicy: { retentionDays: 14, storageBudgetBytes: 1_073_741_824, storageTargetWatermarkBytes: 536_870_912 },
-    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch
+    }), { status: 200, headers: { "content-type": "application/json" } }))
 
     const result = await makeConnection().fetchConfig(new AbortController().signal)
 
@@ -78,7 +76,7 @@ describe("ServerConnection.fetchConfig", () => {
   })
 
   it("ReturnsNull_WhenCleanupPolicyFieldIsAbsent", async () => {
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }))
 
     const result = await makeConnection().fetchConfig(new AbortController().signal)
 
@@ -86,7 +84,7 @@ describe("ServerConnection.fetchConfig", () => {
   })
 
   it("ReturnsNull_WhenCleanupPolicyIsExplicitNull", async () => {
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ cleanupPolicy: null }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ cleanupPolicy: null }), { status: 200, headers: { "content-type": "application/json" } }))
 
     const result = await makeConnection().fetchConfig(new AbortController().signal)
 
@@ -94,9 +92,9 @@ describe("ServerConnection.fetchConfig", () => {
   })
 
   it("ReturnsPolicyWithAllNullSentinels_WhenServerReturnsFullyUnconfigured", async () => {
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
       cleanupPolicy: { retentionDays: null, storageBudgetBytes: null, storageTargetWatermarkBytes: null },
-    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch
+    }), { status: 200, headers: { "content-type": "application/json" } }))
 
     const result = await makeConnection().fetchConfig(new AbortController().signal)
 
@@ -108,7 +106,7 @@ describe("ServerConnection.fetchConfig", () => {
   })
 
   it("Throws_OnNonOkResponse_BestEffortCallerHandles", async () => {
-    globalThis.fetch = vi.fn(async () => new Response("not found", { status: 404 })) as typeof fetch
+    fetchMock.mockImplementation(async () => new Response("not found", { status: 404 }))
 
     // Per design D4: fetchConfig throws on non-2xx / network error;
     // the caller's existing try/catch in runCleanupOnce logs and
@@ -117,25 +115,25 @@ describe("ServerConnection.fetchConfig", () => {
   })
 
   it("Throws_OnServerError500", async () => {
-    globalThis.fetch = vi.fn(async () => new Response("oops", { status: 500 })) as typeof fetch
+    fetchMock.mockImplementation(async () => new Response("oops", { status: 500 }))
 
     await expect(makeConnection().fetchConfig(new AbortController().signal)).rejects.toThrow(/fetchConfig failed: 500/)
   })
 
   it("Throws_OnNetworkError", async () => {
-    globalThis.fetch = vi.fn(async () => {
+    fetchMock.mockImplementation(async () => {
       throw new Error("ECONNREFUSED")
-    }) as typeof fetch
+    })
 
     await expect(makeConnection().fetchConfig(new AbortController().signal)).rejects.toThrow(/ECONNREFUSED/)
   })
 
   it("ForwardsAbortSignal_ToFetch", async () => {
     let observedSignal: AbortSignal | undefined
-    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    fetchMock.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       observedSignal = init?.signal ?? undefined
       return new Response(JSON.stringify({ cleanupPolicy: null }), { status: 200 })
-    }) as typeof fetch
+    })
 
     const controller = new AbortController()
     await makeConnection().fetchConfig(controller.signal)

@@ -1,6 +1,6 @@
-import { open, readdir, readFile, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { currentRunnerFileSystem, currentRunnerResources } from "../system/filesystem.js"
 
 const MAX_LOG_FILES = 20
 const MAX_LOG_FILE_BYTES = 10 * 1024 * 1024
@@ -28,24 +28,13 @@ export interface OpencodeProviderErrorSearchOptions {
   failFastOnly?: boolean
 }
 
-type OpencodeProviderErrorDiagnosticFinder = (sessionId: string, options: OpencodeProviderErrorSearchOptions) => Promise<OpencodeProviderErrorDiagnostic | undefined>
-
-let providerErrorDiagnosticFinderForTest: OpencodeProviderErrorDiagnosticFinder | null = null
-let logFileSystemForTest: OpencodeLogFileSystem | null = null
+export type OpencodeProviderErrorDiagnosticFinder = (sessionId: string, options: OpencodeProviderErrorSearchOptions) => Promise<OpencodeProviderErrorDiagnostic | undefined>
 
 export interface OpencodeLogFileSystem {
   readdir(path: string): Promise<string[]>
   stat(path: string): Promise<{ isFile(): boolean; mtimeMs: number; size: number }>
   readFile(path: string): Promise<string>
   readTail(path: string, start: number, length: number): Promise<string>
-}
-
-export function setOpencodeProviderErrorDiagnosticFinderForTest(finder: OpencodeProviderErrorDiagnosticFinder | null) {
-  providerErrorDiagnosticFinderForTest = finder
-}
-
-export function setOpencodeLogFileSystemForTest(fileSystem: OpencodeLogFileSystem | null) {
-  logFileSystemForTest = fileSystem
 }
 
 interface CandidateLogFile {
@@ -56,9 +45,10 @@ interface CandidateLogFile {
 
 export async function findOpencodeProviderErrorDiagnostic(sessionId: string, options: OpencodeProviderErrorSearchOptions = {}): Promise<OpencodeProviderErrorDiagnostic | undefined> {
   if (!sessionId.trim()) return undefined
-  if (providerErrorDiagnosticFinderForTest) return await providerErrorDiagnosticFinderForTest(sessionId, options)
+  const resources = currentRunnerResources()
+  if (resources?.opencodeProviderErrorDiagnosticFinder) return await resources.opencodeProviderErrorDiagnosticFinder(sessionId, options)
 
-  const fileSystem = logFileSystemForTest ?? nodeOpencodeLogFileSystem
+  const fileSystem = resources?.opencodeLogFileSystem ?? nodeOpencodeLogFileSystem
   const logDir = opencodeLogDir()
   let entries: string[]
   try {
@@ -158,7 +148,7 @@ function matchesSearchOptions(diagnostic: OpencodeProviderErrorDiagnostic, optio
 }
 
 async function readLogFileText(file: CandidateLogFile): Promise<string | undefined> {
-  const fileSystem = logFileSystemForTest ?? nodeOpencodeLogFileSystem
+  const fileSystem = currentRunnerResources()?.opencodeLogFileSystem ?? nodeOpencodeLogFileSystem
   if (file.size <= MAX_LOG_FILE_BYTES) {
     try {
       return await fileSystem.readFile(file.path)
@@ -181,23 +171,17 @@ async function readLogFileText(file: CandidateLogFile): Promise<string | undefin
 
 const nodeOpencodeLogFileSystem: OpencodeLogFileSystem = {
   async readdir(path) {
-    return await readdir(path)
+    return (await currentRunnerFileSystem().readdir(path)).map((entry) => entry.name)
   },
   async stat(path) {
-    return await stat(path)
+    const value = await currentRunnerFileSystem().stat(path)
+    return { isFile: value.isFile, mtimeMs: value.mtimeMs, size: value.size }
   },
   async readFile(path) {
-    return await readFile(path, "utf8")
+    return await currentRunnerFileSystem().readText(path)
   },
   async readTail(path, start, length) {
-    const handle = await open(path, "r")
-    try {
-      const buffer = Buffer.alloc(length)
-      await handle.read(buffer, 0, length, start)
-      return buffer.toString("utf8")
-    } finally {
-      await handle.close()
-    }
+    return await currentRunnerFileSystem().readTail(path, start, length)
   },
 }
 
@@ -258,9 +242,10 @@ function parseProviderErrorLine(line: string, sessionId: string, logFile: string
 }
 
 function opencodeLogDir() {
-  if (process.env.MOHIST_OPENCODE_LOG_DIR?.trim()) return process.env.MOHIST_OPENCODE_LOG_DIR
-  if (process.env.OPENCODE_LOG_DIR?.trim()) return process.env.OPENCODE_LOG_DIR
-  const dataHome = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share")
+  const environment = currentRunnerResources()?.environment ?? process.env
+  if (environment.MOHIST_OPENCODE_LOG_DIR?.trim()) return environment.MOHIST_OPENCODE_LOG_DIR
+  if (environment.OPENCODE_LOG_DIR?.trim()) return environment.OPENCODE_LOG_DIR
+  const dataHome = environment.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share")
   return join(dataHome, "opencode", "log")
 }
 

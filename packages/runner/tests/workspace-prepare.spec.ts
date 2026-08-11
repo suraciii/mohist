@@ -1,11 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { createDefaultRegistry } from "../src/actions/registry.js"
-import {
-  setWorkspacePrepareExistsCheckerForTest,
-  setWorkspacePrepareGitRunnerForTest,
-  workspacePrepareAction,
-} from "../src/actions/workspace-prepare.js"
+import { workspacePrepareAction } from "../src/actions/workspace-prepare.js"
+import type { RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
 import { callAction } from "./support/call-action.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 
@@ -14,10 +13,22 @@ type GitCall = { workDir: string; args: string[] }
 const WORKSPACE_PATH = "/workspace"
 const EXPECTED_BRANCH = "mohist/run-wr-prepare-1"
 
-afterEach(() => {
-  setWorkspacePrepareGitRunnerForTest(null)
-  setWorkspacePrepareExistsCheckerForTest(null)
-})
+type WorkspacePrepareTestResources = {
+  fileSystem: RunnerFileSystem
+  workspacePrepareGitRunner?: RunnerGitRunner
+  workspacePrepareExistsChecker?: (path: string) => boolean
+}
+
+function it(name: string, body: (resources: WorkspacePrepareTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: WorkspacePrepareTestResources = { fileSystem: new MemoryFileSystem() }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
+
+function useWorkspacePrepareExistsChecker(resources: WorkspacePrepareTestResources, checker: (path: string) => boolean): void {
+  resources.workspacePrepareExistsChecker = checker
+}
 
 function ok(stdout: string) {
   return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
@@ -27,13 +38,14 @@ function fail(stderr: string) {
   return { success: false, stdout: "", stderr, exitCode: 1, combinedOutput: stderr }
 }
 
-function installGit(respond: (call: GitCall, history: GitCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
+function installGit(resources: WorkspacePrepareTestResources, respond: (call: GitCall, history: GitCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
   const calls: GitCall[] = []
-  setWorkspacePrepareGitRunnerForTest(async (workDir, args) => {
+  const runner: RunnerGitRunner = async (workDir, args) => {
     const record: GitCall = { workDir, args: [...args] }
     calls.push(record)
     return await respond(record, calls)
-  })
+  }
+  resources.workspacePrepareGitRunner = runner
   return calls
 }
 
@@ -104,9 +116,9 @@ describe("mohist/workspace-prepare", () => {
     }
   })
 
-  it("FastPass_CleanWorkspace_IssuesNoMutationCommands", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses())
+  it("FastPass_CleanWorkspace_IssuesNoMutationCommands", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses())
 
     const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
@@ -130,9 +142,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
-  it("UsesHostWorkDirAndExplicitBranchWhenVariablesDisagree", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses())
+  it("UsesHostWorkDirAndExplicitBranchWhenVariablesDisagree", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses())
 
     const contextWithHiddenVariables: ActionContext = {
       ...context(),
@@ -146,9 +158,9 @@ describe("mohist/workspace-prepare", () => {
     expect(calls.every((call) => call.workDir === "/host-workspace")).toBe(true)
   })
 
-  it("InitialStatusProbeFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("InitialStatusProbeFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "status --porcelain") return fail("fatal: status unavailable")
       return null
     }))
@@ -162,9 +174,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
 
-  it("InitialHeadProbeFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("InitialHeadProbeFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "rev-parse HEAD") return fail("fatal: bad HEAD")
       return null
     }))
@@ -178,9 +190,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
 
-  it("InitialHeadRefProbeFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("InitialHeadRefProbeFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "rev-parse --abbrev-ref HEAD") return fail("fatal: cannot resolve ref")
       return null
     }))
@@ -194,9 +206,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
 
-  it("InitialResidualProbeFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("InitialResidualProbeFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "rev-parse --git-path rebase-merge") return fail("fatal: git dir unreadable")
       return null
     }))
@@ -210,10 +222,10 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
 
-  it("RebaseInProgress_AbortsAndReprobesBeforeCheckout", async () => {
+  it("RebaseInProgress_AbortsAndReprobesBeforeCheckout", async (resources) => {
     let rebaseStatePresent = true
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("rebase-merge") && rebaseStatePresent)
-    const calls = installGit(cleanProbeResponses((call) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("rebase-merge") && rebaseStatePresent)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "rebase --abort") {
         rebaseStatePresent = false
         return ok("")
@@ -241,9 +253,9 @@ describe("mohist/workspace-prepare", () => {
     expect(output.residual as Record<string, unknown>).toMatchObject({ rebaseMerge: false, rebaseApply: false })
   })
 
-  it("RebaseAbortFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("rebase-merge"))
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("RebaseAbortFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("rebase-merge"))
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "rebase --abort") return fail("fatal: could not abort rebase")
       return null
     }))
@@ -260,9 +272,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
-  it("RebaseStillInProgressAfterAbort_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("rebase-merge"))
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("RebaseStillInProgressAfterAbort_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("rebase-merge"))
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "rebase --abort") return ok("")
       return null
     }))
@@ -275,10 +287,10 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "merge --abort")).toBe(false)
   })
 
-  it("MergeInProgress_AbortsMergeAndReprobes", async () => {
+  it("MergeInProgress_AbortsMergeAndReprobes", async (resources) => {
     let mergeStatePresent = true
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("MERGE_HEAD") && mergeStatePresent)
-    const calls = installGit(cleanProbeResponses((call) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("MERGE_HEAD") && mergeStatePresent)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "merge --abort") {
         mergeStatePresent = false
         return ok("")
@@ -296,10 +308,10 @@ describe("mohist/workspace-prepare", () => {
     expect((output.residual as Record<string, unknown>).mergeHead).toBe(false)
   })
 
-  it("CherryPickInProgress_AbortsCherryPickAndReprobes", async () => {
+  it("CherryPickInProgress_AbortsCherryPickAndReprobes", async (resources) => {
     let cherryPickStatePresent = true
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("CHERRY_PICK_HEAD") && cherryPickStatePresent)
-    const calls = installGit(cleanProbeResponses((call) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("CHERRY_PICK_HEAD") && cherryPickStatePresent)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "cherry-pick --abort") {
         cherryPickStatePresent = false
         return ok("")
@@ -317,9 +329,9 @@ describe("mohist/workspace-prepare", () => {
     expect((output.residual as Record<string, unknown>).cherryPickHead).toBe(false)
   })
 
-  it("MergeAbortFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("MERGE_HEAD"))
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("MergeAbortFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("MERGE_HEAD"))
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "merge --abort") return fail("fatal: could not abort merge")
       return null
     }))
@@ -332,9 +344,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "cherry-pick --abort")).toBe(false)
   })
 
-  it("CherryPickAbortFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("CHERRY_PICK_HEAD"))
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("CherryPickAbortFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("CHERRY_PICK_HEAD"))
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "cherry-pick --abort") return fail("fatal: could not abort cherry-pick")
       return null
     }))
@@ -345,10 +357,10 @@ describe("mohist/workspace-prepare", () => {
     expect(result.error).toBeDefined()
   })
 
-  it("DetachedHead_ChecksOutExpectedBranch", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
+  it("DetachedHead_ChecksOutExpectedBranch", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
     let checkoutIssued = false
-    const calls = installGit(cleanProbeResponses((call) => {
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "rev-parse --abbrev-ref HEAD") {
         return ok(checkoutIssued ? `${EXPECTED_BRANCH}\n` : "HEAD\n")
@@ -370,10 +382,10 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
-  it("DifferentBranch_ChecksOutExpectedBranch", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
+  it("DifferentBranch_ChecksOutExpectedBranch", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
     let checkoutIssued = false
-    const calls = installGit(cleanProbeResponses((call) => {
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "rev-parse --abbrev-ref HEAD") {
         return ok(checkoutIssued ? `${EXPECTED_BRANCH}\n` : "feature/other\n")
@@ -391,9 +403,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, `checkout ${EXPECTED_BRANCH}`)).toBe(true)
   })
 
-  it("CheckoutFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("CheckoutFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "rev-parse --abbrev-ref HEAD") return ok("HEAD\n")
       if (command === `checkout ${EXPECTED_BRANCH}`) return fail("fatal: path not found")
@@ -408,11 +420,11 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
-  it("DirtyTreeOnDifferentBranch_ResetsAndCleansBeforeCheckout", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
+  it("DirtyTreeOnDifferentBranch_ResetsAndCleansBeforeCheckout", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
     let cleaned = false
     let checkoutIssued = false
-    const calls = installGit(cleanProbeResponses((call) => {
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "status --porcelain") return cleaned ? ok("") : ok(" M dirty-file.txt\n?? untracked.txt\n")
       if (command === "rev-parse --abbrev-ref HEAD") return ok(checkoutIssued ? `${EXPECTED_BRANCH}\n` : "feature/other\n")
@@ -444,10 +456,10 @@ describe("mohist/workspace-prepare", () => {
     expect(cleanIdx).toBeLessThan(checkoutIdx)
   })
 
-  it("DirtyTree_ResetsAndCleans", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
+  it("DirtyTree_ResetsAndCleans", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
     let porcelainDirty = true
-    const calls = installGit(cleanProbeResponses((call) => {
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "status --porcelain") {
         return porcelainDirty ? ok(" M dirty-file.txt\n?? untracked.txt\n") : ok("")
@@ -474,9 +486,9 @@ describe("mohist/workspace-prepare", () => {
     expect(output.porcelain).toBe("")
   })
 
-  it("ResetFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("ResetFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "status --porcelain") return ok(" M dirty-file.txt\n")
       if (command === "reset --hard HEAD") return fail("fatal: reset failed")
@@ -490,9 +502,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
-  it("CleanFails_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("CleanFails_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "status --porcelain") return ok(" M dirty-file.txt\n")
       if (command === "reset --hard HEAD") return ok("")
@@ -506,10 +518,10 @@ describe("mohist/workspace-prepare", () => {
     expect(result.error).toBeDefined()
   })
 
-  it("HealthVerifyFailure_DirtyTreeAfterCleanup_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
+  it("HealthVerifyFailure_DirtyTreeAfterCleanup_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
     let resetIssued = false
-    const calls = installGit(cleanProbeResponses((call) => {
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "status --porcelain") {
         return resetIssued ? ok(" M still-dirty.txt\n") : ok(" M dirty-file.txt\n")
@@ -528,9 +540,9 @@ describe("mohist/workspace-prepare", () => {
     expect(result.error).toBeDefined()
   })
 
-  it("HealthVerifyFailure_WrongBranchAfterCleanup_ReportsWorkspaceSetupFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses((call) => {
+  it("HealthVerifyFailure_WrongBranchAfterCleanup_ReportsWorkspaceSetupFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "rev-parse --abbrev-ref HEAD") return ok("feature/other\n")
       if (command === `checkout ${EXPECTED_BRANCH}`) return ok(`Switched to branch '${EXPECTED_BRANCH}'\n`)
@@ -544,14 +556,14 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, `checkout ${EXPECTED_BRANCH}`)).toBe(true)
   })
 
-  it("HealthVerifyFailure_RebaseReappearsAfterCleanup_ReportsWorkspaceSetupFailure", async () => {
+  it("HealthVerifyFailure_RebaseReappearsAfterCleanup_ReportsWorkspaceSetupFailure", async (resources) => {
     let rebaseProbeCount = 0
-    setWorkspacePrepareExistsCheckerForTest((path) => {
+    useWorkspacePrepareExistsChecker(resources, (path) => {
       if (!path.endsWith("rebase-merge")) return false
       rebaseProbeCount++
       return rebaseProbeCount !== 2
     })
-    const calls = installGit(cleanProbeResponses((call) => {
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       if (commandOf(call) === "rebase --abort") return ok("")
       return null
     }))
@@ -563,9 +575,9 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "rebase --abort")).toBe(true)
   })
 
-  it("NoNetworkOperations_NoFetchPullPush", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses())
+  it("NoNetworkOperations_NoFetchPullPush", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses())
 
     await callAction(workspacePrepareAction, context())
 
@@ -575,9 +587,9 @@ describe("mohist/workspace-prepare", () => {
     }
   })
 
-  it("MissingExpectedBranch_ReportsResolveFailure", async () => {
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    const calls = installGit(cleanProbeResponses())
+  it("MissingExpectedBranch_ReportsResolveFailure", async (resources) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const calls = installGit(resources, cleanProbeResponses())
 
     const contextWithHiddenVariables: ActionContext = {
       ...context(),
@@ -594,11 +606,11 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
-  it("FullPipeline_RebaseAbortThenResetClean_ProducesExpectedCallOrder", async () => {
+  it("FullPipeline_RebaseAbortThenResetClean_ProducesExpectedCallOrder", async (resources) => {
     let rebaseStatePresent = true
-    setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("rebase-merge") && rebaseStatePresent)
+    useWorkspacePrepareExistsChecker(resources, (path) => path.endsWith("rebase-merge") && rebaseStatePresent)
     let porcelainDirty = true
-    const calls = installGit(cleanProbeResponses((call) => {
+    const calls = installGit(resources, cleanProbeResponses((call) => {
       const command = commandOf(call)
       if (command === "rebase --abort") {
         rebaseStatePresent = false
@@ -638,11 +650,11 @@ describe("mohist/workspace-prepare", () => {
     expect(resetIdx).toBeLessThan(cleanIdx)
   })
 
-  it("LocalProbes_NoCommandTimeoutIsApplied", async () => {
+  it("LocalProbes_NoCommandTimeoutIsApplied", async (resources) => {
     type RecordingGitCall = { workDir: string; args: string[]; timeoutMs: number | undefined }
     const calls: RecordingGitCall[] = []
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    setWorkspacePrepareGitRunnerForTest(async (workDir, args, _signal, options) => {
+    useWorkspacePrepareExistsChecker(resources, () => false)
+    const runner: RunnerGitRunner = async (workDir, args, _signal, options) => {
       calls.push({ workDir, args: [...args], timeoutMs: options?.timeoutMs })
       const command = args.join(" ")
       switch (command) {
@@ -663,7 +675,8 @@ describe("mohist/workspace-prepare", () => {
         default:
           return fail(`unexpected git call: ${command}`)
       }
-    })
+    }
+    resources.workspacePrepareGitRunner = runner
 
     await callAction(workspacePrepareAction, context())
 

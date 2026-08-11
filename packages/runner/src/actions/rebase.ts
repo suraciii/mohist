@@ -6,17 +6,9 @@ import { stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { isIssueFieldSource } from "./issue-fields.js"
 import { fail, succeed } from "./action-result.js"
+import { currentRunnerResources, type RunnerGitRunner } from "../system/filesystem.js"
 
-type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-  status?: "timeout"
-  timeoutMs?: number
-}>
-type ExistsChecker = typeof exists
+type GitRunner = RunnerGitRunner
 type GitResult = Awaited<ReturnType<GitRunner>>
 interface RebaseStep {
   name: string
@@ -26,10 +18,17 @@ interface RebaseStep {
   status?: "timeout"
   timeoutMs?: number
 }
-let git: GitRunner = defaultGit
-let pathExists: ExistsChecker = exists
-
 const ACTION_SOURCE = "action:rebase"
+
+function git(workDir: string, args: string[], signal: AbortSignal, options?: GitOptions): Promise<GitResult> {
+  return (currentRunnerResources()?.rebaseGitRunner
+    ?? currentRunnerResources()?.gitRunner
+    ?? defaultGit)(workDir, args, signal, options)
+}
+
+function pathExists(path: string): boolean {
+  return (currentRunnerResources()?.rebaseExistsChecker ?? exists)(path)
+}
 
 function sinkOptions(host: ActionHost): GitOptions | undefined {
   return host.log ? { sink: { log: host.log, source: ACTION_SOURCE } } : undefined
@@ -41,14 +40,6 @@ function networkOptions(host: ActionHost): GitOptions | undefined {
 }
 
 export type RebaseGitResult = GitResult
-
-export function setRebaseGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
-}
-
-export function setRebaseExistsCheckerForTest(checker: ExistsChecker | null) {
-  pathExists = checker ?? exists
-}
 
 export async function rebaseAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const baseBranch = stringInput(inputs, "baseBranch")

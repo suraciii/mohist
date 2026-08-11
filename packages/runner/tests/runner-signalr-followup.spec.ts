@@ -1,39 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, vi } from "vitest"
 import {
   buildClient,
-  buildRecordingOutbox,
   defaultPiBinding,
   emitFollowup,
   flush,
   invokeFollowup,
   lastBuilder,
-  makeFakeRuntime,
-  resetBuilders,
+  followupIt,
   workflowPayload,
-  type FakeRuntimeHandles,
-  type RecordingOutbox,
 } from "./support/followup-handler-fixture.js"
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
 import type { FollowupOperationJournalStore } from "../src/runtime/followup-operation-journal.js"
 import type { FollowupOperationClaim, FollowupOperationState } from "../src/runtime/followup-operation-journal.js"
 import { capturedLogs } from "./support/logger-test.js"
-import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
-
-let runtime: FakeRuntimeHandles
-let recording: RecordingOutbox
-
-beforeEach(() => {
-  resetBuilders()
-  runtime = makeFakeRuntime()
-  recording = buildRecordingOutbox()
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-})
+import { makeFakePiRuntime } from "./support/pi-runtime-fixture.js"
 
 describe("RunnerSignalRClient ReceiveFollowup handler", () => {
-  it("Followup_FireAndForgetPromptCallsRuntimeFollowupWithoutAwait", async () => {
+  followupIt("Followup_FireAndForgetPromptCallsRuntimeFollowupWithoutAwait", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
@@ -49,7 +32,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
-  it("Followup_AcknowledgesDeliveryBeforeRuntimeCompletion", async () => {
+  followupIt("Followup_AcknowledgesDeliveryBeforeRuntimeCompletion", async ({ runtime, recording }) => {
     let resolveFollowup!: (value: { ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }) => void
     const promise = new Promise<{ ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }>((resolve) => { resolveFollowup = resolve })
     const followupCalls = runtime.followupCalls
@@ -77,7 +60,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     await flush()
   })
 
-  it("Followup_AwaitsDurableInputEnqueue_BeforeInvokingRuntime", async () => {
+  followupIt("Followup_AwaitsDurableInputEnqueue_BeforeInvokingRuntime", async ({ runtime }) => {
     const order: string[] = []
     runtime.runtime.followup = async () => {
       order.push("followup")
@@ -105,7 +88,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(order).toEqual(["before:session.input", "followup"])
   })
 
-  it("Followup_TagsInputWithKindFollowup", async () => {
+  followupIt("Followup_TagsInputWithKindFollowup", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
@@ -129,7 +112,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
-  it("Followup_DropsWhenResolverReturnsNullAndDoesNotThrow", async () => {
+  followupIt("Followup_DropsWhenResolverReturnsNullAndDoesNotThrow", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => null)
 
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
@@ -142,14 +125,14 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("Followup_ReturnsMissingWhenTheRuntimeSessionCannotBeResolved", async () => {
+  followupIt("Followup_ReturnsMissingWhenTheRuntimeSessionCannotBeResolved", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => null)
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
     await expect(invokeFollowup(lastBuilder(), workflowPayload("resume"))).resolves.toEqual({ accepted: false, error: "missing" })
   })
 
-  it("Followup_ReturnsUnavailableWhileRuntimeIsInitializing", async () => {
+  followupIt("Followup_ReturnsUnavailableWhileRuntimeIsInitializing", async ({ runtime, recording }) => {
     runtime.setReady(false)
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
@@ -159,7 +142,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("Followup_ReturnsUnavailableWhenOutboxUnhealthy", async () => {
+  followupIt("Followup_ReturnsUnavailableWhenOutboxUnhealthy", async ({ runtime }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => false,
@@ -179,7 +162,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(runtime.followupCalls).toHaveLength(0)
   })
 
-  it("Followup_ReturnsUnavailableWhenLocalEnqueueFails_BeforeInvokingRuntime", async () => {
+  followupIt("Followup_ReturnsUnavailableWhenLocalEnqueueFails_BeforeInvokingRuntime", async ({ runtime }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
@@ -201,7 +184,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     ]))
   })
 
-  it("Followup_DropsWhenResolverThrows", async () => {
+  followupIt("Followup_DropsWhenResolverThrows", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => { throw new Error("resolver boom") })
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -216,7 +199,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     ]))
   })
 
-  it("Followup_Completion_RecordsIdleActivity", async () => {
+  followupIt("Followup_Completion_RecordsIdleActivity", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
@@ -241,7 +224,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
-  it("Followup_EnqueuesAssistantOutputBeforeTerminalActivity", async () => {
+  followupIt("Followup_EnqueuesAssistantOutputBeforeTerminalActivity", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     runtime.runtime.followup = async (_request, observer) => {
       observer?.onEvent?.({
@@ -293,7 +276,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
-  it("Followup_Failure_RecordsIdleActivity", async () => {
+  followupIt("Followup_Failure_RecordsIdleActivity", async ({ runtime, recording }) => {
     runtime.setFollowupResult({
       ok: false,
       error: {
@@ -329,7 +312,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       })
   })
 
-  it("Followup_DuplicateOperationIdDoesNotEnqueueOrInvokeAgain", async () => {
+  followupIt("Followup_DuplicateOperationIdDoesNotEnqueueOrInvokeAgain", async ({ runtime, recording }) => {
     const states = new Map<string, FollowupOperationState>()
     const journal: FollowupOperationJournalStore = {
       load: async () => {},
@@ -354,7 +337,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(1)
   })
 
-  it("Followup_IndeterminateClaimIsNotAcknowledgedOrReplayed", async () => {
+  followupIt("Followup_IndeterminateClaimIsNotAcknowledgedOrReplayed", async ({ runtime, recording }) => {
     const journal: FollowupOperationJournalStore = {
       load: async () => {},
       claim: async () => "claimed",
@@ -370,7 +353,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("Followup_DropsPayloadWhenTextIsMissing", async () => {
+  followupIt("Followup_DropsPayloadWhenTextIsMissing", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -382,7 +365,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("Followup_DropsPayloadWhenResolverIsNull", async () => {
+  followupIt("Followup_DropsPayloadWhenResolverIsNull", async ({ runtime, recording }) => {
     buildClient({ resolver: null, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
@@ -392,7 +375,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(runtime.followupCalls).toHaveLength(0)
   })
 
-  it("Followup_DropsPayloadWhenOutboxIsNull", async () => {
+  followupIt("Followup_DropsPayloadWhenOutboxIsNull", async ({ runtime }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -403,7 +386,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(runtime.followupCalls).toHaveLength(0)
   })
 
-  it("Followup_DropsPayloadWhenRuntimeIsNull", async () => {
+  followupIt("Followup_DropsPayloadWhenRuntimeIsNull", async ({ recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: null })
     const builder = lastBuilder()
@@ -414,7 +397,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("Followup_DropsNullOrUndefinedPayload", async () => {
+  followupIt("Followup_DropsNullOrUndefinedPayload", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -427,7 +410,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  it("Followup_InvokesRuntimeOnce_OnAcceptedDeliveryEvenIfOutboxLaterDrains", async () => {
+  followupIt("Followup_InvokesRuntimeOnce_OnAcceptedDeliveryEvenIfOutboxLaterDrains", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
@@ -441,22 +424,9 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 })
 
 describe("RunnerSignalRClient routes follow-up by persisted binding runtime", () => {
-  let opencode: FakeRuntimeHandles
-  let pi: FakePiRuntimeHandles
-
-  beforeEach(() => {
-    resetBuilders()
-    opencode = makeFakeRuntime()
-    pi = makeFakePiRuntime()
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it("PiBinding_DispatchesToPiRuntime_WithThePiTarget", async () => {
+  followupIt("PiBinding_DispatchesToPiRuntime_WithThePiTarget", async ({ runtime: opencode, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", projectId: "proj-1" }))
-    const recording = buildRecordingOutbox()
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()
 
@@ -477,9 +447,9 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
     expect(opencode.followupCalls).toHaveLength(0)
   })
 
-  it("OpenCodeBinding_DispatchesToOpenCodeRuntime_AndDoesNotInvokePi", async () => {
+  followupIt("OpenCodeBinding_DispatchesToOpenCodeRuntime_AndDoesNotInvokePi", async ({ runtime: opencode, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
-    const recording = buildRecordingOutbox()
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()
 
@@ -499,9 +469,9 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
     expect(pi.followupCalls).toHaveLength(0)
   })
 
-  it("PiFollowup_PreflightAccepted_ResolvesAcceptedWithoutRotation", async () => {
+  followupIt("PiFollowup_PreflightAccepted_ResolvesAcceptedWithoutRotation", async ({ runtime: opencode, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", projectId: "proj-1" }))
-    const recording = buildRecordingOutbox()
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()
 
@@ -518,9 +488,9 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
     expect(pi.followupCalls[0].target.runtimeSessionId).toBe("/virtual/sessions/one.jsonl")
   })
 
-  it("UnknownRuntime_ReportsUnavailable_AndDoesNotCallAnyRuntime", async () => {
+  followupIt("UnknownRuntime_ReportsUnavailable_AndDoesNotCallAnyRuntime", async ({ runtime: opencode, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-x", workDir: "/work/project", projectId: "proj-1" }))
-    const recording = buildRecordingOutbox()
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()
 
@@ -537,9 +507,9 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
     expect(pi.followupCalls).toHaveLength(0)
   })
 
-  it("PostResetBinding_HonorsTheReplacedRuntimeImmediately", async () => {
+  followupIt("PostResetBinding_HonorsTheReplacedRuntimeImmediately", async ({ runtime: opencode, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/two.jsonl", workDir: "/workspace", projectId: "proj-1" }))
-    const recording = buildRecordingOutbox()
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()
 

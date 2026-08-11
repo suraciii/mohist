@@ -29,6 +29,7 @@ import type { WorkspaceRemovalFence } from "../runtime/workspace-removal-fence.j
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from "../runtime/workspace.js"
 import { runnerLogger } from "../system/logger.js"
+import { currentRunnerResources } from "../system/filesystem.js"
 
 const log = runnerLogger.child("cleanup")
 
@@ -43,7 +44,7 @@ export function registerWorkspaceRemovalHandler(
   conn: signalR.HubConnection,
   deps: WorkspaceRemovalHandlerDeps,
 ): void {
-  const pathExists = deps.pathExists ?? defaultExistsSync
+  const pathExists = deps.pathExists ?? currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
 
   conn.on("RemoveWorkspace", async (query: WorkspaceQuery) => {
     if (!query?.workspacePath) {

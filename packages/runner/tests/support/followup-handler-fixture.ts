@@ -11,9 +11,10 @@
  *   - a fake OpenCodeRuntime with `followupCalls` / `cancelCalls`
  *     observation surfaces
  */
-import { vi } from "vitest"
+import { it as vitestIt, vi } from "vitest"
 import { HubConnectionState, type HubConnection } from "@microsoft/signalr"
 import { RunnerSignalRClient, type ReceiveFollowupPayload } from "../../src/server/runner-signalr.js"
+import type { RunnerFileSystem, RunnerResourceContext } from "../../src/system/filesystem.js"
 import type {
   AgentSessionRuntimeEventOutbox,
   RuntimeEventOutboxFileSystem,
@@ -23,6 +24,8 @@ import type {
 import type { AgentSessionRuntimeEventReceipt } from "../../src/server/connection.js"
 import type { FollowupOperationJournalStore } from "../../src/runtime/followup-operation-journal.js"
 import type { CancelOperationJournalStore } from "../../src/runtime/cancel-operation-journal.js"
+import { MemoryFileSystem } from "./memory-filesystem.js"
+import { currentSignalRTestState, withSignalRTestResources } from "./signalr-test-resources.js"
 import type {
   OpenCodeRuntime,
   RuntimeCancelRequest,
@@ -38,7 +41,7 @@ vi.mock("@microsoft/signalr", () => {
       private _handlers: Map<string, (...args: unknown[]) => unknown> = new Map()
       private _connection = makeFakeConnection()
       withUrl(_url: string) {
-        builders.push({ handlers: this._handlers, connection: this._connection })
+        currentSignalRTestState().builders.push({ handlers: this._handlers, connection: this._connection })
         return this
       }
       withAutomaticReconnect(_reconnectPolicy: number[]) {
@@ -104,9 +107,6 @@ export interface RecordingOutbox {
   flush: () => Promise<void>
 }
 
-const builders: CapturedBuilder[] = []
-let nextConnectionId = 0
-
 function makeFakeConnection(): FakeConnection {
   const conn: FakeConnection = {
     state: HubConnectionState.Disconnected,
@@ -119,7 +119,7 @@ function makeFakeConnection(): FakeConnection {
   }
   conn.start.mockImplementation(async () => {
     conn.state = HubConnectionState.Connected
-    conn.connectionId = `conn-${++nextConnectionId}`
+    conn.connectionId = `conn-${++currentSignalRTestState().nextConnectionId}`
   })
   conn.stop.mockImplementation(async () => {
     conn.state = HubConnectionState.Disconnected
@@ -132,14 +132,29 @@ function makeFakeConnection(): FakeConnection {
 }
 
 export function resetBuilders(): void {
-  builders.length = 0
-  nextConnectionId = 0
+  currentSignalRTestState().builders.length = 0
+  currentSignalRTestState().nextConnectionId = 0
 }
 
 export function lastBuilder(): CapturedBuilder {
-  const builder = builders.at(-1)
+  const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
   if (!builder) throw new Error("no captured builder; construct a RunnerSignalRClient first")
   return builder
+}
+
+export interface FollowupTestResources {
+  readonly resources: Omit<RunnerResourceContext, "fileSystem"> & { fileSystem: RunnerFileSystem }
+  readonly runtime: FakeRuntimeHandles
+  readonly recording: RecordingOutbox
+}
+
+export function followupIt(name: string, body: (context: FollowupTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources = { fileSystem: new MemoryFileSystem() }
+    await withSignalRTestResources(resources, async () => {
+      await body({ resources, runtime: makeFakeRuntime(), recording: buildRecordingOutbox() })
+    })
+  })
 }
 
 export function makeFakeRuntime(): FakeRuntimeHandles {
@@ -327,14 +342,14 @@ export function buildClient(opts: {
   followupOperationJournal?: FollowupOperationJournalStore | null
   cancelOperationJournal?: CancelOperationJournalStore | null
 }): RunnerSignalRClient {
-  builders.length = 0
+  currentSignalRTestState().builders.length = 0
   const resolver = opts.resolver === undefined ? null : opts.resolver
   const outbox = opts.outbox === undefined ? null : opts.outbox
   const openCodeRuntime = opts.openCodeRuntime === undefined ? makeFakeRuntime().runtime : opts.openCodeRuntime
   return new RunnerSignalRClient(
-    "http://localhost:3456",
+    "https://runner.test",
     "runner-1",
-    "/tmp/mohist/projects",
+    "/virtual/projects",
     null,
     {
       followupTargetResolver: resolver as never,

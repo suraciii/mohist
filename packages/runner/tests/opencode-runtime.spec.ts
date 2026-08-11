@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   errorKindFor,
   isNonRecoverableProviderMessage,
@@ -11,15 +11,18 @@ import {
   normalizeUnavailableRuntime,
   OpenCodeRuntime,
   parseModelIdentifier,
-  setOpenCodeRuntimeFactoryForTest,
   getOpenCodeRuntimeFactory,
   createDefaultOpenCodeRuntime,
 } from "../src/runtime/opencode/index.js"
+import type { OpenCodeRuntimeFactory } from "../src/runtime/opencode/factory.js"
+import type { RunnerFileSystem } from "../src/system/filesystem.js"
 import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import * as runtimeModule from "../src/runtime/opencode/index.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void
@@ -538,19 +541,28 @@ describe("OpenCodeRuntime.resolveSession", () => {
 })
 
 describe("factory seam", () => {
-  beforeEach(() => setOpenCodeRuntimeFactoryForTest(null))
-  afterEach(() => setOpenCodeRuntimeFactoryForTest(null))
+  interface FactoryTestResources {
+    fileSystem: RunnerFileSystem
+    openCodeRuntimeFactory?: OpenCodeRuntimeFactory
+  }
 
-  it("setOpenCodeRuntimeFactoryForTest(null) restores the default factory", () => {
-    const defaultFactory = createDefaultOpenCodeRuntime
-    setOpenCodeRuntimeFactoryForTest(() => {
-      throw new Error("should not be called")
+  function factoryIt(name: string, body: (resources: FactoryTestResources) => Promise<void> | void): void {
+    it(name, async () => {
+      const resources: FactoryTestResources = { fileSystem: new MemoryFileSystem() }
+      await withTestRunnerResources(async () => await body(resources), resources)
     })
-    setOpenCodeRuntimeFactoryForTest(null)
+  }
+
+  factoryIt("an absent scoped factory restores the default factory", (resources) => {
+    const defaultFactory = createDefaultOpenCodeRuntime
+    resources.openCodeRuntimeFactory = () => {
+      throw new Error("should not be called")
+    }
+    delete resources.openCodeRuntimeFactory
     expect(getOpenCodeRuntimeFactory()).toBe(defaultFactory)
   })
 
-  it("getOpenCodeRuntimeFactory returns a function that builds an OpenCodeRuntime", () => {
+  factoryIt("getOpenCodeRuntimeFactory returns a function that builds an OpenCodeRuntime", () => {
     const factory = getOpenCodeRuntimeFactory()
     const built = factory({
       directory: "/tmp/work",
@@ -565,11 +577,11 @@ describe("factory seam", () => {
     expect(built).toBeInstanceOf(OpenCodeRuntime)
   })
 
-  it("setOpenCodeRuntimeFactoryForTest replaces the factory", () => {
-    const replacement = () => {
+  factoryIt("a scoped factory replaces the default factory", (resources) => {
+    const replacement: OpenCodeRuntimeFactory = () => {
       throw new Error("custom factory")
     }
-    setOpenCodeRuntimeFactoryForTest(replacement)
+    resources.openCodeRuntimeFactory = replacement
     expect(getOpenCodeRuntimeFactory()).toBe(replacement)
   })
 })

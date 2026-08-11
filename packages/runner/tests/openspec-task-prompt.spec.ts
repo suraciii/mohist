@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { describe, expect, it as vitestIt } from "vitest"
+import { mkdir, writeFile } from "./support/test-fs.js"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
 import {
   OPENSPEC_TASK_PROMPT_LOADER_NAME,
   openspecTaskPromptLoader,
@@ -10,31 +10,41 @@ import {
   defaultPromptLoaderRegistry,
   renderStructuredPrompt,
   resolvePrompt,
-  setPromptLoaderRegistryForTest,
   type PromptLoaderContext,
 } from "../src/core/prompt.js"
 import "../src/core/prompt-registry.js"
+import { createTestTempDir } from "./support/temp-dir.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
-let workDir = ""
-let tasksPath = ""
-let buildBasePrompt = "<artifact id=\"build-task\">base instructions</artifact>"
+interface TestContext {
+  workDir: string
+  tasksPath: string
+  buildBasePrompt: string
+}
 
-beforeEach(async () => {
-  workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-task-prompt-"))
-  tasksPath = join(workDir, "tasks.json")
-  buildBasePrompt = "<artifact id=\"build-task\">base instructions</artifact>"
-})
+const testContextStorage = new AsyncLocalStorage<TestContext>()
 
-afterEach(async () => {
-  setPromptLoaderRegistryForTest(null)
-  if (workDir) await rm(workDir, { recursive: true, force: true })
-  workDir = ""
-  tasksPath = ""
-})
+function context(): TestContext {
+  const value = testContextStorage.getStore()
+  if (!value) throw new Error("openspec task prompt test resource context is not active")
+  return value
+}
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => withTestRunnerResources(async () => {
+    const workDir = await createTestTempDir("mohist-openspec-task-prompt-")
+    await testContextStorage.run({
+      workDir,
+      tasksPath: join(workDir, "tasks.json"),
+      buildBasePrompt: "<artifact id=\"build-task\">base instructions</artifact>",
+    }, async () => await body())
+  })),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
 
 describe("mohist/openspec-task-prompt loader - taskId selection", () => {
   it("SelectTaskByTaskId_ResolvesTaskAndEmbedsBaseInstructions", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         { id: "T-001", title: "Add structured prompt renderer", description: "First task" },
         { id: "T-002", title: "Add prompt loader", description: "Second task" },
@@ -44,13 +54,13 @@ describe("mohist/openspec-task-prompt loader - taskId selection", () => {
     const result = await openspecTaskPromptLoader(loaderContext({
       file: "tasks.json",
       taskId: "T-002",
-      base: buildBasePrompt,
+      base: context().buildBasePrompt,
     }))
 
     expect(result).toEqual({
       artifact: {
         attrs: { id: "T-002" },
-        base_instructions: buildBasePrompt,
+        base_instructions: context().buildBasePrompt,
         selected_task: {
           attrs: { id: "T-002" },
           title: "Add prompt loader",
@@ -61,7 +71,7 @@ describe("mohist/openspec-task-prompt loader - taskId selection", () => {
   })
 
   it("SelectTaskByTaskIdField_ResolvesWhenIdFieldMissing", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         { taskId: "legacy-1", title: "Legacy task id" },
         { taskId: "legacy-2", title: "Other legacy task id" },
@@ -82,7 +92,7 @@ describe("mohist/openspec-task-prompt loader - taskId selection", () => {
   })
 
   it("SelectTaskByTaskId_IdFieldTakesPrecedenceOverTaskIdFieldOnFirstMatch", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         { id: "shared", taskId: "shared-fallback", title: "id first" },
         { id: "other", taskId: "shared", title: "duplicate via taskId" },
@@ -103,7 +113,7 @@ describe("mohist/openspec-task-prompt loader - taskId selection", () => {
   })
 
   it("SelectTaskByTaskId_OverridesProvidedIndex", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         { id: "T-001", title: "First" },
         { id: "T-002", title: "Second" },
@@ -128,7 +138,7 @@ describe("mohist/openspec-task-prompt loader - taskId selection", () => {
 
 describe("mohist/openspec-task-prompt loader - index selection", () => {
   it("SelectTaskByIndex_ResolvesZeroBasedPosition", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         { id: "T-001", title: "First" },
         { id: "T-002", title: "Second" },
@@ -153,7 +163,7 @@ describe("mohist/openspec-task-prompt loader - index selection", () => {
   })
 
   it("SelectTaskByIndex_WhenTaskHasNoId_EmitsIndexAttribute", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         { title: "Anonymous task 1" },
         { title: "Anonymous task 2" },
@@ -186,7 +196,7 @@ describe("mohist/openspec-task-prompt loader - clear errors", () => {
   })
 
   it("MissingItemsPath_FailsWithDescriptiveError", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       other: [{ id: "T-001", title: "x" }],
     }))
 
@@ -198,7 +208,7 @@ describe("mohist/openspec-task-prompt loader - clear errors", () => {
   })
 
   it("ItemsPathResolvesToNonArray_FailsWithDescriptiveError", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: { id: "T-001", title: "x" },
     }))
 
@@ -209,7 +219,7 @@ describe("mohist/openspec-task-prompt loader - clear errors", () => {
   })
 
   it("MissingTaskIdAndIndex_FailsWithSelectorRequiredError", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [{ id: "T-001", title: "x" }],
     }))
 
@@ -219,7 +229,7 @@ describe("mohist/openspec-task-prompt loader - clear errors", () => {
   })
 
   it("MissingTaskIdMatch_FailsWithSelectedTaskError", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [{ id: "T-001", title: "x" }],
     }))
 
@@ -230,7 +240,7 @@ describe("mohist/openspec-task-prompt loader - clear errors", () => {
   })
 
   it("IndexOutOfRange_FailsWithDescriptiveError", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [{ id: "T-001", title: "x" }],
     }))
 
@@ -247,7 +257,7 @@ describe("mohist/openspec-task-prompt loader - clear errors", () => {
   })
 
   it("MalformedJson_FailsWithParseError", async () => {
-    await writeFile(tasksPath, "{ not valid json")
+    await writeFile(context().tasksPath, "{ not valid json")
 
     await expect(openspecTaskPromptLoader(loaderContext({
       file: "tasks.json",
@@ -259,7 +269,7 @@ describe("mohist/openspec-task-prompt loader - clear errors", () => {
 describe("mohist/openspec-task-prompt loader - opaque JSON content", () => {
   it("TaskDescriptionContainingLiteralTemplateSyntax_IsPreservedAsData", async () => {
     const description = "Prepend a YAML block. bodies must remain byte-identical so the runner's ${{ prompts.xxx }} resolution is unaffected."
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         {
           id: "T-001",
@@ -296,7 +306,7 @@ describe("mohist/openspec-task-prompt loader - opaque JSON content", () => {
 
 describe("mohist/openspec-task-prompt loader - configuration", () => {
   it("CustomItemsPath_LocatesTaskArrayAtNestedPath", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       openspec: { items: [{ id: "T-007", title: "Nested task" }] },
     }))
 
@@ -314,7 +324,7 @@ describe("mohist/openspec-task-prompt loader - configuration", () => {
   })
 
   it("CustomRootTag_UsesConfiguredOuterTag", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [{ id: "T-001", title: "First" }],
     }))
 
@@ -329,7 +339,7 @@ describe("mohist/openspec-task-prompt loader - configuration", () => {
   })
 
   it("EmptyBase_OmitsBaseInstructionsField", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [{ id: "T-001", title: "First" }],
     }))
 
@@ -347,7 +357,7 @@ describe("mohist/openspec-task-prompt loader - configuration", () => {
   })
 
   it("BlankBase_OmitsBaseInstructionsField", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [{ id: "T-001", title: "First" }],
     }))
 
@@ -366,7 +376,7 @@ describe("mohist/openspec-task-prompt loader - configuration", () => {
   })
 
   it("RelativeFilePath_ResolvesAgainstWorkDir", async () => {
-    const nestedDir = join(workDir, "nested")
+    const nestedDir = join(context().workDir, "nested")
     const nested = join(nestedDir, "tasks.json")
     await mkdir(nestedDir, { recursive: true })
     await writeFile(nested, JSON.stringify({
@@ -384,7 +394,7 @@ describe("mohist/openspec-task-prompt loader - configuration", () => {
   })
 
   it("AbsoluteFilePath_UsesAsIs", async () => {
-    const absolute = join(workDir, "absolute.json")
+    const absolute = join(context().workDir, "absolute.json")
     await writeFile(absolute, JSON.stringify({
       tasks: [{ id: "T-001", title: "Absolute path" }],
     }))
@@ -400,7 +410,7 @@ describe("mohist/openspec-task-prompt loader - configuration", () => {
   })
 
   it("NonObjectRoot_FailsWithDescriptiveError", async () => {
-    const arrayRootPath = join(workDir, "array.json")
+    const arrayRootPath = join(context().workDir, "array.json")
     await writeFile(arrayRootPath, JSON.stringify([{ id: "T-001", title: "x" }]))
 
     await expect(openspecTaskPromptLoader(loaderContext({
@@ -412,7 +422,7 @@ describe("mohist/openspec-task-prompt loader - configuration", () => {
 
 describe("mohist/openspec-task-prompt loader - integration with default renderer", () => {
   it("LoaderResult_RendersThroughStructuredRendererWhenResolvedViaRegistry", async () => {
-    await writeFile(tasksPath, JSON.stringify({
+    await writeFile(context().tasksPath, JSON.stringify({
       tasks: [
         {
           id: "T-001",
@@ -424,7 +434,6 @@ describe("mohist/openspec-task-prompt loader - integration with default renderer
       ],
     }))
 
-    setPromptLoaderRegistryForTest(null)
     const registry = defaultPromptLoaderRegistry()
     expect(registry.has(OPENSPEC_TASK_PROMPT_LOADER_NAME)).toBe(true)
 
@@ -433,14 +442,14 @@ describe("mohist/openspec-task-prompt loader - integration with default renderer
       with: {
         file: "tasks.json",
         taskId: "T-001",
-        base: buildBasePrompt,
+        base: context().buildBasePrompt,
       },
     }, loaderContext({}))
 
     const direct = renderStructuredPrompt({
       artifact: {
         attrs: { id: "T-001" },
-        base_instructions: buildBasePrompt,
+        base_instructions: context().buildBasePrompt,
         selected_task: {
           attrs: { id: "T-001" },
           title: "Add structured prompt renderer",
@@ -458,7 +467,7 @@ describe("mohist/openspec-task-prompt loader - integration with default renderer
 function loaderContext(with_: Record<string, unknown>): PromptLoaderContext {
   return {
     with: with_ as PromptLoaderContext["with"],
-    workDir,
+    workDir: context().workDir,
     workId: "work-1",
   }
 }

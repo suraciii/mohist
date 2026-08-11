@@ -42,6 +42,7 @@ import { CancelOperationJournal } from "./cancel-operation-journal.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { DispatchWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
+import { currentRunnerResources } from "../system/filesystem.js"
 import { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
 import { SkillResolver } from "./skill-resolver.js"
 import { runnerLogger } from "../system/logger.js"
@@ -488,7 +489,8 @@ export class RunnerHost {
     // Construct the shared runtimes. The factory seam returns real
     // runtimes in production or fakes in tests. Readiness is limited to
     // runtime health; model validity is decided by the requested work.
-    const policy = parseProviderErrorPolicy(process.env as Record<string, string | undefined>)
+    const environment = currentRunnerResources()?.environment ?? process.env
+    const policy = parseProviderErrorPolicy(environment)
     if (!policy.ok) {
       this.providerPolicyDiagnostic = `provider error policy invalid (${policy.error.code}): ${policy.error.message}`
       log.error("provider error policy invalid", { reason: this.providerPolicyDiagnostic })

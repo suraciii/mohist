@@ -1,15 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import type { JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionHost } from "../src/actions/host.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
-import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
+import type { GitRunner } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import { defineTestAction, ActionRegistry } from "./support/action-registry-test.js"
-
-let workDir: string
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 const nonGitRunner: GitRunner = async () => ({
   success: false,
@@ -19,18 +15,16 @@ const nonGitRunner: GitRunner = async () => ({
   combinedOutput: "not a git repository",
 })
 
-beforeEach(async () => {
-  workDir = await mkdtemp(join(tmpdir(), "mohist-executor-raw-with-"))
-  setExecutorGitRunnerForTest(nonGitRunner)
-})
+const withExecutorResources = <T>(body: (workDir: string) => Promise<T>) =>
+  withTestRunnerResources(async () => await body("/virtual/executor-raw-with"), { gitRunner: nonGitRunner })
 
-afterEach(async () => {
-  setExecutorGitRunnerForTest(null)
-  await rm(workDir, { recursive: true, force: true })
-})
+const it = Object.assign(
+  (name: string, body: (workDir: string) => unknown) => vitestIt(name, () => withExecutorResources(async (workDir) => await body(workDir))),
+  { each: vitestIt.each.bind(vitestIt) },
+)
 
 describe("WorkExecutor action input boundary", () => {
-  it("exposes only recursively-rendered input to a custom Action", async () => {
+  it("exposes only recursively-rendered input to a custom Action", async (workDir) => {
     let capturedInputs: JsonObject | null = null
     let capturedHost: ActionHost | null = null
 
@@ -84,7 +78,7 @@ describe("WorkExecutor action input boundary", () => {
     expect(capturedHost!.workDir).toBe(workDir)
   })
 
-  it("receives inputs and host without exposing internal data", async () => {
+  it("receives inputs and host without exposing internal data", async (workDir) => {
     let capturedInputs: JsonObject | null = null
     let capturedHost: ActionHost | null = null
     const registry = new ActionRegistry([
@@ -124,7 +118,7 @@ describe("WorkExecutor action input boundary", () => {
     expect(capturedHost).not.toHaveProperty("variables")
   })
 
-  it("assembles only namespaced dispatch roots and resolved workspace fields", async () => {
+  it("assembles only namespaced dispatch roots and resolved workspace fields", async (workDir) => {
     let capturedInputs: JsonObject | null = null
     const registry = new ActionRegistry([
       defineTestAction("test/context-roots", async (inputs) => {
@@ -171,7 +165,7 @@ describe("WorkExecutor action input boundary", () => {
     expect(unavailable.message).toContain("${{ foo }}")
   })
 
-  it("derives engine-sourced inputs from variables without exposing the variable map", async () => {
+  it("derives engine-sourced inputs from variables without exposing the variable map", async (workDir) => {
     let capturedInputs: JsonObject | null = null
     const registry = new ActionRegistry([
       defineTestAction("test/engine-input", async (inputs) => {
@@ -211,7 +205,7 @@ describe("WorkExecutor action input boundary", () => {
 })
 
 describe("Dispatch rendering boundary", () => {
-  it("renders immediate nested templates against the carried snapshot", async () => {
+  it("renders immediate nested templates against the carried snapshot", async (workDir) => {
     let capturedInputs: JsonObject | null = null
     const registry = new ActionRegistry([
       defineTestAction("test/render-snapshot", async (inputs) => {
@@ -265,6 +259,7 @@ describe("Dispatch rendering boundary", () => {
     ["number", 42],
     ["boolean", true],
   ])("preserves whole-value JSON type for a %s reference", async (_label, resolved) => {
+    return await withExecutorResources(async (workDir) => {
     let capturedInputs: JsonObject | null = null
     const registry = new ActionRegistry([
       defineTestAction("test/json-types", async (inputs) => {
@@ -297,9 +292,10 @@ describe("Dispatch rendering boundary", () => {
     const result = await executor.execute(workItem, new AbortController().signal)
     expect(result.status).toBe("completed")
     expect(capturedInputs).toEqual({ agent: resolved })
+    })
   })
 
-  it("fails an immediate whole-value reference without invoking the Action", async () => {
+  it("fails an immediate whole-value reference without invoking the Action", async (workDir) => {
     let actionInvoked = false
     const registry = new ActionRegistry([
       defineTestAction("test/missing-ref", async () => {
@@ -333,7 +329,7 @@ describe("Dispatch rendering boundary", () => {
     expect(result.message).toContain("vars.missing")
   })
 
-  it("keeps nested templates inside a deferred field unchanged for the Action", async () => {
+  it("keeps nested templates inside a deferred field unchanged for the Action", async (workDir) => {
     let capturedInputs: JsonObject | null = null
     const registry = new ActionRegistry([
       defineTestAction("test/deferred-tasks", async (inputs) => {
@@ -379,7 +375,7 @@ describe("Dispatch rendering boundary", () => {
     })
   })
 
-  it("Action mutation of a deferred reference cannot mutate DispatchWorkItem.with", async () => {
+  it("Action mutation of a deferred reference cannot mutate DispatchWorkItem.with", async (workDir) => {
     const originalDeferred: JsonObject = { id: "child", with: { agent: { name: "${{ vars.agent }}" } } }
     const observed: { mutated: JsonObject | null; sourceDeferred: unknown } = { mutated: null, sourceDeferred: null }
 

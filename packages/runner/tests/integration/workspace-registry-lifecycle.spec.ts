@@ -1,37 +1,36 @@
-import { existsSync } from "node:fs"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  RunnerSignalRClient,
-  setRunnerSignalRExistsCheckerForTest,
-} from "../../src/server/runner-signalr.js"
+import { describe, expect, it as vitestIt, vi } from "vitest"
+import { RunnerSignalRClient } from "../../src/server/runner-signalr.js"
 import { WorkspaceManager } from "../../src/runtime/workspace.js"
 import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../../src/runtime/workspace-registry.js"
-import { exists, runCommand } from "../../src/system/process.js"
-import { createTestTempDir } from "../support/temp-dir.js"
+import type { RunnerFileSystem, RunnerResourceContext } from "../../src/system/filesystem.js"
+import { MemoryFileSystem } from "../support/memory-filesystem.js"
+import { currentSignalRTestState, withSignalRTestResources } from "../support/signalr-test-resources.js"
 
 interface CapturedBuilder {
   handlers: Map<string, (...args: unknown[]) => unknown>
   state: { connected: boolean }
 }
 
-const builders: CapturedBuilder[] = []
 const testGitUrl = "https://repo.test/mohist.git"
-const workspaceBranches = new Map<string, string>()
-let root: string
+type TestResources = {
+  fileSystem: RunnerFileSystem
+  commandRunner: NonNullable<RunnerResourceContext["commandRunner"]>
+  signalRExistsChecker: (path: string) => boolean
+}
 
-beforeEach(async () => {
-  builders.length = 0
-  workspaceBranches.clear()
-  setRunnerSignalRExistsCheckerForTest(existsSync)
-  root = await createTestTempDir("mohist-workspace-registry-integration-")
-  installGitFake()
-})
-
-afterEach(() => {
-  setRunnerSignalRExistsCheckerForTest(null)
-})
+function it(name: string, body: (resources: TestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const fileSystem = new MemoryFileSystem()
+    const resources = {
+      fileSystem,
+      commandRunner: undefined as unknown as TestResources["commandRunner"],
+      signalRExistsChecker: (path: string) => fileSystem.exists(path),
+    }
+    installGitFake(resources, new Map())
+    await withSignalRTestResources(resources, async () => await body(resources))
+  })
+}
 
 vi.mock("@microsoft/signalr", () => {
   class FakeConnection {
@@ -48,7 +47,8 @@ vi.mock("@microsoft/signalr", () => {
     })
     invoke = vi.fn()
     on = vi.fn((event: string, handler: (...args: unknown[]) => unknown) => {
-      const builder = builders.at(-1)!
+      const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
+      if (!builder) throw new Error("no captured SignalR builder")
       builder.handlers.set(event, handler)
       return this
     })
@@ -60,7 +60,7 @@ vi.mock("@microsoft/signalr", () => {
       private _connection = new FakeConnection()
       withUrl() {
         const builder: CapturedBuilder = { handlers: new Map(), state: { connected: true } }
-        builders.push(builder)
+        currentSignalRTestState().builders.push(builder)
         return this
       }
       withAutomaticReconnect() { return this }
@@ -78,17 +78,13 @@ vi.mock("@microsoft/signalr", () => {
   }
 })
 
-vi.mock("../../src/system/process.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/system/process.js")>()
-  return { ...actual, runCommand: vi.fn() }
-})
-
 function commandResult(stdout = "") {
   return { exitCode: 0, stdout, stderr: "" }
 }
 
-function installGitFake() {
-  vi.mocked(runCommand).mockImplementation(async (command, args) => {
+function installGitFake(resources: TestResources, workspaceBranches: Map<string, string>) {
+  resources.commandRunner = {
+    async run(command, args) {
     if (command !== "git") return commandResult()
 
     const workDir = args[0] === "-C" ? args[1] : null
@@ -98,7 +94,7 @@ function installGitFake() {
 
     if (gitArgs[0] === "clone") {
       const workspacePath = gitArgs.at(-1)!
-      await mkdir(join(workspacePath, ".git", "info"), { recursive: true })
+      await resources.fileSystem.ensureDir(join(workspacePath, ".git", "info"))
       return commandResult()
     }
 
@@ -116,7 +112,8 @@ function installGitFake() {
     }
 
     return commandResult()
-  })
+    },
+  }
 }
 
 function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
@@ -148,7 +145,9 @@ function removalQuery(workflowRunId: string, issueNumber: number, workspacePath:
 }
 
 describe("workspace registry lifecycle", () => {
-  it("materialization registers an active entry by workflow run", async () => {
+  const root = "/virtual/workspace-registry"
+
+  it("materialization registers an active entry by workflow run", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
@@ -168,11 +167,11 @@ describe("workspace registry lifecycle", () => {
     expect(entry?.terminalAt).toBeNull()
 
     // The registry is persisted atomically to disk.
-    const persisted = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(runnerRoot), "utf8"))
+    const persisted = JSON.parse(await resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(runnerRoot)))
     expect(persisted.entries["wr-001"]).toMatchObject({ phase: "active", workflowRunId: "wr-001" })
   })
 
-  it("materialization writes only workspace identity to the marker", async () => {
+  it("materialization writes only workspace identity to the marker", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
@@ -181,14 +180,14 @@ describe("workspace registry lifecycle", () => {
 
     const info = await manager.prepare(work("wr-marker", 99, repo), new AbortController().signal)
 
-    const marker = JSON.parse(await readFile(join(info.path, ".mohist/workspace.json"), "utf8"))
+    const marker = JSON.parse(await resources.fileSystem.readText(join(info.path, ".mohist/workspace.json")))
     expect(marker).toMatchObject({
       workflowRunId: "wr-marker",
       runBranch: "mohist/run-wr-marker",
     })
   })
 
-  it("verification refreshes an existing entry", async () => {
+  it("verification refreshes an existing entry", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const first = new Date("2026-06-01T00:00:00.000Z")
@@ -209,7 +208,7 @@ describe("workspace registry lifecycle", () => {
     expect(registry.get("wr-refresh")?.phase).toBe("active")
   })
 
-  it("verification does not create a missing registry entry", async () => {
+  it("verification does not create a missing registry entry", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
@@ -228,7 +227,7 @@ describe("workspace registry lifecycle", () => {
     expect(registry.get("wr-existing-only")).toBeNull()
   })
 
-  it("a fresh registry loads an active entry", async () => {
+  it("a fresh registry loads an active entry", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
 
@@ -251,7 +250,7 @@ describe("workspace registry lifecycle", () => {
     expect(entry?.terminalAt).toBeNull()
   })
 
-  it("manual removal drops the matching registry entry", async () => {
+  it("manual removal drops the matching registry entry", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
@@ -263,8 +262,8 @@ describe("workspace registry lifecycle", () => {
 
     // Stand up a SignalR client bound to the same registry. The handler
     // is registered automatically by the constructor.
-    void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
-    const builder = builders.at(-1)!
+    void new RunnerSignalRClient("https://runner.test", "runner-test", runnerRoot, null, { registry })
+    const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder
     const removeHandler = builder.handlers.get("RemoveWorkspace")
     expect(removeHandler).toBeTypeOf("function")
 
@@ -274,11 +273,11 @@ describe("workspace registry lifecycle", () => {
     expect(registry.get("wr-remove")).toBeNull()
 
     // The on-disk registry was rewritten.
-    const persisted = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(runnerRoot), "utf8"))
+    const persisted = JSON.parse(await resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(runnerRoot)))
     expect(persisted.entries["wr-remove"]).toBeUndefined()
   })
 
-  it("manual removal clears the entry when the workspace is already missing", async () => {
+  it("manual removal clears the entry when the workspace is already missing", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
@@ -286,18 +285,18 @@ describe("workspace registry lifecycle", () => {
     const manager = new WorkspaceManager(runnerRoot, registry)
 
     const info = await manager.prepare(work("wr-gone", 2, repo), new AbortController().signal)
-    await rm(info.path, { recursive: true, force: true })
-    expect(exists(info.path)).toBe(false)
+    await resources.fileSystem.deleteDirectory(info.path)
+    expect(resources.fileSystem.exists(info.path)).toBe(false)
 
-    void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
-    const removeHandler = builders.at(-1)!.handlers.get("RemoveWorkspace")!
+    void new RunnerSignalRClient("https://runner.test", "runner-test", runnerRoot, null, { registry })
+    const removeHandler = (currentSignalRTestState().builders.at(-1) as CapturedBuilder).handlers.get("RemoveWorkspace")!
     const result = await (removeHandler as (query: unknown) => Promise<unknown>)(removalQuery("wr-gone", 2, info.path))
 
     expect(result).toMatchObject({ removed: false, status: "missing" })
     expect(registry.get("wr-gone")).toBeNull()
   })
 
-  it("manual removal refuses a path outside the runner root", async () => {
+  it("manual removal refuses a path outside the runner root", async (resources) => {
     const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
@@ -306,15 +305,15 @@ describe("workspace registry lifecycle", () => {
 
     const info = await manager.prepare(work("wr-out", 3, repo), new AbortController().signal)
 
-    void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
-    const removeHandler = builders.at(-1)!.handlers.get("RemoveWorkspace")!
+    void new RunnerSignalRClient("https://runner.test", "runner-test", runnerRoot, null, { registry })
+    const removeHandler = (currentSignalRTestState().builders.at(-1) as CapturedBuilder).handlers.get("RemoveWorkspace")!
 
     // Path that resolves outside runnerRoot. The handler should refuse
     // BEFORE the registry is touched so a misbehaving caller cannot
     // drop a registry entry for a directory it never managed.
-    await mkdir(join(root, "outside"), { recursive: true })
+    await resources.fileSystem.ensureDir(join(root, "outside"))
     const outsidePath = join(root, "outside", "decoy")
-    await writeFile(outsidePath, "not a workspace")
+    await resources.fileSystem.writeText(outsidePath, "not a workspace")
 
     const result = await (removeHandler as (query: unknown) => Promise<unknown>)(removalQuery("wr-out", 3, outsidePath))
     expect(result).toMatchObject({ removed: false, reason: "workspace_cleanup_refused" })
@@ -322,28 +321,28 @@ describe("workspace registry lifecycle", () => {
 
     // Sanity: the real workspace entry is unchanged and the directory
     // still exists.
-    expect(exists(info.path)).toBe(true)
+    expect(resources.fileSystem.exists(info.path)).toBe(true)
   })
 
-  it("manual removal preserves a registry entry outside the runner root", async () => {
+  it("manual removal preserves a registry entry outside the runner root", async (resources) => {
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
     const outsidePath = join(root, "outside-root-workspace")
-    await mkdir(outsidePath, { recursive: true })
+    await resources.fileSystem.ensureDir(outsidePath)
     await registry.register({
       issueNumber: 4,
       workflowRunId: "wr-outside-entry",
       workspacePath: outsidePath,
     })
 
-    void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
-    const removeHandler = builders.at(-1)!.handlers.get("RemoveWorkspace")!
+    void new RunnerSignalRClient("https://runner.test", "runner-test", runnerRoot, null, { registry })
+    const removeHandler = (currentSignalRTestState().builders.at(-1) as CapturedBuilder).handlers.get("RemoveWorkspace")!
 
     const result = await (removeHandler as (query: unknown) => Promise<unknown>)({ workspacePath: outsidePath })
 
     expect(result).toMatchObject({ removed: false, status: "failed", reason: "workspace_identity_mismatch" })
     expect(registry.get("wr-outside-entry")).toMatchObject({ workspacePath: outsidePath })
-    expect(exists(outsidePath)).toBe(true)
+    expect(resources.fileSystem.exists(outsidePath)).toBe(true)
   })
 })

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import type { AgentJobRuntimeAccessors } from "../src/runtime/agent-job-executor.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -254,14 +254,6 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
     ...overrides,
   }
 }
-
-beforeEach(() => {
-  vi.restoreAllMocks()
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-})
 
 describe("AgentJobExecutor selects the runtime from the dispatch", () => {
   it("selects OpenCodeRuntime for a dispatch with runtime: opencode", async () => {

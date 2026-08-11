@@ -36,7 +36,9 @@
 
 import { errorMessage } from "../core/errors.js"
 import { runnerLogger } from "../system/logger.js"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 import type { AgentSessionRuntimeEventReceipt } from "./connection.js"
+import { dirname } from "node:path"
 
 const log = runnerLogger.child("session")
 
@@ -186,8 +188,7 @@ interface SnapshotShape {
 export class NodeRuntimeEventOutboxFileSystem implements RuntimeEventOutboxFileSystem {
   async readText(path: string): Promise<string | null> {
     try {
-      const { readFile } = await import("node:fs/promises")
-      return await readFile(path, "utf8")
+      return await currentRunnerFileSystem().readText(path)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
       throw error
@@ -195,20 +196,17 @@ export class NodeRuntimeEventOutboxFileSystem implements RuntimeEventOutboxFileS
   }
 
   async writeAtomicText(path: string, body: string): Promise<void> {
-    const { mkdir, rename, writeFile, constants } = await import("node:fs/promises")
-    const { dirname } = await import("node:path")
-    await mkdir(dirname(path), { recursive: true })
+    const fileSystem = currentRunnerFileSystem()
+    await fileSystem.ensureDir(dirname(path))
     const temporary = nextTemporaryFilePath(path)
-    await writeFile(temporary, body, {
-      mode: constants.S_IRUSR | constants.S_IWUSR,
-    })
-    await rename(temporary, path)
+    await fileSystem.writeText(temporary, body, { mode: 0o600 })
+    await fileSystem.rename(temporary, path)
   }
 }
 
 export function nextTemporaryFilePath(path: string): string {
   temporaryFileSequence += 1
-  return `${path}.${process.pid}.${Date.now()}.${temporaryFileSequence}.tmp`
+  return `${path}.${temporaryFileSequence}.tmp`
 }
 
 export function createAgentSessionRuntimeEventOutbox(

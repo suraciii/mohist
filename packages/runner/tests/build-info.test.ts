@@ -33,18 +33,13 @@ describe("runner build-info loader", () => {
     }
   })
 
-  it("returnsWellShapedResultWhenManifestPresent", () => {
-    // After `npm run build`, dist/build-info.json should exist and the
-    // loader should expose either the real git hash (if available) or
-    // null (treated as unknown-identity, non-fatal).
-    const result = loadBuildInfo()
-    expect(result).toHaveProperty("gitHash")
-    expect(result).toHaveProperty("builtAt")
-    if (result.gitHash !== null) {
-      expect(result.gitHash.length).toBeGreaterThan(0)
-    }
-    if (result.builtAt !== null) {
-      expect(typeof result.builtAt).toBe("number")
-    }
+  it("returnsManifestFromInjectedFileSystem", () => {
+    const result = loadBuildInfo({
+      exists: () => true,
+      readText: () => JSON.stringify({ gitHash: "deadbeef", builtAt: 1_700_000_000_000 }),
+    })
+
+    expect(result.gitHash).toBe("deadbeef")
+    expect(result.builtAt).toBe(1_700_000_000_000)
   })
 })

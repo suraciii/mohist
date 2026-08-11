@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
@@ -6,21 +6,28 @@ import { createDefaultRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import {
   markGitHubPrReadyAction,
-  setGitHubPrGhRunnerForTest,
-  setGitHubPrGitRunnerForTest,
 } from "../src/actions/github-pr.js"
+import type { RunnerCommandRunner, RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
 type GhCall = { command: string; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
-const ghCalls: GhCall[] = []
+type ReadyTestResources = {
+  fileSystem: RunnerFileSystem
+  githubPrGitRunner?: RunnerGitRunner
+  githubPrGhRunner?: RunnerCommandRunner
+  ghCalls: GhCall[]
+}
 
-afterEach(() => {
-  setGitHubPrGitRunnerForTest(null)
-  setGitHubPrGhRunnerForTest(null)
-  ghCalls.length = 0
-})
+function it(name: string, body: (resources: ReadyTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: ReadyTestResources = { fileSystem: new MemoryFileSystem(), ghCalls: [] }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 function ghOk(stdout: string, stderr = ""): CommandResult {
   return { exitCode: 0, stdout, stderr }
@@ -62,16 +69,16 @@ function withLog(ctx: ActionContext, writes: Array<{ source: string; text: strin
   }
 }
 
-function installGit(respond: () => never) {
-  setGitHubPrGitRunnerForTest(async () => await respond())
+function installGit(resources: ReadyTestResources, respond: () => never) {
+  resources.githubPrGitRunner = async () => await respond()
 }
 
-function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
-  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+function installGh(resources: ReadyTestResources, respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
+  resources.githubPrGhRunner = async (cmd, args, cwd, _signal, _env, options) => {
     const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
-    ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
+    resources.ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
     return await respond(cmd, visibleArgs, cwd)
-  })
+  }
 }
 
 describe("mohist/mark-github-pr-ready registry", () => {
@@ -84,8 +91,8 @@ describe("mohist/mark-github-pr-ready registry", () => {
 })
 
 describe("mohist/mark-github-pr-ready action", () => {
-  it("requires prNumber and reports config-error when missing", async () => {
-    installGh(() => ghOk("never called"))
+  it("requires prNumber and reports config-error when missing", async (resources) => {
+    installGh(resources, () => ghOk("never called"))
 
     const result = await callAction(markGitHubPrReadyAction, context({}))
     expect(result.error).toBeDefined()
@@ -93,10 +100,10 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(result.error?.message).toContain("requires prNumber")
   })
 
-  it("is idempotent: a PR already marked READY returns success without gh pr ready", async () => {
+  it("is idempotent: a PR already marked READY returns success without gh pr ready", async (resources) => {
     const ghCalls: string[] = []
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -127,10 +134,10 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(ghCalls.some((call) => call === "gh pr ready 42")).toBe(false)
   })
 
-  it("forwards gh command output to the task log sink", async () => {
+  it("forwards gh command output to the task log sink", async (resources) => {
     const writes: Array<{ source: string; text: string }> = []
-    installGit(() => { throw new Error("git should not be called") })
-    setGitHubPrGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    resources.githubPrGhRunner = async (cmd, args, _cwd, _signal, _env, options) => {
       const full = [cmd, ...args].join(" ")
       options?.onLine?.(`captured ${full}`)
       if (full === "gh --version") return ghOk("gh version 2.0.0\n")
@@ -138,7 +145,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       if (full.startsWith("gh pr view 42 --json state,isDraft,url")) return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/acme/repo/pull/42" }))
       if (full.startsWith("gh pr ready 42")) return ghOk("ready\n")
       return ghFail(`unexpected gh call: ${full}`)
-    })
+    }
 
     const result = await callAction(markGitHubPrReadyAction, withLog(context({ prNumber: 42 }), writes))
 
@@ -146,10 +153,10 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(writes.some((write) => write.source === "action:mark-github-pr-ready" && write.text.includes("gh pr ready 42"))).toBe(true)
   })
 
-  it("transitions a draft PR to READY when isDraft is true", async () => {
+  it("transitions a draft PR to READY when isDraft is true", async (resources) => {
     const ghCalls: string[] = []
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -181,10 +188,10 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(ghCalls).toContain("gh pr ready 42")
   })
 
-  it("uses the explicitly declared repository despite different Variables", async () => {
+  it("uses the explicitly declared repository despite different Variables", async (resources) => {
     const prArguments: string[][] = []
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((_cmd, args) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (_cmd, args) => {
       if (args[0] === "--version" || args.join(" ") === "auth status") return ghOk("ok\n")
       if (args[0] === "pr") prArguments.push(args)
       if (args.join(" ").startsWith("pr view ")) return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/acme/repo/pull/42" }))
@@ -206,10 +213,10 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(result.error?.message).toContain("valid GitHub repository URL")
   })
 
-  it("does not call git push or update title/body — the action is a state transition only", async () => {
+  it("does not call git push or update title/body — the action is a state transition only", async (resources) => {
     const ghCalls: string[] = []
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       switch (full) {
@@ -237,8 +244,8 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(ghCalls).toContain("gh pr view 42 --json state,isDraft,url")
   })
 
-  it("reports config-error when the gh CLI precheck fails", async () => {
-    installGh((cmd, args) => {
+  it("reports config-error when the gh CLI precheck fails", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full === "gh --version") return ghFail("gh: command not found", "", 127)
       return ghFail(`unexpected gh call: ${full}`)
@@ -250,8 +257,8 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(result.error?.message).toContain("gh CLI is not installed")
   })
 
-  it("returns errorCode pr-state-conflict if the PR is closed", async () => {
-    installGh((cmd, args) => {
+  it("returns errorCode pr-state-conflict if the PR is closed", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -270,8 +277,8 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(result.error?.message).toContain("in state CLOSED")
   })
 
-  it("classifies gh pr ready failures via the shared classifier", async () => {
-    installGh((cmd, args) => {
+  it("classifies gh pr ready failures via the shared classifier", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -292,8 +299,8 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(result.error?.message).toContain("gh pr ready 42 failed")
   })
 
-  it("falls back to errorCode retry-safe when gh pr view returns unparseable JSON", async () => {
-    installGh((cmd, args) => {
+  it("falls back to errorCode retry-safe when gh pr view returns unparseable JSON", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -311,9 +318,9 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(result.error).toMatchObject({ code: "retry-safe" })
   })
 
-  it("NetworkGhCalls_AllReceiveTimeoutMs", async () => {
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+  it("NetworkGhCalls_AllReceiveTimeoutMs", async (resources) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -331,14 +338,14 @@ describe("mohist/mark-github-pr-ready action", () => {
     await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
 
     for (const command of ["gh --version", "gh auth status", "gh pr view 42 --json state,isDraft,url", "gh pr ready 42"]) {
-      const call = ghCalls.find((c) => c.command === command)
+      const call = resources.ghCalls.find((c) => c.command === command)
       expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     }
   })
 
-  it("GhPrReadyTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+  it("GhPrReadyTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async (resources) => {
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":

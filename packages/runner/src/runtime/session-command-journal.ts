@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 import {
   isValidSessionCommandRequest,
   isValidSessionCommandResult,
@@ -47,7 +47,7 @@ export class SessionCommandJournal implements SessionCommandJournalStore {
   async load(): Promise<void> {
     this.operations = new Map()
     try {
-      const raw = await readFile(this.filePath, "utf8")
+      const raw = await currentRunnerFileSystem().readText(this.filePath)
       const file = parseJournal(raw)
       if (!file) {
         this.unavailable = true
@@ -135,10 +135,10 @@ export class SessionCommandJournal implements SessionCommandJournalStore {
       ),
     }
     const directory = dirname(this.filePath)
-    await mkdir(directory, { recursive: true })
-    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`
-    await writeFile(tempPath, JSON.stringify(file, null, 2))
-    await rename(tempPath, this.filePath)
+    await currentRunnerFileSystem().ensureDir(directory)
+    const tempPath = `${this.filePath}.tmp`
+    await currentRunnerFileSystem().writeText(tempPath, JSON.stringify(file, null, 2))
+    await currentRunnerFileSystem().rename(tempPath, this.filePath)
   }
 }
 

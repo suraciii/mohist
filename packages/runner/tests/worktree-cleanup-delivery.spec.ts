@@ -1,16 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
-import { setCleanupAgentActionForTest } from "../src/runtime/worktree-enforcement.js"
-import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
-import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
-import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
+import { rebaseAction } from "../src/actions/rebase.js"
+import { pushAction } from "../src/actions/push.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import type { ActionHost } from "../src/actions/host.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import type { CleanupAgentAction } from "../src/runtime/worktree-enforcement.js"
+import type { RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
 import { defineTestActions, type ActionRegistry, type TestActionDefinition } from "./support/action-registry-test.js"
 import { callAction } from "./support/call-action.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 interface FakeWorktree {
   workDir: string
@@ -21,33 +23,25 @@ interface FakeWorktree {
   cleanupCommits: { files: string[]; sha: string }[]
 }
 
-let worktree: FakeWorktree
-let connection: Pick<ServerConnection, "uploadArtifact" | "report">
+type WorktreeTestResources = {
+  fileSystem: RunnerFileSystem
+  gitRunner?: RunnerGitRunner
+  rebaseGitRunner?: RunnerGitRunner
+  rebaseExistsChecker?: (path: string) => boolean
+  pushGitRunner?: RunnerGitRunner
+  cleanupAgentAction?: CleanupAgentAction
+}
 
-beforeEach(() => {
-  worktree = createFakeWorktree()
-  installExecutorGit(worktree)
-  connection = {
-    async report() {
-      return {}
-    },
-    async uploadArtifact() {
-      throw new Error("uploadArtifact should not be called in cleanup delivery tests")
-    },
-  } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
-})
-
-afterEach(() => {
-  setCleanupAgentActionForTest(null)
-  setExecutorGitRunnerForTest(null)
-  setRebaseGitRunnerForTest(null)
-  setRebaseExistsCheckerForTest(null)
-  setPushGitRunnerForTest(null)
-})
+function it(name: string, body: (resources: WorktreeTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: WorktreeTestResources = { fileSystem: new MemoryFileSystem() }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 function createFakeWorktree(): FakeWorktree {
   return {
-    workDir: process.cwd(),
+    workDir: "/virtual/worktree-cleanup",
     branch: "mo/worktree-cleanup",
     staged: [],
     unstaged: [],
@@ -56,8 +50,8 @@ function createFakeWorktree(): FakeWorktree {
   }
 }
 
-function installExecutorGit(state: FakeWorktree) {
-  setExecutorGitRunnerForTest(async (workDir, args) => {
+function installExecutorGit(resources: WorktreeTestResources, state: FakeWorktree) {
+  resources.gitRunner = async (workDir, args) => {
     expect(workDir).toBe(state.workDir)
     switch (args.join(" ")) {
       case "rev-parse --abbrev-ref HEAD":
@@ -75,7 +69,7 @@ function installExecutorGit(state: FakeWorktree) {
       default:
         throw new Error(`unexpected executor git call: ${args.join(" ")}`)
     }
-  })
+  }
 }
 
 function fileList(files: string[]) {
@@ -94,7 +88,7 @@ function buildRegistry(handlers: Record<string, TestActionDefinition | ((inputs:
   return defineTestActions(handlers)
 }
 
-function buildExecutor(registry: ActionRegistry): WorkExecutor {
+function buildExecutor(registry: ActionRegistry, worktree: FakeWorktree, connection: Pick<ServerConnection, "uploadArtifact" | "report">): WorkExecutor {
   return new WorkExecutor(
     registry,
      verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch }),
@@ -103,7 +97,7 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
   )
 }
 
-function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
+function buildWork(worktree: FakeWorktree, overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
     workflowRunId: "wf-worktree-cleanup",
     workId: "build:agent.1",
@@ -120,7 +114,7 @@ function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem 
   }
 }
 
-function rebaseContext(overrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
+function rebaseContext(worktree: FakeWorktree, overrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "wf-worktree-cleanup",
     workId: "integrate:rebase.1",
@@ -147,7 +141,7 @@ function rebaseContext(overrides: JsonObject = {}, variables: JsonObject = {}): 
   }
 }
 
-function pushContext(overrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
+function pushContext(worktree: FakeWorktree, overrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "wf-worktree-cleanup",
     workId: "integrate:push.1",
@@ -177,8 +171,8 @@ function gitFail(stderr: string, exitCode = 1) {
   return { success: false, stdout: "", stderr, exitCode, combinedOutput: stderr }
 }
 
-function installRebaseMockGit(calls: string[]) {
-  setRebaseGitRunnerForTest(async (_dir, args) => {
+function installRebaseMockGit(resources: WorktreeTestResources, calls: string[]) {
+  resources.rebaseGitRunner = async (_dir, args) => {
     const cmd = args.join(" ")
     calls.push(cmd)
     switch (cmd) {
@@ -207,14 +201,24 @@ function installRebaseMockGit(calls: string[]) {
       default:
         return gitFail(`unexpected git call: ${cmd}`, 1)
     }
-  })
-  setRebaseExistsCheckerForTest(() => false)
+  }
+  resources.rebaseExistsChecker = () => false
 }
 
 describe("worktree cleanup before delivery", () => {
-  it("commits agent leftovers before rebase and push", async () => {
+  it("commits agent leftovers before rebase and push", async (resources) => {
+    const worktree = createFakeWorktree()
+    installExecutorGit(resources, worktree)
+    const connection = {
+      async report() {
+        return {}
+      },
+      async uploadArtifact() {
+        throw new Error("uploadArtifact should not be called in cleanup delivery tests")
+      },
+    } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
     const cleanupPrompts: string[] = []
-    setCleanupAgentActionForTest(async (host, inputs) => {
+    resources.cleanupAgentAction = async (_host, inputs) => {
       const prompt = String(inputs.prompt ?? "")
       cleanupPrompts.push(prompt)
       expect(prompt).toMatch(/do NOT start any new task work/i)
@@ -222,7 +226,7 @@ describe("worktree cleanup before delivery", () => {
       expect(prompt).toContain("src/agent-output.ts")
       commitCleanup(worktree, ["src/agent-output.ts"], "cleanup-sha")
       return { output: { commitSha: "cleanup-sha" } }
-    })
+    }
 
     const registry = buildRegistry({
       "mohist/opencode": {
@@ -235,9 +239,9 @@ describe("worktree cleanup before delivery", () => {
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,
     })
-    const executor = buildExecutor(registry)
+    const executor = buildExecutor(registry, worktree, connection)
 
-    const agentResult = await executor.execute(buildWork(), new AbortController().signal)
+    const agentResult = await executor.execute(buildWork(worktree), new AbortController().signal)
     expect(agentResult.status).toBe("completed")
     expect(agentResult.cleanupAttempts).toBe(1)
     expect(cleanupPrompts).toHaveLength(1)
@@ -245,8 +249,8 @@ describe("worktree cleanup before delivery", () => {
     expect(worktree.untracked).toEqual([])
 
     const rebaseCalls: string[] = []
-    installRebaseMockGit(rebaseCalls)
-    const rebaseResult = await callAction(rebaseAction, rebaseContext())
+    installRebaseMockGit(resources, rebaseCalls)
+    const rebaseResult = await callAction(rebaseAction, rebaseContext(worktree))
     const rebaseOutput = rebaseResult.output as Record<string, unknown>
 
     expect(rebaseResult.error).toBeUndefined()
@@ -273,7 +277,7 @@ describe("worktree cleanup before delivery", () => {
     })
 
     const pushCalls: { workDir: string; command: string }[] = []
-    setPushGitRunnerForTest(async (workDir, args) => {
+    resources.pushGitRunner = async (workDir, args) => {
       const command = args.join(" ")
       pushCalls.push({ workDir, command })
       switch (command) {
@@ -284,9 +288,9 @@ describe("worktree cleanup before delivery", () => {
         default:
           return gitFail(`unexpected git call: ${command}`, 1)
       }
-    })
+    }
 
-    const pushResult = await callAction(pushAction, pushContext())
+    const pushResult = await callAction(pushAction, pushContext(worktree))
     const pushOutput = pushResult.output as Record<string, unknown>
     expect(pushResult.error).toBeUndefined()
     expect(pushOutput).toMatchObject({
@@ -304,14 +308,24 @@ describe("worktree cleanup before delivery", () => {
     ])
   })
 
-  it("fails delivery after cleanup attempts leave the workspace dirty", async () => {
+  it("fails delivery after cleanup attempts leave the workspace dirty", async (resources) => {
+    const worktree = createFakeWorktree()
+    installExecutorGit(resources, worktree)
+    const connection = {
+      async report() {
+        return {}
+      },
+      async uploadArtifact() {
+        throw new Error("uploadArtifact should not be called in cleanup delivery tests")
+      },
+    } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
     let attempt = 0
-    setCleanupAgentActionForTest(async (_host, inputs) => {
+    resources.cleanupAgentAction = async (_host, inputs) => {
       attempt += 1
       const prompt = String(inputs.prompt ?? "")
       expect(prompt).toContain(`attempt ${attempt}`)
       return { output: null }
-    })
+    }
 
     const registry = buildRegistry({
       "mohist/opencode": {
@@ -324,10 +338,10 @@ describe("worktree cleanup before delivery", () => {
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,
     })
-    const executor = buildExecutor(registry)
+    const executor = buildExecutor(registry, worktree, connection)
 
     const agentResult = await executor.execute(
-      buildWork({
+        buildWork(worktree, {
         variables: {
           workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
           project: { path: worktree.workDir },

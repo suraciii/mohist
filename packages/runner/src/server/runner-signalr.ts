@@ -26,8 +26,6 @@ import {
 import { forceReconnect, notifyReconnected, probeLiveness } from "./liveness-probe.js"
 import {
   registerWorkspaceGitHandlers,
-  setRunnerSignalRExistsCheckerForTest,
-  setRunnerSignalRGitRunnerForTest,
 } from "./workspace-git-handlers.js"
 import { registerWorkspaceRemovalHandler } from "./workspace-removal-handler.js"
 import { registerFollowupHandler } from "./followup-handler.js"
@@ -62,8 +60,6 @@ export {
   isUnderRunnerRoot,
   resolveWorkspaceQuery,
   resolveSessionTarget,
-  setRunnerSignalRExistsCheckerForTest,
-  setRunnerSignalRGitRunnerForTest,
 }
 export type {
   CancelAgentSessionPayload,

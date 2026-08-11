@@ -1,12 +1,34 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import type * as signalR from "@microsoft/signalr"
 import { SessionCommandJournal } from "../src/runtime/session-command-journal.js"
 import { registerSessionCommandHandler, type SessionCommandRequest } from "../src/server/session-command-handler.js"
+import { createTestTempDir } from "./support/temp-dir.js"
+import { mkdir, writeFile } from "./support/test-fs.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
-let root: string
+const rootStorage = new AsyncLocalStorage<string>()
+
+function root(): string {
+  const value = rootStorage.getStore()
+  if (!value) throw new Error("session command journal test resource context is not active")
+  return value
+}
+
+async function runInTestResources(body: () => unknown): Promise<void> {
+  await withTestRunnerResources(async () => {
+    await rootStorage.run(await createTestTempDir("mohist-session-command-"), async () => await body())
+  })
+}
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => runInTestResources(body)),
+  {
+    each: (table: unknown[]) => (name: string, body: (value: unknown) => unknown) =>
+      vitestIt.each(table)(name, (value) => runInTestResources(() => body(value))),
+  },
+) as typeof vitestIt
 
 function request(): SessionCommandRequest {
   return {
@@ -16,21 +38,13 @@ function request(): SessionCommandRequest {
 }
 
 describe("SessionCommandJournal", () => {
-  beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "mohist-session-command-"))
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-
   it("persists completed results for a new runner process", async () => {
-    const first = new SessionCommandJournal(root)
+    const first = new SessionCommandJournal(root())
     await first.load()
     await first.start(request())
     await first.complete(request(), { ok: true })
 
-    const restarted = new SessionCommandJournal(root)
+    const restarted = new SessionCommandJournal(root())
     await restarted.load()
     await expect(restarted.get("session-1", "compact-1")).resolves.toMatchObject({
       state: "completed", result: { ok: true },
@@ -38,19 +52,19 @@ describe("SessionCommandJournal", () => {
   })
 
   it("retains started operations across restart", async () => {
-    const first = new SessionCommandJournal(root)
+    const first = new SessionCommandJournal(root())
     await first.load()
     await first.start(request())
 
-    const restarted = new SessionCommandJournal(root)
+    const restarted = new SessionCommandJournal(root())
     await restarted.load()
     await expect(restarted.get("session-1", "compact-1")).resolves.toMatchObject({ state: "started" })
   })
 
   it("fails closed for corrupt state", async () => {
-    const journal = new SessionCommandJournal(root)
-    const filePath = join(root, ".mohist", "runner-state", "session-commands.json")
-    await import("node:fs/promises").then(async ({ mkdir }) => await mkdir(join(root, ".mohist", "runner-state"), { recursive: true }))
+    const journal = new SessionCommandJournal(root())
+    const filePath = join(root(), ".mohist", "runner-state", "session-commands.json")
+    await mkdir(join(root(), ".mohist", "runner-state"), { recursive: true })
     await writeFile(filePath, "not-json")
     await journal.load()
 
@@ -61,10 +75,10 @@ describe("SessionCommandJournal", () => {
     { version: 1, operations: [] },
     { version: 1, operations: { "session-1": [] } },
   ])("fails closed for parseable invalid state without invoking the runtime", async (file) => {
-    const filePath = join(root, ".mohist", "runner-state", "session-commands.json")
-    await import("node:fs/promises").then(async ({ mkdir }) => await mkdir(join(root, ".mohist", "runner-state"), { recursive: true }))
+    const filePath = join(root(), ".mohist", "runner-state", "session-commands.json")
+    await mkdir(join(root(), ".mohist", "runner-state"), { recursive: true })
     await writeFile(filePath, JSON.stringify(file))
-    const journal = new SessionCommandJournal(root)
+    const journal = new SessionCommandJournal(root())
     await journal.load()
 
     const callbacks = new Map<string, (request: SessionCommandRequest) => Promise<unknown>>()
@@ -92,8 +106,8 @@ describe("SessionCommandJournal", () => {
     { ok: false },
     { ok: true, runtimeSessionId: "runtime-2" },
   ])("fails closed for a semantically invalid completed result after restart", async (result) => {
-    const filePath = join(root, ".mohist", "runner-state", "session-commands.json")
-    await import("node:fs/promises").then(async ({ mkdir }) => await mkdir(join(root, ".mohist", "runner-state"), { recursive: true }))
+    const filePath = join(root(), ".mohist", "runner-state", "session-commands.json")
+    await mkdir(join(root(), ".mohist", "runner-state"), { recursive: true })
     await writeFile(filePath, JSON.stringify({
       version: 1,
       operations: {
@@ -102,7 +116,7 @@ describe("SessionCommandJournal", () => {
         },
       },
     }))
-    const journal = new SessionCommandJournal(root)
+    const journal = new SessionCommandJournal(root())
     await journal.load()
 
     const callbacks = new Map<string, (request: SessionCommandRequest) => Promise<unknown>>()

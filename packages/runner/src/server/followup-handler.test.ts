@@ -1,19 +1,24 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { registerFollowupHandler } from "./followup-handler.js"
+import { MemoryFileSystem } from "../../tests/support/memory-filesystem.js"
+import { withTestRunnerResources } from "../../tests/support/test-resources.js"
+
+function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>): void {
+  vitestIt(name, async () => {
+    const fileSystem = new MemoryFileSystem()
+    try {
+      await withTestRunnerResources(async () => await body(fileSystem), { fileSystem })
+    } finally {
+      await fileSystem.deleteDirectory("/")
+      if (fileSystem.exists("/")) throw new Error("follow-up test filesystem was not cleaned up")
+    }
+  })
+}
 
 describe("follow-up attachment delivery", () => {
-  const workspaces: string[] = []
-
-  afterEach(async () => {
-    await Promise.all(workspaces.splice(0).map((path) => rm(path, { recursive: true, force: true })))
-  })
-
-  it("executes an attachment-only turn through the owning input scope", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-followup-attachment-"))
-    workspaces.push(workDir)
+  it("executes an attachment-only turn through the owning input scope", async (fileSystem) => {
+    const workDir = "/virtual/mohist-followup-attachment"
     let receive: ((payload: unknown) => Promise<{ accepted: boolean }>) | undefined
     const connection = {
       on: vi.fn((_name: string, handler: (payload: unknown) => Promise<{ accepted: boolean }>) => {
@@ -102,7 +107,7 @@ describe("follow-up attachment delivery", () => {
     expect(request.prompt).not.toContain("provider.invalid")
     expect(request.prompt).not.toContain("secret-token")
     expect(request.fileParts).toBeUndefined()
-    expect(await readFile(join(workDir, ".mohist/attachments/input-1/attachment-1/notes.txt"), "utf8"))
+    expect(await fileSystem.readText(join(workDir, ".mohist/attachments/input-1/attachment-1/notes.txt")))
       .toBe("follow-up attachment")
     expect(JSON.stringify(records)).not.toContain("secret-token")
     expect(JSON.stringify(records)).not.toContain("rawPlatformEvent")

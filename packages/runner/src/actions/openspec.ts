@@ -1,6 +1,8 @@
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises"
-import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
+import { exists, copyDirectory, deleteDirectory, readText } from "../system/process.js"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
+import { currentRunnerResources, type RunnerArchiveFileSystem, type RunnerGitRunner } from "../system/filesystem.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
 import type { ActionResult, AddTaskInput, JsonObject, JsonValue } from "../core/types.js"
 import type { ActionHost } from "./host.js"
@@ -17,29 +19,8 @@ function sinkOptions(host: ActionHost): GitOptions | undefined {
   return host.log ? { sink: { log: host.log, source: ACTION_SOURCE } } : undefined
 }
 
-export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-}>
-
-let openSpecGitRunner: OpenSpecGitRunner = defaultGit
-
-export function setOpenSpecGitRunnerForTest(runner: OpenSpecGitRunner | null) {
-  openSpecGitRunner = runner ?? defaultGit
-}
-
-export interface ArchiveFileSystem {
-  exists(path: string): Promise<boolean>
-  hasFiles(path: string): Promise<boolean>
-  ensureDirectory(path: string): Promise<void>
-  moveDirectory(source: string, destination: string): Promise<void>
-  readText(path: string): Promise<string>
-  writeAtomic(path: string, content: string): Promise<void>
-  remove(path: string): Promise<void>
-}
+export type OpenSpecGitRunner = RunnerGitRunner
+export type ArchiveFileSystem = RunnerArchiveFileSystem
 
 const defaultArchiveFileSystem: ArchiveFileSystem = {
   exists: async (path) => {
@@ -70,12 +51,6 @@ const defaultArchiveFileSystem: ArchiveFileSystem = {
   remove: async (path) => await rm(path, { force: true }),
 }
 
-let archiveFileSystem: ArchiveFileSystem = defaultArchiveFileSystem
-
-export function setArchiveFileSystemForTest(fileSystem: ArchiveFileSystem | null) {
-  archiveFileSystem = fileSystem ?? defaultArchiveFileSystem
-}
-
 async function moveChangeDir(source: string, destination: string) {
   try {
     await rename(source, destination)
@@ -97,7 +72,7 @@ export async function openspecTasksAction(inputs: JsonObject, host: ActionHost):
   if (!path) return fail("invalid-input", "OpenSpec task loader requires 'path'")
   if (!exists(path)) return fail("missing-source", `tasks.json not found: ${path}`)
 
-  const root = JSON.parse(await readFile(path, "utf8")) as JsonObject
+  const root = JSON.parse(await readText(path)) as JsonObject
   const sourceTasks = Array.isArray(root.tasks) ? root.tasks.filter(isObject) : []
   if (!Array.isArray(root.tasks)) return fail("invalid-input", "tasks.json must contain a tasks array")
 
@@ -158,6 +133,8 @@ export async function openspecArtifactsAction(inputs: JsonObject, host: ActionHo
 }
 
 export async function archiveChangeAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const archiveFileSystem = currentRunnerResources()?.archiveFileSystem ?? defaultArchiveFileSystem
+  const openSpecGitRunner = currentRunnerResources()?.openSpecGitRunner ?? defaultGit
   const changeDir = resolveChangeDir(host.workDir, inputs)
   if (!changeDir) return archiveFailure("config-error", "Archive change requires 'changeDir'", { kind: "archive-change" })
 
@@ -196,7 +173,7 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
   await archiveFileSystem.ensureDirectory(archiveDir)
   const today = new Date().toISOString().slice(0, 10)
   const archivePrefix = `${today}-${sourceName}`
-  const destination = await uniqueDestination(archiveDir, archivePrefix)
+  const destination = await uniqueDestination(archiveFileSystem, archiveDir, archivePrefix)
   if (!destination) return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, { kind: "archive-change" })
   const destinationRel = relativePath(host.workDir, destination)
   const destinationValidation = validateHintDestination(host.workDir, archiveDir, destinationRel)
@@ -213,7 +190,7 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
 
   const addResult = await openSpecGitRunner(host.workDir, ["add", "-A", destinationRel], host.signal, opts)
   if (!addResult.success) {
-    await rollbackMove(destination, changeDir)
+    await rollbackMove(archiveFileSystem, destination, changeDir)
     return archiveFailure("retry-safe", `git add archive change failed: ${addResult.combinedOutput || addResult.stderr || `exit ${addResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -225,7 +202,7 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
 
   const rmResult = await openSpecGitRunner(host.workDir, ["rm", "-rf", "--cached", "--ignore-unmatch", sourceRel], host.signal, opts)
   if (!rmResult.success) {
-    await rollbackMove(destination, changeDir)
+    await rollbackMove(archiveFileSystem, destination, changeDir)
     return archiveFailure("retry-safe", `git rm --cached archive change failed: ${rmResult.combinedOutput || rmResult.stderr || `exit ${rmResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -237,7 +214,7 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
 
   const diffResult = await openSpecGitRunner(host.workDir, ["diff", "--cached", "--name-only", "--", sourceRel, destinationRel], host.signal, opts)
   if (!diffResult.success) {
-    await rollbackMove(destination, changeDir)
+    await rollbackMove(archiveFileSystem, destination, changeDir)
     return archiveFailure("retry-safe", `git diff archive change failed: ${diffResult.combinedOutput || diffResult.stderr || `exit ${diffResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -257,7 +234,7 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
 
   const commitResult = await openSpecGitRunner(host.workDir, ["commit", "-m", commitMessage, "--", sourceRel, destinationRel], host.signal, opts)
   if (!commitResult.success) {
-    await rollbackMove(destination, changeDir)
+    await rollbackMove(archiveFileSystem, destination, changeDir)
     return archiveFailure("retry-safe", `git commit archive change failed: ${commitResult.combinedOutput || commitResult.stderr || `exit ${commitResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -302,13 +279,13 @@ function archiveSuccessNoChange(changeDir: string, destination: string, destinat
     : { output }
 }
 
-async function rollbackMove(destination: string, source: string): Promise<void> {
+async function rollbackMove(fileSystem: ArchiveFileSystem, destination: string, source: string): Promise<void> {
   // If the commit phase fails after the directory move, roll the move back so
   // a retry starts from a clean first-archive state (source present, no
   // partial archive). Best effort — a failed rollback only means the next
   // attempt will see both source and destination and report partial-archive.
   try {
-    await archiveFileSystem.moveDirectory(destination, source)
+    await fileSystem.moveDirectory(destination, source)
   } catch {
     // Swallow: the caller already failed; the retry surface is the source
     // of truth, not this rollback.
@@ -403,14 +380,14 @@ function resolveChangeDir(workDir: string, withInput: JsonObject) {
   return resolveActionPath(workDir, changeDir)
 }
 
-async function uniqueDestination(archiveDir: string, baseName: string) {
+async function uniqueDestination(fileSystem: ArchiveFileSystem, archiveDir: string, baseName: string) {
   let destination = resolveArchiveDestination(archiveDir, baseName)
   if (!destination) return null
-  if (!(await archiveFileSystem.exists(destination))) return destination
+  if (!(await fileSystem.exists(destination))) return destination
   for (let version = 2; ; version++) {
     destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
     if (!destination) return null
-    if (!(await archiveFileSystem.exists(destination))) return destination
+    if (!(await fileSystem.exists(destination))) return destination
   }
 }
 
@@ -438,7 +415,7 @@ async function hasFiles(directory: string): Promise<boolean> {
 async function isPresentOfKind(path: string, kind: "file" | "directory"): Promise<boolean> {
   if (!exists(path)) return false
   try {
-    const stats = await stat(path)
+    const stats = await currentRunnerFileSystem().stat(path)
     return kind === "directory" ? stats.isDirectory() : stats.isFile()
   } catch {
     return false

@@ -1,29 +1,41 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
 import { SkillResolver } from "./skill-resolver.js"
 import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
 import { createHash } from "node:crypto"
+import { MemoryFileSystem } from "../../tests/support/memory-filesystem.js"
+import { withTestRunnerResources } from "../../tests/support/test-resources.js"
 
-async function skill(root: string, name: string, body: string): Promise<void> {
-  await mkdir(join(root, name), { recursive: true })
-  await writeFile(join(root, name, "SKILL.md"), body, "utf8")
+async function skill(fileSystem: MemoryFileSystem, root: string, name: string, body: string): Promise<void> {
+  await fileSystem.ensureDir(join(root, name))
+  await fileSystem.writeText(join(root, name, "SKILL.md"), body)
+}
+
+function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const fileSystem = new MemoryFileSystem()
+    try {
+      await withTestRunnerResources(async () => await body(fileSystem), { fileSystem })
+    } finally {
+      await fileSystem.deleteDirectory("/")
+      if (fileSystem.exists("/")) throw new Error("skill resolver test filesystem was not cleaned up")
+    }
+  })
 }
 
 describe("SkillResolver", () => {
-  it("uses workdir, home, then configured roots in order", async () => {
-    const base = await mkdtemp(join(tmpdir(), "mohist-skills-"))
+  it("uses workdir, home, then configured roots in order", async (fileSystem) => {
+    const base = "/virtual/mohist-skills"
     const work = join(base, "work")
     const home = join(base, "home")
     const extra = join(base, "extra")
-    await skill(join(work, ".agents", "skills"), "first", "work")
-    await skill(join(home, ".agents", "skills"), "second", "home")
-    await skill(extra, "third", "extra")
-    await skill(join(work, ".agents", "skills"), "same", "work-wins")
-    await skill(join(home, ".agents", "skills"), "same", "home-loses")
-    await skill(extra, "same", "extra-loses")
+    await skill(fileSystem, join(work, ".agents", "skills"), "first", "work")
+    await skill(fileSystem, join(home, ".agents", "skills"), "second", "home")
+    await skill(fileSystem, extra, "third", "extra")
+    await skill(fileSystem, join(work, ".agents", "skills"), "same", "work-wins")
+    await skill(fileSystem, join(home, ".agents", "skills"), "same", "home-loses")
+    await skill(fileSystem, extra, "same", "extra-loses")
 
     const result = await new SkillResolver({ homeDir: home, environment: { MOHIST_SKILL_ROOTS: extra } }).resolve(["same", "second", "third"], work)
     expect(result).toEqual({ ok: true, skills: [
@@ -33,10 +45,10 @@ describe("SkillResolver", () => {
     ] })
   })
 
-  it("rejects unsafe, missing, and empty skills", async () => {
-    const base = await mkdtemp(join(tmpdir(), "mohist-skills-"))
+  it("rejects unsafe, missing, and empty skills", async (fileSystem) => {
+    const base = "/virtual/mohist-skills-unsafe"
     const work = join(base, "work")
-    await skill(join(work, ".agents", "skills"), "empty", "   ")
+    await skill(fileSystem, join(work, ".agents", "skills"), "empty", "   ")
     for (const name of ["../escape", "a/b", "empty", "missing"]) {
       const result = await new SkillResolver({ homeDir: join(base, "home"), environment: {} }).resolve([name], work)
       expect(result.ok).toBe(false)

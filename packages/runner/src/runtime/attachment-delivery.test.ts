@@ -1,26 +1,30 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import {
   attachmentWorkspacePath,
   buildManifestBlock,
   deliverAcceptedAttachments,
   type AttachmentDescriptor,
 } from "./attachment-delivery.js"
+import { MemoryFileSystem } from "../../tests/support/memory-filesystem.js"
+import { withTestRunnerResources } from "../../tests/support/test-resources.js"
 
 const signal = new AbortController().signal
 
-describe("attachment delivery", () => {
-  const workspaces: string[] = []
-
-  afterEach(async () => {
-    await Promise.all(workspaces.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const fileSystem = new MemoryFileSystem()
+    try {
+      await withTestRunnerResources(async () => await body(fileSystem), { fileSystem })
+    } finally {
+      await fileSystem.deleteDirectory("/")
+      if (fileSystem.exists("/")) throw new Error("attachment test filesystem was not cleaned up")
+    }
   })
+}
 
-  it("materializes content and adds native image data without exposing caller fields", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-attachment-delivery-"))
-    workspaces.push(workDir)
+describe("attachment delivery", () => {
+  it("materializes content and adds native image data without exposing caller fields", async (fileSystem) => {
+    const workDir = "/virtual/attachment-delivery"
     const descriptor: AttachmentDescriptor = {
       id: "attachment-1",
       name: "diagram.png",
@@ -45,7 +49,7 @@ describe("attachment delivery", () => {
     const delivered = result.attachments[0]
     expect(delivered?.status).toBe("delivered")
     if (delivered?.status !== "delivered") throw new Error("attachment was not delivered")
-    expect(await readFile(delivered.workspacePath)).toEqual(Buffer.from([1, 2, 3]))
+    expect(await fileSystem.readBinary(delivered.workspacePath)).toEqual(new Uint8Array([1, 2, 3]))
     expect(delivered.filePart).toEqual({
       mime: "image/png",
       filename: "diagram.png",

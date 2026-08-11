@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { expect, vi } from "vitest"
 import { CleanupLoop, type CleanupRunner } from "../../src/runtime/cleanup-loop.js"
+import type { RunnerFileSystem } from "../../src/system/filesystem.js"
 import { WorkspaceRegistry, type WorkspaceRegistryEntry } from "../../src/runtime/workspace-registry.js"
 import { capturedLogs } from "./logger-test.js"
+import { withTestRunnerResources } from "./test-resources.js"
 
 export class StubCleanupRunner implements CleanupRunner {
   public deletedPaths: string[] = []
@@ -64,8 +65,8 @@ export interface CleanupLoopFixture {
   dispose(): Promise<void>
 }
 
-export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
-  const root = await mkdtemp(join(tmpdir(), "mohist-cleanup-loop-"))
+export async function createCleanupLoopFixture(fileSystem: RunnerFileSystem): Promise<CleanupLoopFixture> {
+  const root = "/virtual/cleanup-loop"
   const now = new Date("2026-06-25T12:00:00.000Z")
   let registryNow = now
   const runner = new StubCleanupRunner()
@@ -111,8 +112,8 @@ export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
     issueNumber: number,
     path = workspacePath(issueNumber),
   ): Promise<string> => {
-    await mkdir(dirname(registry.getFilePath()), { recursive: true })
-    await writeFile(
+    await fileSystem.ensureDir(dirname(registry.getFilePath()))
+    await fileSystem.writeText(
       registry.getFilePath(),
       JSON.stringify({
           version: 2,
@@ -169,7 +170,37 @@ export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
     expectWarnings,
     async dispose() {
       vi.useRealTimers()
-      await rm(root, { recursive: true, force: true })
+      await fileSystem.deleteDirectory(root)
+      if (fileSystem.exists(root)) throw new Error(`cleanup loop fixture root was not cleaned: ${root}`)
     },
   }
+}
+
+const cleanupLoopFixtureStorage = new AsyncLocalStorage<CleanupLoopFixture>()
+
+export function currentCleanupLoopFixture(): CleanupLoopFixture {
+  const fixture = cleanupLoopFixtureStorage.getStore()
+  if (!fixture) throw new Error("cleanup loop fixture context is not active")
+  return fixture
+}
+
+export function scopedCleanupLoopFixture(): CleanupLoopFixture {
+  return new Proxy({} as CleanupLoopFixture, {
+    get(_target, property) {
+      return Reflect.get(currentCleanupLoopFixture(), property)
+    },
+  })
+}
+
+export async function withCleanupLoopFixture<T>(body: () => Promise<T>): Promise<T> {
+  return await withTestRunnerResources(async (fileSystem) => {
+    const fixture = await createCleanupLoopFixture(fileSystem)
+    return await cleanupLoopFixtureStorage.run(fixture, async () => {
+      try {
+        return await body()
+      } finally {
+        await fixture.dispose()
+      }
+    })
+  })
 }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { AgentJobExecutor, projectTurnToWorkItemResult } from "../src/runtime/agent-job-executor.js"
 import type { AgentJobRuntimeAccessors } from "../src/runtime/agent-job-executor.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -13,6 +13,13 @@ import type {
   RuntimeTurnResult,
 } from "../src/runtime/opencode/index.js"
 import { capturedLogs } from "./support/logger-test.js"
+import { withDefaultRunnerTestResources } from "./support/test-resources.js"
+
+function it(name: string, body: () => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    await withDefaultRunnerTestResources(async () => await body())
+  })
+}
 
 interface FakeRuntimeHandles {
   runtime: OpenCodeRuntime
@@ -172,14 +179,6 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
     ...overrides,
   }
 }
-
-beforeEach(() => {
-  vi.restoreAllMocks()
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-})
 
 describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
   it("calls OpenCodeRuntime.runTurn with a flat Agent-owned request", async () => {
@@ -578,7 +577,7 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
     expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
-  it.each([
+  vitestIt.each([
     ["null workspace", null],
     ["non-object workspace", "invalid"],
     ["missing path", {}],
@@ -586,20 +585,22 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
     ["whitespace path", { path: "   " }],
     ["non-string path", { path: 42 }],
   ])("rejects %s instead of using the runner default workdir", async (_name, workspace) => {
-    const runtime = makeFakeRuntime()
-    const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      "/virtual/runner",
-    )
+    await withDefaultRunnerTestResources(async () => {
+      const runtime = makeFakeRuntime()
+      const connection = makeFakeConnection()
+      const executor = new AgentJobExecutor(
+        connection.connection,
+        makeAccessors(runtime.runtime),
+        null,
+        "/virtual/runner",
+      )
 
-    const work = buildAgentJobWork({ variables: { workspace } })
-    const result = await executor.execute(work, new AbortController().signal)
-    expect(result.status).toBe("failed")
-    expect(result.message).toMatch(/workspace\.path/)
-    expect(runtime.runTurnCalls).toHaveLength(0)
+      const work = buildAgentJobWork({ variables: { workspace } })
+      const result = await executor.execute(work, new AbortController().signal)
+      expect(result.status).toBe("failed")
+      expect(result.message).toMatch(/workspace\.path/)
+      expect(runtime.runTurnCalls).toHaveLength(0)
+    })
   })
 
   it("uses the runner default workdir when a direct AgentJob has no workspace", async () => {

@@ -67,7 +67,6 @@ export type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
 
 export {
   getOpenCodeRuntimeFactory,
-  setOpenCodeRuntimeFactoryForTest,
   createDefaultOpenCodeRuntime,
 } from "./factory.js"
 export type { OpenCodeRuntimeFactory } from "./factory.js"

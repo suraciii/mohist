@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { callAction } from "./support/call-action.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
-import { mergeGitHubPrAction, setGitHubPrTransientRetryForTest } from "../src/actions/github-pr.js"
+import { mergeGitHubPrAction } from "../src/actions/github-pr.js"
 import {
   type CommandResult,
   checksRollup,
@@ -10,15 +10,25 @@ import {
   ghFail,
   ghOk,
   ghTimeout,
+  type MergeGhTestResources,
 } from "./support/merge-github-pr-test-helpers.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
 
-const { ghCalls, installGit, installGh, installMoIssueShow } = createMergeGhTestHarness()
+const { installGit, installGh, installMoIssueShow } = createMergeGhTestHarness()
+
+function it(name: string, body: (resources: MergeGhTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: MergeGhTestResources = { fileSystem: new MemoryFileSystem(), ghCalls: [] }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 describe("mohist/merge-github-pr transient network retry", () => {
-  function installHappyMergeGh(mergeStateRespond: (calls: number) => CommandResult) {
+  function installHappyMergeGh(resources: MergeGhTestResources, mergeStateRespond: (calls: number) => CommandResult) {
     let mergeStateCalls = 0
     const localCalls: string[] = []
-    installGh((cmd, args) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       localCalls.push(full)
       switch (full) {
@@ -47,11 +57,11 @@ describe("mohist/merge-github-pr transient network retry", () => {
     }
   }
 
-  it("retries a transient network error (unexpected EOF) on the mergeStateStatus poll then merges", async () => {
-    setGitHubPrTransientRetryForTest({ limit: 2, backoffMs: 0 })
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    const { mergeStateCallCount } = installHappyMergeGh((calls) =>
+  it("retries a transient network error (unexpected EOF) on the mergeStateStatus poll then merges", async (resources) => {
+    resources.githubPrTransientRetry = { limit: 2, backoffMs: 0 }
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    const { mergeStateCallCount } = installHappyMergeGh(resources, (calls) =>
       calls === 1
         ? ghFail(`Post "https://api.github.com/graphql": unexpected EOF`)
         : ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" })),
@@ -63,11 +73,11 @@ describe("mohist/merge-github-pr transient network retry", () => {
     expect(mergeStateCallCount()).toBe(2)
   })
 
-  it("surfaces a retry-safe failure after exhausting transient retries on a read", async () => {
-    setGitHubPrTransientRetryForTest({ limit: 2, backoffMs: 0 })
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    const { mergeStateCallCount } = installHappyMergeGh(() =>
+  it("surfaces a retry-safe failure after exhausting transient retries on a read", async (resources) => {
+    resources.githubPrTransientRetry = { limit: 2, backoffMs: 0 }
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    const { mergeStateCallCount } = installHappyMergeGh(resources, () =>
       ghFail(`Post "https://api.github.com/graphql": unexpected EOF`),
     )
 
@@ -77,12 +87,12 @@ describe("mohist/merge-github-pr transient network retry", () => {
     expect(mergeStateCallCount()).toBe(3)
   })
 
-  it("does not retry non-transient gh read failures", async () => {
-    setGitHubPrTransientRetryForTest({ limit: 3, backoffMs: 0 })
+  it("does not retry non-transient gh read failures", async (resources) => {
+    resources.githubPrTransientRetry = { limit: 3, backoffMs: 0 }
     const localCalls: string[] = []
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       localCalls.push(full)
       switch (full) {
@@ -104,10 +114,10 @@ describe("mohist/merge-github-pr transient network retry", () => {
 })
 
 describe("mohist/merge-github-pr network timeouts", () => {
-  it("NetworkGhCalls_AllReceiveTimeoutMs", async () => {
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+  it("NetworkGhCalls_AllReceiveTimeoutMs", async (resources) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -144,15 +154,15 @@ describe("mohist/merge-github-pr network timeouts", () => {
       "gh pr view 42 --json state,mergeCommit,url",
     ]
     for (const command of networkCommands) {
-      const call = ghCalls.find((c) => c.command === command)
+      const call = resources.ghCalls.find((c) => c.command === command)
       expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     }
   })
 
-  it("GhPrMergeTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+  it("GhPrMergeTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async (resources) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -180,10 +190,10 @@ describe("mohist/merge-github-pr network timeouts", () => {
     expect(result.error?.message).toContain("timed out")
   })
 
-  it("GhPrViewTimeout_IsNotRetriedAndSurfacesDuration", async () => {
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
+  it("GhPrViewTimeout_IsNotRetriedAndSurfacesDuration", async (resources) => {
+    installMoIssueShow(resources)
+    installGit(resources, () => { throw new Error("git should not be called") })
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       switch (full) {
         case "gh --version":
@@ -203,6 +213,6 @@ describe("mohist/merge-github-pr network timeouts", () => {
     }))
     expect(result.error).toMatchObject({ code: "timeout" })
     expect(result.error?.message).toContain("timed out")
-    expect(ghCalls.filter((c) => c.command === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")).toHaveLength(1)
+    expect(resources.ghCalls.filter((c) => c.command === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")).toHaveLength(1)
   })
 })

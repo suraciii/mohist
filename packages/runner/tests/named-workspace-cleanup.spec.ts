@@ -1,7 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { CleanupLoop } from "../src/runtime/cleanup-loop.js"
 import { materializeNamedWorkspace, namedWorkspacePath } from "../src/runtime/workspace-entity.js"
 import {
@@ -13,30 +12,45 @@ import {
   namedWorkspaceRegistryKey,
 } from "../src/runtime/workspace-registry.js"
 import type { CleanupPolicy } from "../src/core/types.js"
+import { createTestTempDir } from "./support/temp-dir.js"
+import { stat, writeFile } from "./support/test-fs.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 async function makeRunnerRoot() {
-  return await mkdtemp(join(tmpdir(), "mohist-named-cleanup-"))
+  return await createTestTempDir("mohist-named-cleanup-")
 }
 
 const signal = new AbortController().signal
+const now = new Date("2026-07-01T08:00:00.000Z")
+
+interface TestContext {
+  root: string
+  registry: NamedWorkspaceRegistry
+  runner: NamedWorkspaceCleanupRunner
+}
+
+const testContextStorage = new AsyncLocalStorage<TestContext>()
+
+function context(): TestContext {
+  const value = testContextStorage.getStore()
+  if (!value) throw new Error("named workspace cleanup test resource context is not active")
+  return value
+}
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => withTestRunnerResources(async () => {
+    const root = await makeRunnerRoot()
+    const registry = new NamedWorkspaceRegistry(root, { now: () => now })
+    await registry.load()
+    const runner = new NamedWorkspaceCleanupRunner(root, registry)
+    await testContextStorage.run({ root, registry, runner }, async () => await body())
+  })),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
 
 describe("NamedWorkspaceReclaimProbe", () => {
-  let root: string
-  let registry: NamedWorkspaceRegistry
-  const now = new Date("2026-07-01T08:00:00.000Z")
-
-  beforeEach(async () => {
-    root = await makeRunnerRoot()
-    registry = new NamedWorkspaceRegistry(root, { now: () => now })
-    await registry.load()
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-    vi.restoreAllMocks()
-  })
-
   it("promotes an archived workspace to eligible", async () => {
+    const { registry } = context()
     await registry.register({ projectId: "mohist", workspaceName: "pay", workspacePath: "/tmp/pay" })
     const connection = { getWorkspaceReclaimability: vi.fn(async () => ({ status: "archived" as const, activeBoundSessions: 0 })) }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
@@ -48,6 +62,7 @@ describe("NamedWorkspaceReclaimProbe", () => {
   })
 
   it("promotes an active workspace with no active bound session to eligible", async () => {
+    const { registry } = context()
     await registry.register({ projectId: "mohist", workspaceName: "pay", workspacePath: "/tmp/pay" })
     const connection = { getWorkspaceReclaimability: vi.fn(async () => ({ status: "active" as const, activeBoundSessions: 0 })) }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
@@ -59,6 +74,7 @@ describe("NamedWorkspaceReclaimProbe", () => {
   })
 
   it("keeps an active workspace with an active bound session active", async () => {
+    const { registry } = context()
     await registry.register({ projectId: "mohist", workspaceName: "pay", workspacePath: "/tmp/pay" })
     const connection = { getWorkspaceReclaimability: vi.fn(async () => ({ status: "active" as const, activeBoundSessions: 2 })) }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
@@ -70,6 +86,7 @@ describe("NamedWorkspaceReclaimProbe", () => {
   })
 
   it("leaves an unobservable workspace active and retries next tick", async () => {
+    const { registry } = context()
     await registry.register({ projectId: "mohist", workspaceName: "pay", workspacePath: "/tmp/pay" })
     const connection = {
       getWorkspaceReclaimability: vi.fn(async () => {
@@ -85,6 +102,7 @@ describe("NamedWorkspaceReclaimProbe", () => {
   })
 
   it("ignores non-active entries", async () => {
+    const { registry } = context()
     await registry.register({ projectId: "mohist", workspaceName: "pay", workspacePath: "/tmp/pay" })
     await registry.markEligible("mohist", "pay")
     const connection = { getWorkspaceReclaimability: vi.fn(async () => ({ status: "active" as const, activeBoundSessions: 0 })) }
@@ -98,34 +116,20 @@ describe("NamedWorkspaceReclaimProbe", () => {
 })
 
 describe("NamedWorkspaceCleanupRunner", () => {
-  let root: string
-  let registry: NamedWorkspaceRegistry
-  const now = new Date("2026-07-01T08:00:00.000Z")
-
-  beforeEach(async () => {
-    root = await makeRunnerRoot()
-    registry = new NamedWorkspaceRegistry(root, { now: () => now })
-    await registry.load()
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-
   it("reads the named workspace marker identity", async () => {
-    const runner = new NamedWorkspaceCleanupRunner(root, registry)
+    const { root, registry, runner } = context()
     await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
     const identity = await runner.readWorkspaceIdentity(namedWorkspacePath(root, "mohist", "pay"))
     expect(identity).toBe(namedWorkspaceRegistryKey("mohist", "pay"))
   })
 
   it("returns null identity for a directory without a marker", async () => {
-    const runner = new NamedWorkspaceCleanupRunner(root, registry)
+    const { root, runner } = context()
     expect(await runner.readWorkspaceIdentity(join(root, "workspaces", "unknown"))).toBeNull()
   })
 
   it("validates the workspace only when marker and derived path match the entry", async () => {
-    const runner = new NamedWorkspaceCleanupRunner(root, registry)
+    const { root, registry, runner } = context()
     await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
     const entry = registry.get("mohist", "pay")!
     expect(await runner.validateWorkspace(entry)).toBe(true)
@@ -136,23 +140,8 @@ describe("NamedWorkspaceCleanupRunner", () => {
 })
 
 describe("named workspace cleanup loop end to end", () => {
-  let root: string
-  let registry: NamedWorkspaceRegistry
-  let runner: NamedWorkspaceCleanupRunner
-  const now = new Date("2026-07-01T08:00:00.000Z")
-
-  beforeEach(async () => {
-    root = await makeRunnerRoot()
-    registry = new NamedWorkspaceRegistry(root, { now: () => now })
-    await registry.load()
-    runner = new NamedWorkspaceCleanupRunner(root, registry)
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-
   it("evicts an eligible named workspace past the retention window", async () => {
+    const { root, runner } = context()
     let current = now
     const registry = new NamedWorkspaceRegistry(root, { now: () => current })
     await registry.load()
@@ -167,17 +156,18 @@ describe("named workspace cleanup loop end to end", () => {
 
     expect(result.retentionRemoved).toBe(1)
     expect(registry.get("mohist", "pay")).toBeNull()
-    await expect(import("node:fs/promises").then((fs) => fs.stat(namedWorkspacePath(root, "mohist", "pay")))).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(stat(namedWorkspacePath(root, "mohist", "pay"))).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   it("refuses (stuck) an eligible entry whose marker identity mismatches the registry", async () => {
+    const { root, runner, registry } = context()
     await materializeNamedWorkspace({ runnerRoot: root, projectId: "mohist", workspaceName: "pay", registry })
     await registry.markEligible("mohist", "pay")
     // Corrupt the marker to a different workspace identity.
-    await import("node:fs/promises").then((fs) => fs.writeFile(
+    await writeFile(
       join(namedWorkspacePath(root, "mohist", "pay"), ".mohist", "workspace.json"),
       JSON.stringify({ projectId: "other", workspaceName: "pay", repositories: [] }),
-    ))
+    )
 
     const loop = new CleanupLoop(registry, runner, root, () => null)
     const policy: CleanupPolicy = { retentionDays: 5 }
@@ -188,4 +178,3 @@ describe("named workspace cleanup loop end to end", () => {
     expect(registry.get("mohist", "pay")?.phase).toBe("stuck")
   })
 })
-

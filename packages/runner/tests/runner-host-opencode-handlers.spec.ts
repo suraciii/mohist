@@ -1,8 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { deferred } from "./support/deferred.js"
-import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
-import { setOpenCodeRuntimeFactoryForTest } from "../src/runtime/opencode/index.js"
+import type { PiRuntime } from "../src/runtime/pi/index.js"
+import type { RunnerFileSystem } from "../src/system/filesystem.js"
+import type { RunnerLogger } from "../src/system/logger.js"
+import type { ExternalProcessPolicy } from "../src/system/process-policy.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { createLoggerCapture } from "./support/logger-test.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+import type { OpenCodeRuntimeTestResources } from "./support/opencode-runtime-factory.js"
 import type {
   OpenCodeRuntime,
   RuntimeCancelRequest,
@@ -12,39 +19,13 @@ import type {
   RuntimeResult,
 } from "../src/runtime/opencode/index.js"
 
-const mocks = vi.hoisted(() => ({
-  connect: vi.fn(),
-  heartbeat: vi.fn(),
-  disconnect: vi.fn(),
-  poll: vi.fn(),
-  report: vi.fn(),
-  uploadTaskLog: vi.fn(),
-  fetchConfig: vi.fn(async () => null),
-  workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
-  agentSessionRuntimeEvents: vi.fn(async () => undefined),
-  startSignalR: vi.fn(),
-  stopSignalR: vi.fn(),
-  getConnectionId: vi.fn(() => "conn-1"),
-  probeLiveness: vi.fn(async () => true),
-  forceReconnect: vi.fn(async () => undefined),
-}))
-
-const {
-  connect,
-  heartbeat,
-  disconnect,
-  poll,
-  report,
-  uploadTaskLog,
-  fetchConfig,
-  workflowAgentSessionRuntimeEvents,
-  agentSessionRuntimeEvents,
-  startSignalR,
-  stopSignalR,
-  getConnectionId,
-  probeLiveness,
-  forceReconnect,
-} = mocks
+type HandlerMock = ReturnType<typeof vi.fn>
+type HandlerMocks = Record<
+  "connect" | "heartbeat" | "disconnect" | "poll" | "report" | "uploadTaskLog" | "fetchConfig" |
+  "workflowAgentSessionRuntimeEvents" | "agentSessionRuntimeEvents" | "startSignalR" | "stopSignalR" |
+  "getConnectionId" | "probeLiveness" | "forceReconnect",
+  HandlerMock
+>
 
 interface CapturedSignalROptions {
   followupTargetResolver: unknown
@@ -52,29 +33,98 @@ interface CapturedSignalROptions {
   openCodeRuntime: unknown
 }
 
-let capturedSignalROptions: CapturedSignalROptions | null = null
+interface HandlerTestResources extends OpenCodeRuntimeTestResources {
+  fileSystem: RunnerFileSystem
+  logger: RunnerLogger
+  externalProcessPolicy: ExternalProcessPolicy
+  piRuntimeFactory: () => PiRuntime
+}
+
+interface HandlerTestState {
+  readonly mocks: HandlerMocks
+  capturedSignalROptions: CapturedSignalROptions | null
+}
+
+const handlerTestStorage = new AsyncLocalStorage<HandlerTestState>()
+
+function currentHandlerTestState(): HandlerTestState {
+  const state = handlerTestStorage.getStore()
+  if (!state) throw new Error("runner host opencode handler test context is not active")
+  return state
+}
+
+function scopedMock(name: keyof HandlerMocks): HandlerMock {
+  const target = (() => undefined) as (...args: unknown[]) => unknown
+  Object.defineProperty(target, "_isMockFunction", { value: true })
+  return new Proxy(target, {
+    apply(_target, thisArg, args) {
+      return Reflect.apply(currentHandlerTestState().mocks[name], thisArg, args)
+    },
+    get(_target, property) {
+      const value = Reflect.get(currentHandlerTestState().mocks[name], property)
+      return typeof value === "function" ? value.bind(currentHandlerTestState().mocks[name]) : value
+    },
+    set(_target, property, value) {
+      return Reflect.set(currentHandlerTestState().mocks[name], property, value)
+    },
+  }) as unknown as HandlerMock
+}
+
+const connect = scopedMock("connect")
+const heartbeat = scopedMock("heartbeat")
+const disconnect = scopedMock("disconnect")
+const poll = scopedMock("poll")
+const report = scopedMock("report")
+const uploadTaskLog = scopedMock("uploadTaskLog")
+const fetchConfig = scopedMock("fetchConfig")
+const workflowAgentSessionRuntimeEvents = scopedMock("workflowAgentSessionRuntimeEvents")
+const agentSessionRuntimeEvents = scopedMock("agentSessionRuntimeEvents")
+const startSignalR = scopedMock("startSignalR")
+const stopSignalR = scopedMock("stopSignalR")
+const getConnectionId = scopedMock("getConnectionId")
+const probeLiveness = scopedMock("probeLiveness")
+const forceReconnect = scopedMock("forceReconnect")
+
+function createHandlerMocks(): HandlerMocks {
+  return {
+    connect: vi.fn(async () => undefined),
+    heartbeat: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    poll: vi.fn(async () => []),
+    report: vi.fn(async () => ({})),
+    uploadTaskLog: vi.fn(async () => ({ status: "changed", accepted: 0, truncated: false })),
+    fetchConfig: vi.fn(async () => null),
+    workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
+    agentSessionRuntimeEvents: vi.fn(async () => undefined),
+    startSignalR: vi.fn(async () => undefined),
+    stopSignalR: vi.fn(async () => undefined),
+    getConnectionId: vi.fn(() => "conn-1"),
+    probeLiveness: vi.fn(async () => true),
+    forceReconnect: vi.fn(async () => undefined),
+  }
+}
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
-    connect = mocks.connect
-    heartbeat = mocks.heartbeat
-    disconnect = mocks.disconnect
-    poll = mocks.poll
-    report = mocks.report
-    uploadTaskLog = mocks.uploadTaskLog
-    fetchConfig = mocks.fetchConfig
-    workflowAgentSessionRuntimeEvents = mocks.workflowAgentSessionRuntimeEvents
-    agentSessionRuntimeEvents = mocks.agentSessionRuntimeEvents
+    connect = connect
+    heartbeat = heartbeat
+    disconnect = disconnect
+    poll = poll
+    report = report
+    uploadTaskLog = uploadTaskLog
+    fetchConfig = fetchConfig
+    workflowAgentSessionRuntimeEvents = workflowAgentSessionRuntimeEvents
+    agentSessionRuntimeEvents = agentSessionRuntimeEvents
   },
 }))
 
 vi.mock("../src/server/runner-signalr.js", () => ({
   RunnerSignalRClient: class {
-    start = mocks.startSignalR
-    stop = mocks.stopSignalR
-    getConnectionId = mocks.getConnectionId
-    probeLiveness = mocks.probeLiveness
-    forceReconnect = mocks.forceReconnect
+    start = startSignalR
+    stop = stopSignalR
+    getConnectionId = getConnectionId
+    probeLiveness = probeLiveness
+    forceReconnect = forceReconnect
     constructor(
       _serverUrl: string,
       _runnerId: string,
@@ -86,7 +136,7 @@ vi.mock("../src/server/runner-signalr.js", () => ({
         openCodeRuntime?: unknown
       } = {},
     ) {
-      capturedSignalROptions = {
+      currentHandlerTestState().capturedSignalROptions = {
         followupTargetResolver: options.followupTargetResolver ?? null,
         agentSessionRuntimeEventOutbox: options.agentSessionRuntimeEventOutbox ?? null,
         openCodeRuntime: options.openCodeRuntime ?? null,
@@ -110,7 +160,7 @@ interface StubRuntimeOptions {
   cancel?: (request: RuntimeCancelRequest) => RuntimeResult<RuntimeCancelResult>
 }
 
-function installStubRuntimeFactory(_options: StubRuntimeOptions = {}): OpenCodeRuntime {
+function installStubRuntimeFactory(resources: OpenCodeRuntimeTestResources, _options: StubRuntimeOptions = {}): OpenCodeRuntime {
   const ready = _options.ready ?? true
   const followupImpl = _options.followup ?? (() => ({
     ok: true as const,
@@ -140,38 +190,16 @@ function installStubRuntimeFactory(_options: StubRuntimeOptions = {}): OpenCodeR
       return cancelImpl(request)
     },
   } as unknown as OpenCodeRuntime
-  setOpenCodeRuntimeFactoryForTest(() => stub)
+  resources.openCodeRuntimeFactory = () => stub
   return stub
 }
 
-beforeEach(() => {
-  vi.useFakeTimers()
-  capturedSignalROptions = null
-  connect.mockReset().mockResolvedValue(undefined)
-  heartbeat.mockReset().mockResolvedValue(undefined)
-  disconnect.mockReset().mockResolvedValue(undefined)
-  poll.mockReset().mockResolvedValue([])
-  report.mockReset().mockResolvedValue({})
-  uploadTaskLog.mockReset().mockResolvedValue({ status: "changed", accepted: 0, truncated: false })
-  startSignalR.mockReset().mockResolvedValue(undefined)
-  stopSignalR.mockReset().mockResolvedValue(undefined)
-  getConnectionId.mockReset().mockReturnValue("conn-1")
-  probeLiveness.mockReset().mockResolvedValue(true)
-  forceReconnect.mockReset().mockResolvedValue(undefined)
-  workflowAgentSessionRuntimeEvents.mockReset().mockResolvedValue(undefined)
-  agentSessionRuntimeEvents.mockReset().mockResolvedValue(undefined)
-})
-
-afterEach(() => {
-  clearOpenCodeRuntimeFactoryForTest()
-})
-
 function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
   return {
-    serverUrl: "http://localhost:3456",
+    serverUrl: "https://runner.test",
     runnerId: "runner-test",
     projectId: "project-1",
-    runnerRoot: "/tmp/mohist-runner-host-opencode-handlers",
+    runnerRoot: "/virtual/mohist-runner-host-opencode-handlers",
     pollIntervalMs: 10,
     heartbeatIntervalMs: 60_000,
     dispatchLivenessProbeIntervalMs: 60_000,
@@ -194,12 +222,41 @@ async function startHost(): Promise<RunnerHost> {
 }
 
 describe("RunnerHost wires OpenCodeRuntime into SignalR followup/cancel handlers", () => {
-  it("constructs RunnerSignalRClient with the OpenCodeRuntime handle via an accessor", async () => {
-    const stub = installStubRuntimeFactory()
+  function it(name: string, body: (resources: HandlerTestResources, state: HandlerTestState) => Promise<void>): void {
+    vitestIt(name, async () => {
+      const resources: HandlerTestResources = {
+        fileSystem: new MemoryFileSystem(),
+        logger: createLoggerCapture(),
+        externalProcessPolicy: {
+          assertAllowed(label) { throw new Error(`external process forbidden in handler test: ${label}`) },
+          register() {},
+        },
+        piRuntimeFactory: () => ({
+          start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
+          ready: () => true,
+          diagnostic: () => null,
+          catalog: () => ({ models: [] }),
+          shutdown: async () => {},
+        } as never),
+      }
+      const state: HandlerTestState = { mocks: createHandlerMocks(), capturedSignalROptions: null }
+      await handlerTestStorage.run(state, async () => {
+        vi.useFakeTimers()
+        try {
+          await withTestRunnerResources(async () => await body(resources, state), resources)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+    })
+  }
+
+  it("constructs RunnerSignalRClient with the OpenCodeRuntime handle via an accessor", async (resources, state) => {
+    const stub = installStubRuntimeFactory(resources)
     await startHost()
 
-    expect(capturedSignalROptions).not.toBeNull()
-    const accessor = capturedSignalROptions?.openCodeRuntime as
+    expect(state.capturedSignalROptions).not.toBeNull()
+    const accessor = state.capturedSignalROptions?.openCodeRuntime as
       | OpenCodeRuntime
       | (() => OpenCodeRuntime | null)
       | null
@@ -208,20 +265,20 @@ describe("RunnerHost wires OpenCodeRuntime into SignalR followup/cancel handlers
     expect(resolvedRuntime).toBe(stub)
   })
 
-  it("the OpenCodeRuntime accessor returns the live runtime handle (not a snapshot)", async () => {
-    const stub = installStubRuntimeFactory()
+  it("the OpenCodeRuntime accessor returns the live runtime handle (not a snapshot)", async (resources, state) => {
+    const stub = installStubRuntimeFactory(resources)
     await startHost()
 
-    const accessor = capturedSignalROptions?.openCodeRuntime as () => OpenCodeRuntime | null
+    const accessor = state.capturedSignalROptions?.openCodeRuntime as () => OpenCodeRuntime | null
     expect(accessor()).toBe(stub)
   })
 
-  it("passes the followup target resolver and runtime-event outbox through to RunnerSignalRClient", async () => {
-    installStubRuntimeFactory()
+  it("passes the followup target resolver and runtime-event outbox through to RunnerSignalRClient", async (resources, state) => {
+    installStubRuntimeFactory(resources)
     await startHost()
 
-    expect(capturedSignalROptions).not.toBeNull()
-    expect(typeof capturedSignalROptions?.followupTargetResolver).toBe("function")
-    expect(capturedSignalROptions?.agentSessionRuntimeEventOutbox).not.toBeNull()
+    expect(state.capturedSignalROptions).not.toBeNull()
+    expect(typeof state.capturedSignalROptions?.followupTargetResolver).toBe("function")
+    expect(state.capturedSignalROptions?.agentSessionRuntimeEventOutbox).not.toBeNull()
   })
 })

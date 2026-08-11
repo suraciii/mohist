@@ -1,16 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, vi } from "vitest"
 import type { CancelAgentSessionPayload } from "../src/server/runner-signalr.js"
-import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
+import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
 import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
-import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
+import { makeFakePiRuntime } from "./support/pi-runtime-fixture.js"
 import {
   buildClient,
   lastBuilder,
-  makeFakeRuntime,
-  resetBuilders,
   type CapturedBuilder,
+  followupIt,
 } from "./support/followup-handler-fixture.js"
-import { setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import { capturedLogs } from "./support/logger-test.js"
 
 // `vi.mock("@microsoft/signalr", ...)` lives in `./support/followup-handler-fixture.ts`.
@@ -23,51 +21,6 @@ function emitCancel(builder: CapturedBuilder, payload: CancelAgentSessionPayload
   if (!handler) throw new Error("CancelAgentSession handler was not registered")
   return Promise.resolve(handler(payload))
 }
-
-interface RecordingOutbox {
-  outbox: AgentSessionRuntimeEventOutbox
-  producedFactCalls: RuntimeEventRecord[]
-  beforeExecutionCalls: RuntimeEventRecord[]
-}
-
-function buildRecordingOutbox(): RecordingOutbox {
-  const producedFactCalls: RuntimeEventRecord[] = []
-  const beforeExecutionCalls: RuntimeEventRecord[] = []
-  const outbox: AgentSessionRuntimeEventOutbox = {
-    ready: () => true,
-    load: async () => {},
-    recover: async () => {},
-    async enqueueBeforeExecution(record) {
-      beforeExecutionCalls.push(record)
-    },
-    async enqueueProducedFact(record) {
-      producedFactCalls.push(record)
-    },
-    enqueueProducedFactBatch: async () => {},
-    kick: async () => {},
-    stop: async () => {},
-    snapshot() { return [] },
-  }
-  return { outbox, producedFactCalls, beforeExecutionCalls }
-}
-
-let opencode: ReturnType<typeof makeFakeRuntime>
-let pi: FakePiRuntimeHandles
-let recording: RecordingOutbox
-
-beforeEach(() => {
-  resetBuilders()
-  opencode = makeFakeRuntime()
-  pi = makeFakePiRuntime()
-  recording = buildRecordingOutbox()
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-  resetBuilders()
-  setRunnerSignalRGitRunnerForTest(null)
-  setRunnerSignalRExistsCheckerForTest(null)
-})
 
 function opencodePayload(): CancelAgentSessionPayload {
   return {
@@ -108,12 +61,13 @@ function workflowPayload(): CancelAgentSessionPayload {
 }
 
 describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () => {
-  it("ConfirmedCancel_AgainstActiveSession_EnqueuesBindingGuardedSessionActivityIdle", async () => {
+  followupIt("ConfirmedCancel_AgainstActiveSession_EnqueuesBindingGuardedSessionActivityIdle", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({
       resolver,
       outbox: recording.outbox,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -143,12 +97,13 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     })
   })
 
-  it("ConfirmedCancel_AgainstUnknownSession_SettlesActivityToIdle_BindingStillCurrent", async () => {
+  followupIt("ConfirmedCancel_AgainstUnknownSession_SettlesActivityToIdle_BindingStillCurrent", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({
       resolver,
       outbox: recording.outbox,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -168,7 +123,8 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     })
   })
 
-  it("UnconfirmedCancel_EnqueuesSessionActivityUnknown_AndSurfacesInterruptUnconfirmedTrue", async () => {
+  followupIt("UnconfirmedCancel_EnqueuesSessionActivityUnknown_AndSurfacesInterruptUnconfirmedTrue", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     pi.setCancelResult({
       ok: true,
       value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", cancelled: true, stopConfirmed: false },
@@ -178,7 +134,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     buildClient({
       resolver,
       outbox: recording.outbox,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -206,12 +162,13 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     })
   })
 
-  it("CancelFactForSupersededBinding_CarriesTheOutboundBindingRuntimeSessionId_AndAcknowledgementPolicyIsSuccessfulResponse", async () => {
+  followupIt("CancelFactForSupersededBinding_CarriesTheOutboundBindingRuntimeSessionId_AndAcknowledgementPolicyIsSuccessfulResponse", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({
       resolver,
       outbox: recording.outbox,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -229,10 +186,11 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     })
   })
 
-  it("Cancel_DoesNotCreateCandidateSession_AndDoesNotInvokeRuntimeCreateSession", async () => {
+  followupIt("Cancel_DoesNotCreateCandidateSession_AndDoesNotInvokeRuntimeCreateSession", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const createSessionCalls = vi.fn()
     const cancelCalls: unknown[] = []
-    const runtime = {
+    const customRuntime = {
       ready: () => true,
       diagnostic: () => null,
       async cancel(request: unknown) {
@@ -248,7 +206,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     buildClient({
       resolver,
       outbox: recording.outbox,
-      openCodeRuntime: runtime,
+      openCodeRuntime: customRuntime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -263,12 +221,13 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     expect(recording.producedFactCalls[0].event.type).toBe("session.activity")
   })
 
-  it("Cancel_EnqueuesGenericTarget_AndWorkflowTarget_WithCorrectProjectId", async () => {
+  followupIt("Cancel_EnqueuesGenericTarget_AndWorkflowTarget_WithCorrectProjectId", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({
       resolver,
       outbox: recording.outbox,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -283,12 +242,13 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     expect(recording.producedFactCalls[1].producerFamily).toBe("workflow-session")
   })
 
-  it("Cancel_StaleFactForSupersededBinding_IsCarriedWithTheOutboundBindingRuntimeSessionId", async () => {
+  followupIt("Cancel_StaleFactForSupersededBinding_IsCarriedWithTheOutboundBindingRuntimeSessionId", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({
       resolver,
       outbox: recording.outbox,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -313,12 +273,13 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     })
   })
 
-  it("Cancel_WithoutOutbox_StillRepliesAndQuietlySkipsFactWrite", async () => {
+  followupIt("Cancel_WithoutOutbox_StillRepliesAndQuietlySkipsFactWrite", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({
       resolver,
       outbox: null,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()
@@ -329,7 +290,8 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     expect(recording.producedFactCalls).toHaveLength(0)
   })
 
-  it("Cancel_FailedEnqueue_LeavesStopRequested", async () => {
+  followupIt("Cancel_FailedEnqueue_LeavesStopRequested", async ({ runtime, recording }) => {
+    const pi = makeFakePiRuntime()
     const failingOutbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
       load: async () => {},
@@ -345,7 +307,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     buildClient({
       resolver,
       outbox: failingOutbox,
-      openCodeRuntime: opencode.runtime,
+      openCodeRuntime: runtime.runtime,
       piRuntime: pi.runtime,
     })
     const builder = lastBuilder()

@@ -1,20 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { ServerConnection } from "../src/server/connection.js"
 import type { TaskLogBatch } from "../src/runtime/task-log.js"
+import { transportFetch, withFakeTransport } from "./support/fake-transport.js"
 
-const originalFetch = globalThis.fetch
-
-let fetchMock: ReturnType<typeof vi.fn>
-
-beforeEach(() => {
-  fetchMock = vi.fn()
-  globalThis.fetch = fetchMock as unknown as typeof fetch
-})
-
-afterEach(() => {
-  globalThis.fetch = originalFetch
-  vi.restoreAllMocks()
-})
+const fetchMock = transportFetch
+const it = (name: string, body: () => unknown) => vitestIt(name, () => withFakeTransport(async () => await body()))
 
 function mockResponse({ status, body = "{}" }: { status: number; body?: string }): Response {
   return new Response(body, { status, headers: { "content-type": "application/json" } })
@@ -22,9 +12,9 @@ function mockResponse({ status, body = "{}" }: { status: number; body?: string }
 
 function options() {
   return {
-    serverUrl: "http://localhost:3456",
+    serverUrl: "https://runner.test",
     runnerId: "runner-1",
-    runnerRoot: "/tmp",
+    runnerRoot: "/virtual/runner",
     pollIntervalMs: 100,
     heartbeatIntervalMs: 60_000,
     dispatchLivenessProbeIntervalMs: 60_000,

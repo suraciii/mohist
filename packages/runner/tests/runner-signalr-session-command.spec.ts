@@ -1,26 +1,38 @@
-import { describe, expect, it, vi, afterEach } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import {
   RunnerSignalRClient,
-  setRunnerSignalRExistsCheckerForTest,
-  setRunnerSignalRGitRunnerForTest,
   type SessionCommandRequest,
 } from "../src/server/runner-signalr.js"
+import type { RunnerFileSystem, RunnerResourceContext } from "../src/system/filesystem.js"
 import { makeFakeRuntime, type FakeRuntimeHandles } from "./support/opencode-runtime-fixture.js"
 import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
 import type { HubConnection } from "@microsoft/signalr"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { currentSignalRTestState, withSignalRTestResources } from "./support/signalr-test-resources.js"
 
 interface FakeBuilder {
   handlers: Map<string, (...args: unknown[]) => unknown>
 }
 
-const builders: FakeBuilder[] = []
+type SignalRResources = {
+  fileSystem: RunnerFileSystem
+  signalRGitRunner?: NonNullable<RunnerResourceContext["signalRGitRunner"]>
+  signalRExistsChecker?: (path: string) => boolean
+}
+
+function it(name: string, body: (resources: SignalRResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: SignalRResources = { fileSystem: new MemoryFileSystem() }
+    await withSignalRTestResources(resources, async () => await body(resources))
+  })
+}
 
 vi.mock("@microsoft/signalr", () => {
   return {
     HubConnectionBuilder: class {
       private _handlers: Map<string, (...args: unknown[]) => unknown> = new Map()
       withUrl(_url: string) {
-        builders.push({ handlers: this._handlers })
+        currentSignalRTestState().builders.push({ handlers: this._handlers })
         return this
       }
       withAutomaticReconnect(_reconnectPolicy: number[]) {
@@ -52,25 +64,18 @@ vi.mock("@microsoft/signalr", () => {
   }
 })
 
-afterEach(() => {
-  vi.restoreAllMocks()
-  builders.length = 0
-  setRunnerSignalRGitRunnerForTest(null)
-  setRunnerSignalRExistsCheckerForTest(null)
-})
-
 function lastBuilder(): FakeBuilder {
-  const builder = builders.at(-1)
+  const builder = currentSignalRTestState().builders.at(-1) as FakeBuilder | undefined
   if (!builder) throw new Error("no captured builder; construct a RunnerSignalRClient first")
   return builder
 }
 
-function newClient(opts: { openCodeRuntime: unknown; piRuntime: unknown; journal?: unknown; outbox?: unknown }) {
-  builders.length = 0
+function newClient(_resources: SignalRResources, opts: { openCodeRuntime: unknown; piRuntime: unknown; journal?: unknown; outbox?: unknown }) {
+  currentSignalRTestState().builders.length = 0
   return new RunnerSignalRClient(
-    "http://localhost:3456",
+    "https://runner.test",
     "runner-1",
-    "/tmp/mohist/projects",
+    "/virtual/projects",
     null,
     {
       openCodeRuntime: opts.openCodeRuntime as never,
@@ -138,12 +143,12 @@ function makeResetRequest(runtime: string, expectedBinding = "runtime-1"): Sessi
 }
 
 describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime", () => {
-  function setup(opts?: { openCode?: unknown; pi?: unknown; journal?: unknown }) {
+  function setup(resources: SignalRResources, opts?: { openCode?: unknown; pi?: unknown; journal?: unknown }) {
     const opencode = makeFakeRuntime()
     const pi = makeFakePiRuntime()
     const openCodeRuntime = opts && "openCode" in opts ? opts.openCode : opencode.runtime
     const piRuntime = opts && "pi" in opts ? opts.pi : pi.runtime
-    newClient({
+    newClient(resources, {
       openCodeRuntime,
       piRuntime,
       journal: opts?.journal ?? makeMemoryJournal(),
@@ -151,8 +156,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     return { builder: lastBuilder(), pi, opencode }
   }
 
-  it("PiBinding_Compact_DispatchesToPiRuntime_AndReturnsOk", async () => {
-    const { builder, pi, opencode } = setup()
+  it("PiBinding_Compact_DispatchesToPiRuntime_AndReturnsOk", async (resources) => {
+    const { builder, pi, opencode } = setup(resources)
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -165,7 +170,7 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(opencode.cancelCalls).toHaveLength(0)
   })
 
-  it("PiBinding_Compact_PersistsProjectedEventsThroughTheOutbox", async () => {
+  it("PiBinding_Compact_PersistsProjectedEventsThroughTheOutbox", async (resources) => {
     const events: unknown[] = []
     const outbox = {
       ready: () => true,
@@ -177,7 +182,7 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
       observer?.onEvent?.({ id: "compact-event-1", type: "compaction_event", runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/work/project", payload: { phase: "completed" } })
       return { ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/work/project" }, diagnostics: [] }
     }
-    newClient({ openCodeRuntime: opencode.runtime, piRuntime: pi.runtime, journal: makeMemoryJournal(), outbox })
+    newClient(resources, { openCodeRuntime: opencode.runtime, piRuntime: pi.runtime, journal: makeMemoryJournal(), outbox })
     const handler = lastBuilder().handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -190,9 +195,9 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     })
   })
 
-  it("PiBinding_Compact_DoesNotStartWithoutADurableEventTarget", async () => {
-    const { builder, pi } = setup()
-    newClient({ openCodeRuntime: makeFakeRuntime().runtime, piRuntime: pi.runtime, journal: makeMemoryJournal(), outbox: { ready: () => false, enqueueProducedFact: async () => {} } })
+  it("PiBinding_Compact_DoesNotStartWithoutADurableEventTarget", async (resources) => {
+    const { builder, pi } = setup(resources)
+    newClient(resources, { openCodeRuntime: makeFakeRuntime().runtime, piRuntime: pi.runtime, journal: makeMemoryJournal(), outbox: { ready: () => false, enqueueProducedFact: async () => {} } })
     const handler = lastBuilder().handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -201,8 +206,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.compactCalls).toHaveLength(0)
   })
 
-  it("PiBinding_Reset_DispatchesToPiRuntime_AndReturnsReplacementId", async () => {
-    const { builder, pi } = setup()
+  it("PiBinding_Reset_DispatchesToPiRuntime_AndReturnsReplacementId", async (resources) => {
+    const { builder, pi } = setup(resources)
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -213,8 +218,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.resetCalls[0].target.runtime).toBe("pi")
   })
 
-  it("OpenCodeBinding_Compact_ReturnsUnavailable_WithoutInvokingEitherRuntime", async () => {
-    const { builder, pi } = setup()
+  it("OpenCodeBinding_Compact_ReturnsUnavailable_WithoutInvokingEitherRuntime", async (resources) => {
+    const { builder, pi } = setup(resources)
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -225,8 +230,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.resetCalls).toHaveLength(0)
   })
 
-  it("OpenCodeBinding_Reset_CreatesAndReturnsReplacement", async () => {
-    const { builder, pi, opencode } = setup()
+  it("OpenCodeBinding_Reset_CreatesAndReturnsReplacement", async (resources) => {
+    const { builder, pi, opencode } = setup(resources)
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -239,8 +244,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.resetCalls).toHaveLength(0)
   })
 
-  it("UnknownRuntime_ReturnsUnavailable_AndPreservesErrorVocabulary", async () => {
-    const { builder, pi } = setup()
+  it("UnknownRuntime_ReturnsUnavailable_AndPreservesErrorVocabulary", async (resources) => {
+    const { builder, pi } = setup(resources)
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -250,8 +255,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.compactCalls).toHaveLength(0)
   })
 
-  it("MissingRuntimeAccessor_ReturnsUnavailable_WithoutThrowing", async () => {
-    const { builder } = setup({ pi: null })
+  it("MissingRuntimeAccessor_ReturnsUnavailable_WithoutThrowing", async (resources) => {
+    const { builder } = setup(resources, { pi: null })
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -260,8 +265,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(result).toEqual({ ok: false, error: "unavailable" })
   })
 
-  it("RedeliveryOfCompletedOp_ReplaysPriorResult_WithoutBlindReExecute", async () => {
-    const { builder, pi } = setup()
+  it("RedeliveryOfCompletedOp_ReplaysPriorResult_WithoutBlindReExecute", async (resources) => {
+    const { builder, pi } = setup(resources)
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
@@ -274,8 +279,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.resetCalls).toHaveLength(1)
   })
 
-  it("PiCompact_MissingSession_ReportsMissingError", async () => {
-    const { builder, pi } = setup()
+  it("PiCompact_MissingSession_ReportsMissingError", async (resources) => {
+    const { builder, pi } = setup(resources)
     pi.setCompactResult({
       ok: false,
       error: { kind: "missing-session", message: "The bound Pi Session is missing", diagnostics: [] },
@@ -290,8 +295,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.compactCalls).toHaveLength(1)
   })
 
-  it("PiCompact_Streaming_ReportsConflict", async () => {
-    const { builder, pi } = setup()
+  it("PiCompact_Streaming_ReportsConflict", async (resources) => {
+    const { builder, pi } = setup(resources)
     pi.setCompactResult({
       ok: false,
       error: { kind: "conflict", message: "physical session is still streaming", diagnostics: [] },
@@ -305,8 +310,8 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(result).toEqual({ ok: false, error: "conflict" })
   })
 
-  it("PostResetBinding_DispatchesByNewRuntime", async () => {
-    const { builder, pi } = setup()
+  it("PostResetBinding_DispatchesByNewRuntime", async (resources) => {
+    const { builder, pi } = setup(resources)
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 

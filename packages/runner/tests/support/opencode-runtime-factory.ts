@@ -1,5 +1,5 @@
 import { vi } from "vitest"
-import { setOpenCodeRuntimeFactoryForTest } from "../../src/runtime/opencode/index.js"
+import type { OpenCodeRuntimeFactory } from "../../src/runtime/opencode/factory.js"
 import { OpenCodeRuntime } from "../../src/runtime/opencode/runtime.js"
 import type { OpenCodeRuntimeDeps } from "../../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../../src/runtime/opencode/server-process.js"
@@ -47,6 +47,10 @@ export interface InstallFakeRuntimeArgs {
   failHealth?: boolean
 }
 
+export interface OpenCodeRuntimeTestResources {
+  openCodeRuntimeFactory?: OpenCodeRuntimeFactory
+}
+
 /**
  * Install a fake OpenCode runtime factory. The factory returns a real
  * `OpenCodeRuntime` instance wired with stubbed Server and Subscription
@@ -57,7 +61,7 @@ export interface InstallFakeRuntimeArgs {
  * `runtime.start(signal)` itself and the runtime's idempotent
  * `start()` resolves with `ready: true` when health passes.
  */
-export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs = {}): FakeRuntimeHandles {
+export function installFakeOpenCodeRuntimeFactory(resources: OpenCodeRuntimeTestResources, args: InstallFakeRuntimeArgs = {}): FakeRuntimeHandles {
   const subscription = new FakeRuntimeSubscription()
   const closed = { value: false }
   const health = vi.fn(async () => ({ data: { ok: true } }))
@@ -86,7 +90,7 @@ export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs =
       resolveRuntime = resolve
     }),
   }
-  setOpenCodeRuntimeFactoryForTest((deps: OpenCodeRuntimeDeps) => {
+  resources.openCodeRuntimeFactory = (deps: OpenCodeRuntimeDeps) => {
     const runtime = new OpenCodeRuntime({
       ...deps,
       serverFactory: async () => {
@@ -99,14 +103,10 @@ export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs =
     handles.lastRuntime = runtime
     resolveRuntime(runtime)
     return runtime
-  })
+  }
   return handles
 }
 
-export function installReadyOpenCodeRuntimeFactory(): FakeRuntimeHandles {
-  return installFakeOpenCodeRuntimeFactory()
-}
-
-export function clearOpenCodeRuntimeFactoryForTest(): void {
-  setOpenCodeRuntimeFactoryForTest(null)
+export function installReadyOpenCodeRuntimeFactory(resources: OpenCodeRuntimeTestResources): FakeRuntimeHandles {
+  return installFakeOpenCodeRuntimeFactory(resources)
 }

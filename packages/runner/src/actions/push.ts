@@ -4,24 +4,18 @@ import { booleanInput, stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
 import { fail, succeed } from "./action-result.js"
+import { currentRunnerResources, type RunnerGitRunner } from "../system/filesystem.js"
 
-type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-  status?: "timeout"
-  timeoutMs?: number
-}>
+type GitRunner = RunnerGitRunner
 type GitResult = Awaited<ReturnType<GitRunner>>
-let git: GitRunner = defaultGit
+
+function git(workDir: string, args: string[], signal: AbortSignal, options?: GitOptions): Promise<GitResult> {
+  return (currentRunnerResources()?.pushGitRunner
+    ?? currentRunnerResources()?.gitRunner
+    ?? defaultGit)(workDir, args, signal, options)
+}
 
 export type PushGitResult = GitResult
-
-export function setPushGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
-}
 
 const ACTION_SOURCE = "action:push"
 

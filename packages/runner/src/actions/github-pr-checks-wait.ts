@@ -6,6 +6,7 @@ import {
 } from "./github-pr-checks.js"
 import { combinedGhOutput, errorMessage } from "./github-pr-parse.js"
 import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStepMetadata } from "./github-pr-types.js"
+import { currentRunnerResources } from "../system/filesystem.js"
 
 type GhRunner = typeof runCommand
 
@@ -18,27 +19,22 @@ const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
 const PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT = 120_000
 const PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT = 3
 
-let prChecksPollIntervalMs = PR_CHECKS_POLL_INTERVAL_MS_DEFAULT
-let prChecksNoChecksGraceMs = PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT
-let prChecksUnavailableRetryLimit = PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT
-
-export function setGitHubPrChecksTimingForTest(timing: { pollIntervalMs?: number; noChecksGraceMs?: number; unavailableRetryLimit?: number } | null) {
-  if (timing === null) {
-    prChecksPollIntervalMs = PR_CHECKS_POLL_INTERVAL_MS_DEFAULT
-    prChecksNoChecksGraceMs = PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT
-    prChecksUnavailableRetryLimit = PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT
-    return
+function checksTiming() {
+  const timing = currentRunnerResources()?.githubPrChecksTiming
+  return {
+    pollIntervalMs: timing?.pollIntervalMs ?? PR_CHECKS_POLL_INTERVAL_MS_DEFAULT,
+    noChecksGraceMs: timing?.noChecksGraceMs ?? PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT,
+    unavailableRetryLimit: timing?.unavailableRetryLimit === undefined
+      ? PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT
+      : Math.max(0, Math.floor(timing.unavailableRetryLimit)),
   }
-  if (timing.pollIntervalMs !== undefined) prChecksPollIntervalMs = timing.pollIntervalMs
-  if (timing.noChecksGraceMs !== undefined) prChecksNoChecksGraceMs = timing.noChecksGraceMs
-  if (timing.unavailableRetryLimit !== undefined) prChecksUnavailableRetryLimit = Math.max(0, Math.floor(timing.unavailableRetryLimit))
 }
 
 // Read accessor so callers that share the checks-poll cadence (e.g. the merge
 // action's mergeStateStatus poll) follow test-injected timing without owning
 // the mutable state.
 export function getGitHubPrChecksPollIntervalMs(): number {
-  return prChecksPollIntervalMs
+  return checksTiming().pollIntervalMs
 }
 
 // Bounded in-action retry for transient network failures on read-only gh calls
@@ -48,17 +44,12 @@ export function getGitHubPrChecksPollIntervalMs(): number {
 // NOT retried here: they are not all idempotent.
 const GH_TRANSIENT_RETRY_LIMIT_DEFAULT = 3
 const GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT = 2_000
-let ghTransientRetryLimit = GH_TRANSIENT_RETRY_LIMIT_DEFAULT
-let ghTransientRetryBackoffMs = GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT
-
-export function setGitHubPrTransientRetryForTest(opts: { limit?: number; backoffMs?: number } | null) {
-  if (opts === null) {
-    ghTransientRetryLimit = GH_TRANSIENT_RETRY_LIMIT_DEFAULT
-    ghTransientRetryBackoffMs = GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT
-    return
+function transientRetry() {
+  const options = currentRunnerResources()?.githubPrTransientRetry
+  return {
+    limit: options?.limit === undefined ? GH_TRANSIENT_RETRY_LIMIT_DEFAULT : Math.max(0, Math.floor(options.limit)),
+    backoffMs: options?.backoffMs === undefined ? GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT : Math.max(0, options.backoffMs),
   }
-  if (opts.limit !== undefined) ghTransientRetryLimit = Math.max(0, Math.floor(opts.limit))
-  if (opts.backoffMs !== undefined) ghTransientRetryBackoffMs = Math.max(0, Math.floor(opts.backoffMs))
 }
 
 export type GitHubPrCheckRecorder = (
@@ -84,6 +75,7 @@ export async function waitForGitHubPrChecks(
   options?: CommandLineOptions,
   githubRepository?: string,
 ): Promise<GitHubPrChecksWaitResult> {
+  const timing = checksTiming()
   // Timestamp of the first poll that saw zero check runs, or null once checks
   // have appeared. Used to bound how long we wait before treating the branch
   // as genuinely check-less.
@@ -120,15 +112,15 @@ export async function waitForGitHubPrChecks(
         const checks = parsed.checks
         if (checks.length === 0) {
           if (noChecksSince === null) noChecksSince = Date.now()
-          if (Date.now() - noChecksSince >= prChecksNoChecksGraceMs) {
+          if (Date.now() - noChecksSince >= timing.noChecksGraceMs) {
             return {
               kind: "unavailable",
-              message: `no PR checks were reported during the ${prChecksNoChecksGraceMs / 1000}s bounded wait`,
+              message: `no PR checks were reported during the ${timing.noChecksGraceMs / 1000}s bounded wait`,
               output: checksOutput,
             }
           }
           try {
-            await delayWithSignal(prChecksPollIntervalMs, signal)
+            await delayWithSignal(timing.pollIntervalMs, signal)
           } catch (error) {
             return {
               kind: "cancelled",
@@ -154,7 +146,7 @@ export async function waitForGitHubPrChecks(
       }
     }
     if (unavailable) {
-      if (unavailableRetries >= prChecksUnavailableRetryLimit) {
+      if (unavailableRetries >= timing.unavailableRetryLimit) {
         return {
           kind: "unavailable",
           message: `check status unavailable after ${unavailableRetries + 1} attempts: ${unavailable.message}`,
@@ -164,7 +156,7 @@ export async function waitForGitHubPrChecks(
       unavailableRetries += 1
     }
     try {
-      await delayWithSignal(prChecksPollIntervalMs, signal)
+      await delayWithSignal(timing.pollIntervalMs, signal)
     } catch (error) {
       return {
         kind: "cancelled",
@@ -208,21 +200,22 @@ export async function runGhReadWithRetry(
   recordCommand: string,
   options?: CommandLineOptions,
 ): Promise<CommandResult> {
+  const retry = transientRetry()
   let attempt = 0
   for (;;) {
     const result = await gh("gh", args, workDir, signal, undefined, options)
     const transient = result.exitCode !== 0
       && result.status !== "timeout"
-      && attempt < ghTransientRetryLimit
+      && attempt < retry.limit
       && looksLikeRetrySafe(`${result.stdout}\n${result.stderr}`)
     if (!transient) {
       record(recordName, recordCommand, result.exitCode, combinedGhOutput(result), timeoutStepMetadata(result))
       return result
     }
     attempt++
-    record(recordName, `${recordCommand} (transient retry ${attempt}/${ghTransientRetryLimit})`, result.exitCode, combinedGhOutput(result), timeoutStepMetadata(result))
+    record(recordName, `${recordCommand} (transient retry ${attempt}/${retry.limit})`, result.exitCode, combinedGhOutput(result), timeoutStepMetadata(result))
     try {
-      await delayWithSignal(ghTransientRetryBackoffMs, signal)
+      await delayWithSignal(retry.backoffMs, signal)
     } catch (error) {
       record(recordName, recordCommand, result.exitCode, `aborted during retry backoff: ${errorMessage(error)}`)
       return result

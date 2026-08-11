@@ -1,17 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { createCleanupLoopFixture, type CleanupLoopFixture } from "./support/cleanup-loop-fixture.js"
+import { describe, expect, it as vitestIt } from "vitest"
+import { scopedCleanupLoopFixture, withCleanupLoopFixture } from "./support/cleanup-loop-fixture.js"
 import type { CleanupPolicy } from "../src/core/types.js"
 
 describe("CleanupLoop", () => {
-  let fixture: CleanupLoopFixture
+  const fixture = scopedCleanupLoopFixture()
 
-  beforeEach(async () => {
-    fixture = await createCleanupLoopFixture()
-  })
-
-  afterEach(async () => {
-    await fixture.dispose()
-  })
+  function it(name: string, body: () => Promise<void>): void {
+    vitestIt(name, () => withCleanupLoopFixture(body))
+  }
 
   describe("retention eviction", () => {
     it("removes eligible workspace past the retention window", async () => {

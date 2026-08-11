@@ -1,17 +1,23 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import {
   evaluateCompletion,
   parseLastMarker,
   promiseValue,
 } from "../src/actions/expectations.js"
-import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { createTestTempDirSync } from "./support/temp-dir.js"
+import { currentRunnerFileSystem } from "../src/system/filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => withTestRunnerResources(async () => await body())),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
 
 describe("evaluateCompletion", () => {
   it("AllArtifactsPresent_ReturnsSatisfied", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "file.txt"), "hello world")
+    await currentRunnerFileSystem().writeText(join(dir, "file.txt"), "hello world")
 
     const result = await evaluateCompletion({
       files: [{ path: "file.txt" }],
@@ -39,7 +45,7 @@ describe("evaluateCompletion", () => {
 
   it("MissingMarker_ReturnsMarkerDiagnostic", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "file.txt"), "hello world")
+    await currentRunnerFileSystem().writeText(join(dir, "file.txt"), "hello world")
 
     const result = await evaluateCompletion({
       markers: [{ path: "file.txt", contains: "## Section" }],
@@ -54,7 +60,7 @@ describe("evaluateCompletion", () => {
 
   it("VerdictMarkerNotInExpectation_DoesNotFailHere", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "<promise>FAIL</promise>")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "<promise>FAIL</promise>")
 
     const result = await evaluateCompletion({
       files: [{ path: "review.md" }],
@@ -65,7 +71,7 @@ describe("evaluateCompletion", () => {
 
   it("OneOfMarkers_PASSValue_SatisfiesExpectation", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "Looks good.\n<promise>PASS</promise>\n")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "Looks good.\n<promise>PASS</promise>\n")
 
     const result = await evaluateCompletion({
       markers: [{
@@ -81,7 +87,7 @@ describe("evaluateCompletion", () => {
 
   it("OneOfMarkers_FAILValue_SatisfiesExpectation", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "Issues found.\n<promise>FAIL</promise>\n")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "Issues found.\n<promise>FAIL</promise>\n")
 
     const result = await evaluateCompletion({
       markers: [{
@@ -97,7 +103,7 @@ describe("evaluateCompletion", () => {
 
   it("OneOfMarkers_NeitherValuePresent_KeepsAskingForRequiredFormat", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "Still drafting the review.")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "Still drafting the review.")
 
     const result = await evaluateCompletion({
       markers: [{
@@ -132,7 +138,7 @@ describe("evaluateCompletion", () => {
 
   it("OneOfMarkers_BeatsContainsFallback_AcceptsListedValue", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "<promise>FAIL</promise>")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "<promise>FAIL</promise>")
 
     const result = await evaluateCompletion({
       markers: [{
@@ -152,7 +158,7 @@ describe("evaluateCompletion", () => {
     // for that match). Design D3 + spec "first present in
     // declaration order".
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "<promise>PASS</promise>\n<promise>FAIL</promise>\n")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "<promise>PASS</promise>\n<promise>FAIL</promise>\n")
 
     const result = await evaluateCompletion({
       markers: [{
@@ -286,7 +292,7 @@ describe("evaluateCompletion", () => {
 
   it("OutputMarkers_MixedWithFileMarkers_BothSatisfied", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "<promise>PASS</promise>")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "<promise>PASS</promise>")
     const agentText = "All work done.\n\n<promise>done</promise>"
 
     const result = await evaluateCompletion({
@@ -303,7 +309,7 @@ describe("evaluateCompletion", () => {
 
   it("FailIf_PASSMarker_DoesNotFailTask", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "<promise>PASS</promise>")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "<promise>PASS</promise>")
 
     const result = await evaluateCompletion({
       markers: [{
@@ -321,7 +327,7 @@ describe("evaluateCompletion", () => {
 
   it("FailIf_FAILMarker_FailsTask", async () => {
     const dir = mkTestDir()
-    writeFileSync(
+    await currentRunnerFileSystem().writeText(
       join(dir, "review.md"),
       "Reviewing found issues.\n<promise>FAIL</promise>\n",
     )
@@ -346,7 +352,7 @@ describe("evaluateCompletion", () => {
 
   it("FailIf_NoMarkerMatched_DoesNotFailTask", async () => {
     const dir = mkTestDir()
-    writeFileSync(join(dir, "review.md"), "Still drafting the review.")
+    await currentRunnerFileSystem().writeText(join(dir, "review.md"), "Still drafting the review.")
 
     const result = await evaluateCompletion({
       markers: [{
@@ -398,7 +404,7 @@ describe("evaluateCompletion", () => {
 
   it("FailIf_MultipleMarkers_AllFailIfHitsRecorded", async () => {
     const dir = mkTestDir()
-    writeFileSync(
+    await currentRunnerFileSystem().writeText(
       join(dir, "review.md"),
       "errorCode: review-failed\n<promise>FAIL</promise>\n",
     )

@@ -11,6 +11,6 @@ export default defineConfig({
     unstubEnvs: true,
     clearMocks: true,
     exclude: [...configDefaults.exclude, 'tests/integration/**'],
-    setupFiles: ['./tests/setup.common.ts', './tests/setup.default.ts'],
+    setupFiles: ['./tests/setup.common.ts'],
   },
 })

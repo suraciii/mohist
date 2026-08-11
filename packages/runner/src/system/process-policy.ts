@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process"
+import { currentRunnerResources } from "./filesystem.js"
 
 export interface ExternalProcessPolicy {
   assertAllowed(label: string): void
@@ -10,16 +11,10 @@ const productionPolicy: ExternalProcessPolicy = {
   register() {},
 }
 
-let externalProcessPolicy: ExternalProcessPolicy = productionPolicy
-
 export function assertExternalProcessAllowed(label: string): void {
-  externalProcessPolicy.assertAllowed(label)
+  (currentRunnerResources()?.externalProcessPolicy ?? productionPolicy).assertAllowed(label)
 }
 
 export function registerExternalProcess(child: ChildProcess): void {
-  externalProcessPolicy.register(child)
-}
-
-export function setExternalProcessPolicyForTest(policy: ExternalProcessPolicy | null): void {
-  externalProcessPolicy = policy ?? productionPolicy
+  (currentRunnerResources()?.externalProcessPolicy ?? productionPolicy).register(child)
 }

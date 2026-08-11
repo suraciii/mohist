@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { RunnerSignalRClient, type CancelAgentSessionPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { RunnerSignalRClient, type CancelAgentSessionPayload } from "../src/server/runner-signalr.js"
+import type { RunnerFileSystem, RunnerResourceContext } from "../src/system/filesystem.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
 import type { CancelOperationJournalEntry, CancelOperationJournalStore } from "../src/runtime/cancel-operation-journal.js"
@@ -12,6 +13,8 @@ import type {
 } from "../src/runtime/opencode/index.js"
 import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
 import { capturedLogs } from "./support/logger-test.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { currentSignalRTestState, withSignalRTestResources } from "./support/signalr-test-resources.js"
 
 
 interface CapturedBuilder {
@@ -19,16 +22,18 @@ interface CapturedBuilder {
   connection: FakeConnection
 }
 
-const builders: CapturedBuilder[] = []
-let nextConnectionId = 0
+type SignalRResources = {
+  fileSystem: RunnerFileSystem
+  signalRGitRunner?: NonNullable<RunnerResourceContext["signalRGitRunner"]>
+  signalRExistsChecker?: (path: string) => boolean
+}
 
-afterEach(() => {
-  vi.restoreAllMocks()
-  builders.length = 0
-  nextConnectionId = 0
-  setRunnerSignalRGitRunnerForTest(null)
-  setRunnerSignalRExistsCheckerForTest(null)
-})
+function it(name: string, body: (resources: SignalRResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: SignalRResources = { fileSystem: new MemoryFileSystem() }
+    await withSignalRTestResources(resources, async () => await body(resources))
+  })
+}
 
 interface FakeConnection {
   state: signalR.HubConnectionState
@@ -53,7 +58,7 @@ function makeFakeConnection(): FakeConnection {
   }
   conn.start.mockImplementation(async () => {
     conn.state = signalR.HubConnectionState.Connected
-    conn.connectionId = `conn-${++nextConnectionId}`
+    conn.connectionId = `conn-${++currentSignalRTestState().nextConnectionId}`
   })
   conn.stop.mockImplementation(async () => {
     conn.state = signalR.HubConnectionState.Disconnected
@@ -71,7 +76,7 @@ vi.mock("@microsoft/signalr", () => {
       private _handlers: Map<string, (...args: unknown[]) => unknown> = new Map()
       private _connection: FakeConnection = makeFakeConnection()
       withUrl(_url: string) {
-        builders.push({ handlers: this._handlers, connection: this._connection })
+        currentSignalRTestState().builders.push({ handlers: this._handlers, connection: this._connection })
         return this
       }
       withAutomaticReconnect(_reconnectPolicy: number[]) {
@@ -96,7 +101,7 @@ vi.mock("@microsoft/signalr", () => {
 })
 
 function lastBuilder(): CapturedBuilder {
-  const builder = builders.at(-1)
+  const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
   if (!builder) throw new Error("no captured builder; construct a RunnerSignalRClient first")
   return builder
 }
@@ -154,13 +159,13 @@ function buildClient(opts: {
   piRuntime?: unknown
   cancelOperationJournal?: CancelOperationJournalStore | null
 }) {
-  builders.length = 0
+  currentSignalRTestState().builders.length = 0
   const resolver = opts.resolver === undefined ? null : opts.resolver
   const openCodeRuntime = opts.openCodeRuntime === undefined ? makeFakeRuntime().runtime : opts.openCodeRuntime
   const client = new RunnerSignalRClient(
-    "http://localhost:3456",
+    "https://runner.test",
     "runner-1",
-    "/tmp/mohist/projects",
+    "/virtual/projects",
     null,
     {
       followupTargetResolver: resolver as never,
@@ -589,8 +594,9 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 })
 
 describe("RunnerSignalRClient CancelAgentSession routes by persisted binding runtime", () => {
-  let opencode: ReturnType<typeof makeFakeRuntime>
-  let pi: FakePiRuntimeHandles
+  function runtimeFixtures(): { opencode: ReturnType<typeof makeFakeRuntime>; pi: FakePiRuntimeHandles } {
+    return { opencode: makeFakeRuntime(), pi: makeFakePiRuntime() }
+  }
 
   function piCancelPayload(sessionId: string): CancelAgentSessionPayload {
     return {
@@ -614,20 +620,8 @@ describe("RunnerSignalRClient CancelAgentSession routes by persisted binding run
     }
   }
 
-  beforeEach(() => {
-    builders.length = 0
-    opencode = makeFakeRuntime()
-    pi = makeFakePiRuntime()
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-    builders.length = 0
-    setRunnerSignalRGitRunnerForTest(null)
-    setRunnerSignalRExistsCheckerForTest(null)
-  })
-
   it("PiBinding_CancelConfirmed_RepliesCancelled_WithoutInterruptUnconfirmed", async () => {
+    const { opencode, pi } = runtimeFixtures()
     const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", projectId: "proj-1" }))
     buildClient({ resolver, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()
@@ -642,6 +636,7 @@ describe("RunnerSignalRClient CancelAgentSession routes by persisted binding run
   })
 
   it("PiBinding_CancelStopUnconfirmed_RepliesCancelledWithInterruptUnconfirmedTrue", async () => {
+    const { opencode, pi } = runtimeFixtures()
     pi.setCancelResult({
       ok: true,
       value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", cancelled: true, stopConfirmed: false },
@@ -658,6 +653,7 @@ describe("RunnerSignalRClient CancelAgentSession routes by persisted binding run
   })
 
   it("PiBinding_CancelRequestWithoutConfirmation_ReturnsStopRequested", async () => {
+    const { opencode, pi } = runtimeFixtures()
     pi.setCancelResult({
       ok: true,
       value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", cancelled: true } as never,
@@ -673,6 +669,7 @@ describe("RunnerSignalRClient CancelAgentSession routes by persisted binding run
   })
 
   it("OpenCodeBinding_CancelRepliesCancelled_WithoutInterruptUnconfirmed", async () => {
+    const { opencode, pi } = runtimeFixtures()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()
@@ -685,6 +682,7 @@ describe("RunnerSignalRClient CancelAgentSession routes by persisted binding run
   })
 
   it("UnknownBinding_RepliesNotCancellable_AndDoesNotCallAnyRuntime", async () => {
+    const { opencode, pi } = runtimeFixtures()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-x", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
     const builder = lastBuilder()

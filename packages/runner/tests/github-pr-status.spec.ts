@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
@@ -8,19 +8,27 @@ import {
   __testing,
   githubPrStatusAction,
   parseGitHubPrStatusExpectation,
-  setGitHubPrStatusGhRunnerForTest,
 } from "../src/actions/github-pr-status.js"
+import type { RunnerCommandRunner, RunnerFileSystem } from "../src/system/filesystem.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
 type GhCall = { command: string; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
-const ghCalls: GhCall[] = []
+type StatusTestResources = {
+  fileSystem: RunnerFileSystem
+  githubPrStatusGhRunner?: RunnerCommandRunner
+  ghCalls: GhCall[]
+}
 
-afterEach(() => {
-  setGitHubPrStatusGhRunnerForTest(null)
-  ghCalls.length = 0
-})
+function it(name: string, body: (resources: StatusTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: StatusTestResources = { fileSystem: new MemoryFileSystem(), ghCalls: [] }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 function ghOk(stdout: string, stderr = ""): CommandResult {
   return { exitCode: 0, stdout, stderr }
@@ -64,12 +72,12 @@ function withLog(ctx: ActionContext, writes: Array<{ source: string; text: strin
   }
 }
 
-function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
-  setGitHubPrStatusGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+function installGh(resources: StatusTestResources, respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
+  resources.githubPrStatusGhRunner = async (cmd, args, cwd, _signal, _env, options) => {
     const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
-    ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
+    resources.ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
     return await respond(cmd, visibleArgs, cwd)
-  })
+  }
 }
 
 const PR_VIEW_OPEN = JSON.stringify({
@@ -102,9 +110,9 @@ describe("mohist/github-pr-status registry", () => {
 })
 
 describe("mohist/github-pr-status action", () => {
-  it("returns success when the PR is OPEN and not draft (default ready+open expectations)", async () => {
+  it("returns success when the PR is OPEN and not draft (default ready+open expectations)", async (resources) => {
     const ghCalls: string[] = []
-    installGh((cmd, args) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
@@ -127,9 +135,9 @@ describe("mohist/github-pr-status action", () => {
     expect(ghCalls).toContain("gh pr view 42 --json url,state,isDraft")
   })
 
-  it("uses the explicitly declared repository despite different Variables", async () => {
+  it("uses the explicitly declared repository despite different Variables", async (resources) => {
     const commands: string[] = []
-    installGh((cmd, args) => {
+    installGh(resources, (cmd, args) => {
       commands.push([cmd, ...args].join(" "))
        if (args.join(" ") === "pr view 42 --json url,state,isDraft") return ghOk(PR_VIEW_OPEN)
       return ghFail(`unexpected gh call: ${[cmd, ...args].join(" ")}`)
@@ -147,14 +155,14 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.message).toContain("valid GitHub repository URL")
   })
 
-  it("forwards gh command output to the task log sink", async () => {
+  it("forwards gh command output to the task log sink", async (resources) => {
     const writes: Array<{ source: string; text: string }> = []
-    setGitHubPrStatusGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
+    resources.githubPrStatusGhRunner = async (cmd, args, _cwd, _signal, _env, options) => {
       const full = [cmd, ...args].join(" ")
       options?.onLine?.(`captured ${full}`)
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
       return ghFail(`unexpected gh call: ${full}`)
-    })
+    }
 
     const result = await callAction(githubPrStatusAction, withLog(context({ prNumber: 42 }), writes))
 
@@ -162,8 +170,8 @@ describe("mohist/github-pr-status action", () => {
     expect(writes).toEqual([{ source: "action:github-pr-status", text: "captured gh pr view 42 --json url,state,isDraft --repo github.com/example/repo" }])
   })
 
-  it("rejects a draft PR by default", async () => {
-    installGh((cmd, args) => {
+  it("rejects a draft PR by default", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_DRAFT)
       return ghFail(`unexpected gh call: ${full}`)
@@ -175,8 +183,8 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.code).toBe("pr-status-failed")
   })
 
-  it("rejects a non-open PR by default", async () => {
-    installGh((cmd, args) => {
+  it("rejects a non-open PR by default", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_MERGED)
       return ghFail(`unexpected gh call: ${full}`)
@@ -188,8 +196,8 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.code).toBe("pr-status-failed")
   })
 
-  it("fails with expect=merged when the PR state is OPEN", async () => {
-    installGh((cmd, args) => {
+  it("fails with expect=merged when the PR state is OPEN", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full === "gh pr view 42 --json url,state") return ghOk(PR_VIEW_OPEN)
       return ghFail(`unexpected gh call: ${full}`)
@@ -201,8 +209,8 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.code).toBe("pr-status-failed")
   })
 
-  it("passes expect=merged when the PR state is MERGED", async () => {
-    installGh((cmd, args) => {
+  it("passes expect=merged when the PR state is MERGED", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_MERGED)
       return ghFail(`unexpected gh call: ${full}`)
@@ -216,8 +224,8 @@ describe("mohist/github-pr-status action", () => {
     expect(parsed.missing).toEqual([])
   })
 
-  it("rejects a draft PR when expect=ready is set", async () => {
-    installGh((cmd, args) => {
+  it("rejects a draft PR when expect=ready is set", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_DRAFT)
       return ghFail(`unexpected gh call: ${full}`)
@@ -229,8 +237,8 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.code).toBe("pr-status-failed")
   })
 
-  it("requires prNumber instead of reading vars.github.pr.number", async () => {
-    installGh((cmd, args) => {
+  it("requires prNumber instead of reading vars.github.pr.number", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 7")) return ghOk(PR_VIEW_OPEN.replace("42", "7"))
       return ghFail(`unexpected gh call: ${full}`)
@@ -250,8 +258,8 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.message).toContain("prNumber")
   })
 
-  it("returns failure when gh pr view fails", async () => {
-    installGh(() => ghFail("gh: not found"))
+  it("returns failure when gh pr view fails", async (resources) => {
+    installGh(resources, () => ghFail("gh: not found"))
 
     const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
@@ -259,8 +267,8 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.message).toContain("gh pr view 42 failed")
   })
 
-  it("returns failure when gh pr view returns unparseable JSON", async () => {
-    installGh(() => ghOk("not-json"))
+  it("returns failure when gh pr view returns unparseable JSON", async (resources) => {
+    installGh(resources, () => ghOk("not-json"))
 
     const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
@@ -279,8 +287,8 @@ describe("mohist/github-pr-status action", () => {
     expect(__testing.buildPrViewFields(["merged"])).toEqual(["url", "state"])
   })
 
-  it("NetworkGhPrView_ReceivesTimeoutMs", async () => {
-    installGh((cmd, args) => {
+  it("NetworkGhPrView_ReceivesTimeoutMs", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
       return ghFail(`unexpected gh call: ${full}`)
@@ -288,12 +296,12 @@ describe("mohist/github-pr-status action", () => {
 
     await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
-    const view = ghCalls.find((c) => c.command.startsWith("gh pr view 42"))
+    const view = resources.ghCalls.find((c) => c.command.startsWith("gh pr view 42"))
     expect(view?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
-  it("GhPrViewTimeout_SurfacesStepNameAndDuration", async () => {
-    installGh((cmd, args) => {
+  it("GhPrViewTimeout_SurfacesStepNameAndDuration", async (resources) => {
+    installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) {
         return {

@@ -1,6 +1,6 @@
-import { mkdir, rename, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { exists, readText } from "../system/process.js"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 
 // Runner-local registry of workspaces this runner has materialized. The
 // registry is runtime state, NOT domain truth — workflow run lifecycle
@@ -81,6 +81,7 @@ export class WorkspaceRegistry {
   private entries: Map<string, WorkspaceRegistryEntry> = new Map()
   private pathIndex: Map<string, string> = new Map()
   private loaded = false
+  private tempSequence = 0
 
   constructor(runnerRoot: string, options: WorkspaceRegistryOptions = {}) {
     this.runnerRoot = resolve(runnerRoot)
@@ -365,14 +366,14 @@ export class WorkspaceRegistry {
   // half-written file behind.
   private async persist(): Promise<void> {
     const dir = dirname(this.filePath)
-    await mkdir(dir, { recursive: true })
-    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`
+    await currentRunnerFileSystem().ensureDir(dir)
+    const tempPath = `${this.filePath}.${this.tempSequence++}.tmp`
     const file: WorkspaceRegistryFile = {
       version: 3,
       entries: Object.fromEntries(this.entries),
     }
-    await writeFile(tempPath, JSON.stringify(file, null, 2))
-    await rename(tempPath, this.filePath)
+    await currentRunnerFileSystem().writeText(tempPath, JSON.stringify(file, null, 2))
+    await currentRunnerFileSystem().rename(tempPath, this.filePath)
   }
 }
 
@@ -464,6 +465,7 @@ export class NamedWorkspaceRegistry {
   private entries: Map<string, NamedWorkspaceRegistryEntry> = new Map()
   private pathIndex: Map<string, string> = new Map()
   private loaded = false
+  private tempSequence = 0
 
   constructor(runnerRoot: string, options: NamedWorkspaceRegistryOptions = {}) {
     this.filePath = options.filePath
@@ -640,14 +642,14 @@ export class NamedWorkspaceRegistry {
 
   private async persist(): Promise<void> {
     const dir = dirname(this.filePath)
-    await mkdir(dir, { recursive: true })
-    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`
+    await currentRunnerFileSystem().ensureDir(dir)
+    const tempPath = `${this.filePath}.${this.tempSequence++}.tmp`
     const file: NamedWorkspaceRegistryFile = {
       version: 1,
       entries: Object.fromEntries(this.entries),
     }
-    await writeFile(tempPath, JSON.stringify(file, null, 2))
-    await rename(tempPath, this.filePath)
+    await currentRunnerFileSystem().writeText(tempPath, JSON.stringify(file, null, 2))
+    await currentRunnerFileSystem().rename(tempPath, this.filePath)
   }
 }
 

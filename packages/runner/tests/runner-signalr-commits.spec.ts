@@ -1,7 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { RunnerSignalRClient, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { RunnerSignalRClient } from "../src/server/runner-signalr.js"
 import type { CommandResult } from "../src/system/process.js"
+import type { RunnerFileSystem, RunnerResourceContext } from "../src/system/filesystem.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { currentSignalRTestState, withSignalRTestResources } from "./support/signalr-test-resources.js"
 
 
 interface CapturedBuilder {
@@ -9,19 +12,21 @@ interface CapturedBuilder {
   connection: FakeConnection
 }
 
-const builders: CapturedBuilder[] = []
-let nextConnectionId = 0
+type SignalRResources = {
+  fileSystem: RunnerFileSystem
+  signalRGitRunner?: NonNullable<RunnerResourceContext["signalRGitRunner"]>
+  signalRExistsChecker?: (path: string) => boolean
+}
 
-afterEach(() => {
-  vi.restoreAllMocks()
-  builders.length = 0
-  nextConnectionId = 0
-  setRunnerSignalRGitRunnerForTest(null)
-  setRunnerSignalRExistsCheckerForTest(null)
-})
+function it(name: string, body: (resources: SignalRResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: SignalRResources = { fileSystem: new MemoryFileSystem() }
+    await withSignalRTestResources(resources, async () => await body(resources))
+  })
+}
 
 function findHandler(name: string): (...args: unknown[]) => unknown {
-  const conn = builders.at(-1)!.connection
+  const conn = (currentSignalRTestState().builders.at(-1) as CapturedBuilder).connection
   const call = conn.on.mock.calls.find(([event]) => event === name)
   const handler = call?.[1]
   if (typeof handler !== "function") throw new Error(`handler not registered: ${name}`)
@@ -51,7 +56,7 @@ function makeFakeConnection(): FakeConnection {
   }
   conn.start.mockImplementation(async () => {
     conn.state = signalR.HubConnectionState.Connected
-    conn.connectionId = `conn-${++nextConnectionId}`
+    conn.connectionId = `conn-${++currentSignalRTestState().nextConnectionId}`
   })
   conn.stop.mockImplementation(async () => {
     conn.state = signalR.HubConnectionState.Disconnected
@@ -69,7 +74,7 @@ vi.mock("@microsoft/signalr", () => {
       private _handlers: Map<string, (...args: unknown[]) => unknown> = new Map()
       private _connection: FakeConnection = makeFakeConnection()
       withUrl(_url: string) {
-        builders.push({ handlers: this._handlers, connection: this._connection })
+        currentSignalRTestState().builders.push({ handlers: this._handlers, connection: this._connection })
         return this
       }
       withAutomaticReconnect(_reconnectPolicy: number[]) {
@@ -94,7 +99,7 @@ vi.mock("@microsoft/signalr", () => {
 })
 
 function lastBuilder(): CapturedBuilder {
-  const builder = builders.at(-1)
+  const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
   if (!builder) throw new Error("no captured builder; construct a RunnerSignalRClient first")
   return builder
 }
@@ -107,22 +112,22 @@ function runFail(stderr = ""): CommandResult {
   return { exitCode: 1, stdout: "", stderr }
 }
 
-function buildGitOnlyClient() {
-  builders.length = 0
-  new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, { allowUnverifiedWorkspaceQueriesForTest: true })
+function buildGitOnlyClient(_resources: SignalRResources) {
+  currentSignalRTestState().builders.length = 0
+  new RunnerSignalRClient("https://runner.test", "runner-1", "/virtual/projects", null, { allowUnverifiedWorkspaceQueriesForTest: true })
   return lastBuilder()
 }
 
 describe("RunnerSignalRClient GetCommits handler", () => {
-  it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async () => {
+  it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async (resources) => {
     const calls: string[] = []
-    setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+    resources.signalRExistsChecker = () => true
+    resources.signalRGitRunner = async (_cmd, args) => {
       calls.push(args.join(" "))
       return runFail(`unexpected git call: ${args.join(" ")}`)
-    })
+    }
 
-    const builder = buildGitOnlyClient()
+    const builder = buildGitOnlyClient(resources)
     const handler = findHandler("GetCommits")
 
     const result = await handler({
@@ -134,15 +139,15 @@ describe("RunnerSignalRClient GetCommits handler", () => {
     expect(calls).toEqual([])
   })
 
-  it("GitWorkTreeProbeFails_ReturnsNullAndDoesNotInvokeGit", async () => {
+  it("GitWorkTreeProbeFails_ReturnsNullAndDoesNotInvokeGit", async (resources) => {
     const calls: string[] = []
-    setRunnerSignalRExistsCheckerForTest(() => false)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+    resources.signalRExistsChecker = () => false
+    resources.signalRGitRunner = async (_cmd, args) => {
       calls.push(args.join(" "))
       return runFail(`unexpected git call: ${args.join(" ")}`)
-    })
+    }
 
-    const builder = buildGitOnlyClient()
+    const builder = buildGitOnlyClient(resources)
     const handler = findHandler("GetCommits")
 
     const result = await handler({
@@ -155,10 +160,10 @@ describe("RunnerSignalRClient GetCommits handler", () => {
     expect(calls).toEqual([])
   })
 
-  it("PathExistsButNotWorktree_ReturnsNullAndDoesNotInvokeGit", async () => {
+  it("PathExistsButNotWorktree_ReturnsNullAndDoesNotInvokeGit", async (resources) => {
     const calls: string[] = []
-    setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+    resources.signalRExistsChecker = () => true
+    resources.signalRGitRunner = async (_cmd, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
@@ -166,9 +171,9 @@ describe("RunnerSignalRClient GetCommits handler", () => {
         default:
           return runFail(`unexpected git call: ${args.join(" ")}`)
       }
-    })
+    }
 
-    const builder = buildGitOnlyClient()
+    const builder = buildGitOnlyClient(resources)
     const handler = findHandler("GetCommits")
 
     const result = await handler({
@@ -181,15 +186,15 @@ describe("RunnerSignalRClient GetCommits handler", () => {
     expect(calls).toEqual(["rev-parse --is-inside-work-tree"])
   })
 
-  it("ParsesCommitsFromTabSeparatedLog_WithFileTotalsAndMergeBaseFallback", async () => {
+  it("ParsesCommitsFromTabSeparatedLog_WithFileTotalsAndMergeBaseFallback", async (resources) => {
     const log = [
       "abc123\tabc\tsubject 1\tAlice\t2026-07-01T10:00:00+00:00",
       "def456\tdef\tsubject 2\tBob\t2026-07-02T11:00:00+00:00",
     ].join("\n")
     const numstat = "3\t1\tpackages/foo.ts\n5\t0\tpackages/bar.ts\n"
     const calls: string[] = []
-    setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+    resources.signalRExistsChecker = () => true
+    resources.signalRGitRunner = async (_cmd, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
@@ -205,9 +210,9 @@ describe("RunnerSignalRClient GetCommits handler", () => {
         default:
           return runFail(`unexpected git call: ${args.join(" ")}`)
       }
-    })
+    }
 
-    const builder = buildGitOnlyClient()
+    const builder = buildGitOnlyClient(resources)
     const handler = findHandler("GetCommits")
 
     const result = (await handler({
@@ -256,11 +261,11 @@ describe("RunnerSignalRClient GetCommits handler", () => {
     expect(calls).toContain("merge-base master mohist/run-wr-1")
   })
 
-  it("EmptyLog_ReturnsCommitsEmptyArrayButStillReportsTotals", async () => {
+  it("EmptyLog_ReturnsCommitsEmptyArrayButStillReportsTotals", async (resources) => {
     const numstat = ""
     const calls: string[] = []
-    setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+    resources.signalRExistsChecker = () => true
+    resources.signalRGitRunner = async (_cmd, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
@@ -276,9 +281,9 @@ describe("RunnerSignalRClient GetCommits handler", () => {
         default:
           return runFail(`unexpected git call: ${args.join(" ")}`)
       }
-    })
+    }
 
-    const builder = buildGitOnlyClient()
+    const builder = buildGitOnlyClient(resources)
     const handler = findHandler("GetCommits")
 
     const result = (await handler({
@@ -291,7 +296,7 @@ describe("RunnerSignalRClient GetCommits handler", () => {
     expect(result.filesChanged).toBe(0)
   })
 
-  it("ShortLogLines_AreDropped", async () => {
+  it("ShortLogLines_AreDropped", async (resources) => {
     // Real-world: parseCommits skips lines with fewer than 5 tab fields.
     const log = [
       "abc123\tabc\tsubject 1\tAlice\t2026-07-01T10:00:00+00:00",
@@ -299,8 +304,8 @@ describe("RunnerSignalRClient GetCommits handler", () => {
       "def456\tdef\tsubject 2", // only 3 fields
       "ghi789", // only 1 field
     ].join("\n")
-    setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+    resources.signalRExistsChecker = () => true
+    resources.signalRGitRunner = async (_cmd, args) => {
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
           return runOk("true\n")
@@ -315,9 +320,9 @@ describe("RunnerSignalRClient GetCommits handler", () => {
         default:
           return runFail(`unexpected git call: ${args.join(" ")}`)
       }
-    })
+    }
 
-    const builder = buildGitOnlyClient()
+    const builder = buildGitOnlyClient(resources)
     const handler = findHandler("GetCommits")
 
     const result = (await handler({
