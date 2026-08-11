@@ -83,6 +83,22 @@ internal sealed record RuntimeIdentity(
     };
 }
 
+internal static class ManagedRuntimeLayout
+{
+    public const string CliEntrypoint = "Mohist.Cli";
+    public const string ServerEntrypoint = "Mohist.Server";
+    public const string RunnerEntrypoint = "dist/cli.js";
+    public const string RunnerBuildInfo = "dist/build-info.json";
+
+    public static string EntrypointFor(string component) => component switch
+    {
+        "cli" => CliEntrypoint,
+        "server" => ServerEntrypoint,
+        "runner" => RunnerEntrypoint,
+        _ => throw new ArgumentOutOfRangeException(nameof(component), component, "Unknown managed runtime component."),
+    };
+}
+
 internal sealed record RuntimeTarget(
     string Component,
     string Entrypoint,
@@ -101,6 +117,13 @@ internal sealed record RuntimeTarget(
         && (DependencyRoot is null || Path.IsPathRooted(DependencyRoot))
         && (LaunchMode != RuntimeLaunchMode.Node
             || NodeExecutable is not null && Path.IsPathRooted(NodeExecutable));
+
+    public bool UsesCanonicalEntrypoint =>
+        Component != "runner"
+        || string.Equals(
+            Path.Combine(WorkingDirectory, ManagedRuntimeLayout.RunnerEntrypoint).Replace('\\', '/'),
+            Entrypoint,
+            StringComparison.Ordinal);
 }
 
 internal enum RuntimeLaunchMode

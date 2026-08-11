@@ -163,6 +163,101 @@ public sealed class ManagedRuntimeTransactionSpecs
     }
 
     [Fact]
+    public async Task PrepareRunner_PublishesSingleLayerCanonicalEntrypointAndAbsoluteNodeTarget()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-layout",
+            null);
+
+        Assert.NotNull(prepared.Session);
+        var session = prepared.Session!;
+        var runner = session.Targets.Runner!;
+        var distCopy = Assert.Single(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "cp" && command.Args[^1].EndsWith("/runner/dist", StringComparison.Ordinal));
+        Assert.Equal(["-RL", distCopy.Args[1], distCopy.Args[2]], distCopy.Args);
+        Assert.EndsWith("/packages/runner/dist/.", distCopy.Args[1], StringComparison.Ordinal);
+        Assert.Equal(
+            Path.Combine(session.ReleaseRoot, "runner", ManagedRuntimeLayout.RunnerEntrypoint).Replace('\\', '/'),
+            runner.Entrypoint);
+        Assert.True(runner.IsAbsoluteTarget);
+        Assert.True(runner.UsesCanonicalEntrypoint);
+        Assert.Equal(RuntimeLaunchMode.Node, runner.LaunchMode);
+        Assert.True(Path.IsPathRooted(runner.NodeExecutable!));
+        Assert.True(fixture.Files.HasFile(runner.Entrypoint));
+        Assert.True(fixture.Files.HasFile(
+            Path.Combine(session.ReleaseRoot, "runner", ManagedRuntimeLayout.RunnerBuildInfo).Replace('\\', '/')));
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path => path.Contains("/dist/dist/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PrepareRunner_WhenCandidateExistsForRetry_RemovesStaleNestedPayload()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+        var runnerRoot = Path.Combine(
+            fixture.RuntimeRoot,
+            "transactions",
+            "tx-runner-retry",
+            "candidate",
+            "runner").Replace('\\', '/');
+        fixture.Files.AddDirectory(runnerRoot);
+        fixture.Files.AddFile(Path.Combine(runnerRoot, "dist", "stale.js"), "stale");
+        fixture.Files.AddFile(Path.Combine(runnerRoot, "dist", "dist", "cli.js"), "nested stale");
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-retry",
+            null);
+
+        Assert.NotNull(prepared.Session);
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path => path.EndsWith("/stale.js", StringComparison.Ordinal));
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path => path.Contains("/dist/dist/", StringComparison.Ordinal));
+        Assert.True(fixture.Files.HasFile(prepared.Session!.Targets.Runner!.Entrypoint));
+    }
+
+    [Fact]
+    public async Task PrepareRunner_WhenEntrypointIsMissing_FailsBeforeActivation()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+        fixture.Commands.RunnerCopyCreatesEntrypoint = false;
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-missing-entrypoint",
+            null);
+
+        Assert.Null(prepared.Session);
+        Assert.Contains("Runner candidate", prepared.Error, StringComparison.Ordinal);
+        Assert.Equal(0, fixture.Activator.ApplyCalls);
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path => path.Contains("/dist/dist/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PrepareRunner_WhenPublisherCreatesNestedDist_FailsClosed()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0);
+        fixture.Commands.RunnerCopyCreatesNestedEntrypoint = true;
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-nested-dist",
+            null);
+
+        Assert.Null(prepared.Session);
+        Assert.Contains("Runner candidate", prepared.Error, StringComparison.Ordinal);
+        Assert.Equal(0, fixture.Activator.ApplyCalls);
+        Assert.Contains(
+            fixture.Files.Files.Keys,
+            path => path.EndsWith("/dist/dist/cli.js", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task PrepareFull_WhenNodeDependenciesFail_StopsBeforeBuildAndActivation()
     {
         var fixture = ManagedFixture.Create(activationCode: 0);
@@ -732,10 +827,17 @@ public sealed class ManagedRuntimeTransactionSpecs
                 {
                     var source = args[1];
                     var target = args[2];
-                    if (source.EndsWith("/dist", StringComparison.Ordinal))
+                    if (source.EndsWith("/dist/.", StringComparison.Ordinal))
                     {
                         files.AddDirectory(target);
-                        files.AddFile(Path.Combine(target, "cli.js"), "runner payload");
+                        if (commands.RunnerCopyCreatesNestedEntrypoint)
+                        {
+                            files.AddFile(Path.Combine(target, "dist", "cli.js"), "nested runner payload");
+                        }
+                        else if (commands.RunnerCopyCreatesEntrypoint)
+                        {
+                            files.AddFile(Path.Combine(target, "cli.js"), "runner payload");
+                        }
                     }
                     else if (source.EndsWith("/package.json", StringComparison.Ordinal))
                     {
