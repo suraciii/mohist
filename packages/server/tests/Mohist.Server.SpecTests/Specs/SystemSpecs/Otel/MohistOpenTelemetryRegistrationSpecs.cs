@@ -108,6 +108,27 @@ public class MohistOpenTelemetryRegistrationSpecs
     }
 
     [Fact]
+    public async Task SpecHostExporterDisabled_KeepsInstrumentationWithoutExporterRequests()
+    {
+        await using var host = new OtelTestHost(new OtelTestHostOptions
+        {
+            Enabled = true,
+            ExportEnabled = false,
+        });
+
+        using var response = await host.CreateClient().GetAsync("/api/health");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        using var source = new ActivitySource(MohistOpenTelemetryRegistration.SignalRServerActivitySourceName);
+        using (var activity = source.StartActivity("export-probe", ActivityKind.Internal))
+        {
+            Assert.NotNull(activity);
+        }
+        Assert.True(host.ForceFlushOtelExporter(TimeSpan.FromSeconds(1)));
+        Assert.False(host.FakeExporterConfigured);
+        Assert.Empty(host.OtlpExporterRequests);
+    }
+
+    [Fact]
     public void Enabled_ActivityListenerSeesActivityStartedWhileProviderIsAlive()
     {
         // Stand up the same provider pipeline the production code wires
