@@ -20,6 +20,10 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<RunnerPollAdmission> TryBeginPollAsync();
     /// <summary>Releases the poll round admitted by <see cref="TryBeginPollAsync"/>.</summary>
     Task EndPollAsync();
+    /// <summary>Atomically rejects new poll and work claims until cancelled.</summary>
+    Task BeginDrainAsync();
+    /// <summary>Atomically reopens poll and work claim admission.</summary>
+    Task CancelDrainAsync();
     /// <summary>
     /// Claims one workflow work item while checking the runner's live
     /// registration and capacity. Poll admission prevents overlapping polls;
@@ -278,7 +282,8 @@ public enum RunnerStatus { Online, Offline }
 public record RunnerRuntimeState(
     RunnerStatus Status,
     DateTimeOffset LastHeartbeatAt,
-    IReadOnlyList<RunnerActiveWorkItem> ActiveWorks);
+    IReadOnlyList<RunnerActiveWorkItem> ActiveWorks,
+    bool Draining = false);
 
 [GenerateSerializer]
 public sealed record RunnerActiveWorkItem(
