@@ -1,0 +1,151 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+namespace Mohist.Server.ArchTests;
+
+internal sealed partial class SpecUnitMigrationInventory
+{
+    private CSharpCompilation CompilationFor(SpecUnitMigrationType root)
+    {
+        var compilationKey = CompilationNameForPath(root.PrimaryPath);
+        return _scopeCompilations.GetOrAdd(compilationKey, _ => new Lazy<CSharpCompilation>(() =>
+        {
+            IReadOnlyList<SyntaxTree> trees;
+            if (_fullProjectScopes)
+            {
+                trees = _treesByPath.Values.Where(tree => InCompilation(root.PrimaryPath, tree.FilePath)).ToArray();
+            }
+            else
+            {
+                var scopedFqns = BuildProjectScope(root.PrimaryPath);
+                trees = scopedFqns.SelectMany(fqn => _typesByFqn.TryGetValue(fqn, out var type) ? type.Paths : [])
+                    .Distinct(StringComparer.Ordinal).Select(path => _treesByPath[path]).ToArray();
+            }
+            return CreateCompilation(trees, CompilationNameForPath(root.PrimaryPath));
+        }, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+    }
+
+    private string[] BuildProjectScope(string rootPath)
+    {
+        var scopedFqns = _analysisScopes.Where(entry => _typesByFqn.TryGetValue(entry.Key, out var root)
+                && CompilationNameForPath(root.PrimaryPath) == CompilationNameForPath(rootPath))
+            .SelectMany(entry => entry.Value.Append(entry.Key)).ToHashSet(StringComparer.Ordinal);
+        if (rootPath.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal))
+            foreach (var candidate in CurrentSpecTypes()) scopedFqns.UnionWith(BuildAutomaticScope(candidate));
+        return scopedFqns.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+    }
+
+    private string[] BuildAutomaticScope(SpecUnitMigrationType root)
+    {
+        var pending = new Stack<SpecUnitMigrationType>([root]);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (pending.Count > 0)
+        {
+            var type = pending.Pop();
+            if (!visited.Add(type.Fqn)) continue;
+            foreach (var name in type.ReferencedTypeNames)
+            {
+                if (!_typesByName.TryGetValue(name, out var candidates)) continue;
+                var local = candidates.Where(candidate => candidate.Fqn.StartsWith(type.Fqn + ".", StringComparison.Ordinal)
+                    || type.Fqn.StartsWith(candidate.Fqn + ".", StringComparison.Ordinal)).ToArray();
+                var resolved = local.Length == 1 ? local[0] : candidates.Count == 1 ? candidates[0] : null;
+                if (resolved is not null) pending.Push(resolved);
+            }
+        }
+        return visited.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+    }
+
+    private static string CacheKey(SpecUnitMigrationType root, SpecUnitMigrationType type)
+        => CompilationNameForPath(root.PrimaryPath) + "\n" + type.Fqn;
+
+    private static bool InCompilation(string rootPath, string candidatePath)
+        => rootPath.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+            ? candidatePath.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+              || candidatePath.StartsWith("Mohist.Server.TestSupport/", StringComparison.Ordinal)
+              || candidatePath == "eng/TestTime.cs"
+            : candidatePath.StartsWith("Mohist.Server.UnitTests/", StringComparison.Ordinal)
+              || candidatePath.StartsWith("Mohist.Server.TestSupport/", StringComparison.Ordinal)
+              || candidatePath == "eng/TestTime.cs";
+
+    private static CSharpCompilation CreateCompilation(
+        IReadOnlyList<SyntaxTree> trees,
+        string assemblyName,
+        IReadOnlyList<MetadataReference>? references = null)
+    {
+        var globalUsings = CSharpSyntaxTree.ParseText("""
+            global using global::System;
+            global using global::System.Collections.Generic;
+            global using global::System.IO;
+            global using global::System.Linq;
+            global using global::System.Net.Http;
+            global using global::System.Net.Http.Json;
+            global using global::System.Threading;
+            global using global::System.Threading.Tasks;
+            global using global::Orleans;
+            global using global::Orleans.Hosting;
+            global using global::Orleans.Runtime;
+            """, path: "GeneratedImplicitUsings.cs", options: ParseOptions);
+        return CSharpCompilation.Create(assemblyName, [globalUsings, .. trees],
+            references ?? SpecUnitMigrationReferenceSet.CreateCompilationReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+    }
+
+    private static string ComputeDiscoveryShapeDigest(IEnumerable<SyntaxTree> trees)
+    {
+        var entries = trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
+            .SelectMany(declaration => declaration.Members.OfType<MethodDeclarationSyntax>()
+                .Where(method => method.AttributeLists.SelectMany(list => list.Attributes)
+                    .Any(attribute => NameIs(attribute, "Fact") || NameIs(attribute, "Theory")))
+                .Select(method => string.Join("|",
+                    SyntaxFqn(declaration), method.Identifier.ValueText, method.TypeParameterList?.ToString() ?? "",
+                    method.ParameterList.ToString(), string.Join(";", method.ConstraintClauses.Select(value => value.ToString())),
+                    string.Join(";", method.AttributeLists.Select(value => value.ToString())))));
+        return Digest(entries);
+    }
+
+    private static string CompilationNameForPath(string path)
+        => path.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+            ? "Mohist.Server.SpecTests"
+            : "Mohist.Server.UnitTests";
+
+    private static string FormatDiagnostic(Diagnostic diagnostic)
+        => $"SEMANTIC|{diagnostic.Location.SourceTree?.FilePath ?? "<compilation>"}: {diagnostic.GetMessage()}";
+
+    private static string FormatParseDiagnostic(Diagnostic diagnostic)
+        => $"PARSE|{diagnostic.Location.SourceTree?.FilePath ?? "<compilation>"}: {diagnostic.GetMessage()}";
+
+    private static string? DiagnosticPath(string diagnostic)
+    {
+        var separator = diagnostic.IndexOf('|');
+        var value = separator < 0 ? diagnostic : diagnostic[(separator + 1)..];
+        var colon = value.IndexOf(':');
+        return colon < 0 ? null : value[..colon];
+    }
+
+    private static bool IsTestSource(ArchitectureRules.EmbeddedSource source)
+        => source.Path.StartsWith("Mohist.Server.SpecTests/", StringComparison.Ordinal)
+        || source.Path.StartsWith("Mohist.Server.UnitTests/", StringComparison.Ordinal)
+        || source.Path.StartsWith("Mohist.Server.TestSupport/", StringComparison.Ordinal)
+        || source.Path == "eng/TestTime.cs";
+
+    private static bool IsCurrentSpecPath(string path)
+        => path.StartsWith("Mohist.Server.SpecTests/Specs/", StringComparison.Ordinal);
+
+    private static string SyntaxFqn(ClassDeclarationSyntax declaration)
+    {
+        var namespaces = declaration.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse()
+            .Select(namespaceNode => namespaceNode.Name.ToString()).Where(value => !string.IsNullOrWhiteSpace(value));
+        var containingTypes = declaration.Ancestors().OfType<TypeDeclarationSyntax>().Reverse()
+            .Select(type => type.Identifier.ValueText);
+        return string.Join('.', namespaces.Concat(containingTypes).Append(declaration.Identifier.ValueText));
+    }
+
+    private static bool NameIs(AttributeSyntax attribute, string expected)
+    {
+        var name = attribute.Name.ToString();
+        return name == expected || name == expected + "Attribute"
+            || name.EndsWith("." + expected, StringComparison.Ordinal);
+    }
+}

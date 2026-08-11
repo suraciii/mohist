@@ -8,19 +8,15 @@ internal sealed partial class SpecUnitMigrationInventory
 {
     internal sealed class SpecUnitMigrationType
     {
-        private readonly List<(string Path, ClassDeclarationSyntax Declaration, CSharpCompilation Compilation)> _declarations = [];
-        private readonly HashSet<string> _blockers = new(StringComparer.Ordinal);
+        private readonly List<(string Path, ClassDeclarationSyntax Declaration)> _declarations = [];
         private readonly Dictionary<string, string> _sourceContentDigests = new(StringComparer.Ordinal);
 
-        internal SpecUnitMigrationType(string fqn, string name, string path, bool isCurrentSpec,
-            IReadOnlyList<string> diagnostics)
+        internal SpecUnitMigrationType(string fqn, string name, string path, bool isCurrentSpec)
         {
             Fqn = fqn;
             Name = name;
             PrimaryPath = path;
             IsCurrentSpec = isCurrentSpec;
-            _blockers.UnionWith(diagnostics.Where(value => DiagnosticPath(value) == path)
-                .Select(value => $"source diagnostics: {value}"));
         }
 
         internal string Fqn { get; }
@@ -28,66 +24,42 @@ internal sealed partial class SpecUnitMigrationInventory
         internal string PrimaryPath { get; private set; }
         internal bool IsCurrentSpec { get; }
         internal string SourceContentDigest => Digest(_sourceContentDigests.Select(entry => $"{entry.Key}|{entry.Value}"));
-        internal IReadOnlyList<SpecUnitMigrationType> ResolvedReferences { get; private set; } = [];
-        internal IReadOnlyList<string> Blockers { get; private set; } = [];
+        internal IReadOnlyList<string> DirectBlockers { get; private set; } = [];
+        internal IReadOnlyList<string> ReferencedTypeNames { get; private set; } = [];
+        internal IReadOnlyList<string> DeclaredReferenceNames { get; private set; } = [];
+        internal IReadOnlyList<string> Paths => _declarations.Select(value => value.Path).Distinct(StringComparer.Ordinal).ToArray();
 
-        internal void AddDeclaration(string path, ClassDeclarationSyntax declaration, CSharpCompilation compilation, string content)
+        internal void AddDeclaration(string path, ClassDeclarationSyntax declaration, string content)
         {
-            _declarations.Add((path, declaration, compilation));
+            _declarations.Add((path, declaration));
             _sourceContentDigests[path] = Digest([content]);
             if (string.CompareOrdinal(path, PrimaryPath) < 0) PrimaryPath = path;
         }
 
-        internal SpecUnitMigrationType CloneWithSourceContent(string path,
-            IReadOnlyList<ClassDeclarationSyntax> declarations, CSharpCompilation compilation, string content,
-            IReadOnlyList<string> diagnostics)
+        internal void Complete()
         {
-            var clone = new SpecUnitMigrationType(Fqn, Name, PrimaryPath, IsCurrentSpec, diagnostics);
-            foreach (var declaration in _declarations.Where(value => value.Path != path))
-                clone.AddDeclarationDigest(declaration.Path, declaration.Declaration, declaration.Compilation,
-                    _sourceContentDigests[declaration.Path]);
-            foreach (var declaration in declarations)
-                clone.AddDeclaration(path, declaration, compilation, content);
-            return clone;
-        }
-
-        private void AddDeclarationDigest(string path, ClassDeclarationSyntax declaration,
-            CSharpCompilation compilation, string digest)
-        {
-            _declarations.Add((path, declaration, compilation));
-            _sourceContentDigests[path] = digest;
-            if (string.CompareOrdinal(path, PrimaryPath) < 0) PrimaryPath = path;
-        }
-
-        internal void ResolveReferences(SpecUnitMigrationInventory inventory)
-        {
-            var references = new HashSet<SpecUnitMigrationType>();
-            var blockers = new HashSet<string>(_blockers, StringComparer.Ordinal);
-            foreach (var (path, declaration, compilation) in _declarations)
+            var blockers = new HashSet<string>(StringComparer.Ordinal);
+            var referencedTypeNames = new HashSet<string>(StringComparer.Ordinal);
+            var declaredReferenceNames = new HashSet<string>(StringComparer.Ordinal) { Name };
+            foreach (var (path, declaration) in _declarations)
             {
-                var model = compilation.GetSemanticModel(declaration.SyntaxTree, ignoreAccessibility: true);
+                foreach (var method in declaration.Members.OfType<MethodDeclarationSyntax>())
+                    declaredReferenceNames.Add(method.Identifier.ValueText);
+                foreach (var property in declaration.Members.OfType<PropertyDeclarationSyntax>())
+                    declaredReferenceNames.Add(property.Identifier.ValueText);
+                foreach (var constructor in declaration.Members.OfType<ConstructorDeclarationSyntax>())
+                    declaredReferenceNames.Add(constructor.Identifier.ValueText);
+                foreach (var eventDeclaration in declaration.Members.OfType<EventDeclarationSyntax>())
+                    declaredReferenceNames.Add(eventDeclaration.Identifier.ValueText);
+                foreach (var field in declaration.Members.OfType<BaseFieldDeclarationSyntax>())
+                    foreach (var variable in field.Declaration.Variables)
+                        declaredReferenceNames.Add(variable.Identifier.ValueText);
                 foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>())
                 {
-                    var name = identifier.Identifier.ValueText;
-                    if (name == "var") continue;
-                    if (BlockingNames.Contains(name)) blockers.Add($"external boundary symbol {name}");
-                    var info = GetSymbolInfo(model, identifier);
-                    if (info.CandidateSymbols.Length > 1)
-                    {
-                        blockers.Add($"ambiguous symbol {name}: {string.Join(", ", info.CandidateSymbols.Select(SymbolDisplay))}");
-                        continue;
-                    }
-                    var resolvedSymbol = info.Symbol ?? info.CandidateSymbols.SingleOrDefault();
-                    if (resolvedSymbol is null)
-                    {
-                        blockers.Add($"unresolved symbol {name} at {path}:{identifier.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
-                        continue;
-                    }
-
-                    var referencedType = EmbeddedContainingType(resolvedSymbol, inventory);
-                    if (referencedType is not null && !ReferenceEquals(referencedType, this)) references.Add(referencedType);
+                    referencedTypeNames.Add(identifier.Identifier.ValueText);
+                    if (BlockingNames.Contains(identifier.Identifier.ValueText))
+                        blockers.Add($"external boundary symbol {identifier.Identifier.ValueText}");
                 }
-
                 if (declaration.AttributeLists.SelectMany(list => list.Attributes)
                     .Any(attribute => NameIs(attribute, "Collection") || NameIs(attribute, "CollectionDefinition")))
                     blockers.Add("collection fixture attribute");
@@ -102,12 +74,66 @@ internal sealed partial class SpecUnitMigrationInventory
                             blockers.Add($"fixture/spec base {baseName}");
                     }
                 }
-                if (path.StartsWith("Mohist.Server.SpecTests/Support/", StringComparison.Ordinal)) blockers.Add("SpecTests-only support");
+                if (path.StartsWith("Mohist.Server.SpecTests/Support/", StringComparison.Ordinal))
+                    blockers.Add("SpecTests-only support");
+            }
+            DirectBlockers = blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+            ReferencedTypeNames = referencedTypeNames.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+            DeclaredReferenceNames = declaredReferenceNames.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        }
+
+        internal SpecUnitMigrationTypeAnalysis Analyze(
+            SpecUnitMigrationInventory inventory,
+            CSharpCompilation compilation)
+        {
+            var references = new HashSet<string>(StringComparer.Ordinal);
+            var blockers = new HashSet<string>(DirectBlockers, StringComparer.Ordinal);
+            foreach (var (path, declaration) in _declarations)
+            {
+                var model = compilation.GetSemanticModel(declaration.SyntaxTree, ignoreAccessibility: true);
+                foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>())
+                {
+                    var name = identifier.Identifier.ValueText;
+                    if (name == "var" || !inventory.RequiresSemanticBinding(name)) continue;
+                    var info = GetSymbolInfo(model, identifier);
+                    if (info.CandidateSymbols.Length > 1)
+                    {
+                        blockers.Add($"ambiguous symbol {name}: {string.Join(", ", info.CandidateSymbols.Select(SymbolDisplay))}");
+                        continue;
+                    }
+                    var resolvedSymbol = info.Symbol ?? info.CandidateSymbols.SingleOrDefault();
+                    if (resolvedSymbol is null)
+                    {
+                        blockers.Add($"unresolved symbol {name} at {path}:{identifier.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
+                        continue;
+                    }
+
+                    var referencedFqn = EmbeddedContainingTypeFqn(resolvedSymbol, inventory);
+                    if (referencedFqn is not null && referencedFqn != Fqn) references.Add(referencedFqn);
+                }
             }
 
-            ResolvedReferences = references.OrderBy(reference => reference.Fqn, StringComparer.Ordinal).ToArray();
-            Blockers = blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+            return new SpecUnitMigrationTypeAnalysis(
+                references.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+                blockers.OrderBy(value => value, StringComparer.Ordinal).ToArray());
         }
+
+        internal bool RequiresSemanticAnalysis(SpecUnitMigrationInventory inventory)
+            => _declarations.SelectMany(value => value.Declaration.DescendantNodes().OfType<IdentifierNameSyntax>())
+                .Any(identifier => identifier.Identifier.ValueText is var name
+                    && name != "var" && inventory.RequiresSemanticBinding(name));
+
+        internal SpecUnitMigrationTypeAnalysis DirectAnalysis() => new([], DirectBlockers);
+
+        internal IReadOnlyList<string> ReadSemanticDiagnostics(CSharpCompilation compilation)
+            => _declarations.SelectMany(value => compilation
+                    .GetSemanticModel(value.Declaration.SyntaxTree, ignoreAccessibility: true)
+                    .GetDiagnostics(value.Declaration.FullSpan))
+                .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+                .Select(FormatDiagnostic).Distinct(StringComparer.Ordinal)
+                .OrderBy(value => value, StringComparer.Ordinal).ToArray();
+
+        internal bool HasPath(string path) => _declarations.Any(declaration => declaration.Path == path);
 
         private static SymbolInfo GetSymbolInfo(SemanticModel model, IdentifierNameSyntax identifier)
         {
@@ -120,9 +146,7 @@ internal sealed partial class SpecUnitMigrationInventory
             return model.GetSymbolInfo(identifier);
         }
 
-        internal bool HasPath(string path) => _declarations.Any(declaration => declaration.Path == path);
-
-        private static SpecUnitMigrationType? EmbeddedContainingType(ISymbol symbol, SpecUnitMigrationInventory inventory)
+        private static string? EmbeddedContainingTypeFqn(ISymbol symbol, SpecUnitMigrationInventory inventory)
         {
             var type = symbol switch
             {
@@ -131,16 +155,16 @@ internal sealed partial class SpecUnitMigrationInventory
             };
             if (type is null) return null;
             var fqn = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", "", StringComparison.Ordinal);
-            return inventory._typesByFqn.GetValueOrDefault(fqn);
+            return inventory._typesByFqn.ContainsKey(fqn) ? fqn : null;
         }
 
         private static string SymbolDisplay(ISymbol symbol)
             => symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-
-        private static bool NameIs(AttributeSyntax attribute, string expected)
-        {
-            var name = attribute.Name.ToString();
-            return name == expected || name == expected + "Attribute" || name.EndsWith("." + expected, StringComparison.Ordinal);
-        }
     }
+
+    internal sealed record SpecUnitMigrationTypeAnalysis(
+        IReadOnlyList<string> ReferenceFqns,
+        IReadOnlyList<string> Blockers);
+
+    internal sealed record SpecUnitMigrationSourceProbe(bool Blocked, IReadOnlyList<string> ReferenceFqns);
 }

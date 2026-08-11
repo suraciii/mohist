@@ -2,19 +2,19 @@ using Xunit;
 
 namespace Mohist.Server.ArchTests;
 
-public sealed class SpecUnitMigrationLedgerRules : IClassFixture<SpecUnitMigrationLedgerFixture>
+public sealed partial class SpecUnitMigrationLedgerRules
 {
     private const string LedgerResourceName = "SpecUnitMigrationLedger.json";
-    private readonly SpecUnitMigrationInventory _productionInventory;
-
-    public SpecUnitMigrationLedgerRules(SpecUnitMigrationLedgerFixture fixture)
-        => _productionInventory = fixture.Inventory;
+    private const string BoundedProofFqn = "Mohist.Server.SpecTests.Specs.Negative.BoundedLedgerSpecs";
+    private const string BoundedProofPath = "Mohist.Server.SpecTests/Specs/Negative/BoundedLedgerSpecs.cs";
+    private static readonly Lazy<SpecUnitMigrationInventory> ProductionInventory = new(
+        CreateProductionInventory, LazyThreadSafetyMode.ExecutionAndPublication);
 
     [Fact]
     public void SpecUnitMigrationLedger_CoversEveryCurrentStaticLightSpec()
     {
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
-        var inventory = _productionInventory;
+        var inventory = ProductionInventory.Value;
         var violations = SpecUnitMigrationLedgerValidator.Validate(ledger, inventory);
 
         Assert.True(violations.Count == 0, "Spec/Unit migration ledger violations:\n" + string.Join("\n", violations));
@@ -90,24 +90,25 @@ public sealed class SpecUnitMigrationLedgerRules : IClassFixture<SpecUnitMigrati
         var provenance = SpecUnitMigrationProvenance.Read();
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         ledger.ValidationHead = "34f0f666d988a3a38ba218cad088f1062a55d5e";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(ledger, _productionInventory),
+        var inventory = ProductionInventory.Value;
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(ledger, inventory),
             violation => violation.Contains("ledger validationHead must be", StringComparison.Ordinal));
 
         var change = provenance.Changes.First(change => change.Operation == "rename-spec");
         var row = ledger.Rows!.Single(candidate => candidate.Id == "rename-agent-availability");
         row.History!.Commit = "602efa6abd6fca3efcd43b66b47ba10a80d9fabb";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, _productionInventory, provenance),
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, inventory, provenance),
             violation => violation.Contains("Git commit mismatch", StringComparison.Ordinal));
 
         row.History.Commit = SpecUnitMigrationLedgerValidator.Pr388Commit;
         row.History.SourcePath = change.SourcePath + ".mutated";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, _productionInventory, provenance),
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, inventory, provenance),
             violation => violation.Contains("absent from embedded PR #388 raw Git provenance", StringComparison.Ordinal));
 
         var current = SpecUnitMigrationLedger.Read(LedgerResourceName).Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var classification = _productionInventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == current.Current!.Fqn);
+        var classification = CurrentClassification(inventory, current.Current!.Fqn!);
         current.History!.Commit = "34f0f666d988a3a38ba218cad088f1062a55d5e";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(current, classification, _productionInventory),
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(current, classification, inventory),
             violation => violation.Contains("validationHead history mismatch", StringComparison.Ordinal));
     }
 
@@ -117,23 +118,24 @@ public sealed class SpecUnitMigrationLedgerRules : IClassFixture<SpecUnitMigrati
         var placeholder = SpecUnitMigrationLedger.Read(LedgerResourceName);
         placeholder.ValidationSourceFileCount = -1;
         placeholder.ValidationSourceTreeDigest = "__RECOMPUTE_VALIDATION_SOURCE_TREE_DIGEST__";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(placeholder, _productionInventory), violation =>
+        var inventory = ProductionInventory.Value;
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(placeholder, inventory), violation =>
             violation.Contains("current embedded source tree digest mismatch", StringComparison.Ordinal));
 
         var tampered = SpecUnitMigrationLedger.Read(LedgerResourceName);
         tampered.ValidationSourceFileCount++;
         tampered.ValidationSourceTreeDigest = new string('0', SpecUnitMigrationLedgerValidator.ValidationSourceTreeDigest.Length);
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(tampered, _productionInventory), violation =>
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(tampered, inventory), violation =>
             violation.Contains("current embedded source tree digest mismatch", StringComparison.Ordinal));
     }
 
     [Fact]
     public void SpecUnitMigrationLedger_NegativeProof_RejectsClosureEvidenceDigestAndCompiledDiscoveryMutations()
     {
-        var inventory = _productionInventory;
-        var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
-        var row = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var classification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == row.Current!.Fqn);
+        var inventory = CreateBoundedLiveInventory(BoundedSource("public int Value() => 1;"));
+        var classification = CurrentClassification(inventory, BoundedProofFqn);
+        var row = BoundCurrentRow(classification);
+        Assert.Empty(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory));
 
         row.Closure!.Evidence = row.Closure.Evidence!.Replace("edges-digest=", "edges-digest=mutated-", StringComparison.Ordinal);
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory),
@@ -153,16 +155,16 @@ public sealed class SpecUnitMigrationLedgerRules : IClassFixture<SpecUnitMigrati
     [Fact]
     public void SpecUnitMigrationLedger_NegativeProof_RejectsFailIfKeepAndNonexistentCurrentTarget()
     {
-        var inventory = _productionInventory;
+        var inventory = ProductionInventory.Value;
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var failIf = ledger.Rows!.Single(candidate => candidate.Id == "current-fail-if-marker-review");
-        var failIfClassification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == failIf.Current!.Fqn);
+        var failIfClassification = CurrentClassification(inventory, failIf.Current!.Fqn!);
         failIf.Status = "KEEP";
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(failIf, failIfClassification, inventory),
             violation => violation.Contains("blocked current row cannot escape", StringComparison.Ordinal));
 
         var windows = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var windowsClassification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == windows.Current!.Fqn);
+        var windowsClassification = CurrentClassification(inventory, windows.Current!.Fqn!);
         windows.Target!.Path = "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs";
         windows.Target.Fqn = "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests";
         windows.MoveContract = null;
@@ -250,16 +252,99 @@ public sealed class SpecUnitMigrationLedgerRules : IClassFixture<SpecUnitMigrati
     [Fact]
     public void SpecUnitMigrationLedger_NegativeProof_SourceBodyMutationChangesClosureBinding()
     {
-        var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
-        var row = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var sourcePath = row.Current!.Path ?? throw new InvalidOperationException("current source path is missing");
-        var mutatedContent = ArchitectureRulesSupport.EmbeddedSources("TestSources/").Single(source => source.Path == sourcePath).Content
-            .Replace("Assert.Equal(0, exitCode);", "Assert.Equal(0, exitCode);\n        _ = exitCode;", StringComparison.Ordinal);
-        var inventory = _productionInventory.WithSourceContent(sourcePath, mutatedContent);
-        var classification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == row.Current!.Fqn);
+        var source = BoundedSource("public int Value() => 1;");
+        var productionInventory = CreateBoundedLiveInventory(source);
+        var before = CurrentClassification(productionInventory, BoundedProofFqn);
+        var row = BoundCurrentRow(before);
+        Assert.Empty(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, before, productionInventory));
 
+        var inventory = productionInventory.WithSourceContent(BoundedProofPath,
+            source.Replace("=> 1", "=> 2", StringComparison.Ordinal));
+        var classification = CurrentClassification(inventory, BoundedProofFqn);
+
+        Assert.Equal(productionInventory.SourceTree.FileCount, inventory.SourceTree.FileCount);
+        Assert.NotEqual(productionInventory.SourceTree.Digest, inventory.SourceTree.Digest);
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory), violation =>
             violation.Contains("source-content digest mismatch", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SpecUnitMigrationLedger_NegativeProof_HelperMutationRebindsReverseDependencyClosure()
+    {
+        const string specFqn = "Mohist.Server.SpecTests.Specs.Negative.HelperConsumerSpecs";
+        const string helperPath = "Mohist.Server.SpecTests/Specs/Negative/ClosureHelper.cs";
+        const string originalHelper = """
+            namespace Mohist.Server.SpecTests.Specs.Negative;
+            public static class ClosureHelper { public static int Value() => 1; }
+            """;
+        var inventory = SpecUnitMigrationInventory.Create(
+        [
+            Source(helperPath, originalHelper),
+            Source("Mohist.Server.SpecTests/Specs/Negative/HelperConsumerSpecs.cs", """
+                using Xunit;
+                namespace Mohist.Server.SpecTests.Specs.Negative;
+                public class HelperConsumerSpecs { [Fact] public void UsesHelper() => Assert.Equal(1, ClosureHelper.Value()); }
+                """),
+        ], SpecUnitMigrationCompiledDiscovery.ForTests((specFqn,
+            new SpecUnitMigrationMtpFacts(1, 0, 0, 1, "synthetic", false))));
+        var before = CurrentClassification(inventory, specFqn);
+
+        var mutated = inventory.WithSourceContent(helperPath, originalHelper.Replace("=> 1", "=> 2", StringComparison.Ordinal));
+        var after = CurrentClassification(mutated, specFqn);
+
+        Assert.Contains("Mohist.Server.SpecTests.Specs.Negative.ClosureHelper", after.Closure);
+        Assert.NotEqual(before.SourceContentDigest, after.SourceContentDigest);
+        Assert.NotEqual(before.ClosureIdentityDigest, after.ClosureIdentityDigest);
+    }
+
+    [Fact]
+    public void SpecUnitMigrationLedger_NegativeProof_DiscoveryShapeMutationRequiresFreshCompiledDiscovery()
+    {
+        const string fqn = "Mohist.Server.SpecTests.Specs.Negative.DiscoveryShapeSpecs";
+        const string path = "Mohist.Server.SpecTests/Specs/Negative/DiscoveryShapeSpecs.cs";
+        const string source = """
+            using Xunit;
+            namespace Mohist.Server.SpecTests.Specs.Negative;
+            public class DiscoveryShapeSpecs { [Fact] public void Case() { } }
+            """;
+        var inventory = SpecUnitMigrationInventory.Create([Source(path, source)],
+            SpecUnitMigrationCompiledDiscovery.ForTests((fqn,
+                new SpecUnitMigrationMtpFacts(1, 0, 0, 1, "synthetic", false))));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => inventory.WithSourceContent(path,
+            source.Replace("[Fact]", "[Theory] [InlineData(1)]", StringComparison.Ordinal)));
+
+        Assert.Contains("fresh compiled discovery is required", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SpecUnitMigrationLedger_ReferenceMetadataHasBoundedApphostLifetime()
+    {
+        var first = SpecUnitMigrationReferenceSet.CreateCompilationReferences();
+        var ownedCount = SpecUnitMigrationReferenceSet.OwnedMetadataCount;
+
+        var second = SpecUnitMigrationReferenceSet.CreateCompilationReferences();
+
+        Assert.Same(first, second);
+        Assert.Equal(ownedCount, SpecUnitMigrationReferenceSet.OwnedMetadataCount);
+        Assert.Equal(first.Count * 2, ownedCount);
+    }
+
+    [Fact]
+    public void SpecUnitMigrationLedger_FreshSetupAndProofAreDurationGated()
+    {
+        var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
+        var inventory = CreateProductionInventory();
+        var violations = SpecUnitMigrationLedgerValidator.Validate(ledger, inventory);
+
+        Assert.Empty(violations);
+        Assert.True(inventory.DiscoveredTypeCount > 0, "filtered compiled discovery must contain live endpoint types");
+        Assert.True(inventory.DiscoveredTypeCount <= (ledger.Rows?.Count ?? 0) * 2 + inventory.CurrentSpecFqns.Count,
+            $"filtered compiled discovery escaped its ledger-scaled bound: {inventory.DiscoveredTypeCount}");
+        Assert.True(inventory.ProbedTypeCount < 256,
+            $"source candidate scan escaped its bounded set: {inventory.ProbedTypeCount}");
+        Assert.True(inventory.AnalyzedTypeCount < 256,
+            $"semantic closure analysis escaped its bounded candidate set: {inventory.AnalyzedTypeCount}");
     }
 
     [Fact]
@@ -315,23 +400,4 @@ public sealed class SpecUnitMigrationLedgerRules : IClassFixture<SpecUnitMigrati
             violation.Contains("validation-head", StringComparison.Ordinal));
     }
 
-    private static ArchitectureRules.EmbeddedSource Source(string path, string content)
-        => new(path, content, System.Text.Encoding.UTF8.GetByteCount(content));
-
-    private static string Evidence(SpecUnitMigrationCandidate candidate)
-        => $"source-path={candidate.Path} source-fqn={candidate.Fqn} case-digest={candidate.ExecutableCaseIdentityDigest} source-content-digest={candidate.SourceContentDigest} executable-closure-digest={candidate.ClosureIdentityDigest} edges-digest={candidate.EdgesDigest}";
-
-}
-
-public sealed class SpecUnitMigrationLedgerFixture
-{
-    internal SpecUnitMigrationInventory Inventory { get; }
-
-    public SpecUnitMigrationLedgerFixture()
-    {
-        var specAssembly = typeof(Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs).Assembly;
-        var unitAssembly = typeof(Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests).Assembly;
-        var discovery = SpecUnitMigrationCompiledDiscovery.FromAssemblies(specAssembly, unitAssembly);
-        Inventory = SpecUnitMigrationInventory.Create(ArchitectureRulesSupport.EmbeddedSources("TestSources/"), discovery);
-    }
 }
