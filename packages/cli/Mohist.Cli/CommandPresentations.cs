@@ -169,7 +169,7 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "view"), new CommandPresentation(
                     CommandCapability.Work, "Read a single Issue by its number",
                     Boundary: "Issue view returns the canonical Issue record; resource-result commands list --json fields when called with no value.",
-                    JsonFields: ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.Issue)).Fields));
+                    JsonFields: IssueCommands.IssueViewDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "edit"), new CommandPresentation(
                     CommandCapability.Work, "Edit an Issue by its number",
                     Boundary: "Edits patch a single Issue; combining --ready and --draft is rejected locally.",

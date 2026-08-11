@@ -12,6 +12,10 @@ internal static partial class IssueCommands
         ResourceCardinality.Single,
         ["number", "title", "status", "stage", "priority", "risk", "labels", "body", "repository", "repositoryName", "prereq", "epic", "workflowRunId", "createdAt", "updatedAt"]);
 
+    internal static readonly ResourceDescriptor IssueViewDescriptor = new(
+        ResourceCardinality.Single,
+        ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.Issue)).Fields);
+
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List issues");
@@ -95,7 +99,7 @@ internal static partial class IssueCommands
         var cmd = new Command("view", "Show issue details");
         var numberArg = NumberArg();
         var projectOpt = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueViewDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(jsonOpt);
@@ -109,14 +113,14 @@ internal static partial class IssueCommands
 
             async Task<int> GetAsync()
             {
-                var selection = JsonSelection.Parse(IssueDescriptor, jsonProvided, json);
+                var selection = JsonSelection.Parse(IssueViewDescriptor, jsonProvided, json);
                 if (selection.Kind == JsonSelectionKind.Discovery || selection.Kind == JsonSelectionKind.Invalid)
-                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
+                    return api.WriteJsonSelectionResult(IssueViewDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintResourceAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"),
-                    IssueDescriptor,
+                    IssueViewDescriptor,
                     selection,
                     data => api.RenderTableAsync(data, MohistCliApi.TableShape.Issue));
             }
