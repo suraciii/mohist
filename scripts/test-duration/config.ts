@@ -84,6 +84,12 @@ function validateTrack(track: TrackConfig): string[] {
   if (track.executionProvenance !== undefined && track.executionProvenance.length === 0) {
     errors.push(`${prefix}: executionProvenance must be a non-empty path`)
   }
+  if (track.executionLedger !== undefined && (!track.executionSourceRoots || track.executionSourceRoots.length === 0)) {
+    errors.push(`${prefix}: executionLedger requires non-empty executionSourceRoots`)
+  }
+  if (track.executionSourceRoots?.some((root) => typeof root !== 'string' || root.length === 0)) {
+    errors.push(`${prefix}: executionSourceRoots must contain only non-empty paths`)
+  }
   if (track.apphostArgs !== undefined && !Array.isArray(track.apphostArgs)) {
     errors.push(`${prefix}: apphostArgs must be an array of strings`)
   } else if (track.apphostArgs?.some((arg) => typeof arg !== 'string')) {

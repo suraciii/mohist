@@ -107,3 +107,17 @@ test('runWithDeadline waits for suite-timeout child cleanup before returning', a
   assert.equal(outcome.timeoutReason, 'suite')
   assert.equal(cleanupCalls, 1)
 })
+
+test('runWithDeadline reports cleanup failure instead of returning timeout success', async () => {
+  const timeout = Promise.resolve('track' as const)
+  const outcome = await runWithDeadline({
+    start: () => new Promise<{ exitCode: number | null }>(() => undefined),
+    kill: async () => { throw new Error('SIGKILL was not confirmed') },
+    timeout,
+    now: () => 100,
+  })
+
+  assert.equal(outcome.status, 'cleanup-failed')
+  assert.equal(outcome.timeoutReason, 'track')
+  assert.equal(outcome.cleanupError, 'SIGKILL was not confirmed')
+})

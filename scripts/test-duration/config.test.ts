@@ -68,11 +68,22 @@ test('validateConfig keeps execution ledgers on dotnet apphost tracks', () => {
   const config = parseSuiteConfig(JSON.stringify({
     suiteDeadlineMs: 1000,
     tracks: [{
-      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'reports/cli-ledger.json', executionProvenance: 'reports/cli-provenance.json',
+      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'reports/cli-ledger.json', executionProvenance: 'reports/cli-provenance.json', executionSourceRoots: ['packages/cli'],
       report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
     }],
   }))
   assert.deepEqual(validateConfig(config), [])
+})
+
+test('validateConfig requires source roots for execution-ledger freshness', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'ledger.json', executionProvenance: 'provenance.json',
+      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.ok(validateConfig(config).some((e) => e.includes('requires non-empty executionSourceRoots')))
 })
 
 test('validateConfig rejects execution ledgers on non-apphost tracks', () => {

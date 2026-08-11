@@ -26,6 +26,7 @@ export interface ExecutionLedger {
   readonly manifestCount: number
   readonly assemblyPath: string
   readonly assemblySha256: string
+  readonly sourceSha256: string
   readonly xunitVersion: string
   readonly mtpVersion: string
   readonly parallelism: string
@@ -44,8 +45,11 @@ export interface ExecutionLedgerExpectation {
   readonly manifest: ExecutionManifest
   readonly assemblyPath: string
   readonly assemblySha256: string
+  readonly sourceSha256: string
   readonly parallelism: string
 }
+
+export type CurrentExecutionIdentity = Omit<ExecutionLedgerExpectation, 'runId'>
 
 export interface ExecutionLedgerProvenance {
   readonly schemaVersion: 1
@@ -55,6 +59,7 @@ export interface ExecutionLedgerProvenance {
   readonly manifestNames: readonly string[]
   readonly assemblyPath: string
   readonly assemblySha256: string
+  readonly sourceSha256: string
   readonly parallelism: string
 }
 
@@ -103,6 +108,7 @@ export interface TrackConfig {
   readonly report: string
   readonly executionLedger?: string
   readonly executionProvenance?: string
+  readonly executionSourceRoots?: readonly string[]
   readonly reportFormat: ReportFormat
   readonly deadlineMs: number
   readonly enforce: boolean
@@ -179,4 +185,6 @@ export interface TrackRun {
   readonly executionLedgerReady?: boolean
   readonly executionLedgerError?: string
   readonly executionLedgerExpectation?: ExecutionLedgerExpectation
+  readonly cleanupFailed?: boolean
+  readonly cleanupError?: string
 }

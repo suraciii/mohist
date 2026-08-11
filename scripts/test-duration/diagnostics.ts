@@ -14,12 +14,15 @@ function describeRule(rule: RuleDiagnosis): string {
 }
 
 export function formatTrackRun(run: TrackRun): string {
-  const flag = run.timedOut
+  const flag = run.cleanupFailed
+    ? 'CLEANUP FAILED'
+    : run.timedOut
     ? run.timeoutReason === 'suite' ? 'SUITE TIMEOUT' : 'TIMEOUT'
     : run.exitCode === 0 ? 'ok' : `exit ${run.exitCode}`
   const report = run.reportReady ? '' : '  [report missing/stale]'
   const ledger = run.executionLedgerReady === false ? '  [execution ledger missing/stale]' : ''
-  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${ledger}  ${run.command}`
+  const cleanup = run.cleanupError ? `  [${run.cleanupError}]` : ''
+  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${ledger}${cleanup}  ${run.command}`
 }
 
 export function formatEvaluation(eval_: TrackEvaluation): string[] {
@@ -76,7 +79,7 @@ export function summarize(
   const timeoutTracks = runs.filter((r) => r.timedOut).length
   const failedTrackIds = new Set([
     ...evaluations.filter((e) => !e.passed).map((e) => e.trackId),
-    ...runs.filter((r) => r.timedOut || r.exitCode !== 0).map((r) => r.trackId),
+    ...runs.filter((r) => r.timedOut || r.cleanupFailed || r.exitCode !== 0).map((r) => r.trackId),
   ])
   const governed = evaluations.reduce(
     (sum, e) => sum + e.rules.reduce((s, r) => s + r.governed.length, 0),

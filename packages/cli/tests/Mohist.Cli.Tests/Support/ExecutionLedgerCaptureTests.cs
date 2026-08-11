@@ -56,6 +56,7 @@ public sealed class ExecutionLedgerCaptureTests
         Assert.Equal(TimeSpan.FromSeconds(1), result.FinishTime - result.StartTime);
         Assert.Equal("Mohist.Cli.Tests.Sample", result.ClassName);
         Assert.Equal("CLI collection", result.CollectionName);
+        Assert.Equal(new string('b', 64), ReadDocument(artifacts).SourceSha256);
         Assert.Equal("/virtual/Mohist.Cli.Tests.dll", Assert.Single(artifacts.ReadPaths));
         Assert.Equal("/virtual/cli.execution-ledger.json", artifacts.WrittenPath);
     }
@@ -114,6 +115,35 @@ public sealed class ExecutionLedgerCaptureTests
             reversed.RecordResult(TestId, "passed", 0.001m, start.AddMilliseconds(-1)));
     }
 
+    [Fact]
+    public async Task DisposeAsync_ReclaimsEveryMetadataLevelAfterCancellationWithoutFinishedMessages()
+    {
+        var start = new DateTimeOffset(2026, 8, 11, 6, 0, 0, TimeSpan.Zero);
+        var (handler, artifacts) = CreateHandler();
+        StartEveryMetadataLevel(handler, start);
+        Assert.Equal(6, handler.CachedMetadataCount);
+
+        await handler.DisposeAsync();
+
+        Assert.Equal(0, handler.CachedMetadataCount);
+        Assert.Equal(string.Empty, artifacts.WrittenContent);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ReclaimsEveryMetadataLevelAfterFailureWithoutFinishedMessages()
+    {
+        var start = new DateTimeOffset(2026, 8, 11, 6, 0, 0, TimeSpan.Zero);
+        var (handler, artifacts) = CreateHandler();
+        StartEveryMetadataLevel(handler, start);
+        handler.OnMessage(Result("failed", start.AddMilliseconds(20)));
+        Assert.Equal(6, handler.CachedMetadataCount);
+
+        await handler.DisposeAsync();
+
+        Assert.Equal(0, handler.CachedMetadataCount);
+        Assert.Equal("failed", Assert.Single(ReadDocument(artifacts).Cases).Outcome);
+    }
+
     private static (ExecutionLedgerReporterMessageHandler Handler, MemoryArtifactStore Artifacts) CreateHandler()
     {
         var assemblyBytes = new byte[] { 1, 2, 3, 4 };
@@ -126,6 +156,7 @@ public sealed class ExecutionLedgerCaptureTests
             [ExecutionLedgerEnvironment.ManifestCount] = "1",
             [ExecutionLedgerEnvironment.AssemblyPath] = "/virtual/Mohist.Cli.Tests.dll",
             [ExecutionLedgerEnvironment.AssemblySha256] = assemblyHash,
+            [ExecutionLedgerEnvironment.SourceSha256] = new string('b', 64),
             [ExecutionLedgerEnvironment.Parallelism] = "xunit-default",
         });
         var artifacts = new MemoryArtifactStore(assemblyBytes);
@@ -134,7 +165,17 @@ public sealed class ExecutionLedgerCaptureTests
 
     private static ExecutionLedgerCapture CreateCapture(int manifestCount) => new(new ExecutionLedgerMetadata(
         "run-1", new string('a', 64), manifestCount, "/virtual/test.dll", new string('b', 64),
-        "3.2.2.0", "1.9.1.0", "xunit-default", "/virtual/ledger.json"));
+        new string('c', 64), "3.2.2.0", "1.9.1.0", "xunit-default", "/virtual/ledger.json"));
+
+    private static void StartEveryMetadataLevel(ExecutionLedgerReporterMessageHandler handler, DateTimeOffset start)
+    {
+        handler.OnMessage(AssemblyStarting(start));
+        handler.OnMessage(CollectionStarting());
+        handler.OnMessage(ClassStarting());
+        handler.OnMessage(MethodStarting());
+        handler.OnMessage(CaseStarting());
+        handler.OnMessage(TestStarting(start));
+    }
 
     private static ExecutionLedgerDocument ReadDocument(MemoryArtifactStore artifacts) =>
         JsonSerializer.Deserialize<ExecutionLedgerDocument>(

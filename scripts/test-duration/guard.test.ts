@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 
-import { commandFor, createTimeout, evaluateTrackArtifacts, main, parseArgs, runProcessWithDeadline } from './guard.js'
+import {
+  commandFor,
+  createTimeout,
+  evaluateTrackArtifacts,
+  main,
+  parseArgs,
+  runProcessWithDeadline,
+  terminateChildTree,
+} from './guard.js'
 import { formatEvaluation, formatSummary, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
-import type { ExecutionLedgerExpectation, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
 
 function captureStderr(): { calls: () => string; restore: () => void } {
   const stderrMock = mock.method(process.stderr, 'write', () => true)
@@ -74,6 +82,45 @@ test('compiled discovery timeout kills a hung fake child through the canonical p
   assert.equal(killed, true)
 })
 
+test('child cleanup records signal failure and still awaits forced termination', async () => {
+  const signals: NodeJS.Signals[] = []
+  let graceCancelled = 0
+  await assert.rejects(terminateChildTree({
+    pid: 42,
+    done: Promise.resolve({ exitCode: null, stdout: '' }),
+  }, {
+    signal: (_pid, signal) => {
+      signals.push(signal)
+      if (signal === 'SIGTERM') throw new Error('permission denied')
+    },
+    createGrace: () => ({
+      promise: new Promise<void>(() => undefined),
+      cancel: () => { graceCancelled += 1 },
+    }),
+  }), /SIGTERM failed: permission denied/)
+
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
+  assert.equal(graceCancelled, 1)
+})
+
+test('child cleanup fails closed when SIGKILL termination is unconfirmed', async () => {
+  const signals: NodeJS.Signals[] = []
+  let graceCancelled = 0
+  await assert.rejects(terminateChildTree({
+    pid: 42,
+    done: new Promise<{ exitCode: number | null; stdout: string }>(() => undefined),
+  }, {
+    signal: (_pid, signal) => { signals.push(signal) },
+    createGrace: () => ({
+      promise: Promise.resolve(),
+      cancel: () => { graceCancelled += 1 },
+    }),
+  }), /termination was not confirmed within cleanup grace/)
+
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
+  assert.equal(graceCancelled, 2)
+})
+
 test('--check evaluates authoritative saved provenance and ledger without an in-memory run', () => {
   const manifest = manifestFromDiscovery('Ns.Cli.Fast')
   const expected: ExecutionLedgerExpectation = {
@@ -81,6 +128,7 @@ test('--check evaluates authoritative saved provenance and ledger without an in-
     manifest,
     assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
     assemblySha256: 'a'.repeat(64),
+    sourceSha256: 'b'.repeat(64),
     parallelism: 'xunit-default',
   }
   const track: TrackConfig = {
@@ -90,6 +138,7 @@ test('--check evaluates authoritative saved provenance and ledger without an in-
     report: 'reports/cli.trx',
     executionLedger: 'reports/cli.execution-ledger.json',
     executionProvenance: 'reports/cli.execution-provenance.json',
+    executionSourceRoots: ['packages/cli'],
     reportFormat: 'trx',
     deadlineMs: 60_000,
     enforce: true,
@@ -105,6 +154,7 @@ test('--check evaluates authoritative saved provenance and ledger without an in-
       manifestCount: 1,
       assemblyPath: expected.assemblyPath,
       assemblySha256: expected.assemblySha256,
+      sourceSha256: expected.sourceSha256,
       xunitVersion: '3.2.2.0',
       mtpVersion: '1.9.1.0',
       parallelism: expected.parallelism,
@@ -120,11 +170,133 @@ test('--check evaluates authoritative saved provenance and ledger without an in-
       if (value === undefined) throw new Error(`missing ${path}`)
       return value
     },
-  }, undefined, new Date('2026-08-11T00:00:00Z'))
+  }, undefined, new Date('2026-08-11T00:00:00Z'), {
+    manifest,
+    assemblyPath: expected.assemblyPath,
+    assemblySha256: expected.assemblySha256,
+    sourceSha256: expected.sourceSha256,
+    parallelism: expected.parallelism,
+  })
 
   assert.equal(result.total, 1)
   assert.equal(result.passed, true)
   assert.equal(result.reportError, undefined)
+})
+
+function savedExecutionFixture(): {
+  readonly track: TrackConfig
+  readonly expected: ExecutionLedgerExpectation
+  readonly current: CurrentExecutionIdentity
+  readonly artifacts: Map<string, string>
+} {
+  const manifest = manifestFromDiscovery('Ns.Cli.Fast')
+  const expected: ExecutionLedgerExpectation = {
+    runId: 'saved-run',
+    manifest,
+    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+    assemblySha256: 'a'.repeat(64),
+    sourceSha256: 'b'.repeat(64),
+    parallelism: 'xunit-default',
+  }
+  const track: TrackConfig = {
+    id: 'cli',
+    kind: 'dotnet-apphost',
+    csproj: 'virtual.csproj',
+    report: 'reports/cli.trx',
+    executionLedger: 'reports/cli.execution-ledger.json',
+    executionProvenance: 'reports/cli.execution-provenance.json',
+    executionSourceRoots: ['packages/cli'],
+    reportFormat: 'trx',
+    deadlineMs: 60_000,
+    enforce: true,
+    rules: [{ id: 'unit', absoluteMs: 50 }],
+  }
+  const current: CurrentExecutionIdentity = {
+    manifest,
+    assemblyPath: expected.assemblyPath,
+    assemblySha256: expected.assemblySha256,
+    sourceSha256: expected.sourceSha256,
+    parallelism: expected.parallelism,
+  }
+  return {
+    track,
+    expected,
+    current,
+    artifacts: new Map([
+      [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
+      [track.executionProvenance!, serializeExecutionProvenance(expected)],
+      [track.executionLedger!, JSON.stringify({
+        schemaVersion: 1,
+        runId: expected.runId,
+        manifestHash: manifest.hash,
+        manifestCount: 1,
+        assemblyPath: expected.assemblyPath,
+        assemblySha256: expected.assemblySha256,
+        sourceSha256: expected.sourceSha256,
+        xunitVersion: '3.2.2.0',
+        mtpVersion: '1.9.1.0',
+        parallelism: expected.parallelism,
+        durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
+        durationUnit: 'seconds',
+        cases: [{ uid: 'fast', name: 'Ns.Cli.Fast', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T00:00:00Z', finishTime: '2026-08-11T00:00:01Z' }],
+      })],
+    ]),
+  }
+}
+
+function evaluateSavedFixture(fixture: ReturnType<typeof savedExecutionFixture>): TrackEvaluation {
+  return evaluateTrackArtifacts(fixture.track, {
+    readText: (path) => {
+      const value = fixture.artifacts.get(path)
+      if (value === undefined) throw new Error(`missing ${path}`)
+      return value
+    },
+  }, undefined, new Date('2026-08-11T00:00:00Z'), fixture.current)
+}
+
+test('--check rejects an empty TRX with Total=0', () => {
+  const fixture = savedExecutionFixture()
+  fixture.artifacts.set(fixture.track.report, '<TestRun><Results></Results></TestRun>')
+
+  const result = evaluateSavedFixture(fixture)
+
+  assert.equal(result.total, 0)
+  assert.equal(result.passed, false)
+  assert.match(result.reportError ?? '', /TRX test count does not match compiled discovery/)
+})
+
+test('--check rejects a TRX-ledger outcome mismatch', () => {
+  const fixture = savedExecutionFixture()
+  fixture.artifacts.set(fixture.track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Failed" duration="00:00:00.9000000"/></Results></TestRun>')
+
+  const result = evaluateSavedFixture(fixture)
+
+  assert.equal(result.passed, false)
+  assert.match(result.reportError ?? '', /TRX and execution ledger outcome mismatch/)
+})
+
+test('--check rejects a missing execution ledger', () => {
+  const fixture = savedExecutionFixture()
+  fixture.artifacts.delete(fixture.track.executionLedger!)
+
+  const result = evaluateSavedFixture(fixture)
+
+  assert.equal(result.total, 0)
+  assert.equal(result.passed, false)
+  assert.match(result.reportError ?? '', /missing reports\/cli\.execution-ledger\.json/)
+})
+
+test('--check rejects a stale but internally complete artifact bundle', () => {
+  const fixture = savedExecutionFixture()
+  const staleFixture = {
+    ...fixture,
+    current: { ...fixture.current, sourceSha256: 'c'.repeat(64) },
+  }
+
+  const result = evaluateSavedFixture(staleFixture)
+
+  assert.equal(result.passed, false)
+  assert.match(result.reportError ?? '', /saved execution provenance is stale:.*source hash/)
 })
 
 test('suite deadline breach remains visible in summary and report errors fail the track', () => {

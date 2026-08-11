@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, resolve } from 'node:path'
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { evaluateTrack } from './budget.js'
@@ -14,12 +14,14 @@ import {
   manifestFromDiscovery,
   parseExecutionLedger,
   parseExecutionProvenance,
+  readCurrentExecutionIdentity,
   serializeExecutionProvenance,
+  validateCurrentExecutionIdentity,
   validateExecutionEvidence,
 } from './execution-ledger.js'
 import { parseReport } from './reports.js'
 import { parseAssemblyName, resolveApphostPath, resolveDiscoveryCommand, resolveFocusedCommand } from './focused.js'
-import type { ExecutionLedgerExpectation, SuiteConfig, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, SuiteConfig, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -41,6 +43,43 @@ function apphostFor(track: TrackConfig): string {
 
 function sha256File(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+const sourceDigestIgnoredDirectories = new Set(['.git', 'bin', 'node_modules', 'obj', 'reports'])
+
+function sourceFiles(root: string): readonly string[] {
+  const absoluteRoot = resolve(repoRoot, root)
+  const relativeRoot = relative(repoRoot, absoluteRoot)
+  if (relativeRoot === '..' || relativeRoot.startsWith(`..${sep}`)) {
+    throw new Error(`execution source root escapes the repository: ${root}`)
+  }
+
+  const visit = (path: string): string[] => {
+    const stat = lstatSync(path)
+    if (stat.isSymbolicLink()) throw new Error(`execution source identity does not follow symbolic links: ${path}`)
+    if (stat.isFile()) return [path]
+    if (!stat.isDirectory()) throw new Error(`execution source identity only supports files and directories: ${path}`)
+    return readdirSync(path, { withFileTypes: true })
+      .filter((entry) => !entry.isDirectory() || !sourceDigestIgnoredDirectories.has(entry.name))
+      .flatMap((entry) => visit(resolve(path, entry.name)))
+  }
+
+  return visit(absoluteRoot)
+}
+
+function sha256Sources(roots: readonly string[]): string {
+  const files = [...new Set(roots.flatMap(sourceFiles))]
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+  if (files.length === 0) throw new Error('execution source roots contain no files')
+
+  const hash = createHash('sha256')
+  for (const path of files) {
+    hash.update(relative(repoRoot, path).split(sep).join('/'), 'utf8')
+    hash.update('\0')
+    hash.update(readFileSync(path))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
 }
 
 function assemblyPathFor(apphost: string): string {
@@ -103,16 +142,13 @@ export function commandFor(track: TrackConfig): { command: string; args: readonl
   throw new Error(`track "${track.id}": no run command`)
 }
 
-function signalTree(pid: number, signal: NodeJS.Signals): void {
-  if (pid <= 1) return
-  try {
-    if (process.platform === 'win32') {
-      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
-    } else {
-      process.kill(-pid, signal)
-    }
-  } catch {
-    // already gone or not permitted
+function signalTree(pid: number, signal: NodeJS.Signals, graceMs: number): void {
+  if (pid <= 1) throw new Error(`cannot signal invalid process tree pid ${pid}`)
+  if (process.platform === 'win32') {
+    const force = signal === 'SIGKILL' ? ['/F'] : []
+    execFileSync('taskkill', ['/pid', String(pid), '/T', ...force], { stdio: 'ignore', timeout: graceMs })
+  } else {
+    process.kill(-pid, signal)
   }
 }
 
@@ -173,9 +209,10 @@ export async function runProcessWithDeadline<TimeoutReason>(input: {
   readonly kill: () => Promise<void>
   readonly now: () => number
 }): Promise<Awaited<SpawnedChild['done']> & {
-  readonly status: 'passed' | 'failed' | 'timeout'
+  readonly status: 'passed' | 'failed' | 'timeout' | 'cleanup-failed'
   readonly elapsedMs: number
   readonly timeoutReason?: TimeoutReason
+  readonly cleanupError?: string
 }> {
   const outcome = await runWithDeadline({
     start: () => input.child.done,
@@ -183,7 +220,7 @@ export async function runProcessWithDeadline<TimeoutReason>(input: {
     timeout: input.timeout,
     now: input.now,
   })
-  if (outcome.status === 'timeout') {
+  if (outcome.status === 'timeout' || outcome.status === 'cleanup-failed') {
     return { ...outcome, stdout: '' }
   }
   const completed = await input.child.done
@@ -221,28 +258,109 @@ function suiteTimeoutRun(track: TrackConfig): TrackRun {
   }
 }
 
-async function killTree(child: SpawnedChild, graceMs: number): Promise<void> {
-  if (process.platform === 'win32') {
-    signalTree(child.pid, 'SIGKILL')
-    return
+function cleanupBlockedRun(track: TrackConfig, blocker: string): TrackRun {
+  return {
+    ...failedRun(track, 'not started: prior child cleanup failed', `track was not started because ${blocker}`),
+    cleanupFailed: true,
+    cleanupError: blocker,
+  }
+}
+
+export interface ProcessCleanupLifecycle {
+  readonly signal: (pid: number, signal: NodeJS.Signals) => void
+  readonly createGrace: () => TimeoutHandle
+}
+
+async function waitForExit(child: SpawnedChild, grace: TimeoutHandle): Promise<boolean> {
+  try {
+    return await Promise.race([
+      child.done.then(() => true),
+      grace.promise.then(() => false),
+    ])
+  } finally {
+    grace.cancel()
+  }
+}
+
+export async function terminateChildTree(
+  child: SpawnedChild,
+  lifecycle: ProcessCleanupLifecycle,
+): Promise<void> {
+  const errors: string[] = []
+  let exited = false
+  try {
+    lifecycle.signal(child.pid, 'SIGTERM')
+    exited = await waitForExit(child, lifecycle.createGrace())
+  } catch (error) {
+    errors.push(`SIGTERM failed: ${(error as Error).message}`)
   }
 
-  signalTree(child.pid, 'SIGTERM')
-  const termGrace = createTimeout(graceMs)
-  const exited = await Promise.race([
-    child.done.then(() => true),
-    termGrace.promise.then(() => false),
-  ])
-  termGrace.cancel()
-  signalTree(child.pid, 'SIGKILL')
   if (!exited) {
-    const killGrace = createTimeout(graceMs)
-    await Promise.race([
-      child.done,
-      killGrace.promise,
-    ])
-    killGrace.cancel()
+    try {
+      lifecycle.signal(child.pid, 'SIGKILL')
+    } catch (error) {
+      errors.push(`SIGKILL failed: ${(error as Error).message}`)
+    }
+    exited = await waitForExit(child, lifecycle.createGrace())
   }
+
+  if (!exited) errors.push('child process tree termination was not confirmed within cleanup grace')
+  if (errors.length > 0) throw new Error(errors.join('; '))
+}
+
+function killTree(child: SpawnedChild, graceMs: number): Promise<void> {
+  return terminateChildTree(child, {
+    signal: (pid, signal) => signalTree(pid, signal, graceMs),
+    createGrace: () => createTimeout(graceMs),
+  })
+}
+
+class GateProcessError extends Error {
+  constructor(
+    message: string,
+    readonly status: 'failed' | 'timeout' | 'cleanup-failed',
+    readonly timeoutReason?: 'track' | 'suite',
+    readonly cleanupError?: string,
+  ) {
+    super(message)
+  }
+}
+
+async function readTrackCurrentIdentity(
+  track: TrackConfig,
+  graceMs: number,
+  deadline: Promise<'track' | 'suite'>,
+): Promise<CurrentExecutionIdentity> {
+  const plan = executionLedgerPlan(track)
+  if (!track.executionSourceRoots || track.executionSourceRoots.length === 0) {
+    throw new Error(`track "${track.id}" requires executionSourceRoots for execution ledger evidence`)
+  }
+  return readCurrentExecutionIdentity({
+    assemblyPath: plan.assemblyPath,
+    sourceRoots: track.executionSourceRoots,
+    parallelism: parallelismFor(track),
+  }, {
+    readAssemblySha256: sha256File,
+    readSourceSha256: sha256Sources,
+    readDiscovery: async () => {
+      const child = spawnChild(plan.discovery.apphost, plan.discovery.args, undefined, true)
+      const result = await runProcessWithDeadline({
+        child,
+        timeout: deadline,
+        kill: () => killTree(child, graceMs),
+        now: () => Date.now(),
+      })
+      if (result.status !== 'passed') {
+        const message = result.cleanupError
+          ? `compiled discovery cleanup failed: ${result.cleanupError}`
+          : result.status === 'timeout'
+            ? 'compiled discovery exceeded the track or suite deadline'
+            : `compiled discovery failed with exit ${result.exitCode}`
+        throw new GateProcessError(message, result.status, result.timeoutReason, result.cleanupError)
+      }
+      return result.stdout
+    },
+  })
 }
 
 async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Promise<void>): Promise<TrackRun> {
@@ -274,32 +392,26 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
       }
       if (ledgerPath) {
         if (!provenancePath) throw new Error('execution provenance path is required')
-        const plan = executionLedgerPlan(track)
-        const discoveryChild = spawnChild(plan.discovery.apphost, plan.discovery.args, undefined, true)
-        const discovery = await runProcessWithDeadline({
-          child: discoveryChild,
-          timeout: deadline,
-          kill: () => killTree(discoveryChild, graceMs),
-          now: () => Date.now(),
-        })
-        if (discovery.status === 'timeout') {
+        let currentIdentity: CurrentExecutionIdentity
+        try {
+          currentIdentity = await readTrackCurrentIdentity(track, graceMs, deadline)
+        } catch (error) {
+          if (!(error instanceof GateProcessError)) throw error
           return {
-            ...failedRun(track, `${plan.discovery.apphost} ${plan.discovery.args.join(' ')}`, 'compiled discovery exceeded the track or suite deadline'),
-            timedOut: true,
-            timeoutReason: discovery.timeoutReason,
-            exitCode: null,
+            ...failedRun(track, 'compiled discovery', error.message),
+            timedOut: error.status !== 'failed',
+            timeoutReason: error.timeoutReason,
+            exitCode: error.status === 'failed' ? 1 : null,
             elapsedMs: Date.now() - trackStartedAt,
             executionLedgerReady: false,
-            executionLedgerError: 'compiled discovery timed out before ledger provenance could be captured',
+            executionLedgerError: error.message,
+            cleanupFailed: error.status === 'cleanup-failed',
+            cleanupError: error.cleanupError,
           }
         }
-        if (discovery.exitCode !== 0) throw new Error(`compiled discovery failed with exit ${discovery.exitCode}`)
         ledgerExpectation = {
           runId: createExecutionRunId({ now: () => Date.now() }, randomUUID),
-          manifest: manifestFromDiscovery(discovery.stdout),
-          assemblyPath: plan.assemblyPath,
-          assemblySha256: sha256File(plan.assemblyPath),
-          parallelism: parallelismFor(track),
+          ...currentIdentity,
         }
         writeFileSync(provenancePath, serializeExecutionProvenance(ledgerExpectation), 'utf8')
         ledgerEnvironment = buildLedgerEnvironment({ ...ledgerExpectation, ledgerPath })
@@ -357,6 +469,8 @@ async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Prom
       executionLedgerReady,
       executionLedgerError,
       executionLedgerExpectation: ledgerExpectation,
+      cleanupFailed: result.status === 'cleanup-failed',
+      cleanupError: result.cleanupError,
     }
   } finally {
     trackDeadline.cancel()
@@ -386,6 +500,7 @@ export function evaluateTrackArtifacts(
   artifacts: TrackArtifactReader,
   run?: TrackRun,
   today: Date = new Date(),
+  currentIdentity?: CurrentExecutionIdentity,
 ): TrackEvaluation {
   if (run && !run.reportReady) {
     return failedEvaluation(track, run.reportError ?? `report ${track.report} was not refreshed`)
@@ -399,9 +514,16 @@ export function evaluateTrackArtifacts(
     if (track.executionLedger) {
       if (!track.executionProvenance) return failedEvaluation(track, 'execution provenance path is not configured')
       const expected = parseExecutionProvenance(artifacts.readText(track.executionProvenance))
-      if (run?.executionLedgerExpectation &&
-          serializeExecutionProvenance(run.executionLedgerExpectation) !== serializeExecutionProvenance(expected)) {
-        return failedEvaluation(track, 'saved execution provenance does not match the current run')
+      if (run?.executionLedgerExpectation) {
+        if (serializeExecutionProvenance(run.executionLedgerExpectation) !== serializeExecutionProvenance(expected)) {
+          return failedEvaluation(track, 'saved execution provenance does not match the current run')
+        }
+      } else {
+        if (!currentIdentity) return failedEvaluation(track, 'current execution identity was not captured for saved evidence')
+        const identityErrors = validateCurrentExecutionIdentity(expected, currentIdentity)
+        if (identityErrors.length > 0) {
+          return failedEvaluation(track, `saved execution provenance is stale: ${identityErrors.join('; ')}`)
+        }
       }
       const ledgerContent = artifacts.readText(track.executionLedger)
       const parsedLedger = parseExecutionLedger(ledgerContent)
@@ -541,6 +663,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
         const run = await runTrack(track, graceMs, suiteDeadline)
         runs.push(run)
         if (run.timeoutReason === 'track') console.error(`  ${track.id}: exceeded ${track.deadlineMs}ms deadline`)
+        if (run.cleanupFailed) {
+          for (const blocked of selected.slice(i + 1)) {
+            runs.push(cleanupBlockedRun(blocked, run.cleanupError ?? `${track.id} cleanup failed`))
+          }
+          break
+        }
         if (suiteExpired) {
           for (const skipped of selected.slice(i + 1)) runs.push(suiteTimeoutRun(skipped))
           break
@@ -572,19 +700,59 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     }
     const summary = summarize(runs, evaluations, suiteDeadlineBreached, suiteElapsed)
     console.log(formatSummary(summary, config.suiteDeadlineMs))
-    const runFailed = suiteDeadlineBreached || runs.some((r) => r.timedOut || r.exitCode !== 0)
+    const runFailed = suiteDeadlineBreached || runs.some((r) => r.timedOut || r.cleanupFailed || r.exitCode !== 0)
     const budgetFailed = evaluations.some((e) => !e.passed)
     return runFailed || budgetFailed ? 1 : 0
   }
 
-  for (const track of selected) {
-    evaluations.push(evaluateFromFile(track))
+  const checkSuiteTimer = createTimeout(config.suiteDeadlineMs)
+  let checkSuiteExpired = false
+  const checkSuiteDeadline = checkSuiteTimer.promise.then(() => {
+    checkSuiteExpired = true
+  })
+  try {
+    for (let i = 0; i < selected.length; i++) {
+      const track = selected[i]
+      if (checkSuiteExpired) {
+        evaluations.push(failedEvaluation(track, 'suite deadline expired before current identity validation'))
+        continue
+      }
+      let currentIdentity: CurrentExecutionIdentity | undefined
+      let cleanupFailure: string | undefined
+      if (track.executionLedger) {
+        const trackTimer = createTimeout(track.deadlineMs)
+        try {
+          currentIdentity = await readTrackCurrentIdentity(track, graceMs, Promise.race([
+            trackTimer.promise.then(() => 'track' as const),
+            checkSuiteDeadline.then(() => 'suite' as const),
+          ]))
+        } catch (error) {
+          evaluations.push(failedEvaluation(track, `could not validate current execution identity: ${(error as Error).message}`))
+          if (error instanceof GateProcessError && error.status === 'cleanup-failed') cleanupFailure = error.message
+        } finally {
+          trackTimer.cancel()
+        }
+      }
+      if (!evaluations.some((evaluation) => evaluation.trackId === track.id)) {
+        evaluations.push(evaluateTrackArtifacts(track, {
+          readText: (path) => readFileSync(resolve(repoRoot, path), 'utf8'),
+        }, undefined, new Date(), currentIdentity))
+      }
+      if (cleanupFailure) {
+        for (const blocked of selected.slice(i + 1)) {
+          evaluations.push(failedEvaluation(blocked, `current identity validation stopped because ${cleanupFailure}`))
+        }
+        break
+      }
+    }
+  } finally {
+    checkSuiteTimer.cancel()
   }
   console.log('budget:')
   for (const evaluation of evaluations) {
     for (const line of formatEvaluation(evaluation)) console.log(line)
   }
-  const summary = summarize(runs, evaluations)
+  const summary = summarize(runs, evaluations, checkSuiteExpired)
   console.log(formatSummary(summary, config.suiteDeadlineMs))
 
   const runFailed = runs.some((r) => r.timedOut || r.exitCode !== 0)

@@ -5,7 +5,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading;
 using System.Threading.Tasks;
 using Xunit.Runner.Common;
 using Xunit.Sdk;
@@ -38,6 +37,7 @@ internal static class ExecutionLedgerEnvironment
     public const string ManifestCount = "MOHIST_EXECUTION_LEDGER_MANIFEST_COUNT";
     public const string AssemblyPath = "MOHIST_EXECUTION_LEDGER_ASSEMBLY_PATH";
     public const string AssemblySha256 = "MOHIST_EXECUTION_LEDGER_ASSEMBLY_SHA256";
+    public const string SourceSha256 = "MOHIST_EXECUTION_LEDGER_SOURCE_SHA256";
     public const string Parallelism = "MOHIST_EXECUTION_LEDGER_PARALLELISM";
 }
 
@@ -94,7 +94,8 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
 {
     private readonly ExecutionLedgerCapture capture;
     private readonly IExecutionLedgerArtifactStore artifacts;
-    private readonly MessageMetadataCache metadata = new();
+    private readonly object metadataGate = new();
+    private MessageMetadataCache metadata = new();
     private int cachedMetadataCount;
     private string? error;
 
@@ -111,7 +112,10 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
         capture = ExecutionLedgerCapture.FromEnvironment(runtime, artifacts);
     }
 
-    internal int CachedMetadataCount => Volatile.Read(ref cachedMetadataCount);
+    internal int CachedMetadataCount
+    {
+        get { lock (metadataGate) return cachedMetadataCount; }
+    }
 
     public bool OnMessage(IMessageSinkMessage message)
     {
@@ -121,17 +125,12 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
 
             if (message is ITestStarting starting && message is ITestMetadata testMetadata && message is ITestMessage testMessage)
             {
-                var caseMetadata = message is ITestCaseMessage caseMessage
-                    ? metadata.TryGetTestCaseMetadata(caseMessage)
-                    : null;
-                var collectionMetadata = message is ITestCollectionMessage collectionMessage
-                    ? metadata.TryGetCollectionMetadata(collectionMessage)
-                    : null;
+                var (className, collectionName) = GetMetadata(message);
                 capture.RecordStarting(
                     testMessage.TestUniqueID,
                     testMetadata.TestDisplayName,
-                    caseMetadata?.TestClassName,
-                    collectionMetadata?.TestCollectionDisplayName,
+                    className,
+                    collectionName,
                     starting.StartTime);
             }
 
@@ -170,44 +169,66 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
 
     public ValueTask DisposeAsync()
     {
-        if (error is not null)
-            return ValueTask.CompletedTask;
-
         try
         {
-            capture.WriteTo(artifacts);
+            if (error is null)
+                capture.WriteTo(artifacts);
         }
         catch
         {
             // A missing or invalid ledger is fail-closed in the duration guard.
         }
+        finally
+        {
+            lock (metadataGate)
+            {
+                metadata = new MessageMetadataCache();
+                cachedMetadataCount = 0;
+            }
+        }
 
         return ValueTask.CompletedTask;
     }
 
+    private (string? ClassName, string? CollectionName) GetMetadata(IMessageSinkMessage message)
+    {
+        lock (metadataGate)
+        {
+            return (
+                message is ITestCaseMessage caseMessage ? metadata.TryGetTestCaseMetadata(caseMessage)?.TestClassName : null,
+                message is ITestCollectionMessage collectionMessage ? metadata.TryGetCollectionMetadata(collectionMessage)?.TestCollectionDisplayName : null);
+        }
+    }
+
     private void CacheMetadata(IMessageSinkMessage message)
     {
-        if (message is ITestAssemblyStarting assemblyStarting) { metadata.Set(assemblyStarting); Interlocked.Increment(ref cachedMetadataCount); }
-        if (message is ITestCaseStarting caseStarting) { metadata.Set(caseStarting); Interlocked.Increment(ref cachedMetadataCount); }
-        if (message is ITestClassStarting classStarting) { metadata.Set(classStarting); Interlocked.Increment(ref cachedMetadataCount); }
-        if (message is ITestCollectionStarting collectionStarting) { metadata.Set(collectionStarting); Interlocked.Increment(ref cachedMetadataCount); }
-        if (message is ITestMethodStarting methodStarting) { metadata.Set(methodStarting); Interlocked.Increment(ref cachedMetadataCount); }
-        if (message is ITestStarting testStarting) { metadata.Set(testStarting); Interlocked.Increment(ref cachedMetadataCount); }
+        lock (metadataGate)
+        {
+            if (message is ITestAssemblyStarting assemblyStarting) { metadata.Set(assemblyStarting); cachedMetadataCount++; }
+            if (message is ITestCaseStarting caseStarting) { metadata.Set(caseStarting); cachedMetadataCount++; }
+            if (message is ITestClassStarting classStarting) { metadata.Set(classStarting); cachedMetadataCount++; }
+            if (message is ITestCollectionStarting collectionStarting) { metadata.Set(collectionStarting); cachedMetadataCount++; }
+            if (message is ITestMethodStarting methodStarting) { metadata.Set(methodStarting); cachedMetadataCount++; }
+            if (message is ITestStarting testStarting) { metadata.Set(testStarting); cachedMetadataCount++; }
+        }
     }
 
     private void ReleaseMetadata(IMessageSinkMessage message)
     {
-        object? removed = message switch
+        lock (metadataGate)
         {
-            ITestAssemblyFinished finished => metadata.TryRemove(finished),
-            ITestCaseFinished finished => metadata.TryRemove(finished),
-            ITestClassFinished finished => metadata.TryRemove(finished),
-            ITestCollectionFinished finished => metadata.TryRemove(finished),
-            ITestMethodFinished finished => metadata.TryRemove(finished),
-            ITestFinished finished => metadata.TryRemove(finished),
-            _ => null,
-        };
-        if (removed is not null) Interlocked.Decrement(ref cachedMetadataCount);
+            object? removed = message switch
+            {
+                ITestAssemblyFinished finished => metadata.TryRemove(finished),
+                ITestCaseFinished finished => metadata.TryRemove(finished),
+                ITestClassFinished finished => metadata.TryRemove(finished),
+                ITestCollectionFinished finished => metadata.TryRemove(finished),
+                ITestMethodFinished finished => metadata.TryRemove(finished),
+                ITestFinished finished => metadata.TryRemove(finished),
+                _ => null,
+            };
+            if (removed is not null) cachedMetadataCount--;
+        }
     }
 }
 
@@ -217,6 +238,7 @@ public sealed record ExecutionLedgerMetadata(
     int ManifestCount,
     string AssemblyPath,
     string AssemblySha256,
+    string SourceSha256,
     string XunitVersion,
     string MtpVersion,
     string Parallelism,
@@ -240,6 +262,7 @@ public sealed class ExecutionLedgerDocument
     public int ManifestCount { get; init; }
     public string AssemblyPath { get; init; } = string.Empty;
     public string AssemblySha256 { get; init; } = string.Empty;
+    public string SourceSha256 { get; init; } = string.Empty;
     public string XunitVersion { get; init; } = string.Empty;
     public string MtpVersion { get; init; } = string.Empty;
     public string Parallelism { get; init; } = string.Empty;
@@ -290,6 +313,9 @@ public sealed class ExecutionLedgerCapture
         if (manifestHash.Length != 64 || manifestHash.Any(character => !Uri.IsHexDigit(character)))
             throw new InvalidOperationException("execution ledger manifest hash is invalid");
         var parallelism = Required(ExecutionLedgerEnvironment.Parallelism);
+        var sourceSha256 = Required(ExecutionLedgerEnvironment.SourceSha256);
+        if (sourceSha256.Length != 64 || sourceSha256.Any(character => !Uri.IsHexDigit(character)))
+            throw new InvalidOperationException("execution ledger source hash is invalid");
 
         var mtpVersion = runtime.MtpVersion;
         if (string.IsNullOrWhiteSpace(mtpVersion)) throw new InvalidOperationException("Microsoft.Testing.Platform version is unavailable");
@@ -303,6 +329,7 @@ public sealed class ExecutionLedgerCapture
             manifestCount,
             assemblyPath,
             assemblySha256,
+            sourceSha256,
             xunitVersion,
             mtpVersion,
             parallelism,
@@ -361,6 +388,7 @@ public sealed class ExecutionLedgerCapture
                 ManifestCount = metadata.ManifestCount,
                 AssemblyPath = metadata.AssemblyPath,
                 AssemblySha256 = metadata.AssemblySha256,
+                SourceSha256 = metadata.SourceSha256,
                 XunitVersion = metadata.XunitVersion,
                 MtpVersion = metadata.MtpVersion,
                 Parallelism = metadata.Parallelism,

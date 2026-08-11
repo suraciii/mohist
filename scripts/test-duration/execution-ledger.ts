@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import type {
+  CurrentExecutionIdentity,
   ExecutionLedger,
   ExecutionLedgerCase,
   ExecutionLedgerExpectation,
@@ -25,6 +26,61 @@ export interface GateClock {
   readonly now: () => number
 }
 
+export interface CurrentExecutionIdentityReader {
+  readonly readAssemblySha256: (assemblyPath: string) => string | Promise<string>
+  readonly readSourceSha256: (sourceRoots: readonly string[]) => string | Promise<string>
+  readonly readDiscovery: () => Promise<string>
+}
+
+export async function readCurrentExecutionIdentity(
+  input: {
+    readonly assemblyPath: string
+    readonly sourceRoots: readonly string[]
+    readonly parallelism: string
+  },
+  reader: CurrentExecutionIdentityReader,
+): Promise<CurrentExecutionIdentity> {
+  const [assemblySha256, sourceSha256, discovery] = await Promise.all([
+    reader.readAssemblySha256(input.assemblyPath),
+    reader.readSourceSha256(input.sourceRoots),
+    reader.readDiscovery(),
+  ])
+  if (!/^[0-9a-f]{64}$/i.test(assemblySha256)) throw new Error('current assembly reader returned an invalid SHA-256 digest')
+  if (!/^[0-9a-f]{64}$/i.test(sourceSha256)) throw new Error('current source reader returned an invalid SHA-256 digest')
+  return {
+    manifest: manifestFromDiscovery(discovery),
+    assemblyPath: input.assemblyPath,
+    assemblySha256,
+    sourceSha256,
+    parallelism: input.parallelism,
+  }
+}
+
+export function validateCurrentExecutionIdentity(
+  saved: ExecutionLedgerExpectation,
+  current: CurrentExecutionIdentity,
+): readonly string[] {
+  const errors: string[] = []
+  if (saved.manifest.hash !== current.manifest.hash ||
+      saved.manifest.names.length !== current.manifest.names.length ||
+      saved.manifest.names.some((name, index) => name !== current.manifest.names[index])) {
+    errors.push('saved execution provenance discovery does not match the current executable')
+  }
+  if (saved.assemblyPath !== current.assemblyPath) {
+    errors.push('saved execution provenance assembly path does not match the current build')
+  }
+  if (saved.assemblySha256 !== current.assemblySha256) {
+    errors.push('saved execution provenance assembly hash does not match the current build')
+  }
+  if (saved.sourceSha256 !== current.sourceSha256) {
+    errors.push('saved execution provenance source hash does not match the current source tree')
+  }
+  if (saved.parallelism !== current.parallelism) {
+    errors.push('saved execution provenance parallelism does not match the current invocation')
+  }
+  return errors
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex')
 }
@@ -47,6 +103,7 @@ function provenanceFromExpectation(expected: ExecutionLedgerExpectation): Execut
     manifestNames: expected.manifest.names,
     assemblyPath: expected.assemblyPath,
     assemblySha256: expected.assemblySha256,
+    sourceSha256: expected.sourceSha256,
     parallelism: expected.parallelism,
   }
 }
@@ -77,9 +134,11 @@ export function parseExecutionProvenance(json: string): ExecutionLedgerExpectati
   const manifestNames = Array.isArray(raw.manifestNames) ? raw.manifestNames as string[] : []
   const assemblyPath = requiredString(raw, 'assemblyPath', errors)
   const assemblySha256 = requiredString(raw, 'assemblySha256', errors)
+  const sourceSha256 = requiredString(raw, 'sourceSha256', errors)
   const parallelism = requiredString(raw, 'parallelism', errors)
   if (manifestHash && !/^[0-9a-f]{64}$/i.test(manifestHash)) errors.push('manifestHash must be a SHA-256 hex digest')
   if (assemblySha256 && !/^[0-9a-f]{64}$/i.test(assemblySha256)) errors.push('assemblySha256 must be a SHA-256 hex digest')
+  if (sourceSha256 && !/^[0-9a-f]{64}$/i.test(sourceSha256)) errors.push('sourceSha256 must be a SHA-256 hex digest')
   let manifest: ExecutionManifest | undefined
   try {
     manifest = manifestFromDiscovery(manifestNames.join('\n'))
@@ -89,7 +148,7 @@ export function parseExecutionProvenance(json: string): ExecutionLedgerExpectati
   if (manifest && manifest.hash !== manifestHash) errors.push('manifestHash does not match manifestNames')
   if (manifest && manifest.names.length !== manifestCount) errors.push('manifestCount does not match manifestNames')
   if (errors.length > 0 || !manifest) throw new Error(`execution provenance contract failed: ${errors.join('; ')}`)
-  return { runId, manifest, assemblyPath, assemblySha256, parallelism }
+  return { runId, manifest, assemblyPath, assemblySha256, sourceSha256, parallelism }
 }
 
 export function manifestFromDiscovery(output: string): ExecutionManifest {
@@ -193,11 +252,13 @@ export function parseExecutionLedger(json: string): ExecutionLedgerValidation & 
   const manifestCount = typeof manifestCountValue === 'number' ? manifestCountValue : 0
   const assemblyPath = requiredString(raw, 'assemblyPath', errors)
   const assemblySha256 = requiredString(raw, 'assemblySha256', errors)
+  const sourceSha256 = requiredString(raw, 'sourceSha256', errors)
   const xunitVersion = requiredString(raw, 'xunitVersion', errors)
   const mtpVersion = requiredString(raw, 'mtpVersion', errors)
   const parallelism = requiredString(raw, 'parallelism', errors)
   if (manifestHash && !/^[0-9a-f]{64}$/i.test(manifestHash)) errors.push('ledger manifestHash must be a SHA-256 hex digest')
   if (assemblySha256 && !/^[0-9a-f]{64}$/i.test(assemblySha256)) errors.push('ledger assemblySha256 must be a SHA-256 hex digest')
+  if (sourceSha256 && !/^[0-9a-f]{64}$/i.test(sourceSha256)) errors.push('ledger sourceSha256 must be a SHA-256 hex digest')
   if (xunitVersion === 'unknown' || mtpVersion === 'unknown') errors.push('ledger framework versions must be known')
   const rawCases = raw.cases
   if (!Array.isArray(rawCases) || rawCases.length === 0) {
@@ -235,6 +296,7 @@ export function parseExecutionLedger(json: string): ExecutionLedgerValidation & 
       manifestCount,
       assemblyPath,
       assemblySha256,
+      sourceSha256,
       xunitVersion,
       mtpVersion,
       parallelism,
@@ -259,6 +321,7 @@ export function validateExecutionEvidence(
   if (ledger.manifestCount !== expected.manifest.names.length) errors.push('execution ledger manifest count does not match compiled discovery')
   if (ledger.assemblyPath !== expected.assemblyPath) errors.push('execution ledger assembly path does not match the current build')
   if (ledger.assemblySha256 !== expected.assemblySha256) errors.push('execution ledger assembly hash does not match the current build')
+  if (ledger.sourceSha256 !== expected.sourceSha256) errors.push('execution ledger source hash does not match the current source tree')
   if (ledger.parallelism !== expected.parallelism) errors.push('execution ledger parallelism does not match the current invocation')
 
   const manifestNames = new Set(expected.manifest.names)
@@ -298,6 +361,7 @@ export function buildLedgerEnvironment(input: {
   readonly ledgerPath: string
   readonly assemblyPath: string
   readonly assemblySha256: string
+  readonly sourceSha256: string
   readonly parallelism: string
 }): Readonly<Record<string, string>> {
   return {
@@ -307,6 +371,7 @@ export function buildLedgerEnvironment(input: {
     MOHIST_EXECUTION_LEDGER_MANIFEST_COUNT: String(input.manifest.names.length),
     MOHIST_EXECUTION_LEDGER_ASSEMBLY_PATH: input.assemblyPath,
     MOHIST_EXECUTION_LEDGER_ASSEMBLY_SHA256: input.assemblySha256,
+    MOHIST_EXECUTION_LEDGER_SOURCE_SHA256: input.sourceSha256,
     MOHIST_EXECUTION_LEDGER_PARALLELISM: input.parallelism,
   }
 }

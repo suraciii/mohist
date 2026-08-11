@@ -8,7 +8,9 @@ import {
   manifestFromDiscovery,
   parseExecutionLedger,
   parseExecutionProvenance,
+  readCurrentExecutionIdentity,
   serializeExecutionProvenance,
+  validateCurrentExecutionIdentity,
   validateExecutionEvidence,
 } from './execution-ledger.js'
 import type { ExecutionLedgerExpectation, TestCase } from './types.js'
@@ -22,6 +24,7 @@ const expectation: ExecutionLedgerExpectation = {
   manifest,
   assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
   assemblySha256: 'a'.repeat(64),
+  sourceSha256: 'b'.repeat(64),
   parallelism: 'xunit-default',
 }
 
@@ -33,6 +36,7 @@ function ledger(overrides: Record<string, unknown> = {}): string {
     manifestCount: 2,
     assemblyPath: expectation.assemblyPath,
     assemblySha256: expectation.assemblySha256,
+    sourceSha256: expectation.sourceSha256,
     xunitVersion: '3.2.2.0',
     mtpVersion: '1.9.1.0',
     parallelism: expectation.parallelism,
@@ -57,6 +61,33 @@ test('discovery and run ids use fake process and fake clock seams', () => {
   assert.throws(() => manifestFromDiscovery('Ns.Cli.Fast\nNs.Cli.Fast'), /duplicate test cases/)
 })
 
+test('current identity reads assembly source and discovery through injected seams', async () => {
+  const calls: string[] = []
+  const current = await readCurrentExecutionIdentity({
+    assemblyPath: expectation.assemblyPath,
+    sourceRoots: ['packages/cli'],
+    parallelism: expectation.parallelism,
+  }, {
+    readAssemblySha256: (path) => { calls.push(`assembly:${path}`); return expectation.assemblySha256 },
+    readSourceSha256: (roots) => { calls.push(`source:${roots.join(',')}`); return expectation.sourceSha256 },
+    readDiscovery: async () => { calls.push('discovery'); return manifest.names.join('\n') },
+  })
+
+  assert.deepEqual(current, {
+    manifest,
+    assemblyPath: expectation.assemblyPath,
+    assemblySha256: expectation.assemblySha256,
+    sourceSha256: expectation.sourceSha256,
+    parallelism: expectation.parallelism,
+  })
+  assert.deepEqual(calls.sort(), [
+    `assembly:${expectation.assemblyPath}`,
+    'discovery',
+    'source:packages/cli',
+  ])
+  assert.deepEqual(validateCurrentExecutionIdentity(expectation, current), [])
+})
+
 test('execution evidence uses xUnit ExecutionTime seconds, never TRX duration', () => {
   const parsed = parseExecutionLedger(ledger())
   const result = validateExecutionEvidence(trxCases, parsed, expectation)
@@ -71,6 +102,7 @@ test('execution evidence fails closed for run, manifest, identity, and outcome m
     manifestHash: 'b'.repeat(64),
     assemblyPath: '/stale/test.dll',
     assemblySha256: 'c'.repeat(64),
+    sourceSha256: 'd'.repeat(64),
     parallelism: 'xunit-none',
   }))
   const result = validateExecutionEvidence(trxCases, parsed, expectation)
@@ -79,6 +111,7 @@ test('execution evidence fails closed for run, manifest, identity, and outcome m
   assert.ok(result.errors.some((error) => error.includes('manifest hash')))
   assert.ok(result.errors.some((error) => error.includes('assembly path')))
   assert.ok(result.errors.some((error) => error.includes('assembly hash')))
+  assert.ok(result.errors.some((error) => error.includes('source hash')))
   assert.ok(result.errors.some((error) => error.includes('parallelism')))
 })
 
@@ -100,6 +133,14 @@ test('execution evidence rejects an unsupported timing contract before evaluatio
   unsupported.durationSource = 'trx.UnitTestResult.duration'
   const parsed = parseExecutionLedger(JSON.stringify(unsupported))
   assert.ok(parsed.errors.some((error) => error.includes('durationSource')))
+})
+
+test('execution evidence rejects a TRX-ledger outcome mismatch', () => {
+  const parsed = parseExecutionLedger(ledger())
+  const mismatchedTrx = trxCases.map((item, index) => index === 0 ? { ...item, outcome: 'failed' as const } : item)
+  const result = validateExecutionEvidence(mismatchedTrx, parsed, expectation)
+
+  assert.ok(result.errors.some((error) => error.includes('outcome mismatch for Ns.Cli.Fast')))
 })
 
 test('execution evidence rejects duplicate names and missing partial records', () => {
@@ -130,6 +171,7 @@ test('ledger environment carries every provenance field to the reporter', () => 
     ledgerPath: '/virtual/ledger.json',
     assemblyPath: expectation.assemblyPath,
     assemblySha256: expectation.assemblySha256,
+    sourceSha256: expectation.sourceSha256,
     parallelism: expectation.parallelism,
   })
 
@@ -140,6 +182,7 @@ test('ledger environment carries every provenance field to the reporter', () => 
     MOHIST_EXECUTION_LEDGER_MANIFEST_COUNT: '2',
     MOHIST_EXECUTION_LEDGER_ASSEMBLY_PATH: expectation.assemblyPath,
     MOHIST_EXECUTION_LEDGER_ASSEMBLY_SHA256: expectation.assemblySha256,
+    MOHIST_EXECUTION_LEDGER_SOURCE_SHA256: expectation.sourceSha256,
     MOHIST_EXECUTION_LEDGER_PARALLELISM: expectation.parallelism,
   })
 })
