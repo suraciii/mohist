@@ -185,6 +185,24 @@ test('validateConfig requires a valid non-partitioned duration-measurement phase
   assert.ok(errors.some((error) => error.includes('cannot include partitioned track: spec')))
 })
 
+test('validateConfig requires duration isolation to target a non-partitioned Vitest track', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    canonical: {
+      maxConcurrentLanes: 4,
+      resourceLimits: { host: 4, 'duration-measurement': 1 },
+      durationMeasurementTracks: ['unit'],
+      durationIsolationTrack: 'spec',
+    },
+    tracks: [
+      { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
+      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 100, enforce: false },
+    ],
+  }))
+  const errors = validateConfig(config)
+  assert.ok(errors.some((error) => error.includes('cannot include partitioned track: spec')))
+})
+
 test('validateConfig rejects invalid canonical limits and non-apphost partitioning', () => {
   const config = parseSuiteConfig(JSON.stringify({
     suiteDeadlineMs: 1000,
