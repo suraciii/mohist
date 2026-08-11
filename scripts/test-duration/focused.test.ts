@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { parseAssemblyName, parseTargetFramework, resolveApphostPath, resolveFocusedCommand } from './focused.js'
+import { parseAssemblyName, parseTargetFramework, resolveApphostPath, resolveDiscoveryCommand, resolveFocusedCommand } from './focused.js'
 
 const CSPROJ = `
 <Project Sdk="Microsoft.NET.Sdk">
@@ -47,4 +47,11 @@ test('resolveFocusedCommand emits apphost -class, never dotnet --filter', () => 
   const reported = cmd.report('reports/foo.trx')
   assert.deepEqual(reported.slice(-2), ['-trx', 'reports/foo.trx'])
   assert.equal(reported.some((a) => a === '-class'), true)
+})
+
+test('resolveDiscoveryCommand uses the compiled apphost and emits a nonzero-list request', () => {
+  const cmd = resolveDiscoveryCommand({ csprojXml: CSPROJ })
+  assert.equal(cmd.apphost, 'bin/Debug/net11.0/Mohist.Cli.Tests')
+  assert.deepEqual(cmd.args, ['-list', 'full/json', '-preEnumerateTheories', '-noColor', '-noLogo'])
+  assert.equal(cmd.args.includes('--filter'), false)
 })

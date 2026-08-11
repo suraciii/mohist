@@ -18,7 +18,8 @@ export function formatTrackRun(run: TrackRun): string {
     ? run.timeoutReason === 'suite' ? 'SUITE TIMEOUT' : 'TIMEOUT'
     : run.exitCode === 0 ? 'ok' : `exit ${run.exitCode}`
   const report = run.reportReady ? '' : '  [report missing/stale]'
-  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}  ${run.command}`
+  const ledger = run.executionLedgerReady === false ? '  [execution ledger missing/stale]' : ''
+  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${ledger}  ${run.command}`
 }
 
 export function formatEvaluation(eval_: TrackEvaluation): string[] {

@@ -66,6 +66,30 @@ export function validateConfig(config: SuiteConfig): string[] {
 function validateTrack(track: TrackConfig): string[] {
   const errors: string[] = []
   const prefix = `track "${track.id}"`
+  if (track.executionLedger !== undefined && track.kind !== 'dotnet-apphost') {
+    errors.push(`${prefix}: executionLedger requires kind=dotnet-apphost`)
+  }
+  if (track.executionLedger !== undefined && track.reportFormat !== 'trx') {
+    errors.push(`${prefix}: executionLedger requires reportFormat=trx`)
+  }
+  if (track.executionLedger !== undefined && track.executionLedger.length === 0) {
+    errors.push(`${prefix}: executionLedger must be a non-empty path`)
+  }
+  if (track.executionLedger !== undefined && !track.executionProvenance) {
+    errors.push(`${prefix}: executionLedger requires executionProvenance`)
+  }
+  if (track.executionLedger === undefined && track.executionProvenance !== undefined) {
+    errors.push(`${prefix}: executionProvenance requires executionLedger`)
+  }
+  if (track.executionProvenance !== undefined && track.executionProvenance.length === 0) {
+    errors.push(`${prefix}: executionProvenance must be a non-empty path`)
+  }
+  if (track.executionLedger !== undefined && (!track.executionSourceRoots || track.executionSourceRoots.length === 0)) {
+    errors.push(`${prefix}: executionLedger requires non-empty executionSourceRoots`)
+  }
+  if (track.executionSourceRoots?.some((root) => typeof root !== 'string' || root.length === 0)) {
+    errors.push(`${prefix}: executionSourceRoots must contain only non-empty paths`)
+  }
   if (track.apphostArgs !== undefined && !Array.isArray(track.apphostArgs)) {
     errors.push(`${prefix}: apphostArgs must be an array of strings`)
   } else if (track.apphostArgs?.some((arg) => typeof arg !== 'string')) {
