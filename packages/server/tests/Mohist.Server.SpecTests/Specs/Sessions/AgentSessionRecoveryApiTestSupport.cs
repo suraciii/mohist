@@ -106,11 +106,18 @@ public abstract class AgentSessionRecoveryApiTestSupport
 
     protected SessionCommandRequest AssertSingleSessionCommandInvocation()
     {
-        var invocation = Assert.Single(RunnerHub.Invocations);
-        Assert.Equal($"connection-{_runnerId}", invocation.ConnectionId);
-        Assert.Equal("SessionCommand", invocation.Method);
+        var invocation = Assert.Single(SessionCommandInvocations());
         return Assert.IsType<SessionCommandRequest>(Assert.Single(invocation.Arguments));
     }
+
+    protected void AssertNoSessionCommandInvocations() =>
+        Assert.Empty(SessionCommandInvocations());
+
+    private RecordedRunnerHubInvocation[] SessionCommandInvocations() =>
+        RunnerHub.Invocations
+            .Where(invocation => invocation.ConnectionId == $"connection-{_runnerId}")
+            .Where(invocation => invocation.Method == "SessionCommand")
+            .ToArray();
 
     protected async Task<AgentSessionInfo> CreateAgentLaunchSessionAsync(
         ProjectDto project,
