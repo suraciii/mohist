@@ -9,9 +9,12 @@ public sealed class FilePromptLoader : IPromptLoader
     private readonly IPromptFileStore _files;
     private readonly Dictionary<string, SystemTemplate> _cache = new(StringComparer.Ordinal);
 
-    public FilePromptLoader(string? promptsDirectory = null, IPromptFileStore? files = null)
+    public FilePromptLoader(
+        string? promptsDirectory = null,
+        IPromptFileStore? files = null,
+        string? applicationRoot = null)
     {
-        _promptsDirectory = promptsDirectory ?? ResolveDefaultPromptsDirectory();
+        _promptsDirectory = promptsDirectory ?? ResolveDefaultPromptsDirectory(applicationRoot ?? AppContext.BaseDirectory);
         _files = files ?? RealPromptFileStore.Instance;
     }
 
@@ -31,7 +34,7 @@ public sealed class FilePromptLoader : IPromptLoader
 
         var result = new Dictionary<string, SystemTemplate>(StringComparer.Ordinal);
         if (!_files.DirectoryExists(_promptsDirectory))
-            return result;
+            throw new DirectoryNotFoundException($"Built-in prompt directory not found: '{_promptsDirectory}'.");
 
         foreach (var filePath in _files.EnumeratePromptFiles(_promptsDirectory))
         {
@@ -52,40 +55,8 @@ public sealed class FilePromptLoader : IPromptLoader
         return result;
     }
 
-    private static string ResolveDefaultPromptsDirectory()
-    {
-        // Try to find the Prompts directory relative to the executing assembly
-        var assemblyLocation = typeof(FilePromptLoader).Assembly.Location;
-        var assemblyDir = Path.GetDirectoryName(assemblyLocation);
-        if (assemblyDir is not null)
-        {
-            var promptsDir = Path.Combine(assemblyDir, "Workflow", "Services", "Prompts", "builtins");
-            if (Directory.Exists(promptsDir))
-                return promptsDir;
-
-            // Try parent directories for development scenarios
-            var current = assemblyDir;
-            for (var i = 0; i < 5; i++)
-            {
-                var candidate = Path.Combine(current, "Workflow", "Services", "Prompts", "builtins");
-                if (Directory.Exists(candidate))
-                    return candidate;
-
-                var srcCandidate = Path.Combine(current, "src", "Mohist.Server", "Workflow", "Services", "Prompts", "builtins");
-                if (Directory.Exists(srcCandidate))
-                    return srcCandidate;
-
-                var parent = Directory.GetParent(current);
-                if (parent is null) break;
-                current = parent.FullName;
-            }
-        }
-
-        // Fallback: use the known source location
-        var baseDir = AppContext.BaseDirectory;
-        var fallback = Path.Combine(baseDir, "..", "..", "..", "..", "src", "Mohist.Server", "Workflow", "Services", "Prompts", "builtins");
-        return Path.GetFullPath(fallback);
-    }
+    private static string ResolveDefaultPromptsDirectory(string applicationRoot) =>
+        Path.Combine(applicationRoot, "Workflow", "Services", "Prompts", "builtins");
 }
 
 public interface IPromptFileStore
