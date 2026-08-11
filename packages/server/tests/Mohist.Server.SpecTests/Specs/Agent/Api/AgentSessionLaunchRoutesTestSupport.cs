@@ -26,50 +26,59 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         _fixture = fixture;
     }
 
-    protected static async Task WaitForJobTerminalAsync(
-        IAgentJobGrain job,
-        AgentJobStatus expected,
-        TimeSpan timeout,
-        Func<Task>? advance = null)
-        => await TestWait.ForAsync(
-            () => job.GetTerminalResultAsync(),
-            t => t.Status == expected,
-            timeout,
-            TimeSpan.FromMilliseconds(200),
-            $"Agent job to reach {expected}",
-            advance);
+    protected async Task<ClaimResult> ClaimPreparedAgentJobAsync(
+        string agentJobId,
+        string runnerId,
+        string projectId,
+        string expectedSessionId)
+    {
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            agentJobId,
+            TimeSpan.FromSeconds(5));
+
+        var assignment = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, assignment.RunnerId);
+
+        var claim = await _fixture.Grains
+            .GetGrain<IRunnerGrain>(runnerId)
+            .TryClaimAgentJobAsync(agentJobId, projectId);
+
+        Assert.NotNull(claim);
+        Assert.Equal(agentJobId, claim.AgentJobId);
+        Assert.Equal(runnerId, claim.RunnerId);
+        Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claim.Dispatch.OwnerKind);
+        return claim;
+    }
 
     protected async Task<PollSnapshot> PollDispatchForSessionAsync(
         string agentJobId,
         string runnerId,
         string expectedSessionId)
     {
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
-            _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId));
-        // Assignment-prepared does not guarantee the dispatch has propagated to
-        // the runner's poll endpoint; retry over a window (as PollAgentJobDispatchAsync
-        // does) instead of a fixed two attempts, which flaked on slower CI runners.
-        var dispatch = (await TestWait.ForAsync(
-            () => PollDispatchOnceAsync(runnerId, expectedSessionId),
-            candidate => candidate is not null,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to return AgentJob '{agentJobId}' for AgentSessionId '{expectedSessionId}'"))!;
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            agentJobId,
+            TimeSpan.FromSeconds(5));
+        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
 
+        Assert.NotNull(dispatch);
         Assert.Equal(agentJobId, dispatch.AgentJobId);
         return dispatch;
     }
 
     protected async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
     {
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
-            _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId));
-        var dispatch = (await TestWait.ForAsync(
-            () => PollDispatchOnceAsync(runnerId, expectedSessionId: null, expectedAgentJobId: agentJobId),
-            candidate => candidate is not null,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"an AgentJob dispatch for '{agentJobId}' on runner '{runnerId}'"))!;
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            agentJobId,
+            TimeSpan.FromSeconds(5));
+        var dispatch = await PollDispatchOnceAsync(
+            runnerId,
+            expectedSessionId: null,
+            expectedAgentJobId: agentJobId);
+
+        Assert.NotNull(dispatch);
         Assert.Equal(agentJobId, dispatch.AgentJobId);
         return dispatch.WorkId;
     }

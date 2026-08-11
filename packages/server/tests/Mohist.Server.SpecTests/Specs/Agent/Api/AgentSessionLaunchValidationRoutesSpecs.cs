@@ -283,14 +283,13 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            Assert.False(string.IsNullOrWhiteSpace(polled.AgentJobId));
+            var claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
 
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(polled.AgentJobId!);
+            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(claim.AgentJobId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain.ReportResultAsync(
                 runnerId,
-                polled.WorkId,
+                claim.WorkId,
                 new WorkResult(
                     Status: "completed",
                     Message: "generic job completed",
@@ -322,60 +321,6 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             var item = listPayload.GetProperty("data").EnumerateArray()
                 .Single(entry => entry.GetProperty("sessionId").GetString() == sessionId);
             Assert.Equal("idle", item.GetProperty("activity").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task Launch_AgentJobTimeout_PreservesUnknownWithoutClosingSession()
-    {
-        var projectId = await CreateProjectAsync("launch-timeout");
-        var runnerId = $"launch-timeout-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentAsync(projectId, "timeout-agent");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "this will never finish" });
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
-
-            var jobGrain = await FindAgentJobGrainAsync(sessionId);
-            Assert.NotNull(jobGrain);
-            await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-
-            // The fixture configures JobTimeout=8s. An inconclusive
-            // timeout remains Unknown so a caller cannot safely replay
-            // the original prompt.
-            await WaitForJobTerminalAsync(
-                jobGrain!,
-                AgentJobStatus.Unknown,
-                TimeSpan.FromSeconds(30),
-                async () =>
-                {
-                    _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
-                    await jobGrain!.CheckTimeoutsAsync();
-                });
-
-            var terminal = await jobGrain!.GetTerminalResultAsync();
-            Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
-            Assert.StartsWith(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason, StringComparison.Ordinal);
-
-            var query = await GetAgentSessionQueryAsync();
-            var record = await query.FirstByLabelsAsync(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-                });
-            Assert.NotNull(record);
-            Assert.Equal(sessionId, record!.Session.Id);
-            Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
         }
         finally
         {

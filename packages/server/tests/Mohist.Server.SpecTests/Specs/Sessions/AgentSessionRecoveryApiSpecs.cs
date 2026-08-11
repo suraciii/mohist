@@ -29,7 +29,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     [Fact]
     public async Task CompactEndpoint_InactiveSession_ReturnsStableSessionIdOnly()
     {
-        var (project, issue, work, currentSession) = await CreateAndStartSessionAsync("compact-inactive", sessionName: "plan", attachIdle: true);
+        var (project, issue, work, currentSession) = await CreateAndStartSessionAsync("compact-inactive", sessionName: "plan", attach: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
@@ -58,7 +58,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     [Fact]
     public async Task CompactEndpoint_ActiveSession_ReturnsConflict()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-active", sessionName: "plan", attachAndStart: true);
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-active", sessionName: "plan", attach: true);
         // Attaching the runtime does not make the session active; session.activity does.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
@@ -94,7 +94,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     [Fact]
     public async Task ResetEndpoint_InactiveSession_ReturnsStableSessionIdOnly()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-inactive", sessionName: "build", attachIdle: true);
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-inactive", sessionName: "build", attach: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
 
@@ -120,7 +120,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
   [Fact]
   public async Task RuntimeEventsEndpoint_IgnoresOldPhysicalBindingAfterReset()
   {
-    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("stale-runtime-events", sessionName: "build", attachIdle: true);
+    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("stale-runtime-events", sessionName: "build", attach: true);
     using var reset = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
     Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
     var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
@@ -128,7 +128,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     Assert.NotNull(afterReset);
     Assert.NotEqual(currentSession.Id, afterReset!.AgentSessionId);
 
-    _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
     using var staleEvent = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
     {
       runtimeSessionId = currentSession.Id,
@@ -156,7 +155,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
   [Fact]
   public async Task CompactEndpoint_PiBoundSession_AdmitsCommandAndStampsPiRuntimeOnWire()
   {
-    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-bound", sessionName: "plan", attachIdle: true);
+    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-bound", sessionName: "plan", attach: true);
     await SetPersistedRuntimeAsync(currentSession.Id, "pi");
 
     using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
@@ -171,7 +170,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
   [Fact]
   public async Task ResetEndpoint_PiBoundSession_AdmitsCommandAndStampsPiRuntimeOnWire()
   {
-    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-pi-bound", sessionName: "build", attachIdle: true);
+    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-pi-bound", sessionName: "build", attach: true);
     await SetPersistedRuntimeAsync(currentSession.Id, "pi");
 
     using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
@@ -186,7 +185,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     [Fact]
     public async Task CompactEndpoint_PiBoundActiveSession_StillRejectsWithIdleConflict()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-active", sessionName: "plan", attachAndStart: true);
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-active", sessionName: "plan", attach: true);
         await SetPersistedRuntimeAsync(currentSession.Id, "pi");
         // Attaching the runtime does not make the session active; session.activity does.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);

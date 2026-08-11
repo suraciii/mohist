@@ -360,7 +360,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle"}"""),
         }, "runtime-first"));
         await firstPersistence.WaitAsync();
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand("runtime-first", "runtime-second"));
         var secondPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
@@ -419,7 +418,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         }, "runtime-first"));
         await firstPersistence.WaitAsync();
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand("runtime-first", "runtime-second"));
         var secondPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
