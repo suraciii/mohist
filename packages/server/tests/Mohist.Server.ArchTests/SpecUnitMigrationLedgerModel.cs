@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Mohist.Server.ArchTests;
 
-internal static class SpecUnitMigrationLedgerValidator
+internal static partial class SpecUnitMigrationLedgerValidator
 {
     internal const string ValidationHead = "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8";
     internal const string ValidationTree = "ff159609b97df5b1fac6d6404a6d1811f6bda99a";
@@ -47,34 +47,6 @@ internal static class SpecUnitMigrationLedgerValidator
         foreach (var row in rows.Where(row => row.Kind == "historical"))
             ValidateHistoricalRow(row, inventory, provenance, violations);
         ValidateRequiredNamedRows(currentRows, violations);
-        return violations;
-    }
-
-    internal static IReadOnlyList<string> ValidateHistoricalRowForTests(
-        SpecUnitMigrationLedgerRow row, SpecUnitMigrationInventory inventory, SpecUnitMigrationProvenance? provenance = null)
-    {
-        var violations = new List<string>();
-        ValidateHistoricalRow(row, inventory, provenance ?? SpecUnitMigrationProvenance.Read(), violations);
-        return violations;
-    }
-
-    internal static IReadOnlyList<string> ValidateCurrentRowForTests(
-        SpecUnitMigrationLedgerRow row, SpecUnitMigrationCandidate classification, SpecUnitMigrationInventory inventory)
-    {
-        var violations = new List<string>();
-        ValidateCurrentRow(row, classification, inventory, violations);
-        return violations;
-    }
-
-    internal static IReadOnlyList<string> ValidateCurrentRowForTests(
-        SpecUnitMigrationLedgerRow row,
-        SpecUnitMigrationCandidate classification,
-        SpecUnitMigrationExecutableFacts executable)
-    {
-        var violations = new List<string>();
-        ValidateCurrentRowCore(row, classification, (endpoint, targetViolations) =>
-            ValidateExecutableAndClosure(row, endpoint, executable,
-                fqn => fqn == classification.Fqn ? classification : null, targetViolations, "current"), violations);
         return violations;
     }
 
@@ -260,13 +232,6 @@ internal static class SpecUnitMigrationLedgerValidator
             "Mohist.Server.UnitTests/Events/MohistHubTests.cs", "Mohist.Server.UnitTests.Events.MohistHubTests", violations);
         ValidatePlannedNamedRow(rows.SingleOrDefault(row => row.Id == "current-mohist-hub-project-affinity"), "MOVE",
             "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs", "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests", violations);
-    }
-
-    internal static IReadOnlyList<string> ValidateNamedRowsForTests(IEnumerable<SpecUnitMigrationLedgerRow> rows)
-    {
-        var violations = new List<string>();
-        ValidateRequiredNamedRows(rows.ToArray(), violations);
-        return violations;
     }
 
     private static void ValidatePlannedNamedRow(SpecUnitMigrationLedgerRow? row, string status, string path, string fqn,

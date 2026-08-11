@@ -5,7 +5,16 @@ namespace Mohist.Server.ArchTests;
 public sealed class SpecUnitMigrationLedgerRules
 {
     private const string LedgerResourceName = "SpecUnitMigrationLedger.json";
+    private static readonly Lazy<SpecUnitMigrationInventory> ProductionSourceInventory = new(CreateProductionSourceInventory);
+    private static readonly Lazy<IReadOnlyList<string>> ProductionPotentialCurrentSpecFqns = new(
+        () => ProductionSourceInventory.Value.PotentialCurrentSpecFqns);
     private static readonly Lazy<SpecUnitMigrationInventory> ProductionInventory = new(CreateProductionInventory);
+
+    internal static void WarmProductionInventory()
+    {
+        var inventory = ProductionInventory.Value;
+        _ = SpecUnitMigrationLedgerValidator.Validate(SpecUnitMigrationLedger.Read(LedgerResourceName), inventory);
+    }
 
     [Fact]
     public void SpecUnitMigrationLedger_CoversEveryCurrentStaticLightSpec()
@@ -102,7 +111,7 @@ public sealed class SpecUnitMigrationLedgerRules
             violation => violation.Contains("absent from embedded PR #388 raw Git provenance", StringComparison.Ordinal));
 
         var current = SpecUnitMigrationLedger.Read(LedgerResourceName).Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var classification = ProductionInventory.Value.CurrentSpecClassifications.Single(candidate => candidate.Fqn == current.Current!.Fqn);
+        var classification = CurrentClassification(ProductionInventory.Value, current.Current!.Fqn!);
         current.History!.Commit = "34f0f666d988a3a38ba218cad088f1062a55d5e";
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(current, classification, ProductionInventory.Value),
             violation => violation.Contains("validationHead history mismatch", StringComparison.Ordinal));
@@ -130,7 +139,7 @@ public sealed class SpecUnitMigrationLedgerRules
         var inventory = ProductionInventory.Value;
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var row = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var classification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == row.Current!.Fqn);
+        var classification = CurrentClassification(inventory, row.Current!.Fqn!);
 
         row.Closure!.Evidence = row.Closure.Evidence!.Replace("edges-digest=", "edges-digest=mutated-", StringComparison.Ordinal);
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory),
@@ -153,13 +162,13 @@ public sealed class SpecUnitMigrationLedgerRules
         var inventory = ProductionInventory.Value;
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var failIf = ledger.Rows!.Single(candidate => candidate.Id == "current-fail-if-marker-review");
-        var failIfClassification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == failIf.Current!.Fqn);
+        var failIfClassification = CurrentClassification(inventory, failIf.Current!.Fqn!);
         failIf.Status = "KEEP";
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(failIf, failIfClassification, inventory),
             violation => violation.Contains("blocked current row cannot escape", StringComparison.Ordinal));
 
         var windows = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var windowsClassification = inventory.CurrentSpecClassifications.Single(candidate => candidate.Fqn == windows.Current!.Fqn);
+        var windowsClassification = CurrentClassification(inventory, windows.Current!.Fqn!);
         windows.Target!.Path = "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs";
         windows.Target.Fqn = "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests";
         windows.MoveContract = null;
@@ -255,12 +264,32 @@ public sealed class SpecUnitMigrationLedgerRules
     {
         var specAssembly = typeof(Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs).Assembly;
         var unitAssembly = typeof(Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests).Assembly;
-        var discovery = SpecUnitMigrationCompiledDiscovery.FromAssemblies(specAssembly, unitAssembly);
-        return SpecUnitMigrationInventory.Create(ArchitectureRulesSupport.EmbeddedSources("TestSources/"), discovery);
+        var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
+        var requestedFqns = (ledger.Rows ?? []).SelectMany(row => new[]
+            {
+                row.Legacy?.Fqn,
+                row.Current?.Fqn,
+                row.Target?.Fqn,
+                row.Executable?.Fqn,
+            })
+            .Where(fqn => !string.IsNullOrWhiteSpace(fqn)).Cast<string>()
+            .Concat(ProductionPotentialCurrentSpecFqns.Value)
+            .ToHashSet(StringComparer.Ordinal);
+        var discovery = SpecUnitMigrationCompiledDiscovery.FromAssemblies(requestedFqns, specAssembly, unitAssembly);
+        return ProductionSourceInventory.Value.BindCompiledDiscovery(discovery);
     }
+
+    private static SpecUnitMigrationInventory CreateProductionSourceInventory()
+        => SpecUnitMigrationInventory.Create(ArchitectureRulesSupport.EmbeddedSources("TestSources/"));
 
     private static ArchitectureRules.EmbeddedSource Source(string path, string content)
         => new(path, content, System.Text.Encoding.UTF8.GetByteCount(content));
+
+    private static SpecUnitMigrationCandidate CurrentClassification(SpecUnitMigrationInventory inventory, string fqn)
+    {
+        Assert.True(inventory.TryGetCurrentSpecClassification(fqn, out var candidate), $"Current Spec classification not found: {fqn}");
+        return candidate;
+    }
 
     private static string Evidence(SpecUnitMigrationCandidate candidate)
         => $"source-path={candidate.Path} source-fqn={candidate.Fqn} case-digest={candidate.ExecutableCaseIdentityDigest} source-content-digest={candidate.SourceContentDigest} executable-closure-digest={candidate.ClosureIdentityDigest} edges-digest={candidate.EdgesDigest}";

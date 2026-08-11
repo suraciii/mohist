@@ -15,25 +15,38 @@ internal sealed class SpecUnitMigrationCompiledDiscovery
     internal static SpecUnitMigrationCompiledDiscovery ForTests(params (string Fqn, SpecUnitMigrationMtpFacts Facts)[] entries)
         => new(entries.ToDictionary(entry => entry.Fqn, entry => entry.Facts, StringComparer.Ordinal));
 
-    internal static SpecUnitMigrationCompiledDiscovery FromAssemblies(params Assembly[] assemblies)
+    internal static SpecUnitMigrationCompiledDiscovery FromAssemblies(
+        IReadOnlySet<string> requestedFqns,
+        params Assembly[] assemblies)
     {
         var cases = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var assembly in assemblies)
         {
-            var discoverer = ((ITestFramework)new XunitTestFramework()).GetDiscoverer(assembly);
+            var requestedTypes = requestedFqns.Select(fqn => assembly.GetType(fqn, throwOnError: false))
+                .Where(type => type is not null).Cast<Type>().ToArray();
+            if (requestedTypes.Length == 0) continue;
+            var testAssembly = new XunitTestAssembly(assembly);
+            var discoverer = new ScopedXunitTestFrameworkDiscoverer(
+                testAssembly, new CollectionPerClassTestCollectionFactory(testAssembly));
             var options = new InMemoryDiscoveryOptions();
             options.SetValue(TestOptionsNames.Discovery.PreEnumerateTheories, true);
-            discoverer.Find(testCase =>
+            try
             {
-                var fqn = testCase.TestClassName;
-                if (!string.IsNullOrWhiteSpace(fqn))
+                discoverer.FindTypes(testCase =>
                 {
-                    if (!cases.TryGetValue(fqn!, out var identities)) cases.Add(fqn!, identities = []);
-                    identities.Add(string.Join("|", fqn, testCase.TestMethodName, testCase.TestCaseDisplayName));
-                }
-                return new ValueTask<bool>(true);
-            }, options, null, null).GetAwaiter().GetResult();
-            (discoverer as IDisposable)?.Dispose();
+                    var fqn = testCase.TestClassName;
+                    if (!string.IsNullOrWhiteSpace(fqn))
+                    {
+                        if (!cases.TryGetValue(fqn!, out var identities)) cases.Add(fqn!, identities = []);
+                        identities.Add(string.Join("|", fqn, testCase.TestMethodName, testCase.TestCaseDisplayName));
+                    }
+                    return new ValueTask<bool>(true);
+                }, options, requestedTypes).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                discoverer.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
         }
 
         var facts = new Dictionary<string, SpecUnitMigrationMtpFacts>(StringComparer.Ordinal);
@@ -68,6 +81,26 @@ internal sealed class SpecUnitMigrationCompiledDiscovery
         public TValue? GetValue<TValue>(string name) => _values.TryGetValue(name, out var value) ? (TValue?)value : default;
         public void SetValue<TValue>(string name, TValue value) => _values[name] = value;
         public string ToJson() => "{}";
+    }
+
+    // The top-level Find requires an active xUnit TestContext, which is unavailable during module warmup.
+    private sealed class ScopedXunitTestFrameworkDiscoverer(
+        IXunitTestAssembly testAssembly,
+        IXunitTestCollectionFactory collectionFactory)
+        : XunitTestFrameworkDiscoverer(testAssembly, collectionFactory)
+    {
+        internal async ValueTask FindTypes(
+            Func<ITestCase, ValueTask<bool>> callback,
+            ITestFrameworkDiscoveryOptions discoveryOptions,
+            IReadOnlyList<Type> types)
+        {
+            foreach (var type in types)
+            {
+                if (type.IsAbstract && !type.IsSealed) continue;
+                var testClass = new XunitTestClass(type, TestCollectionFactory.Get(type));
+                if (!await FindTestsForType(testClass, discoveryOptions, callback)) return;
+            }
+        }
     }
 }
 
