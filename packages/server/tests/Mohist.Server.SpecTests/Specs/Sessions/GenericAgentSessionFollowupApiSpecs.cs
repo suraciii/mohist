@@ -146,37 +146,46 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     [Fact]
     public async Task GenericFollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
-        var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-empty");
+        var project = await CreateProjectAsync("gen-followup-empty");
+        var sessionId = $"input-validation-{Guid.NewGuid():N}";
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("rejected", data.GetProperty("status").GetString());
+        Assert.Equal("followup_input_required", data.GetProperty("code").GetString());
     }
 
     [Fact]
     public async Task GenericFollowupEndpoint_WhitespaceText_ReturnsBadRequest()
     {
-        var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-ws");
+        var project = await CreateProjectAsync("gen-followup-ws");
+        var sessionId = $"input-validation-{Guid.NewGuid():N}";
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "   \t  " });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("rejected", data.GetProperty("status").GetString());
+        Assert.Equal("followup_input_required", data.GetProperty("code").GetString());
     }
 
     [Fact]
     public async Task GenericFollowupEndpoint_MissingText_ReturnsBadRequest()
     {
-        var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-missing");
+        var project = await CreateProjectAsync("gen-followup-missing");
+        var sessionId = $"input-validation-{Guid.NewGuid():N}";
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("rejected", data.GetProperty("status").GetString());
+        Assert.Equal("followup_input_required", data.GetProperty("code").GetString());
     }
 
     [Fact]
