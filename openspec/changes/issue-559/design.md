@@ -98,7 +98,11 @@ an external Runtime or process to start. The Runner performs these steps:
    four declared keys.
 3. Send the rendered, validated envelope to an internal Server handoff command
    keyed by `(projectId, workflowRunId, taskRunId)`.
-4. Retire the handoff work after the Server acknowledges either accepted
+4. After structural request validation, the Server immediately calls the durable
+   coordinator to record the command fingerprint, rendered input, Workflow
+   origin, and `preflight_pending` phase before resolving live Agent,
+   readiness, or Workspace state.
+5. Retire the handoff work after the Server acknowledges either accepted
    lineage or a definitive pre-acceptance rejection. A rejected handoff may
    therefore have been claimed as transport, but it has no accepted
    AgentJob/AgentSession lineage and no external execution.
@@ -145,13 +149,19 @@ AgentHandoffAck {
 
 `requestFingerprint` is the SHA-256 of canonical JSON containing the project,
 WorkflowRun, TaskRun, attempt, and rendered validated input. The coordinator
-is keyed by `(projectId, commandId)` and stores that fingerprint before any
-participant promotion. Repeating the same request returns the original
-`accepted` or `rejected` acknowledgement; a conflicting fingerprint is a
-definitive `rejected` acknowledgement with `handoff_conflict`. `retry` is a
-nonterminal acknowledgement for a transient server condition. A timeout,
-connection loss, or 5xx response is treated the same as `retry` and is retried
-with the same request body.
+is keyed by `(projectId, commandId)`. Its durable command phases are
+`preflight_pending`, `participants_ready`, `acceptance_pending`,
+`activation_pending`, `accepted`, `rejection_pending`, and `rejected`; the
+coordinator stores the original rendered input and any terminal rejection
+error with the phase. The initial coordinator call persists the fingerprint
+and `preflight_pending` phase before live preflight begins. Repeating the same
+request resumes the stored phase or returns the original `accepted` or
+`rejected` acknowledgement; it never reruns a completed preflight rejection
+against current Agent state. A conflicting fingerprint is a definitive
+`rejected` acknowledgement with `handoff_conflict`. `retry` is a nonterminal
+acknowledgement for a transient server condition. A timeout, connection loss,
+or 5xx response is treated the same as `retry` and is retried with the same
+request body.
 
 `accepted` and `rejected` are terminal transport acknowledgements. The Server
 retires the matching Workflow handoff obligation as part of either response,
@@ -161,17 +171,21 @@ and the Runner removes it from `awaitingAck`. The Runner never sends an
 service may acknowledge or retire this work.
 
 Before returning a definitive `rejected` acknowledgement, the handoff service
-must call the lineage-checked
+must first persist the original rejection error in the coordinator as
+`rejection_pending`, then call the lineage-checked
 `IWorkflowGrain.ApplyAgentHandoffRejectionAsync` operation with
 `(runnerId, workId, taskRunId, commandId, requestFingerprint, ExecutionError)`.
 That Workflow-owned operation verifies the active handoff and fingerprint,
 applies the normal failed-TaskRun and declared recovery boundary, clears the
-active handoff snapshot, and returns `Accepted` or `Stale`. The service returns
-the terminal transport rejection only after that operation succeeds. A retry
-of the same command replays the stored rejection without applying the failure
-twice; a conflicting fingerprint returns `handoff_conflict` and cannot mutate
-the TaskRun. A transient failure of the Workflow operation returns `retry` and
-keeps the transport obligation available for replay.
+active handoff snapshot, and returns `Accepted` or `Stale`. Only after that
+operation succeeds does the coordinator persist the terminal `rejected`
+acknowledgement containing the original code and reason. A coordinator
+recovery reminder resumes `rejection_pending` after a process loss, so a replay
+cannot rerun preflight and accept a Job after the Agent becomes available. A
+retry of the same command replays the stored rejection without applying the
+failure twice; a conflicting fingerprint returns `handoff_conflict` and cannot
+mutate the TaskRun. A transient failure of the Workflow operation returns
+`retry` and keeps the transport obligation available for replay.
 
 The endpoint is implemented by a Server handoff service backed by an extension
 of the existing `AgentLaunchCoordinatorGrain`, not by a separate launch
@@ -180,31 +194,48 @@ prompt, session name, timeout, immutable Workflow task contract, resolved Agent
 snapshot, workspace identity, and pre-minted Job/Session/Input/Turn IDs. The
 coordinator persists the command and plan before calling another aggregate.
 
-The coordinator advances the participants in this order:
+The coordinator advances the handoff in this order:
 
 ```text
 handoff request
+  -> persist command fingerprint, rendered envelope, and preflight_pending
   -> resolve active Agent, readiness, and workspace through existing Server services
-  -> invoke the coordinator with the rendered envelope and resolved snapshot
-  -> persist request fingerprint and all accepted facts
+  -> persist the resolved immutable snapshot
   -> prepare provisional AgentJob with Job/Input/Turn ids
   -> EnsureInitialLaunchAsync on provisional AgentSession
+  -> promote and verify both participants as handoff-ready and nonclaimable
   -> accept lineage on WorkflowRun
-  -> promote AgentJob and AgentSession
-  -> submit AgentJob to canonical admission
+  -> activate the verified participants and submit AgentJob to canonical admission
   -> await AgentJob terminal delivery to WorkflowRun
 ```
 
-The provisional visibility state prevents a partial launch from appearing as
-accepted Agent work. If Agent selection, deterministic readiness, Session
-creation, or Workflow acceptance fails, the Server handoff rejects the request
-before promotion; when provisional participants already exist, the coordinator
-aborts them and records the rejection under the same request identity. The
-already-claimed transport work is retired, but no accepted AgentJob,
-AgentSession, SessionInput, AgentTurn, or external Runtime work is created.
-The rejection also applies the Workflow failure/recovery boundary through
-`ApplyAgentHandoffRejectionAsync` before the terminal transport acknowledgement
-is persisted.
+The coordinator persists each phase and participant command before invoking the
+next aggregate. Handoff-ready participants have durable, mutually locatable
+identities, but remain hidden from public accepted-invocation reads, outside the
+claimable AgentJob set, outside Agent concurrency admission, and unable to
+start a Runtime until Workflow acceptance succeeds. This promotion-and-verify
+step occurs before Workflow accepts the lineage, so a failed Workflow
+acceptance can abort the complete provisional set without leaving a Running
+TaskRun pointing at missing participants. If Agent selection, deterministic
+readiness, workspace resolution, Session creation, or participant promotion
+fails, the coordinator records the original rejection and aborts any
+provisional participants under the same command fence before applying the
+Workflow failure boundary. The already-claimed transport work is retired, and
+no accepted AgentJob, AgentSession, SessionInput, AgentTurn, Agent concurrency
+permit, or external Runtime work is created.
+
+Workflow acceptance is idempotent and is attempted only from
+`participants_ready`. After it succeeds, the coordinator enters
+`activation_pending` and resumes the same activation commands after a lost
+response. Activation makes the Job claimable and submits it to canonical
+admission only after the accepted Workflow invocation and all four participant
+identities are present. If activation cannot complete, the durable coordinator
+phase remains recoverable and invokes the guarded
+`IWorkflowGrain.ApplyAgentHandoffActivationFailureAsync` operation with the
+accepted invocation and Job identities. That operation applies the existing
+Workflow failure/recovery boundary exactly once and records the stable reason;
+it cannot turn a missing participant into accepted execution or leave a Running
+TaskRun without a claimable or recoverable Job.
 
 **Alternative considered:** resolve the Agent in
 `WorkflowItemTranslator` and continue sending `mohist/opencode` or
@@ -296,10 +327,11 @@ The workflow handoff uses the same resolution seams as direct launch:
   Workspace home affinity and Runner capacity, persists the dispatch ledger,
   and is claimed by the same `DispatchService` poll path as direct AgentJobs.
 
-The Server handoff service performs the Agent resolution, readiness check, and
-workspace snapshot before it invokes `AgentLaunchCoordinatorGrain`. The
-coordinator persists those resolved facts and never re-reads mutable Agent or
-Project state while replaying the handoff.
+The Server handoff service invokes `AgentLaunchCoordinatorGrain` to persist the
+command fence before it performs the Agent resolution, readiness check, and
+workspace snapshot. It then supplies those resolved facts to the coordinator,
+which persists them and never re-reads mutable Agent or Project state while
+replaying the handoff or promoting participants.
 
 The task prompt is an input goal. It is composed with the snapshotted Agent
 Instructions by `AgentJobGrain.BuildDispatchAsync` / the AgentJob executor. The
@@ -375,11 +407,15 @@ PendingWorkflowTerminalDelivery {
 ```
 
 For a Workflow-owned AgentJob, `workflowFinalization` is required and is the
-same immutable request persisted with the AgentJob terminal report. For a direct
-AgentJob it remains null and the existing direct-Agent terminal path is
-unchanged. `AgentJobGrain` must reject a Workflow-owned terminal report that
-does not carry the complete finalization request instead of accepting a result
-that cannot be applied to Workflow.
+same immutable request persisted with the AgentJob terminal result. A
+Runner-originated terminal report carries it in the typed `/report` field. A
+server-generated terminal transition, such as bounded admission expiry or
+runner loss before a valid report, constructs the same request from the frozen
+WorkflowTaskContract and stable failure reason. For a direct AgentJob it
+remains null and the existing direct-Agent terminal path is unchanged.
+`AgentJobGrain` must reject a Workflow-owned Runner terminal report that does
+not carry the complete finalization request instead of accepting a result that
+cannot be applied to Workflow.
 
 Workflow-owned delivery has one operation:
 `IWorkflowGrain.ApplyAgentJobFinalizationAsync(PendingWorkflowTerminalDelivery)`.
@@ -454,6 +490,41 @@ workspace. After the Agent runtime returns, that adapter:
   finalization envelope. It does not call the generic Workflow variable patch
   route, send an ordinary Workflow task report, or advance WorkflowRun.
 
+The completion adapter sends that envelope to AgentJob through the existing
+AgentJob branch of the Runner report boundary, rather than creating a second
+terminal endpoint or using the generic Workflow report path:
+
+```text
+POST /api/runner/{runnerId}/report
+
+RunnerReportRequest {
+  workId
+  ownerKind = agent-job
+  agentJobId
+  status, message, output, exitCode, artifactUploadIds, error
+  workflowFinalization? = WorkflowAgentFinalizationRequest
+}
+```
+
+`workflowFinalization` is an optional append-only field on the shared C#
+`WorkResult`/`RunnerReportRequest` and TypeScript `WorkItemResult` contracts.
+The Runner sends it only for a Workflow-owned AgentJob; direct AgentJob reports
+omit it and retain their existing generic result behavior. The `/report` route
+forwards the typed value to `IAgentJobGrain.ReportResultAsync` as one report
+operation. AgentJob validates that a Workflow-owned terminal report contains
+the field, that every lineage id and `finalizerKey` matches its frozen
+`WorkflowTaskContract`, that the typed terminal status agrees with the generic
+status, and that captured outputs, `setVars`, and artifact upload ids have the
+declared JSON shapes before it commits the terminal transition. A missing or
+mismatched envelope returns a stable `invalid-workflow-finalization` rejection
+without changing the Job; a non-null envelope on a direct AgentJob is rejected
+as invalid. The first valid report returns `accepted` only after the typed
+request is durable. A duplicate with the same work identity and payload after
+terminal transition returns `stale` and re-emits the existing pending delivery;
+a different payload under the same Job/finalizer identity returns definitive
+`finalization_conflict` and never rewrites the terminal result. Transport
+timeouts and 5xx responses retry the identical JSON body.
+
 The AgentJob terminal report carries exactly one
 `WorkflowAgentFinalizationRequest` when the dispatch has a Workflow owner:
 
@@ -491,13 +562,27 @@ IWorkflowArtifactBindService.BindAgentInvocationAsync(
 ```
 
 The bind resolver verifies every upload against the immutable invocation and
-`finalizerKey`, creates the visible `WorkflowArtifact` rows for `taskRunId`, and
-removes the matching pending uploads in one idempotent transaction. It does not
-require active Workflow work or derive TaskRun identity from `workId`. The
-Server finalizer then records a `WorkflowAgentFinalizationReceipt` containing
-the request fingerprint, bound artifact ids, and variable-patch fingerprint.
-The bind result is part of the receipt, so a replay returns the existing bound
-ids without creating another artifact row or deleting unrelated pending data.
+`finalizerKey`. It owns a durable
+`WorkflowAgentArtifactBindReceipt` keyed by
+`(workflowRunId, taskRunId, jobId, finalizerKey)` whose request fingerprint
+includes the ordered upload ids and declared artifact contract. The first bind
+creates the visible `WorkflowArtifact` rows, writes the bind receipt with their
+stable ids, and removes the matching pending uploads in one database
+transaction. The receipt is written even when the upload list is empty. A
+unique constraint on the invocation key serializes concurrent first binds; a
+same-fingerprint replay returns the stored bound ids, while a conflicting
+payload returns `artifact_bind_conflict`. It does not require active Workflow
+work or derive TaskRun identity from `workId`.
+
+The Server finalizer then records a
+`WorkflowAgentFinalizationReceipt` containing the request fingerprint, the bind
+receipt key, bound artifact ids, and variable-patch fingerprint. If the process
+fails after the bind transaction commits but before this finalizer receipt is
+written, a replay reads the durable bind receipt, completes the finalizer
+receipt, and does not create another artifact row or delete unrelated pending
+data. If the bind transaction fails before commit, all artifact rows, the bind
+receipt, and pending-upload deletion roll back together and the same request is
+safe to retry.
 It applies `setVars` only through a keyed
 `WorkflowRunVariablesStore.PatchVariablesIfNewAsync(workflowRunId,
 finalizerKey, vars)` operation and applies the existing Workflow completion or
@@ -575,9 +660,11 @@ inventing a success or failure.
   Workflow assignment before AgentJob promotion. A lost handoff is retried by
   the same task identity and cannot leave two active execution owners.
 - [AgentJob, AgentSession, and WorkflowRun still do not share a transaction] ->
-  Extend the existing launch coordinator with provisional visibility, one
-  persisted command fence, and abort steps before promotion. Keep a durable
-  terminal delivery obligation on AgentJob until Workflow acknowledges it.
+  Persist the handoff command before live preflight, retain the original
+  rejection in a `rejection_pending` fence, promote and verify nonclaimable
+  participants before Workflow acceptance, and resume activation from durable
+  phases after a crash. Keep a durable terminal delivery obligation on AgentJob
+  until Workflow acknowledges it.
 - [A lost Runtime response could duplicate the prompt] -> Transition the
   original Job to `Unknown`/`recovering`, remove it from claimable work, and
   reconcile the original work and effect identities before any retry. Never
@@ -615,11 +702,12 @@ inventing a success or failure.
    `agent-handoff` dispatch shape to C# and TypeScript contracts. Preserve
    existing `mohist/opencode` and `mohist/pi` shapes.
 2. **Durable launch layer:** extend `AgentLaunchCoordinatorGrain` with the
-   Workflow request fingerprint, provisional participant commands, Workflow
-   acceptance command, and terminal result delivery. Add the AgentJob timeout,
-   Workflow contract, and terminal-delivery fields with append-only Orleans
-   serializer IDs. Add fake clock, Agent, Workspace, Runner, and Runtime
-   seams for deterministic tests.
+   preflight command fence, durable rejection outcome, handoff phase machine,
+   provisional participant commands, participant promotion/verification,
+   Workflow acceptance command, activation recovery, and terminal result
+   delivery. Add the AgentJob timeout, Workflow contract, and
+   terminal-delivery fields with append-only Orleans serializer IDs. Add fake
+   clock, Agent, Workspace, Runner, and Runtime seams for deterministic tests.
 3. **Workflow ownership handoff:** add guarded Workflow grain operations and
    update dispatch candidate/rendering logic so an accepted Agent handoff is no
    longer returned as Workflow Runner work. Keep the logical stage lock until
@@ -634,7 +722,9 @@ inventing a success or failure.
 5. **Result and read projections:** implement the durable AgentJob-to-Workflow
    terminal delivery, Workflow result application, cross-links, status mapping,
    and `WorkflowAgentInvocationRead`. Add tests for every required lifecycle,
-   replay, stale-report, and projection scenario in the issue spec.
+   preflight rejection replay after Agent recovery, participant promotion and
+   activation recovery, terminal-delivery replay, stale-report, and projection
+   scenario in the issue spec.
 6. **Documentation and cleanup:** update `design/agent-execution.md`,
    `design/agent-api.md`, `docs/actions/agent.md`, and `docs/agent-sessions.md`
    to replace the old TaskRun-only description. Remove the old translator
