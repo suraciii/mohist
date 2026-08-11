@@ -320,7 +320,7 @@ test('planTracks gives every Server Spec partition its own report, temp, and por
   assert.deepEqual(planned.map((lane) => lane.sandboxOrdinal), [0, 1, 2, 3, 4])
 })
 
-test('planTracks isolates configured duration measurements before bounded throughput fan-out', () => {
+test('planTracks isolates duration measurements and gates only Node fan-out', () => {
   const cli: TrackConfig = {
     id: 'cli', kind: 'dotnet-apphost', apphost: 'bin/cli', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
   }
@@ -336,7 +336,7 @@ test('planTracks isolates configured duration measurements before bounded throug
   const spec: TrackConfig = {
     id: 'server-spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 1000, enforce: false,
   }
-  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-unit', 'runner'])
+  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-unit'], 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
@@ -346,10 +346,10 @@ test('planTracks isolates configured duration measurements before bounded throug
   assert.deepEqual(byId.get('runner')?.dependsOn, ['server-unit'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
-  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['runner'])
-  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'runner'])
+  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['server-unit'])
+  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'server-unit'])
 
-  const focused = planTracks([unit], '/evidence', ['cli', 'server-unit', 'runner'])
+  const focused = planTracks([unit], '/evidence', ['cli', 'server-unit'], 'runner')
   assert.deepEqual(focused[0].lane.dependsOn, undefined)
   assert.ok(!focused[0].lane.resources?.includes('duration-measurement'))
 })

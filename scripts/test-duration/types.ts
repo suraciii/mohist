@@ -65,6 +65,7 @@ export interface CanonicalGateConfig {
   readonly maxConcurrentLanes: number
   readonly resourceLimits: Readonly<Record<string, number>>
   readonly durationMeasurementTracks?: readonly string[]
+  readonly durationIsolationTrack?: string
 }
 
 export interface OutcomeCounts {

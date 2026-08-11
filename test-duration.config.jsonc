@@ -32,10 +32,11 @@
       "server-spec": 3,
       "duration-measurement": 1
     },
-    // These duration-sensitive tracks run as a short ordered prefix. Every
-    // other test lane starts after their samples are complete, then resumes
-    // the normal bounded throughput schedule.
-    "durationMeasurementTracks": ["cli", "server-unit", "runner"]
+    // These duration-sensitive .NET tracks run as a short ordered prefix.
+    // Runner then gates only the remaining Node lanes while .NET fan-out stays
+    // bounded and concurrent.
+    "durationMeasurementTracks": ["cli", "server-unit"],
+    "durationIsolationTrack": "runner"
   },
   "tracks": [
     { "id": "mohist-slack", "kind": "vitest", "run": ["npm","run","test:duration","-w","packages/mohist-slack","--","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
