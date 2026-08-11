@@ -5,6 +5,7 @@ import type { FollowupTargetResolution } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
 import { capturedLogs, onCapturedLog } from "./support/logger-test.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+import { createTestTempDirSync } from "./support/temp-dir.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
@@ -51,6 +52,7 @@ const {
 
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
 let capturedFollowupTargetResolver: ((target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>) | null = null
+let runnerRoot: string
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -99,6 +101,7 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  runnerRoot = createTestTempDirSync("mohist-runner-host-lifecycle-")
   installReadyRuntimeFactory()
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
@@ -147,7 +150,7 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -210,7 +213,7 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -251,7 +254,7 @@ describe("RunnerHost", () => {
       uses: "test/block",
       ownerKind: "agent-job",
       agentJobId: `job-${id}`,
-      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+      variables: { workspace: { path: runnerRoot } },
     })
     let pollIndex = 0
     poll.mockImplementation(async () => {
@@ -267,7 +270,7 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -318,7 +321,7 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -378,7 +381,7 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -419,7 +422,7 @@ describe("RunnerHost", () => {
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -480,7 +483,7 @@ describe("RunnerHost", () => {
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -520,7 +523,7 @@ describe("RunnerHost", () => {
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -550,7 +553,7 @@ describe("RunnerHost", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -582,7 +585,7 @@ describe("RunnerHost", () => {
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -604,7 +607,7 @@ describe("RunnerHost", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -631,7 +634,7 @@ describe("RunnerHost", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -656,7 +659,7 @@ describe("RunnerHost", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -681,7 +684,7 @@ describe("RunnerHost", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -702,7 +705,7 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       projectId: "runner-project",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,

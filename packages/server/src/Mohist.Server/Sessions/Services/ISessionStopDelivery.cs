@@ -1,5 +1,6 @@
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions.Services;
 
@@ -18,7 +19,41 @@ public sealed record SessionStopDeliveryRequest(
 
 public interface ISessionStopDelivery
 {
-    Task<RunnerStopReply?> DispatchAsync(
+    Task<SessionStopDeliveryResponse> DispatchAsync(
         SessionStopDeliveryRequest request,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Interprets the runner's stable stop reply vocabulary before either the API
+/// or the recovery reminder updates the owning session.
+/// </summary>
+public static class SessionStopDeliveryArbitration
+{
+    public static SessionStopDeliveryResult Interpret(SessionStopDeliveryResponse response)
+    {
+        var disposition = response.Reply?.State?.ToLowerInvariant() switch
+        {
+            "stopped" => AgentSessionStopDisposition.Stopped,
+            "unknown" => AgentSessionStopDisposition.Unknown,
+            "not-cancellable" => AgentSessionStopDisposition.NotCancellable,
+            "ended" => AgentSessionStopDisposition.Ended,
+            null => AgentSessionStopDisposition.Unavailable,
+            _ => AgentSessionStopDisposition.StopRequested,
+        };
+
+        return new SessionStopDeliveryResult(
+            disposition,
+            response.Reply?.InterruptUnconfirmed,
+            response.DispatchStarted);
+    }
+}
+
+public sealed record SessionStopDeliveryResponse(
+    RunnerStopReply? Reply,
+    bool DispatchStarted);
+
+public sealed record SessionStopDeliveryResult(
+    AgentSessionStopDisposition Disposition,
+    bool? InterruptUnconfirmed,
+    bool DispatchStarted);

@@ -1,7 +1,7 @@
 # Aggregate Coordination
 
 Participants are `Issue` and `Epic` from the Issue context, `WorkflowRun` from the Workflow
-context, and `Runner` and `Session`.
+context, and `AgentJob`, `Runner` and `Session`.
 
 In the diagrams, `->` denotes a synchronous command and `[Event]` denotes an asynchronous reaction
 triggered by a durable handler after commit. Each solid command enters exactly one target aggregate
@@ -165,11 +165,27 @@ If the command result is lost after the Session settlement committed, replaying 
 operation re-issues the same abandon; the WorkflowRun command is idempotent on its frozen
 `(runnerId, workId)`.
 
+## Session and AgentJob Propagate One Way per Call Stack
+
+```text diagram
+Session -> MarkUnknown -> AgentJob        (stop of the launch Turn unconfirmed)
+AgentJob --[job state fact]--> Session    (initial Turn settles asynchronously)
+```
+
+When the Session's stop recovery cannot confirm the stop of a launch Turn, Session synchronously
+marks the owning AgentJob unknown — one direction. AgentJob never calls Session back synchronously
+from that command: its initial-Turn propagation reaches Session through a durable job-state fact
+plus the existing asynchronous channel (an event handler or Session's own recovery pass), replayed
+under the same identity until acknowledged. No call stack holds a grain while that grain is called
+back; a propagation that would close a synchronous cycle always takes the asynchronous leg.
+
 ## Other Interactions
 
 ```text diagram
 Issue -> Cancel -> WorkflowRun
 Session -> AbandonActiveWork -> WorkflowRun
+Session -> MarkUnknown -> AgentJob
+AgentJob --[job state fact]--> Session (settles the initial Turn asynchronously)
 Runner --[RunnerDisconnected]--> Session (fails affected sessions)
 
 WorkflowRun: Pause, Resume, Approve, Reject, Retry, Rerun

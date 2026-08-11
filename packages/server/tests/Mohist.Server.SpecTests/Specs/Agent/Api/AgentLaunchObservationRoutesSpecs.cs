@@ -170,6 +170,8 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var terminal = await jobGrain.GetTerminalResultAsync();
             Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
 
+            await jobGrain.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
             var observation = await ReadObservationAsync(projectId, jobId);
             Assert.NotNull(observation);
              var obs = observation!.Value.GetProperty("data");

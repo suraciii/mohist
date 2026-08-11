@@ -1,14 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -25,8 +23,7 @@ public sealed class SlackTurnControlService : IScopedService
     private readonly IGrainFactory _grains;
     private readonly AgentSessionQuerier _sessions;
     private readonly SlackProviderInboxStore _inbox;
-    private readonly IHubContext<RunnerHub> _runnerHub;
-    private readonly RunnerConnectionTracker _runnerConnections;
+    private readonly ISessionStopDelivery _stopDelivery;
     private readonly TimeProvider _time;
 
     public SlackTurnControlService(
@@ -34,16 +31,14 @@ public sealed class SlackTurnControlService : IScopedService
         IGrainFactory grains,
         AgentSessionQuerier sessions,
         SlackProviderInboxStore inbox,
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker runnerConnections,
+        ISessionStopDelivery stopDelivery,
         TimeProvider time)
     {
         _secrets = secrets;
         _grains = grains;
         _sessions = sessions;
         _inbox = inbox;
-        _runnerHub = runnerHub;
-        _runnerConnections = runnerConnections;
+        _stopDelivery = stopDelivery;
         _time = time;
     }
 
@@ -165,8 +160,7 @@ public sealed class SlackTurnControlService : IScopedService
         var control = await AgentSessionStopOperations.StopAsync(
             projectId,
             _grains,
-            _runnerHub,
-            _runnerConnections,
+            _stopDelivery,
             target,
             payload.TurnId,
             ct);
@@ -179,6 +173,7 @@ public sealed class SlackTurnControlService : IScopedService
             TurnControlResultKind.Unknown => Confirmed("unknown", "The runtime could not confirm whether work stopped."),
             TurnControlResultKind.NotCancellable => Confirmed("not_cancellable", "The runtime cannot stop this work."),
             TurnControlResultKind.RunnerUnavailable => Confirmed("runner_unavailable", "The runtime is unavailable; Stop was not confirmed."),
+            TurnControlResultKind.Blocked => Confirmed("blocked", "Stop recovery deadline was exhausted."),
             _ => Rejected("stale_action", "That Turn is no longer executing."),
         };
     }
