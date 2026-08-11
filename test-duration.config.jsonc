@@ -20,12 +20,29 @@
   // Allowlist entries are real >cap exact identities (no class/glob exemptions).
   "suiteDeadlineMs": 300000,
   "killGraceMs": 5000,
+  // The local canonical gate does not open every test process at once. The
+  // four-lane host cap matches the active Spec runner bound; resource caps
+  // reserve capacity for a Node lane while bounded .NET work is active.
+  "canonical": {
+    "maxConcurrentLanes": 4,
+    "resourceLimits": {
+      "host": 4,
+      "dotnet": 3,
+      "node": 2,
+      "server-spec": 3,
+      "duration-measurement": 1
+    },
+    // These duration-sensitive tracks run as a short ordered prefix. Every
+    // other test lane starts after their samples are complete, then resumes
+    // the normal bounded throughput schedule.
+    "durationMeasurementTracks": ["cli", "server-unit"]
+  },
   "tracks": [
-    { "id": "mohist-slack", "kind": "vitest", "run": ["npm","run","test:run","-w","packages/mohist-slack","--","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
+    { "id": "mohist-slack", "kind": "vitest", "run": ["npm","run","test:duration","-w","packages/mohist-slack","--","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
-    { "id": "runner", "kind": "vitest", "run": ["npm","run","test:run","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
+    { "id": "runner", "kind": "vitest", "run": ["npm","run","test:duration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [
           { "id": "RunnerHost idle-system cleanup FetchesConfigOnEachCleanupTick_AndRunsEviction_WhenPollStays204", "observedMs": 1041.8, "reason": "cleanup tick runs eviction against a poll-stays-204 path; optimize or move behind a fake clock signal", "owner": "runner", "deadline": "2026-09-30" }
           ] }
@@ -40,7 +57,7 @@
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
-    { "id": "web", "kind": "vitest", "run": ["npm","run","test:run","-w","packages/web","--","--reporter=json","--outputFile={report}"], "report": "reports/web.json", "reportFormat": "vitest", "deadlineMs": 180000, "enforce": false, "status": "baseline-pending", "reason": "large suite; ratchet pending a baseline capture run"
+    { "id": "web", "kind": "vitest", "run": ["npm","run","test:duration","-w","packages/web","--","--reporter=json","--outputFile={report}"], "report": "reports/web.json", "reportFormat": "vitest", "deadlineMs": 180000, "enforce": false, "status": "baseline-pending", "reason": "large suite; ratchet pending a baseline capture run"
     },
     { "id": "server-unit", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [
@@ -63,7 +80,7 @@
           ] }
       ]
     },
-    { "id": "server-spec", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    { "id": "server-spec", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "report": "reports/server-spec/partition-{partition}.trx", "reportFormat": "trx", "partitions": 4, "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [
           { "id": "Mohist.Server.SpecTests.Specs.Workspace.WebConversationWorkspaceSpecs.WebConversation_Followup_ReusesSameSessionAndWorkspace", "observedMs": 12723.6, "reason": "launch POST intermittently absorbs 2-12s full-suite parallel-load stalls (silo scheduler backlog; same stalls hit other spec tests at load peaks, e.g. migrations); p95 unaffected", "owner": "slack", "deadline": "2026-10-31" },
           { "id": "Mohist.Server.SpecTests.Specs.Agent.Api.AgentSessionLaunchRoutesSpecs.Launch_ResolvesAgent_ComposesSnapshot_MintsSession_Returns201_WithIdentityAndStatus", "observedMs": 1897.1, "reason": "provisioner round-trip per ingress (post #330); load-sensitive under parallel specs; launch POST intermittently absorbs 4-5s full-suite parallel-load stalls (silo scheduler backlog; observed 5.09s over the 5s cap in 1/12 runs); p95 unaffected", "owner": "ws330", "deadline": "2026-10-31" }
@@ -81,7 +98,7 @@
           ] }
       ]
     },
-    { "id": "runner-integration", "kind": "vitest", "run": ["npm","run","test:integration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner-integration.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": false, "status": "baseline-pending", "reason": "integration track; ratchet pending a baseline capture run"
+    { "id": "runner-integration", "kind": "vitest", "run": ["npm","run","test:duration:integration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner-integration.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": false, "status": "baseline-pending", "reason": "integration track; ratchet pending a baseline capture run"
     }
   ]
 }

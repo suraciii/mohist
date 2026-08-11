@@ -75,6 +75,78 @@ test('validateConfig rejects enforce=true without rules', () => {
   assert.ok(errors.some((e) => e.includes('requires at least one rule')))
 })
 
+test('validateConfig fails closed when an unenforced track is not explicitly baseline-pending', () => {
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        { id: 'silent', kind: 'report-only', report: 'r', reportFormat: 'trx', deadlineMs: 100, enforce: false },
+        {
+          id: 'rules-ignored', kind: 'report-only', report: 's', reportFormat: 'trx', deadlineMs: 100,
+          enforce: false, status: 'baseline-pending', reason: 'capture a baseline',
+          rules: [{ id: 'unit', absoluteMs: 500 }],
+        },
+      ],
+    }),
+  )
+
+  const errors = validateConfig(config)
+
+  assert.ok(errors.some((error) => error.includes('track "silent": enforce=false requires status baseline-pending')))
+  assert.ok(errors.some((error) => error.includes('track "silent": enforce=false requires a non-empty baseline-pending reason')))
+  assert.ok(errors.some((error) => error.includes('track "rules-ignored": enforce=false must not carry unenforced rules')))
+})
+
+test('validateConfig accepts canonical resource limits and partitioned apphost tracks', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    canonical: { maxConcurrentLanes: 4, resourceLimits: { host: 4, dotnet: 3 } },
+    tracks: [{
+      id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx',
+      reportFormat: 'trx', partitions: 4, deadlineMs: 100, enforce: true,
+      rules: [{ id: 'spec', absoluteMs: 5000 }],
+    }],
+  }))
+  assert.deepEqual(validateConfig(config), [])
+})
+
+test('validateConfig requires a valid non-partitioned duration-measurement phase', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    canonical: {
+      maxConcurrentLanes: 4,
+      resourceLimits: { host: 4 },
+      durationMeasurementTracks: ['unit', 'unit', 'missing', 'spec'],
+    },
+    tracks: [
+      { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
+      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 100, enforce: false },
+    ],
+  }))
+  const errors = validateConfig(config)
+  assert.ok(errors.some((error) => error.includes('requires canonical.resourceLimits.duration-measurement')))
+  assert.ok(errors.some((error) => error.includes('duplicate track id: unit')))
+  assert.ok(errors.some((error) => error.includes('unknown track: missing')))
+  assert.ok(errors.some((error) => error.includes('cannot include partitioned track: spec')))
+})
+
+test('validateConfig rejects invalid canonical limits and non-apphost partitioning', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    canonical: { maxConcurrentLanes: 0, resourceLimits: { host: 0 } },
+    tracks: [{
+      id: 'spec', kind: 'vitest', run: ['npm', 'test'], report: 'reports/spec.json', reportFormat: 'vitest',
+      partitions: 1, deadlineMs: 100, enforce: false,
+    }],
+  }))
+  const errors = validateConfig(config)
+  assert.ok(errors.some((error) => error.includes('canonical.maxConcurrentLanes')))
+  assert.ok(errors.some((error) => error.includes('canonical.resourceLimits.host')))
+  assert.ok(errors.some((error) => error.includes('partitions must be an integer greater than one')))
+  assert.ok(errors.some((error) => error.includes('partitions require kind dotnet-apphost')))
+  assert.ok(errors.some((error) => error.includes('partitioned reports must include {partition}')))
+})
+
 test('validateConfig requires the last rule to be the default catch-all', () => {
   const config = parseSuiteConfig(
     JSON.stringify({

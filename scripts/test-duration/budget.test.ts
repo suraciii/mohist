@@ -134,7 +134,7 @@ test('evaluateTrack: enforce=true fails on a parseable but empty report (0 cases
   assert.equal(evaluation.rules[0].total, 0)
 })
 
-test('evaluateTrack: enforce=false baseline track stays green on empty report (deadline-governed only)', () => {
+test('evaluateTrack: baseline-pending still requires a nonzero total', () => {
   const track: TrackConfig = {
     id: 'pending',
     kind: 'report-only',
@@ -145,8 +145,29 @@ test('evaluateTrack: enforce=false baseline track stays green on empty report (d
     status: 'baseline-pending',
   }
   const evaluation = evaluateTrack(track, [], TODAY)
-  assert.equal(evaluation.passed, true)
+  assert.equal(evaluation.passed, false)
   assert.equal(evaluation.total, 0)
+})
+
+test('evaluateTrack fails every skipped, not-run, and unknown outcome', () => {
+  const track: TrackConfig = {
+    id: 'enforced',
+    kind: 'report-only',
+    report: 'x',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: true,
+    rules: [{ id: 'unit', absoluteMs: 50 }],
+  }
+  const evaluation = evaluateTrack(track, [
+    case_('skipped', 0, 'skipped'),
+    case_('not-run', 0, 'not-run'),
+    case_('other', 0, 'other'),
+  ], TODAY)
+  assert.equal(evaluation.passed, false)
+  assert.deepEqual(evaluation.outcomes, {
+    total: 3, passed: 0, failed: 0, errors: 0, skipped: 1, notRun: 1, other: 1,
+  })
 })
 
 test('model: a spec test at 600ms passes the spec rule (5s cap) but violates the unit rule (500ms cap)', () => {
