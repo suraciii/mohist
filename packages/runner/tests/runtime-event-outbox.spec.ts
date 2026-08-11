@@ -235,6 +235,49 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
     expect(second.outbox.snapshot().map((r) => r.id)).toEqual(["evt_a"])
   })
 
+  it("restart replays the same pending Workflow input until the Server returns its turn receipt", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const record = inputRecord({
+      id: "delivery-1",
+      runtime: "opencode",
+      work: {
+        workId: "work-1",
+        taskRunId: "task-1.1",
+        workType: "task",
+        stage: "plan",
+        inputDeliveryId: "delivery-1",
+        agentTurnId: null,
+      },
+    })
+    const first = makeOutbox({
+      fileSystem,
+      deliver: { async send() { throw new Error("server unavailable") } },
+    })
+    await first.outbox.load()
+    await first.outbox.enqueueBeforeExecution(record)
+    await flushMicrotasks()
+    expect(first.outbox.snapshot().map((entry) => entry.id)).toEqual(["delivery-1"])
+    await first.outbox.stop()
+
+    const second = makeOutbox({
+      fileSystem,
+      deliver: {
+        async send(entry) {
+          return [{ type: "session.input", inputDeliveryId: entry.id, agentTurnId: "turn-1" }]
+        },
+      },
+    })
+    await second.outbox.load()
+    const awaitReceipt = second.outbox.awaitInputReceipt
+    if (!awaitReceipt) throw new Error("outbox must support Workflow input receipts")
+
+    await expect(awaitReceipt.call(second.outbox, "delivery-1")).resolves.toMatchObject({
+      inputDeliveryId: "delivery-1",
+      agentTurnId: "turn-1",
+    })
+    expect(second.outbox.snapshot()).toEqual([])
+  })
+
   it("serialization refuses malformed snapshot JSON and never replaces it with empty state", async () => {
     const fileSystem = new RecordingFileSystem()
     fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, "{ not json")
@@ -247,6 +290,68 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
 })
 
 describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
+  it("resolves a Workflow input only for its matching delivery receipt and durable Agent turn", async () => {
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send(record) {
+          return [{ type: record.event.type, inputDeliveryId: record.id, agentTurnId: "turn-1" }]
+        },
+      },
+    })
+    await outbox.load()
+    const awaitReceipt = outbox.awaitInputReceipt
+    if (!awaitReceipt) throw new Error("outbox must support Workflow input receipts")
+    const record = inputRecord({
+      id: "delivery-1",
+      runtime: "opencode",
+      work: {
+        workId: "work-1",
+        taskRunId: "task-1.1",
+        workType: "task",
+        stage: "plan",
+        inputDeliveryId: "delivery-1",
+        agentTurnId: null,
+      },
+    })
+
+    await outbox.enqueueBeforeExecution(record)
+
+    await expect(awaitReceipt.call(outbox, "delivery-1")).resolves.toEqual({
+      type: "session.input",
+      inputDeliveryId: "delivery-1",
+      agentTurnId: "turn-1",
+    })
+    expect(outbox.snapshot()).toEqual([])
+  })
+
+  it("retains a Workflow input when the receipt does not prove its frozen turn", async () => {
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send(record) {
+          return [{ type: record.event.type, inputDeliveryId: "other-delivery", agentTurnId: "turn-1" }]
+        },
+      },
+    })
+    await outbox.load()
+    const awaitReceipt = outbox.awaitInputReceipt
+    if (!awaitReceipt) throw new Error("outbox must support Workflow input receipts")
+    await outbox.enqueueBeforeExecution(inputRecord({
+      id: "delivery-1",
+      runtime: "opencode",
+      work: {
+        workId: "work-1",
+        taskRunId: "task-1.1",
+        workType: "task",
+        stage: "plan",
+        inputDeliveryId: "delivery-1",
+        agentTurnId: null,
+      },
+    }))
+
+    await expect(awaitReceipt.call(outbox, "delivery-1")).rejects.toThrow(/matching Server receipt/)
+    expect(outbox.snapshot().map((record) => record.id)).toEqual(["delivery-1"])
+  })
+
   it("matching-receipt removes the head only when the response carries the submitted type", async () => {
     let responses: AgentSessionRuntimeEventReceipt[][] = [[], [{ type: "session.input" }]]
     const { outbox } = makeOutbox({

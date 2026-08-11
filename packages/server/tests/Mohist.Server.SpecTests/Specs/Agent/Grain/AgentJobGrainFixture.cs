@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -151,6 +152,10 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
             lock (_gate)
                 _requests.Clear();
         }
+
+        public Task<bool> BindAgentExecutionAsync(
+            SessionWorkflowExecutionBinding binding,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
 
         public Task AbandonActiveWorkAsync(
             SessionWorkflowWorkBinding binding,

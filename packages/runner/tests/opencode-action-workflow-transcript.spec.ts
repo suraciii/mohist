@@ -201,6 +201,7 @@ function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventOutbox {
     load: async () => {},
     recover: async () => {},
     async enqueueBeforeExecution() {},
+    async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` } },
     async enqueueProducedFact() { throw new Error("disk full (produced)") },
     async enqueueProducedFactBatch() { throw new Error("disk full (produced)") },
     kick: async () => {},
@@ -362,6 +363,28 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     }
   })
 
+  it("rejected Server input receipt returns execution-unavailable and never invokes OpenCodeRuntime.runTurn", async () => {
+    const { runtime, client } = buildRuntime()
+    await ensureReady(runtime)
+    const handles = makeRecordingOutbox()
+    handles.setInputAccepted(false)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
+    })
+
+    try {
+      const result = await callAction(opencodeAction, context)
+      expect(result.error?.code).toBe("execution-unavailable")
+      expect(client.sessionPrompt).not.toHaveBeenCalled()
+      expect(handles.eventsByType("session.input")).toHaveLength(1)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it("does not replace a successful Action result when a projected event enqueue fails after input accepted", async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
@@ -382,6 +405,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       async enqueueBeforeExecution(record) {
         handles.records.push(record as RuntimeEventRecord)
       },
+      async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` } },
       async enqueueProducedFact() {
         if (firstCall) {
           firstCall = false
@@ -489,6 +513,9 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
         if (failEnqueueBeforeExecution) throw new Error("input snapshot failed")
         records.push(record as RuntimeEventRecord)
       },
+      async awaitInputReceipt(recordId) {
+        return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` }
+      },
       async enqueueProducedFact(record) {
         producedFactSingleCalls.push(record as RuntimeEventRecord)
         producedFactCalls.push(record as RuntimeEventRecord)
@@ -516,7 +543,8 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
       projectId: "proj-1",
       workflowRunId: "wf-1",
       sessionName: "plan",
-      workMetadata: { workId: "work-1", workType: "task", stage: "plan" },
+      workMetadata: { workId: "work-1", taskRunId: "task-1.1", workType: "task", stage: "plan" },
+      runtime: "opencode",
       randomId: (() => {
         let counter = 0
         return () => `id_${++counter}`
@@ -564,6 +592,31 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     } finally {
       errorSpy.mockRestore()
     }
+  })
+
+  it("stamps every later runtime event with the acknowledged Workflow turn", async () => {
+    const { reporter, beforeExecutionCalls, producedFactCalls } = buildReporter()
+
+    await reporter.awaitInput("p", "ses_1")
+    reporter.registerEvent({ type: "tool_call.started", runtimeSessionId: "ses_1", workDir: "/w", payload: { tool: "test" } })
+    await reporter.settle()
+
+    const input = beforeExecutionCalls[0]
+    const fact = producedFactCalls[0]
+    if (!input || !fact) throw new Error("expected input and produced runtime event")
+    expect(input.event.type).toBe("session.input")
+    expect(fact.event.type).toBe("tool_call.started")
+    expect(input.work).toMatchObject({
+      taskRunId: "task-1.1",
+      inputDeliveryId: input.id,
+      agentTurnId: null,
+    })
+    expect(fact.work).toMatchObject({
+      taskRunId: "task-1.1",
+      inputDeliveryId: input.id,
+      agentTurnId: `turn-${input.id}`,
+    })
+    expect(fact.event.payload).toMatchObject({ turnId: `turn-${input.id}` })
   })
 
   it("buffers streaming deltas and flushes them as one batch before the close fact", async () => {

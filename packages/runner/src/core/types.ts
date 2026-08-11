@@ -102,6 +102,7 @@ export interface AgentSessionStartup {
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
+  taskRunId?: string | null
   uses?: string | null
   with?: string | null
   /**
@@ -194,6 +195,7 @@ export interface RunnerConfigResponse {
 export interface DispatchWorkItem {
   workflowRunId: string
   workId: string
+  taskRunId?: string | null
   workType: string
   stage?: string | null
   title?: string | null

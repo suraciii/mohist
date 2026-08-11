@@ -588,6 +588,8 @@ export interface WorkflowAgentSession {
 
 export interface AgentSessionRuntimeEventReceipt {
   type: string
+  inputDeliveryId?: string
+  agentTurnId?: string
 }
 
 export interface AgentInputAttachmentContent {
@@ -600,6 +602,8 @@ export interface AgentSessionRuntimeEventAcceptance {
   id?: string
   type?: string
   sequence?: number
+  inputDeliveryId?: string
+  agentTurnId?: string
 }
 
 export type AgentSession = WorkflowAgentSession
@@ -608,6 +612,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
   const work: DispatchWorkItem = {
     workflowRunId: dispatch.workflowRunId,
     workId: dispatch.workId,
+    taskRunId: dispatch.taskRunId ?? undefined,
     workType: dispatch.workType,
     stage: dispatch.stage,
     title: dispatch.title,

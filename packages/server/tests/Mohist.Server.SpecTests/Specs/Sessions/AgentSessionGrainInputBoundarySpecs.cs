@@ -83,6 +83,61 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
         Assert.Equal("second-answer", secondFlush.Parts[0].TextDelta);
         Assert.DoesNotContain(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
     }
+
+    [Fact]
+    public async Task AcceptWorkflowInput_ReplayReusesTheFrozenTurnBindingAndRejectsMismatchedRuntimeEvents()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var command = new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-1",
+            "implement the task",
+            "workflow-1",
+            "task-1.1",
+            "work-1",
+            "runner-1",
+            "opencode",
+            "runtime-1",
+            "{\"text\":\"implement the task\"}");
+
+        var first = await grain.AcceptWorkflowInputAsync(command);
+        var replay = await grain.AcceptWorkflowInputAsync(command);
+
+        Assert.Equal(first, replay);
+        Assert.Equal("delivery-1", first.InputDeliveryId);
+        Assert.NotEmpty(first.AgentTurnId);
+        var binding = Assert.Single(Fixture.SessionWork.ExecutionBindings.Distinct());
+        Assert.Equal(first.AgentTurnId, binding.AgentTurnId);
+        Assert.Equal("task-1.1", binding.TaskRunId);
+        Assert.Equal("work-1", binding.WorkId);
+        Assert.Equal("runner-1", binding.RunnerId);
+
+        var session = Assert.IsType<Mohist.Server.Sessions.Domain.AgentSession>(Fixture.StateStore.State);
+        var turn = Assert.Single(session.Status.Turns!);
+        Assert.Equal(binding, turn.WorkflowExecution);
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new("message.delta", "{\"text\":\"working\"}"),
+            },
+            "runtime-1",
+            binding));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"wrong\"}"),
+                },
+                "runtime-1",
+                binding with { TaskRunId = "task-2.1" })));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"missing\"}"),
+                },
+                "runtime-1")));
+    }
 }
 
 public class AgentSessionGrainInputBoundaryPersistFailureSpecs : AgentSessionGrainInputBoundarySpecsBase

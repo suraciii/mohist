@@ -1,3 +1,5 @@
+using Mohist.Server.Sessions.Domain;
+
 namespace Mohist.Server.Sessions.Services;
 
 public sealed record SessionWorkflowWorkBinding(
@@ -7,6 +9,10 @@ public sealed record SessionWorkflowWorkBinding(
 
 public interface ISessionWorkPort
 {
+    Task<bool> BindAgentExecutionAsync(
+        SessionWorkflowExecutionBinding binding,
+        CancellationToken cancellationToken = default);
+
     Task AbandonActiveWorkAsync(
         SessionWorkflowWorkBinding binding,
         string reason,

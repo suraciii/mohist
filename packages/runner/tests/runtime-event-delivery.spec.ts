@@ -82,6 +82,10 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
       workId: null,
       workType: null,
       stage: null,
+      taskRunId: null,
+      inputDeliveryId: null,
+      agentTurnId: null,
+      runtime: null,
       runtimeSessionId: "runtime-1",
       runtimeEvents: [{ type: "session.activity", payload: { activity: "idle" } }],
     })

@@ -1719,14 +1719,172 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             wasCompacted);
     }
 
-    public Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command) =>
-        AppendEventsAsync(command.RuntimeEvents, command.RuntimeSessionId, requireCurrentRuntimeBinding: true);
+    public async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(
+        AppendAgentSessionRuntimeEventsCommand command)
+    {
+        var session = await GetRequiredAsync();
+        var hasWorkflowTurnForRuntime = (session.Status.Turns ?? []).Any(turn =>
+            turn.WorkflowExecution is { } binding
+            && string.Equals(binding.RuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal));
+        if (hasWorkflowTurnForRuntime)
+        {
+            if (command.WorkflowExecution is null)
+                throw new InvalidOperationException("Workflow runtime events require the acknowledged Agent turn binding.");
+            ValidateWorkflowRuntimeEventBinding(session, command.WorkflowExecution);
+        }
+        else if (command.WorkflowExecution is not null)
+        {
+            ValidateWorkflowRuntimeEventBinding(session, command.WorkflowExecution);
+        }
+
+        return await AppendEventsAsync(command.RuntimeEvents, command.RuntimeSessionId, requireCurrentRuntimeBinding: true);
+    }
+
+    public async Task<WorkflowAgentSessionInputReceipt> AcceptWorkflowInputAsync(
+        AcceptWorkflowAgentSessionInputCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.InputDeliveryId)
+            || string.IsNullOrWhiteSpace(command.Prompt)
+            || string.IsNullOrWhiteSpace(command.WorkflowRunId)
+            || string.IsNullOrWhiteSpace(command.TaskRunId)
+            || string.IsNullOrWhiteSpace(command.WorkId)
+            || string.IsNullOrWhiteSpace(command.RunnerId)
+            || string.IsNullOrWhiteSpace(command.Runtime)
+            || string.IsNullOrWhiteSpace(command.RuntimeSessionId))
+        {
+            throw new ArgumentException("Workflow input requires a complete execution identity.", nameof(command));
+        }
+
+        var session = await GetRequiredAsync();
+        ValidateWorkflowInputTarget(session, command);
+
+        var existingInput = (session.Status.Inputs ?? []).SingleOrDefault(input =>
+            string.Equals(input.Id, command.InputDeliveryId, StringComparison.Ordinal));
+        var existingTurn = (session.Status.Turns ?? []).SingleOrDefault(turn =>
+            turn.InputIds.Contains(command.InputDeliveryId, StringComparer.Ordinal));
+
+        SessionWorkflowExecutionBinding binding;
+        if (existingInput is not null || existingTurn is not null)
+        {
+            if (existingInput is null || existingTurn?.WorkflowExecution is null
+                || !string.Equals(existingInput.Text, command.Prompt, StringComparison.Ordinal)
+                || !string.Equals(existingInput.Source, "workflow", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Workflow input delivery '{command.InputDeliveryId}' conflicts with persisted AgentSession state.");
+            }
+            binding = existingTurn.WorkflowExecution;
+            var expected = binding with { AgentTurnId = existingTurn.Id };
+            if (!Equals(binding, expected)
+                || !WorkflowInputBindingMatches(binding, command, SessionId))
+            {
+                throw new InvalidOperationException(
+                    $"Workflow input delivery '{command.InputDeliveryId}' conflicts with the frozen execution binding.");
+            }
+        }
+        else
+        {
+            var turnId = $"turn_{Guid.NewGuid():N}";
+            binding = new SessionWorkflowExecutionBinding(
+                command.InputDeliveryId,
+                command.WorkflowRunId,
+                command.TaskRunId,
+                command.WorkId,
+                command.RunnerId,
+                SessionId,
+                turnId,
+                command.Runtime,
+                command.RuntimeSessionId);
+
+            _ = session.RecordFollowupTurn(
+                command.InputDeliveryId,
+                turnId,
+                command.Prompt,
+                "workflow",
+                Now());
+            var turns = (session.Status.Turns ?? []).ToList();
+            var turnIndex = turns.FindIndex(turn => string.Equals(turn.Id, turnId, StringComparison.Ordinal));
+            if (turnIndex < 0)
+                throw new InvalidOperationException("Workflow input did not create an Agent turn.");
+            turns[turnIndex] = turns[turnIndex] with { WorkflowExecution = binding };
+            session.Status = session.Status with { Turns = turns };
+            _session = session;
+
+            // The binding is the recovery source of truth. Persist it before
+            // transcript projection or the cross-grain Workflow call.
+            await _stateStore.SaveAsync(SessionId, session);
+
+            var entries = await AppendEventsAsync(
+                [new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, command.PayloadJson)],
+                command.RuntimeSessionId,
+                requireCurrentRuntimeBinding: true);
+            if (entries.Count != 1)
+                throw new InvalidOperationException("Workflow input was not accepted by the AgentSession transcript.");
+            _ = await FlushAsync(CancellationToken.None);
+        }
+
+        if (_sessionWorkPort is null)
+            throw new InvalidOperationException("Workflow input binding port is unavailable.");
+
+        var accepted = await _sessionWorkPort.BindAgentExecutionAsync(binding);
+        return new WorkflowAgentSessionInputReceipt(
+            command.InputDeliveryId,
+            binding.AgentTurnId,
+            accepted);
+    }
 
     public Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command)
     {
         if (command.RuntimeEvents.Any(e => !string.Equals(e.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)))
             throw new InvalidOperationException("System AgentSession events are limited to session.activity.");
         return AppendEventsAsync(command.RuntimeEvents, null, requireCurrentRuntimeBinding: false);
+    }
+
+    private static bool WorkflowInputBindingMatches(
+        SessionWorkflowExecutionBinding binding,
+        AcceptWorkflowAgentSessionInputCommand command,
+        string sessionId) =>
+        string.Equals(binding.InputDeliveryId, command.InputDeliveryId, StringComparison.Ordinal)
+        && string.Equals(binding.WorkflowRunId, command.WorkflowRunId, StringComparison.Ordinal)
+        && string.Equals(binding.TaskRunId, command.TaskRunId, StringComparison.Ordinal)
+        && string.Equals(binding.WorkId, command.WorkId, StringComparison.Ordinal)
+        && string.Equals(binding.RunnerId, command.RunnerId, StringComparison.Ordinal)
+        && string.Equals(binding.AgentSessionId, sessionId, StringComparison.Ordinal)
+        && string.Equals(binding.Runtime, command.Runtime, StringComparison.Ordinal)
+        && string.Equals(binding.RuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal);
+
+    private static void ValidateWorkflowRuntimeEventBinding(
+        AgentSession session,
+        SessionWorkflowExecutionBinding binding)
+    {
+        var turn = (session.Status.Turns ?? []).SingleOrDefault(turn =>
+            string.Equals(turn.Id, binding.AgentTurnId, StringComparison.Ordinal));
+        if (turn?.WorkflowExecution is null
+            || !Equals(turn.WorkflowExecution, binding))
+        {
+            throw new InvalidOperationException("Workflow runtime events do not match a frozen Agent turn binding.");
+        }
+    }
+
+    private static void ValidateWorkflowInputTarget(
+        AgentSession session,
+        AcceptWorkflowAgentSessionInputCommand command)
+    {
+        if (!string.Equals(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind),
+                "workflow",
+                StringComparison.Ordinal)
+            || !string.Equals(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId),
+                command.WorkflowRunId,
+                StringComparison.Ordinal)
+            || !string.Equals(session.Runtime.RunnerId, command.RunnerId, StringComparison.Ordinal)
+            || !string.Equals(session.Runtime.Runtime, command.Runtime, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(session.Status.AgentRuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Workflow input does not match the current AgentSession runtime binding.");
+        }
     }
 
     public async Task<AppendTerminalCloseResult> AppendTerminalCloseAsync(AppendTerminalCloseCommand command)

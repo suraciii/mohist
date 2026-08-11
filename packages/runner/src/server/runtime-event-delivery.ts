@@ -23,7 +23,11 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
           envelope(record),
           signal,
         )
-        return accepted.map<AgentSessionRuntimeEventReceipt>((a) => ({ type: a.type ?? "" }))
+        return accepted.map<AgentSessionRuntimeEventReceipt>((a) => ({
+          type: a.type ?? "",
+          inputDeliveryId: a.inputDeliveryId,
+          agentTurnId: a.agentTurnId,
+        }))
       }
       if (record.producerFamily === "generic-followup" && record.target.kind === "generic") {
         return await connection.agentSessionRuntimeEvents(
@@ -57,7 +61,11 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
         // The server returns one receipt per submitted event, in order.
         // Preserve that order so the outbox can settle each record against
         // its own acknowledgement policy by position.
-        return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{ type: a.type ?? "" }])
+        return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{
+          type: a.type ?? "",
+          inputDeliveryId: a.inputDeliveryId,
+          agentTurnId: a.agentTurnId,
+        }])
       }
       if (head.producerFamily === "generic-followup" && head.target.kind === "generic") {
         const genericRecords = records as readonly (RuntimeEventRecord & { target: { kind: "generic"; projectId: string; sessionId: string } })[]
@@ -88,6 +96,10 @@ function envelope(record: RuntimeEventRecord) {
     workId: work?.workId ?? null,
     workType: work?.workType ?? null,
     stage: work?.stage ?? null,
+    taskRunId: work?.taskRunId ?? null,
+    inputDeliveryId: work?.inputDeliveryId ?? null,
+    agentTurnId: work?.agentTurnId ?? null,
+    runtime: record.runtime ?? null,
     runtimeSessionId: record.runtimeSessionId,
     runtimeEvents: [{ type: record.event.type, payload: record.event.payload }],
   }
@@ -100,6 +112,10 @@ function batchEnvelope(records: readonly RuntimeEventRecord[]) {
     workId: work?.workId ?? null,
     workType: work?.workType ?? null,
     stage: work?.stage ?? null,
+    taskRunId: work?.taskRunId ?? null,
+    inputDeliveryId: work?.inputDeliveryId ?? null,
+    agentTurnId: work?.agentTurnId ?? null,
+    runtime: head.runtime ?? null,
     runtimeSessionId: head.runtimeSessionId,
     runtimeEvents: records.map((record) => ({ type: record.event.type, payload: record.event.payload })),
   }

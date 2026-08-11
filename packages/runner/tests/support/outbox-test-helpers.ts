@@ -49,6 +49,10 @@ export function makeRecordingOutbox(options: FakeOutboxOptions = {}): OutboxHand
       records.push(internal)
       if (fileSystem) await fileSystem.writeAtomicText("outbox", JSON.stringify({ version: 1, entries: records }))
     },
+    async awaitInputReceipt(recordId) {
+      if (!inputAccepted) throw new Error("session.input was not acknowledged")
+      return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` }
+    },
     async enqueueProducedFact(record) {
       const internal: RuntimeEventRecord = { ...record }
       records.push(internal)

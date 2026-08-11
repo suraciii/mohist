@@ -6,6 +6,7 @@ const log = runnerLogger.child("session")
 
 export interface WorkflowAgentSessionWorkMetadata {
   readonly workId: string
+  readonly taskRunId: string
   readonly workType: string
   readonly stage?: string | null
 }
@@ -19,6 +20,7 @@ export interface WorkflowAgentSessionReporterOptions {
   readonly projectId: string
   readonly sessionName: string
   readonly workMetadata: WorkflowAgentSessionWorkMetadata
+  readonly runtime: "opencode" | "pi"
   readonly randomId: () => string
 }
 
@@ -44,12 +46,15 @@ export class WorkflowAgentSessionReporter {
   private readonly workflowRunId: string
   private readonly sessionName: string
   private readonly workMetadata: WorkflowAgentSessionWorkMetadata
+  private readonly runtime: "opencode" | "pi"
   private readonly randomId: () => string
   private readonly pendingPromises: Set<Promise<void>> = new Set()
   private readonly deltaBuffer: RuntimeTurnEvent[] = []
   private closed = false
   private inputAccepted = false
   private inputRejected = false
+  private inputDeliveryId: string | null = null
+  private agentTurnId: string | null = null
 
   constructor(options: WorkflowAgentSessionReporterOptions) {
     this.outbox = options.outbox
@@ -57,12 +62,28 @@ export class WorkflowAgentSessionReporter {
     this.workflowRunId = options.workflowRunId
     this.sessionName = options.sessionName
     this.workMetadata = options.workMetadata
+    this.runtime = options.runtime
     this.randomId = options.randomId
   }
 
   async awaitInput(prompt: string, runtimeSessionId: string): Promise<void> {
     if (this.closed) return
-    const record = this.buildRecord(runtimeSessionId, {
+    const pending = this.outbox.snapshot().find((record) =>
+      record.producerFamily === "workflow-session"
+      && record.target.kind === "workflow"
+      && record.target.projectId === this.projectId
+      && record.target.workflowRunId === this.workflowRunId
+      && record.target.sessionName === this.sessionName
+      && record.runtimeSessionId === runtimeSessionId
+      && record.work?.workId === this.workMetadata.workId
+      && record.work?.taskRunId === this.workMetadata.taskRunId
+      && record.event.type === "session.input")
+    if (pending && pending.event.payload.text !== prompt)
+      throw new Error("pending Workflow session.input does not match the requested prompt")
+
+    const inputDeliveryId = pending?.id ?? this.randomId()
+    this.inputDeliveryId = inputDeliveryId
+    const record = pending ?? this.buildRecord(runtimeSessionId, {
       type: "session.input",
       payload: {
         text: prompt,
@@ -71,9 +92,16 @@ export class WorkflowAgentSessionReporter {
         role: "user",
         runtimeSessionId,
       },
-    })
-    const promise = this.outbox.enqueueBeforeExecution(record)
-      .then(() => {
+    }, inputDeliveryId)
+    const promise = (pending ? Promise.resolve() : this.outbox.enqueueBeforeExecution(record))
+      .then(async () => {
+        const awaitReceipt = this.outbox.awaitInputReceipt
+        if (!awaitReceipt)
+          throw new Error("Workflow AgentSession outbox does not support Server input receipts")
+        const receipt = await awaitReceipt.call(this.outbox, inputDeliveryId)
+        if (receipt.inputDeliveryId !== inputDeliveryId || !receipt.agentTurnId)
+          throw new Error("Workflow AgentSession returned a malformed session.input receipt")
+        this.agentTurnId = receipt.agentTurnId
         this.inputAccepted = true
       })
       .catch((error) => {
@@ -218,9 +246,14 @@ export class WorkflowAgentSessionReporter {
     this.pendingPromises.clear()
   }
 
-  private buildRecord(runtimeSessionId: string, event: { type: string; payload: Record<string, unknown> }): RuntimeEventRecord {
+  private buildRecord(
+    runtimeSessionId: string,
+    event: { type: string; payload: Record<string, unknown> },
+    id = this.randomId(),
+  ): RuntimeEventRecord {
+    const agentTurnId = this.agentTurnId
     return {
-      id: this.randomId(),
+      id,
       producerFamily: "workflow-session",
       target: {
         kind: "workflow",
@@ -229,12 +262,19 @@ export class WorkflowAgentSessionReporter {
         sessionName: this.sessionName,
       },
       runtimeSessionId,
+      runtime: this.runtime,
       work: {
         workId: this.workMetadata.workId,
+        taskRunId: this.workMetadata.taskRunId,
         workType: this.workMetadata.workType,
         stage: this.workMetadata.stage ?? null,
+        inputDeliveryId: this.inputDeliveryId,
+        agentTurnId,
       },
-      event,
+      event: {
+        type: event.type,
+        payload: agentTurnId ? { ...event.payload, turnId: agentTurnId } : event.payload,
+      },
       acknowledgementPolicy: "matching-receipt",
     }
   }

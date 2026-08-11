@@ -7,7 +7,7 @@ internal static partial class SpecUnitMigrationLedgerValidator
     internal const string ValidationHead = "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8";
     internal const string ValidationTree = "ff159609b97df5b1fac6d6404a6d1811f6bda99a";
     internal const int ValidationSourceTreeFileCount = 838;
-    internal const string ValidationSourceTreeDigest = "b0f62625f3407970f80d7f8b1b0e7d3de9176271fd1761c07efad23464708753";
+    internal const string ValidationSourceTreeDigest = "1aaffac644de9a79f11283331cd4a6d15fe4bee3b05c9ad11fbdef37d603d12e";
     internal const string ExpectedValidationBaselineDigest = "03cad8aca4e8ddf9688d7b3532d03cb1b93c039e8a9ec4e0e38ee73e5b403c62";
     internal const string Pr388Commit = "602efa6abd6fca3efcd43b66b47ba10a80d9faba";
     internal const string Pr388Parent = "0f723ddb87dfd0943b32e5b53b9af9ccbc89367d";
