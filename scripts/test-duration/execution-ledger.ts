@@ -4,6 +4,7 @@ import type {
   ExecutionLedger,
   ExecutionLedgerCase,
   ExecutionLedgerExpectation,
+  ExecutionLedgerProvenance,
   ExecutionLedgerValidation,
   ExecutionManifest,
   TestCase,
@@ -35,6 +36,60 @@ function stableNames(names: readonly string[]): string[] {
     if (normalized) unique.add(normalized)
   }
   return [...unique].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+function provenanceFromExpectation(expected: ExecutionLedgerExpectation): ExecutionLedgerProvenance {
+  return {
+    schemaVersion: 1,
+    runId: expected.runId,
+    manifestHash: expected.manifest.hash,
+    manifestCount: expected.manifest.names.length,
+    manifestNames: expected.manifest.names,
+    assemblyPath: expected.assemblyPath,
+    assemblySha256: expected.assemblySha256,
+    parallelism: expected.parallelism,
+  }
+}
+
+export function serializeExecutionProvenance(expected: ExecutionLedgerExpectation): string {
+  return JSON.stringify(provenanceFromExpectation(expected))
+}
+
+export function parseExecutionProvenance(json: string): ExecutionLedgerExpectation {
+  let raw: unknown
+  try {
+    raw = JSON.parse(json) as unknown
+  } catch (error) {
+    throw new Error(`execution provenance is not valid JSON: ${(error as Error).message}`)
+  }
+  if (!isRecord(raw)) throw new Error('execution provenance root must be an object')
+  const errors: string[] = []
+  if (raw.schemaVersion !== 1) errors.push('schemaVersion must be 1')
+  const runId = requiredString(raw, 'runId', errors)
+  const manifestHash = requiredString(raw, 'manifestHash', errors)
+  const manifestCount = raw.manifestCount
+  if (typeof manifestCount !== 'number' || !Number.isInteger(manifestCount) || manifestCount <= 0) {
+    errors.push('manifestCount must be a positive integer')
+  }
+  if (!Array.isArray(raw.manifestNames) || raw.manifestNames.some((name) => typeof name !== 'string')) {
+    errors.push('manifestNames must be an array of strings')
+  }
+  const manifestNames = Array.isArray(raw.manifestNames) ? raw.manifestNames as string[] : []
+  const assemblyPath = requiredString(raw, 'assemblyPath', errors)
+  const assemblySha256 = requiredString(raw, 'assemblySha256', errors)
+  const parallelism = requiredString(raw, 'parallelism', errors)
+  if (manifestHash && !/^[0-9a-f]{64}$/i.test(manifestHash)) errors.push('manifestHash must be a SHA-256 hex digest')
+  if (assemblySha256 && !/^[0-9a-f]{64}$/i.test(assemblySha256)) errors.push('assemblySha256 must be a SHA-256 hex digest')
+  let manifest: ExecutionManifest | undefined
+  try {
+    manifest = manifestFromDiscovery(manifestNames.join('\n'))
+  } catch (error) {
+    errors.push((error as Error).message)
+  }
+  if (manifest && manifest.hash !== manifestHash) errors.push('manifestHash does not match manifestNames')
+  if (manifest && manifest.names.length !== manifestCount) errors.push('manifestCount does not match manifestNames')
+  if (errors.length > 0 || !manifest) throw new Error(`execution provenance contract failed: ${errors.join('; ')}`)
+  return { runId, manifest, assemblyPath, assemblySha256, parallelism }
 }
 
 export function manifestFromDiscovery(output: string): ExecutionManifest {

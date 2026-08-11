@@ -7,6 +7,8 @@ import {
   discoverManifest,
   manifestFromDiscovery,
   parseExecutionLedger,
+  parseExecutionProvenance,
+  serializeExecutionProvenance,
   validateExecutionEvidence,
 } from './execution-ledger.js'
 import type { ExecutionLedgerExpectation, TestCase } from './types.js'
@@ -64,11 +66,20 @@ test('execution evidence uses xUnit ExecutionTime seconds, never TRX duration', 
 })
 
 test('execution evidence fails closed for run, manifest, identity, and outcome mismatches', () => {
-  const parsed = parseExecutionLedger(ledger({ runId: 'stale-run', manifestHash: 'stale-manifest' }))
+  const parsed = parseExecutionLedger(ledger({
+    runId: 'stale-run',
+    manifestHash: 'b'.repeat(64),
+    assemblyPath: '/stale/test.dll',
+    assemblySha256: 'c'.repeat(64),
+    parallelism: 'xunit-none',
+  }))
   const result = validateExecutionEvidence(trxCases, parsed, expectation)
 
   assert.ok(result.errors.some((error) => error.includes('run ID')))
   assert.ok(result.errors.some((error) => error.includes('manifest hash')))
+  assert.ok(result.errors.some((error) => error.includes('assembly path')))
+  assert.ok(result.errors.some((error) => error.includes('assembly hash')))
+  assert.ok(result.errors.some((error) => error.includes('parallelism')))
 })
 
 test('execution evidence rejects duplicate UIDs and non-executed cases', () => {
@@ -89,6 +100,27 @@ test('execution evidence rejects an unsupported timing contract before evaluatio
   unsupported.durationSource = 'trx.UnitTestResult.duration'
   const parsed = parseExecutionLedger(JSON.stringify(unsupported))
   assert.ok(parsed.errors.some((error) => error.includes('durationSource')))
+})
+
+test('execution evidence rejects duplicate names and missing partial records', () => {
+  const duplicateName = JSON.parse(ledger()) as { cases: Array<Record<string, unknown>> }
+  duplicateName.cases[1].name = duplicateName.cases[0].name
+  assert.ok(parseExecutionLedger(JSON.stringify(duplicateName)).errors.some((error) => error.includes('duplicate test name')))
+
+  const partial = JSON.parse(ledger()) as { cases: Array<Record<string, unknown>> }
+  partial.cases.pop()
+  const parsed = parseExecutionLedger(JSON.stringify(partial))
+  assert.ok(parsed.errors.some((error) => error.includes('case count')))
+})
+
+test('saved provenance is self-authenticating, non-empty, and round trips exactly', () => {
+  const parsed = parseExecutionProvenance(serializeExecutionProvenance(expectation))
+  assert.deepEqual(parsed, expectation)
+
+  const stale = JSON.parse(serializeExecutionProvenance(expectation)) as Record<string, unknown>
+  stale.manifestHash = 'b'.repeat(64)
+  assert.throws(() => parseExecutionProvenance(JSON.stringify(stale)), /manifestHash does not match/)
+  assert.throws(() => parseExecutionProvenance(JSON.stringify({ ...stale, manifestNames: [], manifestCount: 0 })), /positive integer|no test cases/)
 })
 
 test('ledger environment carries every provenance field to the reporter', () => {

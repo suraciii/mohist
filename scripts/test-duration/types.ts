@@ -47,6 +47,17 @@ export interface ExecutionLedgerExpectation {
   readonly parallelism: string
 }
 
+export interface ExecutionLedgerProvenance {
+  readonly schemaVersion: 1
+  readonly runId: string
+  readonly manifestHash: string
+  readonly manifestCount: number
+  readonly manifestNames: readonly string[]
+  readonly assemblyPath: string
+  readonly assemblySha256: string
+  readonly parallelism: string
+}
+
 export interface ExecutionLedgerValidation {
   readonly cases: readonly TestCase[]
   readonly errors: readonly string[]
@@ -91,6 +102,7 @@ export interface TrackConfig {
   readonly run?: readonly string[]
   readonly report: string
   readonly executionLedger?: string
+  readonly executionProvenance?: string
   readonly reportFormat: ReportFormat
   readonly deadlineMs: number
   readonly enforce: boolean

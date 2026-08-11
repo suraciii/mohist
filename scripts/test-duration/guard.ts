@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -11,8 +11,10 @@ import { runWithDeadline } from './deadline.js'
 import {
   buildLedgerEnvironment,
   createExecutionRunId,
-  discoverManifest,
+  manifestFromDiscovery,
   parseExecutionLedger,
+  parseExecutionProvenance,
+  serializeExecutionProvenance,
   validateExecutionEvidence,
 } from './execution-ledger.js'
 import { parseReport } from './reports.js'
@@ -51,8 +53,11 @@ function parallelismFor(track: TrackConfig): string {
   return index >= 0 && args[index + 1] ? `xunit-${args[index + 1]}` : 'xunit-default'
 }
 
-function executionLedgerExpectation(track: TrackConfig): ExecutionLedgerExpectation {
-  if (!track.executionLedger || track.kind !== 'dotnet-apphost' || !track.csproj) {
+function executionLedgerPlan(track: TrackConfig): {
+  readonly assemblyPath: string
+  readonly discovery: { readonly apphost: string; readonly args: readonly string[] }
+} {
+  if (!track.executionLedger || !track.executionProvenance || track.kind !== 'dotnet-apphost' || !track.csproj) {
     throw new Error(`track "${track.id}" requires a dotnet-apphost csproj for execution ledger evidence`)
   }
   const csprojAbs = resolve(repoRoot, track.csproj)
@@ -60,22 +65,9 @@ function executionLedgerExpectation(track: TrackConfig): ExecutionLedgerExpectat
   const xml = readCsproj(track.csproj)
   const assemblyName = parseAssemblyName(xml) ?? basename(csprojAbs).replace(/\.csproj$/, '')
   const apphost = resolve(projectDir, resolveApphostPath({ csprojXml: xml, projectDir, assemblyName }))
-  const assemblyPath = assemblyPathFor(apphost)
-  const discovery = resolveDiscoveryCommand({ csprojXml: xml, projectDir, assemblyName })
-  let manifest
-  try {
-    manifest = discoverManifest({
-      listTests: () => execFileSync(discovery.apphost, discovery.args as string[], { cwd: repoRoot, encoding: 'utf8' }),
-    })
-  } catch (error) {
-    throw new Error(`compiled discovery failed: ${(error as Error).message}`)
-  }
   return {
-    runId: createExecutionRunId({ now: () => Date.now() }, randomUUID),
-    manifest,
-    assemblyPath,
-    assemblySha256: sha256File(assemblyPath),
-    parallelism: parallelismFor(track),
+    assemblyPath: assemblyPathFor(apphost),
+    discovery: resolveDiscoveryCommand({ csprojXml: xml, projectDir, assemblyName }),
   }
 }
 
@@ -124,8 +116,8 @@ function signalTree(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-interface SpawnedChild {
-  readonly done: Promise<{ exitCode: number | null }>
+export interface SpawnedChild {
+  readonly done: Promise<{ exitCode: number | null; stdout: string }>
   readonly pid: number
 }
 
@@ -152,19 +144,50 @@ export function createTimeout(delayMs: number, scheduler: TimeoutScheduler = nat
   return { promise, cancel: () => scheduler.clear(timer) }
 }
 
-function spawnChild(command: string, args: readonly string[], extraEnvironment?: Readonly<Record<string, string>>): SpawnedChild {
+function spawnChild(
+  command: string,
+  args: readonly string[],
+  extraEnvironment?: Readonly<Record<string, string>>,
+  captureStdout = false,
+): SpawnedChild {
   const detached = process.platform !== 'win32'
   const child = spawn(command, args as string[], {
     cwd: repoRoot,
-    stdio: 'inherit',
+    stdio: captureStdout ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     detached,
     env: extraEnvironment ? { ...process.env, ...extraEnvironment } : undefined,
   })
-  const done = new Promise<{ exitCode: number | null }>((resolvePromise) => {
-    child.on('exit', (code) => resolvePromise({ exitCode: code }))
-    child.on('error', () => resolvePromise({ exitCode: 1 }))
+  let stdout = ''
+  child.stdout?.setEncoding('utf8')
+  child.stdout?.on('data', (chunk: string) => { stdout += chunk })
+  const done = new Promise<{ exitCode: number | null; stdout: string }>((resolvePromise) => {
+    child.on('exit', (code) => resolvePromise({ exitCode: code, stdout }))
+    child.on('error', () => resolvePromise({ exitCode: 1, stdout }))
   })
   return { done, pid: child.pid ?? -1 }
+}
+
+export async function runProcessWithDeadline<TimeoutReason>(input: {
+  readonly child: SpawnedChild
+  readonly timeout: Promise<TimeoutReason>
+  readonly kill: () => Promise<void>
+  readonly now: () => number
+}): Promise<Awaited<SpawnedChild['done']> & {
+  readonly status: 'passed' | 'failed' | 'timeout'
+  readonly elapsedMs: number
+  readonly timeoutReason?: TimeoutReason
+}> {
+  const outcome = await runWithDeadline({
+    start: () => input.child.done,
+    kill: input.kill,
+    timeout: input.timeout,
+    now: input.now,
+  })
+  if (outcome.status === 'timeout') {
+    return { ...outcome, stdout: '' }
+  }
+  const completed = await input.child.done
+  return { ...outcome, stdout: completed.stdout }
 }
 
 export function reportFileReady(reportPath: string): boolean {
@@ -222,61 +245,89 @@ async function killTree(child: SpawnedChild, graceMs: number): Promise<void> {
   }
 }
 
-function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Promise<void>): Promise<TrackRun> {
+async function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Promise<void>): Promise<TrackRun> {
   const reportPath = resolve(repoRoot, track.report)
   const ledgerPath = track.executionLedger ? resolve(repoRoot, track.executionLedger) : undefined
-  let command: string
-  let args: readonly string[]
-  let ledgerExpectation: ExecutionLedgerExpectation | undefined
-  let ledgerEnvironment: Readonly<Record<string, string>> | undefined
-  try {
-    if (ledgerPath === reportPath) throw new Error('execution ledger path must differ from the TRX report path')
-    try {
-      unlinkSync(reportPath)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    if (ledgerPath) {
-      try {
-        unlinkSync(ledgerPath)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-      ledgerExpectation = executionLedgerExpectation(track)
-      ledgerEnvironment = buildLedgerEnvironment({
-        ...ledgerExpectation,
-        ledgerPath,
-      })
-    }
-    ({ command, args } = commandFor(track))
-  } catch (error) {
-    const failed = failedRun(track, 'not started', `could not prepare report ${track.report}: ${(error as Error).message}`)
-    return Promise.resolve(ledgerPath
-      ? { ...failed, executionLedgerReady: false, executionLedgerError: (error as Error).message }
-      : failed)
-  }
-
-  const cmdString = `${command} ${args.join(' ')}`
-  let child: SpawnedChild
-  try {
-    child = spawnChild(command, args, ledgerEnvironment)
-  } catch (error) {
-    const failed = failedRun(track, cmdString, `could not start track: ${(error as Error).message}`)
-    return Promise.resolve(ledgerPath
-      ? { ...failed, executionLedgerReady: false, executionLedgerError: (error as Error).message }
-      : failed)
-  }
+  const provenancePath = track.executionProvenance ? resolve(repoRoot, track.executionProvenance) : undefined
+  const trackStartedAt = Date.now()
   const trackDeadline = createTimeout(track.deadlineMs)
-  const outcome = runWithDeadline({
-    start: () => child.done,
-    kill: () => killTree(child, graceMs),
-    timeout: Promise.race([
-      trackDeadline.promise.then(() => 'track' as const),
-      suiteDeadline.then(() => 'suite' as const),
-    ]),
-    now: () => Date.now(),
-  })
-  return outcome.then((result) => {
+  const deadline = Promise.race([
+    trackDeadline.promise.then(() => 'track' as const),
+    suiteDeadline.then(() => 'suite' as const),
+  ])
+  try {
+    let command: string
+    let args: readonly string[]
+    let ledgerExpectation: ExecutionLedgerExpectation | undefined
+    let ledgerEnvironment: Readonly<Record<string, string>> | undefined
+    try {
+      const artifactPaths = [reportPath, ledgerPath, provenancePath].filter((path): path is string => path !== undefined)
+      if (new Set(artifactPaths).size !== artifactPaths.length) {
+        throw new Error('TRX report, execution ledger, and execution provenance paths must differ')
+      }
+      for (const artifactPath of artifactPaths) {
+        try {
+          unlinkSync(artifactPath)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+      }
+      if (ledgerPath) {
+        if (!provenancePath) throw new Error('execution provenance path is required')
+        const plan = executionLedgerPlan(track)
+        const discoveryChild = spawnChild(plan.discovery.apphost, plan.discovery.args, undefined, true)
+        const discovery = await runProcessWithDeadline({
+          child: discoveryChild,
+          timeout: deadline,
+          kill: () => killTree(discoveryChild, graceMs),
+          now: () => Date.now(),
+        })
+        if (discovery.status === 'timeout') {
+          return {
+            ...failedRun(track, `${plan.discovery.apphost} ${plan.discovery.args.join(' ')}`, 'compiled discovery exceeded the track or suite deadline'),
+            timedOut: true,
+            timeoutReason: discovery.timeoutReason,
+            exitCode: null,
+            elapsedMs: Date.now() - trackStartedAt,
+            executionLedgerReady: false,
+            executionLedgerError: 'compiled discovery timed out before ledger provenance could be captured',
+          }
+        }
+        if (discovery.exitCode !== 0) throw new Error(`compiled discovery failed with exit ${discovery.exitCode}`)
+        ledgerExpectation = {
+          runId: createExecutionRunId({ now: () => Date.now() }, randomUUID),
+          manifest: manifestFromDiscovery(discovery.stdout),
+          assemblyPath: plan.assemblyPath,
+          assemblySha256: sha256File(plan.assemblyPath),
+          parallelism: parallelismFor(track),
+        }
+        writeFileSync(provenancePath, serializeExecutionProvenance(ledgerExpectation), 'utf8')
+        ledgerEnvironment = buildLedgerEnvironment({ ...ledgerExpectation, ledgerPath })
+      }
+      ({ command, args } = commandFor(track))
+    } catch (error) {
+      const failed = failedRun(track, 'not started', `could not prepare report ${track.report}: ${(error as Error).message}`)
+      return ledgerPath
+        ? { ...failed, elapsedMs: Date.now() - trackStartedAt, executionLedgerReady: false, executionLedgerError: (error as Error).message }
+        : { ...failed, elapsedMs: Date.now() - trackStartedAt }
+    }
+
+    const cmdString = `${command} ${args.join(' ')}`
+    let child: SpawnedChild
+    try {
+      child = spawnChild(command, args, ledgerEnvironment)
+    } catch (error) {
+      const failed = failedRun(track, cmdString, `could not start track: ${(error as Error).message}`)
+      return ledgerPath
+        ? { ...failed, elapsedMs: Date.now() - trackStartedAt, executionLedgerReady: false, executionLedgerError: (error as Error).message }
+        : { ...failed, elapsedMs: Date.now() - trackStartedAt }
+    }
+    const result = await runProcessWithDeadline({
+      child,
+      timeout: deadline,
+      kill: () => killTree(child, graceMs),
+      now: () => Date.now(),
+    })
     let ready = false
     try {
       ready = reportFileReady(reportPath)
@@ -298,7 +349,7 @@ function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Promise<vo
       timedOut: result.status === 'timeout',
       timeoutReason: result.timeoutReason,
       exitCode: result.exitCode,
-      elapsedMs: result.elapsedMs,
+      elapsedMs: Date.now() - trackStartedAt,
       deadlineMs: track.deadlineMs,
       command: cmdString,
       reportReady: ready,
@@ -307,7 +358,9 @@ function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Promise<vo
       executionLedgerError,
       executionLedgerExpectation: ledgerExpectation,
     }
-  }).finally(trackDeadline.cancel)
+  } finally {
+    trackDeadline.cancel()
+  }
 }
 
 function failedEvaluation(track: TrackConfig, reportError: string): TrackEvaluation {
@@ -324,7 +377,16 @@ function failedEvaluation(track: TrackConfig, reportError: string): TrackEvaluat
   }
 }
 
-function evaluateFromFile(track: TrackConfig, run?: TrackRun): TrackEvaluation {
+export interface TrackArtifactReader {
+  readonly readText: (path: string) => string
+}
+
+export function evaluateTrackArtifacts(
+  track: TrackConfig,
+  artifacts: TrackArtifactReader,
+  run?: TrackRun,
+  today: Date = new Date(),
+): TrackEvaluation {
   if (run && !run.reportReady) {
     return failedEvaluation(track, run.reportError ?? `report ${track.report} was not refreshed`)
   }
@@ -332,22 +394,33 @@ function evaluateFromFile(track: TrackConfig, run?: TrackRun): TrackEvaluation {
     return failedEvaluation(track, run.executionLedgerError ?? `execution ledger ${track.executionLedger} was not refreshed`)
   }
   try {
-    const trxContent = readFileSync(resolve(repoRoot, track.report), 'utf8')
+    const trxContent = artifacts.readText(track.report)
     const trxCases = parseReport(track.reportFormat, trxContent)
     if (track.executionLedger) {
-      if (!run?.executionLedgerExpectation) return failedEvaluation(track, 'execution ledger expectation was not captured before the run')
-      const ledgerContent = readFileSync(resolve(repoRoot, track.executionLedger), 'utf8')
+      if (!track.executionProvenance) return failedEvaluation(track, 'execution provenance path is not configured')
+      const expected = parseExecutionProvenance(artifacts.readText(track.executionProvenance))
+      if (run?.executionLedgerExpectation &&
+          serializeExecutionProvenance(run.executionLedgerExpectation) !== serializeExecutionProvenance(expected)) {
+        return failedEvaluation(track, 'saved execution provenance does not match the current run')
+      }
+      const ledgerContent = artifacts.readText(track.executionLedger)
       const parsedLedger = parseExecutionLedger(ledgerContent)
-      const evidence = validateExecutionEvidence(trxCases, parsedLedger, run.executionLedgerExpectation)
+      const evidence = validateExecutionEvidence(trxCases, parsedLedger, expected)
       if (evidence.errors.length > 0) {
         return failedEvaluation(track, `execution ledger contract failed: ${evidence.errors.join('; ')}`)
       }
-      return evaluateTrack(track, evidence.cases, new Date())
+      return evaluateTrack(track, evidence.cases, today)
     }
-    return evaluateTrack(track, trxCases, new Date())
+    return evaluateTrack(track, trxCases, today)
   } catch (error) {
     return failedEvaluation(track, `could not read report ${track.report}: ${(error as Error).message}`)
   }
+}
+
+function evaluateFromFile(track: TrackConfig, run?: TrackRun): TrackEvaluation {
+  return evaluateTrackArtifacts(track, {
+    readText: (path) => readFileSync(resolve(repoRoot, path), 'utf8'),
+  }, run)
 }
 
 function focusedFlow(csprojPath: string, className: string): number {
