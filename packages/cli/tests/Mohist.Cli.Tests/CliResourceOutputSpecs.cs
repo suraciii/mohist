@@ -345,6 +345,51 @@ public sealed class CliResourceOutputSpecs
     }
 
     [Fact]
+    public async Task EpicLink_SelectedFieldsProjectsAllMembershipValues()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(_ =>
+            RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    results = new[]
+                    {
+                        new
+                        {
+                            identifier = "5",
+                            status = "linked",
+                            issueNumber = 5,
+                            owningEpicNumber = 8,
+                            owningEpicTitle = "Target epic",
+                        },
+                    },
+                },
+            }));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["epic", "add", "8", "5", "--project", "proj_test", "--json", "identifier,status,issueNumber,owningEpicNumber,owningEpicTitle"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(0, exit);
+        var result = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal(
+            ["identifier", "status", "issueNumber", "owningEpicNumber", "owningEpicTitle"],
+            result.Select(property => property.Key).ToArray());
+        Assert.Equal("5", result["identifier"]?.GetValue<string>());
+        Assert.Equal("linked", result["status"]?.GetValue<string>());
+        Assert.Equal(5, result["issueNumber"]?.GetValue<int>());
+        Assert.Equal(8, result["owningEpicNumber"]?.GetValue<int>());
+        Assert.Equal("Target epic", result["owningEpicTitle"]?.GetValue<string>());
+        Assert.Empty(error.ToString());
+        Assert.Equal(HttpMethod.Post, handler.Requests.Single().Method);
+    }
+
+    [Fact]
     public async Task EpicCreate_BareJsonDiscoversFieldsWithoutRequest()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);

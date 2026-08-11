@@ -116,7 +116,7 @@ public sealed record EpicDetailDto(
 /// <c>UnlinkIssuesAsync</c>. The HTTP layer wraps the list in
 /// <c>{ results: [...] }</c>. The <see cref="Status"/> discriminator is
 /// machine-friendly; <see cref="OwningEpicNumber"/> / <see cref="OwningEpicTitle"/>
-/// are populated only for <c>conflict</c> outcomes.
+/// are populated for outcomes that retain or establish an Epic relationship.
 /// </summary>
 [GenerateSerializer]
 public sealed record BatchMembershipOutcome(
@@ -126,11 +126,13 @@ public sealed record BatchMembershipOutcome(
     [property: Id(3)] int? OwningEpicNumber = null,
     [property: Id(4)] string? OwningEpicTitle = null)
 {
-    public static BatchMembershipOutcome Linked(string identifier, int issueNumber) =>
-        new(identifier, "linked", issueNumber);
+    public static BatchMembershipOutcome Linked(
+        string identifier, int issueNumber, int owningEpicNumber, string owningEpicTitle) =>
+        new(identifier, "linked", issueNumber, owningEpicNumber, owningEpicTitle);
 
-    public static BatchMembershipOutcome AlreadyLinked(string identifier, int issueNumber) =>
-        new(identifier, "already-linked", issueNumber);
+    public static BatchMembershipOutcome AlreadyLinked(
+        string identifier, int issueNumber, int owningEpicNumber, string owningEpicTitle) =>
+        new(identifier, "already-linked", issueNumber, owningEpicNumber, owningEpicTitle);
 
     public static BatchMembershipOutcome Unlinked(string identifier, int issueNumber) =>
         new(identifier, "unlinked", issueNumber);

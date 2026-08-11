@@ -78,7 +78,7 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
         Assert.Contains("active", doc.RootElement.GetProperty("error").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-        Assert.Empty(RunnerHub.Invocations);
+        AssertNoSessionCommandInvocations();
     }
 
     [Fact]
@@ -205,6 +205,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
-        Assert.Empty(RunnerHub.Invocations);
+        AssertNoSessionCommandInvocations();
     }
 }

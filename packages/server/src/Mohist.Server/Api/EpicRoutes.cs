@@ -66,7 +66,8 @@ public static class EpicRoutes
             var grain = GetEpicGrain(grains, pid, number);
             try
             {
-                await grain.LinkIssueAsync(issue.Number, pid);
+                var outcome = await grain.LinkIssueAsync(issue.Number, pid);
+                return ApiResults.Ok(new BatchMembershipResponse([outcome]));
             }
             catch (EpicClosedCannotLinkException ex)
             {
@@ -82,9 +83,6 @@ public static class EpicRoutes
                     return ApiResults.Conflict(ex.Message, "DUPLICATE_EPIC_MEMBERSHIP");
                 throw;
             }
-            return ApiResults.Ok(new BatchMembershipResponse([
-                BatchMembershipOutcome.Linked(issue.Number.ToString(), issue.Number),
-            ]));
         });
 
         group.MapDelete("/{number:int}/issues/{issueNumber:int}", async (HttpContext context, int number, int issueNumber, IGrainFactory grains, EpicQuerier queryService, IssueQuerier issuesQuery) =>
@@ -419,7 +417,7 @@ public static class EpicRoutes
             return BatchMembershipOutcome.WasNotAMember(identifier, item.IssueNumber);
         return firstOutcome.Status == "conflict"
             ? firstOutcome with { Identifier = identifier }
-            : BatchMembershipOutcome.AlreadyLinked(identifier, item.IssueNumber);
+            : firstOutcome with { Identifier = identifier, Status = "already-linked" };
     }
 
     private static async Task<BatchMembershipRequest?> ReadBatchRequestAsync(HttpContext context)
