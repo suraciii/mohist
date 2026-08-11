@@ -194,6 +194,133 @@ public sealed class ManagedRuntimeTransactionSpecs
         Assert.DoesNotContain(fixture.Files.Files.Keys, path => path.Contains("/dist/dist/", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(null, "runner-pluto")]
+    [InlineData("runner-custom", "runner-custom")]
+    public async Task PrepareManagedRunner_UsesCurrentLaunchIdentityForCandidateAndUnit(
+        string? configuredRunnerId,
+        string expectedRunnerId)
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        SeedSourceRunner(fixture, configuredRunnerId);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-instance-identity",
+            null);
+
+        var session = Assert.IsType<ManagedUpdateSession>(prepared.Session);
+        var runner = Assert.IsType<RuntimeTarget>(session.Targets.Runner);
+        Assert.Equal(expectedRunnerId, runner.Identity.RunnerId);
+        var identityPath = Path.Combine(runner.WorkingDirectory, "runtime-identity.json").Replace('\\', '/');
+        Assert.Equal(expectedRunnerId, RuntimeIdentity.Read(fixture.Files.Read(identityPath))!.RunnerId);
+        Assert.Contains(
+            $"Environment=\"RUNNER_ID={expectedRunnerId}\"",
+            fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")),
+            StringComparison.Ordinal);
+        Assert.Equal(0, await fixture.Transaction.CommitAsync(session));
+        var verified = Parse(fixture.Files.Read(fixture.VerifiedPath));
+        Assert.Equal(expectedRunnerId, verified.Runner!.Identity.RunnerId);
+    }
+
+    [Fact]
+    public async Task PrepareManagedRunner_UsesSourceLaunchIdentityInsteadOfPreviousManagedTarget()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        SeedSourceRunner(fixture, "runner-pluto");
+        var previous = new RuntimeTargetSet(
+            "verified",
+            3,
+            "previous-runner",
+            null,
+            null,
+            new RuntimeTarget(
+                "runner",
+                "/managed/runner/dist/cli.js",
+                "/managed/runner",
+                [],
+                "linux-x64",
+                Identity("runner", 3, "runner-other"),
+                "/usr/bin/node",
+                "/managed/runner",
+                RuntimeLaunchMode.Node),
+            null);
+        fixture.Files.AddFile(
+            fixture.VerifiedPath,
+            JsonSerializer.Serialize(previous, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-source-identity",
+            null);
+
+        var session = Assert.IsType<ManagedUpdateSession>(prepared.Session);
+        Assert.Equal(4, session.Targets.Generation);
+        Assert.Equal("runner-pluto", session.Targets.Runner!.Identity.RunnerId);
+    }
+
+    [Fact]
+    public async Task RollbackManagedRunner_RestoresSourceUnitAndPreservesVerifiedCliAndServer()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        SeedSourceRunner(fixture, "runner-pluto");
+        var sourceUnit = fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service"));
+        var previous = new RuntimeTargetSet(
+            "verified",
+            3,
+            "previous-runtime",
+            new RuntimeTarget("cli", "/managed/cli/Mohist.Cli", "/managed/cli", [], "linux-x64", Identity("cli", 3)),
+            new RuntimeTarget("server", "/managed/server/Mohist.Server", "/managed/server", [], "linux-x64", Identity("server", 3)),
+            null,
+            null);
+        var verifiedJson = JsonSerializer.Serialize(previous, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        fixture.Files.AddFile(fixture.ActivePath, verifiedJson);
+        fixture.Files.AddFile(fixture.VerifiedPath, verifiedJson);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-rollback",
+            null);
+
+        var session = Assert.IsType<ManagedUpdateSession>(prepared.Session);
+        Assert.Equal(0, await fixture.Transaction.RollbackAsync(session, "candidate identity differs"));
+        Assert.Equal(sourceUnit, fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")));
+        Assert.Equal(verifiedJson, fixture.Files.Read(fixture.VerifiedPath));
+        var active = Parse(fixture.Files.Read(fixture.ActivePath));
+        Assert.Equal("verified", active.Status);
+        Assert.Equal(previous.Cli!.Identity, active.Cli!.Identity);
+        Assert.Equal(previous.Server!.Identity, active.Server!.Identity);
+        Assert.Null(active.Runner);
+    }
+
+    [Theory]
+    [InlineData(null, "configuration is unavailable")]
+    [InlineData("[Service]\nEnvironment=\"RUNNER_ID=\"\n", "identity is empty")]
+    [InlineData("[Service]\nEnvironment=\"RUNNER_ID=runner-a\" \"RunnerId=runner-b\"\n", "identity is ambiguous")]
+    public async Task PrepareManagedRunner_WhenLaunchIdentityIsUnresolved_FailsBeforeBuild(
+        string? sourceUnit,
+        string expectedError)
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        if (sourceUnit is not null)
+            fixture.Files.AddFile(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service"), sourceUnit);
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-unresolved-identity",
+            null);
+
+        Assert.Null(prepared.Session);
+        Assert.Contains(expectedError, prepared.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Commands.ExecutedCommands, command => command.FileName == "npm");
+        Assert.Equal(0, fixture.Activator.ApplyCalls);
+        Assert.False(fixture.Files.HasFile(fixture.ActivePath));
+    }
+
     [Fact]
     public async Task PrepareRunner_WhenCandidateExistsForRetry_RemovesStaleNestedPayload()
     {
@@ -363,6 +490,7 @@ public sealed class ManagedRuntimeTransactionSpecs
             "Environment=\"MOHIST_RUNTIME_IDENTITY_PATH=/managed/runner/runtime-identity.json\"",
             runnerUnit,
             StringComparison.Ordinal);
+        Assert.Contains("Environment=\"RUNNER_ID=runner-1\"", runnerUnit, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -677,6 +805,26 @@ public sealed class ManagedRuntimeTransactionSpecs
         return sourceUnit;
     }
 
+    private static void SeedSourceRunner(ManagedFixture fixture, string? runnerId)
+    {
+        var environment = runnerId is null ? string.Empty : $"Environment=\"RUNNER_ID={runnerId}\"\n";
+        fixture.Files.AddFile(
+            Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service"),
+            $"[Service]\n{environment}ExecStart=/repo/runner\n");
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]),
+            0,
+            "active\n",
+            "");
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "is-enabled", "mohist-runner.service"]),
+            0,
+            "enabled\n",
+            "");
+    }
+
     private static HttpMessageHandler BuildManagedServerHandler(ManagedFixture fixture, string identityMode)
     {
         return new RecordingHttpHandler((request, _) =>
@@ -872,7 +1020,13 @@ public sealed class ManagedRuntimeTransactionSpecs
             var runtimeRoot = UpdateSourceResolver.ResolveRuntimeRoot("/home/test");
             var resolver = new UpdateSourceResolver(commands, files, () => "/home/test");
             var systemd = useSystemd
-                ? new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, files, commands, environment)
+                ? new SystemdServiceInstaller(
+                    TextWriter.Null,
+                    TextWriter.Null,
+                    files,
+                    commands,
+                    environment,
+                    getLocalHostname: () => "pluto")
                 : null;
             var activator = new RecordingActivator(activationCode, systemd);
             var transaction = new ManagedRuntimeTransaction(
@@ -893,6 +1047,12 @@ public sealed class ManagedRuntimeTransactionSpecs
         public int ApplyCalls { get; private set; }
         public int RestoreCalls { get; private set; }
         public RuntimeTargetSet? LastTargets { get; private set; }
+
+        public Task<(RunnerLaunchIdentity? Identity, string? Error)> ResolveRunnerLaunchIdentityAsync(
+            string? unitDir,
+            CancellationToken cancellationToken = default) =>
+            inner?.ResolveRunnerLaunchIdentityAsync(unitDir, cancellationToken)
+            ?? Task.FromResult<(RunnerLaunchIdentity?, string?)>((new RunnerLaunchIdentity("runner-test"), null));
 
         public Task<ManagedRuntimeSnapshot?> CaptureManagedRuntimeSnapshotAsync(
             string scope,

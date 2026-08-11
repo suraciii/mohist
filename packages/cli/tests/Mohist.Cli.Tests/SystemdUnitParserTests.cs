@@ -230,4 +230,14 @@ public class SystemdUnitParserTests
 
         Assert.Equal(new[] { "FOO=hello world", "BAR=baz" }, tokens);
     }
+
+    [Fact]
+    public void ReadRunnerIdSetting_OnlyUsesRunnerIdentityAssignments()
+    {
+        var setting = SystemdUnitParser.ReadRunnerIdSetting(
+            "[Service]\nEnvironment=\"OTHER=value RUNNER_ID=not-an-assignment\" \"RUNNER_ID=runner-pluto\"\n");
+
+        Assert.Equal("runner-pluto", setting.RunnerId);
+        Assert.Null(setting.Error);
+    }
 }

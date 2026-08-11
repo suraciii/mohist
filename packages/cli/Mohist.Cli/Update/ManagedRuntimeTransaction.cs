@@ -73,12 +73,21 @@ internal sealed class ManagedRuntimeTransaction
         var previous = ReadVerifiedTargets(context.RuntimeRoot);
         var generation = previous?.Generation is > 0 ? previous.Generation + 1 : 1;
         var built = new Dictionary<string, BuiltRuntime>(StringComparer.Ordinal);
+        RunnerLaunchIdentity? runnerLaunchIdentity = null;
         RuntimeTargetSet? activatedTargets = null;
         ManagedRuntimeSnapshot? sourceSnapshot = null;
         var activePointerWritten = false;
 
         try
         {
+            if (Includes(scope, "runner"))
+            {
+                var launchIdentity = await _activator.ResolveRunnerLaunchIdentityAsync(_unitDir, cancellationToken);
+                if (launchIdentity.Identity is not { IsComplete: true })
+                    return (null, launchIdentity.Error ?? "runner launch identity is unavailable");
+                runnerLaunchIdentity = launchIdentity.Identity;
+            }
+
             var nodeDependencyError = await PrepareNodeDependenciesAsync(
                 context,
                 scope,
@@ -114,7 +123,7 @@ internal sealed class ManagedRuntimeTransaction
 
             if (Includes(scope, "runner"))
             {
-                var runner = await BuildRunnerAsync(context, generation, cancellationToken);
+                var runner = await BuildRunnerAsync(context, generation, runnerLaunchIdentity!, cancellationToken);
                 if (runner is null)
                     return (null, "Runner candidate build or install failed");
                 built["runner"] = runner;
@@ -350,12 +359,13 @@ internal sealed class ManagedRuntimeTransaction
         }
 
         var entryName = ManagedRuntimeLayout.EntrypointFor(component);
-        return await CompleteArtifactAsync(context, component, root, entryName, generation, cancellationToken);
+        return await CompleteArtifactAsync(context, component, root, entryName, generation, null, cancellationToken);
     }
 
     private async Task<BuiltRuntime?> BuildRunnerAsync(
         UpdateSourceContext context,
         long generation,
+        RunnerLaunchIdentity launchIdentity,
         CancellationToken cancellationToken)
     {
         var runnerSource = Path.Combine(context.BuildWorkspaceRoot, "packages", "runner").Replace('\\', '/');
@@ -397,6 +407,7 @@ internal sealed class ManagedRuntimeTransaction
             runnerRoot,
             ManagedRuntimeLayout.RunnerEntrypoint,
             generation,
+            launchIdentity.RunnerId,
             cancellationToken);
     }
 
@@ -406,6 +417,7 @@ internal sealed class ManagedRuntimeTransaction
         string root,
         string entryRelativePath,
         long generation,
+        string? runnerId,
         CancellationToken cancellationToken)
     {
         var payload = _files.EnumerateFiles(root, "*", SearchOption.AllDirectories)
@@ -434,7 +446,7 @@ internal sealed class ManagedRuntimeTransaction
             artifactDigest,
             context.Source.ReleaseId(context.Scope),
             generation,
-            component == "runner" ? ResolveRunnerId() : null,
+            runnerId,
             BuildGitHash: component == "runner" ? context.Source.GitCommit : null);
         if (!identity.IsComplete)
             return null;
@@ -668,11 +680,6 @@ internal sealed class ManagedRuntimeTransaction
     private static bool Includes(string scope, string component) =>
         string.Equals(scope, "full", StringComparison.Ordinal)
             || string.Equals(scope, component, StringComparison.Ordinal);
-
-    private string ResolveRunnerId() =>
-        _environment.GetEnvironmentVariable("MOHIST_RUNNER_ID")?.Trim() is { Length: > 0 } id
-            ? id
-            : "managed-runner";
 
     private string ResolveExecutable(string name)
     {

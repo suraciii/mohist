@@ -44,7 +44,9 @@ internal sealed record RuntimeIdentity(
         && !string.IsNullOrWhiteSpace(TreeHash)
         && !string.IsNullOrWhiteSpace(ArtifactDigest)
         && !string.IsNullOrWhiteSpace(ReleaseId)
-        && Generation > 0;
+        && Generation > 0
+        && (!string.Equals(Component, "runner", StringComparison.Ordinal)
+            || !string.IsNullOrWhiteSpace(RunnerId));
 
     public bool Matches(RuntimeIdentity expected)
     {
@@ -99,6 +101,11 @@ internal sealed record RuntimeIdentity(
     {
         WriteIndented = true,
     };
+}
+
+internal sealed record RunnerLaunchIdentity(string RunnerId)
+{
+    public bool IsComplete => !string.IsNullOrWhiteSpace(RunnerId);
 }
 
 internal sealed record RuntimeIdentityDifference(string Field, string? Expected, string? Actual)
