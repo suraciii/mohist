@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import {
@@ -33,6 +33,11 @@ interface ValidationError {
 
 type EditorMode = 'view' | 'editing'
 
+interface EditorDraftState {
+  serverYaml: string | null
+  draftYaml: string
+}
+
 const templateSourceLabel: Record<'system' | 'project' | 'custom', string> = {
   system: 'System default',
   project: 'Project default',
@@ -40,68 +45,105 @@ const templateSourceLabel: Record<'system' | 'project' | 'custom', string> = {
 }
 
 export function IssueWorkflowProfileEditor({ issueNumber, embedded = false, hooks = defaultHooks }: IssueWorkflowProfileEditorProps) {
-  const [draftYaml, setDraftYaml] = useState('')
-  const [serverYaml, setServerYaml] = useState<string | null>(null)
+  const [editorState, setEditorState] = useState<EditorDraftState>({ serverYaml: null, draftYaml: '' })
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [revertError, setRevertError] = useState<string | null>(null)
   const [mode, setMode] = useState<EditorMode>('view')
 
+  const mountedRef = useRef(false)
+  const currentIssueNumberRef = useRef(issueNumber)
+  const currentProfileRef = useRef<IssueWorkflowProfileYamlResponse | undefined>(undefined)
+  const profileResourceKeyRef = useRef<string | null>(null)
+  const draftRevisionRef = useRef(0)
+  const saveRequestRef = useRef(0)
+  const revertRequestRef = useRef(0)
+  const saveSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  currentIssueNumberRef.current = issueNumber
+
   const { data, isLoading, error: fetchError, refetch } = hooks.useProfile(issueNumber, true)
   const updateMutation = hooks.useUpdate()
   const deleteMutation = hooks.useDelete()
 
+  const { draftYaml, serverYaml } = editorState
+  currentProfileRef.current = data
+
   useEffect(() => {
-    if (data?.yaml !== undefined && data.yaml !== null) {
-      setServerYaml((currentServerYaml) => {
-        const nextServerYaml = data.yaml ?? ''
-
-        setDraftYaml((currentDraftYaml) => {
-          if (currentServerYaml === null || currentDraftYaml === currentServerYaml) {
-            return nextServerYaml
-          }
-
-          return currentDraftYaml
-        })
-
-        setValidationErrors([])
-        setSaveSuccess(false)
-        return nextServerYaml
-      })
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      saveRequestRef.current += 1
+      revertRequestRef.current += 1
+      if (saveSuccessTimeoutRef.current !== null) {
+        clearTimeout(saveSuccessTimeoutRef.current)
+        saveSuccessTimeoutRef.current = null
+      }
     }
-  }, [data])
+  }, [])
 
   useEffect(() => {
-    if (data && !data.hasCustomTemplate) {
+    if (!data || data.issueNumber !== issueNumber) return
+
+    const nextServerYaml = data.yaml ?? ''
+    const profileResourceKey = `${data.projectId}:${issueNumber}`
+    const isNewResource = profileResourceKeyRef.current !== profileResourceKey
+    profileResourceKeyRef.current = profileResourceKey
+
+    setEditorState((current) => {
+      const nextDraftYaml = isNewResource || current.serverYaml === null || current.draftYaml === current.serverYaml
+        ? nextServerYaml
+        : current.draftYaml
+      if (current.serverYaml === nextServerYaml && current.draftYaml === nextDraftYaml) return current
+      return { serverYaml: nextServerYaml, draftYaml: nextDraftYaml }
+    })
+    setValidationErrors([])
+    setSaveSuccess(false)
+  }, [data, issueNumber])
+
+  useEffect(() => {
+    if (data && data.issueNumber === issueNumber && !data.hasCustomTemplate) {
       setMode('view')
       setRevertError(null)
     }
-  }, [data])
+  }, [data, issueNumber])
 
   const isDirty =
     draftYaml.trim() !== '' && (serverYaml === null || draftYaml !== serverYaml)
 
   const handleDraftChange = useCallback((value: string) => {
-    setDraftYaml(value)
+    draftRevisionRef.current += 1
+    setEditorState((current) => ({ ...current, draftYaml: value }))
     setValidationErrors([])
     setSaveSuccess(false)
   }, [])
 
   const handleSave = useCallback(() => {
     if (!draftYaml.trim()) return
+    const requestIssueNumber = issueNumber
+    const requestProjectId = data?.projectId ?? null
+    const requestId = saveRequestRef.current + 1
+    const requestDraftRevision = draftRevisionRef.current
+    saveRequestRef.current = requestId
     setValidationErrors([])
     setSaveSuccess(false)
     updateMutation.mutate(
       { issueNumber, yaml: draftYaml },
       {
         onSuccess: (response: IssueWorkflowProfileYamlResponse) => {
-          setServerYaml(response.yaml)
-          setDraftYaml(response.yaml ?? '')
+          if (!mountedRef.current || currentIssueNumberRef.current !== requestIssueNumber || currentProfileRef.current?.issueNumber !== requestIssueNumber || currentProfileRef.current?.projectId !== requestProjectId || saveRequestRef.current !== requestId || draftRevisionRef.current !== requestDraftRevision) return
+          const nextServerYaml = response.yaml ?? ''
+          setEditorState({ serverYaml: nextServerYaml, draftYaml: nextServerYaml })
           setValidationErrors([])
           setSaveSuccess(true)
-          setTimeout(() => setSaveSuccess(false), 3000)
+          if (saveSuccessTimeoutRef.current !== null) clearTimeout(saveSuccessTimeoutRef.current)
+          saveSuccessTimeoutRef.current = setTimeout(() => {
+            if (!mountedRef.current || currentIssueNumberRef.current !== requestIssueNumber || currentProfileRef.current?.projectId !== requestProjectId || saveRequestRef.current !== requestId) return
+            saveSuccessTimeoutRef.current = null
+            setSaveSuccess(false)
+          }, 3000)
         },
         onError: (err: Error) => {
+          if (!mountedRef.current || currentIssueNumberRef.current !== requestIssueNumber || currentProfileRef.current?.issueNumber !== requestIssueNumber || currentProfileRef.current?.projectId !== requestProjectId || saveRequestRef.current !== requestId || draftRevisionRef.current !== requestDraftRevision) return
           const errorMessage = err.message || 'Save failed'
           if (errorMessage.includes('yaml_syntax') || errorMessage.toLowerCase().includes('yaml')) {
             setValidationErrors([{ code: 'yaml_syntax', message: errorMessage }])
@@ -111,19 +153,26 @@ export function IssueWorkflowProfileEditor({ issueNumber, embedded = false, hook
         },
       }
     )
-  }, [draftYaml, issueNumber, updateMutation])
+  }, [data?.projectId, draftYaml, issueNumber, updateMutation])
 
   const handleRevert = useCallback(() => {
+    const requestIssueNumber = issueNumber
+    const requestProjectId = data?.projectId ?? null
+    const requestId = revertRequestRef.current + 1
+    revertRequestRef.current = requestId
     setRevertError(null)
     deleteMutation.mutate(
       { issueNumber },
       {
         onError: (err: Error) => {
+          if (!mountedRef.current || currentIssueNumberRef.current !== requestIssueNumber || currentProfileRef.current?.issueNumber !== requestIssueNumber || currentProfileRef.current?.projectId !== requestProjectId || revertRequestRef.current !== requestId) return
           setRevertError(err.message || 'Revert failed')
         },
       }
     )
-  }, [deleteMutation, issueNumber])
+  }, [data?.projectId, deleteMutation, issueNumber])
+
+  const hasCurrentData = data?.issueNumber === issueNumber
 
   if (isLoading) {
     return <LoadingCard embedded={embedded} />
@@ -133,7 +182,11 @@ export function IssueWorkflowProfileEditor({ issueNumber, embedded = false, hook
     return <ErrorCard embedded={embedded} message={(fetchError as Error).message} onRetry={() => refetch()} />
   }
 
-  if (!data) {
+  if (data !== undefined && data !== null && !hasCurrentData) {
+    return <LoadingCard embedded={embedded} />
+  }
+
+  if (!data || !hasCurrentData) {
     return null
   }
 
