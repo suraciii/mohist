@@ -236,6 +236,8 @@ public class TaskLogRouteSpecs
             body);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var responseJson = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("changed", responseJson.GetProperty("data").GetProperty("status").GetString());
 
         var stateAfter = await db.WorkflowRuns.AsNoTracking()
             .Where(r => r.WorkflowRunId == workflowRunId)
@@ -255,6 +257,8 @@ public class TaskLogRouteSpecs
             OneLineBody("forged"));
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var responseJson = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("not_found", responseJson.GetProperty("details").GetProperty("status").GetString());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();

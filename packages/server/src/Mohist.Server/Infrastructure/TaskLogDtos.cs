@@ -1,5 +1,13 @@
 namespace Mohist.Server.Infrastructure;
 
+public enum TaskLogAppendResult
+{
+    Changed,
+    Duplicate,
+    NotFound,
+    Conflict,
+}
+
 /// <summary>
 /// One captured line of an ops task's execution log in
 /// transport-friendly form. Lives in the root Infrastructure

@@ -22,5 +22,10 @@ public class TaskLogBatchRow
 
     public bool Truncated { get; set; }
 
+    public bool Terminal { get; set; }
+
+    [MaxLength(64)]
+    public string? TerminalDigest { get; set; }
+
     public DateTimeOffset UploadedAt { get; set; }
 }

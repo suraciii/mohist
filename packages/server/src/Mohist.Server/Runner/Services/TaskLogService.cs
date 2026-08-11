@@ -59,14 +59,7 @@ public sealed class TaskLogService : IScopedService
     /// <paramref name="truncated"/> reports whether head lines were
     /// dropped so the web client can surface that to users.
     /// </summary>
-    /// <returns>
-    /// <c>true</c> when the work item is recognised as
-    /// <c>Outstanding</c> and the batch is persisted; <c>false</c>
-    /// when the work item is unknown or no longer outstanding (the
-    /// caller surfaces that as a 4xx without touching real-time
-    /// fan-out).
-    /// </returns>
-    public async Task<bool> AppendAsync(
+    public async Task<TaskLogAppendResult> AppendAsync(
         string runnerId,
         string ownerKind,
         string ownerId,
@@ -81,12 +74,15 @@ public sealed class TaskLogService : IScopedService
 
         ValidateBatchCaps(entries);
 
-        if (!await IsActiveWorkAsync(runnerId, ownerKind, ownerId, workId, ct))
-            return false;
+        if (!await IsAcceptedWorkAsync(runnerId, ownerKind, ownerId, workId, terminal, ct))
+            return TaskLogAppendResult.NotFound;
 
         // 1. Persist FIRST. Authoritative; throw propagates (the
         //    upload route handles the validation/storing errors).
-        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated, terminal, ct);
+        var changed = await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated, terminal, ct);
+
+        if (changed != TaskLogAppendResult.Changed)
+            return changed;
 
         // 2. Best-effort fan-out, AFTER persistence has succeeded.
         //    A publisher throw, no-subscribers state, or per-send
@@ -122,7 +118,7 @@ public sealed class TaskLogService : IScopedService
                 ownerKind, ownerId, workId);
         }
 
-        return true;
+        return TaskLogAppendResult.Changed;
     }
 
     /// <summary>
@@ -161,19 +157,27 @@ public sealed class TaskLogService : IScopedService
         return await _workProjection.ResolveWorkIdAsync(workflowRunId, taskId, ct);
     }
 
-    private async Task<bool> IsActiveWorkAsync(
+    private async Task<bool> IsAcceptedWorkAsync(
         string runnerId,
         string ownerKind,
         string ownerId,
         string workId,
+        bool terminal,
         CancellationToken ct)
     {
         if (string.Equals(ownerKind, TaskLogOwnershipKinds.Workflow, StringComparison.Ordinal))
             return await _workProjection.IsActiveWorkAsync(ownerId, workId, runnerId, ct);
 
-        return (await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
+        if (!string.Equals(ownerKind, TaskLogOwnershipKinds.AgentJob, StringComparison.Ordinal))
+            return false;
+
+        var active = (await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
             .Any(work => string.Equals(work.JobKey, ownerId, StringComparison.Ordinal)
                 && string.Equals(work.WorkId, workId, StringComparison.Ordinal));
+        if (active)
+            return true;
+
+        return terminal && await _agentJobs.IsTerminalWorkAsync(ownerId, runnerId, workId, ct);
     }
 
     /// <summary>

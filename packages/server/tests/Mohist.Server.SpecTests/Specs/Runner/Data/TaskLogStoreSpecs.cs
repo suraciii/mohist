@@ -9,8 +9,11 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Data;
 
-public class TaskLogStoreSpecs : IAsyncLifetime
+public partial class TaskLogStoreSpecs : IAsyncLifetime
 {
+    private const string BeforeTerminalReceiptMigration = "20260902000000_AddRoutingRuleIdempotencyKey";
+    private const string TerminalReceiptMigration = "20260903000000_AddTaskLogTerminalReceipt";
+
     private readonly TestSqliteDatabase _database;
     private readonly TaskLogStore _store;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
@@ -27,6 +30,51 @@ public class TaskLogStoreSpecs : IAsyncLifetime
     {
         _database.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    [Fact]
+    public async Task TerminalReceiptMigration_UpgradesExistingSchemaAndSupportsAppend()
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeTerminalReceiptMigration);
+
+        await using (var db = database.CreateContext())
+        {
+            await db.Database.MigrateAsync(TerminalReceiptMigration);
+            Assert.Contains(TerminalReceiptMigration, await db.Database.GetAppliedMigrationsAsync());
+
+            await db.Database.OpenConnectionAsync();
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "PRAGMA table_info('TaskLogBatches')";
+            await using var reader = await command.ExecuteReaderAsync();
+            var columns = new List<string>();
+            while (await reader.ReadAsync())
+                columns.Add(reader.GetString(1));
+
+            Assert.Contains("Terminal", columns);
+            Assert.Contains("TerminalDigest", columns);
+        }
+
+        var store = new TaskLogStore(
+            new TestDbContextFactory(database.Options),
+            new FakeTimeProvider(_timeProvider.GetUtcNow()));
+        var result = await store.AppendAsync(
+            "agent-job",
+            "migration-owner",
+            "migration-work",
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "migrated")],
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.Changed, result);
+        var page = await store.QueryAsync(
+            "agent-job",
+            "migration-owner",
+            "migration-work",
+            afterSeq: null,
+            limit: 10);
+        Assert.Single(page.Lines);
+        Assert.Equal("migrated", page.Lines[0].Text);
     }
 
     [Fact]
@@ -184,7 +232,7 @@ public class TaskLogStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_TerminalBatchDedupsOverlappingIncrementalSeqs()
+    public async Task AppendAsync_TerminalBatchReconcilesOverlappingIncrementalSeqs()
     {
         var ownerKind = "workflow";
         var ownerId = $"wr-{Guid.NewGuid():N}";
@@ -196,19 +244,101 @@ public class TaskLogStoreSpecs : IAsyncLifetime
                 .ToList(),
             truncated: false);
 
+        var terminalNow = _timeProvider.GetUtcNow().AddSeconds(10);
+        var terminalEntries = Enumerable.Range(1, 15)
+            .Select(seq => new TaskLogLine(seq, terminalNow, "terminal", $"terminal-{seq}"))
+            .ToList();
         await _store.AppendAsync(ownerKind, ownerId, workId,
-            Enumerable.Range(1, 15)
-                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "terminal", $"terminal-{seq}"))
-                .ToList(),
-            truncated: true);
+            terminalEntries,
+            truncated: true,
+            terminal: true);
 
         var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 20);
 
         Assert.Equal(Enumerable.Range(1, 15).Select(i => (long)i).ToArray(), page.Lines.Select(l => l.Seq).ToArray());
         Assert.Equal(15, page.Lines.Select(l => l.Seq).Distinct().Count());
-        Assert.Equal("incremental-1", page.Lines[0].Text);
+        Assert.All(page.Lines, line => Assert.Equal("terminal", line.Source));
+        Assert.All(page.Lines, line => Assert.Equal(terminalNow, line.Timestamp));
+        Assert.Equal("terminal-1", page.Lines[0].Text);
         Assert.Equal("terminal-15", page.Lines[^1].Text);
         Assert.True(page.Truncated);
+    }
+
+    [Fact]
+    public async Task AppendAsync_TerminalReceiptReturnsConflictWithoutChangingRows()
+    {
+        var ownerKind = "agent-job";
+        var ownerId = $"aj-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var first = Enumerable.Range(1, 2)
+            .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "terminal", $"line-{seq}"))
+            .ToList();
+
+        var changed = await _store.AppendAsync(ownerKind, ownerId, workId, first, truncated: false, terminal: true);
+        var duplicate = await _store.AppendAsync(ownerKind, ownerId, workId, first, truncated: false, terminal: true);
+        var conflict = await _store.AppendAsync(
+            ownerKind,
+            ownerId,
+            workId,
+            [first[1]],
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.Changed, changed);
+        Assert.Equal(TaskLogAppendResult.Duplicate, duplicate);
+        Assert.Equal(TaskLogAppendResult.Conflict, conflict);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 10);
+        Assert.Equal([1, 2], page.Lines.Select(line => line.Seq).ToArray());
+        Assert.Equal(["line-1", "line-2"], page.Lines.Select(line => line.Text).ToArray());
+
+        await using var db = new MohistDbContext(_database.Options);
+        var batch = await db.TaskLogBatches.AsNoTracking()
+            .SingleAsync(b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId);
+        Assert.True(batch.Terminal);
+        Assert.NotNull(batch.TerminalDigest);
+    }
+
+    [Fact]
+    public async Task AppendAsync_ConcurrentTerminalUploadsResolveToOneReceipt()
+    {
+        var firstStore = new TaskLogStore(new TestDbContextFactory(_database.Options), _timeProvider);
+        var secondStore = new TaskLogStore(new TestDbContextFactory(_database.Options), _timeProvider);
+        var sameOwner = $"aj-{Guid.NewGuid():N}";
+        var sameWork = $"work-{Guid.NewGuid():N}";
+        var samePayload = new List<TaskLogLine>
+        {
+            new(1, _timeProvider.GetUtcNow(), "terminal", "same"),
+        };
+
+        var sameResults = await Task.WhenAll(
+            Task.Run(() => firstStore.AppendAsync("agent-job", sameOwner, sameWork, samePayload, false, true)),
+            Task.Run(() => secondStore.AppendAsync("agent-job", sameOwner, sameWork, samePayload, false, true)));
+
+        Assert.Equal(1, sameResults.Count(result => result == TaskLogAppendResult.Changed));
+        Assert.Equal(1, sameResults.Count(result => result == TaskLogAppendResult.Duplicate));
+
+        var differentOwner = $"aj-{Guid.NewGuid():N}";
+        var differentWork = $"work-{Guid.NewGuid():N}";
+        var firstPayload = new List<TaskLogLine>
+        {
+            new(1, _timeProvider.GetUtcNow(), "terminal", "first"),
+        };
+        var secondPayload = new List<TaskLogLine>
+        {
+            new(1, _timeProvider.GetUtcNow(), "terminal", "second"),
+        };
+
+        var differentResults = await Task.WhenAll(
+            Task.Run(() => firstStore.AppendAsync("agent-job", differentOwner, differentWork, firstPayload, false, true)),
+            Task.Run(() => secondStore.AppendAsync("agent-job", differentOwner, differentWork, secondPayload, false, true)));
+
+        Assert.Equal(1, differentResults.Count(result => result == TaskLogAppendResult.Changed));
+        Assert.Equal(1, differentResults.Count(result => result == TaskLogAppendResult.Conflict));
+
+        var page = await firstStore.QueryAsync("agent-job", differentOwner, differentWork, null, 10);
+        Assert.Single(page.Lines);
+        Assert.Contains(page.Lines[0].Text, new[] { "first", "second" });
     }
 
     [Fact]

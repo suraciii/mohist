@@ -94,21 +94,42 @@ public static class TaskLogRoutes
         if (string.IsNullOrWhiteSpace(runnerId))
             return ApiResults.BadRequest($"'{RunnerIdHeader}' header is required");
 
-        bool accepted;
+        TaskLogAppendResult result;
         try
         {
-            accepted = await service.AppendAsync(runnerId, ownerKind, ownerId, workId, validation.Lines, body.Truncated, body.Terminal, cancellationToken);
+            result = await service.AppendAsync(runnerId, ownerKind, ownerId, workId, validation.Lines, body.Truncated, body.Terminal, cancellationToken);
         }
         catch (ArgumentException ex)
         {
             return ApiResults.BadRequest(ex.Message);
         }
 
-        if (!accepted)
-            return ApiResults.NotFound("Active runner work item not found");
+        var status = result switch
+        {
+            TaskLogAppendResult.Changed => "changed",
+            TaskLogAppendResult.Duplicate => "duplicate",
+            TaskLogAppendResult.NotFound => "not_found",
+            TaskLogAppendResult.Conflict => "conflict",
+            _ => throw new ArgumentOutOfRangeException(nameof(result), result, null),
+        };
+        if (result == TaskLogAppendResult.NotFound)
+        {
+            return ApiResults.Fail(
+                "Active runner work item not found",
+                StatusCodes.Status404NotFound,
+                "not_found",
+                new { status });
+        }
+
+        if (result == TaskLogAppendResult.Conflict)
+            return ApiResults.Conflict(
+                "A different terminal task-log snapshot is already sealed",
+                "terminal_snapshot_conflict",
+                new { status });
 
         return ApiResults.Ok(new
         {
+            status,
             runnerId,
             ownerKind,
             ownerId,
