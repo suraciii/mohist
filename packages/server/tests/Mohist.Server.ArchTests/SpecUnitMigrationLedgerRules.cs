@@ -58,8 +58,10 @@ public sealed partial class SpecUnitMigrationLedgerRules
             SpecUnitMigrationCompiledDiscovery.ForTests(("Mohist.Server.SpecTests.Specs.Negative.UnknownDependencySpecs",
                 new SpecUnitMigrationMtpFacts(1, 0, 0, 1, "synthetic", false))));
         var unresolvedCandidate = unresolved.CurrentSpecClassifications.Single(candidate => candidate.Fqn.EndsWith("UnknownDependencySpecs", StringComparison.Ordinal));
-        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("unresolved symbol UnknownExternalBase", StringComparison.Ordinal));
-        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("unresolved symbol UnknownHelper", StringComparison.Ordinal));
+        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("source diagnostics: SEMANTIC|", StringComparison.Ordinal)
+            && blocker.Contains("UnknownExternalBase", StringComparison.Ordinal));
+        Assert.Contains(unresolvedCandidate.Blockers, blocker => blocker.Contains("source diagnostics: SEMANTIC|", StringComparison.Ordinal)
+            && blocker.Contains("UnknownHelper", StringComparison.Ordinal));
 
         var ambiguous = SpecUnitMigrationInventory.Create(
         [

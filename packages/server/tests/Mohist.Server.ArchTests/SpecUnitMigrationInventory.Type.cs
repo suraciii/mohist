@@ -188,12 +188,34 @@ internal sealed partial class SpecUnitMigrationInventory
         }
 
         internal IReadOnlyList<string> ReadSemanticDiagnostics(CSharpCompilation compilation)
-            => _declarations.SelectMany(value => compilation
-                    .GetSemanticModel(value.Declaration.SyntaxTree, ignoreAccessibility: true)
-                    .GetDiagnostics(value.Declaration.FullSpan))
-                .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-                .Select(FormatDiagnostic).Distinct(StringComparer.Ordinal)
-                .OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        {
+            var diagnostics = new List<string>();
+            foreach (var (_, declaration) in _declarations)
+            {
+                var model = compilation.GetSemanticModel(declaration.SyntaxTree, ignoreAccessibility: true);
+                foreach (var diagnostic in model.GetDiagnostics(declaration.FullSpan)
+                             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+                {
+                    var value = FormatDiagnostic(diagnostic);
+                    if (diagnostic.Id == "CS0411")
+                    {
+                        var node = declaration.SyntaxTree.GetRoot().FindNode(diagnostic.Location.SourceSpan);
+                        var invocation = node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+                        if (invocation?.Expression is MemberAccessExpressionSyntax memberAccess)
+                        {
+                            var receiver = model.GetTypeInfo(memberAccess.Expression).Type?.ToDisplayString(
+                                SymbolDisplayFormat.FullyQualifiedFormat) ?? "<unbound>";
+                            var candidates = model.GetSymbolInfo(invocation).CandidateSymbols
+                                .Select(SymbolDisplay).OrderBy(candidate => candidate, StringComparer.Ordinal);
+                            value += $" [receiver={receiver}; candidates={string.Join(", ", candidates)}]";
+                        }
+                    }
+                    diagnostics.Add(value);
+                }
+            }
+
+            return diagnostics.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        }
 
         internal bool HasPath(string path) => _declarations.Any(declaration => declaration.Path == path);
 

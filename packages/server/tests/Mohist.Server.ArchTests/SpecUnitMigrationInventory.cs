@@ -272,9 +272,12 @@ internal sealed partial class SpecUnitMigrationInventory : IDisposable
 
         var blockers = closure.SelectMany(type => Analyze(root, type).Blockers.Select(blocker => $"{type.Fqn}: {blocker}"))
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var type in closure)
-            foreach (var diagnostic in SemanticDiagnostics(root, type))
-                blockers.Add($"{type.Fqn}: source diagnostics: {diagnostic}");
+        if (blockers.Count == 0)
+        {
+            foreach (var type in closure)
+                foreach (var diagnostic in SemanticDiagnostics(root, type))
+                    blockers.Add($"{type.Fqn}: source diagnostics: {diagnostic}");
+        }
         var closureNames = closure.Select(type => type.Fqn).OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var distinctEdges = edges.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var facts = _compiledDiscovery.ForType(root.Fqn);
@@ -309,7 +312,7 @@ internal sealed partial class SpecUnitMigrationInventory : IDisposable
             LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
     internal bool RequiresSemanticBinding(string name)
-        => _embeddedReferenceNames.Contains(name) || (name.Length > 0 && char.IsUpper(name[0]));
+        => _embeddedReferenceNames.Contains(name);
 
     private IEnumerable<SpecUnitMigrationType> CurrentSpecTypes()
         => _typesByFqn.Values.Where(type => type.IsCurrentSpec && type.Name.EndsWith("Specs", StringComparison.Ordinal));

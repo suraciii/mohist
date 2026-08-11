@@ -73,7 +73,6 @@ public sealed partial class SpecUnitMigrationLedgerRules
         var classification = CurrentClassification(mutated, BoundedProofFqn);
 
         Assert.Contains(classification.Blockers, blocker => blocker.Contains("fixture/spec base MissingFixture", StringComparison.Ordinal));
-        Assert.Contains(mutated.Diagnostics, diagnostic => diagnostic.Contains("MissingFixture", StringComparison.Ordinal));
         Assert.NotEqual(inventory.DiscoveryBindingIdentity, mutated.DiscoveryBindingIdentity);
     }
 

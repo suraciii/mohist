@@ -79,13 +79,17 @@ internal sealed class SpecUnitMigrationReferenceSet : IDisposable
     {
         yield return typeof(object).Assembly;
         yield return typeof(Enumerable).Assembly;
+        yield return typeof(IQueryable<>).Assembly;
+        yield return typeof(Queryable).Assembly;
+        yield return typeof(System.Linq.Expressions.Expression).Assembly;
         yield return typeof(System.Diagnostics.Process).Assembly;
         yield return typeof(System.Net.Http.HttpClient).Assembly;
         yield return typeof(System.Net.Http.Json.JsonContent).Assembly;
+        yield return typeof(System.Reflection.DispatchProxy).Assembly;
         yield return typeof(System.Security.Claims.ClaimsPrincipal).Assembly;
         yield return typeof(System.Text.Json.JsonSerializer).Assembly;
         yield return typeof(System.Threading.Channels.Channel).Assembly;
-        yield return typeof(EnvironmentAbstractions.IEnvironmentVariableProvider).Assembly;
+        yield return typeof(System.IEnvironmentVariableProvider).Assembly;
         yield return typeof(EnvironmentAbstractions.TestHelpers.MockEnvironmentVariableProvider).Assembly;
         yield return typeof(Microsoft.AspNetCore.Hosting.IWebHostBuilder).Assembly;
         yield return typeof(Microsoft.AspNetCore.Http.DefaultHttpContext).Assembly;
@@ -94,12 +98,23 @@ internal sealed class SpecUnitMigrationReferenceSet : IDisposable
         yield return typeof(Microsoft.AspNetCore.Http.Json.JsonOptions).Assembly;
         yield return typeof(Microsoft.AspNetCore.SignalR.Hub).Assembly;
         yield return typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly;
+        yield return typeof(Microsoft.EntityFrameworkCore.BackingFieldAttribute).Assembly;
         yield return typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly;
+        yield return typeof(Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions).Assembly;
+        yield return typeof(Microsoft.Extensions.Configuration.ConfigurationBuilder).Assembly;
+        yield return typeof(Microsoft.Extensions.Configuration.IConfiguration).Assembly;
         yield return typeof(Microsoft.Extensions.DependencyInjection.ServiceCollection).Assembly;
         yield return typeof(Microsoft.Extensions.Hosting.IHost).Assembly;
+        yield return typeof(Microsoft.Extensions.DependencyInjection.OptionsConfigurationServiceCollectionExtensions).Assembly;
+        yield return typeof(Microsoft.Extensions.DependencyInjection.OptionsServiceCollectionExtensions).Assembly;
         yield return typeof(Microsoft.Extensions.Time.Testing.FakeTimeProvider).Assembly;
         yield return typeof(Orleans.IGrain).Assembly;
+        yield return typeof(Orleans.IClusterClient).Assembly;
+        yield return typeof(Orleans.Hosting.ISiloBuilder).Assembly;
+        yield return typeof(Orleans.Runtime.IManagementGrain).Assembly;
+        yield return typeof(Orleans.Hosting.MemoryGrainStorageSiloBuilderExtensions).Assembly;
         yield return typeof(Orleans.TestingHost.InProcessTestCluster).Assembly;
+        yield return typeof(Mohist.Server.Infrastructure.Data.Db.MohistDbContext).Assembly;
         yield return typeof(Xunit.FactAttribute).Assembly;
     }
 
