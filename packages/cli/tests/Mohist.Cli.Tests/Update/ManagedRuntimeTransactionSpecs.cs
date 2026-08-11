@@ -1,5 +1,6 @@
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli;
+using System.Text;
 using System.Text.Json;
 using Xunit;
 
@@ -132,6 +133,7 @@ public sealed class ManagedRuntimeTransactionSpecs
         Assert.True(cliPublishIndex > npmCiIndex);
         Assert.True(serverPublishIndex > npmCiIndex);
         Assert.True(runnerBuildIndex > npmCiIndex);
+        Assert.Equal(RuntimeLaunchMode.Node, fixture.LastPreparedTargets!.Runner!.LaunchMode);
         Assert.Equal(1, fixture.Activator.ApplyCalls);
     }
 
@@ -215,7 +217,267 @@ public sealed class ManagedRuntimeTransactionSpecs
         Assert.False(fixture.Files.HasFile(fixture.VerifiedPath));
     }
 
-    private static RuntimeIdentity Identity(string component, long generation) =>
+    [Fact]
+    public async Task SystemdManagedUnits_UseArtifactLaunchSemantics()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var installer = new SystemdServiceInstaller(
+            TextWriter.Null,
+            TextWriter.Null,
+            files,
+            commands,
+            new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false));
+        var server = new RuntimeTarget(
+            "server",
+            "/managed/server/Mohist.Server",
+            "/managed/server",
+            [],
+            "linux-x64",
+            Identity("server", 4));
+        var runner = new RuntimeTarget(
+            "runner",
+            "/managed/runner/dist/cli.js",
+            "/managed/runner",
+            [],
+            "linux-x64",
+            Identity("runner", 4, "runner-1"),
+            "/usr/bin/node",
+            "/managed/runner",
+            RuntimeLaunchMode.Node);
+
+        var result = await installer.ApplyManagedRuntimeAsync(
+            new RuntimeTargetSet("candidate-staged", 4, "tx-units", null, server, runner, null),
+            "full",
+            "/units");
+
+        Assert.Equal(0, result);
+        var serverUnit = files.Read("/units/mohist.service");
+        var runnerUnit = files.Read("/units/mohist-runner.service");
+        Assert.Contains("ExecStart=/managed/server/Mohist.Server\n", serverUnit, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet", serverUnit, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ExecStart=/usr/bin/node /managed/runner/dist/cli.js\n", runnerUnit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenFirstManagedServerActivationFails_RestoresSourceUnitAndCliPointer()
+    {
+        var fixture = ManagedFixture.Create(0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        const string sourceUnit = "[Unit]\nDescription=Source Server\n\n[Service]\nExecStart=/repo/server\n\n[Install]\nWantedBy=default.target\n";
+        fixture.Files.AddFile(Path.Combine(UpdateTestFactory.UnitDir, "mohist.service"), sourceUnit);
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "is-active", "mohist.service"]),
+            0,
+            "active\n",
+            "");
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "is-enabled", "mohist.service"]),
+            0,
+            "enabled\n",
+            "");
+        fixture.Commands.QueueResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "restart", "mohist.service"]),
+            17,
+            "",
+            "candidate failed");
+        fixture.Commands.QueueResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "restart", "mohist.service"]),
+            0,
+            "",
+            "");
+        var previous = new RuntimeTargetSet(
+            "verified",
+            2,
+            "tx-cli",
+            new RuntimeTarget("cli", "/managed/cli/mo", "/managed/cli", [], "linux-x64", Identity("cli", 2)),
+            null,
+            null,
+            null);
+        fixture.Files.AddFile(fixture.VerifiedPath, JsonSerializer.Serialize(previous, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        var prepared = await fixture.Transaction.PrepareAsync("/repo", "server", "tx-source-failure", null);
+
+        Assert.Null(prepared.Session);
+        Assert.Equal(sourceUnit, fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist.service")));
+        Assert.Contains(fixture.Commands.ExecutedCommands, command => command.Args.SequenceEqual(["--user", "daemon-reload"]));
+        Assert.Contains(fixture.Commands.ExecutedCommands, command => command.Args.SequenceEqual(["--user", "enable", "mohist.service"]));
+        Assert.Equal(2, fixture.Commands.ExecutedCommands.Count(command => command.Args.SequenceEqual(["--user", "restart", "mohist.service"])));
+        var transaction = Parse(fixture.Files.Read(Path.Combine(
+            fixture.RuntimeRoot,
+            "transactions",
+            "tx-source-failure",
+            "state.json")));
+        Assert.NotNull(transaction.SourceSnapshot?.Server);
+        Assert.True(transaction.SourceSnapshot!.Server!.Exists);
+        Assert.Equal(Encoding.UTF8.GetBytes(sourceUnit), transaction.SourceSnapshot.Server.Contents);
+        Assert.True(transaction.SourceSnapshot.Server.WasActive);
+        Assert.True(transaction.SourceSnapshot.Server.WasEnabled);
+        var active = Parse(fixture.Files.Read(fixture.ActivePath));
+        var verified = Parse(fixture.Files.Read(fixture.VerifiedPath));
+        Assert.Equal("verified", active.Status);
+        Assert.NotNull(active.Cli);
+        Assert.Null(active.Server);
+        Assert.Equal(previous.Cli!.Identity, active.Cli!.Identity);
+        Assert.Equal(previous.Cli.Identity, verified.Cli!.Identity);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenSourceProbeIsUnrecognized_FailsBeforeUnitOverwrite()
+    {
+        var fixture = ManagedFixture.Create(0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        const string sourceUnit = "[Service]\nExecStart=/repo/server\n";
+        var unitPath = Path.Combine(UpdateTestFactory.UnitDir, "mohist.service");
+        fixture.Files.AddFile(unitPath, sourceUnit);
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "is-active", "mohist.service"]),
+            1,
+            "state-not-recognized\n",
+            "probe failed");
+
+        var prepared = await fixture.Transaction.PrepareAsync("/repo", "server", "tx-invalid-probe", null);
+
+        Assert.Null(prepared.Session);
+        Assert.Contains("staging failed", prepared.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, fixture.Activator.ApplyCalls);
+        Assert.Equal(sourceUnit, fixture.Files.Read(unitPath));
+    }
+
+    [Fact]
+    public async Task Rollback_WhenServerRestoreFails_RetainsPreviousCliAndLeavesVerifiedUnchanged()
+    {
+        var fixture = ManagedFixture.Create(0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        const string sourceUnit = "[Service]\nExecStart=/repo/server\n";
+        var unitPath = Path.Combine(UpdateTestFactory.UnitDir, "mohist.service");
+        fixture.Files.AddFile(unitPath, sourceUnit);
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.Length == 3 && args[1] == "is-active",
+            0,
+            "active\n",
+            "");
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.Length == 3 && args[1] == "is-enabled",
+            0,
+            "enabled\n",
+            "");
+        var previous = new RuntimeTargetSet(
+            "verified",
+            2,
+            "tx-cli",
+            new RuntimeTarget("cli", "/managed/cli/mo", "/managed/cli", [], "linux-x64", Identity("cli", 2)),
+            null,
+            null,
+            null);
+        var verifiedJson = JsonSerializer.Serialize(previous, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        fixture.Files.AddFile(fixture.VerifiedPath, verifiedJson);
+
+        var prepared = await fixture.Transaction.PrepareAsync("/repo", "server", "tx-rollback-failure", null);
+        Assert.NotNull(prepared.Session);
+        fixture.Commands.QueueResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "restart", "mohist.service"]),
+            23,
+            "",
+            "restore failed");
+
+        var rollback = await fixture.Transaction.RollbackAsync(prepared.Session!, "readiness failed");
+
+        Assert.Equal(23, rollback);
+        var active = Parse(fixture.Files.Read(fixture.ActivePath));
+        Assert.Equal("recovery-failed", active.Status);
+        Assert.NotNull(active.Cli);
+        Assert.Null(active.Server);
+        Assert.Equal(previous.Cli!.Identity, active.Cli!.Identity);
+        Assert.Equal(nameof(ManagedRuntimeRestoreState.Failed), active.Recovery!.Server);
+        Assert.Equal(nameof(ManagedRuntimeRestoreState.NotAttempted), active.Recovery.Runner);
+        Assert.Equal(verifiedJson, fixture.Files.Read(fixture.VerifiedPath));
+        var transaction = Parse(fixture.Files.Read(Path.Combine(
+            fixture.RuntimeRoot,
+            "transactions",
+            "tx-rollback-failure",
+            "state.json")));
+        Assert.Equal("recovery-failed", transaction.Status);
+        Assert.Contains("affected scope=server", transaction.RecoveryDiagnostic, StringComparison.Ordinal);
+        Assert.Equal(sourceUnit, fixture.Files.Read(unitPath));
+    }
+
+    [Fact]
+    public async Task RollbackFull_WhenOneSourceRestoreFails_AttemptsOtherUnitAndPersistsDiagnostics()
+    {
+        var fixture = ManagedFixture.Create(0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        fixture.Files.AddFile(Path.Combine(UpdateTestFactory.UnitDir, "mohist.service"), "[Service]\nExecStart=/repo/server\n");
+        fixture.Files.AddFile(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service"), "[Service]\nExecStart=/repo/runner\n");
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.Length == 3 && args[1] == "is-active",
+            0,
+            "active\n",
+            "");
+        fixture.Commands.SetResultFor(
+            "systemctl",
+            args => args.Length == 3 && args[1] == "is-enabled",
+            0,
+            "enabled\n",
+            "");
+        var previous = new RuntimeTargetSet(
+            "verified",
+            2,
+            "tx-full",
+            new RuntimeTarget("cli", "/managed/cli/mo", "/managed/cli", [], "linux-x64", Identity("cli", 2)),
+            new RuntimeTarget("server", "/managed/server/Mohist.Server", "/managed/server", [], "linux-x64", Identity("server", 2)),
+            new RuntimeTarget("runner", "/managed/runner/dist/cli.js", "/managed/runner", [], "linux-x64", Identity("runner", 2, "runner-1"), "/usr/bin/node", "/managed/runner", RuntimeLaunchMode.Node),
+            null);
+        var verifiedJson = JsonSerializer.Serialize(previous, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        fixture.Files.AddFile(fixture.VerifiedPath, verifiedJson);
+
+        var prepared = await fixture.Transaction.PrepareAsync("/repo", "full", "tx-full-rollback-failure", null);
+        Assert.NotNull(prepared.Session);
+        fixture.Commands.QueueResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "restart", "mohist.service"]),
+            0,
+            "",
+            "");
+        fixture.Commands.QueueResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "restart", "mohist-runner.service"]),
+            29,
+            "",
+            "runner restore failed");
+
+        var rollback = await fixture.Transaction.RollbackAsync(prepared.Session!, "identity failed");
+
+        Assert.Equal(29, rollback);
+        Assert.Equal(2, fixture.Commands.ExecutedCommands.Count(command =>
+            command.Args.SequenceEqual(["--user", "restart", "mohist-runner.service"])));
+        var active = Parse(fixture.Files.Read(fixture.ActivePath));
+        Assert.Equal("recovery-failed", active.Status);
+        Assert.NotNull(active.Cli);
+        Assert.NotNull(active.Server);
+        Assert.Null(active.Runner);
+        Assert.Equal(previous.Cli!.Identity, active.Cli!.Identity);
+        Assert.Equal(previous.Server!.Identity, active.Server!.Identity);
+        Assert.Equal(nameof(ManagedRuntimeRestoreState.Restored), active.Recovery!.Server);
+        Assert.Equal(nameof(ManagedRuntimeRestoreState.Failed), active.Recovery.Runner);
+        Assert.Equal(verifiedJson, fixture.Files.Read(fixture.VerifiedPath));
+        var transaction = Parse(fixture.Files.Read(Path.Combine(
+            fixture.RuntimeRoot,
+            "transactions",
+            "tx-full-rollback-failure",
+            "state.json")));
+        Assert.Equal("recovery-failed", transaction.Status);
+        Assert.Contains("affected scope=full", transaction.RecoveryDiagnostic, StringComparison.Ordinal);
+        Assert.Equal(nameof(ManagedRuntimeRestoreState.Restored), transaction.Recovery!.Server);
+        Assert.Equal(nameof(ManagedRuntimeRestoreState.Failed), transaction.Recovery.Runner);
+    }
+
+    private static RuntimeIdentity Identity(string component, long generation, string? runnerId = null) =>
         new(
             component,
             "0.0.0+commit",
@@ -223,7 +485,8 @@ public sealed class ManagedRuntimeTransactionSpecs
             new string('b', 40),
             new string('c', 64),
             "mohist-server-commit",
-            generation);
+            generation,
+            runnerId);
 
     private static RuntimeTargetSet Parse(string json) =>
         JsonSerializer.Deserialize<RuntimeTargetSet>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))
@@ -253,10 +516,11 @@ public sealed class ManagedRuntimeTransactionSpecs
         public RecordingActivator Activator { get; }
         public ManagedRuntimeTransaction Transaction { get; }
         public string RuntimeRoot { get; }
+        public RuntimeTargetSet? LastPreparedTargets => Activator.LastTargets;
         public string ActivePath => Path.Combine(RuntimeRoot, "active.json").Replace('\\', '/');
         public string VerifiedPath => Path.Combine(RuntimeRoot, "verified.json").Replace('\\', '/');
 
-        public static ManagedFixture Create(int activationCode)
+        public static ManagedFixture Create(int activationCode, bool useSystemd = false, string? unitDir = null)
         {
             var files = new FakeFileSystem();
             files.AddFile("/repo/Mohist.sln", "solution");
@@ -338,7 +602,10 @@ public sealed class ManagedRuntimeTransactionSpecs
             var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
             var runtimeRoot = UpdateSourceResolver.ResolveRuntimeRoot("/home/test");
             var resolver = new UpdateSourceResolver(commands, files, () => "/home/test");
-            var activator = new RecordingActivator(activationCode);
+            var systemd = useSystemd
+                ? new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, files, commands, environment)
+                : null;
+            var activator = new RecordingActivator(activationCode, systemd);
             var transaction = new ManagedRuntimeTransaction(
                 TextWriter.Null,
                 TextWriter.Null,
@@ -346,34 +613,49 @@ public sealed class ManagedRuntimeTransactionSpecs
                 files,
                 environment,
                 resolver,
-                activator);
+                activator,
+                unitDir);
             return new ManagedFixture(files, commands, activator, transaction, runtimeRoot);
         }
     }
 
-    private sealed class RecordingActivator(int applyCode) : IManagedRuntimeActivator
+    private sealed class RecordingActivator(int applyCode, IManagedRuntimeActivator? inner = null) : IManagedRuntimeActivator
     {
         public int ApplyCalls { get; private set; }
         public int RestoreCalls { get; private set; }
+        public RuntimeTargetSet? LastTargets { get; private set; }
+
+        public Task<ManagedRuntimeSnapshot?> CaptureManagedRuntimeSnapshotAsync(
+            string scope,
+            string? unitDir,
+            CancellationToken cancellationToken = default) =>
+            inner?.CaptureManagedRuntimeSnapshotAsync(scope, unitDir, cancellationToken)
+            ?? Task.FromResult<ManagedRuntimeSnapshot?>(null);
 
         public Task<int> ApplyManagedRuntimeAsync(
             RuntimeTargetSet targets,
             string scope,
             string? unitDir,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            ManagedRuntimeSnapshot? snapshot = null)
         {
             ApplyCalls++;
-            return Task.FromResult(applyCode);
+            LastTargets = targets;
+            return inner is null
+                ? Task.FromResult(applyCode)
+                : inner.ApplyManagedRuntimeAsync(targets, scope, unitDir, cancellationToken, snapshot);
         }
 
-        public Task<int> RestoreManagedRuntimeAsync(
+        public Task<ManagedRuntimeRestoreResult> RestoreManagedRuntimeAsync(
             RuntimeTargetSet? targets,
             string scope,
             string? unitDir,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            ManagedRuntimeSnapshot? snapshot = null)
         {
             RestoreCalls++;
-            return Task.FromResult(0);
+            return inner?.RestoreManagedRuntimeAsync(targets, scope, unitDir, cancellationToken, snapshot)
+                ?? Task.FromResult(ManagedRuntimeRestoreResult.FromExitCode(0, scope));
         }
     }
 }

@@ -91,14 +91,70 @@ internal sealed record RuntimeTarget(
     string RuntimeIdentifier,
     RuntimeIdentity Identity,
     string? NodeExecutable = null,
-    string? DependencyRoot = null)
+    string? DependencyRoot = null,
+    RuntimeLaunchMode LaunchMode = RuntimeLaunchMode.SelfContained)
 {
     public bool IsAbsoluteTarget =>
         Path.IsPathRooted(Entrypoint)
         && Path.IsPathRooted(WorkingDirectory)
         && (NodeExecutable is null || Path.IsPathRooted(NodeExecutable))
-        && (DependencyRoot is null || Path.IsPathRooted(DependencyRoot));
+        && (DependencyRoot is null || Path.IsPathRooted(DependencyRoot))
+        && (LaunchMode != RuntimeLaunchMode.Node
+            || NodeExecutable is not null && Path.IsPathRooted(NodeExecutable));
 }
+
+internal enum RuntimeLaunchMode
+{
+    SelfContained,
+    Node,
+}
+
+internal sealed record ManagedUnitSnapshot(
+    string UnitName,
+    bool Exists,
+    byte[]? Contents,
+    bool WasActive,
+    bool WasEnabled);
+
+internal sealed record ManagedRuntimeSnapshot(
+    ManagedUnitSnapshot? Server,
+    ManagedUnitSnapshot? Runner);
+
+internal enum ManagedRuntimeRestoreState
+{
+    NotAttempted,
+    Restored,
+    Failed,
+}
+
+internal sealed record ManagedRuntimeRestoreResult(
+    int ExitCode,
+    ManagedRuntimeRestoreState Server,
+    ManagedRuntimeRestoreState Runner,
+    string? Diagnostic)
+{
+    public ManagedRuntimeRecovery ToRecovery(string fallbackDiagnostic) =>
+        new(
+            Server.ToString(),
+            Runner.ToString(),
+            string.IsNullOrWhiteSpace(Diagnostic) ? fallbackDiagnostic : Diagnostic);
+
+    public static ManagedRuntimeRestoreResult FromExitCode(int exitCode, string scope, string? diagnostic = null) =>
+        new(
+            exitCode,
+            Includes(scope, "server") ? exitCode == 0 ? ManagedRuntimeRestoreState.Restored : ManagedRuntimeRestoreState.Failed : ManagedRuntimeRestoreState.NotAttempted,
+            Includes(scope, "runner") ? exitCode == 0 ? ManagedRuntimeRestoreState.Restored : ManagedRuntimeRestoreState.Failed : ManagedRuntimeRestoreState.NotAttempted,
+            diagnostic);
+
+    private static bool Includes(string scope, string component) =>
+        string.Equals(scope, "full", StringComparison.Ordinal)
+        || string.Equals(scope, component, StringComparison.Ordinal);
+}
+
+internal sealed record ManagedRuntimeRecovery(
+    string Server,
+    string Runner,
+    string Diagnostic);
 
 internal sealed record RuntimeTargetSet(
     string Status,
@@ -108,7 +164,10 @@ internal sealed record RuntimeTargetSet(
     RuntimeTarget? Server,
     RuntimeTarget? Runner,
     RuntimeTargetSet? Previous,
-    string? ActivationLease = null)
+    string? ActivationLease = null,
+    ManagedRuntimeSnapshot? SourceSnapshot = null,
+    string? RecoveryDiagnostic = null,
+    ManagedRuntimeRecovery? Recovery = null)
 {
     public bool IsNone => string.Equals(Status, "none", StringComparison.Ordinal);
 
