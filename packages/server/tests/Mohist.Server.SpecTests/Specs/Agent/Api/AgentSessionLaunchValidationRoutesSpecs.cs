@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -232,6 +233,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             projectId,
             runnerId,
             "launch-dispatch");
+        ClaimResult? claim = null;
         PollSnapshot? polled = null;
 
         try
@@ -246,6 +248,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
             Assert.False(string.IsNullOrWhiteSpace(mintedSessionId));
 
+            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, mintedSessionId);
             polled = await PollDispatchForSessionAsync(jobId, runnerId, mintedSessionId);
 
             // Launch-route regression guard: the dispatch envelope the
@@ -262,8 +265,8 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         }
         finally
         {
-            if (polled is not null && polled.AgentJobId is not null)
-                await CompleteClaimedAgentJobAsync(runnerId, polled.AgentJobId, polled.WorkId);
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
