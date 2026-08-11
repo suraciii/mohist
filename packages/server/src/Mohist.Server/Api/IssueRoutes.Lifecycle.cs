@@ -121,12 +121,13 @@ public static partial class IssueRoutes
             try
             {
                 await grain.MarkDoneAsync();
-                return ApiResults.Ok();
             }
             catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message);
             }
+
+            return await ReadCanonicalIssueAfterMutationAsync(issuesQuery, project, number);
         });
 
         group.MapPost("/{number:int}/close", async (
@@ -147,7 +148,6 @@ public static partial class IssueRoutes
                     await grain.CloseCompositeAsync();
                 else
                     await grain.CancelAsync();
-                return ApiResults.Ok();
             }
             catch (IssueParentHasNonTerminalChildrenException ex)
             {
@@ -160,6 +160,8 @@ public static partial class IssueRoutes
             {
                 return ApiResults.Conflict(ex.Message);
             }
+
+            return await ReadCanonicalIssueAfterMutationAsync(issuesQuery, project, number);
         });
 
         group.MapPost("/{number:int}/reopen", async (
@@ -180,12 +182,13 @@ public static partial class IssueRoutes
                 try
                 {
                     await parentGrain.ReopenCompositeAsync();
-                    return ApiResults.Ok();
                 }
                 catch (InvalidOperationException ex)
                 {
                     return ApiResults.Conflict(ex.Message);
                 }
+
+                return await ReadCanonicalIssueAfterMutationAsync(issuesQuery, project, number);
             }
 
             // reopen enters through the Project-scoped
@@ -215,7 +218,7 @@ public static partial class IssueRoutes
             {
                 case IssueRepositoryBindingResultCode.Applied:
                 case IssueRepositoryBindingResultCode.AlreadyApplied:
-                    return ApiResults.Ok();
+                    return await ReadCanonicalIssueAfterMutationAsync(issuesQuery, project, number);
                 case IssueRepositoryBindingResultCode.RepositoryMissingOnReopen:
                     return ApiResults.Conflict(
                         coordinatorResult.Message ?? "Target repository is no longer declared",
@@ -311,6 +314,31 @@ public static partial class IssueRoutes
                 $"Archived {completed.Count} completed issues, skipped {skipped.Count}"));
         });
     }
+
+    private static async Task<IResult> ReadCanonicalIssueAfterMutationAsync(
+        IssueQuerier issuesQuery,
+        ProjectInfo project,
+        int number)
+    {
+        try
+        {
+            var updated = await issuesQuery.GetAsync(project.Id, number, project);
+            return updated is null
+                ? LifecycleResourceUnavailable(number)
+                : ApiResults.Ok(updated);
+        }
+        catch (Exception)
+        {
+            return LifecycleResourceUnavailable(number);
+        }
+    }
+
+    private static IResult LifecycleResourceUnavailable(int number) =>
+        ApiResults.Fail(
+            $"Issue #{number} was changed, but its canonical resource is unavailable",
+            StatusCodes.Status500InternalServerError,
+            "lifecycle_resource_unavailable",
+            new { issueNumber = number, mutationCommitted = true });
 }
 
 public sealed record IssueArchiveCompletedResponse(
