@@ -173,6 +173,10 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
       errors.push('canonical.partitionExecutionCapacity must be a positive integer when partitioned tracks exist')
     }
     for (const track of partitionedTracks) {
+      if (track.id !== 'server-spec') {
+        errors.push(`track "${track.id}": only server-spec supports partitioned execution`)
+        continue
+      }
       const outerLimit = config.resourceLimits[track.id]
       if (!Number.isInteger(outerLimit) || outerLimit <= 0) {
         errors.push(`canonical.resourceLimits.${track.id} must bound partitioned track "${track.id}"`)
