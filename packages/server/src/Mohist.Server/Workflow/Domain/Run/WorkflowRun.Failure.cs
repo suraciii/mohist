@@ -87,7 +87,7 @@ public static partial class WorkflowRunExtensions
             switch (target.Reason)
             {
                 case FailureReason.TaskFailed:
-                    current.RetryFailedTask(target.Target);
+                    current.RetryFailedTask(run, target.Target);
                     run.Failure = null;
                     ApplyWaitingForDispatchStatus(run, now);
                     return [new WorkflowRunResumed()];

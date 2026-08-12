@@ -12,24 +12,22 @@ public sealed class WorkflowReportService : IScopedService
     private readonly IGrainFactory _grains;
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly WorkflowItemTranslator _translator;
-    private readonly ILogger<WorkflowReportService> _log;
 
     public WorkflowReportService(
         IGrainFactory grains,
         WorkflowRunQuerier workflowRuns,
-        WorkflowItemTranslator translator,
-        ILogger<WorkflowReportService> log)
+        WorkflowItemTranslator translator)
     {
         _grains = grains;
         _workflowRuns = workflowRuns;
         _translator = translator;
-        _log = log;
     }
 
     public async Task<(string Ack, string? WorkflowStatus)> ReportAsync(
         string runnerId,
         string workflowRunId,
         string workId,
+        string? taskRunId,
         WorkResult result,
         CancellationToken ct = default)
     {
@@ -37,47 +35,35 @@ public sealed class WorkflowReportService : IScopedService
         if (run is null)
             return ("missing-workflow", null);
 
-        var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        var workerId = runnerId;
-
-        var activeWork = run.FindActiveWork(workId, workerId);
-        if (activeWork is null)
+        var item = run.FindReportShape(taskRunId, workId);
+        if (item is null)
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
-        if (activeWork.IsTask)
+        var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        var report = _translator.TranslateResult(item, result, workflowRunId);
+        if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && item.IsTask)
         {
-            try
-            {
-                RuntimeTaskFollowUps.Project(result.AddTasks);
-            }
-            catch (InvalidOperationException ex)
-            {
-                // A permanently invalid recovery follow-up (missing/out-of-range
-                // recoveryRemaining, or remaining without a declaration) must not
-                // escape as a non-2xx response: the runner would keep the result in
-                // awaitingAck and resend it forever, and the run would never reach a
-                // terminal state. Validation runs before any task mutation, so fail
-                // the active work durably and ack so the runner retires the work.
-                _log.LogError(
-                    "run {run} work {work} rejected recovery follow-up: {reason}",
-                    workflowRunId, workId, ex.Message);
-                var rejectionAck = await workflow.ReceiveTaskReportAsync(workerId, workId, new TaskReport(
-                    workId,
-                    TaskReportStatus.Failed,
-                    Output: null,
-                    Artifacts: null,
-                    Detail: $"Recovery follow-up rejected: {ex.Message}"));
-                return (rejectionAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
-            }
+            var unknownAck = await workflow.ObserveAgentResultUnknownAsync(
+                runnerId,
+                taskRunId ?? string.Empty,
+                workId,
+                unknown.ReasonCode,
+                unknown.Message);
+            if (unknownAck != ReportAck.Stale)
+                return (unknownAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+
+            report = new WorkflowItemTranslator.InboundReport.Task(unknown.Fallback);
         }
 
-        var report = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
         ReportAck ack = report switch
         {
-            WorkflowItemTranslator.InboundReport.Task t when activeWork.IsTask =>
-                await workflow.ReceiveTaskReportAsync(workerId, workId, t.Value),
-            WorkflowItemTranslator.InboundReport.Checks c when activeWork.IsChecks =>
-                await workflow.ReceiveCheckReportAsync(workerId, workId, c.Value),
+            WorkflowItemTranslator.InboundReport.Task task when item.IsTask && taskRunId is not null =>
+                await workflow.ReceiveTaskReportAsync(
+                    runnerId,
+                    workId,
+                    task.Value with { TaskRunId = taskRunId }),
+            WorkflowItemTranslator.InboundReport.Checks checks when item.IsChecks =>
+                await workflow.ReceiveCheckReportAsync(runnerId, workId, checks.Value),
             _ => ReportAck.Stale,
         };
         return (ack.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());

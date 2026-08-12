@@ -23,7 +23,7 @@ import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } f
 import { fail as actionFail, isActionFailure, succeed as actionSucceed } from "../actions/action-result.js"
 import type { ActionDefinition, ActionManifest, ActionCapabilitySet } from "../actions/manifest.js"
 import { validateActionInput, deferredInputFields, injectEngineInputs } from "../actions/input-validation.js"
-import { malformedToUnexpectedError, normalizeActionResult, passThroughExitCode, passThroughTurnFact } from "../actions/result-validation.js"
+import { malformedToUnexpectedError, normalizeActionResult, passThroughExitCode, passThroughOutcome, passThroughTurnFact } from "../actions/result-validation.js"
 import {
   evaluateCompletion,
   promiseValue,
@@ -33,6 +33,7 @@ import type { AgentJobExecutor } from "./agent-job-executor.js"
 import type { ActionHost, ActionEffects, AgentTurnRequest } from "../actions/host.js"
 import { capabilitySet } from "../actions/host.js"
 import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from "../actions/opencode.js"
+import { composePiPrompt, piAction } from "../actions/pi.js"
 import { WorkflowAgentSessionReporter } from "../actions/workflow-agent-session-reporter.js"
 import { hasUnconfirmedCleanup, parseModelIdentifier } from "./opencode/index.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "./binding-recovery.js"
@@ -187,6 +188,7 @@ export class WorkExecutor {
         )
       }
       const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
+      const outcome = passThroughOutcome(rawResult)
       const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
       let effects: ActionEffects = {}
       let validatedResult: ActionResult
@@ -202,6 +204,9 @@ export class WorkExecutor {
       if (exitCode !== undefined && exitCode !== null) {
         ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
       }
+      if (outcome) {
+        ;(validatedResult as { outcome?: "unknown" }).outcome = outcome
+      }
       const actionSucceeded = !isActionFailure(validatedResult)
       const completion = actionSucceeded
         ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
@@ -209,6 +214,7 @@ export class WorkExecutor {
       const projected = projectTaskOutput(work, validatedResult, completion, caps)
       const resultForRecovery = projected
       if (isActionFailure(validatedResult)) {
+        if (resultForRecovery.status === "unknown") return resultForRecovery
         const recoveryResult = tryRecovery(work, resultForRecovery, variables)
         if (recoveryResult) return recoveryResult
         return resultForRecovery
@@ -295,6 +301,9 @@ export class WorkExecutor {
     const self = this
     return {
       async turn(request: AgentTurnRequest): Promise<ActionResult> {
+        if (work.uses?.trim().toLowerCase() === "mohist/pi") {
+          return await self.runPiAgentTurn(work, workDir, signal, request)
+        }
         const definition = work.agentDefinition
         const skillNames = definition?.skills ?? []
         const resolvedSkills = await self.skillResolver.resolve(skillNames, workDir)
@@ -309,7 +318,7 @@ export class WorkExecutor {
 
         const runtime = self.openCodeRuntime
         const sessionName = request.session ?? work.workId
-        let binding: { runtimeSessionId: string | null; workDir: string; runnerId: string; runtime: "opencode" } | null = null
+        let binding: { agentSessionId: string; runtimeSessionId: string | null; workDir: string; runnerId: string; runtime: "opencode" } | null = null
         let freshRuntimeSessionRequired = false
         let freshBindingCreated = false
         if (self.connection && work.projectId) {
@@ -335,7 +344,9 @@ export class WorkExecutor {
                 work.projectId,
                 work.workflowRunId,
                 sessionName,
-                { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+                { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+                self.connection.runnerId,
+                opened.sessionId,
                 opened.runtimeSessionId ?? null,
                 self.agentSessionRuntimeEventOutbox,
                 self.runtimeEventRecordId,
@@ -354,6 +365,7 @@ export class WorkExecutor {
               )
             }
             binding = {
+              agentSessionId: opened.sessionId,
               runtimeSessionId: opened.runtimeSessionId ?? null,
               workDir: opened.workDir || workDir,
               runnerId: self.connection.runnerId,
@@ -365,14 +377,16 @@ export class WorkExecutor {
           }
         }
         if (!binding) {
-          binding = { runtimeSessionId: null, workDir, runnerId: self.connection?.runnerId ?? "", runtime: "opencode" }
+          binding = { agentSessionId: "", runtimeSessionId: null, workDir, runnerId: self.connection?.runnerId ?? "", runtime: "opencode" }
         }
 
         let reporter = createWorkflowReporter(
           work.projectId ?? null,
           work.workflowRunId,
           sessionName,
-          { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+          { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+          binding.runnerId,
+          binding.agentSessionId,
           binding.runtimeSessionId,
           self.agentSessionRuntimeEventOutbox,
           self.runtimeEventRecordId,
@@ -431,10 +445,12 @@ export class WorkExecutor {
           } catch (error) {
             const attachReporter = createWorkflowReporter(
               work.projectId,
-              work.workflowRunId,
-              sessionName,
-              { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
-              created.value.runtimeSessionId,
+                work.workflowRunId,
+                sessionName,
+                { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+                self.connection.runnerId,
+                binding.agentSessionId,
+                created.value.runtimeSessionId,
               self.agentSessionRuntimeEventOutbox,
               self.runtimeEventRecordId,
             )
@@ -446,6 +462,7 @@ export class WorkExecutor {
             )
           }
           binding = {
+            agentSessionId: binding.agentSessionId,
             runtimeSessionId: created.value.runtimeSessionId,
             workDir: created.value.workDir,
             runnerId: self.connection.runnerId,
@@ -455,7 +472,9 @@ export class WorkExecutor {
             work.projectId ?? null,
             work.workflowRunId,
             sessionName,
-            { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+            { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+            binding.runnerId,
+            binding.agentSessionId,
             binding.runtimeSessionId,
             self.agentSessionRuntimeEventOutbox,
             self.runtimeEventRecordId,
@@ -502,6 +521,7 @@ export class WorkExecutor {
           }
 
           binding = {
+            agentSessionId: binding.agentSessionId,
             runtimeSessionId: created.value.runtimeSessionId,
             workDir: created.value.workDir,
             runnerId: self.connection.runnerId,
@@ -513,7 +533,9 @@ export class WorkExecutor {
             work.projectId ?? null,
             work.workflowRunId,
             sessionName,
-            { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+            { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+            binding.runnerId,
+            binding.agentSessionId,
             binding.runtimeSessionId,
             self.agentSessionRuntimeEventOutbox,
             self.runtimeEventRecordId,
@@ -570,6 +592,7 @@ export class WorkExecutor {
           }
           binding = {
             ...recovery.binding,
+            agentSessionId: binding.agentSessionId,
             runtime: "opencode",
           }
         }
@@ -595,7 +618,9 @@ export class WorkExecutor {
           work.projectId ?? null,
           work.workflowRunId,
           sessionName,
-          { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+          { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+          selectedBinding.runnerId,
+          selectedBinding.agentSessionId,
           selectedBinding.runtimeSessionId,
           self.agentSessionRuntimeEventOutbox,
           self.runtimeEventRecordId,
@@ -628,7 +653,11 @@ export class WorkExecutor {
         if (!result.ok) {
           const kind = result.error.kind
           const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
-          return runtimeActionFailure(code, result.error.message)
+          return runtimeActionFailure(
+            code,
+            result.error.message,
+            hasUnconfirmedCleanup(result.diagnostics ?? result.error.diagnostics ?? []) ? "unknown" : undefined,
+          )
         }
 
         const facts = result.value.facts
@@ -644,6 +673,37 @@ export class WorkExecutor {
         return actionSucceed(output, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
       },
     }
+  }
+
+  private async runPiAgentTurn(
+    work: DispatchWorkItem,
+    workDir: string,
+    signal: AbortSignal,
+    request: AgentTurnRequest,
+  ): Promise<ActionResult> {
+    return await piAction({
+      workflowRunId: work.workflowRunId,
+      workId: work.workId,
+      taskRunId: work.taskRunId ?? null,
+      workType: work.workType,
+      stage: work.stage,
+      title: work.title,
+      workDir,
+      signal,
+      projectId: work.projectId,
+      issueNumber: work.issueNumber,
+      epicNumber: work.epicNumber,
+      parentIssueContext: work.parentIssueContext,
+      piRuntime: this.piRuntime,
+      skillResolver: this.skillResolver,
+      agentDefinition: work.agentDefinition,
+      serverConnection: this.connection,
+      runtimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+      runtimeEventRecordId: this.runtimeEventRecordId,
+      runnerId: this.connection.runnerId,
+      preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
+      preparedOptions: request.options,
+    })
   }
 
   private buildIssueFieldsCapability(work: DispatchWorkItem, workDir: string, signal: AbortSignal) {
@@ -754,6 +814,14 @@ function projectTaskOutput(
   completion: CompletionEvaluation | null,
   caps: ActionCapabilitySet,
 ): WorkItemResult {
+  if (result.outcome === "unknown") {
+    return {
+      status: "unknown",
+      message: isActionFailure(result) ? result.error.message : null,
+      error: isActionFailure(result) ? result.error : null,
+      exitCode: result.exitCode,
+    }
+  }
   if (isActionFailure(result)) {
     return {
       status: failureStatus(work),
@@ -898,8 +966,8 @@ function isUnsettledWorkflowSessionStatus(status: string | null | undefined): st
   return status === "active" || status === "unknown"
 }
 
-function runtimeActionFailure(code: string, message: string): ActionResult {
-  return actionFail(code, message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+function runtimeActionFailure(code: string, message: string, outcome?: "unknown"): ActionResult {
+  return actionFail(code, message, { exitCode: 1, outcome, turnFact: { finalAssistantText: null } })
 }
 
 async function workflowActionFailure(
@@ -922,7 +990,9 @@ function createWorkflowReporter(
   projectId: string | null,
   workflowRunId: string,
   sessionName: string,
-  workMetadata: { workId: string; workType: string; stage: string | null },
+  workMetadata: { workId: string; taskRunId: string; workType: string; stage: string | null },
+  runnerId: string,
+  agentSessionId: string,
   runtimeSessionId: string | null,
   outbox: AgentSessionRuntimeEventOutbox | null,
   runtimeEventRecordId: () => string,
@@ -930,12 +1000,14 @@ function createWorkflowReporter(
   if (!projectId) return null
   if (!outbox) return null
   if (!runtimeSessionId) return null
+  if (!agentSessionId) return null
   return new WorkflowAgentSessionReporter({
     outbox,
     projectId,
     workflowRunId,
     sessionName,
-    workMetadata,
+    workMetadata: { ...workMetadata, runnerId, agentSessionId },
+    runtime: "opencode",
     randomId: runtimeEventRecordId,
   })
 }

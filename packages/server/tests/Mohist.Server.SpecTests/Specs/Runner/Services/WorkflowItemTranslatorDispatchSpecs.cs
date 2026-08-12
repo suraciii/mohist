@@ -187,10 +187,12 @@ public partial class WorkflowItemTranslatorSpecs
             "Original instructions", "opencode", null, null, []);
         var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
 
+        var retryRunId = $"wr-{Guid.NewGuid():N}";
+        var retryRun = await SeedRunningWorkflowAsync(retryRunId, "proj-agent-retry-current", "task-1.2");
         _agentResolver.Snapshot = new AgentExecutionDefinition(
             "Edited instructions", "opencode", null, null, []);
         var retried = await _translator.TranslateToDispatchAsync(
-            item with { Id = "task-1.2" }, runId, run, "runner-1");
+            item with { Id = "task-1.2" }, retryRunId, retryRun, "runner-1");
 
         Assert.Equal("Original instructions", first.AgentDefinition!.Instructions);
         Assert.Equal("Edited instructions", retried.AgentDefinition!.Instructions);
@@ -222,7 +224,7 @@ public partial class WorkflowItemTranslatorSpecs
         var runId = $"wr-{Guid.NewGuid():N}";
         var run = await SeedRunningWorkflowAsync(runId, "proj-agent-no-resolver");
         var translatorWithoutResolver = new WorkflowItemTranslator(
-            _promptResolver, _variableResolver, _bindService, TranslatorNullLogger, agentSnapshots: null);
+            _promptResolver, _variableResolver, agentSnapshots: null);
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
             With(@"{ ""name"": ""reviewer"", ""prompt"": ""Review the change."" }"));

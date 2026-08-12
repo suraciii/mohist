@@ -35,20 +35,17 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsSessionEvents_ConcurrentChunks_BuffersUntilFlush()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("sequence");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
         await Task.WhenAll(
-            PostEventEntriesAsync(session, "first"),
-            PostEventEntriesAsync(session, "second"));
+            PostEventEntriesAsync(session, turnId, "first"),
+            PostEventEntriesAsync(session, turnId, "second"));
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
-            {
-                new { type = "session.activity", payload = new { activity = "idle", status = "completed", operationId = "op-flush" } }
-            }
-        });
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("session.activity", new { activity = "idle", status = "completed", operationId = "op-flush" }));
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, persistence);
@@ -64,20 +61,17 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsSessionEvents_StoresAggregateDomainEvents()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-events-store");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var before = await eventStore.ListAgentSessionEventsAsync(session.Id);
         var lastExistingId = before.Count == 0 ? 0 : before.Max(e => e.Id);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
-            {
-                new { type = "usage.updated", payload = new { contextWindowUsed = 500, contextWindowSize = 1000 } }
-            }
-        });
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("usage.updated", new { contextWindowUsed = 500, contextWindowSize = 1000 }));
 
         await persistence.WaitAsync();
 
@@ -92,46 +86,35 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsUsageUpdate_AccumulatesTokenAndCostCounters()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-accumulate");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("usage.updated", new
             {
-                new
-                {
-                    type = "usage.updated",
-                    payload = new
-                    {
-                        inputTokens = 10,
-                        outputTokens = 5,
-                        totalTokens = 15,
-                        cachedReadTokens = 2,
-                        thoughtTokens = 1,
-                        costAmount = 0.001,
-                        costCurrency = "USD",
-                        contextWindowSize = 200,
-                        contextWindowUsed = 100
-                    }
-                },
-                new
-                {
-                    type = "usage.updated",
-                    payload = new
-                    {
-                        inputTokens = 20,
-                        outputTokens = 10,
-                        totalTokens = 30,
-                        cachedReadTokens = 3,
-                        thoughtTokens = 2,
-                        costAmount = 0.002,
-                        costCurrency = "EUR",
-                        contextWindowSize = 250,
-                        contextWindowUsed = 150
-                    }
-                }
-            }
-        });
+                inputTokens = 10,
+                outputTokens = 5,
+                totalTokens = 15,
+                cachedReadTokens = 2,
+                thoughtTokens = 1,
+                costAmount = 0.001,
+                costCurrency = "USD",
+                contextWindowSize = 200,
+                contextWindowUsed = 100
+            }),
+            ("usage.updated", new
+            {
+                inputTokens = 20,
+                outputTokens = 10,
+                totalTokens = 30,
+                cachedReadTokens = 3,
+                thoughtTokens = 2,
+                costAmount = 0.002,
+                costCurrency = "EUR",
+                contextWindowSize = 250,
+                contextWindowUsed = 150
+            }));
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -150,31 +133,20 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsUsageUpdate_PartialFields_DoesNotEraseExistingValues()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-partial");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new object[]
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("usage.updated", new
             {
-                new
-                {
-                    type = "usage.updated",
-                    payload = new
-                    {
-                        inputTokens = 10,
-                        outputTokens = 5,
-                        costAmount = 0.001,
-                        costCurrency = "USD",
-                        contextWindowUsed = 100
-                    }
-                },
-                new
-                {
-                    type = "usage.updated",
-                    payload = new { inputTokens = 20 }
-                }
-            }
-        });
+                inputTokens = 10,
+                outputTokens = 5,
+                costAmount = 0.001,
+                costCurrency = "USD",
+                contextWindowUsed = 100
+            }),
+            ("usage.updated", new { inputTokens = 20 }));
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -189,35 +161,24 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsUsageUpdate_TerminalSession_PersistsEventButDoesNotMutateCounters()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-terminal");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
-            {
-                new { type = "session.activity", payload = new { activity = "idle", status = "completed", operationId = "op-terminal" } }
-            }
-        });
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("session.activity", new { activity = "idle", status = "completed", operationId = "op-terminal" }));
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("usage.updated", new
             {
-                new
-                {
-                    type = "usage.updated",
-                    payload = new
-                    {
-                        inputTokens = 10,
-                        outputTokens = 5,
-                        costAmount = 0.001,
-                        costCurrency = "USD"
-                    }
-                }
-            }
-        });
+                inputTokens = 10,
+                outputTokens = 5,
+                costAmount = 0.001,
+                costCurrency = "USD"
+            }));
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, persistence);
@@ -239,20 +200,17 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsResolvedModelEvent_UpdatesResolvedModel()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("model.resolved", new
             {
-                new
-                {
-                    type = "model.resolved",
-                    payload = new { resolvedModel = "anthropic/claude-sonnet-4-20250514", source = "newSession" }
-                }
-            }
-        });
+                resolvedModel = "anthropic/claude-sonnet-4-20250514",
+                source = "newSession"
+            }));
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
@@ -266,20 +224,17 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsResolvedModelEvent_WithoutResolvedModelField_DoesNotSetModel()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model-divergent");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("model.resolved", new
             {
-                new
-                {
-                    type = "model.resolved",
-                    payload = new { model = "anthropic/claude-sonnet-4-20250514", source = "newSession" }
-                }
-            }
-        });
+                model = "anthropic/claude-sonnet-4-20250514",
+                source = "newSession"
+            }));
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
@@ -293,20 +248,21 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsTerminalEvent_WithFailureCategory_PersistsCategory()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("failure-category");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("session.activity", new
             {
-                new
-                {
-                    type = "session.activity",
-                    payload = new { activity = "idle", status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1, operationId = "op-terminal" }
-                }
-            }
-        });
+                activity = "idle",
+                status = "failed",
+                failureReason = "probe timed out",
+                failureCategory = "probe_timeout",
+                exitCode = 1,
+                operationId = "op-terminal"
+            }));
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
@@ -321,35 +277,16 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsToolCallEvents_CountsCallsAndErrors()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("tool-calls");
+        var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new[]
-            {
-                new
-                {
-                    type = "tool_call.started",
-                    payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read file" }
-                },
-                new
-                {
-                    type = "tool_call.started",
-                    payload = new { toolCallId = "tool-2", kind = "edit", status = "in_progress", title = "Edit file" }
-                },
-                new
-                {
-                    type = "tool_call.updated",
-                    payload = new { toolCallId = "tool-1", kind = "read", status = "completed", title = "Read file" }
-                },
-                new
-                {
-                    type = "tool_call.updated",
-                    payload = new { toolCallId = "tool-2", kind = "edit", status = "failed", title = "Edit file" }
-                }
-            }
-        });
+        await PostSessionTurnRuntimeEventsAsync(
+            session,
+            turnId,
+            ("tool_call.started", new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read file" }),
+            ("tool_call.started", new { toolCallId = "tool-2", kind = "edit", status = "in_progress", title = "Edit file" }),
+            ("tool_call.updated", new { toolCallId = "tool-1", kind = "read", status = "completed", title = "Read file" }),
+            ("tool_call.updated", new { toolCallId = "tool-2", kind = "edit", status = "failed", title = "Edit file" }));
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, persistence);

@@ -182,7 +182,7 @@ public record WorkDispatch(
     /// </summary>
     [property: Id(16)] string? AgentSessionId = null,
     [property: Id(17)] [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
-[property: Id(18)] int? EpicNumber = null,
+    [property: Id(18)] int? EpicNumber = null,
     /// <summary>
     /// Task-level completion contract (files, markers, failIf,
     /// <c>path: _output</c>) carried as an expanded JSON string for
@@ -217,7 +217,13 @@ public record WorkDispatch(
     /// </summary>
     [property: Id(23)] string? InitialTurnId = null,
     [property: Id(24)] string? PinnedRunnerId = null,
-    [property: Id(25)] AgentSessionStartup? AgentSessionStartup = null)
+    [property: Id(25)] AgentSessionStartup? AgentSessionStartup = null,
+    /// <summary>
+    /// Persisted Workflow task-attempt identity. Workflow Agent input delivery
+    /// carries this together with <see cref="WorkId"/> so the Server can bind
+    /// the Turn without trusting mutable Session labels.
+    /// </summary>
+    [property: Id(26)] string? TaskRunId = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

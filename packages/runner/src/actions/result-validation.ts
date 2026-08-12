@@ -194,3 +194,8 @@ export function passThroughTurnFact(result: unknown): unknown {
   if (!Object.prototype.hasOwnProperty.call(result, "turnFact")) return undefined
   return (result as { turnFact?: unknown }).turnFact
 }
+
+export function passThroughOutcome(result: unknown): "unknown" | undefined {
+  if (!result || typeof result !== "object") return undefined
+  return (result as { outcome?: unknown }).outcome === "unknown" ? "unknown" : undefined
+}

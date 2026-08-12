@@ -67,7 +67,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("terminal-lock");
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new[]
@@ -75,7 +75,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
             }
         });
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new[]
@@ -83,7 +83,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
                 new { type = "session.liveness", payload = new { status = "probing", failureReason = "late" } }
             }
         });
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new[]
@@ -104,7 +104,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     {
         var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-reuse");
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new[]
@@ -140,7 +140,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-unregister");
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new object[]
@@ -180,11 +180,8 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("named-reuse", sessionName: "check");
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
-            workId = work.WorkId,
-            workType = work.WorkType,
-            stage = work.Stage,
             runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {

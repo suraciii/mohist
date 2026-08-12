@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
@@ -82,6 +83,158 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
         Assert.Equal("first-answer", firstFlush.Parts[0].TextDelta);
         Assert.Equal("second-answer", secondFlush.Parts[0].TextDelta);
         Assert.DoesNotContain(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task AcceptWorkflowInput_ReplayReusesTheFrozenTurnBindingAndRejectsMismatchedRuntimeEvents()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var command = new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-1",
+            "implement the task",
+            "workflow-1",
+            "task-1.1",
+            "work-1",
+            "runner-1",
+            "opencode",
+            "runtime-1",
+            "{\"text\":\"implement the task\"}");
+
+        var first = await grain.AcceptWorkflowInputAsync(command);
+        var replay = await grain.AcceptWorkflowInputAsync(command);
+
+        Assert.Equal(first, replay);
+        Assert.Equal("delivery-1", first.InputDeliveryId);
+        Assert.NotEmpty(first.AgentTurnId);
+        var binding = Assert.Single(Fixture.SessionWork.ExecutionBindings.Distinct());
+        Assert.Equal(first.AgentTurnId, binding.AgentTurnId);
+        Assert.Equal("task-1.1", binding.TaskRunId);
+        Assert.Equal("work-1", binding.WorkId);
+        Assert.Equal("runner-1", binding.RunnerId);
+
+        var session = Assert.IsType<Mohist.Server.Sessions.Domain.AgentSession>(Fixture.StateStore.State);
+        var turn = Assert.Single(session.Status.Turns!);
+        Assert.Equal(binding, turn.WorkflowExecution);
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new("message.delta", $"{{\"text\":\"working\",\"turnId\":\"{first.AgentTurnId}\"}}"),
+            },
+            "runtime-1",
+            binding));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"wrong turn\",\"turnId\":\"turn-other\"}"),
+                },
+                "runtime-1",
+                binding)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"wrong\"}"),
+                },
+                "runtime-1",
+                binding with { TaskRunId = "task-2.1" })));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"missing\"}"),
+                },
+                "runtime-1")));
+    }
+
+    [Fact]
+    public async Task AppendWorkflowRuntimeEvents_PreservesFailureWhenTheCloseBatchAlsoReportsIdle()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var receipt = await grain.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-terminal-batch",
+            "execute",
+            "workflow-1",
+            "task-terminal.1",
+            "work-terminal",
+            "runner-1",
+            "opencode",
+            "runtime-1",
+            "{\"text\":\"execute\"}"));
+        var binding = Assert.Single(Fixture.SessionWork.ExecutionBindings);
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new(RuntimeEventTypes.TurnFailed,
+                    $"{{\"turnId\":\"{receipt.AgentTurnId}\",\"failureReason\":\"tool failed\"}}"),
+                new(RuntimeEventTypes.SessionActivity,
+                    $"{{\"turnId\":\"{receipt.AgentTurnId}\",\"activity\":\"idle\",\"status\":\"failed\"}}"),
+            },
+            "runtime-1",
+            binding));
+
+        var observation = Assert.Single(Fixture.SessionWork.Observations);
+        Assert.Equal(SessionWorkflowObservationKind.Failed, observation.Kind);
+        Assert.Equal("turn-failed", observation.ReasonCode);
+        Assert.Equal("tool failed", observation.Message);
+    }
+
+    [Fact]
+    public async Task DelayedWorkflowObservation_UsesTheOldFrozenTurnBindingAfterSessionReuse()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var first = await grain.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-1",
+            "first task",
+            "workflow-1",
+            "task-1.1",
+            "work-1",
+            "runner-1",
+            "opencode",
+            "runtime-1",
+            "{\"text\":\"first task\"}"));
+        var firstBinding = Assert.Single(Fixture.SessionWork.ExecutionBindings);
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput(
+                    "session.activity",
+                    $"{{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"{first.AgentTurnId}\"}}")
+            },
+            "runtime-1",
+            firstBinding));
+        Fixture.SessionWork.Observations.Clear();
+
+        var second = await grain.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-2",
+            "second task",
+            "workflow-1",
+            "task-2.1",
+            "work-2",
+            "runner-1",
+            "opencode",
+            "runtime-1",
+            "{\"text\":\"second task\"}"));
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput(
+                    "session.activity",
+                    $"{{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"{first.AgentTurnId}\"}}")
+            },
+            "runtime-1",
+            firstBinding));
+
+        var observation = Assert.Single(Fixture.SessionWork.Observations);
+        Assert.Equal(firstBinding, observation.Binding);
+        Assert.Equal(SessionWorkflowObservationKind.Idle, observation.Kind);
+        var turns = await grain.ListTurnsAsync();
+        Assert.Equal(AgentTurnStatus.Completed, Assert.Single(turns, turn => turn.Id == first.AgentTurnId).Status);
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(turns, turn => turn.Id == second.AgentTurnId).Status);
     }
 }
 

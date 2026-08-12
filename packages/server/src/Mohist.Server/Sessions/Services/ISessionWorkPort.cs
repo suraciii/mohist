@@ -1,14 +1,18 @@
-namespace Mohist.Server.Sessions.Services;
+using Mohist.Server.Sessions.Domain;
 
-public sealed record SessionWorkflowWorkBinding(
-    string WorkflowRunId,
-    string RunnerId,
-    string WorkId);
+namespace Mohist.Server.Sessions.Services;
 
 public interface ISessionWorkPort
 {
-    Task AbandonActiveWorkAsync(
-        SessionWorkflowWorkBinding binding,
-        string reason,
+    Task<bool> BindAgentExecutionAsync(
+        SessionWorkflowExecutionBinding binding,
+        CancellationToken cancellationToken = default);
+
+    Task ObserveAgentExecutionAsync(
+        SessionWorkflowExecutionBinding binding,
+        SessionWorkflowObservationKind kind,
+        string reasonCode,
+        string? message = null,
+        string? stopOperationId = null,
         CancellationToken cancellationToken = default);
 }

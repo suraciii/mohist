@@ -54,6 +54,7 @@ public abstract class AgentSessionTestSupport
                 await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
                 {
                     workId = work.WorkId,
+                    taskRunId = work.TaskRunId,
                     workflowRunId = work.WorkflowRunId,
                     status = "completed",
                     projectId = work.ProjectId
@@ -66,11 +67,11 @@ public abstract class AgentSessionTestSupport
                 if (expectedIssueNumber is null || work.IssueNumber == expectedIssueNumber)
                     return work;
 
-                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
+                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, taskRunId = work.TaskRunId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
                 continue;
             }
 
-            await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
+            await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, taskRunId = work.TaskRunId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
         }
 
         Assert.Fail("No agent work dispatched");
@@ -112,6 +113,9 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     protected string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/runtime-events";
 
+    protected string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
+        $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";
+
     protected string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";
 
@@ -141,14 +145,40 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             .SingleAsync();
     }
 
-    protected Task PostEventEntriesAsync(CreatedSession session, string text) => _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+    protected async Task<string> AcceptSessionRuntimeEventTurnAsync(CreatedSession session)
     {
-        runtimeSessionId = session.Id,
-        runtimeEvents = new[]
+        var receipt = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).AcceptFollowupAsync(
+            new AcceptFollowupCommand("record runtime events", "test", $"runtime-events-{session.SessionName}"));
+        return receipt.TurnId;
+    }
+
+    protected Task PostSessionTurnRuntimeEventsAsync(
+        CreatedSession session,
+        string turnId,
+        params (string Type, object Payload)[] runtimeEvents) =>
+        _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
-            new { type = "message.delta", payload = new { text } }
-        }
-    });
+            runtimeSessionId = session.Id,
+            agentSessionId = session.Id,
+            agentTurnId = turnId,
+            runtimeEvents = runtimeEvents.Select(runtimeEvent => new
+            {
+                type = runtimeEvent.Type,
+                payload = WithTurnId(runtimeEvent.Payload, turnId)
+            }).ToArray()
+        });
+
+    protected Task PostEventEntriesAsync(CreatedSession session, string turnId, string text) =>
+        PostSessionTurnRuntimeEventsAsync(session, turnId, ("message.delta", new { text }));
+
+    private static JsonElement WithTurnId(object payload, string turnId)
+    {
+        var properties = JsonSerializer.SerializeToElement(payload)
+            .EnumerateObject()
+            .ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.Ordinal);
+        properties["turnId"] = JsonSerializer.SerializeToElement(turnId);
+        return JsonSerializer.SerializeToElement(properties);
+    }
 
     protected static async Task<AgentSessionTranscriptPartRow[]> LoadTranscriptPartsAsync(MohistDbContext db, string sessionId)
     {
@@ -250,7 +280,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         public string Id => Info.Id;
     }
 
-    protected sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
+    protected sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? TaskRunId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
     protected sealed record AgentSessionSummaryDto(
         string Id,
         string SessionName,

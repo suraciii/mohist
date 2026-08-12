@@ -6,13 +6,15 @@ import type { ActionHost } from "./host.js"
 import { isObject } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { sessionNameFromContext } from "./workflow-session-name.js"
-import { parseModelIdentifier } from "../runtime/opencode/index.js"
+import { hasUnconfirmedCleanup, parseModelIdentifier } from "../runtime/opencode/index.js"
 import type { PiRuntimeEvent, PiTurnRequest } from "../runtime/pi/index.js"
 import { actionErrorMessage, fail, succeed } from "./action-result.js"
 import type { PromptLoaderContext } from "../core/prompt.js"
 import { SkillResolver } from "../runtime/skill-resolver.js"
 import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
 import type { AgentExecutionDefinition } from "../core/types.js"
+import { WorkflowAgentSessionReporter } from "./workflow-agent-session-reporter.js"
+import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
 
 export const PI_USES = "mohist/pi"
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -30,10 +32,16 @@ interface ActionInvocationContext {
   issueNumber?: number | null
   epicNumber?: number | null
   parentIssueContext?: ParentIssueContext | null
+  taskRunId?: string | null
+  runnerId?: string | null
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
   agentDefinition?: AgentExecutionDefinition | null
   serverConnection?: ServerConnection | null
+  runtimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  runtimeEventRecordId?: () => string
+  preparedPrompt?: string
+  preparedOptions?: PiOptions
   log?: TaskLogger | null
 }
 
@@ -43,11 +51,12 @@ export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssue
   return `Parent issue context (read-only background; JSON):\n${parent}\n\nTreat the parent issue context above as read-only background. The current child issue body is authoritative and controls delivery scope.\n\n${prompt}`
 }
 
-interface PiOptions { model?: string; variant?: string; unknownKeys?: readonly string[] }
+export interface PiOptions { model?: string; variant?: string; timeoutMs?: number; unknownKeys?: readonly string[] }
 
 export function piAction(context: ActionInvocationContext): Promise<ActionResult>
 export function piAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult>
 export async function piAction(contextOrInputs: ActionInvocationContext | JsonObject, host?: ActionHost): Promise<ActionResult> {
+  if (host?.agent) return await piActionThroughAgent(contextOrInputs as JsonObject, host)
   const context: ActionInvocationContext = host
     ? {
       workflowRunId: "",
@@ -80,6 +89,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   let runtimeSessionId: string | null = null
   let expectedRuntime: string | null = null
   let expectedRuntimeSessionId: string | null = null
+  let agentSessionId: string | null = null
   if (canBind) {
     try {
       const opened = await context.serverConnection!.openWorkflowAgentSession(
@@ -88,6 +98,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
         context.signal,
       )
       if (opened.workDir && opened.workDir !== context.workDir) return fail("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
+      agentSessionId = opened.sessionId
       runtimeSessionId = opened.runtimeSessionId ?? null
       expectedRuntime = opened.runtime ?? null
       expectedRuntimeSessionId = opened.runtimeSessionId ?? null
@@ -114,8 +125,22 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   }
 
   const events: PiRuntimeEvent[] = []
+  const reporter = createWorkflowReporter(context, sessionName, agentSessionId, runtimeSessionId)
   const report = async (facts: readonly PiRuntimeEvent[], signal = context.signal) => {
     if (!canBind || facts.length === 0) return
+    if (reporter) {
+      const input = facts.find((event) => event.type === "session.input")
+      if (input) {
+        if (facts.length !== 1 || typeof input.payload.text !== "string") {
+          throw new Error("Workflow session.input must be reported by itself with a text payload")
+        }
+        await reporter.awaitInput(input.payload.text, input.runtimeSessionId)
+        return
+      }
+      for (const event of facts) reporter.registerEvent(event as never)
+      await reporter.settle()
+      return
+    }
     await context.serverConnection!.workflowAgentSessionRuntimeEvents(
       context.projectId!, context.workflowRunId, sessionName,
       { workId: context.workId, workType: context.workType, stage: context.stage, runtimeSessionId, runtimeEvents: facts.map((event) => ({ id: event.id, type: event.type, payload: event.payload })) },
@@ -129,7 +154,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
     return fail("session-reporting-failed", "Workflow AgentSession rejected session.input; prompt was not submitted", { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
 
-  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt: executionPrompt, durationMs: PI_TURN_DURATION_MS, options: { model: model ?? null, variant: variant ?? null, ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}), unknownKeys: options.unknownKeys } }
+  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt: executionPrompt, durationMs: options.timeoutMs ?? PI_TURN_DURATION_MS, options: { model: model ?? null, variant: variant ?? null, ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}), unknownKeys: options.unknownKeys } }
   let result
   try {
     result = await runtime.runTurn(request, context.signal, { onEvent: (event) => { events.push(event) } })
@@ -150,12 +175,13 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       : message, { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
 
+  const unknownOutcome = !result.ok && hasUnconfirmedCleanup(result.diagnostics ?? result.error.diagnostics ?? [])
   const finalText = result.ok ? result.value.facts.finalAssistantText : null
   const runtimeCode = result.ok ? null : runtimeErrorCode(result.error.kind)
   const finalFacts = [...events]
   const submittedFailure = !result.ok && (result.error.kind === "deadline-exceeded" || result.error.kind === "interrupted" || result.error.kind === "turn-failed")
   if (result.ok || submittedFailure) {
-    if (!result.ok) finalFacts.push({ id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: runtimeCode ?? "turn-failed", message: result.error.message } })
+    if (!result.ok) finalFacts.push({ id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: unknownOutcome ? "unknown" : "failed", errorCode: runtimeCode ?? "turn-failed", message: result.error.message } })
     finalFacts.push(activityEvent(runtimeSessionId, "idle", context))
   }
   try {
@@ -164,7 +190,11 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
     if (result.ok) return fail("session-reporting-failed", "Workflow AgentSession did not accept the final Pi turn facts", { exitCode: 1, turnFact: { finalAssistantText: null } })
     return fail(runtimeCode ?? "turn-failed", `${result.error.message}; Session terminal reporting failed and terminal state was not accepted`, { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
-  if (!result.ok) return fail(runtimeCode ?? "turn-failed", result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+  if (!result.ok) return fail(runtimeCode ?? "turn-failed", result.error.message, {
+    exitCode: 1,
+    outcome: unknownOutcome ? "unknown" : undefined,
+    turnFact: { finalAssistantText: null },
+  })
   return succeed(null, { exitCode: 0, turnFact: { finalAssistantText: finalText } })
 }
 
@@ -189,8 +219,11 @@ async function reportWithTerminalSignal(report: (facts: readonly PiRuntimeEvent[
 }
 
 async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok"; prompt: string; options: PiOptions } | { kind: "failure"; result: ActionResult }> {
+  if (context.preparedPrompt !== undefined) {
+    return { kind: "ok", prompt: context.preparedPrompt, options: context.preparedOptions ?? {} }
+  }
   const input = context.with ?? {}
-  const allowed = new Set(["prompt", "session", "options", "working-directory"])
+  const allowed = new Set(["prompt", "session", "options", "timeout", "working-directory"])
   const invalid = Object.keys(input).find((key) => !allowed.has(key))
   if (invalid) return { kind: "failure", result: fail("invalid-input", `mohist/pi does not accept top-level input '${invalid}'`) }
   const rawSession = input.session
@@ -199,9 +232,14 @@ async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok
   let prompt: string | undefined
   try { prompt = await resolvePrompt(input.prompt, buildPromptLoaderContext(context)) } catch (error) { return { kind: "failure", result: fail("invalid-input", actionErrorMessage(error)) } }
   if (!prompt?.trim()) return { kind: "failure", result: fail("invalid-input", "mohist/pi requires 'prompt' that resolves to non-empty text") }
+  const timeout = input.timeout
+  if (timeout !== undefined && (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0)) {
+    return { kind: "failure", result: fail("invalid-input", "mohist/pi 'timeout' must be a positive finite number when present") }
+  }
   const rawOptions = input.options
   if (rawOptions !== undefined && rawOptions !== null && !isObject(rawOptions)) return { kind: "failure", result: fail("invalid-input", "mohist/pi 'options' must be an object when present") }
   const options: PiOptions = {}
+  if (typeof timeout === "number") options.timeoutMs = timeout
   const record = (rawOptions ?? {}) as Record<string, unknown>
   for (const key of ["model", "variant"] as const) {
     const value = record[key]
@@ -216,6 +254,48 @@ async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok
   const unknownKeys = Object.keys(record).filter((key) => key !== "model" && key !== "variant")
   if (unknownKeys.length > 0) options.unknownKeys = unknownKeys
   return { kind: "ok", prompt: composePiPrompt(prompt, context.parentIssueContext), options }
+}
+
+async function piActionThroughAgent(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const parsed = await parseInput({
+    workflowRunId: "",
+    workId: "pi",
+    workType: "task",
+    with: inputs,
+    workDir: host.workDir,
+    signal: host.signal,
+    skillResolver: host.skillResolver,
+    agentDefinition: host.agentDefinition,
+  })
+  if (parsed.kind === "failure") return parsed.result
+  const session = typeof inputs.session === "string" ? inputs.session : undefined
+  return await host.agent!.turn({ prompt: parsed.prompt, session, options: parsed.options })
+}
+
+function createWorkflowReporter(
+  context: ActionInvocationContext,
+  sessionName: string,
+  agentSessionId: string | null,
+  runtimeSessionId: string | null,
+): WorkflowAgentSessionReporter | null {
+  if (!context.projectId || !context.runtimeEventOutbox || !context.runtimeEventRecordId) return null
+  if (!context.taskRunId || !context.runnerId || !agentSessionId || !runtimeSessionId) return null
+  return new WorkflowAgentSessionReporter({
+    outbox: context.runtimeEventOutbox,
+    projectId: context.projectId,
+    workflowRunId: context.workflowRunId,
+    sessionName,
+    workMetadata: {
+      workId: context.workId,
+      taskRunId: context.taskRunId,
+      workType: context.workType,
+      stage: context.stage ?? null,
+      runnerId: context.runnerId,
+      agentSessionId,
+    },
+    runtime: "pi",
+    randomId: context.runtimeEventRecordId,
+  })
 }
 
 function inputEvent(runtimeSessionId: string, prompt: string, context: ActionInvocationContext): PiRuntimeEvent {

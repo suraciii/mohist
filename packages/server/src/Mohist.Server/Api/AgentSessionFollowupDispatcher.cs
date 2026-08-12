@@ -53,7 +53,8 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 InputTexts: dispatch.InputTexts,
                 Attachments: dispatch.Attachments,
                 InputId: dispatch.InputId,
-                SlackExecutionContext: SlackExecutionContextFor(dispatch, target.SessionId)), ct);
+                SlackExecutionContext: SlackExecutionContextFor(dispatch, target.SessionId),
+                TurnId: dispatch.TurnId), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -102,6 +102,7 @@ export interface AgentSessionStartup {
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
+  taskRunId?: string | null
   uses?: string | null
   with?: string | null
   /**
@@ -194,6 +195,7 @@ export interface RunnerConfigResponse {
 export interface DispatchWorkItem {
   workflowRunId: string
   workId: string
+  taskRunId?: string | null
   workType: string
   stage?: string | null
   title?: string | null
@@ -295,6 +297,11 @@ export type ActionResult = (
     writeVars?: JsonObject
   }
   exitCode?: number | null
+  /**
+   * The Agent runtime could not establish a result. This remains internal to
+   * the Runner until it is projected as a Workflow `unknown` observation.
+   */
+  outcome?: "unknown"
   /**
    * Runner-private Action-result facts that must never be serialized
    * into `WorkItemResult.output`, `TaskRun.Output`, recovery matching,

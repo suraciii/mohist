@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -6,18 +7,20 @@ using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
 [Collection("WorkflowGrain")]
-public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
+public partial class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 {
     public WorkflowArtifactBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
@@ -135,6 +138,125 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
             .Where(p => p.WorkflowRunId == work.WorkflowRunId)
             .ToListAsync();
         Assert.Empty(pending);
+    }
+
+    [Fact]
+    public async Task ConcurrentReplay_SelectsOneWinnerAndBindsTheUploadOnce()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var uploadId = await SeedPendingUploadAsync(
+            work.WorkflowRunId,
+            work.WorkId,
+            "task-1.1",
+            "result.txt");
+        var service = Services.GetRequiredService<WorkflowReportService>();
+        var result = new WorkResult("completed", ArtifactUploadIds: [uploadId]);
+
+        var reports = await Task.WhenAll(
+            service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId, result),
+            service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId, result));
+
+        Assert.Equal(["accepted", "stale"], reports.Select(report => report.Ack).Order().ToArray());
+        await using var db = CreateDb();
+        var artifact = Assert.Single(await db.WorkflowArtifacts
+            .Where(row => row.WorkflowRunId == work.WorkflowRunId)
+            .ToListAsync());
+        Assert.Equal(uploadId, artifact.SourceUploadId);
+        Assert.Equal("task-1.1", artifact.TaskRunId);
+        var eventTypes = (await EventStore.ListAsync(work.WorkflowRunId))
+            .Select(entry => entry.Envelope.Type)
+            .ToArray();
+        Assert.Single(eventTypes, type => type == EventCatalog.ReverseDns.WorkflowArtifactRecorded);
+        Assert.Single(eventTypes, type => type == EventCatalog.ReverseDns.TaskCompleted);
+    }
+
+    [Fact]
+    public async Task TerminalTask_LateReportDoesNotConsumeItsUpload()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, work.WorkId, new WorkResult("completed"));
+        var uploadId = await SeedPendingUploadAsync(
+            work.WorkflowRunId,
+            work.WorkId,
+            "task-1.1",
+            "late.txt");
+        var service = Services.GetRequiredService<WorkflowReportService>();
+
+        var report = await service.ReportAsync(
+            runnerId,
+            work.WorkflowRunId,
+            work.WorkId,
+            work.TaskRunId,
+            new WorkResult("completed", ArtifactUploadIds: [uploadId]));
+
+        Assert.Equal("stale", report.Ack);
+        await using var db = CreateDb();
+        Assert.Empty(await db.WorkflowArtifacts
+            .Where(row => row.WorkflowRunId == work.WorkflowRunId)
+            .ToListAsync());
+        Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+    }
+
+    [Fact]
+    public async Task BoundUpload_ReplayReturnsTheOriginalArtifactAndRejectsAnotherTaskAttempt()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            checks: []));
+        var (work, _) = await PollWorkAnyAsync();
+        var uploadId = await SeedPendingUploadAsync(
+            work.WorkflowRunId,
+            work.WorkId,
+            "task-1.1",
+            "result.txt");
+        var bindService = Services.GetRequiredService<IWorkflowArtifactBindService>();
+
+        var first = await bindService.BindAsync(
+            work.WorkflowRunId, work.WorkId, "task-1.1", [uploadId], declaredArtifacts: null);
+        var replay = await bindService.BindAsync(
+            work.WorkflowRunId, work.WorkId, "task-1.1", [uploadId], declaredArtifacts: null);
+        var foreignAttempt = await bindService.BindAsync(
+            work.WorkflowRunId, work.WorkId, "task-1.2", [uploadId], declaredArtifacts: null);
+
+        Assert.True(first.IsSuccess, first.Error);
+        Assert.True(replay.IsSuccess, replay.Error);
+        Assert.Equal(first.ArtifactRecordedEvents, replay.ArtifactRecordedEvents);
+        Assert.False(foreignAttempt.IsSuccess);
+        Assert.Contains("different workflow task attempt", foreignAttempt.Error, StringComparison.Ordinal);
+        await using var db = CreateDb();
+        var artifact = Assert.Single(await db.WorkflowArtifacts
+            .Where(row => row.WorkflowRunId == work.WorkflowRunId)
+            .ToListAsync());
+        Assert.Equal(uploadId, artifact.SourceUploadId);
+        Assert.Equal("task-1.1", artifact.TaskRunId);
+    }
+
+    [Fact]
+    public async Task ArtifactBindingMigration_AddsNullableReplayIdentityAndFilteredUniqueIndex()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        await db.Database.MigrateAsync();
+
+        await using var column = connection.CreateCommand();
+        column.CommandText = "SELECT 1 FROM pragma_table_info('WorkflowArtifacts') WHERE name = 'SourceUploadId' LIMIT 1;";
+        Assert.NotNull(await column.ExecuteScalarAsync());
+
+        await using var index = connection.CreateCommand();
+        index.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'UX_WorkflowArtifacts_SourceUploadId';";
+        var sql = Assert.IsType<string>(await index.ExecuteScalarAsync());
+        Assert.Contains("UNIQUE", sql, StringComparison.Ordinal);
+        Assert.Contains("WHERE \"SourceUploadId\" IS NOT NULL", sql, StringComparison.Ordinal);
     }
 
     [Fact]

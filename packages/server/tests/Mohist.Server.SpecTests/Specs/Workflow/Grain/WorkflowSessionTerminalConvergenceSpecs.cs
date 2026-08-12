@@ -14,14 +14,14 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-// Issue-458 T-002: two back-to-back Workflow OpenCode turns reuse
+// Issue-458 T-002: two back-to-back OpenCode turns reuse
 // the same logical AgentSession. Each turn records its own input,
 // assistant/tool activity, and session.closed terminal event. The
 // session.input persistence fence (T-001) splits the turns without
 // depending on the 200 ms grain persist timer, and the latest accepted
 // session.closed drives the Workflow session read model toward its
 // terminal state. One final deterministic flush surfaces both turns
-// through Workflow session reads.
+// through Workflow-labelled session reads.
 [Collection("IntegrationWorkflow")]
 public class WorkflowSessionTerminalConvergenceSpecs
 {
@@ -36,7 +36,7 @@ public class WorkflowSessionTerminalConvergenceSpecs
     }
 
     [Fact]
-    public async Task GivenTwoBackToBackWorkflowTurns_WhenRuntimeEventsRouteIsPostedWithoutInterveningFlush_ThenBothTurnsPersistAndLatestCloseDrivesSessionStatus()
+    public async Task GivenTwoBackToBackWorkflowTurns_WhenSessionRuntimeEventsRouteIsPostedWithoutInterveningFlush_ThenBothTurnsPersistAndLatestCloseDrivesSessionStatus()
     {
         var (project, issue, sessionName, workflowRunId) = await CreateIssueWorkflowSessionAsync("workflow-two-turn-convergence");
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
@@ -49,7 +49,7 @@ public class WorkflowSessionTerminalConvergenceSpecs
         });
 
         var persistence = _fixture.Persistence.Checkpoint(sessionId);
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(_runnerId, sessionId), new
         {
             runtimeSessionId = sessionId,
             runtimeEvents = new object[]
@@ -70,7 +70,7 @@ public class WorkflowSessionTerminalConvergenceSpecs
             }
         });
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(_runnerId, sessionId), new
         {
             runtimeSessionId = sessionId,
             runtimeEvents = new object[]
@@ -175,8 +175,8 @@ public class WorkflowSessionTerminalConvergenceSpecs
     private static string RunnerAgentSessionAttachPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/attach";
 
-    private static string RunnerAgentSessionRuntimeEventsPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
-        $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/runtime-events";
+    private static string RunnerSessionRuntimeEventsPath(string runnerId, string sessionId) =>
+        $"/api/runner/{runnerId}/agent-sessions/{sessionId}/runtime-events";
 
     private static string RunnerSessionPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}";

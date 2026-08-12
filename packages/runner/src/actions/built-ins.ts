@@ -159,6 +159,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "unavailable-runtime", description: "Runtime reported unavailable" },
         { code: "turn-failed", description: "Pi turn failed for an unspecified reason" },
       ],
+      capabilities: ["agent-turn"],
     },
     run: (inputs, host: ActionHost) => piAction(inputs, host),
   }),

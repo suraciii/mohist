@@ -129,6 +129,7 @@ describe("ServerConnection.report", () => {
       {
         workflowRunId: "wf-1",
         workId: "work-1",
+        taskRunId: "task-1.1",
         workType: "task",
       },
       { status: "completed", artifactUploadIds: ["artup_a", "artup_b"] },
@@ -141,6 +142,7 @@ describe("ServerConnection.report", () => {
     expect(JSON.parse(init.body as string)).toEqual(expect.objectContaining({
       workflowRunId: "wf-1",
       workId: "work-1",
+      taskRunId: "task-1.1",
       status: "completed",
       artifactUploadIds: ["artup_a", "artup_b"],
     }))

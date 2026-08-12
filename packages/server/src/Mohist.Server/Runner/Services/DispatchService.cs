@@ -80,6 +80,10 @@ public sealed class DispatchService : IScopedService
             reportedWorkKeys,
             dispatches,
             ct);
+        // Unresolved Agent work is deliberately absent from desired
+        // redelivery, but a connected Runner still reports its execution as
+        // occupying a slot until it retires the key itself.
+        activeWorkKeys.UnionWith(reportedWorkKeys);
         var spare = slots - activeWorkKeys.Count;
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
@@ -230,6 +234,8 @@ public sealed class DispatchService : IScopedService
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
         if (run is null)
             return (WorkflowOwnerKey(workflowRunId), null);
+        if (run.HasUnresolvedAgentResult())
+            return (null, null);
 
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is null)

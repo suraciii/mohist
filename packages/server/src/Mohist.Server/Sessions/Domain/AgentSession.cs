@@ -619,7 +619,38 @@ public sealed record AgentTurnRecord(
     [property: Id(4)] string? JobId = null,
     [property: Id(5)] AgentTurnResult? Result = null,
     [property: Id(6)] DateTime? RecordedAt = null,
-    [property: Id(7)] DateTime? UpdatedAt = null);
+    [property: Id(7)] DateTime? UpdatedAt = null,
+    [property: Id(8)] SessionWorkflowExecutionBinding? WorkflowExecution = null);
+
+/// <summary>
+/// Immutable Workflow execution identity frozen on the Agent turn before its
+/// runtime starts. The input delivery id makes a lost receipt replayable
+/// without creating another input or turn.
+/// </summary>
+[GenerateSerializer]
+public sealed record SessionWorkflowExecutionBinding(
+    [property: Id(0)] string InputDeliveryId,
+    [property: Id(1)] string WorkflowRunId,
+    [property: Id(2)] string TaskRunId,
+    [property: Id(3)] string WorkId,
+    [property: Id(4)] string RunnerId,
+    [property: Id(5)] string AgentSessionId,
+    [property: Id(6)] string AgentTurnId,
+    [property: Id(7)] string Runtime,
+    [property: Id(8)] string RuntimeSessionId);
+
+public enum SessionWorkflowObservationKind
+{
+    Idle,
+    Completed,
+    Failed,
+    Cancelled,
+    Unknown,
+    Stopped,
+    StopUnconfirmed,
+    TargetMissing,
+    Disconnected,
+}
 
 [GenerateSerializer]
 public sealed record AgentSessionStopClaim(
@@ -645,6 +676,7 @@ public enum AgentSessionStopDisposition
     Ended,
     Blocked,
     Unavailable,
+    Idle,
 }
 
 public enum AgentTurnStatus

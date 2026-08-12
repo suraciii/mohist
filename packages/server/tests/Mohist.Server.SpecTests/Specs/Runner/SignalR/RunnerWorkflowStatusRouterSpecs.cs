@@ -171,6 +171,7 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task ResumeAsync() => Task.CompletedTask;
         public Task PauseAsync(string? reason = null) => Task.CompletedTask;
         public Task StopAsync(string? reason = null) => Task.CompletedTask;
+        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
         public Task ApproveAsync(string? decidedBy = null, string? displayName = null) => Task.CompletedTask;
         public Task<string> RequestChangesAsync(string body, string? decidedBy = null, string? displayName = null) => Task.FromResult(string.Empty);
         public Task RetryAsync() => Task.CompletedTask;
@@ -192,6 +193,14 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task<Mohist.Server.Workflow.Grains.ReportAck> FailActiveWorkAsync(string workerId, string message)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason)
+            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding)
+            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
+            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null)
+            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);

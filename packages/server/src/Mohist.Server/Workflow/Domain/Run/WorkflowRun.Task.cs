@@ -19,14 +19,36 @@ public static partial class WorkflowRunExtensions
             task.StartedAt = now;
             task.WorkId = workId;
             task.WorkerId = workerId;
+            if (RequiresAgentResultSettlement(task.Uses))
+            {
+                task.AgentResultSettlement ??= new AgentResultSettlement
+                {
+                    State = AgentResultSettlementState.AwaitingResult,
+                    TaskRunId = task.Id,
+                    WorkId = workId,
+                    RunnerId = workerId
+                };
+            }
             run.Status = WorkflowRunStatus.Running;
             return [new TaskStarted(current.Id, task.Id, workerId)];
         }
 
         public IReadOnlyList<WorkflowEvent> CompleteTask(DateTimeOffset now, bool advance = true)
         {
-            var current = run.CurrentStage();
-            var task = current.CurrentTask();
+            var stage = run.CurrentStage();
+            var taskRunId = stage.CurrentTask()?.Id;
+            return taskRunId is null ? [] : run.CompleteTask(stage.Id, taskRunId, now, advance);
+        }
+
+        public IReadOnlyList<WorkflowEvent> CompleteTask(
+            string stageId,
+            string taskRunId,
+            DateTimeOffset now,
+            bool advance = true)
+        {
+            var match = FindTask(run, stageId, taskRunId);
+            if (match is not { } found) return [];
+            var (current, task) = found;
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
             task.FinishedAt = now;
@@ -53,8 +75,20 @@ public static partial class WorkflowRunExtensions
         /// </summary>
         public IReadOnlyList<WorkflowEvent> FailTask(TaskResult result, DateTimeOffset now)
         {
-            var current = run.CurrentStage();
-            var task = current.CurrentTask();
+            var stage = run.CurrentStage();
+            var taskRunId = stage.CurrentTask()?.Id;
+            return taskRunId is null ? [] : run.FailTask(stage.Id, taskRunId, result, now);
+        }
+
+        public IReadOnlyList<WorkflowEvent> FailTask(
+            string stageId,
+            string taskRunId,
+            TaskResult result,
+            DateTimeOffset now)
+        {
+            var match = FindTask(run, stageId, taskRunId);
+            if (match is not { } found) return [];
+            var (current, task) = found;
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
             task.FinishedAt = now;
@@ -70,6 +104,21 @@ public static partial class WorkflowRunExtensions
             ];
         }
 
+        private static (StageRun Stage, TaskRun Task)? FindTask(
+            WorkflowRun workflow,
+            string stageId,
+            string taskRunId)
+        {
+            var matches = workflow.Stages
+                .Where(stage => string.Equals(stage.Id, stageId, StringComparison.Ordinal))
+                .SelectMany(stage => stage.Tasks
+                    .Where(task => string.Equals(task.Id, taskRunId, StringComparison.Ordinal))
+                    .Select(task => (Stage: stage, Task: task)))
+                .Take(2)
+                .ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
         public IReadOnlyList<WorkflowEvent> FailTaskForStopped(string reason, DateTimeOffset now)
         {
             var current = run.CurrentStage();
@@ -82,6 +131,21 @@ public static partial class WorkflowRunExtensions
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: message);
             run.Failure = current.Failure;
             return [new TaskFailed(current.Id, task.Id, message)];
+        }
+
+        public IReadOnlyList<WorkflowEvent> CancelUnresolvedAgentTaskForStop(DateTimeOffset now)
+        {
+            var current = run.CurrentStage();
+            var task = current.RunningTask;
+            if (task?.AgentResultSettlement?.State is not
+                (AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked))
+            {
+                return [];
+            }
+
+            task.FinishedAt = now;
+            task.Status = TaskRunStatus.Cancelled;
+            return [new TaskCancelled(current.Id, task.Id)];
         }
 
         /// <summary>
@@ -110,6 +174,7 @@ public static partial class WorkflowRunExtensions
             task.FinishedAt = null;
             task.WorkerId = null;
             task.WorkId = null;
+            task.AgentResultSettlement = null;
             task.Output = null;
             task.Error = null;
 
@@ -120,4 +185,9 @@ public static partial class WorkflowRunExtensions
             return true;
         }
     }
+
+    private static bool RequiresAgentResultSettlement(string? uses) =>
+        string.Equals(uses, "mohist/agent", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
 }

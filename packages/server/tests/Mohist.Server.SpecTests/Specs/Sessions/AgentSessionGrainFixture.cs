@@ -29,6 +29,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public FakeAgentSessionTranscriptStore TranscriptStore { get; } = new();
     public RecordingTranscriptEventPublisher TranscriptPublisher { get; } = new();
     public RecordingFollowupDispatchScheduler FollowupDispatch { get; } = new();
+    public RecordingSessionWorkPort SessionWork { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
@@ -42,6 +43,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         TranscriptStore.Reset();
         TranscriptPublisher.Clear();
         FollowupDispatch.Reset();
+        SessionWork.Reset();
         Logger.Entries.Clear();
     }
 
@@ -71,6 +73,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(TranscriptPublisher);
             siloBuilder.Services.AddSingleton<IFollowupDispatchScheduler>(FollowupDispatch);
+            siloBuilder.Services.AddSingleton<ISessionWorkPort>(SessionWork);
             siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
              siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
              siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
@@ -105,6 +108,46 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             return Task.CompletedTask;
         }
     }
+
+    public sealed class RecordingSessionWorkPort : ISessionWorkPort
+    {
+        public List<SessionWorkflowExecutionBinding> ExecutionBindings { get; } = [];
+        public List<SessionWorkflowExecutionObservation> Observations { get; } = [];
+
+        public void Reset()
+        {
+            ExecutionBindings.Clear();
+            Observations.Clear();
+        }
+
+        public Task<bool> BindAgentExecutionAsync(
+            SessionWorkflowExecutionBinding binding,
+            CancellationToken cancellationToken = default)
+        {
+            ExecutionBindings.Add(binding);
+            return Task.FromResult(true);
+        }
+
+        public Task ObserveAgentExecutionAsync(
+            SessionWorkflowExecutionBinding binding,
+            SessionWorkflowObservationKind kind,
+            string reasonCode,
+            string? message = null,
+            string? stopOperationId = null,
+            CancellationToken cancellationToken = default)
+        {
+            Observations.Add(new SessionWorkflowExecutionObservation(
+                binding, kind, reasonCode, message, stopOperationId));
+            return Task.CompletedTask;
+        }
+    }
+
+    public sealed record SessionWorkflowExecutionObservation(
+        SessionWorkflowExecutionBinding Binding,
+        SessionWorkflowObservationKind Kind,
+        string ReasonCode,
+        string? Message,
+        string? StopOperationId);
 }
 
     public sealed class FakeAgentSessionStore : IAgentSessionStore

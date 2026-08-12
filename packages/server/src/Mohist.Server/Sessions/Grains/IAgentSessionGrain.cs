@@ -12,6 +12,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> RecoverMissingRuntimeSessionAsync(RecoverMissingRuntimeSessionCommand command);
     Task<AgentSessionInfo> ReconcileMissingBindingAsync(ReconcileMissingBindingCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
+    Task<WorkflowAgentSessionInputReceipt> AcceptWorkflowInputAsync(AcceptWorkflowAgentSessionInputCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
 
     /// <summary>
@@ -201,7 +202,33 @@ public sealed record ReconcileMissingBindingCommand(
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(
     [property: Id(0)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!,
-    [property: Id(1)] string RuntimeSessionId = "");
+    [property: Id(1)] string RuntimeSessionId = "",
+    [property: Id(2)] SessionWorkflowExecutionBinding? WorkflowExecution = null,
+    [property: Id(3)] string? SessionTurnId = null);
+
+/// <summary>
+/// A replay-idempotent Workflow turn-opening command. The AgentSession writes
+/// the input and frozen turn binding before asking Workflow to bind the same
+/// execution identity.
+/// </summary>
+[GenerateSerializer]
+public sealed record AcceptWorkflowAgentSessionInputCommand(
+    [property: Id(0)] string InputDeliveryId,
+    [property: Id(1)] string Prompt,
+    [property: Id(2)] string WorkflowRunId,
+    [property: Id(3)] string TaskRunId,
+    [property: Id(4)] string WorkId,
+    [property: Id(5)] string RunnerId,
+    [property: Id(6)] string Runtime,
+    [property: Id(7)] string RuntimeSessionId,
+    [property: Id(8)] string PayloadJson);
+
+[GenerateSerializer]
+public sealed record WorkflowAgentSessionInputReceipt(
+    [property: Id(0)] string InputDeliveryId,
+    [property: Id(1)] string AgentTurnId,
+    [property: Id(2)] bool WorkflowBindingAccepted,
+    [property: Id(3)] string AgentSessionId);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionSystemEventsCommand(

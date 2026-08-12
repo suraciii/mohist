@@ -97,7 +97,9 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
     expect(recording.beforeExecutionCalls).toHaveLength(1)
     expect(recording.beforeExecutionCalls[0]).toMatchObject({
-      producerFamily: "workflow-session",
+      producerFamily: "session-followup",
+      target: { kind: "session", sessionId: "session-1" },
+      sessionTurnId: "turn-1",
       acknowledgementPolicy: "matching-receipt",
       event: {
         type: "session.input",
@@ -207,12 +209,14 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       target: { kind: "generic", projectId: "proj-1", sessionId: "session-1", binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" } },
       text: "continue",
       operationId: "followup-1",
+      turnId: "turn-1",
     })
     await flush()
 
     expect(recording.producedFactCalls.find((r) => r.event.type === "session.activity")).toMatchObject({
       acknowledgementPolicy: "successful-response",
-      target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
+      target: { kind: "session", sessionId: "session-1" },
+      sessionTurnId: "turn-1",
       event: {
         type: "session.activity",
         payload: expect.objectContaining({
@@ -293,6 +297,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
         target: { kind: "generic", projectId: "proj-1", sessionId: "session-1", binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" } },
         text: "continue",
         operationId: "followup-1",
+        turnId: "turn-1",
       })
       await flush()
       await flush()
@@ -438,6 +443,7 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
         binding: defaultPiBinding(),
       },
       text: "follow me",
+      turnId: "turn-1",
     })
     await flush()
 
@@ -461,6 +467,7 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
         binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
       },
       text: "stay on opencode",
+      turnId: "turn-1",
     })
     await flush()
 
@@ -483,6 +490,7 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
         binding: defaultPiBinding(),
       },
       text: "go",
+      turnId: "turn-1",
     })
     await expect(delivery).resolves.toEqual({ accepted: true })
     expect(pi.followupCalls[0].target.runtimeSessionId).toBe("/virtual/sessions/one.jsonl")
@@ -502,6 +510,7 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
         binding: { runtime: "acp", runtimeSessionId: "runtime-x", runnerId: "runner-1", workDir: "/work/project" },
       },
       text: "no go",
+      turnId: "turn-1",
     })).resolves.toEqual({ accepted: false, error: "unavailable" })
     expect(opencode.followupCalls).toHaveLength(0)
     expect(pi.followupCalls).toHaveLength(0)
@@ -521,6 +530,7 @@ describe("RunnerSignalRClient routes follow-up by persisted binding runtime", ()
         binding: { runtime: "pi", runtimeSessionId: "/virtual/sessions/two.jsonl", runnerId: "runner-1", workDir: "/workspace" },
       },
       text: "after reset",
+      turnId: "turn-1",
     })
     await flush()
 

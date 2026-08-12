@@ -1,6 +1,6 @@
 import type { ActionError, ActionResult, JsonObject, JsonValue } from "../core/types.js"
 
-type ActionFacts = Pick<ActionResult, "exitCode" | "turnFact">
+type ActionFacts = Pick<ActionResult, "exitCode" | "outcome" | "turnFact">
 
 export function succeed(output: JsonObject | null = null, facts: ActionFacts = {}): ActionResult {
   return { output, ...facts }

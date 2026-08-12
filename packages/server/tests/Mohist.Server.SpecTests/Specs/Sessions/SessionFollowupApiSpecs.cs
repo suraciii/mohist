@@ -85,7 +85,10 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
             var wireTarget = payload.GetProperty("target");
             Assert.Equal(workflowRunId, wireTarget.GetProperty("workflowRunId").GetString());
             Assert.Equal("plan", wireTarget.GetProperty("sessionName").GetString());
+            Assert.Equal(session.Id, wireTarget.GetProperty("sessionId").GetString());
             Assert.Equal("加个登出", payload.GetProperty("text").GetString());
+            Assert.Equal(data.GetProperty("inputId").GetString(), payload.GetProperty("inputId").GetString());
+            Assert.Equal(data.GetProperty("turnId").GetString(), payload.GetProperty("turnId").GetString());
 
             var tasksAfter = await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number);
             Assert.Equal(tasksBefore, tasksAfter);

@@ -60,12 +60,9 @@ public class WorkflowSessionSpecs
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
         var persistence = _fixture.Persistence.Checkpoint(sessionId);
 
-        await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
+        await PostRawAsync<SessionEventDto[]>(RunnerSessionRuntimeEventsPath("runner-1", sessionId), new
         {
             runtimeSessionId = "runtime-1",
-            workId = "proposal",
-            workType = "task",
-            stage = "plan",
             runtimeEvents = new object[]
             {
                 new { type = "session.input", payload = new { text = "write proposal" } },
@@ -73,7 +70,7 @@ public class WorkflowSessionSpecs
                 new { type = "usage.updated", payload = new { inputTokens = 10, outputTokens = 5, totalTokens = 15 } },
             },
         });
-        await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
+        await PostRawAsync<SessionEventDto[]>(RunnerSessionRuntimeEventsPath("runner-1", sessionId), new
         {
             runtimeSessionId = "runtime-1",
             runtimeEvents = new[]
@@ -151,7 +148,7 @@ public class WorkflowSessionSpecs
             processPid = 1234
         });
         var persistence = _fixture.Persistence.Checkpoint(sessionId);
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(_runnerId, sessionId), new
         {
             runtimeSessionId = sessionId,
             runtimeEvents = new object[]
@@ -294,8 +291,8 @@ public class WorkflowSessionSpecs
     private static string RunnerAgentSessionAttachPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/attach";
 
-    private static string RunnerAgentSessionRuntimeEventsPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
-        $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/runtime-events";
+    private static string RunnerSessionRuntimeEventsPath(string runnerId, string sessionId) =>
+        $"/api/runner/{runnerId}/agent-sessions/{sessionId}/runtime-events";
 
     private static string RunnerSessionPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}";

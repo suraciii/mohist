@@ -128,7 +128,9 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     Assert.NotNull(afterReset);
     Assert.NotEqual(currentSession.Id, afterReset!.AgentSessionId);
 
-    using var staleEvent = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
+    using var staleEvent = await _client.PostAsJsonAsync(
+      $"/api/runner/{_runnerId}/agent-sessions/{currentSession.Id}/runtime-events",
+      new
     {
       runtimeSessionId = currentSession.Id,
       runtimeEvents = new[] { new { type = "session.closed", payload = new { status = "completed" } } },

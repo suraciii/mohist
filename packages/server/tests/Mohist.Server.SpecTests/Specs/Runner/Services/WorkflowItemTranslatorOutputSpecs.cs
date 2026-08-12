@@ -15,12 +15,12 @@ public partial class WorkflowItemTranslatorSpecs
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-invalid-output";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null,
             artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]));
         var result = new WorkResult("completed", Output: JSON.DeserializeElement("\"not-an-object\""), ArtifactUploadIds: ["missing-upload"]);
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
         Assert.Equal(TaskReportStatus.Failed, task.Value.Status);
@@ -36,12 +36,12 @@ public partial class WorkflowItemTranslatorSpecs
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-malformed-checks";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Checks("build", "checks-build",
             [new CheckItem("check-1", "Check 1", "spec/check")]);
 
-        var report = await _translator.TranslateResultAsync(
-            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId, run);
+        var report = _translator.TranslateResult(
+            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId);
 
         var checks = Assert.IsType<WorkflowItemTranslator.InboundReport.Checks>(report);
         var check = Assert.Single(checks.Value.Results);
@@ -62,12 +62,12 @@ public partial class WorkflowItemTranslatorSpecs
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-malformed-check-row";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Checks("build", "checks-build",
             [new CheckItem("check-1", "Check 1", "spec/check")]);
 
-        var report = await _translator.TranslateResultAsync(
-            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId, run);
+        var report = _translator.TranslateResult(
+            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId);
 
         var checks = Assert.IsType<WorkflowItemTranslator.InboundReport.Checks>(report);
         var check = Assert.Single(checks.Value.Results);
@@ -85,12 +85,12 @@ public partial class WorkflowItemTranslatorSpecs
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-check-set-mismatch";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Checks("build", "checks-build",
             [new CheckItem("check-1", "Check 1", "spec/check"), new CheckItem("check-2", "Check 2", "spec/check")]);
 
-        var report = await _translator.TranslateResultAsync(
-            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId, run);
+        var report = _translator.TranslateResult(
+            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId);
 
         var checks = Assert.IsType<WorkflowItemTranslator.InboundReport.Checks>(report);
         Assert.Equal(["check-1", "check-2"], checks.Value.Results.Select(check => check.Name));

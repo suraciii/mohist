@@ -10,6 +10,7 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Workflow.Definition;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
@@ -28,7 +29,7 @@ public sealed class WorkflowSessionLifecycleSpecs
     }
 
     [Fact]
-    public async Task GivenPausedWorkflow_WhenRunnerConfirmsSessionStop_ThenWorkflowTaskIsIdleAndRerunIsUnlocked()
+    public async Task GivenPausedWorkflow_WhenRunnerConfirmsSessionStop_ThenExplicitWorkflowStopOwnsSettlement()
     {
         var active = await CreateActiveWorkflowSessionAsync("paused-session-stop");
         await active.Workflow.PauseAsync("user-pause");
@@ -38,9 +39,14 @@ public sealed class WorkflowSessionLifecycleSpecs
             new
             {
                 runtimeSessionId = active.RuntimeSessionId,
+                inputDeliveryId = active.InputDeliveryId,
+                agentSessionId = active.SessionId,
+                agentTurnId = active.TurnId,
+                taskRunId = active.TaskRunId,
                 workId = active.Work.Id,
                 workType = active.Work.WorkType,
                 stage = active.Work.Stage,
+                runtime = "opencode",
                 runtimeEvents = new object[]
                 {
                     new
@@ -50,6 +56,7 @@ public sealed class WorkflowSessionLifecycleSpecs
                         {
                             activity = "idle",
                             status = "completed",
+                            turnId = active.TurnId,
                             source = "stop",
                             stopOperationId = (await _fixture.Grains
                                 .GetGrain<IAgentSessionGrain>(active.SessionId)
@@ -61,17 +68,21 @@ public sealed class WorkflowSessionLifecycleSpecs
             });
 
         Assert.Equal("Paused", await active.Workflow.GetRunStatusAsync());
-        Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
-        Assert.Null(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
+        Assert.Equal(active.Work.Id, await active.Workflow.GetCurrentWorkIdAsync());
+        Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
         Assert.Equal("idle", Assert.Single(await ListWorkflowSessionsAsync(active.WorkflowRunId)).Status);
 
         var rerun = await active.Workflow.RerunFromStageAsync(active.Work.Stage);
-        Assert.True(rerun.Success, rerun.Error);
+        Assert.False(rerun.Success);
+        Assert.Equal("agent_result_unresolved", rerun.Code);
+
+        await active.Workflow.StopAsync("operator stop");
+        Assert.Equal("Stopped", await active.Workflow.GetRunStatusAsync());
         Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
     }
 
     [Fact]
-    public async Task GivenRunningWorkflow_WhenSessionReportsFailedIdle_ThenWorkflowTaskFailsAndLateReportIsStale()
+    public async Task GivenRunningWorkflow_WhenSessionReportsFailedIdle_ThenTaskReportRemainsAuthoritative()
     {
         var active = await CreateActiveWorkflowSessionAsync("runtime-failure-session");
 
@@ -79,34 +90,34 @@ public sealed class WorkflowSessionLifecycleSpecs
             RuntimeEventsPath(active),
             new
             {
-                runtimeSessionId = "stale-runtime-session",
+                runtimeSessionId = active.RuntimeSessionId,
+                inputDeliveryId = active.InputDeliveryId,
+                agentSessionId = active.SessionId,
+                agentTurnId = active.TurnId,
+                taskRunId = active.TaskRunId,
+                workId = active.Work.Id,
+                workType = active.Work.WorkType,
+                stage = active.Work.Stage,
+                runtime = "opencode",
                 runtimeEvents = new object[]
                 {
-                    new { type = "turn.failed", payload = new { status = "failed", failureReason = "pending apply_patch failed" } },
-                    new { type = "session.activity", payload = new { activity = "idle", status = "failed", exitCode = 1, failureReason = "pending apply_patch failed" } },
+                    new { type = "turn.failed", payload = new { turnId = active.TurnId, status = "failed", failureReason = "pending apply_patch failed" } },
+                    new { type = "session.activity", payload = new { turnId = active.TurnId, activity = "idle", status = "failed", exitCode = 1, failureReason = "pending apply_patch failed" } },
                 },
             });
 
         Assert.Equal(active.Work.Id, await active.Workflow.GetCurrentWorkIdAsync());
         Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
-
-        await _client.PostOkAsync(
-            RuntimeEventsPath(active),
-            new
-            {
-                runtimeSessionId = active.RuntimeSessionId,
-                runtimeEvents = new object[]
-                {
-                    new { type = "turn.failed", payload = new { status = "failed", failureReason = "pending apply_patch failed" } },
-                    new { type = "session.activity", payload = new { activity = "idle", status = "failed", exitCode = 1, failureReason = "pending apply_patch failed" } },
-                },
-            });
-
-        Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
-        Assert.Null(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
         Assert.Equal(
-            ReportAck.Stale,
-            await active.Workflow.AbandonActiveWorkAsync(active.RunnerId, active.Work.Id!, "duplicate-session-failure"));
+            ReportAck.Accepted,
+            await active.Workflow.ReceiveTaskReportAsync(active.RunnerId, active.Work.Id!, new TaskReport(
+                active.Work.Id!,
+                TaskReportStatus.Failed,
+                Output: null,
+                Artifacts: null,
+                Detail: "late runner failure",
+                TaskRunId: active.TaskRunId)));
+        Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
         Assert.Equal(
             ReportAck.Stale,
             await active.Workflow.ReceiveTaskReportAsync(active.RunnerId, active.Work.Id!, new TaskReport(
@@ -114,7 +125,8 @@ public sealed class WorkflowSessionLifecycleSpecs
                 TaskReportStatus.Failed,
                 Output: null,
                 Artifacts: null,
-                Detail: "late runner failure")));
+                Detail: "duplicate runner failure",
+                TaskRunId: active.TaskRunId)));
     }
 
     [Fact]
@@ -127,9 +139,17 @@ public sealed class WorkflowSessionLifecycleSpecs
             new
             {
                 runtimeSessionId = active.RuntimeSessionId,
+                inputDeliveryId = active.InputDeliveryId,
+                agentSessionId = active.SessionId,
+                agentTurnId = active.TurnId,
+                taskRunId = active.TaskRunId,
+                workId = active.Work.Id,
+                workType = active.Work.WorkType,
+                stage = active.Work.Stage,
+                runtime = "opencode",
                 runtimeEvents = new object[]
                 {
-                    new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0 } },
+                    new { type = "session.activity", payload = new { turnId = active.TurnId, activity = "idle", status = "completed", exitCode = 0 } },
                 },
             });
 
@@ -142,20 +162,27 @@ public sealed class WorkflowSessionLifecycleSpecs
                 active.Work.Id!,
                 TaskReportStatus.Succeeded,
                 Output: null,
-                Artifacts: null)));
+                Artifacts: null,
+                TaskRunId: active.TaskRunId)));
         Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
     }
 
     [Fact]
-    public async Task GivenPausedWorkflow_WhenQueuedSessionStopCompletes_ThenWorkflowTaskIsReleased()
+    public async Task GivenPausedWorkflow_WhenQueuedSessionStopCompletes_DoesNotAbandonWorkflowWork()
     {
-        var active = await CreateActiveWorkflowSessionAsync("paused-session-stop", createActiveTurn: false);
+        var active = await CreateActiveWorkflowSessionAsync(
+            "paused-session-stop",
+            createActiveTurn: false,
+            acceptWorkflowInput: false);
         await active.Workflow.PauseAsync("user-pause");
-
         const string turnId = "queued-stop-turn";
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(active.SessionId);
-        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
-            "queued-stop-input", turnId, "queued", "test"));
+        await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(active.SessionId)
+            .RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+                "queued-stop-input",
+                turnId,
+                "queued",
+                "test"));
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
@@ -170,17 +197,21 @@ public sealed class WorkflowSessionLifecycleSpecs
 
         Assert.Equal("cancelled", document.RootElement.GetProperty("data").GetProperty("state").GetString());
         Assert.Equal("Paused", await active.Workflow.GetRunStatusAsync());
-        Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
-        Assert.Null(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
+        Assert.Equal(active.Work.Id, await active.Workflow.GetCurrentWorkIdAsync());
+        Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
 
         var rerun = await active.Workflow.RerunFromStageAsync(active.Work.Stage);
-        Assert.True(rerun.Success, rerun.Error);
+        Assert.False(rerun.Success);
+        Assert.Equal("active_work_in_range", rerun.Code);
     }
 
     [Fact]
     public async Task GivenPausedWorkflow_WhenTreeStopSeesNoTurn_DoesNotAbandonUnsettledWorkflowWork()
     {
-        var active = await CreateActiveWorkflowSessionAsync("paused-tree-stop", createActiveTurn: false);
+        var active = await CreateActiveWorkflowSessionAsync(
+            "paused-tree-stop",
+            createActiveTurn: false,
+            acceptWorkflowInput: false);
         await active.Workflow.PauseAsync("user-pause");
 
         using var request = new HttpRequestMessage(
@@ -203,7 +234,8 @@ public sealed class WorkflowSessionLifecycleSpecs
 
     private async Task<ActiveWorkflowSession> CreateActiveWorkflowSessionAsync(
         string title,
-        bool createActiveTurn = true)
+        bool createActiveTurn = true,
+        bool acceptWorkflowInput = true)
     {
         var (project, issue, workflowRunId) = await CreateIssueWorkflowAsync(title);
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
@@ -211,9 +243,11 @@ public sealed class WorkflowSessionLifecycleSpecs
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
 
         var work = await workflow.ClaimNextAsync(_runnerId)
-            ?? throw new InvalidOperationException("The default workflow did not expose claimable work.");
+            ?? throw new InvalidOperationException("The Agent workflow did not expose claimable work.");
         var workId = work.Id
             ?? throw new InvalidOperationException("Claimed workflow work did not have a work id.");
+        var taskRunId = (await workflow.GetActiveWorkAsync(workId))?.TaskRunId
+            ?? throw new InvalidOperationException("Claimed workflow task did not expose its task-run id.");
         var sessionName = $"task-{Guid.NewGuid():N}";
         var sessionId = Guid.NewGuid().ToString("N");
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
@@ -230,19 +264,40 @@ public sealed class WorkflowSessionLifecycleSpecs
             ExpectedRunnerId: _runnerId,
             ExpectedRuntime: "opencode"));
 
+        var inputDeliveryId = string.Empty;
         var turnId = string.Empty;
-        if (createActiveTurn)
+        if (acceptWorkflowInput)
         {
-            turnId = $"turn-{Guid.NewGuid():N}";
-            await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
-                $"input-{Guid.NewGuid():N}",
-                turnId,
+            inputDeliveryId = $"input-{Guid.NewGuid():N}";
+            var receipt = await session.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+                inputDeliveryId,
                 "workflow task",
-                "workflow"));
-            await session.MarkTurnExecutingAsync(turnId);
+                workflowRunId,
+                taskRunId,
+                workId,
+                _runnerId,
+                "opencode",
+                runtimeSessionId,
+                "{\"text\":\"workflow task\"}"));
+            Assert.True(receipt.WorkflowBindingAccepted);
+            turnId = receipt.AgentTurnId;
         }
 
-        return new ActiveWorkflowSession(project, _runnerId, workflowRunId, sessionName, sessionId, runtimeSessionId, work, workflow, turnId);
+        if (createActiveTurn && acceptWorkflowInput)
+            await session.MarkTurnExecutingAsync(turnId);
+
+        return new ActiveWorkflowSession(
+            project,
+            _runnerId,
+            workflowRunId,
+            sessionName,
+            sessionId,
+            runtimeSessionId,
+            work,
+            taskRunId,
+            workflow,
+            turnId,
+            inputDeliveryId);
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId)> CreateIssueWorkflowAsync(string title)
@@ -256,6 +311,16 @@ public sealed class WorkflowSessionLifecycleSpecs
             baseBranch = "main",
             setDefault = true
         });
+        await WorkflowGrainTestHelpers.SeedWorkflowTemplateAsync(
+            _fixture.ConnectionString,
+            $"workflow-session-{Guid.NewGuid():N}",
+            new WorkflowDefinition([
+                new StageDefinition(
+                    "build",
+                    [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+                    [])
+            ]),
+            project.Id);
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
             title,
@@ -306,8 +371,10 @@ public sealed class WorkflowSessionLifecycleSpecs
         string SessionId,
         string RuntimeSessionId,
         WorkItem Work,
+        string TaskRunId,
         IWorkflowGrain Workflow,
-        string TurnId);
+        string TurnId,
+        string InputDeliveryId);
 
     private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(string Id, int Number, string Title, string Status, string? WorkflowRunId);

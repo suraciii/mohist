@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -11,6 +12,7 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Orleans;
 using Xunit;
 
@@ -84,6 +86,8 @@ public sealed class WorkflowGrainProductionContractSpecs
             scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>(),
             definitionResolver,
             variableResolver,
+            scope.ServiceProvider.GetRequiredService<IWorkflowArtifactBindService>(),
+            Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
         await grain.OnActivateAsync(CancellationToken.None);
