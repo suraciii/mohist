@@ -20,6 +20,21 @@ export interface PartitionArtifact {
   readonly selectedClasses: readonly string[]
 }
 
+export function partitionExecutionArguments(
+  reportPath: string,
+  selectedClasses: readonly string[],
+  maxThreads: number,
+): string[] {
+  if (!Number.isInteger(maxThreads) || maxThreads <= 0) {
+    throw new Error('partition-max-threads must be a positive integer')
+  }
+  return [
+    '-noColor', '-noLogo', '-noAutoReporters', '-trx', reportPath,
+    '-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', String(maxThreads),
+    ...selectedClasses.flatMap((className) => ['-class', className]),
+  ]
+}
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
@@ -171,6 +186,7 @@ async function runPartition(
   apphost: string,
   partitionIndex: number,
   partitionCount: number,
+  partitionMaxThreads: number,
   manifestDirectory: string,
   reportPath: string,
 ): Promise<void> {
@@ -181,10 +197,10 @@ async function runPartition(
   writePlan(manifestDirectory, plan)
   console.log(`Spec partition ${plan.index + 1}/${plan.count}: ${plan.selectedClasses.length} of ${plan.allClasses.length} classes`)
   mkdirSync(dirname(reportPath), { recursive: true })
-  const classArgs = plan.selectedClasses.flatMap((className) => ['-class', className])
-  const execution = await runCommand(apphost, [
-    '-noColor', '-noLogo', '-noAutoReporters', '-trx', reportPath, ...classArgs,
-  ])
+  const execution = await runCommand(
+    apphost,
+    partitionExecutionArguments(reportPath, plan.selectedClasses, partitionMaxThreads),
+  )
   writeFileSync(resolve(manifestDirectory, 'spec.log'), execution.output)
   if (execution.exitCode !== 0) throw new Error(`xUnit partition exited ${execution.exitCode ?? 'without an exit code'}`)
   if (!existsSync(reportPath) || statSync(reportPath).size === 0) {
@@ -197,14 +213,14 @@ async function runPartition(
 
 function usage(): never {
   throw new Error(
-    'usage: spec-partition <run apphost index count manifest-dir report | verify manifest-root>',
+    'usage: spec-partition <run apphost index count max-threads manifest-dir report | verify manifest-root>',
   )
 }
 
 async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   try {
-    if (argv[0] === 'run' && argv.length === 6) {
-      await runPartition(argv[1], Number(argv[2]), Number(argv[3]), argv[4], argv[5])
+    if (argv[0] === 'run' && argv.length === 7) {
+      await runPartition(argv[1], Number(argv[2]), Number(argv[3]), Number(argv[4]), argv[5], argv[6])
       return 0
     }
     if (argv[0] === 'verify' && argv.length === 2) {

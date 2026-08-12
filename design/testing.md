@@ -255,9 +255,10 @@ a gate recovery mechanism.
 
 The scheduler has explicit lane ownership rather than opening every command at
 once. `test-duration.config.jsonc` declares the reproducible host limits. The
-default is four host lanes, with at most three .NET lanes and two Node lanes;
-this preserves the repository's active four-thread Spec bound while allowing a
-Node lane to overlap a compatible .NET lane. A lane starts only when its
+default is four host lanes, with at most four .NET lanes and two Node lanes.
+Partitioned tracks declare both their per-process thread count and an aggregate
+execution capacity; configuration fails closed when outer partition concurrency
+times inner test concurrency exceeds that capacity. A lane starts only when its
 dependencies and all claimed resources are available, and an already-aborted
 schedule admits none. Node duration commands place reporter arguments on their
 terminal `vitest run` invocation, and execute TypeScript boundary checks through
@@ -279,17 +280,18 @@ fails before a child is admitted instead of changing quoting semantics.
 
 `canonical.durationMeasurementTracks` is an ordered, small set of tracks whose
 per-test duration policy must not share CPU or I/O with another test executor.
-Every member claims the `duration-measurement` resource and depends on the
-previous member. The optional `canonical.durationIsolationTrack` is admitted
-after that prefix and gates only other Vitest lanes; .NET and Spec lanes resume
-the normal bounded fan-out immediately after the measurement prefix. The
-current measurement set is the CLI track, with Runner as the isolated Node
-track. Server Unit remains fully budgeted but is admitted with the bounded
-.NET fan-out to keep the complete gate within its existing wall. This changes
-neither test behavior, thresholds, nor internal test-runner settings, and does
-not globally serialize the suite. The phase is applied only when the complete
-configured set is selected, so focused `--track` execution has no hidden
-prerequisite work.
+Each single-lane member claims the `duration-measurement` resource and every
+member depends on the previous member's terminal lane. A partitioned member
+uses its coverage lane as the phase barrier. The optional
+`canonical.durationIsolationTrack` is admitted
+after that prefix and gates other Vitest lanes. The current measurement set is
+the CLI track followed by Server Spec: four partition apphosts each run one
+xUnit collection at a time, so aggregate Spec execution concurrency is four.
+Server Unit, Server Arch, Workflow, and Node throughput lanes start after Spec
+coverage completes; Runner remains the isolated Node track. This preserves
+parallel partitions without changing duration thresholds. The phase is applied
+only when the complete configured set is selected, so focused `--track`
+execution has no hidden prerequisite work.
 
 #### Host exclusivity for duration evidence
 

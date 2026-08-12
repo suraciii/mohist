@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { planPartitionClasses, verifyPartitionArtifacts } from './spec-partition.js'
+import { partitionExecutionArguments, planPartitionClasses, verifyPartitionArtifacts } from './spec-partition.js'
 
 const discovered = [
   'Mohist.Server.SpecTests.ZetaSpecs',
@@ -28,6 +28,18 @@ test('Spec partition planning sorts discovery and assigns a deterministic disjoi
     'Mohist.Server.SpecTests.BetaSpecs',
     'Mohist.Server.SpecTests.ZetaSpecs',
   ])
+})
+
+test('Spec partition execution fixes the aggregate inner concurrency and keeps whole-class filters', () => {
+  assert.deepEqual(
+    partitionExecutionArguments('/evidence/spec.trx', ['Ns.Alpha', 'Ns.Beta'], 1),
+    [
+      '-noColor', '-noLogo', '-noAutoReporters', '-trx', '/evidence/spec.trx',
+      '-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', '1',
+      '-class', 'Ns.Alpha', '-class', 'Ns.Beta',
+    ],
+  )
+  assert.throws(() => partitionExecutionArguments('/evidence/spec.trx', ['Ns.Alpha'], 0), /positive integer/)
 })
 
 test('Spec coverage verification rejects duplicate selection and requires every partition', () => {

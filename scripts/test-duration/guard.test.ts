@@ -503,7 +503,7 @@ test('report evaluation fails closed at the execution cutoff and after external 
 })
 
 test('Spec partition lanes launch a Node-hosted executor instead of a shell script', () => {
-  const command = specPartitionCommand(['run', '/tests/spec', '0', '4', '/tmp/manifests', '/tmp/report.trx'])
+  const command = specPartitionCommand(['run', '/tests/spec', '0', '4', '1', '/tmp/manifests', '/tmp/report.trx'])
   assert.equal(command.command, process.execPath)
   assert.deepEqual(command.args.slice(0, 4), ['--import', 'tsx', `${process.cwd()}/scripts/test-duration/spec-partition.ts`, 'run'])
   assert.doesNotMatch(command.args.join(' '), /ci-spec-partition\.sh/)
@@ -517,6 +517,7 @@ test('planTracks gives every Server Spec partition its own report, temp, and por
     report: 'reports/server-spec/partition-{partition}.trx',
     reportFormat: 'trx',
     partitions: 4,
+    partitionMaxThreads: 1,
     deadlineMs: 1000,
     enforce: true,
     rules: [{ id: 'spec', absoluteMs: 5000 }],
@@ -536,7 +537,7 @@ test('planTracks gives every Server Spec partition its own report, temp, and por
   assert.deepEqual(planned.map((lane) => lane.sandboxOrdinal), [0, 1, 2, 3, 4])
 })
 
-test('planTracks isolates duration measurements and gates only Node fan-out', () => {
+test('planTracks isolates a four-way Spec duration phase before remaining fan-out', () => {
   const cli: TrackConfig = {
     id: 'cli', kind: 'dotnet-apphost', apphost: 'bin/cli', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
   }
@@ -550,22 +551,24 @@ test('planTracks isolates duration measurements and gates only Node fan-out', ()
     id: 'web', kind: 'vitest', run: ['npm', 'run', 'test'], report: 'reports/web.json', reportFormat: 'vitest', deadlineMs: 1000, enforce: false,
   }
   const spec: TrackConfig = {
-    id: 'server-spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 1000, enforce: false,
+    id: 'server-spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 1, deadlineMs: 1000, enforce: false,
   }
-  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli'], 'runner')
+  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-spec'], 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
   assert.ok(byId.get('cli')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['cli'])
+  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['server-spec-coverage'])
   assert.ok(!byId.get('server-unit')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('runner')?.dependsOn, ['cli'])
+  assert.deepEqual(byId.get('runner')?.dependsOn, ['server-spec-coverage'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
   assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['cli'])
   assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'cli'])
+  assert.ok(!byId.get('server-spec-0')?.resources?.includes('duration-measurement'))
+  assert.ok(!byId.get('server-spec-1')?.resources?.includes('duration-measurement'))
 
-  const focused = planTracks([unit], '/evidence', ['cli'], 'runner')
+  const focused = planTracks([unit], '/evidence', ['cli', 'server-spec'], 'runner')
   assert.deepEqual(focused[0].lane.dependsOn, undefined)
   assert.ok(!focused[0].lane.resources?.includes('duration-measurement'))
 })

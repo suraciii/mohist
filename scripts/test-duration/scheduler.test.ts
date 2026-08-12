@@ -180,42 +180,57 @@ test('scheduler waits for all partition dependencies before admitting the covera
   assert.deepEqual(result.lanes.map((lane) => lane.state), ['passed', 'passed', 'passed'])
 })
 
-test('scheduler completes duration measurements before admitting bounded throughput fan-out', async () => {
-  const starts = startSignals('cli', 'server-unit', 'web', 'server-spec')
+test('scheduler completes the bounded four-way Spec phase before throughput fan-out', async () => {
+  const specIds = ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3'] as const
+  const starts = startSignals('cli', ...specIds, 'server-spec-coverage', 'server-unit', 'runner')
   const cli = deferred<boolean>()
+  const specs = specIds.map(() => deferred<boolean>())
+  const coverage = deferred<boolean>()
   const unit = deferred<boolean>()
-  const web = deferred<boolean>()
-  const spec = deferred<boolean>()
-  const deferredById = new Map([['cli', cli], ['server-unit', unit], ['web', web], ['server-spec', spec]])
+  const runner = deferred<boolean>()
+  const deferredById = new Map<string, Deferred<boolean>>([
+    ['cli', cli],
+    ...specIds.map((id, index) => [id, specs[index]] as const),
+    ['server-spec-coverage', coverage],
+    ['server-unit', unit],
+    ['runner', runner],
+  ])
 
   const pending = scheduleLanes(
     [
       { id: 'cli', resources: ['host', 'dotnet', 'duration-measurement'] },
-      { id: 'server-unit', dependsOn: ['cli'], resources: ['host', 'dotnet', 'duration-measurement'] },
-      { id: 'web', dependsOn: ['server-unit'], resources: ['host', 'node'] },
-      { id: 'server-spec', dependsOn: ['server-unit'], resources: ['host', 'dotnet'] },
+      ...specIds.map((id) => ({ id, dependsOn: ['cli'], resources: ['host', 'dotnet', 'server-spec'] })),
+      { id: 'server-spec-coverage', dependsOn: [...specIds, 'cli'], resources: ['host'] },
+      { id: 'server-unit', dependsOn: ['server-spec-coverage'], resources: ['host', 'dotnet'] },
+      { id: 'runner', dependsOn: ['server-spec-coverage'], resources: ['host', 'node', 'duration-measurement'] },
     ],
     (lane): RunningLane<boolean> => {
       starts.record(lane.id)
       return { result: deferredById.get(lane.id)!.promise, cancel: () => {} }
     },
     (result) => result,
-    { resourceLimits: { host: 2, dotnet: 1, node: 1, 'duration-measurement': 1 } },
+    { resourceLimits: { host: 4, dotnet: 4, node: 1, 'server-spec': 4, 'duration-measurement': 1 } },
   )
 
   await starts.waitFor('cli')
   assert.deepEqual(starts.started, ['cli'])
   cli.resolve(true)
-  await starts.waitFor('server-unit')
-  assert.deepEqual(starts.started, ['cli', 'server-unit'])
+  await Promise.all(specIds.map((id) => starts.waitFor(id)))
+  assert.deepEqual(starts.started, ['cli', ...specIds])
+  specs.slice(0, 3).forEach((spec) => spec.resolve(true))
+  await Promise.resolve()
+  assert.deepEqual(starts.started, ['cli', ...specIds])
+  specs[3].resolve(true)
+  await starts.waitFor('server-spec-coverage')
+  assert.deepEqual(starts.started, ['cli', ...specIds, 'server-spec-coverage'])
+  coverage.resolve(true)
+  await Promise.all([starts.waitFor('server-unit'), starts.waitFor('runner')])
+  assert.deepEqual(starts.started, ['cli', ...specIds, 'server-spec-coverage', 'server-unit', 'runner'])
   unit.resolve(true)
-  await Promise.all([starts.waitFor('web'), starts.waitFor('server-spec')])
-  assert.deepEqual(starts.started, ['cli', 'server-unit', 'web', 'server-spec'])
-  web.resolve(true)
-  spec.resolve(true)
+  runner.resolve(true)
 
   const result = await pending
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['passed', 'passed', 'passed', 'passed'])
+  assert.deepEqual(result.lanes.map((lane) => lane.state), Array.from({ length: 8 }, () => 'passed'))
 })
 
 test('scheduler admits no lane when the abort signal was already fulfilled', async () => {

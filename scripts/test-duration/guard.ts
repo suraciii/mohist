@@ -463,28 +463,41 @@ function applyDurationMeasurementPhase(
   if (durationMeasurementTracks.length === 0) return [...planned]
   if (new Set(durationMeasurementTracks).size !== durationMeasurementTracks.length) return [...planned]
 
-  const measurementLaneIds: string[] = []
+  const measurementGroups: Array<{
+    readonly trackId: string
+    readonly executionLaneIds: readonly string[]
+    readonly terminalLaneIds: readonly string[]
+  }> = []
   for (const trackId of durationMeasurementTracks) {
     const matching = planned.filter((plan) => plan.policyTrack?.id === trackId)
-    if (matching.length !== 1) return [...planned]
-    measurementLaneIds.push(matching[0].lane.id)
+    if (matching.length === 0) return [...planned]
+    const coverage = planned.find((plan) => plan.lane.id === `${trackId}-coverage`)
+    if (matching.length > 1 && coverage === undefined) return [...planned]
+    measurementGroups.push({
+      trackId,
+      executionLaneIds: matching.map((plan) => plan.lane.id),
+      terminalLaneIds: coverage === undefined ? [matching[0].lane.id] : [coverage.lane.id],
+    })
   }
 
-  const finalMeasurementLaneId = measurementLaneIds[measurementLaneIds.length - 1]
+  const finalMeasurementLaneIds = measurementGroups.at(-1)!.terminalLaneIds
   const isolationLaneId = durationIsolationTrack === undefined
     ? undefined
     : planned.find((plan) => plan.policyTrack?.id === durationIsolationTrack)?.lane.id
   return planned.map((plan) => {
-    const measurementIndex = plan.policyTrack === undefined
-      ? -1
-      : durationMeasurementTracks.indexOf(plan.policyTrack.id)
+    const measurementIndex = measurementGroups.findIndex((group) =>
+      group.executionLaneIds.includes(plan.lane.id) || group.terminalLaneIds.includes(plan.lane.id),
+    )
     if (measurementIndex >= 0) {
-      const predecessor = measurementIndex === 0 ? [] : [measurementLaneIds[measurementIndex - 1]]
-      return withLaneConstraints(plan, predecessor, ['duration-measurement'])
+      const predecessor = measurementIndex === 0 ? [] : measurementGroups[measurementIndex - 1].terminalLaneIds
+      const resources = measurementGroups[measurementIndex].executionLaneIds.length === 1
+        ? ['duration-measurement']
+        : []
+      return withLaneConstraints(plan, predecessor, resources)
     }
     const dependencies = isolationLaneId !== undefined && plan.lane.id !== isolationLaneId && plan.policyTrack?.kind === 'vitest'
       ? [isolationLaneId]
-      : [finalMeasurementLaneId]
+      : finalMeasurementLaneIds
     const resources = plan.lane.id === isolationLaneId ? ['duration-measurement'] : []
     return withLaneConstraints(plan, dependencies, resources)
   })
@@ -774,6 +787,7 @@ function startLane(
           apphost,
           String(plan.partition),
           String(executionTrack.partitions),
+          String(executionTrack.partitionMaxThreads),
           manifestDir,
           plan.reportPath!,
         ]))
@@ -1310,9 +1324,11 @@ export async function main(
       resources: plan.lane.resources ?? [],
       reportPath: plan.reportPath,
       partition: plan.partition,
+      partitionMaxThreads: plan.executionTrack?.partitionMaxThreads,
       sandboxOrdinal: plan.sandboxOrdinal,
       deadlineMs: plan.deadlineMs,
     })),
+    partitionExecutionCapacity: config.canonical?.partitionExecutionCapacity,
   })) return 1
 
   const runs: TrackRun[] = []

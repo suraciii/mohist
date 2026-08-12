@@ -167,37 +167,67 @@ test('validateConfig fails closed when an unenforced track is not explicitly bas
   assert.ok(errors.some((error) => error.includes('track "rules-ignored": enforce=false must not carry unenforced rules')))
 })
 
-test('validateConfig accepts canonical resource limits and partitioned apphost tracks', () => {
+test('validateConfig accepts a bounded partition execution capacity', () => {
   const config = parseSuiteConfig(JSON.stringify({
     suiteDeadlineMs: 1000,
-    canonical: { maxConcurrentLanes: 4, resourceLimits: { host: 4, dotnet: 3 } },
+    canonical: {
+      maxConcurrentLanes: 4,
+      resourceLimits: { host: 4, dotnet: 4, spec: 4 },
+      partitionExecutionCapacity: 4,
+    },
     tracks: [{
       id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx',
-      reportFormat: 'trx', partitions: 4, deadlineMs: 100, enforce: true,
+      reportFormat: 'trx', partitions: 4, partitionMaxThreads: 1, deadlineMs: 100, enforce: true,
       rules: [{ id: 'spec', absoluteMs: 5000 }],
     }],
   }))
   assert.deepEqual(validateConfig(config), [])
 })
 
-test('validateConfig requires a valid non-partitioned duration-measurement phase', () => {
+test('validateConfig requires bounded partition concurrency and permits a partitioned duration phase', () => {
   const config = parseSuiteConfig(JSON.stringify({
     suiteDeadlineMs: 1000,
     canonical: {
       maxConcurrentLanes: 4,
-      resourceLimits: { host: 4 },
+      resourceLimits: { host: 4, spec: 2 },
+      partitionExecutionCapacity: 4,
       durationMeasurementTracks: ['unit', 'unit', 'missing', 'spec'],
     },
     tracks: [
       { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
-      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 100, enforce: false },
+      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 2, deadlineMs: 100, enforce: false },
     ],
   }))
   const errors = validateConfig(config)
   assert.ok(errors.some((error) => error.includes('requires canonical.resourceLimits.duration-measurement')))
   assert.ok(errors.some((error) => error.includes('duplicate track id: unit')))
   assert.ok(errors.some((error) => error.includes('unknown track: missing')))
-  assert.ok(errors.some((error) => error.includes('cannot include partitioned track: spec')))
+  assert.ok(!errors.some((error) => error.includes('cannot include partitioned track: spec')))
+})
+
+test('validateConfig fails closed when partition execution capacity is missing or exceeded', () => {
+  const track = {
+    id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx',
+    reportFormat: 'trx', partitions: 4, partitionMaxThreads: 2, deadlineMs: 100,
+    enforce: true, rules: [{ id: 'spec', absoluteMs: 5000 }],
+  }
+  const missing = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    canonical: { maxConcurrentLanes: 4, resourceLimits: { host: 4, spec: 4 } },
+    tracks: [track],
+  }))
+  const exceeded = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    canonical: {
+      maxConcurrentLanes: 4,
+      resourceLimits: { host: 4, spec: 3 },
+      partitionExecutionCapacity: 4,
+    },
+    tracks: [track],
+  }))
+
+  assert.ok(validateConfig(missing).some((error) => error.includes('partitionExecutionCapacity must be a positive integer')))
+  assert.ok(validateConfig(exceeded).some((error) => error.includes('partition concurrency exceeds')))
 })
 
 test('validateConfig requires duration isolation to target a non-partitioned Vitest track', () => {
@@ -211,7 +241,7 @@ test('validateConfig requires duration isolation to target a non-partitioned Vit
     },
     tracks: [
       { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
-      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 100, enforce: false },
+      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 1, deadlineMs: 100, enforce: false },
     ],
   }))
   const errors = validateConfig(config)
@@ -224,13 +254,14 @@ test('validateConfig rejects invalid canonical limits and non-apphost partitioni
     canonical: { maxConcurrentLanes: 0, resourceLimits: { host: 0 } },
     tracks: [{
       id: 'spec', kind: 'vitest', run: ['npm', 'test'], report: 'reports/spec.json', reportFormat: 'vitest',
-      partitions: 1, deadlineMs: 100, enforce: false,
+      partitions: 1, partitionMaxThreads: 0, deadlineMs: 100, enforce: false,
     }],
   }))
   const errors = validateConfig(config)
   assert.ok(errors.some((error) => error.includes('canonical.maxConcurrentLanes')))
   assert.ok(errors.some((error) => error.includes('canonical.resourceLimits.host')))
   assert.ok(errors.some((error) => error.includes('partitions must be an integer greater than one')))
+  assert.ok(errors.some((error) => error.includes('positive integer partitionMaxThreads')))
   assert.ok(errors.some((error) => error.includes('partitions require kind dotnet-apphost')))
   assert.ok(errors.some((error) => error.includes('partitioned reports must include {partition}')))
 })

@@ -21,20 +21,20 @@
   "suiteDeadlineMs": 300000,
   "killGraceMs": 5000,
   // The local canonical gate does not open every test process at once. The
-  // four-lane host cap matches the active Spec runner bound; resource caps
+  // four-lane host cap matches the active Spec execution bound; resource caps
   // reserve capacity for a Node lane while bounded .NET work is active.
   "canonical": {
     "maxConcurrentLanes": 4,
     "resourceLimits": {
       "host": 4,
-      "dotnet": 3,
+      "dotnet": 4,
       "node": 2,
-      "server-spec": 3,
+      "server-spec": 4,
       "duration-measurement": 1
     },
-    // The CLI sample is a short ordered prefix. Runner then gates only the
-    // remaining Node lanes while all .NET fan-out stays bounded and concurrent.
-    "durationMeasurementTracks": ["cli"],
+    "partitionExecutionCapacity": 4,
+    // CLI and bounded Spec measurements precede the remaining fan-out.
+    "durationMeasurementTracks": ["cli", "server-spec"],
     "durationIsolationTrack": "runner"
   },
   "tracks": [
@@ -81,7 +81,7 @@
           ] }
       ]
     },
-    { "id": "server-spec", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "report": "reports/server-spec/partition-{partition}.trx", "reportFormat": "trx", "partitions": 4, "deadlineMs": 240000, "enforce": true, "rules": [
+    { "id": "server-spec", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "report": "reports/server-spec/partition-{partition}.trx", "reportFormat": "trx", "partitions": 4, "partitionMaxThreads": 1, "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [
           { "id": "Mohist.Server.SpecTests.Specs.Workspace.WebConversationWorkspaceSpecs.WebConversation_Followup_ReusesSameSessionAndWorkspace", "observedMs": 12723.6, "reason": "launch POST intermittently absorbs 2-12s full-suite parallel-load stalls (silo scheduler backlog; same stalls hit other spec tests at load peaks, e.g. migrations); p95 unaffected", "owner": "slack", "deadline": "2026-10-31" },
           { "id": "Mohist.Server.SpecTests.Specs.Agent.Api.AgentSessionLaunchRoutesSpecs.Launch_ResolvesAgent_ComposesSnapshot_MintsSession_Returns201_WithIdentityAndStatus", "observedMs": 1897.1, "reason": "provisioner round-trip per ingress (post #330); load-sensitive under parallel specs; launch POST intermittently absorbs 4-5s full-suite parallel-load stalls (silo scheduler backlog; observed 5.09s over the 5s cap in 1/12 runs); p95 unaffected", "owner": "ws330", "deadline": "2026-10-31" }

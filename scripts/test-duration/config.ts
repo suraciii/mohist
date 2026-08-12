@@ -100,6 +100,15 @@ function validateTrack(track: TrackConfig): string[] {
   if (track.partitions !== undefined && (!Number.isInteger(track.partitions) || track.partitions < 2)) {
     errors.push(`${prefix}: partitions must be an integer greater than one`)
   }
+  if (track.partitions !== undefined && (!Number.isInteger(track.partitionMaxThreads) || track.partitionMaxThreads! <= 0)) {
+    errors.push(`${prefix}: partitions require a positive integer partitionMaxThreads`)
+  }
+  if (track.partitions === undefined && track.partitionMaxThreads !== undefined) {
+    errors.push(`${prefix}: partitionMaxThreads requires partitions`)
+  }
+  if (track.partitions !== undefined && (track.apphostArgs?.length ?? 0) > 0) {
+    errors.push(`${prefix}: partitioned tracks use partitionMaxThreads instead of apphostArgs`)
+  }
   if (track.partitions !== undefined && track.kind !== 'dotnet-apphost') {
     errors.push(`${prefix}: partitions require kind dotnet-apphost`)
   }
@@ -158,6 +167,28 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
       errors.push(`canonical.resourceLimits.${resource} must be a positive integer`)
     }
   }
+  const partitionedTracks = tracks.filter((track) => track.partitions !== undefined)
+  if (partitionedTracks.length > 0) {
+    if (!Number.isInteger(config.partitionExecutionCapacity) || config.partitionExecutionCapacity! <= 0) {
+      errors.push('canonical.partitionExecutionCapacity must be a positive integer when partitioned tracks exist')
+    }
+    for (const track of partitionedTracks) {
+      const outerLimit = config.resourceLimits[track.id]
+      if (!Number.isInteger(outerLimit) || outerLimit <= 0) {
+        errors.push(`canonical.resourceLimits.${track.id} must bound partitioned track "${track.id}"`)
+        continue
+      }
+      if (
+        Number.isInteger(config.partitionExecutionCapacity) && config.partitionExecutionCapacity! > 0 &&
+        Number.isInteger(track.partitionMaxThreads) && track.partitionMaxThreads! > 0 &&
+        Math.min(track.partitions!, outerLimit) * track.partitionMaxThreads! > config.partitionExecutionCapacity!
+      ) {
+        errors.push(
+          `track "${track.id}" partition concurrency exceeds canonical.partitionExecutionCapacity`,
+        )
+      }
+    }
+  }
   if (config.durationMeasurementTracks !== undefined) {
     if (!Array.isArray(config.durationMeasurementTracks) || config.durationMeasurementTracks.length === 0) {
       errors.push('canonical.durationMeasurementTracks must be a non-empty array of track ids')
@@ -181,8 +212,6 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
       const track = knownTracks.get(trackId)
       if (!track) {
         errors.push(`canonical.durationMeasurementTracks references unknown track: ${trackId}`)
-      } else if (track.partitions !== undefined) {
-        errors.push(`canonical.durationMeasurementTracks cannot include partitioned track: ${trackId}`)
       }
     }
   }
