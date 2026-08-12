@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -72,6 +74,44 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.False(completed.HasUnresolvedAgentResult());
         Assert.Contains(await EventStore.ListAsync(_workflowId!), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.TaskCompleted);
+    }
+
+    [Fact]
+    public async Task UnknownRunnerResultUsesTheBoundObservationWithoutOutputArtifactOrFollowUpSideEffects()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var initial = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(initial.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id, work.WorkId, runnerId, "session-result", "turn-result", "opencode", "runtime-result");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+
+        var service = Services.GetRequiredService<WorkflowReportService>();
+        var result = new WorkResult(
+            "unknown",
+            "Agent cleanup was not confirmed",
+            Output: JsonSerializer.SerializeToElement(new[] { "invalid output must not fail the task" }),
+            ArtifactUploadIds: ["missing-upload"],
+            AddTasks: [new RuntimeTaskInput("follow-up", "Must not be projected", "spec/task")]);
+
+        var (ack, status) = await service.ReportAsync(runnerId, _workflowId!, work.WorkId, result);
+
+        Assert.Equal("accepted", ack);
+        Assert.Equal("Running", status);
+        var unresolved = await LoadRunAsync(_workflowId!);
+        var unsettledTask = Assert.Single(unresolved.CurrentStage().Tasks);
+        var settlement = Assert.IsType<AgentResultSettlement>(unsettledTask.AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.Unknown, settlement.State);
+        Assert.Equal(AgentExecutionObservationKind.Unknown, settlement.LastObservation);
+        Assert.Equal("agent-result-unconfirmed", settlement.ReasonCode);
+        Assert.Equal(TaskRunStatus.Running, unsettledTask.Status);
+        Assert.Single(unresolved.CurrentStage().Tasks);
+        Assert.Null(unsettledTask.Output);
+        Assert.DoesNotContain(await EventStore.ListAsync(_workflowId!), entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.TaskFailed);
     }
 
     [Fact]

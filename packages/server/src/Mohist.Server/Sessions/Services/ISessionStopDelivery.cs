@@ -38,6 +38,7 @@ public static class SessionStopDeliveryArbitration
             "unknown" => AgentSessionStopDisposition.Unknown,
             "not-cancellable" => AgentSessionStopDisposition.NotCancellable,
             "ended" => AgentSessionStopDisposition.Ended,
+            "idle" => AgentSessionStopDisposition.Idle,
             null => AgentSessionStopDisposition.Unavailable,
             _ => AgentSessionStopDisposition.StopRequested,
         };

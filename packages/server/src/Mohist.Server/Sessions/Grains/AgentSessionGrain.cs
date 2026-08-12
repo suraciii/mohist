@@ -1767,10 +1767,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         AppendAgentSessionRuntimeEventsCommand command)
     {
         var session = await GetRequiredAsync();
+        if (command.WorkflowExecution is not null && command.SessionTurnId is not null)
+            throw new InvalidOperationException("Runtime events cannot carry both Workflow execution and Session turn identity.");
+        if (command.SessionTurnId is not null)
+            ValidateSessionRuntimeEventTurnIds(session, command.RuntimeEvents, command.SessionTurnId);
         var hasWorkflowTurnForRuntime = (session.Status.Turns ?? []).Any(turn =>
             turn.WorkflowExecution is { } binding
             && string.Equals(binding.RuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal));
-        if (hasWorkflowTurnForRuntime)
+        if (hasWorkflowTurnForRuntime && command.SessionTurnId is null)
         {
             if (command.WorkflowExecution is null)
                 throw new InvalidOperationException("Workflow runtime events require the acknowledged Agent turn binding.");
@@ -1780,46 +1784,98 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         {
             ValidateWorkflowRuntimeEventBinding(session, command.WorkflowExecution);
         }
+        if (command.WorkflowExecution is { } workflowBinding)
+            ValidateWorkflowRuntimeEventTurnIds(command.RuntimeEvents, workflowBinding);
 
         var events = await AppendEventsAsync(command.RuntimeEvents, command.RuntimeSessionId, requireCurrentRuntimeBinding: true);
-        if (command.WorkflowExecution is { } binding
-            && TryBuildWorkflowRuntimeObservation(command.RuntimeEvents, out var observation))
+        if (command.WorkflowExecution is { } binding)
         {
+            var observations = BuildWorkflowRuntimeObservations(command.RuntimeEvents);
+            if (observations.Count == 0)
+                return events;
             if (!await FlushAsync(CancellationToken.None))
                 throw new InvalidOperationException($"Agent session {SessionId} could not persist Workflow runtime observation.");
             if (_sessionWorkPort is not null)
-                await _sessionWorkPort.ObserveAgentExecutionAsync(
-                    binding,
-                    observation.Kind!.Value,
-                    observation.ReasonCode,
-                    observation.Message,
-                    observation.StopOperationId);
+            {
+                foreach (var observation in observations)
+                {
+                    await _sessionWorkPort.ObserveAgentExecutionAsync(
+                        binding,
+                        observation.Kind,
+                        observation.ReasonCode,
+                        observation.Message,
+                        observation.StopOperationId);
+                }
+            }
         }
         return events;
     }
 
-    private static bool TryBuildWorkflowRuntimeObservation(
+    private static void ValidateWorkflowRuntimeEventTurnIds(
         IReadOnlyList<AgentSessionRuntimeEventInput> events,
-        out WorkflowRuntimeObservation observation)
+        SessionWorkflowExecutionBinding binding)
     {
-        observation = default;
         foreach (var runtimeEvent in events)
         {
-            if (runtimeEvent.Type == RuntimeEventTypes.TurnFailed)
+            var payload = SafeDeserialize(runtimeEvent.PayloadJson);
+            if (!string.Equals(
+                    AgentSessionJsonHelper.GetStringProp(payload, "turnId"),
+                    binding.AgentTurnId,
+                    StringComparison.Ordinal))
             {
-                var failedPayload = SafeDeserialize(runtimeEvent.PayloadJson);
-                var unknown = string.Equals(
-                    AgentSessionJsonHelper.GetStringProp(failedPayload, "failureCategory"),
-                    "unknown",
-                    StringComparison.OrdinalIgnoreCase);
-                observation = new WorkflowRuntimeObservation(
+                throw new InvalidOperationException("Workflow runtime event does not match the acknowledged Agent turn binding.");
+            }
+        }
+    }
+
+    private static void ValidateSessionRuntimeEventTurnIds(
+        AgentSession session,
+        IReadOnlyList<AgentSessionRuntimeEventInput> events,
+        string turnId)
+    {
+        var turn = (session.Status.Turns ?? []).SingleOrDefault(candidate =>
+            string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+        if (turn is null || turn.WorkflowExecution is not null)
+            throw new InvalidOperationException("Session runtime events do not match a recorded Session follow-up turn.");
+
+        foreach (var runtimeEvent in events)
+        {
+            var payload = SafeDeserialize(runtimeEvent.PayloadJson);
+            if (!string.Equals(
+                    AgentSessionJsonHelper.GetStringProp(payload, "turnId"),
+                    turnId,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Session runtime event does not match the recorded Session follow-up turn.");
+            }
+        }
+    }
+
+    private static IReadOnlyList<WorkflowRuntimeObservation> BuildWorkflowRuntimeObservations(
+        IReadOnlyList<AgentSessionRuntimeEventInput> events)
+    {
+        foreach (var runtimeEvent in events)
+        {
+            if (runtimeEvent.Type != RuntimeEventTypes.TurnFailed)
+                continue;
+            var failedPayload = SafeDeserialize(runtimeEvent.PayloadJson);
+            var unknown = string.Equals(
+                AgentSessionJsonHelper.GetStringProp(failedPayload, "failureCategory"),
+                "unknown",
+                StringComparison.OrdinalIgnoreCase);
+            return
+            [
+                new WorkflowRuntimeObservation(
                     unknown ? SessionWorkflowObservationKind.Unknown : SessionWorkflowObservationKind.Failed,
                     unknown ? "turn-unknown" : "turn-failed",
                     AgentSessionJsonHelper.GetStringProp(failedPayload, "failureReason")
                         ?? AgentSessionJsonHelper.GetStringProp(failedPayload, "message"),
-                    AgentSessionJsonHelper.GetStringProp(failedPayload, "stopOperationId"));
-                continue;
-            }
+                    AgentSessionJsonHelper.GetStringProp(failedPayload, "stopOperationId"))
+            ];
+        }
+
+        foreach (var runtimeEvent in events)
+        {
             if (runtimeEvent.Type != RuntimeEventTypes.SessionActivity)
                 continue;
 
@@ -1836,31 +1892,24 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             };
             if (kind is null)
                 continue;
-            observation = new WorkflowRuntimeObservation(
-                kind.Value,
-                reason ?? (kind == SessionWorkflowObservationKind.Idle ? "session-idle" : "session-unknown"),
-                AgentSessionJsonHelper.GetStringProp(activityPayload, "failureReason")
-                    ?? AgentSessionJsonHelper.GetStringProp(activityPayload, "message"),
-                AgentSessionJsonHelper.GetStringProp(activityPayload, "stopOperationId"));
+            return
+            [
+                new WorkflowRuntimeObservation(
+                    kind.Value,
+                    reason ?? (kind == SessionWorkflowObservationKind.Idle ? "session-idle" : "session-unknown"),
+                    AgentSessionJsonHelper.GetStringProp(activityPayload, "failureReason")
+                        ?? AgentSessionJsonHelper.GetStringProp(activityPayload, "message"),
+                    AgentSessionJsonHelper.GetStringProp(activityPayload, "stopOperationId"))
+            ];
         }
-        return observation.Kind is not null;
+        return [];
     }
 
     private readonly record struct WorkflowRuntimeObservation(
-        SessionWorkflowObservationKind? Kind,
+        SessionWorkflowObservationKind Kind,
         string ReasonCode,
         string? Message,
-        string? StopOperationId)
-    {
-        public WorkflowRuntimeObservation(
-            SessionWorkflowObservationKind kind,
-            string reasonCode,
-            string? message,
-            string? stopOperationId)
-            : this((SessionWorkflowObservationKind?)kind, reasonCode, message, stopOperationId)
-        {
-        }
-    }
+        string? StopOperationId);
 
     public async Task<WorkflowAgentSessionInputReceipt> AcceptWorkflowInputAsync(
         AcceptWorkflowAgentSessionInputCommand command)
@@ -1953,7 +2002,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         return new WorkflowAgentSessionInputReceipt(
             command.InputDeliveryId,
             binding.AgentTurnId,
-            accepted);
+            accepted,
+            binding.AgentSessionId);
     }
 
     public Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command)
@@ -2619,9 +2669,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         var session = await GetRequiredAsync();
         if (session.Status.Activity != AgentSessionActivity.Active) return;
         var turn = (session.Status.Turns ?? []).LastOrDefault(candidate =>
-            candidate.WorkflowExecution is not null
+            candidate.Status == AgentTurnStatus.Executing
+            && candidate.WorkflowExecution is { } binding
+            && string.Equals(binding.AgentSessionId, session.Id, StringComparison.Ordinal)
+            && string.Equals(binding.RunnerId, session.Runtime.RunnerId, StringComparison.Ordinal)
+            && string.Equals(binding.Runtime, session.Runtime.Runtime, StringComparison.Ordinal)
             && string.Equals(
-                candidate.WorkflowExecution.RuntimeSessionId,
+                binding.RuntimeSessionId,
                 session.Status.AgentRuntimeSessionId,
                 StringComparison.Ordinal));
         var now = Now();
@@ -3841,6 +3895,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         switch (disposition)
         {
             case AgentSessionStopDisposition.Unavailable:
+                await ObserveWorkflowExecutionAsync(
+                    turn,
+                    SessionWorkflowObservationKind.StopUnconfirmed,
+                    reason ?? "stop-delivery-unavailable",
+                    stopOperationId: operationId);
                 await EnsureStopRecoveryReminderAsync();
                 return;
 
@@ -3848,7 +3907,37 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
                 session.SettleTurnStop(turnId, operationId, disposition, reason);
                 await _stateStore.SaveAsync(SessionId, session);
                 _session = session;
+                await ObserveWorkflowExecutionAsync(
+                    turn,
+                    SessionWorkflowObservationKind.StopUnconfirmed,
+                    reason ?? "stop-unconfirmed",
+                    stopOperationId: operationId);
                 await EnsureStopRecoveryReminderAsync();
+                return;
+
+            case AgentSessionStopDisposition.Idle:
+                session.SettleTurnStop(turnId, operationId, disposition, reason);
+                await _stateStore.SaveAsync(SessionId, session);
+                _session = session;
+                await EnsureStopRecoveryReminderAsync();
+                await ObserveWorkflowExecutionAsync(
+                    turn,
+                    SessionWorkflowObservationKind.Idle,
+                    reason ?? "stop-target-idle",
+                    stopOperationId: operationId);
+                return;
+
+            case AgentSessionStopDisposition.Ended:
+            case AgentSessionStopDisposition.NotCancellable:
+                session.SettleTurnStop(turnId, operationId, disposition, reason);
+                await _stateStore.SaveAsync(SessionId, session);
+                _session = session;
+                await EnsureStopRecoveryReminderAsync();
+                await ObserveWorkflowExecutionAsync(
+                    turn,
+                    SessionWorkflowObservationKind.TargetMissing,
+                    reason ?? "stop-target-missing",
+                    stopOperationId: operationId);
                 return;
 
             case AgentSessionStopDisposition.Unknown:

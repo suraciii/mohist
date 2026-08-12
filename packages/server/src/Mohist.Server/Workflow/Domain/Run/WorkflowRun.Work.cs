@@ -153,6 +153,28 @@ public static partial class WorkflowRunExtensions
                 : null;
         }
 
+        public AgentExecutionBinding? FindBoundAgentExecution(
+            string taskRunId,
+            string workId,
+            string runnerId)
+        {
+            var found = FindTaskAttempt(run, taskRunId, workId, runnerId);
+            var settlement = found?.Task.AgentResultSettlement;
+            return found is not null
+                && found.Value.Task.Status == TaskRunStatus.Running
+                && settlement is not null
+                && HasFullExecutionBinding(settlement)
+                ? new AgentExecutionBinding(
+                    settlement.TaskRunId,
+                    settlement.WorkId,
+                    settlement.RunnerId,
+                    settlement.AgentSessionId!,
+                    settlement.AgentTurnId!,
+                    settlement.Runtime!,
+                    settlement.RuntimeSessionId!)
+                : null;
+        }
+
         public WorkflowAgentResultSettlementTask? FindUnresolvedAgentResultSettlementTask() =>
             run.Stages
                 .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentResultSettlementTask(stage.Id, task)))
@@ -222,33 +244,69 @@ public static partial class WorkflowRunExtensions
                 return AgentExecutionUpdate.Rejected;
             }
 
-            var state = settlement.State == AgentResultSettlementState.AwaitingResult
-                ? AgentResultSettlementState.Unknown
-                : settlement.State;
-            var firstUnknownAt = settlement.FirstUnknownAt ?? now;
-            var deadlineAt = state == AgentResultSettlementState.Unknown
-                ? settlement.DeadlineAt ?? firstUnknownAt + settlementTimeout
-                : settlement.DeadlineAt;
-            var stopOperationId = observation.StopOperationId ?? settlement.StopOperationId;
-            if (settlement.State == state
-                && settlement.FirstUnknownAt == firstUnknownAt
-                && settlement.DeadlineAt == deadlineAt
-                && settlement.LastObservation == observation.Kind
-                && string.Equals(settlement.ReasonCode, observation.ReasonCode, StringComparison.Ordinal)
-                && string.Equals(settlement.Message, observation.Message, StringComparison.Ordinal)
-                && string.Equals(settlement.StopOperationId, stopOperationId, StringComparison.Ordinal))
+            return RecordObservation(
+                settlement,
+                observation.Kind,
+                observation.ReasonCode,
+                observation.Message,
+                observation.StopOperationId,
+                now,
+                settlementTimeout);
+        }
+
+        public AgentExecutionUpdate ObserveAgentResultUnknown(
+            string taskRunId,
+            string workId,
+            string runnerId,
+            string reasonCode,
+            string? message,
+            DateTimeOffset now,
+            TimeSpan settlementTimeout)
+        {
+            if (string.IsNullOrWhiteSpace(reasonCode)) return AgentExecutionUpdate.Rejected;
+            var found = FindTaskAttempt(run, taskRunId, workId, runnerId);
+            if (found is not { } match
+                || match.Task.Status != TaskRunStatus.Running
+                || match.Task.AgentResultSettlement is not { } settlement)
             {
-                return AgentExecutionUpdate.Unchanged;
+                return AgentExecutionUpdate.Rejected;
             }
 
-            settlement.State = state;
-            settlement.FirstUnknownAt = firstUnknownAt;
-            settlement.DeadlineAt = deadlineAt;
-            settlement.LastObservation = observation.Kind;
-            settlement.ReasonCode = observation.ReasonCode;
-            settlement.Message = observation.Message;
-            settlement.StopOperationId = stopOperationId;
-            return AgentExecutionUpdate.Updated;
+            return RecordObservation(
+                settlement,
+                AgentExecutionObservationKind.Unknown,
+                reasonCode,
+                message,
+                stopOperationId: null,
+                now,
+                settlementTimeout);
+        }
+
+        public AgentExecutionUpdate ObserveAgentRunnerDisconnected(
+            string runnerId,
+            DateTimeOffset now,
+            TimeSpan settlementTimeout)
+        {
+            var active = run.CurrentActiveWorkFor(runnerId);
+            if (active is not { IsTask: true, TaskRunId: { } taskRunId })
+                return AgentExecutionUpdate.Rejected;
+
+            var found = FindTaskAttempt(run, taskRunId, active.WorkId, runnerId);
+            if (found is not { } match
+                || match.Task.Status != TaskRunStatus.Running
+                || match.Task.AgentResultSettlement is not { } settlement)
+            {
+                return AgentExecutionUpdate.Rejected;
+            }
+
+            return RecordObservation(
+                settlement,
+                AgentExecutionObservationKind.Disconnected,
+                "runner-disconnected",
+                "Runner disconnected before the Agent result was accepted.",
+                stopOperationId: null,
+                now,
+                settlementTimeout);
         }
 
         public IReadOnlyList<WorkflowEvent> BlockUnresolvedAgentResult(DateTimeOffset now)
@@ -480,4 +538,42 @@ public static partial class WorkflowRunExtensions
         && (settlement.AgentTurnId is null || string.Equals(settlement.AgentTurnId, binding.AgentTurnId, StringComparison.Ordinal))
         && (settlement.Runtime is null || string.Equals(settlement.Runtime, binding.Runtime, StringComparison.Ordinal))
         && (settlement.RuntimeSessionId is null || string.Equals(settlement.RuntimeSessionId, binding.RuntimeSessionId, StringComparison.Ordinal));
+
+    private static AgentExecutionUpdate RecordObservation(
+        AgentResultSettlement settlement,
+        AgentExecutionObservationKind kind,
+        string reasonCode,
+        string? message,
+        string? stopOperationId,
+        DateTimeOffset now,
+        TimeSpan settlementTimeout)
+    {
+        var state = settlement.State == AgentResultSettlementState.AwaitingResult
+            ? AgentResultSettlementState.Unknown
+            : settlement.State;
+        var firstUnknownAt = settlement.FirstUnknownAt ?? now;
+        var deadlineAt = state == AgentResultSettlementState.Unknown
+            ? settlement.DeadlineAt ?? firstUnknownAt + settlementTimeout
+            : settlement.DeadlineAt;
+        var operationId = stopOperationId ?? settlement.StopOperationId;
+        if (settlement.State == state
+            && settlement.FirstUnknownAt == firstUnknownAt
+            && settlement.DeadlineAt == deadlineAt
+            && settlement.LastObservation == kind
+            && string.Equals(settlement.ReasonCode, reasonCode, StringComparison.Ordinal)
+            && string.Equals(settlement.Message, message, StringComparison.Ordinal)
+            && string.Equals(settlement.StopOperationId, operationId, StringComparison.Ordinal))
+        {
+            return AgentExecutionUpdate.Unchanged;
+        }
+
+        settlement.State = state;
+        settlement.FirstUnknownAt = firstUnknownAt;
+        settlement.DeadlineAt = deadlineAt;
+        settlement.LastObservation = kind;
+        settlement.ReasonCode = reasonCode;
+        settlement.Message = message;
+        settlement.StopOperationId = operationId;
+        return AgentExecutionUpdate.Updated;
+    }
 }

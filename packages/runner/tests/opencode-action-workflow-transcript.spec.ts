@@ -201,7 +201,7 @@ function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventOutbox {
     load: async () => {},
     recover: async () => {},
     async enqueueBeforeExecution() {},
-    async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` } },
+    async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}`, agentSessionId: "agent-session-test" } },
     async enqueueProducedFact() { throw new Error("disk full (produced)") },
     async enqueueProducedFactBatch() { throw new Error("disk full (produced)") },
     kick: async () => {},
@@ -405,7 +405,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       async enqueueBeforeExecution(record) {
         handles.records.push(record as RuntimeEventRecord)
       },
-      async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` } },
+      async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}`, agentSessionId: "agent-session-test" } },
       async enqueueProducedFact() {
         if (firstCall) {
           firstCall = false
@@ -514,7 +514,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
         records.push(record as RuntimeEventRecord)
       },
       async awaitInputReceipt(recordId) {
-        return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` }
+        return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}`, agentSessionId: "agent-session-1" }
       },
       async enqueueProducedFact(record) {
         producedFactSingleCalls.push(record as RuntimeEventRecord)
@@ -543,7 +543,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
       projectId: "proj-1",
       workflowRunId: "wf-1",
       sessionName: "plan",
-      workMetadata: { workId: "work-1", taskRunId: "task-1.1", runnerId: "runner-1", workType: "task", stage: "plan" },
+      workMetadata: { workId: "work-1", taskRunId: "task-1.1", runnerId: "runner-1", agentSessionId: "agent-session-1", workType: "task", stage: "plan" },
       runtime: "opencode",
       randomId: (() => {
         let counter = 0

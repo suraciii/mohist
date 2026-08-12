@@ -676,6 +676,7 @@ public enum AgentSessionStopDisposition
     Ended,
     Blocked,
     Unavailable,
+    Idle,
 }
 
 public enum AgentTurnStatus

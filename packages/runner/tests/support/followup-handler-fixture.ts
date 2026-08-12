@@ -387,6 +387,8 @@ export function genericPayload(text: string): ReceiveFollowupPayload {
       binding: defaultOpenCodeBinding(),
     },
     text,
+    inputId: "input-1",
+    turnId: "turn-1",
   }
 }
 
@@ -397,9 +399,12 @@ export function workflowPayload(text: string): ReceiveFollowupPayload {
       projectId: "proj-1",
       workflowRunId: "wr-1",
       sessionName: "work-1",
+      sessionId: "session-1",
       binding: defaultOpenCodeBinding(),
     },
     text,
+    inputId: "input-1",
+    turnId: "turn-1",
   }
 }
 

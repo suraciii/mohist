@@ -434,6 +434,7 @@ public sealed class WorkflowItemTranslator : IScopedService
     public abstract record InboundReport
     {
         public sealed record Task(TaskReport Value) : InboundReport;
+        public sealed record Unknown(TaskReport Fallback, string ReasonCode, string? Message) : InboundReport;
         public sealed record Checks(CheckReport Value) : InboundReport;
     }
 
@@ -459,6 +460,21 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         var workId = item.Id ?? throw new InvalidOperationException(
             $"Task work item for workflow '{workflowRunId}' is missing work id");
+        if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            var unknownDetail = NormalizeUnknownDetail(result);
+            return new InboundReport.Unknown(
+                new TaskReport(
+                    WorkId: workId,
+                    Status: TaskReportStatus.Failed,
+                    Output: null,
+                    Artifacts: null,
+                    Detail: unknownDetail,
+                    Error: result.Error),
+                "agent-result-unconfirmed",
+                unknownDetail);
+        }
+
         var status = ResolveTaskReportStatus(result);
         var detail = NormalizeDetail(result, status);
 
@@ -614,6 +630,13 @@ public sealed class WorkflowItemTranslator : IScopedService
         if (result.Error is not null) return result.Error.Message;
         if (!string.IsNullOrWhiteSpace(result.Message)) return result.Message;
         return result.Status;
+    }
+
+    private static string NormalizeUnknownDetail(WorkResult result)
+    {
+        if (result.Error is not null) return result.Error.Message;
+        if (!string.IsNullOrWhiteSpace(result.Message)) return result.Message;
+        return "Agent result authority is unconfirmed.";
     }
 
     private async Task<JsonElement?> ResolveBindVariablesAsync(

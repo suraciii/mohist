@@ -8,6 +8,7 @@ export interface WorkflowAgentSessionWorkMetadata {
   readonly workId: string
   readonly taskRunId: string
   readonly runnerId: string
+  readonly agentSessionId: string
   readonly workType: string
   readonly stage?: string | null
 }
@@ -100,7 +101,9 @@ export class WorkflowAgentSessionReporter {
         if (!awaitReceipt)
           throw new Error("Workflow AgentSession outbox does not support Server input receipts")
         const receipt = await awaitReceipt.call(this.outbox, inputDeliveryId)
-        if (receipt.inputDeliveryId !== inputDeliveryId || !receipt.agentTurnId)
+        if (receipt.inputDeliveryId !== inputDeliveryId
+          || receipt.agentSessionId !== this.workMetadata.agentSessionId
+          || !receipt.agentTurnId)
           throw new Error("Workflow AgentSession returned a malformed session.input receipt")
         this.agentTurnId = receipt.agentTurnId
         this.inputAccepted = true
@@ -268,6 +271,7 @@ export class WorkflowAgentSessionReporter {
         workId: this.workMetadata.workId,
         taskRunId: this.workMetadata.taskRunId,
         runnerId: this.workMetadata.runnerId,
+        agentSessionId: this.workMetadata.agentSessionId,
         workType: this.workMetadata.workType,
         stage: this.workMetadata.stage ?? null,
         inputDeliveryId: this.inputDeliveryId,

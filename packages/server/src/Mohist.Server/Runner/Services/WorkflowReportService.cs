@@ -44,6 +44,29 @@ public sealed class WorkflowReportService : IScopedService
         if (activeWork is null)
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
+        var report = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
+        if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && activeWork.IsTask)
+        {
+            var binding = activeWork.TaskRunId is { } taskRunId
+                ? run.FindBoundAgentExecution(taskRunId, workId, workerId)
+                : null;
+            var unknownAck = binding is not null
+                ? await workflow.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+                    binding,
+                    AgentExecutionObservationKind.Unknown,
+                    unknown.ReasonCode,
+                    unknown.Message))
+                : await workflow.ObserveAgentResultUnknownAsync(
+                    workerId,
+                    workId,
+                    unknown.ReasonCode,
+                    unknown.Message);
+            if (unknownAck != ReportAck.Stale)
+                return (unknownAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+
+            report = new WorkflowItemTranslator.InboundReport.Task(unknown.Fallback);
+        }
+
         if (activeWork.IsTask)
         {
             try
@@ -71,7 +94,6 @@ public sealed class WorkflowReportService : IScopedService
             }
         }
 
-        var report = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
         ReportAck ack = report switch
         {
             WorkflowItemTranslator.InboundReport.Task t when activeWork.IsTask =>

@@ -27,6 +27,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
           type: a.type ?? "",
           inputDeliveryId: a.inputDeliveryId,
           agentTurnId: a.agentTurnId,
+          agentSessionId: a.agentSessionId,
         }))
       }
       if (record.producerFamily === "generic-followup" && record.target.kind === "generic") {
@@ -38,6 +39,13 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
         )
       }
       if (record.producerFamily === "binding-reconcile" && record.target.kind === "session") {
+        return await connection.reconcileAgentSessionRuntimeEvents(
+          record.target.sessionId,
+          envelope(record),
+          signal,
+        )
+      }
+      if (record.producerFamily === "session-followup" && record.target.kind === "session") {
         return await connection.reconcileAgentSessionRuntimeEvents(
           record.target.sessionId,
           envelope(record),
@@ -66,6 +74,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
           type: a.type ?? "",
           inputDeliveryId: a.inputDeliveryId,
           agentTurnId: a.agentTurnId,
+          agentSessionId: a.agentSessionId,
         }])
       }
       if (head.producerFamily === "generic-followup" && head.target.kind === "generic") {
@@ -86,6 +95,14 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
         )
         return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{ type: a.type ?? "" }])
       }
+      if (head.producerFamily === "session-followup" && head.target.kind === "session") {
+        const accepted = await connection.reconcileAgentSessionRuntimeEvents(
+          head.target.sessionId,
+          batchEnvelope(records),
+          signal,
+        )
+        return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{ type: a.type ?? "" }])
+      }
       throw new Error("runtime-event delivery: target does not match producer family")
     },
   }
@@ -99,7 +116,9 @@ function envelope(record: RuntimeEventRecord) {
     stage: work?.stage ?? null,
     taskRunId: work?.taskRunId ?? null,
     inputDeliveryId: work?.inputDeliveryId ?? null,
+    agentSessionId: work?.agentSessionId ?? null,
     agentTurnId: work?.agentTurnId ?? null,
+    ...(record.sessionTurnId ? { agentSessionId: record.target.kind === "session" ? record.target.sessionId : null, agentTurnId: record.sessionTurnId } : {}),
     runtime: record.runtime ?? null,
     runtimeSessionId: record.runtimeSessionId,
     runtimeEvents: [{ type: record.event.type, payload: record.event.payload }],
@@ -116,7 +135,9 @@ function batchEnvelope(records: readonly RuntimeEventRecord[]) {
     stage: work?.stage ?? null,
     taskRunId: work?.taskRunId ?? null,
     inputDeliveryId: work?.inputDeliveryId ?? null,
+    agentSessionId: work?.agentSessionId ?? null,
     agentTurnId: work?.agentTurnId ?? null,
+    ...(head.sessionTurnId ? { agentSessionId: head.target.kind === "session" ? head.target.sessionId : null, agentTurnId: head.sessionTurnId } : {}),
     runtime: head.runtime ?? null,
     runtimeSessionId: head.runtimeSessionId,
     runtimeEvents: records.map((record) => ({ type: record.event.type, payload: record.event.payload })),

@@ -203,7 +203,8 @@ public sealed record ReconcileMissingBindingCommand(
 public sealed record AppendAgentSessionRuntimeEventsCommand(
     [property: Id(0)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!,
     [property: Id(1)] string RuntimeSessionId = "",
-    [property: Id(2)] SessionWorkflowExecutionBinding? WorkflowExecution = null);
+    [property: Id(2)] SessionWorkflowExecutionBinding? WorkflowExecution = null,
+    [property: Id(3)] string? SessionTurnId = null);
 
 /// <summary>
 /// A replay-idempotent Workflow turn-opening command. The AgentSession writes
@@ -226,7 +227,8 @@ public sealed record AcceptWorkflowAgentSessionInputCommand(
 public sealed record WorkflowAgentSessionInputReceipt(
     [property: Id(0)] string InputDeliveryId,
     [property: Id(1)] string AgentTurnId,
-    [property: Id(2)] bool WorkflowBindingAccepted);
+    [property: Id(2)] bool WorkflowBindingAccepted,
+    [property: Id(3)] string AgentSessionId);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionSystemEventsCommand(

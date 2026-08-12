@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { describe, expect, it as vitestIt, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
+import { piAction } from "../src/actions/pi.js"
 import type { DispatchWorkItem } from "../src/core/types.js"
 import { currentRunnerFileSystem } from "../src/system/filesystem.js"
 import { makeRecordingOutbox } from "./support/outbox-test-helpers.js"
@@ -40,6 +41,16 @@ function actionRegistry() {
       errors: runtimeFailureErrors,
       run: async (_inputs, host) => host.agent!.turn({ prompt: "invoke the agent", session: "plan" }),
     },
+    "mohist/pi": {
+      inputs: {
+        prompt: { types: ["string"], required: true },
+        session: { types: ["string"] },
+        options: { types: ["object"] },
+      },
+      capabilities: ["agent-turn"],
+      errors: runtimeFailureErrors,
+      run: (inputs, host) => piAction(inputs, host),
+    },
   })
 }
 
@@ -47,7 +58,7 @@ function fakeConnection(overrides: Record<string, unknown> = {}) {
   return {
     runnerId: "runner-1",
     async openWorkflowAgentSession() {
-      return { runtimeSessionId: "runtime-1", workDir }
+      return { sessionId: "agent-session-1", runtimeSessionId: "runtime-1", workDir }
     },
     async attachWorkflowAgentSession() {},
     async recoverMissingWorkflowAgentSession() {},
@@ -72,7 +83,7 @@ function fakeRuntime(overrides: Record<string, unknown> = {}) {
   } as never
 }
 
-function createExecutor(runtime: unknown, connection: unknown, outbox = makeRecordingOutbox(), executionWorkDir = workDir) {
+function createExecutor(runtime: unknown, connection: unknown, outbox = makeRecordingOutbox(), executionWorkDir = workDir, piRuntime: unknown = null) {
   const executor = new WorkExecutor(
     actionRegistry(),
     verifyOnlyWorkspaceManager({ path: executionWorkDir, branch: null }),
@@ -86,6 +97,7 @@ function createExecutor(runtime: unknown, connection: unknown, outbox = makeReco
       let n = 0
       return () => `runtime-failure-${++n}`
     })(),
+    piRuntime as never,
   )
   return { executor, outbox }
 }
@@ -172,7 +184,7 @@ describe("WorkExecutor runtime failure convergence", () => {
 
     const result = await executor.execute(work(), new AbortController().signal)
 
-    expect(result.status).toBe("failed")
+    expect(result.status).toBe("unknown")
     expect(result.error?.code).toBe("timeout")
     expect(outbox.eventTypeList()).toEqual(["session.input", "turn.failed", "session.activity"])
     expect(outbox.eventsByType("turn.failed")[0]?.event.payload).toMatchObject({
@@ -187,6 +199,44 @@ describe("WorkExecutor runtime failure convergence", () => {
     })
   })
 
+  it("preserves an unconfirmed Pi cleanup through the Agent outbox", async () => {
+    const piRuntime = {
+      ready: () => true,
+      diagnostic: () => null,
+      async createSession() {
+        return { ok: true as const, value: { runtimeSessionId: "pi-runtime-1", workDir }, diagnostics: [] }
+      },
+      async runTurn() {
+        return {
+          ok: false as const,
+          error: {
+            kind: "deadline-exceeded" as const,
+            message: "Pi cleanup could not be confirmed",
+            diagnostics: [{ severity: "error" as const, code: "abort-unconfirmed", message: "Pi did not confirm stop" }],
+          },
+          diagnostics: [{ severity: "error" as const, code: "abort-unconfirmed", message: "Pi did not confirm stop" }],
+        }
+      },
+    }
+    const { executor, outbox } = createExecutor(null, fakeConnection(), makeRecordingOutbox(), workDir, piRuntime)
+
+    const result = await executor.execute({
+      ...work(),
+      taskRunId: "task-run-1",
+      uses: "mohist/pi",
+      with: { prompt: "invoke Pi" },
+    }, new AbortController().signal)
+
+    expect(result.status).toBe("unknown")
+    expect(result.error?.code).toBe("timeout")
+    expect(outbox.eventTypeList()).toEqual(["session.input", "turn.failed", "session.activity"])
+    expect(outbox.eventsByType("session.input")[0]?.work).toMatchObject({
+      taskRunId: "task-run-1",
+      agentSessionId: "agent-session-1",
+    })
+    expect(outbox.eventsByType("turn.failed")[0]?.event.payload).toMatchObject({ status: "unknown" })
+  })
+
   it("keeps create/attach failures as deterministic failed results", async () => {
     const create = vi.fn(async () => {
       throw new Error("OpenCode createSession unavailable")
@@ -195,7 +245,7 @@ describe("WorkExecutor runtime failure convergence", () => {
     const { executor, outbox } = createExecutor(
       fakeRuntime({ createSession: create }),
       fakeConnection({
-        openWorkflowAgentSession: async () => ({ runtimeSessionId: null, workDir }),
+        openWorkflowAgentSession: async () => ({ sessionId: "agent-session-1", runtimeSessionId: null, workDir }),
         attachWorkflowAgentSession: attach,
       }),
     )
@@ -221,7 +271,7 @@ describe("WorkExecutor runtime failure convergence", () => {
         }),
       }),
       fakeConnection({
-        openWorkflowAgentSession: async () => ({ runtimeSessionId: null, workDir }),
+        openWorkflowAgentSession: async () => ({ sessionId: "agent-session-1", runtimeSessionId: null, workDir }),
         attachWorkflowAgentSession: attach,
       }),
     )
@@ -267,6 +317,7 @@ describe("WorkExecutor runtime failure convergence", () => {
         fakeRuntime({ createSession, resolveSession, runTurn }),
         fakeConnection({
           openWorkflowAgentSession: async () => ({
+            sessionId: "agent-session-1",
             runtimeSessionId: "runtime-old",
             workDir: retryWorkDir,
             needsFreshRuntimeSession: true,

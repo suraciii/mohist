@@ -40,6 +40,7 @@ export {
   malformedToUnexpectedError,
   expectedResultCodes,
   passThroughExitCode,
+  passThroughOutcome,
   passThroughTurnFact,
   MALFORMED_RESULT_ERROR_CODE,
   UNDECLARED_RESULT_ERROR_CODE,

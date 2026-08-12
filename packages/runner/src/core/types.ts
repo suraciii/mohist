@@ -298,6 +298,11 @@ export type ActionResult = (
   }
   exitCode?: number | null
   /**
+   * The Agent runtime could not establish a result. This remains internal to
+   * the Runner until it is projected as a Workflow `unknown` observation.
+   */
+  outcome?: "unknown"
+  /**
    * Runner-private Action-result facts that must never be serialized
    * into `WorkItemResult.output`, `TaskRun.Output`, recovery matching,
    * `setVars` projections, captured outputs, or artifacts. The boundary

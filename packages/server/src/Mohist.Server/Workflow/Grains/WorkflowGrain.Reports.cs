@@ -43,6 +43,61 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public async Task<ReportAck> ObserveAgentResultUnknownAsync(
+        string workerId,
+        string workId,
+        string reasonCode,
+        string? message = null)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null) return ReportAck.Stale;
+
+        var existing = _run.FindReportableWork(workId, workerId);
+        var task = existing?.TaskRunId is { } taskRunId
+            ? _run.Stages.SelectMany(stage => stage.Tasks).SingleOrDefault(candidate => candidate.Id == taskRunId)
+            : null;
+        var wasAwaitingResult = task?.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult;
+        var update = existing?.TaskRunId is { } id
+            ? _run.ObserveAgentResultUnknown(id, workId, workerId, reasonCode, message, Now(), _agentResultSettlementTimeout)
+            : AgentExecutionUpdate.Rejected;
+        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Updated)
+        {
+            var deadline = task?.AgentResultSettlement?.DeadlineAt;
+            await CommitAsync(wasAwaitingResult && deadline is { } due
+                ? [new AgentTaskResultUnconfirmed(existing!.Item.Stage, task!.Id, workId, reasonCode, due)]
+                : []);
+        }
+
+        await ReconcileAgentResultSettlementAsync();
+        return ReportAck.Accepted;
+    }
+
+    public async Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null) return ReportAck.Stale;
+
+        var active = _run.CurrentActiveWorkFor(workerId);
+        var taskRunId = active?.TaskRunId;
+        var task = taskRunId is null
+            ? null
+            : _run.Stages.SelectMany(stage => stage.Tasks).SingleOrDefault(candidate => candidate.Id == taskRunId);
+        var wasAwaitingResult = task?.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult;
+        var update = _run.ObserveAgentRunnerDisconnected(workerId, Now(), _agentResultSettlementTimeout);
+        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Updated)
+        {
+            var deadline = task?.AgentResultSettlement?.DeadlineAt;
+            await CommitAsync(wasAwaitingResult && active is not null && task is not null && deadline is { } due
+                ? [new AgentTaskResultUnconfirmed(active.Item.Stage, task.Id, active.WorkId, "runner-disconnected", due)]
+                : []);
+        }
+
+        await ReconcileAgentResultSettlementAsync();
+        return ReportAck.Accepted;
+    }
+
     public async Task<ReportAck> FailActiveWorkAsync(string workerId, string message)
     {
         RejectIfRunReloadRequired();

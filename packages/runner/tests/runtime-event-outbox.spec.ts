@@ -11,6 +11,7 @@ import {
   createAgentSessionRuntimeEventOutbox,
   nextTemporaryFilePath,
   RUNTIME_EVENT_OUTBOX_FILE,
+  runtimeEventDeliveryKey,
   type AgentSessionRuntimeEventOutbox,
   type RuntimeEventRecord,
   type RuntimeEventOutboxFileSystem,
@@ -111,8 +112,9 @@ function makeOutbox(options: {
 }
 
 function inputRecord(overrides: Partial<RuntimeEventRecord> = {}): RuntimeEventRecord {
+  const id = overrides.id ?? "evt_input"
   return {
-    id: overrides.id ?? "evt_input",
+    id,
     producerFamily: "workflow-session",
     target: {
       kind: "workflow",
@@ -120,8 +122,18 @@ function inputRecord(overrides: Partial<RuntimeEventRecord> = {}): RuntimeEventR
       workflowRunId: "wf-1",
       sessionName: "plan",
     },
+    runtime: "opencode",
     runtimeSessionId: "ses_1",
-    work: null,
+    work: {
+      workId: "work-1",
+      taskRunId: "task-1.1",
+      runnerId: "runner-1",
+      agentSessionId: "agent-session-1",
+      inputDeliveryId: id,
+      agentTurnId: null,
+      workType: "task",
+      stage: "plan",
+    },
     event: { type: "session.input", payload: { text: "do work" } },
     acknowledgementPolicy: "matching-receipt",
     ...overrides,
@@ -152,6 +164,7 @@ function workflowFact(id: string, overrides: Partial<RuntimeEventRecord> = {}): 
       workId: "work-1",
       taskRunId: "task-1.1",
       runnerId: "runner-1",
+      agentSessionId: "agent-session-1",
       inputDeliveryId: "input-1",
       agentTurnId: "turn-1",
       workType: "task",
@@ -264,6 +277,7 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
       runtime: "opencode",
       work: {
         runnerId: "runner-1",
+        agentSessionId: "agent-session-1",
         workId: "work-1",
         taskRunId: "task-1.1",
         workType: "task",
@@ -297,7 +311,7 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
       fileSystem,
       deliver: {
         async send(entry) {
-          return [{ type: "session.input", inputDeliveryId: entry.id, agentTurnId: "turn-1" }]
+          return [{ type: "session.input", inputDeliveryId: entry.id, agentTurnId: "turn-1", agentSessionId: "agent-session-1" }]
         },
       },
     })
@@ -308,6 +322,7 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
     await expect(awaitReceipt.call(second.outbox, "delivery-1")).resolves.toMatchObject({
       inputDeliveryId: "delivery-1",
       agentTurnId: "turn-1",
+      agentSessionId: "agent-session-1",
     })
     expect(second.outbox.snapshot()).toEqual([])
   })
@@ -328,7 +343,7 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
     const { outbox } = makeOutbox({
       deliver: {
         async send(record) {
-          return [{ type: record.event.type, inputDeliveryId: record.id, agentTurnId: "turn-1" }]
+          return [{ type: record.event.type, inputDeliveryId: record.id, agentTurnId: "turn-1", agentSessionId: "agent-session-1" }]
         },
       },
     })
@@ -340,6 +355,7 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
       runtime: "opencode",
       work: {
         runnerId: "runner-1",
+        agentSessionId: "agent-session-1",
         workId: "work-1",
         taskRunId: "task-1.1",
         workType: "task",
@@ -355,6 +371,7 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
       type: "session.input",
       inputDeliveryId: "delivery-1",
       agentTurnId: "turn-1",
+      agentSessionId: "agent-session-1",
     })
     expect(outbox.snapshot()).toEqual([])
   })
@@ -363,7 +380,7 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
     const { outbox } = makeOutbox({
       deliver: {
         async send(record) {
-          return [{ type: record.event.type, inputDeliveryId: "other-delivery", agentTurnId: "turn-1" }]
+          return [{ type: record.event.type, inputDeliveryId: "other-delivery", agentTurnId: "turn-1", agentSessionId: "agent-session-1" }]
         },
       },
     })
@@ -375,6 +392,7 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
       runtime: "opencode",
       work: {
         runnerId: "runner-1",
+        agentSessionId: "agent-session-1",
         workId: "work-1",
         taskRunId: "task-1.1",
         workType: "task",
@@ -389,7 +407,12 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
   })
 
   it("matching-receipt removes the head only when the response carries the submitted type", async () => {
-    let responses: AgentSessionRuntimeEventReceipt[][] = [[], [{ type: "session.input" }]]
+    let responses: AgentSessionRuntimeEventReceipt[][] = [[], [{
+      type: "session.input",
+      inputDeliveryId: "evt_input",
+      agentTurnId: "turn-1",
+      agentSessionId: "agent-session-1",
+    }]]
     const { outbox } = makeOutbox({
       deliver: {
         async send() {
@@ -473,7 +496,14 @@ describe("AgentSessionRuntimeEventOutbox — managed-sequence FIFO", () => {
       deliver: {
         async send(record) {
           order.push(record.id)
-          return [{ type: record.event.type }]
+          return record.event.type === "session.input"
+            ? [{
+                type: record.event.type,
+                inputDeliveryId: record.id,
+                agentTurnId: `turn-${record.id}`,
+                agentSessionId: record.work?.agentSessionId ?? undefined,
+              }]
+            : [{ type: record.event.type }]
         },
       },
     })
@@ -581,6 +611,12 @@ describe("AgentSessionRuntimeEventOutbox — managed-sequence FIFO", () => {
     expect(outbox.snapshot()).toEqual([])
   })
 
+  it("rejects Workflow facts without the complete immutable execution identity", () => {
+    expect(() => runtimeEventDeliveryKey({ ...workflowFact("missing-identity"), work: null })).toThrow(
+      "workflow-session execution record requires its complete immutable execution identity",
+    )
+  })
+
   it("successful-response consumes the operation lease; replay legitimately settles with []", async () => {
     let responses: AgentSessionRuntimeEventReceipt[][] = [[], []]
     const { outbox } = makeOutbox({
@@ -665,8 +701,18 @@ describe("AgentSessionRuntimeEventOutbox — batched streaming deltas", () => {
       id: overrides.id ?? "evt_delta",
       producerFamily: "workflow-session",
       target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
+      runtime: "opencode",
       runtimeSessionId: "ses_1",
-      work: null,
+      work: {
+        workId: "work-1",
+        taskRunId: "task-1.1",
+        runnerId: "runner-1",
+        agentSessionId: "agent-session-1",
+        inputDeliveryId: "input-1",
+        agentTurnId: "turn-1",
+        workType: "task",
+        stage: "plan",
+      },
       event: { type: "reasoning.delta", payload: { text: "x" } },
       acknowledgementPolicy: "matching-receipt",
       ...overrides,
@@ -759,8 +805,18 @@ describe("AgentSessionRuntimeEventOutbox — batched streaming deltas", () => {
       id: `evt_${i}`,
       producerFamily: "workflow-session",
       target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
+      runtime: "opencode",
       runtimeSessionId: "ses_1",
-      work: null,
+      work: {
+        workId: "work-1",
+        taskRunId: "task-1.1",
+        runnerId: "runner-1",
+        agentSessionId: "agent-session-1",
+        inputDeliveryId: "input-1",
+        agentTurnId: "turn-1",
+        workType: "task",
+        stage: "plan",
+      },
       event: { type: "reasoning.delta", payload: { text: String(i) } },
       acknowledgementPolicy: "matching-receipt",
       sequence: i,

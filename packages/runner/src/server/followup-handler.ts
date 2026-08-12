@@ -120,6 +120,7 @@ async function handleFollowup(
 
   const sessionTarget = resolveSessionTarget(payload)
   if (!sessionTarget) return unavailable()
+  if (!sessionTargetId(sessionTarget) || !payload.turnId) return unavailable()
 
   const operationId = payload.operationId
   const operationKey = operationId ? sessionTargetKey(sessionTarget) : null
@@ -250,7 +251,7 @@ async function handleFollowup(
       ...(skills.length > 0 ? { skills } : {}),
     } } : {}),
   }
-  const observerState = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)
+  const observerState = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId)
   try {
     const completion = callFollowup(handle, followupRequest, observerState.observer).then(
       async (result) => {
@@ -317,9 +318,7 @@ async function handleFollowup(
 }
 
 function sessionTargetKey(target: SessionTarget): string {
-  return target.kind === "workflow"
-    ? `workflow:${target.projectId}:${target.workflowRunId}:${target.sessionName}`
-    : `generic:${target.projectId}:${target.sessionId}`
+  return `session:${sessionTargetId(target)}`
 }
 
 function followupOperationKey(payload: ReceiveFollowupPayload | null | undefined): string | null {
@@ -337,6 +336,7 @@ function buildFollowupObserver(
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
+  turnId: string | undefined,
 ): {
   observer: PiTurnObserver | RuntimeTurnObserver | null
   flush: () => Promise<unknown>
@@ -351,13 +351,14 @@ function buildFollowupObserver(
       const ordinal = "id" in event ? 0 : ++openCodeEventOrdinal
       const record: RuntimeEventRecord = {
         id: `followup-event:${operationId}:${followupEventId(event, ordinal)}`,
-        producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
+        producerFamily: "session-followup",
         target: sessionTargetToRuntimeTarget(sessionTarget),
         runtimeSessionId: target.runtimeSessionId,
+        sessionTurnId: turnId,
         work: null,
         event: {
           type: event.type,
-          payload: { ...event.payload, source: "followup", operationId, runtimeSessionId: target.runtimeSessionId, completedAt },
+          payload: { ...event.payload, turnId, source: "followup", operationId, runtimeSessionId: target.runtimeSessionId, completedAt },
         },
         acknowledgementPolicy: "successful-response",
       }
@@ -418,9 +419,10 @@ async function enqueueFollowupInput(
   const recordId = payload.inputId ?? randomId()
   const record: RuntimeEventRecord = {
     id: recordId,
-    producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
+    producerFamily: "session-followup",
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId: target.runtimeSessionId,
+    sessionTurnId: payload.turnId,
     work: null,
     event: {
       type: "session.input",
@@ -455,9 +457,10 @@ function recordFollowupActivity(
   const completedAt = new Date().toISOString()
   const record: RuntimeEventRecord = {
     id: `followup-activity:${operationId}:${activity}:${completedAt}`,
-    producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
+    producerFamily: "session-followup",
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId: target.runtimeSessionId,
+    sessionTurnId: turnId,
     work: null,
     event: {
       type: "session.activity",
@@ -481,10 +484,11 @@ function recordFollowupActivity(
 }
 
 function sessionTargetToRuntimeTarget(target: SessionTarget): RuntimeEventRecord["target"] {
-  if (target.kind === "workflow") {
-    return { kind: "workflow", projectId: target.projectId, workflowRunId: target.workflowRunId, sessionName: target.sessionName }
-  }
-  return { kind: "generic", projectId: target.projectId, sessionId: target.sessionId }
+  return { kind: "session", sessionId: sessionTargetId(target) }
+}
+
+function sessionTargetId(target: SessionTarget): string {
+  return target.kind === "workflow" ? target.agentSessionId ?? "" : target.sessionId
 }
 
 function isPromise<T>(value: T | Promise<T>): value is Promise<T> {

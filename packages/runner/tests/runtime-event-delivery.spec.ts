@@ -14,6 +14,7 @@ function workflowRecord(id: string, type = "reasoning.delta"): RuntimeEventRecor
       workId: "work-1",
       taskRunId: "task-1.1",
       runnerId: "runner-1",
+      agentSessionId: "agent-session-1",
       inputDeliveryId: "input-1",
       agentTurnId: "turn-1",
       workType: "task",
@@ -93,12 +94,49 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
       stage: null,
       taskRunId: null,
       inputDeliveryId: null,
+      agentSessionId: null,
       agentTurnId: null,
       runtime: null,
       runtimeSessionId: "runtime-1",
       runtimeEvents: [{ type: "session.activity", payload: { activity: "idle" } }],
     })
     expect(result).toEqual([{ type: "session.activity" }])
+  })
+
+  it("delivers follow-up facts with the exact Session and Agent turn identity", async () => {
+    const sendSpy = vi.fn(async (_sessionId: string, _body: unknown) => [{ type: "session.input" }])
+    const connection = {
+      async reconcileAgentSessionRuntimeEvents(sessionId: string, body: unknown) {
+        return await sendSpy(sessionId, body)
+      },
+    } as unknown as ServerConnection
+    const delivery = createServerRuntimeEventDelivery({ connection })
+    const record: RuntimeEventRecord = {
+      id: "input-followup-1",
+      producerFamily: "session-followup",
+      target: { kind: "session", sessionId: "session-1" },
+      runtimeSessionId: "runtime-1",
+      sessionTurnId: "turn-1",
+      work: null,
+      event: { type: "session.input", payload: { text: "continue", turnId: "turn-1" } },
+      acknowledgementPolicy: "matching-receipt",
+    }
+
+    const result = await delivery.send(record, new AbortController().signal)
+
+    expect(sendSpy).toHaveBeenCalledWith("session-1", {
+      workId: null,
+      workType: null,
+      stage: null,
+      taskRunId: null,
+      inputDeliveryId: null,
+      agentSessionId: "session-1",
+      agentTurnId: "turn-1",
+      runtime: null,
+      runtimeSessionId: "runtime-1",
+      runtimeEvents: [{ type: "session.input", payload: { text: "continue", turnId: "turn-1" } }],
+    })
+    expect(result).toEqual([{ type: "session.input" }])
   })
 
   it("returns an empty array for an empty batch without calling the server", async () => {
@@ -120,8 +158,10 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
     ["task attempt", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, taskRunId: "task-2.1" } })],
     ["work", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, workId: "work-2" } })],
     ["Runner", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, runnerId: "runner-2" } })],
+    ["Agent Session", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, agentSessionId: "agent-session-2" } })],
     ["input", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, inputDeliveryId: "input-2" } })],
     ["Agent turn", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, agentTurnId: "turn-2" } })],
+    ["runtime", (record: RuntimeEventRecord) => ({ ...record, runtime: "pi" })],
     ["runtime Session", (record: RuntimeEventRecord) => ({ ...record, runtimeSessionId: "ses_2" })],
   ])("rejects a mixed %s batch before using the batch head envelope", async (_name, change) => {
     const sendSpy = vi.fn(async () => [{ type: "reasoning.delta" }])

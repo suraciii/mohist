@@ -47,3 +47,11 @@
 
 - The first `npm run test:fast` completed every lane except architecture, which correctly caught a Sessions-to-Workflow dependency through the observation enum. The enum is now owned by Sessions and mapped in `WorkflowSessionWorkPort`; the source-tree baseline is files=837, digest=d740a68880316b263daed1945f4bc6de159d53682af65703ea591e71bbbb80c4.
 - The focused SpecTests project build and Runner typecheck pass after that boundary correction. Rerun the architecture suite and `npm run test:fast` after resuming; no further feature work is pending for T-004.
+
+## T-005
+
+- Runner `ActionResult.outcome` is an internal `unknown` projection. OpenCode and Pi map unconfirmed cleanup diagnostics to that outcome, preserve it through result validation and WorkExecutor projection, and skip recovery for unknown work.
+- Pi now executes through the Agent-turn capability in Workflow work, so it uses the same receipt-gated `WorkflowAgentSessionReporter` outbox path as OpenCode. It retains its declared validated `timeout` as the Pi turn duration.
+- `WorkflowItemTranslator` represents unknown as an inbound observation, not a third `TaskReportStatus`. `WorkflowReportService` observes the original bound Agent execution before output, artifact, or follow-up handling, and only retires the Runner result after that durable acknowledgement.
+- Runner loss first records `runner-disconnected` against the active Workflow Agent settlement. Only a stale Agent observation falls back to existing `runner-lost` failure behavior for non-Agent tasks and checks.
+- Stable candidate checks passed after T-005 became idle: Runner Pi/executor/follow-up/cancel 27/27, Server settlement/reconnect/identity/stop 76/76, full architecture 69/69, and `npm run test:fast` with Workflow 175, CLI 1,793, Unit 2,625, Arch 69, Web 4,697, and Runner 1,610; all failed/skipped counts are zero and typecheck passed. The current migration source-tree baseline is files=838, digest=d6284aeebdec678bfca87e4ccd20dce7097c3cba6fda9bec3dfd17317d1c0365.

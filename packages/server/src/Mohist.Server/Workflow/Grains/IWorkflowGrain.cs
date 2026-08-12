@@ -31,6 +31,8 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
     Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
+    Task<ReportAck> ObserveAgentResultUnknownAsync(string workerId, string workId, string reasonCode, string? message = null);
+    Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId);
     Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);

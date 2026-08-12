@@ -119,10 +119,18 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
             {
-                new("message.delta", "{\"text\":\"working\"}"),
+                new("message.delta", $"{{\"text\":\"working\",\"turnId\":\"{first.AgentTurnId}\"}}"),
             },
             "runtime-1",
             binding));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"wrong turn\",\"turnId\":\"turn-other\"}"),
+                },
+                "runtime-1",
+                binding)));
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
             new AppendAgentSessionRuntimeEventsCommand(
                 new List<AgentSessionRuntimeEventInput>
@@ -138,6 +146,39 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
                     new("message.delta", "{\"text\":\"missing\"}"),
                 },
                 "runtime-1")));
+    }
+
+    [Fact]
+    public async Task AppendWorkflowRuntimeEvents_PreservesFailureWhenTheCloseBatchAlsoReportsIdle()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var receipt = await grain.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-terminal-batch",
+            "execute",
+            "workflow-1",
+            "task-terminal.1",
+            "work-terminal",
+            "runner-1",
+            "opencode",
+            "runtime-1",
+            "{\"text\":\"execute\"}"));
+        var binding = Assert.Single(Fixture.SessionWork.ExecutionBindings);
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new(RuntimeEventTypes.TurnFailed,
+                    $"{{\"turnId\":\"{receipt.AgentTurnId}\",\"failureReason\":\"tool failed\"}}"),
+                new(RuntimeEventTypes.SessionActivity,
+                    $"{{\"turnId\":\"{receipt.AgentTurnId}\",\"activity\":\"idle\",\"status\":\"failed\"}}"),
+            },
+            "runtime-1",
+            binding));
+
+        var observation = Assert.Single(Fixture.SessionWork.Observations);
+        Assert.Equal(SessionWorkflowObservationKind.Failed, observation.Kind);
+        Assert.Equal("turn-failed", observation.ReasonCode);
+        Assert.Equal("tool failed", observation.Message);
     }
 
     [Fact]

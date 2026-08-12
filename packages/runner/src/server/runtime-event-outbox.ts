@@ -69,10 +69,11 @@ export type RuntimeEventAcknowledgementPolicy = "matching-receipt" | "successful
 
 export interface RuntimeEventRecord {
   readonly id: string
-  readonly producerFamily: "workflow-session" | "generic-followup" | "binding-reconcile"
+  readonly producerFamily: "workflow-session" | "session-followup" | "generic-followup" | "binding-reconcile"
   readonly target: RuntimeEventTarget
   readonly runtimeSessionId: string
   readonly runtime?: string | null
+  readonly sessionTurnId?: string | null
   readonly work: RuntimeEventWorkMetadata | null
   readonly event: RuntimeEventEntry
   readonly acknowledgementPolicy: RuntimeEventAcknowledgementPolicy
@@ -89,6 +90,7 @@ export interface RuntimeEventWorkMetadata {
   readonly stage: string | null
   readonly taskRunId?: string | null
   readonly runnerId?: string | null
+  readonly agentSessionId?: string | null
   readonly inputDeliveryId?: string | null
   readonly agentTurnId?: string | null
 }
@@ -321,7 +323,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   async enqueueBeforeExecution(
-    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
+    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "runtime" | "sessionTurnId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
   ): Promise<void> {
     if (this.stopped) throw new Error("runtime-event outbox is stopped; cannot enqueue")
     this.requireLoaded("enqueueBeforeExecution")
@@ -716,6 +718,16 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
       runtimeSessionId: record.runtimeSessionId,
     }
   }
+  if (record.producerFamily === "session-followup") {
+    if (record.target.kind !== "session") throw new Error("session-followup family requires Session target")
+    if (!nonEmpty(record.sessionTurnId)) throw new Error("session-followup record requires its immutable Agent turn identity")
+    return {
+      family: "session-followup",
+      sessionId: record.target.sessionId,
+      runtimeSessionId: record.runtimeSessionId,
+      sessionTurnId: record.sessionTurnId,
+    }
+  }
   if (record.target.kind !== "generic") throw new Error("generic-followup family requires generic target")
   return {
     family: "generic-followup",
@@ -724,13 +736,13 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
   }
 }
 
-/** Stable queue identity for one server delivery envelope. */
 export function runtimeEventDeliveryKey(record: RuntimeEventRecord): string {
   return sequenceKeyLabel(sequenceKey(record))
 }
 
 export interface WorkflowRuntimeEventExecutionIdentity {
   readonly runnerId: string
+  readonly agentSessionId: string
   readonly taskRunId: string
   readonly workId: string
   readonly inputDeliveryId: string
@@ -739,21 +751,14 @@ export interface WorkflowRuntimeEventExecutionIdentity {
   readonly runtimeSessionId: string
 }
 
-/**
- * Workflow task events carry the server-acknowledged input identity. Session
- * control events without task metadata intentionally retain their own route.
- */
 export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowRuntimeEventExecutionIdentity | null {
   if (record.producerFamily !== "workflow-session" || record.target.kind !== "workflow") return null
   const work = record.work
-  const containsExecutionField = work?.taskRunId !== undefined
-    || work?.runnerId !== undefined
-    || work?.inputDeliveryId !== undefined
-    || work?.agentTurnId !== undefined
-  if (!work || !containsExecutionField) return null
-  if (!nonEmpty(work.workId)
+  if (!work
+    || !nonEmpty(work.workId)
     || !nonEmpty(work.taskRunId)
     || !nonEmpty(work.runnerId)
+    || !nonEmpty(work.agentSessionId)
     || !nonEmpty(work.inputDeliveryId)
     || !nonEmpty(record.runtime)
     || !nonEmpty(record.runtimeSessionId)) {
@@ -763,6 +768,7 @@ export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowR
     throw new Error("workflow-session execution record has an invalid Agent turn identity")
   return {
     runnerId: work.runnerId,
+    agentSessionId: work.agentSessionId,
     taskRunId: work.taskRunId,
     workId: work.workId,
     inputDeliveryId: work.inputDeliveryId,
@@ -789,6 +795,9 @@ function sequenceKeyLabel(key: SequenceKey): string {
   if (key.family === "binding-reconcile") {
     return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
   }
+  if (key.family === "session-followup") {
+    return `session-followup:${key.sessionId}:${key.runtimeSessionId}:${key.sessionTurnId}`
+  }
   return `generic-followup:${key.projectId}:${key.sessionId}`
 }
 
@@ -801,7 +810,10 @@ function matchingReceipt(
   const matching = receipts.find((entry) => entry.type === record.event.type)
   if (!matching) return null
   if (record.producerFamily === "workflow-session" && record.event.type === "session.input" && record.work?.taskRunId) {
-    return matching.inputDeliveryId === record.id && typeof matching.agentTurnId === "string" && matching.agentTurnId.length > 0
+    return matching.inputDeliveryId === record.id
+      && matching.agentSessionId === record.work.agentSessionId
+      && typeof matching.agentTurnId === "string"
+      && matching.agentTurnId.length > 0
       ? matching
       : null
   }
@@ -842,15 +854,17 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
   const family = value["producerFamily"]
   const runtimeSessionId = value["runtimeSessionId"]
   const runtime = value["runtime"]
+  const sessionTurnId = value["sessionTurnId"]
   const event = value["event"]
   const policy = value["acknowledgementPolicy"]
   const work = value["work"] ?? null
   const sequence = value["sequence"]
   const enqueuedAt = value["enqueuedAt"]
   if (typeof id !== "string" || !isRuntimeTarget(target)
-    || (family !== "workflow-session" && family !== "generic-followup" && family !== "binding-reconcile")
+    || (family !== "workflow-session" && family !== "session-followup" && family !== "generic-followup" && family !== "binding-reconcile")
     || typeof runtimeSessionId !== "string"
     || (runtime !== undefined && runtime !== null && typeof runtime !== "string")
+    || (sessionTurnId !== undefined && sessionTurnId !== null && typeof sessionTurnId !== "string")
     || !isRuntimeEvent(event)
     || (policy !== "matching-receipt" && policy !== "successful-response")
     || typeof sequence !== "number"
@@ -864,6 +878,7 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
     target,
     runtimeSessionId,
     runtime: typeof runtime === "string" ? runtime : null,
+    sessionTurnId: typeof sessionTurnId === "string" ? sessionTurnId : null,
     work,
     event,
     acknowledgementPolicy: policy,
@@ -879,6 +894,7 @@ function stripInternal(record: InternalRecord): RuntimeEventRecord {
     target: record.target,
     runtimeSessionId: record.runtimeSessionId,
     runtime: record.runtime ?? null,
+    sessionTurnId: record.sessionTurnId ?? null,
     work: record.work,
     event: record.event,
     acknowledgementPolicy: record.acknowledgementPolicy,
@@ -918,6 +934,7 @@ function isRuntimeWorkMetadata(value: unknown): value is RuntimeEventWorkMetadat
     && (value["stage"] === null || typeof value["stage"] === "string")
     && (value["taskRunId"] === undefined || value["taskRunId"] === null || typeof value["taskRunId"] === "string")
     && (value["runnerId"] === undefined || value["runnerId"] === null || typeof value["runnerId"] === "string")
+    && (value["agentSessionId"] === undefined || value["agentSessionId"] === null || typeof value["agentSessionId"] === "string")
     && (value["inputDeliveryId"] === undefined || value["inputDeliveryId"] === null || typeof value["inputDeliveryId"] === "string")
     && (value["agentTurnId"] === undefined || value["agentTurnId"] === null || typeof value["agentTurnId"] === "string")
 }
@@ -929,6 +946,7 @@ function cloneInternal(record: InternalRecord): InternalRecord {
     target: { ...record.target },
     runtimeSessionId: record.runtimeSessionId,
     runtime: record.runtime ?? null,
+    sessionTurnId: record.sessionTurnId ?? null,
     work: record.work ? { ...record.work } : null,
     event: {
       type: record.event.type,
@@ -945,11 +963,12 @@ async function defaultDelivery(_record: RuntimeEventRecord, _signal: AbortSignal
 }
 
 interface SequenceKey {
-  readonly family: "workflow-session" | "generic-followup" | "binding-reconcile"
+  readonly family: "workflow-session" | "session-followup" | "generic-followup" | "binding-reconcile"
   readonly projectId?: string
   readonly workflowRunId?: string
   readonly sessionName?: string
   readonly sessionId?: string
   readonly runtimeSessionId?: string
+  readonly sessionTurnId?: string
   readonly execution?: WorkflowRuntimeEventExecutionIdentity | null
 }

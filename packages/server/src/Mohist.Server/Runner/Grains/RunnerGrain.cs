@@ -700,7 +700,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             try
             {
                 var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-                await workflow.FailActiveWorkAsync(workerId, "runner-lost");
+                var observation = await workflow.ObserveAgentRunnerDisconnectedAsync(workerId);
+                if (observation == ReportAck.Stale)
+                    await workflow.FailActiveWorkAsync(workerId, "runner-lost");
             }
             catch (Exception ex)
             {

@@ -141,14 +141,40 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             .SingleAsync();
     }
 
-    protected Task PostEventEntriesAsync(CreatedSession session, string text) => _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+    protected async Task<string> AcceptSessionRuntimeEventTurnAsync(CreatedSession session)
     {
-        runtimeSessionId = session.Id,
-        runtimeEvents = new[]
+        var receipt = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).AcceptFollowupAsync(
+            new AcceptFollowupCommand("record runtime events", "test", $"runtime-events-{session.SessionName}"));
+        return receipt.TurnId;
+    }
+
+    protected Task PostSessionTurnRuntimeEventsAsync(
+        CreatedSession session,
+        string turnId,
+        params (string Type, object Payload)[] runtimeEvents) =>
+        _client.PostOkAsync($"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events", new
         {
-            new { type = "message.delta", payload = new { text } }
-        }
-    });
+            runtimeSessionId = session.Id,
+            agentSessionId = session.Id,
+            agentTurnId = turnId,
+            runtimeEvents = runtimeEvents.Select(runtimeEvent => new
+            {
+                type = runtimeEvent.Type,
+                payload = WithTurnId(runtimeEvent.Payload, turnId)
+            }).ToArray()
+        });
+
+    protected Task PostEventEntriesAsync(CreatedSession session, string turnId, string text) =>
+        PostSessionTurnRuntimeEventsAsync(session, turnId, ("message.delta", new { text }));
+
+    private static JsonElement WithTurnId(object payload, string turnId)
+    {
+        var properties = JsonSerializer.SerializeToElement(payload)
+            .EnumerateObject()
+            .ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.Ordinal);
+        properties["turnId"] = JsonSerializer.SerializeToElement(turnId);
+        return JsonSerializer.SerializeToElement(properties);
+    }
 
     protected static async Task<AgentSessionTranscriptPartRow[]> LoadTranscriptPartsAsync(MohistDbContext db, string sessionId)
     {

@@ -577,6 +577,7 @@ export interface AgentSessionReconcileBinding {
 }
 
 export interface WorkflowAgentSession {
+  sessionId: string
   runtimeSessionId?: string | null
   runtime?: string | null
   status?: string | null
@@ -590,6 +591,7 @@ export interface AgentSessionRuntimeEventReceipt {
   type: string
   inputDeliveryId?: string
   agentTurnId?: string
+  agentSessionId?: string
 }
 
 export interface AgentInputAttachmentContent {
@@ -604,6 +606,7 @@ export interface AgentSessionRuntimeEventAcceptance {
   sequence?: number
   inputDeliveryId?: string
   agentTurnId?: string
+  agentSessionId?: string
 }
 
 export type AgentSession = WorkflowAgentSession

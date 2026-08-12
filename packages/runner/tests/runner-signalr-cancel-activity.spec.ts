@@ -221,7 +221,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     expect(recording.producedFactCalls[0].event.type).toBe("session.activity")
   })
 
-  followupIt("Cancel_EnqueuesGenericTarget_AndWorkflowTarget_WithCorrectProjectId", async ({ runtime, recording }) => {
+  followupIt("Cancel_EnqueuesGenericTarget_WithoutAnUnfencedWorkflowActivityFact", async ({ runtime, recording }) => {
     const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({
@@ -235,11 +235,9 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     await emitCancel(builder, opencodePayload())
     await emitCancel(builder, workflowPayload())
 
-    expect(recording.producedFactCalls).toHaveLength(2)
+    expect(recording.producedFactCalls).toHaveLength(1)
     expect(recording.producedFactCalls[0].target).toEqual({ kind: "generic", projectId: "proj-1", sessionId: "gen-session-1" })
-    expect(recording.producedFactCalls[1].target).toEqual({ kind: "workflow", projectId: "proj-1", workflowRunId: "wr-1", sessionName: "work-1" })
     expect(recording.producedFactCalls[0].producerFamily).toBe("generic-followup")
-    expect(recording.producedFactCalls[1].producerFamily).toBe("workflow-session")
   })
 
   followupIt("Cancel_StaleFactForSupersededBinding_IsCarriedWithTheOutboundBindingRuntimeSessionId", async ({ runtime, recording }) => {

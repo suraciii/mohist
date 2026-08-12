@@ -1,5 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
@@ -64,6 +66,56 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);
         Assert.Equal(FailureReason.TaskFailed, run.Failure?.Reason);
         Assert.Equal("runner-lost", run.Failure?.Message);
+    }
+
+    [Theory]
+    [InlineData("mohist/opencode")]
+    [InlineData("mohist/pi")]
+    public async Task RunnerLoss_PreservesAgentResultAndReconnectSettlesTheOriginalAttempt(string uses)
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new("agent", "Agent", uses)],
+            checks: []));
+        var runnerId = _runnerId!;
+        var (work, _) = await PollWorkAnyAsync();
+        var initial = await LoadRunAsync(work.WorkflowRunId);
+        var originalTask = Assert.Single(initial.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            originalTask.Id,
+            work.WorkId,
+            runnerId,
+            $"session-{uses}",
+            $"turn-{uses}",
+            uses == "mohist/pi" ? "pi" : "opencode",
+            $"runtime-{uses}");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.UnregisterAsync();
+
+        var disconnected = await LoadRunAsync(work.WorkflowRunId);
+        var unsettledTask = Assert.Single(disconnected.CurrentStage().Tasks);
+        var settlement = Assert.IsType<AgentResultSettlement>(unsettledTask.AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.Unknown, settlement.State);
+        Assert.Equal(AgentExecutionObservationKind.Disconnected, settlement.LastObservation);
+        Assert.Equal("runner-disconnected", settlement.ReasonCode);
+        Assert.Equal(TaskRunStatus.Running, unsettledTask.Status);
+        Assert.Equal(WorkflowRunStatus.Running, disconnected.Status);
+        Assert.Null(disconnected.Failure);
+
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", TestProjectId(work.WorkflowRunId)));
+        var dispatch = Services.GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        var report = Services.GetRequiredService<Mohist.Server.Runner.Services.WorkflowReportService>();
+        var (ack, _) = await report.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
+        Assert.Equal("accepted", ack);
+
+        var completed = await LoadRunAsync(work.WorkflowRunId);
+        var completedTask = Assert.Single(completed.CurrentStage().Tasks);
+        Assert.Equal(originalTask.Id, completedTask.Id);
+        Assert.Equal(TaskRunStatus.Completed, completedTask.Status);
+        Assert.Equal(WorkflowRunStatus.Completed, completed.Status);
     }
 
     [Fact]

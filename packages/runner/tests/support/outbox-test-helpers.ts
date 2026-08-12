@@ -51,7 +51,13 @@ export function makeRecordingOutbox(options: FakeOutboxOptions = {}): OutboxHand
     },
     async awaitInputReceipt(recordId) {
       if (!inputAccepted) throw new Error("session.input was not acknowledged")
-      return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}` }
+      const record = records.find((candidate) => candidate.id === recordId)
+      return {
+        type: "session.input",
+        inputDeliveryId: recordId,
+        agentTurnId: `turn-${recordId}`,
+        agentSessionId: record?.work?.agentSessionId ?? undefined,
+      }
     },
     async enqueueProducedFact(record) {
       const internal: RuntimeEventRecord = { ...record }
