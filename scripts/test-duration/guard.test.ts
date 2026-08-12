@@ -62,6 +62,28 @@ test('commandFor appends dotnet apphost arguments after the default report argum
   assert.deepEqual(command.args.slice(-7), ['-noColor', '-noLogo', '-noAutoReporters', '-trx', `${process.cwd()}/reports/unit.trx`, '-parallel', 'none'])
 })
 
+test('commandFor explicitly selects the execution-ledger reporter without environmental auto-reporters', () => {
+  const track: TrackConfig = {
+    id: 'cli',
+    kind: 'dotnet-apphost',
+    csproj: 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj',
+    report: 'reports/cli.trx',
+    executionLedger: 'reports/cli.execution-ledger.json',
+    executionProvenance: 'reports/cli.execution-provenance.json',
+    executionSourceRoots: ['packages/cli'],
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: true,
+  }
+
+  const command = commandFor(track, '/evidence')
+
+  assert.deepEqual(command.args.slice(0, 7), [
+    '-noColor', '-noLogo', '-noAutoReporters', '-reporter', 'mohist-ledger',
+    '-trx', '/evidence/reports/cli.trx',
+  ])
+})
+
 test('parallelism provenance records every effective xUnit override', () => {
   const track: TrackConfig = {
     id: 'cli', kind: 'dotnet-apphost', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
