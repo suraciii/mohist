@@ -197,6 +197,28 @@ test('validateConfig accepts bounded Server Spec partitions and rejects other pa
     }],
   }))
   assert.ok(validateConfig(unsupported).some((error) => error.includes('only server-spec supports partitioned execution')))
+
+  const unsupportedWithoutCanonical = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx',
+      reportFormat: 'trx', partitions: 4, partitionMaxThreads: 1, deadlineMs: 100, enforce: true,
+      rules: [{ id: 'spec', absoluteMs: 5000 }],
+    }],
+  }))
+  const unsupportedErrors = validateConfig(unsupportedWithoutCanonical)
+  assert.ok(unsupportedErrors.some((error) => error.includes('only server-spec supports partitioned execution')))
+  assert.ok(unsupportedErrors.some((error) => error.includes('canonical configuration is required')))
+
+  const serverSpecWithoutCanonical = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'server-spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx',
+      reportFormat: 'trx', partitions: 4, partitionMaxThreads: 1, deadlineMs: 100, enforce: true,
+      rules: [{ id: 'spec', absoluteMs: 5000 }],
+    }],
+  }))
+  assert.ok(validateConfig(serverSpecWithoutCanonical).some((error) => error.includes('canonical configuration is required')))
 })
 
 test('validateConfig requires bounded partition concurrency and permits a partitioned duration phase', () => {
