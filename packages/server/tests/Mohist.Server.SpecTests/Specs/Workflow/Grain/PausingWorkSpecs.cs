@@ -89,7 +89,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
             AddTasks: new List<RuntimeTaskInput>
             {
                 new("follow-up", "Follow up", "spec/task")
-            }));
+            },
+            TaskRunId: task.TaskRunId));
 
         Assert.Equal(ReportAck.Accepted, acknowledgement);
         Assert.Equal("Paused", await workflow.GetRunStatusAsync());

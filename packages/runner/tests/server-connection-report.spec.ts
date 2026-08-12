@@ -23,11 +23,12 @@ describe("ServerConnection.report", () => {
   it("forwardsCleanupAttemptsToServerWhenResultIncludesThem", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "{}" }))
     const connection = new ServerConnection(options())
-    const work = { workflowRunId: "wf-1", workId: "work-1", workType: "task" }
+    const work = { workflowRunId: "wf-1", workId: "work-1", taskRunId: "task-1.1", workType: "task" }
     await connection.report(work, { status: "failed", message: "dirty", output: "{}", cleanupAttempts: 3 }, new AbortController().signal)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const init = fetchMock.mock.calls[0][1] as RequestInit
     const body = JSON.parse(init.body as string)
+    expect(body.taskRunId).toBe("task-1.1")
     expect(body.cleanupAttempts).toBe(3)
   })
 

@@ -69,9 +69,11 @@ export type RuntimeEventAcknowledgementPolicy = "matching-receipt" | "successful
 
 export interface RuntimeEventRecord {
   readonly id: string
-  readonly producerFamily: "workflow-session" | "generic-followup" | "binding-reconcile"
+  readonly producerFamily: "workflow-session" | "session-followup" | "generic-followup" | "binding-reconcile"
   readonly target: RuntimeEventTarget
   readonly runtimeSessionId: string
+  readonly runtime?: string | null
+  readonly sessionTurnId?: string | null
   readonly work: RuntimeEventWorkMetadata | null
   readonly event: RuntimeEventEntry
   readonly acknowledgementPolicy: RuntimeEventAcknowledgementPolicy
@@ -86,6 +88,11 @@ export interface RuntimeEventWorkMetadata {
   readonly workId: string
   readonly workType: string
   readonly stage: string | null
+  readonly taskRunId?: string | null
+  readonly runnerId?: string | null
+  readonly agentSessionId?: string | null
+  readonly inputDeliveryId?: string | null
+  readonly agentTurnId?: string | null
 }
 
 export interface RuntimeEventEntry {
@@ -157,8 +164,9 @@ export interface AgentSessionRuntimeEventOutbox {
   load(): Promise<void>
   recover(): Promise<void>
   enqueueBeforeExecution(
-    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
+    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "runtime" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
   ): Promise<void>
+  awaitInputReceipt?(recordId: string): Promise<AgentSessionRuntimeEventReceipt>
   enqueueProducedFact(record: RuntimeEventRecord): Promise<void>
   /**
    * Enqueue a batch of produced facts sharing one target in one
@@ -232,6 +240,11 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private readonly now: () => Date
   private readonly timer: RuntimeEventOutboxTimer
   private readonly records = new Map<string, InternalRecord>()
+  private readonly inputReceiptWaiters = new Map<string, {
+    resolve: (receipt: AgentSessionRuntimeEventReceipt) => void
+    reject: (error: Error) => void
+  }>()
+  private readonly receivedInputReceipts = new Map<string, AgentSessionRuntimeEventReceipt>()
   private loaded = false
   private healthy = false
   private kicked: Promise<void> | null = null
@@ -310,7 +323,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   async enqueueBeforeExecution(
-    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
+    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "runtime" | "sessionTurnId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
   ): Promise<void> {
     if (this.stopped) throw new Error("runtime-event outbox is stopped; cannot enqueue")
     this.requireLoaded("enqueueBeforeExecution")
@@ -328,6 +341,27 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       this.scheduleLocalRetry()
     })
     void this.kick()
+  }
+
+  async awaitInputReceipt(recordId: string): Promise<AgentSessionRuntimeEventReceipt> {
+    this.requireLoaded("awaitInputReceipt")
+    const received = this.receivedInputReceipts.get(recordId)
+    if (received) {
+      this.receivedInputReceipts.delete(recordId)
+      return received
+    }
+    if (!this.records.has(recordId))
+      throw new Error(`workflow input ${recordId} is no longer pending and has no matching receipt`)
+    if (this.inputReceiptWaiters.has(recordId))
+      throw new Error(`workflow input ${recordId} already has a receipt waiter`)
+
+    const receipt = new Promise<AgentSessionRuntimeEventReceipt>((resolve, reject) => {
+      this.inputReceiptWaiters.set(recordId, { resolve, reject })
+    })
+    void this.kick().catch((error) => {
+      this.rejectInputReceipt(recordId, error)
+    })
+    return await receipt
   }
 
   async enqueueProducedFact(record: RuntimeEventRecord): Promise<void> {
@@ -449,7 +483,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private takeBatch(label: string, limit: number): InternalRecord[] {
     const matching: InternalRecord[] = []
     for (const record of this.records.values()) {
-      const recordLabel = sequenceKeyLabel(sequenceKey(record))
+      const recordLabel = runtimeEventDeliveryKey(record)
       if (recordLabel !== label) continue
       matching.push(record)
       if (matching.length >= limit) break
@@ -484,6 +518,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       transportError = new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`)
     }
     if (transportError || perRecord === null) {
+      for (const record of batch) this.rejectInputReceipt(record.id, transportError)
       this.scheduleNetworkRetry()
       return false
     }
@@ -495,10 +530,16 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     for (let i = 0; i < batch.length; i += 1) {
       const record = batch[i]
       const receipts = perRecord[i] ?? []
-      if (!recordMeetsPolicy(record.acknowledgementPolicy, record, receipts)) continue
+      const receipt = matchingReceipt(record.acknowledgementPolicy, record, receipts)
+      if (!receipt) {
+        this.rejectInputReceipt(record.id, new Error(`workflow input ${record.id} did not receive a matching Server receipt`))
+        continue
+      }
       if (this.records.get(record.id) !== record) continue
       this.records.delete(record.id)
       removed.push(record)
+      if (record.producerFamily === "workflow-session" && record.event.type === "session.input")
+        this.resolveInputReceipt(record.id, receipt)
       anyAcknowledged = true
     }
     if (!anyAcknowledged) {
@@ -620,6 +661,23 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private requireLoaded(op: string): void {
     if (!this.loaded) throw new Error(`runtime-event outbox is not loaded; cannot ${op}`)
   }
+
+  private resolveInputReceipt(recordId: string, receipt: AgentSessionRuntimeEventReceipt): void {
+    const waiter = this.inputReceiptWaiters.get(recordId)
+    if (waiter) {
+      this.inputReceiptWaiters.delete(recordId)
+      waiter.resolve(receipt)
+      return
+    }
+    this.receivedInputReceipts.set(recordId, receipt)
+  }
+
+  private rejectInputReceipt(recordId: string, error: unknown): void {
+    const waiter = this.inputReceiptWaiters.get(recordId)
+    if (!waiter) return
+    this.inputReceiptWaiters.delete(recordId)
+    waiter.reject(error instanceof Error ? error : new Error(errorMessage(error)))
+  }
 }
 
 interface GroupSnapshot {
@@ -630,7 +688,7 @@ interface GroupSnapshot {
 function collectGroups(records: InternalRecord[]): GroupSnapshot[] {
   const groups = new Map<string, InternalRecord[]>()
   for (const record of records) {
-    const label = sequenceKeyLabel(sequenceKey(record))
+    const label = runtimeEventDeliveryKey(record)
     const list = groups.get(label)
     if (list) list.push(record)
     else groups.set(label, [record])
@@ -649,6 +707,7 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
       projectId: record.target.projectId,
       workflowRunId: record.target.workflowRunId,
       sessionName: record.target.sessionName,
+      execution: workflowExecutionIdentity(record),
     }
   }
   if (record.producerFamily === "binding-reconcile") {
@@ -659,6 +718,16 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
       runtimeSessionId: record.runtimeSessionId,
     }
   }
+  if (record.producerFamily === "session-followup") {
+    if (record.target.kind !== "session") throw new Error("session-followup family requires Session target")
+    if (!nonEmpty(record.sessionTurnId)) throw new Error("session-followup record requires its immutable Agent turn identity")
+    return {
+      family: "session-followup",
+      sessionId: record.target.sessionId,
+      runtimeSessionId: record.runtimeSessionId,
+      sessionTurnId: record.sessionTurnId,
+    }
+  }
   if (record.target.kind !== "generic") throw new Error("generic-followup family requires generic target")
   return {
     family: "generic-followup",
@@ -667,23 +736,88 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
   }
 }
 
+export function runtimeEventDeliveryKey(record: RuntimeEventRecord): string {
+  return sequenceKeyLabel(sequenceKey(record))
+}
+
+export interface WorkflowRuntimeEventExecutionIdentity {
+  readonly runnerId: string
+  readonly agentSessionId: string
+  readonly taskRunId: string
+  readonly workId: string
+  readonly inputDeliveryId: string
+  readonly agentTurnId: string | null
+  readonly runtime: string
+  readonly runtimeSessionId: string
+}
+
+export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowRuntimeEventExecutionIdentity | null {
+  if (record.producerFamily !== "workflow-session" || record.target.kind !== "workflow") return null
+  const work = record.work
+  if (!work
+    || !nonEmpty(work.workId)
+    || !nonEmpty(work.taskRunId)
+    || !nonEmpty(work.runnerId)
+    || !nonEmpty(work.agentSessionId)
+    || !nonEmpty(work.inputDeliveryId)
+    || !nonEmpty(record.runtime)
+    || !nonEmpty(record.runtimeSessionId)) {
+    throw new Error("workflow-session execution record requires its complete immutable execution identity")
+  }
+  if (work.agentTurnId !== undefined && work.agentTurnId !== null && !nonEmpty(work.agentTurnId))
+    throw new Error("workflow-session execution record has an invalid Agent turn identity")
+  return {
+    runnerId: work.runnerId,
+    agentSessionId: work.agentSessionId,
+    taskRunId: work.taskRunId,
+    workId: work.workId,
+    inputDeliveryId: work.inputDeliveryId,
+    agentTurnId: work.agentTurnId ?? null,
+    runtime: record.runtime,
+    runtimeSessionId: record.runtimeSessionId,
+  }
+}
+
+function nonEmpty(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.length > 0
+}
+
 function sequenceKeyLabel(key: SequenceKey): string {
   if (key.family === "workflow-session") {
-    return `workflow-session:${key.projectId}:${key.workflowRunId}:${key.sessionName}`
+    return JSON.stringify({
+      family: key.family,
+      projectId: key.projectId,
+      workflowRunId: key.workflowRunId,
+      sessionName: key.sessionName,
+      execution: key.execution ?? null,
+    })
   }
   if (key.family === "binding-reconcile") {
     return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
   }
+  if (key.family === "session-followup") {
+    return `session-followup:${key.sessionId}:${key.runtimeSessionId}:${key.sessionTurnId}`
+  }
   return `generic-followup:${key.projectId}:${key.sessionId}`
 }
 
-function recordMeetsPolicy(
+function matchingReceipt(
   policy: RuntimeEventAcknowledgementPolicy,
   record: RuntimeEventRecord,
   receipts: AgentSessionRuntimeEventReceipt[],
-): boolean {
-  if (policy === "successful-response") return true
-  return receipts.some((entry) => entry.type === record.event.type)
+): AgentSessionRuntimeEventReceipt | null {
+  if (policy === "successful-response") return receipts[0] ?? { type: record.event.type }
+  const matching = receipts.find((entry) => entry.type === record.event.type)
+  if (!matching) return null
+  if (record.producerFamily === "workflow-session" && record.event.type === "session.input" && record.work?.taskRunId) {
+    return matching.inputDeliveryId === record.id
+      && matching.agentSessionId === record.work.agentSessionId
+      && typeof matching.agentTurnId === "string"
+      && matching.agentTurnId.length > 0
+      ? matching
+      : null
+  }
+  return matching
 }
 
 function sortBySequence(a: InternalRecord, b: InternalRecord): number {
@@ -719,14 +853,18 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
   const target = value["target"]
   const family = value["producerFamily"]
   const runtimeSessionId = value["runtimeSessionId"]
+  const runtime = value["runtime"]
+  const sessionTurnId = value["sessionTurnId"]
   const event = value["event"]
   const policy = value["acknowledgementPolicy"]
   const work = value["work"] ?? null
   const sequence = value["sequence"]
   const enqueuedAt = value["enqueuedAt"]
   if (typeof id !== "string" || !isRuntimeTarget(target)
-    || (family !== "workflow-session" && family !== "generic-followup" && family !== "binding-reconcile")
+    || (family !== "workflow-session" && family !== "session-followup" && family !== "generic-followup" && family !== "binding-reconcile")
     || typeof runtimeSessionId !== "string"
+    || (runtime !== undefined && runtime !== null && typeof runtime !== "string")
+    || (sessionTurnId !== undefined && sessionTurnId !== null && typeof sessionTurnId !== "string")
     || !isRuntimeEvent(event)
     || (policy !== "matching-receipt" && policy !== "successful-response")
     || typeof sequence !== "number"
@@ -739,6 +877,8 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
     producerFamily: family,
     target,
     runtimeSessionId,
+    runtime: typeof runtime === "string" ? runtime : null,
+    sessionTurnId: typeof sessionTurnId === "string" ? sessionTurnId : null,
     work,
     event,
     acknowledgementPolicy: policy,
@@ -753,6 +893,8 @@ function stripInternal(record: InternalRecord): RuntimeEventRecord {
     producerFamily: record.producerFamily,
     target: record.target,
     runtimeSessionId: record.runtimeSessionId,
+    runtime: record.runtime ?? null,
+    sessionTurnId: record.sessionTurnId ?? null,
     work: record.work,
     event: record.event,
     acknowledgementPolicy: record.acknowledgementPolicy,
@@ -790,6 +932,11 @@ function isRuntimeWorkMetadata(value: unknown): value is RuntimeEventWorkMetadat
   return typeof value["workId"] === "string"
     && typeof value["workType"] === "string"
     && (value["stage"] === null || typeof value["stage"] === "string")
+    && (value["taskRunId"] === undefined || value["taskRunId"] === null || typeof value["taskRunId"] === "string")
+    && (value["runnerId"] === undefined || value["runnerId"] === null || typeof value["runnerId"] === "string")
+    && (value["agentSessionId"] === undefined || value["agentSessionId"] === null || typeof value["agentSessionId"] === "string")
+    && (value["inputDeliveryId"] === undefined || value["inputDeliveryId"] === null || typeof value["inputDeliveryId"] === "string")
+    && (value["agentTurnId"] === undefined || value["agentTurnId"] === null || typeof value["agentTurnId"] === "string")
 }
 
 function cloneInternal(record: InternalRecord): InternalRecord {
@@ -798,6 +945,8 @@ function cloneInternal(record: InternalRecord): InternalRecord {
     producerFamily: record.producerFamily,
     target: { ...record.target },
     runtimeSessionId: record.runtimeSessionId,
+    runtime: record.runtime ?? null,
+    sessionTurnId: record.sessionTurnId ?? null,
     work: record.work ? { ...record.work } : null,
     event: {
       type: record.event.type,
@@ -814,10 +963,12 @@ async function defaultDelivery(_record: RuntimeEventRecord, _signal: AbortSignal
 }
 
 interface SequenceKey {
-  readonly family: "workflow-session" | "generic-followup" | "binding-reconcile"
+  readonly family: "workflow-session" | "session-followup" | "generic-followup" | "binding-reconcile"
   readonly projectId?: string
   readonly workflowRunId?: string
   readonly sessionName?: string
   readonly sessionId?: string
   readonly runtimeSessionId?: string
+  readonly sessionTurnId?: string
+  readonly execution?: WorkflowRuntimeEventExecutionIdentity | null
 }

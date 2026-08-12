@@ -52,7 +52,7 @@ public class IssueSessionApiSpecs
         var persistence = _fixture.Persistence.Checkpoint(currentSession.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(currentSession), new
         {
             runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
@@ -205,8 +205,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     private string RunnerAgentSessionAttachPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/attach";
 
-    private string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
-        $"{RunnerSessionPath(session)}/runtime-events";
+    private string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
+        $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";
 
     private string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";

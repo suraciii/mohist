@@ -38,6 +38,7 @@ public static class WorkflowStatusMapper
         TaskRunStatus.Running => "running",
         TaskRunStatus.Completed => "completed",
         TaskRunStatus.Failed => "failed",
+        TaskRunStatus.Cancelled => "cancelled",
         _ => throw new SwitchExpressionException($"No wire mapping for TaskRunStatus value {status}"),
     };
 

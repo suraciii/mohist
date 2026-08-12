@@ -84,7 +84,10 @@ A `TaskRun` execution identity consists of Definition ID, Stage attempt, and tas
 Stage attempt retains the existing `{definitionId}.{taskAttempt}` format. Starting with the second,
 it uses `{definitionId}.s{stageAttempt}.{taskAttempt}`. For example, the first build task is
 `T-001.1`, a manual retry in the same Stage is `T-001.2`, and the first task after rerunning build is
-`T-001.s2.1`.
+`T-001.s2.1`. Definition IDs remain scoped to a Stage, so another Stage may use the same ID. If its
+candidate TaskRun ID already exists in the WorkflowRun, the allocator appends the first available
+`.runN` suffix. This preserves established IDs when there is no collision while keeping every
+persisted TaskRun ID and Work ID unique within the run.
 
 `rerun-from-stage` discards visible task history from the old Stage, but it cannot decrease the
 Stage attempt or let a new TaskRun reuse an old identity. A Workflow AgentSession whose default

@@ -234,7 +234,9 @@ public abstract class CanonicalIssueReferenceMigrationTestSupport
         Issues: await context.Issues.CountAsync(),
         Epics: await context.Epics.CountAsync(),
         Profiles: await context.IssueWorkflowProfiles.CountAsync(),
-        Artifacts: await context.WorkflowArtifacts.CountAsync(),
+        Artifacts: checked((int)await context.Database
+            .SqlQueryRaw<long>("SELECT COUNT(*) AS \"Value\" FROM \"WorkflowArtifacts\"")
+            .SingleAsync()),
         PendingUploads: await context.WorkflowArtifactPendingUploads.CountAsync(),
         Attachments: await context.Attachments.CountAsync(),
         Runs: await context.WorkflowRuns.CountAsync(),
@@ -268,8 +270,11 @@ public abstract class CanonicalIssueReferenceMigrationTestSupport
     {
         var profile = await context.IssueWorkflowProfiles.AsNoTracking()
             .SingleAsync(row => row.ProjectId == "proj_alpha" && row.IssueNumber == 42);
-        var artifact = await context.WorkflowArtifacts.AsNoTracking()
-            .SingleAsync(row => row.ArtifactId == "artifact_alpha");
+        var artifactIssueNumber = await context.Database.SqlQueryRaw<long>("""
+            SELECT "IssueNumber" AS "Value"
+            FROM "WorkflowArtifacts"
+            WHERE "ArtifactId" = 'artifact_alpha'
+            """).SingleAsync();
         var attachmentOwnerIssueNumber = await context.Attachments.AsNoTracking()
             .Where(row => row.Id == "att_alpha")
             .Select(row => row.OwnerIssueNumber)
@@ -281,7 +286,7 @@ public abstract class CanonicalIssueReferenceMigrationTestSupport
         return new ConvergedValues(
             profile.ProjectId,
             profile.IssueNumber,
-            artifact.IssueNumber,
+            checked((int)artifactIssueNumber),
             attachmentOwnerIssueNumber,
             run.MetadataProjectId,
             run.IssueNumber);

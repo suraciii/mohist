@@ -93,6 +93,7 @@ describe("follow-up attachment delivery", () => {
       },
       text: "",
       inputId: "input-1",
+      turnId: "turn-1",
       attachments: [{ id: "attachment-1", name: "notes.txt", contentType: "text/plain", size: 20 }],
       callerTempUrl: "https://provider.invalid/temp-token",
       providerToken: "secret-token",

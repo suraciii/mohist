@@ -258,7 +258,7 @@ public static class RunnerRoutes
             // report service (the runner grain no longer relays workflow
             // reports). Accepted and Stale are both acks.
             var (ack, workflowStatus) = await workflowReport.ReportAsync(
-                runnerId, req.WorkflowRunId ?? string.Empty, req.WorkId, result, ct);
+                runnerId, req.WorkflowRunId ?? string.Empty, req.WorkId, req.TaskRunId, result, ct);
             var tracked = ack != "missing-workflow";
             return Results.Ok(new RunnerReportResponse(
                 req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
@@ -434,12 +434,111 @@ public static class RunnerRoutes
             if (string.IsNullOrWhiteSpace(req.RuntimeSessionId))
                 return ApiResults.BadRequest("runtimeSessionId is required", "runtime_session_id_required");
 
+            var openingInputs = req.RuntimeEvents
+                .Where(runtimeEvent => string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionInput, StringComparison.Ordinal))
+                .ToArray();
+            if (openingInputs.Length > 0)
+            {
+                if (openingInputs.Length != 1 || req.RuntimeEvents.Count != 1)
+                    return ApiResults.BadRequest("session.input must be delivered alone", "workflow_input_batch_invalid");
+                if (string.IsNullOrWhiteSpace(req.InputDeliveryId)
+                    || string.IsNullOrWhiteSpace(req.AgentSessionId)
+                    || string.IsNullOrWhiteSpace(req.TaskRunId)
+                    || string.IsNullOrWhiteSpace(req.WorkId)
+                    || string.IsNullOrWhiteSpace(req.Runtime))
+                {
+                    return ApiResults.BadRequest("session.input requires its complete Workflow execution identity", "workflow_input_identity_required");
+                }
+                if (!string.Equals(req.AgentSessionId, sessionId, StringComparison.Ordinal))
+                    return ApiResults.Conflict("Workflow AgentSession changed before session.input delivery", "workflow_agent_session_changed");
+
+                var payload = openingInputs[0].Payload;
+                var prompt = payload.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && payload.TryGetProperty("text", out var text)
+                    && text.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? text.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(prompt))
+                    return ApiResults.BadRequest("session.input text is required", "workflow_input_text_required");
+
+                try
+                {
+                    var receipt = await sessions.GetGrain(sessionId).AcceptWorkflowInputAsync(
+                        new AcceptWorkflowAgentSessionInputCommand(
+                            req.InputDeliveryId,
+                            prompt,
+                            workflowRunId,
+                            req.TaskRunId,
+                            req.WorkId,
+                            runnerId,
+                            req.Runtime,
+                            req.RuntimeSessionId,
+                            payload.GetRawText()));
+                    if (!receipt.WorkflowBindingAccepted)
+                        return Results.Ok(Array.Empty<RunnerRuntimeEventReceipt>());
+                    return Results.Ok(new[]
+                    {
+                        new RunnerRuntimeEventReceipt(
+                            RuntimeEventTypes.SessionInput,
+                            receipt.InputDeliveryId,
+                            receipt.AgentTurnId,
+                            receipt.AgentSessionId)
+                    });
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ApiResults.Conflict(ex.Message, "workflow_input_binding_rejected");
+                }
+            }
+
+            var hasWorkflowExecutionFields = !string.IsNullOrWhiteSpace(req.InputDeliveryId)
+                || !string.IsNullOrWhiteSpace(req.AgentSessionId)
+                || !string.IsNullOrWhiteSpace(req.AgentTurnId)
+                || !string.IsNullOrWhiteSpace(req.TaskRunId)
+                || !string.IsNullOrWhiteSpace(req.WorkId)
+                || !string.IsNullOrWhiteSpace(req.Runtime);
+            if (!hasWorkflowExecutionFields
+                || string.IsNullOrWhiteSpace(req.InputDeliveryId)
+                    || string.IsNullOrWhiteSpace(req.AgentSessionId)
+                    || string.IsNullOrWhiteSpace(req.AgentTurnId)
+                    || string.IsNullOrWhiteSpace(req.TaskRunId)
+                    || string.IsNullOrWhiteSpace(req.WorkId)
+                    || string.IsNullOrWhiteSpace(req.Runtime))
+            {
+                return ApiResults.BadRequest("Workflow runtime events require their complete acknowledged Agent turn binding", "workflow_runtime_binding_required");
+            }
+            if (hasWorkflowExecutionFields
+                && !string.Equals(req.AgentSessionId, sessionId, StringComparison.Ordinal))
+            {
+                return ApiResults.Conflict("Workflow AgentSession changed before runtime-event delivery", "workflow_agent_session_changed");
+            }
+
+            var workflowExecution = hasWorkflowExecutionFields
+                ? new SessionWorkflowExecutionBinding(
+                    req.InputDeliveryId!,
+                    workflowRunId,
+                    req.TaskRunId!,
+                    req.WorkId!,
+                    runnerId,
+                    req.AgentSessionId!,
+                    req.AgentTurnId!,
+                    req.Runtime!,
+                    req.RuntimeSessionId)
+                : null;
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            var events = await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
-            await followups.DispatchNextAsync(projectId, sessionId, ct);
-            return Results.Ok(events);
+            try
+            {
+                var events = await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(
+                    new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId, workflowExecution));
+                await followups.DispatchNextAsync(projectId, sessionId, ct);
+                return Results.Ok(events);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_runtime_binding_rejected");
+            }
         });
 
         group.MapGet("/agent-sessions/reconcile", async (
@@ -496,11 +595,34 @@ public static class RunnerRoutes
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
             if (string.IsNullOrWhiteSpace(req.RuntimeSessionId))
                 return ApiResults.BadRequest("runtimeSessionId is required", "runtime_session_id_required");
+            var hasSessionTurnIdentity = !string.IsNullOrWhiteSpace(req.AgentSessionId)
+                || !string.IsNullOrWhiteSpace(req.AgentTurnId);
+            if (hasSessionTurnIdentity
+                && (string.IsNullOrWhiteSpace(req.AgentSessionId)
+                    || string.IsNullOrWhiteSpace(req.AgentTurnId)))
+            {
+                return ApiResults.BadRequest("Session runtime events require AgentSession and Agent turn identity", "session_runtime_identity_required");
+            }
+            if (hasSessionTurnIdentity
+                && !string.Equals(req.AgentSessionId, sessionId, StringComparison.Ordinal))
+            {
+                return ApiResults.Conflict("AgentSession changed before Session runtime-event delivery", "agent_session_changed");
+            }
+            if (!string.IsNullOrWhiteSpace(req.InputDeliveryId)
+                || !string.IsNullOrWhiteSpace(req.TaskRunId)
+                || !string.IsNullOrWhiteSpace(req.WorkId)
+                || !string.IsNullOrWhiteSpace(req.Runtime))
+            {
+                return ApiResults.BadRequest("Task execution identity is not accepted on the Session runtime-event route", "session_runtime_task_identity_invalid");
+            }
 
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+                runtimeEvents,
+                req.RuntimeSessionId,
+                SessionTurnId: req.AgentTurnId));
             return Results.Ok(events);
         });
 
@@ -739,7 +861,8 @@ public static class RunnerRoutes
             Expect: work.Expect,
             ParentIssueContext: parentIssueContext,
             AgentDefinition: work.AgentDefinition,
-            AgentSessionStartup: work.AgentSessionStartup);
+            AgentSessionStartup: work.AgentSessionStartup,
+            TaskRunId: work.TaskRunId);
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
@@ -806,6 +929,7 @@ public static class RunnerRoutes
     private static RunnerAgentSessionResponse ToRunnerAgentSession(string projectId, string workflowRunId, string sessionName, AgentSessionInfo session) =>
         new(
             new RunnerAgentSessionKey(projectId, workflowRunId, sessionName),
+            session.Id,
             session.AgentSessionId,
             session.Status,
             session.WorkDir,
@@ -965,6 +1089,7 @@ public record RunnerReportRequest(
     string WorkId,
     string Status,
     string? WorkflowRunId = null,
+    string? TaskRunId = null,
     string? ProjectId = null,
     string? Message = null,
     System.Text.Json.JsonElement? Output = null,
@@ -987,7 +1112,7 @@ public record RunnerAgentSessionReconcileResponse(
     string RuntimeSessionId,
     string WorkDir);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
-public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null, bool NeedsFreshRuntimeSession = false);
+public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, string SessionId, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null, bool NeedsFreshRuntimeSession = false);
 public record AgentSessionOpenRequest(
     string? WorkId = null,
     string? WorkType = null,
@@ -1047,8 +1172,23 @@ public record WorkflowAgentSessionResetRequest(
     string ExpectedRuntimeSessionId,
     string ReplacementRuntimeSessionId,
     string ReplacementRuntime = "opencode");
-public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents, string? RuntimeSessionId = null);
+public record AgentSessionRuntimeEventsRequest(
+    string? WorkId,
+    string? WorkType,
+    string? Stage,
+    IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents,
+    string? RuntimeSessionId = null,
+    string? TaskRunId = null,
+    string? InputDeliveryId = null,
+    string? AgentSessionId = null,
+    string? AgentTurnId = null,
+    string? Runtime = null);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
+public record RunnerRuntimeEventReceipt(
+    string Type,
+    string? InputDeliveryId = null,
+    string? AgentTurnId = null,
+    string? AgentSessionId = null);
 public record WorkDispatchResponse(
     string WorkflowRunId,
     string WorkId,
@@ -1078,7 +1218,8 @@ public record WorkDispatchResponse(
     string? Expect = null,
     ParentIssueContextResponse? ParentIssueContext = null,
     AgentExecutionDefinition? AgentDefinition = null,
-    AgentSessionStartup? AgentSessionStartup = null);
+    AgentSessionStartup? AgentSessionStartup = null,
+    string? TaskRunId = null);
 
 public sealed record ParentIssueContextResponse(string Title, string? Body);
 

@@ -89,9 +89,13 @@ function createReporter(
     sessionName,
     workMetadata: {
       workId: context.workId,
+      taskRunId: context.taskRunId ?? context.workId,
+      runnerId: context.serverConnection?.runnerId ?? "runner-test",
+      agentSessionId: context.agentSessionId ?? "agent-session-test",
       workType: context.workType,
       stage: context.stage ?? null,
     },
+    runtime: "opencode",
     randomId: context.runtimeEventRecordId ?? (() => `${Date.now()}_${Math.random().toString(36).slice(2)}`),
   })
 }

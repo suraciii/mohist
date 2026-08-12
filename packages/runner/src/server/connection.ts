@@ -108,6 +108,7 @@ export class ServerConnection {
     const ownerKind = work.ownerKind?.trim().toLowerCase()
     const body: Record<string, unknown> = {
       workId: work.workId,
+      taskRunId: work.taskRunId ?? null,
       projectId: work.projectId,
       status: result.status,
       message: result.message,
@@ -577,6 +578,7 @@ export interface AgentSessionReconcileBinding {
 }
 
 export interface WorkflowAgentSession {
+  sessionId: string
   runtimeSessionId?: string | null
   runtime?: string | null
   status?: string | null
@@ -588,6 +590,9 @@ export interface WorkflowAgentSession {
 
 export interface AgentSessionRuntimeEventReceipt {
   type: string
+  inputDeliveryId?: string
+  agentTurnId?: string
+  agentSessionId?: string
 }
 
 export interface AgentInputAttachmentContent {
@@ -600,6 +605,9 @@ export interface AgentSessionRuntimeEventAcceptance {
   id?: string
   type?: string
   sequence?: number
+  inputDeliveryId?: string
+  agentTurnId?: string
+  agentSessionId?: string
 }
 
 export type AgentSession = WorkflowAgentSession
@@ -608,6 +616,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
   const work: DispatchWorkItem = {
     workflowRunId: dispatch.workflowRunId,
     workId: dispatch.workId,
+    taskRunId: dispatch.taskRunId ?? undefined,
     workType: dispatch.workType,
     stage: dispatch.stage,
     title: dispatch.title,

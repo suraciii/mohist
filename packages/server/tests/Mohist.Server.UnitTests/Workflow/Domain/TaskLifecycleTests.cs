@@ -70,6 +70,25 @@ public class TaskLifecycleTests
     }
 
     [Fact]
+    public void TaskResult_WithWrongPersistedIdentityDoesNotFallBackToTheCurrentTask()
+    {
+        var run = BuildRun();
+        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        var task = run.CurrentStage().Tasks[0];
+
+        Assert.Empty(run.CompleteTask("other-stage", task.Id, DateTimeOffset.UnixEpoch));
+        Assert.Empty(run.FailTask("build", "other-task", new TaskResult("failed", "wrong"), DateTimeOffset.UnixEpoch));
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Null(task.FinishedAt);
+        Assert.Null(run.Failure);
+
+        var events = run.CompleteTask("build", task.Id, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(TaskRunStatus.Completed, task.Status);
+        Assert.IsType<TaskCompleted>(WorkflowEventSerializer.Unwrap(events[0]));
+    }
+
+    [Fact]
     public void FailTask_DoesNotFailPendingTask()
     {
         var run = BuildRun();

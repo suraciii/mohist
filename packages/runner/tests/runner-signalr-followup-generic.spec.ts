@@ -52,6 +52,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
         },
       },
       text: "continue",
+      turnId: "turn-1",
     })).resolves.toEqual({ accepted: true })
 
     expect(runtime.followupCalls).toHaveLength(1)
@@ -59,7 +60,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(runtime.followupCalls[0].prompt).toBe("continue")
   })
 
-  followupIt("GenericFollowup_InputEntersGenericFollowupProducerFamily", async ({ runtime, recording }) => {
+  followupIt("GenericFollowup_InputEntersExactSessionTurnProducerFamily", async ({ runtime, recording }) => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
@@ -68,8 +69,9 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
 
     expect(recording.beforeExecutionCalls).toHaveLength(1)
     expect(recording.beforeExecutionCalls[0]).toMatchObject({
-      producerFamily: "generic-followup",
-      target: { kind: "generic", projectId: "proj-1", sessionId: "gen-session-1" },
+      producerFamily: "session-followup",
+      target: { kind: "session", sessionId: "gen-session-1" },
+      sessionTurnId: "turn-1",
       event: {
         type: "session.input",
         payload: expect.objectContaining({
@@ -97,8 +99,9 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
       "session.activity",
     ])
     for (const record of recording.records) {
-      expect(record.target).toMatchObject({ kind: "generic", projectId: "proj-1", sessionId: "gen-session-1" })
+      expect(record.target).toMatchObject({ kind: "session", sessionId: "gen-session-1" })
       expect(record.runtimeSessionId).toBe("runtime-1")
+      expect(record.sessionTurnId).toBe("turn-1")
     }
   })
 
@@ -168,7 +171,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  followupIt("WorkflowFollowup_InputEntersWorkflowSessionProducerFamily", async ({ runtime, recording }) => {
+  followupIt("WorkflowFollowup_InputEntersExactSessionTurnProducerFamily", async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string }) => {
       expect(target.kind).toBe("workflow")
       return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
@@ -181,19 +184,22 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
         projectId: "proj-1",
         workflowRunId: "wr-1",
         sessionName: "work-1",
+        sessionId: "session-1",
         binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
       },
       text: "tag me",
+      turnId: "turn-1",
     })
     await flush()
 
     expect(recording.beforeExecutionCalls[0]).toMatchObject({
-      producerFamily: "workflow-session",
-      target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wr-1", sessionName: "work-1" },
+      producerFamily: "session-followup",
+      target: { kind: "session", sessionId: "session-1" },
+      sessionTurnId: "turn-1",
     })
   })
 
-  followupIt("WorkflowFollowup_LegacyTopLevelFields_StillResolveToWorkflowTarget", async ({ runtime, recording }) => {
+  followupIt("WorkflowFollowup_PreservesWorkflowResolverContextWhileRoutingByExactSession", async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string; workflowRunId?: string; sessionName?: string }) => {
       expect(target.kind).toBe("workflow")
       expect(target.workflowRunId).toBe("wr-legacy")
@@ -208,18 +214,19 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
         projectId: "proj-legacy",
         workflowRunId: "wr-legacy",
         sessionName: "work-legacy",
+        sessionId: "session-legacy",
         binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
       },
-      text: "legacy ok",
+      text: "continue",
+      turnId: "turn-legacy",
     })
     await flush()
 
     expect(recording.beforeExecutionCalls).toHaveLength(1)
     expect(recording.beforeExecutionCalls[0]).toMatchObject({
-      target: { kind: "workflow", workflowRunId: "wr-legacy", sessionName: "work-legacy" },
+      target: { kind: "session", sessionId: "session-legacy" },
+      sessionTurnId: "turn-legacy",
     })
-    // Resolver-supplied projectId is reflected through `target.projectId` on the
-    // runtime handle (not the Session target key in the outbox).
     expect(runtime.followupCalls[0]?.target).toMatchObject({ runtimeSessionId: "runtime-1" })
   })
 })

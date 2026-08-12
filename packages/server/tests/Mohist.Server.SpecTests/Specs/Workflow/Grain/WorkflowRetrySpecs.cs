@@ -318,7 +318,8 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             TaskReportStatus.Failed,
             Output: null,
             Artifacts: null,
-            Detail: "stale report"));
+            Detail: "stale report",
+            TaskRunId: first.TaskRunId));
 
         Assert.Equal(ReportAck.Stale, ack);
         var run = await LoadRunAsync(_workflowId!);

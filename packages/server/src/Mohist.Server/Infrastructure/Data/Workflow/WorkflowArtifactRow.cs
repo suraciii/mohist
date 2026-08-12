@@ -49,6 +49,10 @@ public class WorkflowArtifactRow
     [MaxLength(128)]
     public string TaskRunId { get; set; } = string.Empty;
 
+    /// <summary>Consumed pending-upload identity used to make binding replay-safe.</summary>
+    [MaxLength(64)]
+    public string? SourceUploadId { get; set; }
+
     [Required]
     [MaxLength(1024)]
     public string Path { get; set; } = string.Empty;

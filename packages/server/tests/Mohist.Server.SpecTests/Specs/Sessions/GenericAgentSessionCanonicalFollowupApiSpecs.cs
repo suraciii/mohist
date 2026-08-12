@@ -66,8 +66,11 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
             Assert.Equal(project.Id, target.GetProperty("projectId").GetString());
             Assert.Equal(workflowRunId, target.GetProperty("workflowRunId").GetString());
             Assert.Equal(sessionName, target.GetProperty("sessionName").GetString());
+            Assert.Equal(sessionId, target.GetProperty("sessionId").GetString());
             Assert.Equal("opencode", target.GetProperty("binding").GetProperty("runtime").GetString());
             Assert.Equal(sessionId, target.GetProperty("binding").GetProperty("runtimeSessionId").GetString());
+            Assert.Equal(responseData.GetProperty("inputId").GetString(), payload.GetProperty("inputId").GetString());
+            Assert.Equal(responseData.GetProperty("turnId").GetString(), payload.GetProperty("turnId").GetString());
         }
         finally
         {

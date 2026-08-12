@@ -5,7 +5,7 @@ using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
 
-public interface IWorkflowGrain : IGrainWithStringKey
+public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
 {
     Task StartAsync(WorkflowStartInput? input = null);
     Task EnsureStartedAsync(WorkflowIssueContext context);
@@ -29,6 +29,10 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
     Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
+    Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
+    Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
+    Task<ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);
+    Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId);
     Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);

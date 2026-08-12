@@ -94,8 +94,13 @@ async function handleJournaledCancel(
       if (existing.state === "completed") return existing.reply!
 
       const reconciliation = await reconcileStartedStop(payload, deps)
-      if (reconciliation === "ended") {
+      if (reconciliation === "missing") {
         const reply = { state: "ended" } as const
+        await journal.complete(sessionId, payload, reply)
+        return reply
+      }
+      if (reconciliation === "idle") {
+        const reply = { state: "idle" } as const
         await journal.complete(sessionId, payload, reply)
         return reply
       }
@@ -119,7 +124,7 @@ async function handleJournaledCancel(
 async function reconcileStartedStop(
   payload: CancelAgentSessionPayload,
   deps: CancelHandlerDeps,
-): Promise<"present" | "ended" | "indeterminate"> {
+): Promise<"active" | "idle" | "missing" | "indeterminate"> {
   const sessionTarget = payload.target ? sessionTargetFromWireTarget(payload.target) : null
   const binding = sessionTarget?.binding
   if (!binding || !binding.workDir) return "indeterminate"
@@ -146,8 +151,8 @@ async function reconcileStartedStop(
           workDir: binding.workDir,
         },
       })
-    if (result.ok) return "present"
-    return readErrorKind(result) === "missing-session" ? "ended" : "indeterminate"
+    if (result.ok) return result.value.activeTurn ? "active" : "idle"
+    return readErrorKind(result) === "missing-session" ? "missing" : "indeterminate"
   } catch (error) {
     log.error("cancel stop reconciliation probe threw", {
       exception: error,
@@ -253,11 +258,12 @@ async function recordCancelActivity(
   facts: { readonly cancelled: boolean; readonly stopConfirmed: boolean },
 ): Promise<void> {
   if (!outbox) return
+  if (sessionTarget.kind === "workflow") return
   const activity = facts.stopConfirmed ? "idle" : "unknown"
   const completedAt = new Date().toISOString()
   const record: RuntimeEventRecord = {
     id: `cancel-activity:${runtimeSessionId}:${activity}:${completedAt}:${Math.random().toString(36).slice(2, 10)}`,
-    producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
+    producerFamily: "generic-followup",
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId,
     work: null,

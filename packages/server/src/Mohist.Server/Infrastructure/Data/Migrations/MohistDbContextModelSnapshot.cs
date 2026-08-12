@@ -3696,6 +3696,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<long?>("Size")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("SourceUploadId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("TaskRunId")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -3710,6 +3714,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "IssueNumber", "RecordedAt")
                         .HasDatabaseName("IX_WorkflowArtifacts_ProjectId_IssueNumber_RecordedAt");
+
+                    b.HasIndex("SourceUploadId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_WorkflowArtifacts_SourceUploadId")
+                        .HasFilter("\"SourceUploadId\" IS NOT NULL");
 
                     b.HasIndex("WorkflowRunId", "Path", "RecordedAt")
                         .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_Path_RecordedAt");

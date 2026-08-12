@@ -36,15 +36,9 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
             new ProjectVariableStore(factory),
             new IssueVariableStore(factory),
             runVariablesStore);
-        var artifactService = new WorkflowArtifactBindService(
-            factory,
-            NullLogger<WorkflowArtifactBindService>.Instance,
-            new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         _translator = new WorkflowItemTranslator(
             promptResolver,
-            variableResolver,
-            artifactService,
-            NullLogger<WorkflowItemTranslator>.Instance);
+            variableResolver);
     }
 
     [Fact]
@@ -56,6 +50,13 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
 
         await SetPromptAsync(projectId, "first body");
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
+        run.Start(DateTimeOffset.UnixEpoch);
+        run.InitializeStage(
+            [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            [],
+            DateTimeOffset.UnixEpoch);
+        run.AssignTo("runner-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(item.Id!, "runner-1", DateTimeOffset.UnixEpoch);
         var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
 
         await SetPromptAsync(projectId, "updated body");

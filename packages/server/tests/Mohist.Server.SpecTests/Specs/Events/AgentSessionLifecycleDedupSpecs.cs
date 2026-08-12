@@ -354,14 +354,14 @@ public class AgentSessionLifecycleDedupSpecs
     }
 
     private Task AppendEventsAsync(CreatedSession session, object body) =>
-        _fixture.Client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session),
+        _fixture.Client.PostOkAsync(RunnerSessionRuntimeEventsPath(session),
             body);
 
     private string RunnerAgentSessionAttachPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/attach";
 
-    private string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
-        $"{RunnerSessionPath(session)}/runtime-events";
+    private string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
+        $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";
 
     private string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";

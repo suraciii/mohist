@@ -44,7 +44,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         // such as `session.liveness` still produces a `status` transcript
         // part, so verify that part type is forwarded to the activity feed
         // rather than suppressed.
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new object[]
@@ -97,7 +97,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var beforeLastDataAt = DateTime.Parse(beforeSummary.LastDataAt!);
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new object[]
@@ -204,7 +204,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
             .Cast<object>()
             .ToArray();
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeSessionId = session.Id, runtimeEvents });
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new { runtimeSessionId = session.Id, runtimeEvents });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
@@ -236,7 +236,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new object[]
@@ -249,7 +249,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
             }
         });
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new object[]

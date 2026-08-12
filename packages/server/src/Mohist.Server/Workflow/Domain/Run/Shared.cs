@@ -68,6 +68,7 @@ public static partial class WorkflowRunExtensions
 
         public bool HasDispatchableWork()
         {
+            if (run.HasUnresolvedAgentResult()) return false;
             if (run.CurrentStageId is null) return false;
             var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
             if (current is null || !current.Initialized) return false;
