@@ -136,9 +136,9 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public sealed class RecordingSessionWorkPort : ISessionWorkPort
     {
         private readonly object _gate = new();
-        private readonly List<SessionWorkAbandonRequest> _requests = [];
+        private readonly List<SessionWorkObservationRequest> _requests = [];
 
-        public IReadOnlyList<SessionWorkAbandonRequest> Requests
+        public IReadOnlyList<SessionWorkObservationRequest> Requests
         {
             get
             {
@@ -157,20 +157,26 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
             SessionWorkflowExecutionBinding binding,
             CancellationToken cancellationToken = default) => Task.FromResult(true);
 
-        public Task AbandonActiveWorkAsync(
-            SessionWorkflowWorkBinding binding,
-            string reason,
+        public Task ObserveAgentExecutionAsync(
+            SessionWorkflowExecutionBinding binding,
+            SessionWorkflowObservationKind kind,
+            string reasonCode,
+            string? message = null,
+            string? stopOperationId = null,
             CancellationToken cancellationToken = default)
         {
             lock (_gate)
-                _requests.Add(new SessionWorkAbandonRequest(binding, reason));
+                _requests.Add(new SessionWorkObservationRequest(binding, kind, reasonCode, message, stopOperationId));
             return Task.CompletedTask;
         }
     }
 
-    public sealed record SessionWorkAbandonRequest(
-        SessionWorkflowWorkBinding Binding,
-        string Reason);
+    public sealed record SessionWorkObservationRequest(
+        SessionWorkflowExecutionBinding Binding,
+        SessionWorkflowObservationKind Kind,
+        string ReasonCode,
+        string? Message,
+        string? StopOperationId);
 
     public ValueTask DisposeAsync()
     {

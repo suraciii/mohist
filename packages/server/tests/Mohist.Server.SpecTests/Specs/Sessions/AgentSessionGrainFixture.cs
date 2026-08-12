@@ -112,8 +112,13 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public sealed class RecordingSessionWorkPort : ISessionWorkPort
     {
         public List<SessionWorkflowExecutionBinding> ExecutionBindings { get; } = [];
+        public List<SessionWorkflowExecutionObservation> Observations { get; } = [];
 
-        public void Reset() => ExecutionBindings.Clear();
+        public void Reset()
+        {
+            ExecutionBindings.Clear();
+            Observations.Clear();
+        }
 
         public Task<bool> BindAgentExecutionAsync(
             SessionWorkflowExecutionBinding binding,
@@ -123,11 +128,26 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             return Task.FromResult(true);
         }
 
-        public Task AbandonActiveWorkAsync(
-            SessionWorkflowWorkBinding binding,
-            string reason,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ObserveAgentExecutionAsync(
+            SessionWorkflowExecutionBinding binding,
+            SessionWorkflowObservationKind kind,
+            string reasonCode,
+            string? message = null,
+            string? stopOperationId = null,
+            CancellationToken cancellationToken = default)
+        {
+            Observations.Add(new SessionWorkflowExecutionObservation(
+                binding, kind, reasonCode, message, stopOperationId));
+            return Task.CompletedTask;
+        }
     }
+
+    public sealed record SessionWorkflowExecutionObservation(
+        SessionWorkflowExecutionBinding Binding,
+        SessionWorkflowObservationKind Kind,
+        string ReasonCode,
+        string? Message,
+        string? StopOperationId);
 }
 
     public sealed class FakeAgentSessionStore : IAgentSessionStore

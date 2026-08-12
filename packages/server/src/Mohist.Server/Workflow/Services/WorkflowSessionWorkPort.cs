@@ -26,14 +26,43 @@ public sealed class WorkflowSessionWorkPort(IGrainFactory grains) : ISessionWork
         return ack == ReportAck.Accepted;
     }
 
-    public Task AbandonActiveWorkAsync(
-        SessionWorkflowWorkBinding binding,
-        string reason,
+    public async Task ObserveAgentExecutionAsync(
+        SessionWorkflowExecutionBinding binding,
+        SessionWorkflowObservationKind kind,
+        string reasonCode,
+        string? message = null,
+        string? stopOperationId = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return grains
+        _ = await grains
             .GetGrain<IWorkflowGrain>(binding.WorkflowRunId)
-            .AbandonActiveWorkAsync(binding.RunnerId, binding.WorkId, reason);
+            .ObserveAgentExecutionAsync(new AgentExecutionObservation(
+                new AgentExecutionBinding(
+                    binding.TaskRunId,
+                    binding.WorkId,
+                    binding.RunnerId,
+                    binding.AgentSessionId,
+                    binding.AgentTurnId,
+                    binding.Runtime,
+                    binding.RuntimeSessionId),
+                ToWorkflowObservationKind(kind),
+                reasonCode,
+                message,
+                stopOperationId));
     }
+
+    private static AgentExecutionObservationKind ToWorkflowObservationKind(SessionWorkflowObservationKind kind) => kind switch
+    {
+        SessionWorkflowObservationKind.Idle => AgentExecutionObservationKind.Idle,
+        SessionWorkflowObservationKind.Completed => AgentExecutionObservationKind.Completed,
+        SessionWorkflowObservationKind.Failed => AgentExecutionObservationKind.Failed,
+        SessionWorkflowObservationKind.Cancelled => AgentExecutionObservationKind.Cancelled,
+        SessionWorkflowObservationKind.Unknown => AgentExecutionObservationKind.Unknown,
+        SessionWorkflowObservationKind.Stopped => AgentExecutionObservationKind.Stopped,
+        SessionWorkflowObservationKind.StopUnconfirmed => AgentExecutionObservationKind.StopUnconfirmed,
+        SessionWorkflowObservationKind.TargetMissing => AgentExecutionObservationKind.TargetMissing,
+        SessionWorkflowObservationKind.Disconnected => AgentExecutionObservationKind.Disconnected,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported Session Workflow observation."),
+    };
 }

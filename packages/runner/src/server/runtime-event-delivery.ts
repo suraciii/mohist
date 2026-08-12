@@ -5,7 +5,7 @@
 // `AgentSessionRuntimeEventReceipt[]`.
 
 import type { ServerConnection, AgentSessionRuntimeEventReceipt } from "./connection.js"
-import type { RuntimeEventDelivery, RuntimeEventRecord } from "./runtime-event-outbox.js"
+import { runtimeEventDeliveryKey, type RuntimeEventDelivery, type RuntimeEventRecord } from "./runtime-event-outbox.js"
 
 export interface RuntimeEventDeliveryOptions {
   readonly connection: ServerConnection
@@ -48,6 +48,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
     },
     async sendBatch(records: readonly RuntimeEventRecord[], signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[][]> {
       if (records.length === 0) return []
+      assertHomogeneousBatch(records)
       const head = records[0]
       if (head.producerFamily === "workflow-session" && head.target.kind === "workflow") {
         const workflowRecords = records as readonly (RuntimeEventRecord & { target: { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string } })[]
@@ -106,6 +107,7 @@ function envelope(record: RuntimeEventRecord) {
 }
 
 function batchEnvelope(records: readonly RuntimeEventRecord[]) {
+  assertHomogeneousBatch(records)
   const head = records[0]
   const work = head.work
   return {
@@ -119,4 +121,12 @@ function batchEnvelope(records: readonly RuntimeEventRecord[]) {
     runtimeSessionId: head.runtimeSessionId,
     runtimeEvents: records.map((record) => ({ type: record.event.type, payload: record.event.payload })),
   }
+}
+
+function assertHomogeneousBatch(records: readonly RuntimeEventRecord[]): void {
+  const head = records[0]
+  if (!head) return
+  const expected = runtimeEventDeliveryKey(head)
+  if (records.some((record) => runtimeEventDeliveryKey(record) !== expected))
+    throw new Error("runtime-event delivery: mixed execution identity batch")
 }

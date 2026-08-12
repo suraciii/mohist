@@ -88,6 +88,7 @@ export interface RuntimeEventWorkMetadata {
   readonly workType: string
   readonly stage: string | null
   readonly taskRunId?: string | null
+  readonly runnerId?: string | null
   readonly inputDeliveryId?: string | null
   readonly agentTurnId?: string | null
 }
@@ -480,7 +481,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private takeBatch(label: string, limit: number): InternalRecord[] {
     const matching: InternalRecord[] = []
     for (const record of this.records.values()) {
-      const recordLabel = sequenceKeyLabel(sequenceKey(record))
+      const recordLabel = runtimeEventDeliveryKey(record)
       if (recordLabel !== label) continue
       matching.push(record)
       if (matching.length >= limit) break
@@ -685,7 +686,7 @@ interface GroupSnapshot {
 function collectGroups(records: InternalRecord[]): GroupSnapshot[] {
   const groups = new Map<string, InternalRecord[]>()
   for (const record of records) {
-    const label = sequenceKeyLabel(sequenceKey(record))
+    const label = runtimeEventDeliveryKey(record)
     const list = groups.get(label)
     if (list) list.push(record)
     else groups.set(label, [record])
@@ -704,6 +705,7 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
       projectId: record.target.projectId,
       workflowRunId: record.target.workflowRunId,
       sessionName: record.target.sessionName,
+      execution: workflowExecutionIdentity(record),
     }
   }
   if (record.producerFamily === "binding-reconcile") {
@@ -722,9 +724,67 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
   }
 }
 
+/** Stable queue identity for one server delivery envelope. */
+export function runtimeEventDeliveryKey(record: RuntimeEventRecord): string {
+  return sequenceKeyLabel(sequenceKey(record))
+}
+
+export interface WorkflowRuntimeEventExecutionIdentity {
+  readonly runnerId: string
+  readonly taskRunId: string
+  readonly workId: string
+  readonly inputDeliveryId: string
+  readonly agentTurnId: string | null
+  readonly runtime: string
+  readonly runtimeSessionId: string
+}
+
+/**
+ * Workflow task events carry the server-acknowledged input identity. Session
+ * control events without task metadata intentionally retain their own route.
+ */
+export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowRuntimeEventExecutionIdentity | null {
+  if (record.producerFamily !== "workflow-session" || record.target.kind !== "workflow") return null
+  const work = record.work
+  const containsExecutionField = work?.taskRunId !== undefined
+    || work?.runnerId !== undefined
+    || work?.inputDeliveryId !== undefined
+    || work?.agentTurnId !== undefined
+  if (!work || !containsExecutionField) return null
+  if (!nonEmpty(work.workId)
+    || !nonEmpty(work.taskRunId)
+    || !nonEmpty(work.runnerId)
+    || !nonEmpty(work.inputDeliveryId)
+    || !nonEmpty(record.runtime)
+    || !nonEmpty(record.runtimeSessionId)) {
+    throw new Error("workflow-session execution record requires its complete immutable execution identity")
+  }
+  if (work.agentTurnId !== undefined && work.agentTurnId !== null && !nonEmpty(work.agentTurnId))
+    throw new Error("workflow-session execution record has an invalid Agent turn identity")
+  return {
+    runnerId: work.runnerId,
+    taskRunId: work.taskRunId,
+    workId: work.workId,
+    inputDeliveryId: work.inputDeliveryId,
+    agentTurnId: work.agentTurnId ?? null,
+    runtime: record.runtime,
+    runtimeSessionId: record.runtimeSessionId,
+  }
+}
+
+function nonEmpty(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.length > 0
+}
+
 function sequenceKeyLabel(key: SequenceKey): string {
   if (key.family === "workflow-session") {
-    return `workflow-session:${key.projectId}:${key.workflowRunId}:${key.sessionName}`
+    return JSON.stringify({
+      family: key.family,
+      projectId: key.projectId,
+      workflowRunId: key.workflowRunId,
+      sessionName: key.sessionName,
+      execution: key.execution ?? null,
+    })
   }
   if (key.family === "binding-reconcile") {
     return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
@@ -857,6 +917,7 @@ function isRuntimeWorkMetadata(value: unknown): value is RuntimeEventWorkMetadat
     && typeof value["workType"] === "string"
     && (value["stage"] === null || typeof value["stage"] === "string")
     && (value["taskRunId"] === undefined || value["taskRunId"] === null || typeof value["taskRunId"] === "string")
+    && (value["runnerId"] === undefined || value["runnerId"] === null || typeof value["runnerId"] === "string")
     && (value["inputDeliveryId"] === undefined || value["inputDeliveryId"] === null || typeof value["inputDeliveryId"] === "string")
     && (value["agentTurnId"] === undefined || value["agentTurnId"] === null || typeof value["agentTurnId"] === "string")
 }
@@ -890,4 +951,5 @@ interface SequenceKey {
   readonly sessionName?: string
   readonly sessionId?: string
   readonly runtimeSessionId?: string
+  readonly execution?: WorkflowRuntimeEventExecutionIdentity | null
 }

@@ -2,19 +2,17 @@ using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions.Services;
 
-public sealed record SessionWorkflowWorkBinding(
-    string WorkflowRunId,
-    string RunnerId,
-    string WorkId);
-
 public interface ISessionWorkPort
 {
     Task<bool> BindAgentExecutionAsync(
         SessionWorkflowExecutionBinding binding,
         CancellationToken cancellationToken = default);
 
-    Task AbandonActiveWorkAsync(
-        SessionWorkflowWorkBinding binding,
-        string reason,
+    Task ObserveAgentExecutionAsync(
+        SessionWorkflowExecutionBinding binding,
+        SessionWorkflowObservationKind kind,
+        string reasonCode,
+        string? message = null,
+        string? stopOperationId = null,
         CancellationToken cancellationToken = default);
 }

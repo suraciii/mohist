@@ -35,3 +35,15 @@
 - Later events for a runtime with a Workflow-bound turn must carry a complete matching frozen binding. The Server rejects a missing or mismatched turn/task/work/runner/runtime identity.
 - Focused checks passed: Server build, AgentSession input-boundary specs, migration-ledger architecture specs, Runner typecheck, and 51 Runner runtime-event/reporter tests. `dotnet test --filter` is ignored by the current Microsoft.Testing.Platform configuration and ran all 3,862 specs; 27 unrelated full-suite failures were reported, so the direct xUnit class runner was used for the focused Server spec instead.
 - The migration source-tree baseline is files=837, digest=1efcb9cbd9d39dac5f5f3d7b268fd7c61358f81551d6ef8df088418ec175e01c.
+
+## T-004
+
+- Workflow runtime-event records now carry the immutable Runner, task-run, work, input-delivery, Agent-turn, runtime, and runtime-session identity. The outbox groups and production delivery batches by that complete identity, and `sendBatch` rejects mixed records before building an envelope from its head.
+- AgentSession sends identity-fenced physical observations through `ObserveAgentExecutionAsync`; terminal, idle, stop, recovery, and disconnect paths use the binding frozen on the recorded turn rather than mutable Session work labels. Generic unbound turns have no Workflow observation target.
+- Stop recovery preserves the existing operation id and sends it again only while the exact frozen target remains active. A stale, replaced, terminal, idle, or indeterminate target is observed without another stop dispatch.
+- Focused Runner runtime-event tests passed (58 tests). Focused AgentSession input, stop-recovery, and Workflow settlement specs passed through the xUnit v3 runner. The migration source-tree baseline is files=837, digest=5b0192e1a5889f506eb39993c0737ae13bc20ab8838ca05bb037d573b04a253b.
+
+### Interrupted Handoff
+
+- The first `npm run test:fast` completed every lane except architecture, which correctly caught a Sessions-to-Workflow dependency through the observation enum. The enum is now owned by Sessions and mapped in `WorkflowSessionWorkPort`; the source-tree baseline is files=837, digest=d740a68880316b263daed1945f4bc6de159d53682af65703ea591e71bbbb80c4.
+- The focused SpecTests project build and Runner typecheck pass after that boundary correction. Rerun the architecture suite and `npm run test:fast` after resuming; no further feature work is pending for T-004.

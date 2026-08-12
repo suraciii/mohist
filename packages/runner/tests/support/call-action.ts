@@ -90,6 +90,7 @@ function createReporter(
     workMetadata: {
       workId: context.workId,
       taskRunId: context.taskRunId ?? context.workId,
+      runnerId: context.serverConnection?.runnerId ?? "runner-test",
       workType: context.workType,
       stage: context.stage ?? null,
     },

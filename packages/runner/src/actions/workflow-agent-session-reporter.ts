@@ -7,6 +7,7 @@ const log = runnerLogger.child("session")
 export interface WorkflowAgentSessionWorkMetadata {
   readonly workId: string
   readonly taskRunId: string
+  readonly runnerId: string
   readonly workType: string
   readonly stage?: string | null
 }
@@ -266,6 +267,7 @@ export class WorkflowAgentSessionReporter {
       work: {
         workId: this.workMetadata.workId,
         taskRunId: this.workMetadata.taskRunId,
+        runnerId: this.workMetadata.runnerId,
         workType: this.workMetadata.workType,
         stage: this.workMetadata.stage ?? null,
         inputDeliveryId: this.inputDeliveryId,

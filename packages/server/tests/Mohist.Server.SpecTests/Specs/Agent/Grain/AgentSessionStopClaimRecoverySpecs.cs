@@ -65,6 +65,57 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task RecoveryReminder_RedeliversTheRecordedWorkflowTargetAndObservesItsFrozenBinding()
+    {
+        _fixture.StopDelivery.Reset();
+        _fixture.StopDelivery.Enqueue(null);
+        _fixture.StopDelivery.Enqueue(new RunnerStopReply("stopped"));
+        _fixture.WorkPort.Reset();
+
+        var sessionId = $"session-workflow-stop-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-workflow-stop",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/workflow-stop",
+            Metadata: WorkflowAgentSessionMetadata.Metadata(
+                new WorkflowAgentSessionContext("project-workflow-stop", "workflow-stop", "build"))));
+        await session.AttachPhysicalSessionAsync(
+            new AttachPhysicalSessionCommand("runtime-workflow-stop", WorkDir: "/tmp/workflow-stop"));
+
+        var receipt = await session.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-workflow-stop",
+            "stop this workflow turn",
+            "workflow-stop",
+            "task-stop.1",
+            "work-stop",
+            "runner-workflow-stop",
+            "opencode",
+            "runtime-workflow-stop",
+            "{\"text\":\"stop this workflow turn\"}"));
+        var claim = await session.ClaimTurnStopAsync(receipt.AgentTurnId, "stop-workflow-operation");
+        Assert.True(claim.CanDispatch);
+
+        await session.RunStopRecoveryAsync();
+        await session.RunStopRecoveryAsync();
+
+        Assert.Equal(2, _fixture.StopDelivery.Requests.Count);
+        Assert.All(_fixture.StopDelivery.Requests, request =>
+        {
+            Assert.Equal("stop-workflow-operation", request.OperationId);
+            Assert.Equal(receipt.AgentTurnId, request.TurnId);
+            Assert.Equal("runner-workflow-stop", request.RunnerId);
+            Assert.Equal("runtime-workflow-stop", request.RuntimeSessionId);
+        });
+        var observation = Assert.Single(_fixture.WorkPort.Requests);
+        Assert.Equal(SessionWorkflowObservationKind.Stopped, observation.Kind);
+        Assert.Equal("task-stop.1", observation.Binding.TaskRunId);
+        Assert.Equal("work-stop", observation.Binding.WorkId);
+        Assert.Equal(receipt.AgentTurnId, observation.Binding.AgentTurnId);
+        Assert.Equal("stop-workflow-operation", observation.StopOperationId);
+    }
+
+    [Fact]
     public async Task RecoveryReminder_DeadlineExhausted_SettlesBlockedWithoutAnotherDelivery()
     {
         _fixture.StopDelivery.Reset();
@@ -269,7 +320,7 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task RuntimeSettlement_OnlyAbandonsForANewNonSuccessTurn()
+    public async Task RuntimeSettlement_DoesNotObserveAnUnboundGenericTurn()
     {
         _fixture.WorkPort.Reset();
 
@@ -303,7 +354,7 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
                 "{\"activity\":\"idle\",\"status\":\"failed\",\"turnId\":\"turn-work-settlement-1\"}") },
             "runtime-work-settlement"));
 
-        Assert.Single(_fixture.WorkPort.Requests);
+        Assert.Empty(_fixture.WorkPort.Requests);
 
         await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
             "input-work-settlement-2",
@@ -317,6 +368,6 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
                 "{\"activity\":\"active\",\"status\":\"running\",\"turnId\":\"turn-work-settlement-2\"}") },
             "runtime-work-settlement"));
 
-        Assert.Single(_fixture.WorkPort.Requests);
+        Assert.Empty(_fixture.WorkPort.Requests);
     }
 }

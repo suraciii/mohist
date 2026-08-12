@@ -543,7 +543,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
       projectId: "proj-1",
       workflowRunId: "wf-1",
       sessionName: "plan",
-      workMetadata: { workId: "work-1", taskRunId: "task-1.1", workType: "task", stage: "plan" },
+      workMetadata: { workId: "work-1", taskRunId: "task-1.1", runnerId: "runner-1", workType: "task", stage: "plan" },
       runtime: "opencode",
       randomId: (() => {
         let counter = 0

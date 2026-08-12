@@ -639,6 +639,19 @@ public sealed record SessionWorkflowExecutionBinding(
     [property: Id(7)] string Runtime,
     [property: Id(8)] string RuntimeSessionId);
 
+public enum SessionWorkflowObservationKind
+{
+    Idle,
+    Completed,
+    Failed,
+    Cancelled,
+    Unknown,
+    Stopped,
+    StopUnconfirmed,
+    TargetMissing,
+    Disconnected,
+}
+
 [GenerateSerializer]
 public sealed record AgentSessionStopClaim(
     [property: Id(0)] string TurnId,

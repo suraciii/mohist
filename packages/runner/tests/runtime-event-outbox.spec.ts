@@ -141,6 +141,28 @@ function followupTerminal(overrides: Partial<RuntimeEventRecord> = {}): RuntimeE
   }
 }
 
+function workflowFact(id: string, overrides: Partial<RuntimeEventRecord> = {}): RuntimeEventRecord {
+  return {
+    id,
+    producerFamily: "workflow-session",
+    target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "build" },
+    runtime: "opencode",
+    runtimeSessionId: "runtime-1",
+    work: {
+      workId: "work-1",
+      taskRunId: "task-1.1",
+      runnerId: "runner-1",
+      inputDeliveryId: "input-1",
+      agentTurnId: "turn-1",
+      workType: "task",
+      stage: "build",
+    },
+    event: { type: "message.delta", payload: { text: id } },
+    acknowledgementPolicy: "matching-receipt",
+    ...overrides,
+  }
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
 })
@@ -241,6 +263,7 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
       id: "delivery-1",
       runtime: "opencode",
       work: {
+        runnerId: "runner-1",
         workId: "work-1",
         taskRunId: "task-1.1",
         workType: "task",
@@ -256,7 +279,18 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
     await first.outbox.load()
     await first.outbox.enqueueBeforeExecution(record)
     await flushMicrotasks()
-    expect(first.outbox.snapshot().map((entry) => entry.id)).toEqual(["delivery-1"])
+    expect(first.outbox.snapshot()).toMatchObject([{
+      id: "delivery-1",
+      runtime: "opencode",
+      runtimeSessionId: "ses_1",
+      work: {
+        runnerId: "runner-1",
+        taskRunId: "task-1.1",
+        workId: "work-1",
+        inputDeliveryId: "delivery-1",
+        agentTurnId: null,
+      },
+    }])
     await first.outbox.stop()
 
     const second = makeOutbox({
@@ -305,6 +339,7 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
       id: "delivery-1",
       runtime: "opencode",
       work: {
+        runnerId: "runner-1",
         workId: "work-1",
         taskRunId: "task-1.1",
         workType: "task",
@@ -339,6 +374,7 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
       id: "delivery-1",
       runtime: "opencode",
       work: {
+        runnerId: "runner-1",
         workId: "work-1",
         taskRunId: "task-1.1",
         workType: "task",
@@ -507,6 +543,42 @@ describe("AgentSessionRuntimeEventOutbox — managed-sequence FIFO", () => {
 
     expect(batches).toEqual([["runtime-old"], ["runtime-current"]])
     expect(outbox.snapshot()).toHaveLength(0)
+  })
+
+  it("partitions persisted Workflow facts by the complete immutable execution identity", async () => {
+    const batches: RuntimeEventRecord[][] = []
+    const { outbox } = makeOutbox({
+      deliveryBatchSize: 64,
+      deliver: {
+        async send() {
+          throw new Error("batched delivery expected")
+        },
+        async sendBatch(records) {
+          batches.push([...records])
+          return records.map((record) => [{ type: record.event.type }])
+        },
+      },
+    })
+    await outbox.load()
+    await outbox.enqueueProducedFactBatch([
+      workflowFact("same-a"),
+      workflowFact("same-b"),
+      workflowFact("other-work", { work: { ...workflowFact("template").work!, workId: "work-2" } }),
+      workflowFact("other-turn", { work: { ...workflowFact("template").work!, agentTurnId: "turn-2" } }),
+      workflowFact("other-runner", { work: { ...workflowFact("template").work!, runnerId: "runner-2" } }),
+      workflowFact("other-runtime", { runtimeSessionId: "runtime-2" }),
+    ])
+
+    await outbox.kick()
+
+    expect(batches.map((batch) => batch.map((record) => record.id))).toEqual(expect.arrayContaining([
+      ["same-a", "same-b"],
+      ["other-work"],
+      ["other-turn"],
+      ["other-runner"],
+      ["other-runtime"],
+    ]))
+    expect(outbox.snapshot()).toEqual([])
   })
 
   it("successful-response consumes the operation lease; replay legitimately settles with []", async () => {
