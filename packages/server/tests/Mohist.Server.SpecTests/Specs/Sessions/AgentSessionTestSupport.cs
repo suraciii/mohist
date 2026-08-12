@@ -113,6 +113,9 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     protected string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/runtime-events";
 
+    protected string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
+        $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";
+
     protected string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";
 
@@ -153,7 +156,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         CreatedSession session,
         string turnId,
         params (string Type, object Payload)[] runtimeEvents) =>
-        _client.PostOkAsync($"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events", new
+        _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             agentSessionId = session.Id,

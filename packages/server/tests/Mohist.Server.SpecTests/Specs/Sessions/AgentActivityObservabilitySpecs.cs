@@ -37,7 +37,7 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("activity-observability");
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
             runtimeEvents = new object[]

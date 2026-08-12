@@ -91,13 +91,12 @@ public class CanonicalIssueReferenceMigrationSpecs : CanonicalIssueReferenceMigr
         Assert.Equal(("proj_alpha", 42), (alphaProfile.ProjectId, alphaProfile.IssueNumber));
         Assert.Equal(("proj_beta", 42), (betaProfile.ProjectId, betaProfile.IssueNumber));
 
-        var artifacts = await verify.WorkflowArtifacts.AsNoTracking()
-            .OrderBy(row => row.ArtifactId)
-            .ToListAsync();
-        Assert.Collection(
-            artifacts,
-            row => Assert.Equal(("proj_alpha", 42), (row.ProjectId, row.IssueNumber)),
-            row => Assert.Equal(("proj_beta", 42), (row.ProjectId, row.IssueNumber)));
+        var artifacts = await verify.Database.SqlQueryRaw<string>("""
+            SELECT "ProjectId" || ':' || "IssueNumber" AS "Value"
+            FROM "WorkflowArtifacts"
+            ORDER BY "ArtifactId"
+            """).ToListAsync();
+        Assert.Equal(["proj_alpha:42", "proj_beta:42"], artifacts);
 
         var issueAttachmentOwnerIssueNumber = await verify.Attachments.AsNoTracking()
             .Where(row => row.Id == "att_alpha_issue")

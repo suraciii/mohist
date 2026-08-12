@@ -50,6 +50,13 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
 
         await SetPromptAsync(projectId, "first body");
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
+        run.Start(DateTimeOffset.UnixEpoch);
+        run.InitializeStage(
+            [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            [],
+            DateTimeOffset.UnixEpoch);
+        run.AssignTo("runner-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(item.Id!, "runner-1", DateTimeOffset.UnixEpoch);
         var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
 
         await SetPromptAsync(projectId, "updated body");
