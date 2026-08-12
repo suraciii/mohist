@@ -59,9 +59,13 @@ const trxCases: TestCase[] = [
   { name: 'Ns.Cli.Theory(value: 1)', durationMs: 800, outcome: 'passed' },
 ]
 
-test('discovery and run ids use fake process and fake clock seams', () => {
+test('discovery and run ids use fake process and monotonic clock seams', () => {
   assert.deepEqual(manifest.cases.map((item) => item.uid), [fastCaseUid, theoryCaseUid])
   assert.equal(createExecutionRunId({ now: () => 1234 }, () => 'fixed'), 'ya-fixed')
+  assert.equal(createExecutionRunId({ now: () => 1234.987 }, () => 'fractional'), 'ya-fractional')
+  for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, -0.1, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => createExecutionRunId({ now: () => invalid }, () => 'invalid'), /invalid timestamp/)
+  }
   const duplicate = JSON.stringify([
     { ID: fastCaseUid, DisplayName: 'Ns.Cli.Fast', Class: 'Ns.Cli', Method: 'Fast' },
     { ID: fastCaseUid, DisplayName: 'Ns.Cli.Other', Class: 'Ns.Cli', Method: 'Other' },
