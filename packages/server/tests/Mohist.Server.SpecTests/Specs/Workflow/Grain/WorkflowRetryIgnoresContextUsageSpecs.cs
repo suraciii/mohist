@@ -17,6 +17,7 @@ using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
@@ -56,12 +57,25 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         try
         {
             var work = await PollForTaskAsync(runnerId, projectId, workflowRunId);
-            await OpenAndAttachSessionAsync(runnerId, projectId, workflowRunId, sessionName, work);
+            var binding = await OpenAndAttachSessionAsync(
+                runnerId,
+                projectId,
+                issueNumber,
+                workflowRunId,
+                sessionName,
+                work);
             if (contextWindowSize > 0)
             {
-                await PushContextUsageAsync(runnerId, projectId, workflowRunId, sessionName, contextWindowUsed, contextWindowSize);
+                await PushContextUsageAsync(
+                    runnerId,
+                    projectId,
+                    workflowRunId,
+                    sessionName,
+                    binding,
+                    contextWindowUsed,
+                    contextWindowSize);
             }
-            await ReportTaskFailedAsync(runnerId, workflowRunId, work.WorkId, $"failed at {label}");
+            await ReportTaskFailedAsync(runnerId, workflowRunId, work, $"failed at {label}");
 
             var response = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/retry", null);
 
@@ -95,7 +109,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         try
         {
             var work = await PollForTaskAsync(runnerId, projectId, workflowRunId);
-            await ReportTaskFailedAsync(runnerId, workflowRunId, work.WorkId, "no session attached");
+            await ReportTaskFailedAsync(runnerId, workflowRunId, work, "no session attached");
 
             var response = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/retry", null);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -112,6 +126,16 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectId);
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
+        await WorkflowGrainTestHelpers.SeedWorkflowTemplateAsync(
+            _fixture.ConnectionString,
+            $"retry-agent-{Guid.NewGuid():N}",
+            new WorkflowDefinition([
+                new StageDefinition(
+                    "build",
+                    [new TaskDefinition("task-1", "Task 1", "mohist/opencode")],
+                    [])
+            ]),
+            project.Id);
 
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
@@ -164,6 +188,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         {
             return new WorkDispatchInfo(
                 data.GetProperty("workId").GetString()!,
+                data.GetProperty("taskRunId").GetString()!,
                 data.GetProperty("stage").GetString() ?? "build",
                 data.TryGetProperty("title", out var t) ? t.GetString() : null);
         }
@@ -172,12 +197,19 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         {
             workflowRunId = dispatchedWorkflowRunId,
             workId = data.GetProperty("workId").GetString(),
+            taskRunId = data.GetProperty("taskRunId").GetString(),
             status = "completed",
         });
         return null;
     }
 
-    private async Task<string> OpenAndAttachSessionAsync(string runnerId, string projectId, string workflowRunId, string sessionName, WorkDispatchInfo work)
+    private async Task<WorkflowRuntimeBinding> OpenAndAttachSessionAsync(
+        string runnerId,
+        string projectId,
+        int issueNumber,
+        string workflowRunId,
+        string sessionName,
+        WorkDispatchInfo work)
     {
         await _client.PostOkAsync(
             $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/open",
@@ -187,7 +219,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
                 workType = "task",
                 stage = work.Stage,
                 title = work.Title ?? "Task 1",
-                issueNumber = 1,
+                issueNumber,
                 runtime = "opencode",
             });
 
@@ -205,7 +237,26 @@ public class WorkflowRetryIgnoresContextUsageSpecs
                 processPid = 4321,
             });
 
-        return sessionId;
+        var inputDeliveryId = $"delivery-{Guid.NewGuid():N}";
+        var receipt = await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(sessionId)
+            .AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+                inputDeliveryId,
+                "execute workflow task",
+                workflowRunId,
+                work.TaskRunId,
+                work.WorkId,
+                runnerId,
+                "opencode",
+                RuntimeSessionId,
+                "{\"text\":\"execute workflow task\"}"));
+        Assert.True(receipt.WorkflowBindingAccepted);
+        return new WorkflowRuntimeBinding(
+            inputDeliveryId,
+            receipt.AgentSessionId,
+            receipt.AgentTurnId,
+            work.TaskRunId,
+            work.WorkId);
     }
 
     private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
@@ -219,16 +270,28 @@ public class WorkflowRetryIgnoresContextUsageSpecs
             .SingleAsync();
     }
 
-    private async Task PushContextUsageAsync(string runnerId, string projectId, string workflowRunId, string sessionName, long contextWindowUsed, long contextWindowSize)
+    private async Task PushContextUsageAsync(
+        string runnerId,
+        string projectId,
+        string workflowRunId,
+        string sessionName,
+        WorkflowRuntimeBinding binding,
+        long contextWindowUsed,
+        long contextWindowSize)
     {
         await _client.PostOkAsync(
             $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/runtime-events",
             new
             {
                 runtimeSessionId = RuntimeSessionId,
-                workId = "task-1.1",
+                inputDeliveryId = binding.InputDeliveryId,
+                agentSessionId = binding.AgentSessionId,
+                agentTurnId = binding.AgentTurnId,
+                taskRunId = binding.TaskRunId,
+                workId = binding.WorkId,
                 workType = "task",
                 stage = "build",
+                runtime = "opencode",
                 runtimeEvents = new object[]
                 {
                     new
@@ -236,6 +299,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
                         type = "usage.updated",
                         payload = new
                         {
+                            turnId = binding.AgentTurnId,
                             contextWindowUsed,
                             contextWindowSize,
                         },
@@ -244,12 +308,17 @@ public class WorkflowRetryIgnoresContextUsageSpecs
             });
     }
 
-    private async Task ReportTaskFailedAsync(string runnerId, string workflowRunId, string workId, string reason)
+    private async Task ReportTaskFailedAsync(
+        string runnerId,
+        string workflowRunId,
+        WorkDispatchInfo work,
+        string reason)
     {
         await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
         {
             workflowRunId,
-            workId,
+            workId = work.WorkId,
+            taskRunId = work.TaskRunId,
             status = "failed",
             message = reason,
         });
@@ -273,7 +342,13 @@ public class WorkflowRetryIgnoresContextUsageSpecs
             });
     }
 
-    private sealed record WorkDispatchInfo(string WorkId, string Stage, string? Title);
+    private sealed record WorkDispatchInfo(string WorkId, string TaskRunId, string Stage, string? Title);
+    private sealed record WorkflowRuntimeBinding(
+        string InputDeliveryId,
+        string AgentSessionId,
+        string AgentTurnId,
+        string TaskRunId,
+        string WorkId);
 
     private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(int Number, string Title);

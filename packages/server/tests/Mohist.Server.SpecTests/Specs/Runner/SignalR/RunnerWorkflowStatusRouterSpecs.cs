@@ -198,7 +198,7 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentResultUnknownAsync(string workerId, string workId, string reasonCode, string? message = null)
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);

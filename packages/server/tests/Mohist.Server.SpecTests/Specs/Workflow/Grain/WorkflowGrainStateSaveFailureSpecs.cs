@@ -205,7 +205,13 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         var failingGrain = CreateGrain(scope.ServiceProvider, failingStore, workflowRunId);
         await failingGrain.OnActivateAsync(CancellationToken.None);
 
-        var report = new TaskReport(workId, TaskReportStatus.Succeeded, Output: null, Artifacts: null);
+        var taskRunId = Assert.Single((await store.LoadAsync(workflowRunId))!.CurrentStage().Tasks).Id;
+        var report = new TaskReport(
+            workId,
+            TaskReportStatus.Succeeded,
+            Output: null,
+            Artifacts: null,
+            TaskRunId: taskRunId);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             failingGrain.ReceiveTaskReportAsync(workerId, workId, report));
         Assert.Equal(1, failingStore.EventSaveAttempts);

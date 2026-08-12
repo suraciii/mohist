@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Orleans;
 
 namespace Mohist.Server.TestSupport;
@@ -55,7 +57,7 @@ public static class DispatchTestExtensions
     /// and non-inheriting specs (Backlog, integration) so the report path is
     /// defined once.
     /// </summary>
-    public static Task ReportWorkflowDirectAsync(
+    public static async Task ReportWorkflowDirectAsync(
         IGrainFactory grains,
         IServiceProvider serviceProvider,
         string runnerId,
@@ -63,8 +65,14 @@ public static class DispatchTestExtensions
         string workId,
         WorkResult result)
     {
+        var active = await grains.GetGrain<IWorkflowGrain>(workflowRunId).GetActiveWorkAsync(workId);
         var report = ResolveScoped<WorkflowReportService>(serviceProvider);
-        return report.ReportAsync(runnerId, workflowRunId, workId, result);
+        await report.ReportAsync(
+            runnerId,
+            workflowRunId,
+            workId,
+            active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null,
+            result);
     }
 
     /// <summary>

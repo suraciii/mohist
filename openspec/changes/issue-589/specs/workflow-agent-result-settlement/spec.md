@@ -24,6 +24,14 @@ For a Workflow-owned Agent task, the WorkflowRun SHALL be the sole authority tha
 
 An unknown settlement SHALL durably retain the original WorkflowRun, task attempt and work identity, bound AgentSession and AgentTurn identity, applicable physical target, stop-operation identity, unresolved reason, and settlement deadline. The turn-opening input SHALL have a stable delivery identity, and the Agent runtime MUST NOT start until the Server acknowledges that both the AgentSession turn binding and Workflow execution binding are durable. Every later runtime event SHALL retain that immutable execution identity; events from different executions MUST NOT be delivered as one identity. Repeated inputs or observations for the same identity MUST resolve to the same turn and settlement and MUST NOT create replacement work, a replacement Agent turn, a replacement deadline, or a second task outcome.
 
+Task definition identifiers remain scoped to their stage and MAY repeat in different stages. The resulting `TaskRunId` and `WorkId` MUST nevertheless be unique within a WorkflowRun, including the first attempt of two different stages with the same definition identifier. Identity allocation MUST retain the established identifier for a non-colliding attempt and deterministically disambiguate only a colliding later attempt.
+
+#### Scenario: Different stages repeat a task definition identifier
+
+- **WHEN** two stages each execute their first attempt of a task with the same definition identifier
+- **THEN** the Workflow SHALL assign distinct TaskRun and work identities within the run
+- **AND** a report or observation naming one identity MUST NOT select the other stage's attempt
+
 #### Scenario: Runtime waits for durable Server binding
 
 - **WHEN** the Runner has persisted the turn-opening input locally but has not received the matching Server acknowledgement

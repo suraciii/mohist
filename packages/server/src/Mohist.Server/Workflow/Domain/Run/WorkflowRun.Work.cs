@@ -108,7 +108,12 @@ public static partial class WorkflowRunExtensions
         {
             var match = FindTaskAttempt(run, taskRunId, workId, workerId);
             return match is { } found && found.Task.Status == TaskRunStatus.Running
-                ? new WorkflowReportableTaskAttempt(found.Stage.Id, found.Task.Id, found.Task.WorkId!, found.Task.WorkerId!)
+                ? new WorkflowReportableTaskAttempt(
+                    found.Stage.Id,
+                    found.Task.Id,
+                    found.Task.WorkId!,
+                    found.Task.WorkerId!,
+                    found.Task.AgentResultSettlement?.State)
                 : null;
         }
 
@@ -135,6 +140,65 @@ public static partial class WorkflowRunExtensions
 
             var match = matches[0];
             return ActiveTask(match.Stage, match.Task);
+        }
+
+        public WorkflowActiveWork? FindReportableWork(
+            string taskRunId,
+            string workId,
+            string workerId)
+        {
+            var attempt = run.FindReportableTaskAttempt(taskRunId, workId, workerId);
+            if (attempt is null)
+                return null;
+
+            var stage = run.Stages.SingleOrDefault(candidate =>
+                string.Equals(candidate.Id, attempt.Stage, StringComparison.Ordinal));
+            var task = stage?.Tasks.SingleOrDefault(candidate =>
+                string.Equals(candidate.Id, attempt.TaskRunId, StringComparison.Ordinal));
+            return stage is not null && task is not null
+                ? ActiveTask(stage, task)
+                : null;
+        }
+
+        /// <summary>
+        /// Reconstructs only the declared report shape for pure ingress
+        /// translation. Eligibility and Runner ownership are deliberately not
+        /// considered here; the serialized grain turn owns that decision.
+        /// </summary>
+        public WorkItem? FindReportShape(string? taskRunId, string workId)
+        {
+            if (string.IsNullOrWhiteSpace(workId))
+                return null;
+
+            var currentStage = run.Stages.FirstOrDefault(stage =>
+                string.Equals(stage.Id, run.CurrentStageId, StringComparison.Ordinal));
+            if (!string.IsNullOrWhiteSpace(taskRunId))
+            {
+                var currentTask = currentStage?.Tasks.SingleOrDefault(task =>
+                    string.Equals(task.Id, taskRunId, StringComparison.Ordinal)
+                    && string.Equals(task.WorkId, workId, StringComparison.Ordinal));
+                if (currentTask is not null)
+                    return ActiveTask(currentStage!, currentTask).Item;
+
+                var taskMatches = run.Stages
+                    .SelectMany(stage => stage.Tasks.Select(task => (Stage: stage, Task: task)))
+                    .Where(candidate =>
+                        string.Equals(candidate.Task.Id, taskRunId, StringComparison.Ordinal)
+                        && string.Equals(candidate.Task.WorkId, workId, StringComparison.Ordinal))
+                    .Take(2)
+                    .ToList();
+                return taskMatches.Count == 1
+                    ? ActiveTask(taskMatches[0].Stage, taskMatches[0].Task).Item
+                    : null;
+            }
+
+            var checkMatches = run.Stages
+                .Where(stage => string.Equals(stage.ChecksWorkId, workId, StringComparison.Ordinal))
+                .Take(2)
+                .ToList();
+            return checkMatches.Count == 1
+                ? ActiveChecks(checkMatches[0])?.Item
+                : null;
         }
 
         /// <summary>
@@ -384,7 +448,12 @@ public static partial class WorkflowRunExtensions
 
             foreach (var task in tasks)
             {
-                var newTask = TaskRun.MakeTask(current.Tasks, task, current.Attempt, causedByFeedbackId);
+                var newTask = TaskRun.MakeTask(
+                    current.Tasks,
+                    task,
+                    current.Attempt,
+                    run.Stages.SelectMany(candidate => candidate.Tasks),
+                    causedByFeedbackId);
                 current.Tasks.Insert(insertIndex, newTask);
                 insertIndex++;
             }
@@ -430,8 +499,17 @@ public static partial class WorkflowRunExtensions
             foreach (var task in tasks)
             {
                 var newTask = task.RecoveryRemaining is { } remaining
-                    ? TaskRun.MakeContinuationTask(current.Tasks, task.Definition, current.Attempt, remaining)
-                    : TaskRun.MakeTask(current.Tasks, task.Definition, current.Attempt);
+                    ? TaskRun.MakeContinuationTask(
+                        current.Tasks,
+                        task.Definition,
+                        current.Attempt,
+                        remaining,
+                        run.Stages.SelectMany(candidate => candidate.Tasks))
+                    : TaskRun.MakeTask(
+                        current.Tasks,
+                        task.Definition,
+                        current.Attempt,
+                        run.Stages.SelectMany(candidate => candidate.Tasks));
                 current.Tasks.Insert(insertIndex, newTask);
                 insertIndex++;
             }

@@ -84,4 +84,5 @@ public sealed record WorkflowReportableTaskAttempt(
     string Stage,
     string TaskRunId,
     string WorkId,
-    string RunnerId);
+    string RunnerId,
+    AgentResultSettlementState? SettlementState);

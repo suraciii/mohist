@@ -157,21 +157,37 @@ public static class TaskRunExtensions
             IEnumerable<TaskRun> existing,
             TaskDefinition input,
             int stageAttempt,
+            IEnumerable<TaskRun> occupiedTaskRuns,
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
-            => MakeTask(existing, input, stageAttempt, recoveryRemaining: null, causedByFeedbackId, causedByFailedTaskId);
+            => MakeTask(
+                existing,
+                input,
+                stageAttempt,
+                recoveryRemaining: null,
+                occupiedTaskRuns,
+                causedByFeedbackId,
+                causedByFailedTaskId);
 
         internal static TaskRun MakeContinuationTask(
             IEnumerable<TaskRun> existing,
             TaskDefinition input,
             int stageAttempt,
             int recoveryRemaining,
+            IEnumerable<TaskRun> occupiedTaskRuns,
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
         {
             ValidateContinuation(input, recoveryRemaining);
 
-            return MakeTask(existing, input, stageAttempt, recoveryRemaining, causedByFeedbackId, causedByFailedTaskId);
+            return MakeTask(
+                existing,
+                input,
+                stageAttempt,
+                recoveryRemaining,
+                occupiedTaskRuns,
+                causedByFeedbackId,
+                causedByFailedTaskId);
         }
 
         internal static void ValidateContinuation(TaskDefinition input, int recoveryRemaining)
@@ -185,6 +201,7 @@ public static class TaskRunExtensions
             TaskDefinition input,
             int stageAttempt,
             int? recoveryRemaining,
+            IEnumerable<TaskRun> occupiedTaskRuns,
             string? causedByFeedbackId,
             string? causedByFailedTaskId)
         {
@@ -197,7 +214,7 @@ public static class TaskRunExtensions
             var classification = DeriveClassification(input.Uses, requiredFiles);
             return new TaskRun
             {
-                Id = TaskRunId(input.Id, stageAttempt, attempt),
+                Id = TaskRunId(input.Id, stageAttempt, attempt, occupiedTaskRuns),
                 DefinitionId = input.Id,
                 Attempt = attempt,
                 Title = input.Title ?? input.Id,
@@ -216,10 +233,24 @@ public static class TaskRunExtensions
             };
         }
 
-        private static string TaskRunId(string definitionId, int stageAttempt, int taskAttempt) =>
-            stageAttempt == 1
+        private static string TaskRunId(
+            string definitionId,
+            int stageAttempt,
+            int taskAttempt,
+            IEnumerable<TaskRun> occupiedTaskRuns)
+        {
+            var candidate = stageAttempt == 1
                 ? $"{definitionId}.{taskAttempt}"
                 : $"{definitionId}.s{stageAttempt}.{taskAttempt}";
+            var occupied = occupiedTaskRuns.Select(task => task.Id).ToHashSet(StringComparer.Ordinal);
+            if (occupied.Add(candidate)) return candidate;
+
+            for (var runAttempt = 2; ; runAttempt++)
+            {
+                var disambiguated = $"{candidate}.run{runAttempt}";
+                if (occupied.Add(disambiguated)) return disambiguated;
+            }
+        }
     }
 
     public static TaskDefinition ToDefinition(this TaskRun task) => new(

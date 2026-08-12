@@ -54,6 +54,7 @@ public abstract class AgentSessionTestSupport
                 await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
                 {
                     workId = work.WorkId,
+                    taskRunId = work.TaskRunId,
                     workflowRunId = work.WorkflowRunId,
                     status = "completed",
                     projectId = work.ProjectId
@@ -66,11 +67,11 @@ public abstract class AgentSessionTestSupport
                 if (expectedIssueNumber is null || work.IssueNumber == expectedIssueNumber)
                     return work;
 
-                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
+                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, taskRunId = work.TaskRunId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
                 continue;
             }
 
-            await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
+            await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, taskRunId = work.TaskRunId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
         }
 
         Assert.Fail("No agent work dispatched");
@@ -276,7 +277,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         public string Id => Info.Id;
     }
 
-    protected sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
+    protected sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? TaskRunId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
     protected sealed record AgentSessionSummaryDto(
         string Id,
         string SessionName,

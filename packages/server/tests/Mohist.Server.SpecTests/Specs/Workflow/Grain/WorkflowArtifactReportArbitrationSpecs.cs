@@ -25,11 +25,13 @@ public partial class WorkflowArtifactBindingSpecs
                 runnerId,
                 work.WorkflowRunId,
                 work.WorkId,
+                work.TaskRunId,
                 new WorkResult("completed")),
             service.ReportAsync(
                 runnerId,
                 work.WorkflowRunId,
                 work.WorkId,
+                work.TaskRunId,
                 new WorkResult("failed", "runner failed")));
 
         Assert.Equal(["accepted", "stale"], reports.Select(report => report.Ack).Order().ToArray());
@@ -60,6 +62,7 @@ public partial class WorkflowArtifactBindingSpecs
             "runner-foreign",
             work.WorkflowRunId,
             work.WorkId,
+            work.TaskRunId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
         Assert.Equal("stale", report.Ack);
@@ -73,41 +76,67 @@ public partial class WorkflowArtifactBindingSpecs
     }
 
     [Fact]
-    public async Task SameTaskRunIdAcrossStages_SettlesOnlyTheActiveStage()
+    public async Task DirectTaskReport_WithMismatchedEnvelopeWorkIdIsStaleBeforeSideEffects()
     {
-        await StartWorkflowAsync(new WorkflowDefinition([
-            new StageDefinition(
-                "plan",
-                [new TaskDefinition("repeat", "Plan repeat", "spec/task")],
-                []),
-            new StageDefinition(
-                "build",
-                [new TaskDefinition("repeat", "Build repeat", "spec/task")],
-                [])
-        ]));
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var uploadId = await SeedPendingUploadAsync(
+            work.WorkflowRunId,
+            work.WorkId,
+            "task-1.1",
+            "mismatched.txt");
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+
+        var ack = await workflow.ReceiveTaskReportAsync(
+            runnerId,
+            work.WorkId,
+            new Mohist.Server.Workflow.Domain.Run.TaskReport(
+                "other-work",
+                Mohist.Server.Workflow.Domain.Run.TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                ArtifactUploadIds: new[] { uploadId },
+                TaskRunId: work.TaskRunId));
+
+        Assert.Equal(ReportAck.Stale, ack);
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+        await using var db = CreateDb();
+        Assert.Empty(await db.WorkflowArtifacts
+            .Where(row => row.WorkflowRunId == work.WorkflowRunId)
+            .ToListAsync());
+        Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+    }
+
+    [Fact]
+    public async Task MismatchedTaskRunId_IsStaleBeforeSideEffects()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var uploadId = await SeedPendingUploadAsync(
+            work.WorkflowRunId,
+            work.WorkId,
+            work.TaskRunId!,
+            "wrong-attempt.txt");
         var service = Services.GetRequiredService<WorkflowReportService>();
 
-        var (planWork, runnerId) = await PollWorkAnyAsync();
-        var planReport = await service.ReportAsync(
+        var report = await service.ReportAsync(
             runnerId,
-            planWork.WorkflowRunId,
-            planWork.WorkId,
-            new WorkResult("completed"));
-        var (buildWork, buildRunnerId) = await PollWorkAnyAsync();
-        var buildReport = await service.ReportAsync(
-            buildRunnerId,
-            buildWork.WorkflowRunId,
-            buildWork.WorkId,
-            new WorkResult("completed"));
+            work.WorkflowRunId,
+            work.WorkId,
+            "other-task.1",
+            new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
-        Assert.Equal("accepted", planReport.Ack);
-        Assert.Equal("accepted", buildReport.Ack);
-        var workflow = Grains.GetGrain<IWorkflowGrain>(buildWork.WorkflowRunId);
-        Assert.Equal("Completed", await workflow.GetRunStatusAsync());
-        var completed = (await EventStore.ListAsync(buildWork.WorkflowRunId))
-            .Where(entry => entry.Envelope.Type == EventCatalog.ReverseDns.TaskCompleted)
-            .Select(entry => entry.Envelope.Extensions[EventCatalog.Lineage.Stage])
-            .ToArray();
-        Assert.Equal(["plan", "build"], completed);
+        Assert.Equal("stale", report.Ack);
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+        await using var db = CreateDb();
+        Assert.Empty(await db.WorkflowArtifacts
+            .Where(row => row.WorkflowRunId == work.WorkflowRunId)
+            .ToListAsync());
+        Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
     }
 }

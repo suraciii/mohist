@@ -108,6 +108,7 @@ export class ServerConnection {
     const ownerKind = work.ownerKind?.trim().toLowerCase()
     const body: Record<string, unknown> = {
       workId: work.workId,
+      taskRunId: work.taskRunId ?? null,
       projectId: work.projectId,
       status: result.status,
       message: result.message,

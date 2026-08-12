@@ -18,7 +18,11 @@ public static partial class WorkflowRunExtensions
 
             var newTasks = new List<TaskRun>();
             foreach (var t in tasks)
-                newTasks.Add(TaskRun.MakeTask(newTasks, t, current.Attempt));
+                newTasks.Add(TaskRun.MakeTask(
+                    newTasks,
+                    t,
+                    current.Attempt,
+                    run.Stages.SelectMany(stage => stage.Tasks).Concat(newTasks)));
 
             current.Tasks = newTasks;
             current.Checks = checks
@@ -149,12 +153,16 @@ public static partial class WorkflowRunExtensions
             stage.Status = StageRunStatus.Running;
         }
 
-        private void RetryFailedTask(string taskRunId)
+        private void RetryFailedTask(WorkflowRun run, string taskRunId)
         {
             var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
                 ?? throw new InvalidOperationException($"Failed task {taskRunId} not found or not in failed state");
 
-            var newTask = TaskRun.MakeTask(stage.Tasks, failedTask.ToDefinition(), stage.Attempt);
+            var newTask = TaskRun.MakeTask(
+                stage.Tasks,
+                failedTask.ToDefinition(),
+                stage.Attempt,
+                run.Stages.SelectMany(candidate => candidate.Tasks));
             var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
             stage.Tasks.Insert(failedTaskIndex + 1, newTask);
             stage.Failure = null;

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
   "validationSourceFileCount": 841,
-  "validationSourceTreeDigest": "738ab3cdc99be2ca5045c8e91b7d133f147d6848c7814ae5f37ff88c27e0d9f0",
+  "validationSourceTreeDigest": "1a3ab7d0448f20b053e998562fd91caa3f1fce537bac86098967e26eecbd6a53",
   "validationBaselineDigest": "03cad8aca4e8ddf9688d7b3532d03cb1b93c039e8a9ec4e0e38ee73e5b403c62",
   "validationHeadMeaning": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8 with tree ff159609b97df5b1fac6d6404a6d1811f6bda99a is the exact current master baseline used to interpret the checked-in migration ledger; it is not the final validation commit. Planned Unit targets are contracts only, while PR #388 history remains 602efa6abd6fca3efcd43b66b47ba10a80d9faba.",
   "history": {
@@ -2404,8 +2404,8 @@
           "Mohist.Server.TestSupport.WorkflowGrainTestHelpers",
           "TestTime"
         ],
-        "digest": "20f159a7e8826d70307317589475771c2ab4afa2d9d9b2710fdd8d3e74ec5238",
-        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=066751d6536f7c0fb1419fc9f7797aba4cef51803b5857b562a13ad7ab275a34 executable-closure-digest=20f159a7e8826d70307317589475771c2ab4afa2d9d9b2710fdd8d3e74ec5238 edges-digest=e01982e711f7637385e6ffad4ee0eac50c8e20a430cb66b16302e9508de59e1d move-contract-schema=1"
+        "digest": "da9c1552fd115054d391d065cd331ed4a01ef4b9088a03a1c4f7caa2b0e1e47b",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=f4e418aaef3fb566082916153e31a52da1030266d2f1f6fc147791976f1f7dc4 executable-closure-digest=da9c1552fd115054d391d065cd331ed4a01ef4b9088a03a1c4f7caa2b0e1e47b edges-digest=e01982e711f7637385e6ffad4ee0eac50c8e20a430cb66b16302e9508de59e1d move-contract-schema=1"
       },
       "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
       "moveContract": {
@@ -2421,7 +2421,7 @@
         "note": "Explicit closure review; no migration PR is created.",
         "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
         "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
-        "sourceContentDigest": "066751d6536f7c0fb1419fc9f7797aba4cef51803b5857b562a13ad7ab275a34"
+        "sourceContentDigest": "f4e418aaef3fb566082916153e31a52da1030266d2f1f6fc147791976f1f7dc4"
       },
       "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
       "executable": {
@@ -2429,8 +2429,8 @@
         "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
         "caseCount": 3,
         "caseIdentityDigest": "25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884",
-        "closureIdentityDigest": "20f159a7e8826d70307317589475771c2ab4afa2d9d9b2710fdd8d3e74ec5238",
-        "sourceContentDigest": "066751d6536f7c0fb1419fc9f7797aba4cef51803b5857b562a13ad7ab275a34"
+        "closureIdentityDigest": "da9c1552fd115054d391d065cd331ed4a01ef4b9088a03a1c4f7caa2b0e1e47b",
+        "sourceContentDigest": "f4e418aaef3fb566082916153e31a52da1030266d2f1f6fc147791976f1f7dc4"
       }
     },
     {

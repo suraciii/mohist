@@ -92,12 +92,22 @@ public sealed class WorkflowRecoveryRoundTests
         var run = BuildRun();
         var definition = Assert.Single(run.CurrentStage().Tasks).ToDefinition();
 
-        var continuation = TaskRun.MakeContinuationTask(run.CurrentStage().Tasks, definition, run.CurrentStage().Attempt, 1);
+        var continuation = TaskRun.MakeContinuationTask(
+            run.CurrentStage().Tasks,
+            definition,
+            run.CurrentStage().Attempt,
+            1,
+            run.Stages.SelectMany(stage => stage.Tasks));
 
         Assert.Equal(1, continuation.RecoveryRemaining);
         Assert.Equal(2, continuation.Recovery!.Budget);
         Assert.Throws<InvalidOperationException>(() =>
-            TaskRun.MakeContinuationTask(run.CurrentStage().Tasks, new TaskDefinition("orphan", "Orphan", "test/orphan"), run.CurrentStage().Attempt, 1));
+            TaskRun.MakeContinuationTask(
+                run.CurrentStage().Tasks,
+                new TaskDefinition("orphan", "Orphan", "test/orphan"),
+                run.CurrentStage().Attempt,
+                1,
+                run.Stages.SelectMany(stage => stage.Tasks)));
     }
 
     [Theory]
@@ -109,7 +119,12 @@ public sealed class WorkflowRecoveryRoundTests
         var run = BuildRun();
         var definition = Assert.Single(run.CurrentStage().Tasks).ToDefinition();
 
-        var continuation = TaskRun.MakeContinuationTask(run.CurrentStage().Tasks, definition, run.CurrentStage().Attempt, recoveryRemaining);
+        var continuation = TaskRun.MakeContinuationTask(
+            run.CurrentStage().Tasks,
+            definition,
+            run.CurrentStage().Attempt,
+            recoveryRemaining,
+            run.Stages.SelectMany(stage => stage.Tasks));
 
         Assert.Equal(recoveryRemaining, continuation.RecoveryRemaining);
         Assert.Equal(2, continuation.Recovery!.Budget);

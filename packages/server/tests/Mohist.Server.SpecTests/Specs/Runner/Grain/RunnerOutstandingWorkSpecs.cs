@@ -108,7 +108,12 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
 
         var report = Services.GetRequiredService<Mohist.Server.Runner.Services.WorkflowReportService>();
-        var (ack, _) = await report.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
+        var (ack, _) = await report.ReportAsync(
+            runnerId,
+            work.WorkflowRunId,
+            work.WorkId,
+            work.TaskRunId,
+            new WorkResult("completed"));
         Assert.Equal("accepted", ack);
 
         var completed = await LoadRunAsync(work.WorkflowRunId);

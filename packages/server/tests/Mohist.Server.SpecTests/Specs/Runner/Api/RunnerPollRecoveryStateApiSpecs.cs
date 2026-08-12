@@ -53,6 +53,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             {
                 workflowRunId,
                 workId = fresh.GetProperty("workId").GetString(),
+                taskRunId = fresh.GetProperty("taskRunId").GetString(),
                 status = "completed",
                 addTasks = new[]
                 {
@@ -162,6 +163,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             {
                 workflowRunId,
                 workId = fresh.GetProperty("workId").GetString(),
+                taskRunId = fresh.GetProperty("taskRunId").GetString(),
                 status = "completed",
                 addTasks = new[]
                 {

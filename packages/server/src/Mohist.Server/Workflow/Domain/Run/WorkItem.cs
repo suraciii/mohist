@@ -65,7 +65,8 @@ public sealed record TaskReport(
     [property: Id(4)] string? Detail = null,
     [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null,
     [property: Id(6)] ExecutionError? Error = null,
-    [property: Id(7)] IReadOnlyList<string>? ArtifactUploadIds = null);
+    [property: Id(7)] IReadOnlyList<string>? ArtifactUploadIds = null,
+    [property: Id(8)] string? TaskRunId = null);
 
 [GenerateSerializer]
 public sealed record CheckReport(

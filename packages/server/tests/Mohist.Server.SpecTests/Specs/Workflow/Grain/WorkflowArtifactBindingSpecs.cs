@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -155,8 +156,8 @@ public partial class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         var result = new WorkResult("completed", ArtifactUploadIds: [uploadId]);
 
         var reports = await Task.WhenAll(
-            service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, result),
-            service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, result));
+            service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId, result),
+            service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId, result));
 
         Assert.Equal(["accepted", "stale"], reports.Select(report => report.Ack).Order().ToArray());
         await using var db = CreateDb();
@@ -191,6 +192,7 @@ public partial class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
             runnerId,
             work.WorkflowRunId,
             work.WorkId,
+            work.TaskRunId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
         Assert.Equal("stale", report.Ack);
@@ -233,6 +235,28 @@ public partial class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
             .ToListAsync());
         Assert.Equal(uploadId, artifact.SourceUploadId);
         Assert.Equal("task-1.1", artifact.TaskRunId);
+    }
+
+    [Fact]
+    public async Task ArtifactBindingMigration_AddsNullableReplayIdentityAndFilteredUniqueIndex()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        await db.Database.MigrateAsync();
+
+        await using var column = connection.CreateCommand();
+        column.CommandText = "SELECT 1 FROM pragma_table_info('WorkflowArtifacts') WHERE name = 'SourceUploadId' LIMIT 1;";
+        Assert.NotNull(await column.ExecuteScalarAsync());
+
+        await using var index = connection.CreateCommand();
+        index.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'UX_WorkflowArtifacts_SourceUploadId';";
+        var sql = Assert.IsType<string>(await index.ExecuteScalarAsync());
+        Assert.Contains("UNIQUE", sql, StringComparison.Ordinal);
+        Assert.Contains("WHERE \"SourceUploadId\" IS NOT NULL", sql, StringComparison.Ordinal);
     }
 
     [Fact]

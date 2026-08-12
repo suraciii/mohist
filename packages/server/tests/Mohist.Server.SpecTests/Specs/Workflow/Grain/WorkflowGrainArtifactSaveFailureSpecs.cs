@@ -53,7 +53,8 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             TaskReportStatus.Succeeded,
             Output: null,
             Artifacts: null,
-            ArtifactUploadIds: [uploadId]);
+            ArtifactUploadIds: [uploadId],
+            TaskRunId: taskRunId);
         var failingStore = new FailingWorkflowRunStore(store);
         var firstDelivery = CreateGrain(scope.ServiceProvider, failingStore, workflowRunId);
         await firstDelivery.OnActivateAsync(CancellationToken.None);

@@ -68,7 +68,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
-            new TaskReport(work.WorkId, TaskReportStatus.Succeeded, Output: null, Artifacts: null)));
+            new TaskReport(
+                work.WorkId,
+                TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                TaskRunId: task.Id)));
         Assert.Equal(ReportAck.Stale, await workflow.ObserveAgentExecutionAsync(observation));
 
         var completed = await LoadRunAsync(_workflowId!);
@@ -99,7 +104,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             ArtifactUploadIds: ["missing-upload"],
             AddTasks: [new RuntimeTaskInput("follow-up", "Must not be projected", "spec/task")]);
 
-        var (ack, status) = await service.ReportAsync(runnerId, _workflowId!, work.WorkId, result);
+        var (ack, status) = await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            result);
 
         Assert.Equal("accepted", ack);
         Assert.Equal("Running", status);
@@ -114,6 +124,52 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Null(unsettledTask.Output);
         Assert.DoesNotContain(await EventStore.ListAsync(_workflowId!), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.TaskFailed);
+    }
+
+    [Fact]
+    public async Task UnknownRunnerResultTargetsUniqueAttemptWhenDefinitionIdRepeatsAcrossStages()
+    {
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition([
+            new StageDefinition(
+                "plan",
+                [new TaskDefinition("repeat", "Plan repeat", "mohist/opencode")],
+                []),
+            new StageDefinition(
+                "build",
+                [new TaskDefinition("repeat", "Build repeat", "mohist/opencode")],
+                [])
+        ]));
+        var (plan, runnerId) = await PollWorkAnyAsync();
+        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+            runnerId,
+            plan.WorkId,
+            new TaskReport(
+                plan.WorkId,
+                TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                TaskRunId: plan.TaskRunId)));
+        var (build, buildRunnerId) = await PollWorkAnyAsync();
+        Assert.Equal(runnerId, buildRunnerId);
+        Assert.NotEqual(plan.TaskRunId, build.TaskRunId);
+        Assert.NotEqual(plan.WorkId, build.WorkId);
+
+        var service = Services.GetRequiredService<WorkflowReportService>();
+        var (ack, status) = await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            build.WorkId,
+            build.TaskRunId,
+            new WorkResult("unknown", "Agent cleanup was not confirmed"));
+
+        Assert.Equal("accepted", ack);
+        Assert.Equal("Running", status);
+        var run = await LoadRunAsync(_workflowId!);
+        Assert.Equal("build", run.CurrentStageId);
+        var settlement = Assert.IsType<AgentResultSettlement>(
+            Assert.Single(run.CurrentStage().Tasks).AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.Unknown, settlement.State);
+        Assert.Equal(build.WorkId, settlement.WorkId);
     }
 
     [Fact]
@@ -165,7 +221,8 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             work.WorkId,
             TaskReportStatus.Succeeded,
             Output: null,
-            Artifacts: null);
+            Artifacts: null,
+            TaskRunId: blockedTask.Id);
         Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(runnerId, work.WorkId, report));
         Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(runnerId, work.WorkId, report));
 
@@ -266,7 +323,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
-            new TaskReport(work.WorkId, TaskReportStatus.Succeeded, Output: null, Artifacts: null)));
+            new TaskReport(
+                work.WorkId,
+                TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                TaskRunId: cancelled.Id)));
         Assert.Equal(ReportAck.Stale, await workflow.ObserveAgentExecutionAsync(observation));
         var eventTypes = (await EventStore.ListAsync(_workflowId!)).Select(entry => entry.Envelope.Type).ToArray();
         Assert.Contains(EventCatalog.ReverseDns.TaskCancelled, eventTypes);
@@ -325,6 +387,7 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             runnerId,
             _workflowId!,
             work.WorkId,
+            work.TaskRunId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
         Assert.Equal("stale", report.Ack);

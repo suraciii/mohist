@@ -61,6 +61,8 @@ AgentResultSettlement
 
 `mohist/agent`, `mohist/opencode`, and `mohist/pi` tasks use this settlement. Other task types retain their current state machine.
 
+Workflow Definition task identifiers remain stage-scoped because built-in profiles intentionally reuse identifiers such as `workspace-prepare` across stages. Persisted `TaskRun.Id` and `WorkId`, however, are run-scoped identities used by reports, artifacts, snapshots, logs, and projections. The allocator retains the existing `{definitionId}.{taskAttempt}` or rerun form when it is free and appends a deterministic `.runN` discriminator only when a later stage would collide. This repairs the run-wide identity invariant without changing Definition IDs, template references, or the externally visible identifiers of non-colliding attempts.
+
 The first record is `awaiting-result`; it has no uncertainty deadline because ordinary execution is still in progress. The first inconclusive observation changes the same record to `unknown`, stamps `firstUnknownAt`, and stores `deadlineAt = firstUnknownAt + AgentResultSettlementTimeout`. Later observations may update the latest reason or fill previously unknown physical identity fields, but cannot replace the execution identity or deadline.
 
 The settlement is cleared when an authoritative result wins. The terminal `TaskRun` retains `WorkId` and `WorkerId`, which are sufficient to classify every later report for that execution as stale without retaining a result fingerprint or attempting content-level duplicate/conflict discrimination. An explicit Workflow stop retains the invalidated execution identity in task history. Traceable settlement transitions remain in Workflow events and AgentSession history.

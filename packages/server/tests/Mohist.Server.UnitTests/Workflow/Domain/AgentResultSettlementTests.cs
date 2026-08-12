@@ -148,6 +148,39 @@ public sealed class AgentResultSettlementTests
     }
 
     [Fact]
+    public void ReportShape_UsesUniqueTaskRunAndWorkIdentityAcrossStages()
+    {
+        var first = new TaskDefinition("repeat", "Plan repeat", "spec/task");
+        var second = new TaskDefinition("repeat", "Build repeat", "spec/task");
+        var run = WorkflowRun.Create(
+            "wr-report-shape",
+            new WorkflowDefinition([
+                new StageDefinition("plan", [first], []),
+                new StageDefinition("build", [second], [])
+            ]),
+            Now);
+        run.Start(Now);
+        run.InitializeStage([first], [], Now);
+        var firstTask = Assert.Single(run.CurrentStage().Tasks);
+        run.AssignTo("runner-1", Now);
+        run.StartTask("repeat-plan", "runner-1", Now);
+        run.CompleteTask(Now);
+        run.InitializeStage([second], [], Now);
+        var secondTask = Assert.Single(run.CurrentStage().Tasks);
+        run.StartTask("repeat-build", "runner-1", Now);
+
+        var shape = Assert.IsType<WorkItem>(run.FindReportShape(secondTask.Id, "repeat-build"));
+
+        Assert.NotEqual(firstTask.Id, secondTask.Id);
+        Assert.Equal("repeat.1", firstTask.Id);
+        Assert.Equal("repeat.1.run2", secondTask.Id);
+        Assert.Equal("build", shape.Stage);
+        Assert.Equal("Build repeat", shape.Title);
+        Assert.True(shape.IsTask);
+        Assert.Null(run.FindReportShape(secondTask.Id, "other-work"));
+    }
+
+    [Fact]
     public void ReusedSessionOldObservationIsStaleAfterTheOriginalTaskSettles()
     {
         var run = BuildRun(
@@ -291,5 +324,6 @@ public sealed class AgentResultSettlementTests
         Assert.Equal(task.Id, attempt.TaskRunId);
         Assert.Equal(task.WorkId, attempt.WorkId);
         Assert.Equal(task.WorkerId, attempt.RunnerId);
+        Assert.Equal(task.AgentResultSettlement?.State, attempt.SettlementState);
     }
 }

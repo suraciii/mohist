@@ -45,6 +45,7 @@ public partial class WorkflowGrain
 
     public async Task<ReportAck> ObserveAgentResultUnknownAsync(
         string workerId,
+        string taskRunId,
         string workId,
         string reasonCode,
         string? message = null)
@@ -52,20 +53,22 @@ public partial class WorkflowGrain
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
 
-        var existing = _run.FindReportableWork(workId, workerId);
-        var task = existing?.TaskRunId is { } taskRunId
-            ? _run.Stages.SelectMany(stage => stage.Tasks).SingleOrDefault(candidate => candidate.Id == taskRunId)
-            : null;
-        var wasAwaitingResult = task?.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult;
-        var update = existing?.TaskRunId is { } id
-            ? _run.ObserveAgentResultUnknown(id, workId, workerId, reasonCode, message, Now(), _agentResultSettlementTimeout)
+        var attempt = _run.FindReportableTaskAttempt(taskRunId, workId, workerId);
+        var wasAwaitingResult = attempt?.SettlementState == AgentResultSettlementState.AwaitingResult;
+        var observedAt = Now();
+        var update = attempt is not null
+            ? _run.ObserveAgentResultUnknown(taskRunId, workId, workerId, reasonCode, message, observedAt, _agentResultSettlementTimeout)
             : AgentExecutionUpdate.Rejected;
         if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
         if (update == AgentExecutionUpdate.Updated)
         {
-            var deadline = task?.AgentResultSettlement?.DeadlineAt;
-            await CommitAsync(wasAwaitingResult && deadline is { } due
-                ? [new AgentTaskResultUnconfirmed(existing!.Item.Stage, task!.Id, workId, reasonCode, due)]
+            await CommitAsync(wasAwaitingResult && attempt is not null
+                ? [new AgentTaskResultUnconfirmed(
+                    attempt.Stage,
+                    attempt.TaskRunId,
+                    attempt.WorkId,
+                    reasonCode,
+                    observedAt + _agentResultSettlementTimeout)]
                 : []);
         }
 
@@ -223,9 +226,12 @@ public partial class WorkflowGrain
     {
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
-        var activeWork = _run.FindReportableWork(workId, workerId);
+        if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)) return ReportAck.Stale;
+        if (string.IsNullOrWhiteSpace(report.TaskRunId)) return ReportAck.Stale;
+        var activeWork = _run.FindReportableWork(report.TaskRunId, workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
+
         var task = _run.Stages
             .Where(stage => string.Equals(stage.Id, activeWork.Item.Stage, StringComparison.Ordinal))
             .SelectMany(stage => stage.Tasks)
@@ -234,7 +240,7 @@ public partial class WorkflowGrain
         var hadAgentResultSettlement = task.AgentResultSettlement is not null;
 
         _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
-            GrainKey, workId, report.Status, report.Detail ?? "(none)");
+            GrainKey, activeWork.WorkId, report.Status, report.Detail ?? "(none)");
 
         TaskReport effectiveReport = report;
         if (report.Status == TaskReportStatus.Succeeded)
@@ -247,9 +253,9 @@ public partial class WorkflowGrain
             {
                 _log.LogError(
                     "run {run} work {work} rejected recovery follow-up: {reason}",
-                    GrainKey, workId, ex.Message);
+                    GrainKey, activeWork.WorkId, ex.Message);
                 effectiveReport = new TaskReport(
-                    workId,
+                    activeWork.WorkId,
                     TaskReportStatus.Failed,
                     Output: null,
                     Artifacts: null,
@@ -269,7 +275,7 @@ public partial class WorkflowGrain
         if (hadAgentResultSettlement)
             await ReconcileAgentResultSettlementAsync();
         else
-            await DeleteSnapshotBestEffortAsync(workId);
+            await DeleteSnapshotBestEffortAsync(activeWork.WorkId);
         return ReportAck.Accepted;
     }
 

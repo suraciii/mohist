@@ -135,7 +135,7 @@
       "type": "WRITE",
       "output": "Serialized late-result arbitration, replay-idempotent artifact binding with real TaskRun attribution, side-effect-free stale acknowledgements, and passing result-replay tests.",
       "dependsOn": ["T-005"],
-      "passes": false,
+      "passes": true,
       "notes": "Artifact storage is outside the WorkflowRun transaction, so persisted `SourceUploadId` replay identity is mandatory for every new binding. Do not add a result fingerprint solely to distinguish duplicate from conflicting terminal reports; both are stale by contract."
     },
     {
