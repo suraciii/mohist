@@ -222,16 +222,48 @@ public partial class WorkflowGrain
     public async Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
     {
         RejectIfRunReloadRequired();
-        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
-        var activeWork = _run.FindActiveWork(workId, workerId);
+        if (_run is null) return ReportAck.Stale;
+        var activeWork = _run.FindReportableWork(workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
-        var hadAgentResultSettlement = _run.CurrentStage().RunningTask?.AgentResultSettlement is not null;
+        var task = _run.Stages
+            .Where(stage => string.Equals(stage.Id, activeWork.Item.Stage, StringComparison.Ordinal))
+            .SelectMany(stage => stage.Tasks)
+            .SingleOrDefault(candidate => string.Equals(candidate.Id, activeWork.TaskRunId, StringComparison.Ordinal));
+        if (task is null) return ReportAck.Stale;
+        var hadAgentResultSettlement = task.AgentResultSettlement is not null;
 
         _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
             GrainKey, workId, report.Status, report.Detail ?? "(none)");
 
-        var events = await _workLifecycle.ApplyTaskReportAsync(_run, report, activeWork.TaskRunId);
+        TaskReport effectiveReport = report;
+        if (report.Status == TaskReportStatus.Succeeded)
+        {
+            try
+            {
+                RuntimeTaskFollowUps.Project(report.AddTasks);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _log.LogError(
+                    "run {run} work {work} rejected recovery follow-up: {reason}",
+                    GrainKey, workId, ex.Message);
+                effectiveReport = new TaskReport(
+                    workId,
+                    TaskReportStatus.Failed,
+                    Output: null,
+                    Artifacts: null,
+                    Detail: $"Recovery follow-up rejected: {ex.Message}");
+            }
+        }
+
+        effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
+
+        var events = await _workLifecycle.ApplyTaskReportAsync(
+            _run,
+            effectiveReport,
+            activeWork.Item.Stage,
+            activeWork.TaskRunId);
 
         await CommitAsync(events);
         if (hadAgentResultSettlement)
@@ -239,6 +271,49 @@ public partial class WorkflowGrain
         else
             await DeleteSnapshotBestEffortAsync(workId);
         return ReportAck.Accepted;
+    }
+
+    private async Task<TaskReport> BindTaskReportArtifactsAsync(
+        WorkflowActiveWork activeWork,
+        TaskReport report)
+    {
+        if (report.ArtifactUploadIds is not { Count: > 0 })
+            return report;
+
+        var variables = await _variableResolver.ResolveEffectiveVariableBundleAsync(
+            GrainKey,
+            activeWork.Item.Stage);
+        var bindResult = await _artifactBindService.BindAsync(
+            GrainKey,
+            activeWork.WorkId,
+            activeWork.TaskRunId!,
+            report.ArtifactUploadIds.ToArray(),
+            activeWork.Item.Artifacts,
+            variables.Vars,
+            GetProjectId(),
+            GetIssueNumber());
+        if (!bindResult.IsSuccess)
+        {
+            _log.LogWarning(
+                "run {run} work {work} artifact binding failed: {reason}",
+                GrainKey, activeWork.WorkId, bindResult.Error);
+            return new TaskReport(
+                activeWork.WorkId,
+                TaskReportStatus.Failed,
+                Output: null,
+                Artifacts: null,
+                Detail: bindResult.Error ?? "artifact binding failed",
+                Error: report.Error);
+        }
+
+        var boundArtifacts = bindResult.ArtifactRecordedEvents
+            .Select(recorded => new ArtifactRef(recorded.Path))
+            .ToList();
+        return report with
+        {
+            Artifacts = boundArtifacts,
+            ArtifactUploadIds = null,
+        };
     }
 
     public async Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)

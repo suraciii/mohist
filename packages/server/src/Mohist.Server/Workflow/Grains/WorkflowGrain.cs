@@ -29,6 +29,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly IDispatchSnapshotStore _dispatchSnapshotStore;
     private readonly WorkflowDefinitionResolver _definitionResolver;
     private readonly WorkflowVariableResolver _variableResolver;
+    private readonly IWorkflowArtifactBindService _artifactBindService;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
@@ -44,6 +45,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         IDispatchSnapshotStore dispatchSnapshotStore,
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
+        IWorkflowArtifactBindService artifactBindService,
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
@@ -53,6 +55,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _dispatchSnapshotStore = dispatchSnapshotStore;
         _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
+        _artifactBindService = artifactBindService;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -69,6 +72,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         IDispatchSnapshotStore dispatchSnapshotStore,
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
+        IWorkflowArtifactBindService artifactBindService,
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
@@ -77,6 +81,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _dispatchSnapshotStore = dispatchSnapshotStore;
         _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
+        _artifactBindService = artifactBindService;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);

@@ -125,6 +125,8 @@ public static partial class WorkflowRunExtensions
                 .SelectMany(stage => stage.Tasks.Select(task => (Stage: stage, Task: task)))
                 .Where(candidate =>
                     candidate.Task.Status == TaskRunStatus.Running
+                    && candidate.Task.AgentResultSettlement?.State is
+                        AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked
                     && string.Equals(candidate.Task.WorkId, workId, StringComparison.Ordinal)
                     && string.Equals(candidate.Task.WorkerId, workerId, StringComparison.Ordinal))
                 .ToList();

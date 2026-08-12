@@ -1698,6 +1698,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ArtifactId).HasMaxLength(64).IsRequired();
             entity.Property(e => e.WorkflowRunId).HasMaxLength(50).IsRequired();
             entity.Property(e => e.TaskRunId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.SourceUploadId).HasMaxLength(64);
             entity.Property(e => e.Path).HasMaxLength(1024).IsRequired();
             entity.Property(e => e.RecordedAt).IsRequired();
             entity.Property(e => e.ArtifactStoragePath).HasMaxLength(1024).IsRequired();
@@ -1714,6 +1715,10 @@ public class MohistDbContext : DbContext
             // Task-run filter and history ordering.
             entity.HasIndex(e => new { e.WorkflowRunId, e.TaskRunId, e.RecordedAt })
                 .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_TaskRunId_RecordedAt");
+            entity.HasIndex(e => e.SourceUploadId)
+                .IsUnique()
+                .HasFilter("\"SourceUploadId\" IS NOT NULL")
+                .HasDatabaseName("UX_WorkflowArtifacts_SourceUploadId");
             // Issue-scoped latest projection support.
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.RecordedAt })
                 .HasDatabaseName("IX_WorkflowArtifacts_ProjectId_IssueNumber_RecordedAt");

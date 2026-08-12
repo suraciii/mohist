@@ -35,8 +35,20 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> CompleteTask(DateTimeOffset now, bool advance = true)
         {
-            var current = run.CurrentStage();
-            var task = current.CurrentTask();
+            var stage = run.CurrentStage();
+            var taskRunId = stage.CurrentTask()?.Id;
+            return taskRunId is null ? [] : run.CompleteTask(stage.Id, taskRunId, now, advance);
+        }
+
+        public IReadOnlyList<WorkflowEvent> CompleteTask(
+            string stageId,
+            string taskRunId,
+            DateTimeOffset now,
+            bool advance = true)
+        {
+            var match = FindTask(run, stageId, taskRunId);
+            if (match is not { } found) return [];
+            var (current, task) = found;
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
             task.FinishedAt = now;
@@ -63,8 +75,20 @@ public static partial class WorkflowRunExtensions
         /// </summary>
         public IReadOnlyList<WorkflowEvent> FailTask(TaskResult result, DateTimeOffset now)
         {
-            var current = run.CurrentStage();
-            var task = current.CurrentTask();
+            var stage = run.CurrentStage();
+            var taskRunId = stage.CurrentTask()?.Id;
+            return taskRunId is null ? [] : run.FailTask(stage.Id, taskRunId, result, now);
+        }
+
+        public IReadOnlyList<WorkflowEvent> FailTask(
+            string stageId,
+            string taskRunId,
+            TaskResult result,
+            DateTimeOffset now)
+        {
+            var match = FindTask(run, stageId, taskRunId);
+            if (match is not { } found) return [];
+            var (current, task) = found;
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
             task.FinishedAt = now;
@@ -78,6 +102,21 @@ public static partial class WorkflowRunExtensions
                 new StageFailed(current.Id, result.Reason),
                 new WorkflowRunFailed(result.Reason)
             ];
+        }
+
+        private static (StageRun Stage, TaskRun Task)? FindTask(
+            WorkflowRun workflow,
+            string stageId,
+            string taskRunId)
+        {
+            var matches = workflow.Stages
+                .Where(stage => string.Equals(stage.Id, stageId, StringComparison.Ordinal))
+                .SelectMany(stage => stage.Tasks
+                    .Where(task => string.Equals(task.Id, taskRunId, StringComparison.Ordinal))
+                    .Select(task => (Stage: stage, Task: task)))
+                .Take(2)
+                .ToList();
+            return matches.Count == 1 ? matches[0] : null;
         }
 
         public IReadOnlyList<WorkflowEvent> FailTaskForStopped(string reason, DateTimeOffset now)

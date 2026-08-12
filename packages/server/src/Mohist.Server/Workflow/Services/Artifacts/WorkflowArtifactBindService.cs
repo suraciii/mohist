@@ -58,25 +58,45 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
     {
         if (artifactUploadIds is null || artifactUploadIds.Length == 0)
             return new WorkflowArtifactBindResult([]);
+        var requestedUploadIds = artifactUploadIds
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+
+        var existingArtifacts = await db.WorkflowArtifacts
+            .Where(artifact => artifact.SourceUploadId != null
+                && requestedUploadIds.Contains(artifact.SourceUploadId))
+            .ToListAsync(cancellationToken);
+        var existingByUploadId = existingArtifacts.ToDictionary(
+            artifact => artifact.SourceUploadId!,
+            StringComparer.Ordinal);
+        var replayMismatch = existingArtifacts.FirstOrDefault(artifact =>
+            !string.Equals(artifact.WorkflowRunId, workflowRunId, StringComparison.Ordinal)
+            || !string.Equals(artifact.TaskRunId, taskRunId, StringComparison.Ordinal));
+        if (replayMismatch is not null)
+        {
+            return new WorkflowArtifactBindResult(
+                [],
+                $"Upload id {replayMismatch.SourceUploadId} is already bound to a different workflow task attempt");
+        }
+
+        var pendingIds = requestedUploadIds
+            .Where(uploadId => !existingByUploadId.ContainsKey(uploadId))
+            .ToArray();
 
         var pendingUploads = await db.WorkflowArtifactPendingUploads
             .Where(p =>
                 p.WorkflowRunId == workflowRunId
                 && p.WorkId == workId
-                && artifactUploadIds.Contains(p.UploadId))
+                && p.TaskRunId == taskRunId
+                && pendingIds.Contains(p.UploadId))
             .ToListAsync(cancellationToken);
 
-        if (pendingUploads.Count == 0)
-        {
-            return new WorkflowArtifactBindResult(
-                [],
-                "No valid pending uploads found for the given upload ids and workflow work item");
-        }
-
-        var matchedIds = pendingUploads.Select(p => p.UploadId).ToHashSet();
-        var foreignIds = artifactUploadIds.Where(id => !matchedIds.Contains(id)).ToList();
+        var matchedIds = pendingUploads.Select(p => p.UploadId)
+            .Concat(existingByUploadId.Keys)
+            .ToHashSet(StringComparer.Ordinal);
+        var foreignIds = requestedUploadIds.Where(id => !matchedIds.Contains(id)).ToList();
         if (foreignIds.Count > 0)
         {
             return new WorkflowArtifactBindResult(
@@ -85,7 +105,11 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         }
 
         var now = _time.GetUtcNow();
-        var recordedEvents = new List<WorkflowArtifactRecorded>(pendingUploads.Count);
+        var recordedEventsByUploadId = existingArtifacts.ToDictionary(
+            artifact => artifact.SourceUploadId!,
+            artifact => new WorkflowArtifactRecorded(
+                workflowRunId, taskRunId, artifact.Path, artifact.RecordedAt),
+            StringComparer.Ordinal);
         var artifactRows = new List<WorkflowArtifactRow>(pendingUploads.Count);
 
         foreach (var pending in pendingUploads)
@@ -97,6 +121,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
                 ArtifactId = artifactId,
                 WorkflowRunId = workflowRunId,
                 TaskRunId = taskRunId,
+                SourceUploadId = pending.UploadId,
                 Path = pending.Path,
                 RecordedAt = now,
                 ArtifactStoragePath = pending.StoragePath,
@@ -110,7 +135,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
             };
 
             artifactRows.Add(row);
-            recordedEvents.Add(new WorkflowArtifactRecorded(
+            recordedEventsByUploadId.Add(pending.UploadId, new WorkflowArtifactRecorded(
                 workflowRunId,
                 taskRunId,
                 pending.Path,
@@ -129,7 +154,8 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
             "Bound {Count} artifact(s) for workflow run {WorkflowRunId}, task run {TaskRunId}",
             artifactRows.Count, workflowRunId, taskRunId);
 
-        return new WorkflowArtifactBindResult(recordedEvents);
+        return new WorkflowArtifactBindResult(
+            requestedUploadIds.Select(uploadId => recordedEventsByUploadId[uploadId]).ToList());
     }
 
     private static string NewArtifactId() => $"art_{Guid.NewGuid():N}";

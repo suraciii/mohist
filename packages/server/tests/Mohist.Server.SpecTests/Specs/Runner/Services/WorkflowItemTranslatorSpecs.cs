@@ -32,7 +32,6 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     private readonly WorkflowPromptResolver _promptResolver;
     private readonly WorkflowVariableResolver _variableResolver;
     private readonly WorkflowItemTranslator _translator;
-    private readonly IWorkflowArtifactBindService _bindService;
     private readonly FakeAgentExecutionSnapshotResolver _agentResolver;
 
     public WorkflowItemTranslatorSpecs()
@@ -50,24 +49,8 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
             new ProjectVariableStore(factory),
             new IssueVariableStore(factory),
             runVariablesStore);
-        _bindService = new WorkflowArtifactBindService(
-            factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));
         _agentResolver = new FakeAgentExecutionSnapshotResolver();
-        _translator = new WorkflowItemTranslator(_promptResolver, _variableResolver, _bindService, TranslatorNullLogger, _agentResolver);
-    }
-
-    private static Microsoft.Extensions.Logging.ILogger<WorkflowItemTranslator> TranslatorNullLogger =>
-        new NullLogger<WorkflowItemTranslator>();
-
-    private static Microsoft.Extensions.Logging.ILogger<WorkflowArtifactBindService> BindNullLogger =>
-        new BindServiceNullLogger();
-
-    private sealed class BindServiceNullLogger : Microsoft.Extensions.Logging.ILogger<WorkflowArtifactBindService>
-    {
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => new NoopScope();
-        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => false;
-        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
-        private sealed class NoopScope : IDisposable { public void Dispose() { } }
+        _translator = new WorkflowItemTranslator(_promptResolver, _variableResolver, _agentResolver);
     }
 
     private sealed class EmptyPromptLoader : IPromptLoader
@@ -237,11 +220,11 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-1";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
         var result = new WorkResult("completed", Output: JSON.DeserializeElement("{\"ok\":true}"));
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
         Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
@@ -258,11 +241,11 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-2";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
         var result = new WorkResult("failed", "runner-exit-42");
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
         Assert.Equal(TaskReportStatus.Failed, task.Value.Status);
@@ -280,7 +263,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     {
         var runId = $"wr-result-unknown-{Guid.NewGuid():N}";
         var projectId = "proj-result-unknown";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Agent", uses, null);
         var result = new WorkResult(
             "unknown",
@@ -288,7 +271,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
             Output: JSON.DeserializeElement("[\"must not be validated or stored\"]"),
             ArtifactUploadIds: ["must-not-bind"]);
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var unknown = Assert.IsType<WorkflowItemTranslator.InboundReport.Unknown>(report);
         Assert.Equal("agent-result-unconfirmed", unknown.ReasonCode);
@@ -302,12 +285,12 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-3";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null,
             artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]));
         var result = new WorkResult("completed", Output: JSON.DeserializeElement("{}"));
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
         Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
@@ -315,13 +298,12 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TranslateResult_SucceededTaskWithUploadIds_RecordsArtifactReferences()
+    public async Task TranslateResult_SucceededTaskWithUploadIds_DefersBindingToTheWorkflowGrain()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-4";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
 
-        // Seed a pending upload the bind service can locate.
         var uploadId = $"up-{Guid.NewGuid():N}";
         await using (var db = new MohistDbContext(_database.Options))
         {
@@ -346,13 +328,15 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
             artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]));
         var result = new WorkResult("completed", Output: JSON.DeserializeElement("{}"), ArtifactUploadIds: [uploadId]);
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
         Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
-        Assert.NotNull(task.Value.Artifacts);
-        Assert.Single(task.Value.Artifacts);
-        Assert.Equal("review.md", task.Value.Artifacts[0].Path);
+        Assert.Null(task.Value.Artifacts);
+        Assert.Equal([uploadId], task.Value.ArtifactUploadIds);
+        await using var unchanged = new MohistDbContext(_database.Options);
+        Assert.NotNull(await unchanged.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+        Assert.Empty(unchanged.WorkflowArtifacts);
     }
 
     [Fact]
@@ -360,7 +344,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-5";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Checks("build", "checks-build",
             [new CheckItem("check-1", "Check 1", "spec/check"), new CheckItem("check-2", "Check 2", "spec/check")]);
         var output = JsonSerializer.SerializeToElement(new[]
@@ -370,7 +354,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         });
         var result = new WorkResult("fail", Output: output);
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var checks = Assert.IsType<WorkflowItemTranslator.InboundReport.Checks>(report);
         Assert.Equal("build", checks.Value.Stage);
@@ -391,11 +375,11 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         // is the only diagnostic surface.
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-6";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
         var result = new WorkResult("failed", "runner-lost");
 
-        var report = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = _translator.TranslateResult(item, result, runId);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
         Assert.Equal(TaskReportStatus.Failed, task.Value.Status);
@@ -478,13 +462,12 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-status-alias";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
 
         foreach (var alias in new[] { "completed", "pass", "PASS", "Completed" })
         {
-            var report = await _translator.TranslateResultAsync(
-                item, new WorkResult(alias), runId, run);
+            var report = _translator.TranslateResult(item, new WorkResult(alias), runId);
             var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
             Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
         }
@@ -495,11 +478,10 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-fail-alias";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
 
-        var report = await _translator.TranslateResultAsync(
-            item, new WorkResult("failed", "work-timeout"), runId, run);
+        var report = _translator.TranslateResult(item, new WorkResult("failed", "work-timeout"), runId);
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
 
         Assert.Equal(TaskReportStatus.Failed, task.Value.Status);

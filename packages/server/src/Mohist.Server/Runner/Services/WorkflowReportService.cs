@@ -12,18 +12,15 @@ public sealed class WorkflowReportService : IScopedService
     private readonly IGrainFactory _grains;
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly WorkflowItemTranslator _translator;
-    private readonly ILogger<WorkflowReportService> _log;
 
     public WorkflowReportService(
         IGrainFactory grains,
         WorkflowRunQuerier workflowRuns,
-        WorkflowItemTranslator translator,
-        ILogger<WorkflowReportService> log)
+        WorkflowItemTranslator translator)
     {
         _grains = grains;
         _workflowRuns = workflowRuns;
         _translator = translator;
-        _log = log;
     }
 
     public async Task<(string Ack, string? WorkflowStatus)> ReportAsync(
@@ -44,7 +41,7 @@ public sealed class WorkflowReportService : IScopedService
         if (activeWork is null)
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
-        var report = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
+        var report = _translator.TranslateResult(activeWork.Item, result, workflowRunId);
         if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && activeWork.IsTask)
         {
             var binding = activeWork.TaskRunId is { } taskRunId
@@ -65,33 +62,6 @@ public sealed class WorkflowReportService : IScopedService
                 return (unknownAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
 
             report = new WorkflowItemTranslator.InboundReport.Task(unknown.Fallback);
-        }
-
-        if (activeWork.IsTask)
-        {
-            try
-            {
-                RuntimeTaskFollowUps.Project(result.AddTasks);
-            }
-            catch (InvalidOperationException ex)
-            {
-                // A permanently invalid recovery follow-up (missing/out-of-range
-                // recoveryRemaining, or remaining without a declaration) must not
-                // escape as a non-2xx response: the runner would keep the result in
-                // awaitingAck and resend it forever, and the run would never reach a
-                // terminal state. Validation runs before any task mutation, so fail
-                // the active work durably and ack so the runner retires the work.
-                _log.LogError(
-                    "run {run} work {work} rejected recovery follow-up: {reason}",
-                    workflowRunId, workId, ex.Message);
-                var rejectionAck = await workflow.ReceiveTaskReportAsync(workerId, workId, new TaskReport(
-                    workId,
-                    TaskReportStatus.Failed,
-                    Output: null,
-                    Artifacts: null,
-                    Detail: $"Recovery follow-up rejected: {ex.Message}"));
-                return (rejectionAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
-            }
         }
 
         ReportAck ack = report switch

@@ -31,31 +31,23 @@ public sealed class WorkflowItemTranslator : IScopedService
 {
     private readonly WorkflowPromptResolver _promptResolver;
     private readonly WorkflowVariableResolver _variableResolver;
-    private readonly IWorkflowArtifactBindService _artifactBindService;
     private readonly IAgentExecutionSnapshotResolver? _agentSnapshots;
-    private readonly ILogger<WorkflowItemTranslator> _log;
 
     public WorkflowItemTranslator(
         WorkflowPromptResolver promptResolver,
-        WorkflowVariableResolver variableResolver,
-        IWorkflowArtifactBindService artifactBindService,
-        ILogger<WorkflowItemTranslator> log)
-        : this(promptResolver, variableResolver, artifactBindService, log, null)
+        WorkflowVariableResolver variableResolver)
+        : this(promptResolver, variableResolver, null)
     {
     }
 
     public WorkflowItemTranslator(
         WorkflowPromptResolver promptResolver,
         WorkflowVariableResolver variableResolver,
-        IWorkflowArtifactBindService artifactBindService,
-        ILogger<WorkflowItemTranslator> log,
         IAgentExecutionSnapshotResolver? agentSnapshots)
     {
         _promptResolver = promptResolver;
         _variableResolver = variableResolver;
-        _artifactBindService = artifactBindService;
         _agentSnapshots = agentSnapshots;
-        _log = log;
     }
 
     /// <summary>
@@ -438,25 +430,23 @@ public sealed class WorkflowItemTranslator : IScopedService
         public sealed record Checks(CheckReport Value) : InboundReport;
     }
 
-    public async Task<InboundReport> TranslateResultAsync(
+    public InboundReport TranslateResult(
         WorkItem item,
         WorkResult result,
-        string workflowRunId,
-        WorkflowRun run)
+        string workflowRunId)
     {
         if (item.IsTask)
-            return await TranslateTaskResultAsync(item, result, workflowRunId, run);
+            return TranslateTaskResult(item, result, workflowRunId);
         if (item.IsChecks)
             return TranslateChecksResult(item, result);
         throw new InvalidOperationException(
             $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
     }
 
-    private async Task<InboundReport> TranslateTaskResultAsync(
+    private static InboundReport TranslateTaskResult(
         WorkItem item,
         WorkResult result,
-        string workflowRunId,
-        WorkflowRun run)
+        string workflowRunId)
     {
         var workId = item.Id ?? throw new InvalidOperationException(
             $"Task work item for workflow '{workflowRunId}' is missing work id");
@@ -491,47 +481,17 @@ public sealed class WorkflowItemTranslator : IScopedService
                 Error: new ExecutionError("unexpected-error", shapeError)));
         }
 
-        IReadOnlyList<ArtifactRef>? artifacts = null;
-
-        if (result.ArtifactUploadIds is { Length: > 0 })
-        {
-            var bindResult = await _artifactBindService.BindAsync(
-                workflowRunId,
-                workId,
-                workId,
-                result.ArtifactUploadIds,
-                item.Artifacts,
-                variables: await ResolveBindVariablesAsync(workflowRunId, run, item.Stage),
-                projectId: run.Metadata.ProjectId,
-                issueNumber: ReadIssueNumber(run));
-
-            if (!bindResult.IsSuccess)
-            {
-                _log.LogWarning(
-                    "run {run} work {work} artifact binding failed: {reason}",
-                    workflowRunId, workId, bindResult.Error);
-                return new InboundReport.Task(new TaskReport(
-                    WorkId: workId,
-                    Status: TaskReportStatus.Failed,
-                    Output: null,
-                    Artifacts: null,
-                    Detail: bindResult.Error ?? "artifact binding failed",
-                    Error: result.Error));
-            }
-
-            artifacts = bindResult.ArtifactRecordedEvents
-                .Select(e => new ArtifactRef(Path: e.Path))
-                .ToList();
-        }
-
         return new InboundReport.Task(new TaskReport(
             WorkId: workId,
             Status: status,
             Output: validatedOutput,
-            Artifacts: artifacts,
+            Artifacts: null,
             Detail: detail,
             AddTasks: result.AddTasks is { Count: > 0 } ? result.AddTasks.ToList() : null,
-            Error: result.Error));
+            Error: result.Error,
+            ArtifactUploadIds: result.ArtifactUploadIds is { Length: > 0 }
+                ? result.ArtifactUploadIds.ToArray()
+                : null));
     }
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
@@ -639,10 +599,4 @@ public sealed class WorkflowItemTranslator : IScopedService
         return "Agent result authority is unconfirmed.";
     }
 
-    private async Task<JsonElement?> ResolveBindVariablesAsync(
-        string workflowRunId, WorkflowRun run, string stage)
-    {
-        var resolved = await _variableResolver.ResolveEffectiveVariableBundleAsync(workflowRunId, stage);
-        return resolved.Vars;
-    }
 }

@@ -36,15 +36,9 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
             new ProjectVariableStore(factory),
             new IssueVariableStore(factory),
             runVariablesStore);
-        var artifactService = new WorkflowArtifactBindService(
-            factory,
-            NullLogger<WorkflowArtifactBindService>.Instance,
-            new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         _translator = new WorkflowItemTranslator(
             promptResolver,
-            variableResolver,
-            artifactService,
-            NullLogger<WorkflowItemTranslator>.Instance);
+            variableResolver);
     }
 
     [Fact]

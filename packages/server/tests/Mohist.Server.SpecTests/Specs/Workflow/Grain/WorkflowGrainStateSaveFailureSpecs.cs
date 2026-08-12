@@ -15,12 +15,13 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
 [Collection("MohistDb")]
-public sealed class WorkflowGrainStateSaveFailureSpecs
+public sealed partial class WorkflowGrainStateSaveFailureSpecs
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly FakeTimeProvider TimeProvider = new(FixedTime);
@@ -327,6 +328,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             services.GetRequiredService<IDispatchSnapshotStore>(),
             services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowVariableResolver>(),
+            services.GetRequiredService<IWorkflowArtifactBindService>(),
             Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
@@ -346,6 +348,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             services.GetRequiredService<IDispatchSnapshotStore>(),
             services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowVariableResolver>(),
+            services.GetRequiredService<IWorkflowArtifactBindService>(),
             Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance,
@@ -451,11 +454,12 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             IDispatchSnapshotStore dispatchSnapshotStore,
             WorkflowDefinitionResolver definitionResolver,
             WorkflowVariableResolver variableResolver,
+            IWorkflowArtifactBindService artifactBindService,
             IOptions<WorkflowOptions> options,
             TimeProvider timeProvider,
             ILogger<WorkflowGrain> log,
             ReminderCalls calls)
-            : base(context, runtime, runStore, dispatchSnapshotStore, definitionResolver, variableResolver,
+            : base(context, runtime, runStore, dispatchSnapshotStore, definitionResolver, variableResolver, artifactBindService,
                 options, timeProvider, log)
         {
             _calls = calls;

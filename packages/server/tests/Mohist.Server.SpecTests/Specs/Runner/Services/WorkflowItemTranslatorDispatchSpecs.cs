@@ -224,7 +224,7 @@ public partial class WorkflowItemTranslatorSpecs
         var runId = $"wr-{Guid.NewGuid():N}";
         var run = await SeedRunningWorkflowAsync(runId, "proj-agent-no-resolver");
         var translatorWithoutResolver = new WorkflowItemTranslator(
-            _promptResolver, _variableResolver, _bindService, TranslatorNullLogger, agentSnapshots: null);
+            _promptResolver, _variableResolver, agentSnapshots: null);
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
             With(@"{ ""name"": ""reviewer"", ""prompt"": ""Review the change."" }"));

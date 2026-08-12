@@ -64,7 +64,8 @@ public sealed record TaskReport(
     [property: Id(3)] IReadOnlyList<ArtifactRef>? Artifacts,
     [property: Id(4)] string? Detail = null,
     [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null,
-    [property: Id(6)] ExecutionError? Error = null);
+    [property: Id(6)] ExecutionError? Error = null,
+    [property: Id(7)] IReadOnlyList<string>? ArtifactUploadIds = null);
 
 [GenerateSerializer]
 public sealed record CheckReport(
@@ -78,10 +79,7 @@ public enum TaskReportStatus
 }
 
 /// <summary>
-/// Reference to a bound artifact as reported by the worker-side translator.
-/// The grain stores the recorded event without touching the upload pipeline
-/// — uploads were resolved on the worker side via
-/// <c>IWorkflowArtifactBindService</c>.
+/// Reference to an artifact after the Workflow grain has bound its upload.
 /// </summary>
 [GenerateSerializer]
 public sealed record ArtifactRef(

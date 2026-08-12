@@ -12,6 +12,7 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Orleans;
 using Xunit;
 
@@ -85,6 +86,7 @@ public sealed class WorkflowGrainProductionContractSpecs
             scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>(),
             definitionResolver,
             variableResolver,
+            scope.ServiceProvider.GetRequiredService<IWorkflowArtifactBindService>(),
             Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);

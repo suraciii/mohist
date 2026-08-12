@@ -17,11 +17,11 @@ internal sealed class WorkflowWorkLifecycle
     /// artifact before the producing task closes.
     /// </summary>
     public async Task<IReadOnlyList<WorkflowEvent>> ApplyTaskReportAsync(
-        WorkflowRun run, TaskReport report, string taskRunId)
+        WorkflowRun run, TaskReport report, string stageId, string taskRunId)
     {
         var now = _owner.Now();
-        var currentStage = run.CurrentStage();
-        var currentTask = currentStage?.Tasks.FirstOrDefault(t => t.Id == taskRunId);
+        var reportStage = run.Stages.SingleOrDefault(stage => stage.Id == stageId);
+        var currentTask = reportStage?.Tasks.SingleOrDefault(task => task.Id == taskRunId);
         var events = new List<WorkflowEvent>();
 
         var taskAttempts = report.Status == TaskReportStatus.Succeeded
@@ -44,7 +44,7 @@ internal sealed class WorkflowWorkLifecycle
                 currentTask.Error = report.Error;
             }
             var hasFollowUpTasks = taskAttempts.Count > 0;
-            events.AddRange(run.CompleteTask(now, advance: !hasFollowUpTasks));
+            events.AddRange(run.CompleteTask(stageId, taskRunId, now, advance: !hasFollowUpTasks));
 
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
@@ -75,7 +75,7 @@ internal sealed class WorkflowWorkLifecycle
             }
             var detail = report.Detail ?? (report.Output.HasValue ? report.Output.Value.GetRawText() : null);
             var taskResult = new TaskResult("failed", detail, report.Error);
-            events.AddRange(run.FailTask(taskResult, now));
+            events.AddRange(run.FailTask(stageId, taskRunId, taskResult, now));
         }
 
         return events;

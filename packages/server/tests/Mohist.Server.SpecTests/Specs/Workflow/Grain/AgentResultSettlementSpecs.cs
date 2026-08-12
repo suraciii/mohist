@@ -1,8 +1,10 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain.Run;
@@ -272,6 +274,65 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(EventCatalog.ReverseDns.TaskFailed, eventTypes);
         Assert.DoesNotContain(EventCatalog.ReverseDns.StageFailed, eventTypes);
         Assert.DoesNotContain(EventCatalog.ReverseDns.WorkflowRunFailed, eventTypes);
+    }
+
+    [Fact]
+    public async Task ExplicitStop_LateReportDoesNotConsumePendingArtifactUpload()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var initial = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(initial.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            "session-stop-artifact",
+            "turn-stop-artifact",
+            "opencode",
+            "runtime-stop-artifact");
+        const string uploadId = "artup_late_after_explicit_stop";
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        await using (var db = new MohistDbContext(options))
+        {
+            db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
+            {
+                UploadId = uploadId,
+                WorkflowRunId = _workflowId!,
+                WorkId = work.WorkId,
+                TaskRunId = task.Id,
+                Path = "late.txt",
+                ContentType = "text/plain",
+                ContentHash = "sha256:late-after-stop",
+                Size = 4,
+                StoragePath = "workflows/test/late.txt",
+                CreatedAt = _fixture.TimeProvider.GetUtcNow(),
+                ExpiresAt = _fixture.TimeProvider.GetUtcNow().AddDays(1),
+            });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
+            new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected")));
+        await workflow.StopAsync("operator stop");
+
+        var reportService = Services.GetRequiredService<WorkflowReportService>();
+        var report = await reportService.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            new WorkResult("completed", ArtifactUploadIds: [uploadId]));
+
+        Assert.Equal("stale", report.Ack);
+        await using var assertionDb = new MohistDbContext(options);
+        Assert.NotNull(await assertionDb.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+        Assert.Empty(await assertionDb.WorkflowArtifacts
+            .Where(row => row.WorkflowRunId == _workflowId)
+            .ToListAsync());
     }
 
     [Fact]
