@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -36,6 +37,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var runnerId = $"launch-runtime-from-config-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "config-runtime-agent", runtime: "pi");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        ClaimResult? claim = null;
 
         try
         {
@@ -51,12 +53,13 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             Assert.NotNull(sessionInfo);
             Assert.Equal("pi", sessionInfo!.Runtime);
 
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("pi", ReadRuntimeFromDispatch(polledDispatch));
+            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
+            Assert.Equal("pi", ReadRuntimeFromDispatch(claim.Dispatch));
         }
         finally
         {
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -68,6 +71,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var runnerId = $"launch-runtime-default-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "default-runtime-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        ClaimResult? claim = null;
 
         try
         {
@@ -83,12 +87,13 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             Assert.NotNull(sessionInfo);
             Assert.Equal("opencode", sessionInfo!.Runtime);
 
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("opencode", ReadRuntimeFromDispatch(polledDispatch));
+            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
+            Assert.Equal("opencode", ReadRuntimeFromDispatch(claim.Dispatch));
         }
         finally
         {
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -234,6 +239,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var runnerId = $"launch-snapshot-fixed-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "snapshot-agent", runtime: "pi");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        ClaimResult? claim = null;
 
         try
         {
@@ -244,9 +250,8 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var firstDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("pi", ReadRuntimeFromDispatch(firstDispatch));
+            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
+            Assert.Equal("pi", ReadRuntimeFromDispatch(claim.Dispatch));
 
             await PatchAgentRuntimeAsync(projectId, agent.Id, "opencode");
 
@@ -255,30 +260,15 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         }
         finally
         {
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
 
-    private async Task<JsonElement> PollDispatchEnvelopeAsync(string runnerId, string workId)
+    private static string ReadRuntimeFromDispatch(WorkDispatch dispatch)
     {
-        for (var i = 0; i < 50; i++)
-        {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            foreach (var data in dispatches)
-            {
-                if (string.Equals(data.GetProperty("workId").GetString(), workId, StringComparison.Ordinal))
-                    return data;
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-
-        throw new InvalidOperationException($"No polled dispatch for workId '{workId}'");
-    }
-
-    private static string ReadRuntimeFromDispatch(JsonElement dispatch)
-    {
-        var withJson = dispatch.GetProperty("with").GetString();
+        var withJson = dispatch.With;
         Assert.False(string.IsNullOrWhiteSpace(withJson));
         using var doc = JsonDocument.Parse(withJson!);
         return doc.RootElement.GetProperty("runtime").GetString()!;
