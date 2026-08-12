@@ -189,6 +189,14 @@ the gate creates the report parent and removes the declared report target. A
 lane is successful only when its process exits zero and writes a fresh,
 non-empty report at that exact path.
 
+Canonical evidence is accepted only from a clean index and worktree, including
+the absence of non-ignored untracked files that a build glob could consume.
+The gate records the exact `HEAD` revision, checks that identity before the
+build, after the build and script boundary phase, and after duration execution,
+and fails if source inputs change at any boundary. Generated dependencies and
+outputs remain governed by the lockfile and ignore policy rather than being
+misrepresented as source changes.
+
 The gate retains the temporary run directory for success, ordinary failure, and
 deadline failure, and prints its absolute path before returning. It never
 removes diagnostics automatically and never relies on `.gitignore` to hide
@@ -264,6 +272,10 @@ allocate their physical silo/gateway ports through `TestClusterPortAllocator`,
 never from a fixed shared port. xUnit v3 lanes use their compiled apphost
 reporter; the legacy xUnit v2 workflow-definition lane reuses its build through
 `dotnet test --no-build --no-restore` and its VSTest TRX reporter.
+On Windows, canonical phases and Node lanes resolve the inherited npm CLI
+through the current Node executable; they do not pass a `.cmd` file to
+`CreateProcess` and never enable a shell. A missing npm CLI identity therefore
+fails before a child is admitted instead of changing quoting semantics.
 
 `canonical.durationMeasurementTracks` is an ordered, small set of tracks whose
 per-test duration policy must not share CPU or I/O with another test executor.
@@ -301,8 +313,10 @@ On the first lane failure or deadline, the scheduler stops admitting queued
 lanes, terminates active lane process trees, and waits for their cleanup through
 the shared absolute cutoff. POSIX lanes use their detached process group;
 Windows lanes use `taskkill /T /F` and wait for the launched process tree's
-terminal event. Neither path waits without a bound. It never deletes completed
-evidence. The final report includes each started or cancelled lane's command,
+terminal event. A spawn failure or nonzero `taskkill` exit cannot establish
+tree convergence, even if the root process has already exited. Neither path
+waits without a bound. It never deletes completed evidence. The final report
+includes each started or cancelled lane's command,
 original exit status, elapsed time, raw-log paths, report state, and all
 parseable real test totals. It reports the triggering failure separately from
 lanes cancelled or not started by fail-fast; cancelled lanes are not recast as

@@ -1,10 +1,81 @@
 export type TestOutcome = 'passed' | 'failed' | 'error' | 'skipped' | 'not-run' | 'other'
 
+export type ExecutionLedgerOutcome = 'passed' | 'failed' | 'skipped' | 'not-run'
+
 export interface TestCase {
   readonly name: string
   readonly durationMs: number
   readonly outcome: TestOutcome
   readonly file?: string
+  readonly uid?: string
+}
+
+export interface ExecutionLedgerCase {
+  readonly uid: string
+  readonly testCaseUid: string
+  readonly name: string
+  readonly outcome: ExecutionLedgerOutcome
+  readonly executionTimeMs: number
+  readonly startTime: string
+  readonly finishTime: string
+  readonly className: string
+  readonly collectionName: string
+}
+
+export interface ExecutionLedger {
+  readonly schemaVersion: 2
+  readonly runId: string
+  readonly manifestHash: string
+  readonly manifestCount: number
+  readonly assemblyPath: string
+  readonly assemblySha256: string
+  readonly sourceSha256: string
+  readonly xunitVersion: string
+  readonly mtpVersion: string
+  readonly parallelism: string
+  readonly durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime'
+  readonly durationUnit: 'seconds'
+  readonly cases: readonly ExecutionLedgerCase[]
+}
+
+export interface ExecutionManifest {
+  readonly hash: string
+  readonly cases: readonly ExecutionManifestCase[]
+}
+
+export interface ExecutionManifestCase {
+  readonly uid: string
+  readonly name: string
+  readonly className: string
+  readonly methodName: string
+}
+
+export interface ExecutionLedgerExpectation {
+  readonly runId: string
+  readonly manifest: ExecutionManifest
+  readonly assemblyPath: string
+  readonly assemblySha256: string
+  readonly sourceSha256: string
+  readonly parallelism: string
+}
+
+export type CurrentExecutionIdentity = Omit<ExecutionLedgerExpectation, 'runId'>
+
+export interface ExecutionLedgerProvenance {
+  readonly schemaVersion: 2
+  readonly runId: string
+  readonly manifestHash: string
+  readonly manifestCount: number
+  readonly manifestCases: readonly ExecutionManifestCase[]
+  readonly assemblyPath: string
+  readonly assemblySha256: string
+  readonly sourceSha256: string
+  readonly parallelism: string
+}
+
+export interface ExecutionLedgerValidation {
+  readonly cases: readonly TestCase[]
+  readonly errors: readonly string[]
 }
 
 export interface AllowlistEntry {
@@ -45,6 +116,9 @@ export interface TrackConfig {
   readonly tfm?: string
   readonly run?: readonly string[]
   readonly report: string
+  readonly executionLedger?: string
+  readonly executionProvenance?: string
+  readonly executionSourceRoots?: readonly string[]
   readonly reportFormat: ReportFormat
   readonly partitions?: number
   readonly deadlineMs: number
@@ -143,6 +217,9 @@ export interface TrackRun {
   readonly reportReady: boolean
   readonly cleanupComplete: boolean
   readonly reportError?: string
+  readonly executionLedgerReady?: boolean
+  readonly executionLedgerError?: string
+  readonly executionLedgerExpectation?: ExecutionLedgerExpectation
   readonly stdoutPath?: string
   readonly stderrPath?: string
 }

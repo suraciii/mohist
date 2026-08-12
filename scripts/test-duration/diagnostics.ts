@@ -24,9 +24,10 @@ export function formatTrackRun(run: TrackRun): string {
     ? `  [report ${run.reportReady ? 'ignored after cancellation' : 'unavailable after cancellation'}]`
     : run.reportReady ? '' : '  [report missing/stale]'
   const cleanup = `  [process-tree ${run.cleanupComplete ? 'terminal' : 'NOT TERMINAL'}]`
+  const ledger = run.executionLedgerReady === false ? '  [execution ledger missing/stale]' : ''
   const reportPath = run.reportPath ? `  report=${run.reportPath}` : ''
   const evidence = run.stdoutPath && run.stderrPath ? `  logs=${run.stdoutPath},${run.stderrPath}` : ''
-  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${cleanup}${reportPath}  ${run.command}${evidence}`
+  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${ledger}${cleanup}${reportPath}  ${run.command}${evidence}`
 }
 
 export function formatEvaluation(eval_: TrackEvaluation): string[] {

@@ -108,6 +108,27 @@ test('runWithDeadline waits for suite-timeout child cleanup before returning', a
   assert.equal(cleanupCalls, 1)
 })
 
+test('runWithDeadline reports only the deadline outcome after bounded best-effort cleanup', async () => {
+  const timeout = Promise.resolve('track' as const)
+  let cleanupCalls = 0
+  const outcome = await runWithDeadline({
+    start: () => new Promise<{ exitCode: number | null }>(() => undefined),
+    kill: async () => { cleanupCalls += 1 },
+    timeout,
+    now: () => 100,
+  })
+
+  assert.deepEqual(outcome, {
+    status: 'timeout',
+    exitCode: null,
+    elapsedMs: 0,
+    timeoutReason: 'track',
+  })
+  assert.equal(cleanupCalls, 1)
+  assert.equal('cleanupFailed' in outcome, false)
+  assert.equal('cleanupError' in outcome, false)
+})
+
 test('runWithDeadline treats a child completion at the hard cutoff as timeout and converges it', async () => {
   const harness = makeHarness()
   let startRelease!: (result: { exitCode: number | null }) => void

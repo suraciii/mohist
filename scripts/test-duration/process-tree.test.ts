@@ -46,7 +46,7 @@ function manualClock(initialNow = 0): {
 test('Windows tree cancellation invokes taskkill /T and waits for the launched tree terminal event', async () => {
   const clock = manualClock()
   const childDone = deferred<void>()
-  const taskkillDone = deferred<void>()
+  const taskkillDone = deferred<{ exitCode: number | null }>()
   const taskkillPids: number[] = []
   let taskkillCancelled = false
   const ops: ProcessTreeOps = {
@@ -63,7 +63,7 @@ test('Windows tree cancellation invokes taskkill /T and waits for the launched t
 
   const terminating = terminateProcessTree({ pid: 77, done: childDone.promise }, 100, 5, ops)
   assert.deepEqual(taskkillPids, [77])
-  taskkillDone.resolve(undefined)
+  taskkillDone.resolve({ exitCode: 0 })
   await Promise.resolve()
   childDone.resolve(undefined)
 
@@ -73,7 +73,7 @@ test('Windows tree cancellation invokes taskkill /T and waits for the launched t
 
 test('Windows taskkill cleanup is bounded by the supplied absolute deadline', async () => {
   const clock = manualClock()
-  const taskkillDone = deferred<void>()
+  const taskkillDone = deferred<{ exitCode: number | null }>()
   let cancelled = false
   const ops: ProcessTreeOps = {
     platform: 'win32',
@@ -89,6 +89,24 @@ test('Windows taskkill cleanup is bounded by the supplied absolute deadline', as
 
   assert.equal(await terminating, false)
   assert.equal(cancelled, true)
+})
+
+test('Windows cleanup fails closed when taskkill exits nonzero even after the root exits', async () => {
+  const clock = manualClock()
+  const childDone = deferred<void>()
+  const ops: ProcessTreeOps = {
+    platform: 'win32',
+    now: clock.now,
+    createTimeout: clock.createTimeout,
+    signalProcessGroup: () => assert.fail('Windows must not use a POSIX process group'),
+    isProcessGroupAlive: () => assert.fail('Windows must not inspect a POSIX process group'),
+    startTaskkill: () => ({ done: Promise.resolve({ exitCode: 5 }), cancel: () => {} }),
+  }
+
+  const terminating = terminateProcessTree({ pid: 83, done: childDone.promise }, 100, 5, ops)
+  childDone.resolve(undefined)
+
+  assert.equal(await terminating, false)
 })
 
 test('POSIX cleanup escalates TERM to KILL and still waits only to the absolute deadline', async () => {
@@ -186,7 +204,7 @@ test('a terminal event observed at the absolute cutoff does not satisfy process-
     createTimeout: clock.createTimeout,
     signalProcessGroup: () => assert.fail('Windows must not use a POSIX process group'),
     isProcessGroupAlive: () => assert.fail('Windows must not inspect a POSIX process group'),
-    startTaskkill: () => ({ done: Promise.resolve(), cancel: () => {} }),
+    startTaskkill: () => ({ done: Promise.resolve({ exitCode: 0 }), cancel: () => {} }),
   }
 
   const terminating = terminateProcessTree({ pid: 80, done: childDone.promise }, 20, 5, ops)

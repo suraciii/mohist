@@ -106,6 +106,9 @@ function validateTrack(track: TrackConfig): string[] {
   if (track.partitions !== undefined && !track.report.includes('{partition}')) {
     errors.push(`${prefix}: partitioned reports must include {partition}`)
   }
+  if (track.partitions !== undefined && track.executionLedger !== undefined) {
+    errors.push(`${prefix}: executionLedger tracks cannot be partitioned`)
+  }
   if (track.kind !== 'report-only' && !track.run && !track.csproj && !track.apphost) {
     errors.push(`${prefix}: needs a run command, csproj, or apphost`)
   }

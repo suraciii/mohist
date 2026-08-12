@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, resolve, basename, isAbsolute, join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, resolve, basename, isAbsolute, join, relative, sep } from 'node:path'
 import { finished } from 'node:stream/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -21,14 +22,47 @@ import {
   suiteDeadlinesAt,
   type SuiteDeadlines,
 } from './deadline.js'
+import {
+  buildLedgerEnvironment,
+  createExecutionRunId,
+  parseExecutionLedger,
+  parseExecutionProvenance,
+  readCurrentExecutionIdentity,
+  serializeExecutionProvenance,
+  validateCurrentExecutionIdentity,
+  validateExecutionEvidence,
+} from './execution-ledger.js'
 import { parseReport } from './reports.js'
-import { parseAssemblyName, resolveApphostPath, resolveFocusedCommand } from './focused.js'
+import { parseAssemblyName, resolveApphostPath, resolveDiscoveryCommand, resolveFocusedCommand } from './focused.js'
 import { nativeProcessTreeOps, terminateProcessTree, type ProcessTreeOps } from './process-tree.js'
 import { scheduleLanes, type LaneSpec, type RunningLane } from './scheduler.js'
+import { resolveSpawnCommand } from './spawn-command.js'
 import { nativeCalendarSource, nativeTimeSource } from './time.js'
-import type { SuiteConfig, TestCase, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, SuiteConfig, TestCase, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+export const DEFAULT_XUNIT_PARALLELISM =
+  'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=default'
+
+export interface ExecutionProvenanceWriter {
+  readonly ensureDirectory: (path: string) => void
+  readonly writeText: (path: string, content: string) => void
+}
+
+const physicalExecutionProvenanceWriter: ExecutionProvenanceWriter = {
+  ensureDirectory: (path) => mkdirSync(path, { recursive: true }),
+  writeText: (path, content) => writeFileSync(path, content, 'utf8'),
+}
+
+export function writeExecutionProvenance(
+  path: string,
+  expectation: ExecutionLedgerExpectation,
+  writer: ExecutionProvenanceWriter = physicalExecutionProvenanceWriter,
+): void {
+  writer.ensureDirectory(dirname(path))
+  writer.writeText(path, serializeExecutionProvenance(expectation))
+}
 
 function readCsproj(csprojPath: string): string {
   return readFileSync(resolve(repoRoot, csprojPath), 'utf8')
@@ -48,6 +82,86 @@ function apphostFor(track: TrackConfig): string {
 
 function resolveApphostExecutable(path: string): string {
   return process.platform === 'win32' && !path.toLowerCase().endsWith('.exe') ? `${path}.exe` : path
+}
+
+function sha256File(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+const sourceDigestIgnoredDirectories = new Set(['.git', 'bin', 'node_modules', 'obj', 'reports'])
+
+function sourceFiles(root: string): readonly string[] {
+  const absoluteRoot = resolve(repoRoot, root)
+  const relativeRoot = relative(repoRoot, absoluteRoot)
+  if (relativeRoot === '..' || relativeRoot.startsWith(`..${sep}`)) {
+    throw new Error(`execution source root escapes the repository: ${root}`)
+  }
+
+  const visit = (path: string): string[] => {
+    const stat = lstatSync(path)
+    if (stat.isSymbolicLink()) throw new Error(`execution source identity does not follow symbolic links: ${path}`)
+    if (stat.isFile()) return [path]
+    if (!stat.isDirectory()) throw new Error(`execution source identity only supports files and directories: ${path}`)
+    return readdirSync(path, { withFileTypes: true })
+      .filter((entry) => !entry.isDirectory() || !sourceDigestIgnoredDirectories.has(entry.name))
+      .flatMap((entry) => visit(resolve(path, entry.name)))
+  }
+
+  return visit(absoluteRoot)
+}
+
+function sha256Sources(roots: readonly string[]): string {
+  const files = [...new Set(roots.flatMap(sourceFiles))]
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+  if (files.length === 0) throw new Error('execution source roots contain no files')
+
+  const hash = createHash('sha256')
+  for (const path of files) {
+    hash.update(relative(repoRoot, path).split(sep).join('/'), 'utf8')
+    hash.update('\0')
+    hash.update(readFileSync(path))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
+
+function assemblyPathFor(apphost: string): string {
+  return apphost.endsWith('.exe') ? `${apphost.slice(0, -4)}.dll` : `${apphost}.dll`
+}
+
+function optionValue(args: readonly string[], option: string, fallback: string): string {
+  const indexes = args.flatMap((value, index) => value === option ? [index] : [])
+  if (indexes.length > 1) throw new Error(`duplicate xUnit option ${option}`)
+  if (indexes.length === 0) return fallback
+  const value = args[indexes[0] + 1]
+  if (!value || value.startsWith('-')) throw new Error(`xUnit option ${option} requires a value`)
+  return value
+}
+
+export function parallelismFor(track: TrackConfig): string {
+  const args = track.apphostArgs ?? []
+  const parallel = optionValue(args, '-parallel', 'collections')
+  const parallelAlgorithm = optionValue(args, '-parallelAlgorithm', 'conservative')
+  const maxThreads = optionValue(args, '-maxThreads', 'default')
+  return `xunit-v3:parallel=${parallel};parallelAlgorithm=${parallelAlgorithm};maxThreads=${maxThreads}`
+}
+
+function executionLedgerPlan(track: TrackConfig): {
+  readonly assemblyPath: string
+  readonly discovery: { readonly apphost: string; readonly args: readonly string[] }
+} {
+  if (!track.executionLedger || !track.executionProvenance || track.kind !== 'dotnet-apphost' || !track.csproj) {
+    throw new Error(`track "${track.id}" requires a dotnet-apphost csproj for execution ledger evidence`)
+  }
+  const csprojAbs = resolve(repoRoot, track.csproj)
+  const projectDir = dirname(csprojAbs)
+  const xml = readCsproj(track.csproj)
+  const assemblyName = parseAssemblyName(xml) ?? basename(csprojAbs).replace(/\.csproj$/, '')
+  const apphost = resolveApphostExecutable(resolve(projectDir, resolveApphostPath({ csprojXml: xml, projectDir, assemblyName })))
+  return {
+    assemblyPath: assemblyPathFor(apphost),
+    discovery: resolveDiscoveryCommand({ csprojXml: xml, projectDir, assemblyName }),
+  }
 }
 
 export function commandFor(track: TrackConfig, reportRoot: string = repoRoot): { command: string; args: readonly string[] } {
@@ -83,7 +197,7 @@ export function commandFor(track: TrackConfig, reportRoot: string = repoRoot): {
 }
 
 interface SpawnedChild {
-  readonly done: Promise<{ exitCode: number | null }>
+  readonly done: Promise<{ exitCode: number | null; stdout: string }>
   readonly pid: number
 }
 
@@ -160,17 +274,20 @@ function spawnChild(
   env: NodeJS.ProcessEnv,
   evidence: RawEvidence,
 ): SpawnedChild {
+  const resolvedCommand = resolveSpawnCommand(command, args)
   const detached = process.platform !== 'win32'
   mkdirSync(dirname(evidence.stdoutPath), { recursive: true })
   const stdout = createWriteStream(evidence.stdoutPath)
   const stderr = createWriteStream(evidence.stderrPath)
-  const child = spawn(command, args as string[], {
+  const child = spawn(resolvedCommand.command, resolvedCommand.args as string[], {
     cwd: repoRoot,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached,
   })
+  let stdoutText = ''
   child.stdout?.on('data', (chunk: Buffer) => {
+    stdoutText += chunk.toString()
     stdout.write(chunk)
     process.stdout.write(chunk)
   })
@@ -178,7 +295,7 @@ function spawnChild(
     stderr.write(chunk)
     process.stderr.write(chunk)
   })
-  const done = new Promise<{ exitCode: number | null }>((resolvePromise) => {
+  const done = new Promise<{ exitCode: number | null; stdout: string }>((resolvePromise) => {
     let settled = false
     const settle = async (code: number | null) => {
       if (settled) return
@@ -186,12 +303,35 @@ function spawnChild(
       stdout.end()
       stderr.end()
       await Promise.allSettled([finished(stdout), finished(stderr)])
-      resolvePromise({ exitCode: code })
+      resolvePromise({ exitCode: code, stdout: stdoutText })
     }
     child.once('error', () => { void settle(1) })
     child.once('close', (code) => { void settle(code) })
   })
   return { done, pid: child.pid ?? -1 }
+}
+
+export async function runProcessWithDeadline<TimeoutReason>(input: {
+  readonly child: SpawnedChild
+  readonly timeout: Promise<TimeoutReason>
+  readonly kill: () => Promise<void>
+  readonly now: () => number
+  readonly hardDeadlineAt?: number
+}): Promise<Awaited<SpawnedChild['done']> & {
+  readonly status: 'passed' | 'failed' | 'timeout'
+  readonly elapsedMs: number
+  readonly timeoutReason?: TimeoutReason
+}> {
+  const outcome = await runWithDeadline({
+    start: () => input.child.done,
+    kill: input.kill,
+    timeout: input.timeout,
+    now: input.now,
+    hardDeadlineAt: input.hardDeadlineAt,
+  })
+  if (outcome.status === 'timeout') return { ...outcome, stdout: '' }
+  const completed = await input.child.done
+  return { ...outcome, stdout: completed.stdout }
 }
 
 export function reportFileReady(reportPath: string): boolean {
@@ -277,7 +417,8 @@ export function laneSandbox(
 }
 
 export function isLaneSuccessful(run: TrackRun): boolean {
-  return !run.cancelled && !run.timedOut && run.exitCode === 0 && run.reportReady && run.cleanupComplete
+  return !run.cancelled && !run.timedOut && run.exitCode === 0 && run.reportReady &&
+    run.executionLedgerReady !== false && run.cleanupComplete
 }
 
 interface PlannedLane {
@@ -480,117 +621,224 @@ function startLane(
   cancellationDeadlineAt: () => number,
 ): RunningLane<TrackRun> {
   const evidence = evidenceFor(artifactRoot, plan.lane.id)
-  let command: string
-  let args: readonly string[]
-  try {
-    if (plan.reportPath) {
-      prepareReportTarget(plan.reportPath)
-    }
-    if (plan.executionTrack && plan.partition !== undefined) {
-      const apphost = apphostFor(plan.executionTrack)
-      const manifestDir = join(artifactRoot, 'manifests', 'server-spec', `partition-${plan.partition}`)
-      ;({ command, args } = specPartitionCommand([
-        'run',
-        apphost,
-        String(plan.partition),
-        String(plan.executionTrack.partitions),
-        manifestDir,
-        plan.reportPath!,
-      ]))
-    } else if (plan.executionTrack) {
-      ({ command, args } = commandFor(plan.executionTrack, artifactRoot))
-    } else {
-      ;({ command, args } = specPartitionCommand(['verify', resolve(artifactRoot, 'manifests', 'server-spec')]))
-    }
-  } catch (error) {
-    return {
-      result: Promise.resolve(failedRun(plan, 'not started', `could not prepare lane: ${(error as Error).message}`, evidence)),
-      cancel: () => {},
-    }
-  }
-
-  const cmdString = `${command} ${args.join(' ')}`
-  let child: SpawnedChild
-  try {
-    const sandbox = laneSandbox(
-      artifactRoot,
-      plan.lane.id,
-      process.env,
-      plan.sandboxOrdinal,
-      plan.lane.resources?.includes('server-spec'),
-    )
-    mkdirSync(sandbox.tempDir, { recursive: true })
-    mkdirSync(sandbox.ipcDir, { recursive: true })
-    mkdirSync(sandbox.homeDir, { recursive: true })
-    mkdirSync(dirname(sandbox.databasePath), { recursive: true })
-    mkdirSync(dirname(sandbox.otelDatabasePath), { recursive: true })
-    child = spawnChild(command, args, sandbox.environment, evidence)
-  } catch (error) {
-    return {
-      result: Promise.resolve(failedRun(plan, cmdString, `could not start lane: ${(error as Error).message}`, evidence)),
-      cancel: () => {},
-    }
-  }
   const trackDeadline = createTimeout(plan.deadlineMs, runtime.timeoutScheduler)
+  const laneStartedAt = runtime.now()
   let cleanupComplete = true
+  let currentChild: SpawnedChild | undefined
+  let cancellationRequested = false
   let cancellation: Promise<void> | undefined
+  let resolveLaneCancellation!: () => void
+  const laneCancellation = new Promise<void>((resolvePromise) => { resolveLaneCancellation = resolvePromise })
   const cancel = () => {
-    cancellation ??= killTree(
-      child,
-      graceMs,
-      cancellationDeadlineAt(),
-      { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
-    ).then((completed) => { cleanupComplete = completed })
+    if (!cancellationRequested) {
+      cancellationRequested = true
+      resolveLaneCancellation()
+    }
+    cancellation ??= currentChild === undefined
+      ? Promise.resolve()
+      : killTree(
+          currentChild,
+          graceMs,
+          cancellationDeadlineAt(),
+          { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
+        ).then((completed) => { cleanupComplete = cleanupComplete && completed })
     return cancellation
   }
-  const outcome = runWithDeadline({
-    start: () => child.done,
-    kill: cancel,
-    timeout: Promise.race([
-      trackDeadline.promise.then(() => 'track' as const),
-      suiteDeadline.then(() => 'suite' as const),
-    ]),
-    now: runtime.now,
-    hardDeadlineAt: deadlines.hardDeadlineAt,
-  })
-  const result = outcome.then(async (outcomeResult) => {
-    if (outcomeResult.status !== 'timeout') {
-      cleanupComplete = await killTree(
+
+  const deadline = Promise.race([
+    trackDeadline.promise.then(() => 'track' as const),
+    suiteDeadline.then(() => 'suite' as const),
+    laneCancellation.then(() => 'suite' as const),
+  ])
+
+  const runStage = async (
+    command: string,
+    args: readonly string[],
+    environment: NodeJS.ProcessEnv,
+    stageEvidence: RawEvidence,
+  ) => {
+    if (cancellationRequested) {
+      return { status: 'timeout' as const, exitCode: null, elapsedMs: runtime.now() - laneStartedAt, timeoutReason: 'suite' as const, stdout: '' }
+    }
+    const child = spawnChild(command, args, environment, stageEvidence)
+    currentChild = child
+    const stageResult = await runProcessWithDeadline({
+      child,
+      timeout: deadline,
+      kill: async () => {
+        const completed = await killTree(
+          child,
+          graceMs,
+          cancellationDeadlineAt(),
+          { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
+        )
+        cleanupComplete = cleanupComplete && completed
+      },
+      now: runtime.now,
+      hardDeadlineAt: deadlines.hardDeadlineAt,
+    })
+    if (stageResult.status !== 'timeout') {
+      const completed = await killTree(
         child,
         graceMs,
         cancellationDeadlineAt(),
         { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
       )
+      cleanupComplete = cleanupComplete && completed
     }
-    let ready = false
+    if (currentChild === child) currentChild = undefined
+    return stageResult
+  }
+
+  const result = (async (): Promise<TrackRun> => {
+    let command = 'not started'
+    let args: readonly string[] = []
+    let ledgerExpectation: ExecutionLedgerExpectation | undefined
+    let ledgerPath: string | undefined
+    let provenancePath: string | undefined
+    let executionEnvironment: Readonly<Record<string, string>> | undefined
     try {
-      ready = plan.reportPath ? reportFileReady(plan.reportPath) : outcomeResult.status === 'passed'
-    } catch {
-      ready = false
+      const sandbox = laneSandbox(
+        artifactRoot,
+        plan.lane.id,
+        process.env,
+        plan.sandboxOrdinal,
+        plan.lane.resources?.includes('server-spec'),
+      )
+      mkdirSync(sandbox.tempDir, { recursive: true })
+      mkdirSync(sandbox.ipcDir, { recursive: true })
+      mkdirSync(sandbox.homeDir, { recursive: true })
+      mkdirSync(dirname(sandbox.databasePath), { recursive: true })
+      mkdirSync(dirname(sandbox.otelDatabasePath), { recursive: true })
+
+      if (plan.reportPath) prepareReportTarget(plan.reportPath)
+      const executionTrack = plan.executionTrack
+      if (executionTrack?.executionLedger) {
+        if (executionTrack.partitions !== undefined) {
+          throw new Error('execution ledger tracks cannot be partitioned')
+        }
+        if (!executionTrack.executionProvenance || !executionTrack.executionSourceRoots?.length) {
+          throw new Error(`track "${executionTrack.id}" has incomplete execution ledger configuration`)
+        }
+        ledgerPath = resolve(artifactRoot, executionTrack.executionLedger)
+        provenancePath = resolve(artifactRoot, executionTrack.executionProvenance)
+        const artifactPaths = [plan.reportPath, ledgerPath, provenancePath]
+          .filter((path): path is string => path !== undefined)
+        if (new Set(artifactPaths).size !== artifactPaths.length) {
+          throw new Error('TRX report, execution ledger, and execution provenance paths must differ')
+        }
+        prepareReportTarget(ledgerPath)
+        prepareReportTarget(provenancePath)
+        const ledgerPlan = executionLedgerPlan(executionTrack)
+        const currentIdentity = await readCurrentExecutionIdentity({
+          assemblyPath: ledgerPlan.assemblyPath,
+          sourceRoots: executionTrack.executionSourceRoots,
+          parallelism: parallelismFor(executionTrack),
+        }, {
+          readAssemblySha256: sha256File,
+          readSourceSha256: sha256Sources,
+          readDiscovery: async () => {
+            const discoveryEvidence = evidenceFor(artifactRoot, `${plan.lane.id}.discovery`)
+            const discovery = await runStage(
+              ledgerPlan.discovery.apphost,
+              ledgerPlan.discovery.args,
+              sandbox.environment,
+              discoveryEvidence,
+            )
+            if (discovery.status !== 'passed') {
+              const reason = discovery.status === 'timeout'
+                ? 'compiled discovery exceeded the track or suite deadline'
+                : `compiled discovery failed with exit ${discovery.exitCode}`
+              throw new Error(reason)
+            }
+            return discovery.stdout
+          },
+        })
+        ledgerExpectation = {
+          runId: createExecutionRunId({ now: runtime.now }, randomUUID),
+          ...currentIdentity,
+        }
+        writeExecutionProvenance(provenancePath, ledgerExpectation)
+        executionEnvironment = buildLedgerEnvironment({ ...ledgerExpectation, ledgerPath })
+      }
+
+      if (cancellationRequested) throw new Error('lane was cancelled before test execution')
+      if (executionTrack && plan.partition !== undefined) {
+        const apphost = apphostFor(executionTrack)
+        const manifestDir = join(artifactRoot, 'manifests', 'server-spec', `partition-${plan.partition}`)
+        ;({ command, args } = specPartitionCommand([
+          'run',
+          apphost,
+          String(plan.partition),
+          String(executionTrack.partitions),
+          manifestDir,
+          plan.reportPath!,
+        ]))
+      } else if (executionTrack) {
+        ({ command, args } = commandFor(executionTrack, artifactRoot))
+      } else {
+        ;({ command, args } = specPartitionCommand(['verify', resolve(artifactRoot, 'manifests', 'server-spec')]))
+      }
+
+      const outcome = await runStage(
+        command,
+        args,
+        { ...sandbox.environment, ...executionEnvironment },
+        evidence,
+      )
+      let reportReady = false
+      try {
+        reportReady = plan.reportPath ? reportFileReady(plan.reportPath) : outcome.status === 'passed'
+      } catch {
+        reportReady = false
+      }
+      let executionLedgerReady: boolean | undefined
+      if (ledgerPath) {
+        try {
+          executionLedgerReady = reportFileReady(ledgerPath)
+        } catch {
+          executionLedgerReady = false
+        }
+      }
+      const reportError = !cleanupComplete
+        ? `lane process tree did not reach a terminal state before ${plan.lane.id} cancellation completed`
+        : !reportReady
+          ? plan.reportPath
+            ? `report ${plan.reportPath} was not created or refreshed by the lane`
+            : 'coverage verification did not complete'
+          : executionLedgerReady === false
+            ? `execution ledger ${ledgerPath} was not created or refreshed by the lane`
+            : undefined
+      return {
+        trackId: plan.lane.id,
+        policyTrackId: plan.policyTrack?.id,
+        reportPath: plan.reportPath,
+        timedOut: outcome.status === 'timeout',
+        timeoutReason: outcome.timeoutReason,
+        exitCode: outcome.exitCode,
+        elapsedMs: runtime.now() - laneStartedAt,
+        deadlineMs: plan.deadlineMs,
+        command: `${command} ${args.join(' ')}`,
+        reportReady,
+        cleanupComplete,
+        reportError,
+        executionLedgerReady,
+        executionLedgerError: executionLedgerReady === false ? reportError : undefined,
+        executionLedgerExpectation: ledgerExpectation,
+        stdoutPath: evidence.stdoutPath,
+        stderrPath: evidence.stderrPath,
+      }
+    } catch (error) {
+      return {
+        ...failedRun(plan, command, `could not prepare or execute lane: ${(error as Error).message}`, evidence),
+        elapsedMs: runtime.now() - laneStartedAt,
+        cleanupComplete,
+        executionLedgerReady: ledgerPath ? false : undefined,
+        executionLedgerError: ledgerPath ? (error as Error).message : undefined,
+        executionLedgerExpectation: ledgerExpectation,
+      }
     }
-    return {
-      trackId: plan.lane.id,
-      policyTrackId: plan.policyTrack?.id,
-      reportPath: plan.reportPath,
-      timedOut: outcomeResult.status === 'timeout',
-      timeoutReason: outcomeResult.timeoutReason,
-      exitCode: outcomeResult.exitCode,
-      elapsedMs: outcomeResult.elapsedMs,
-      deadlineMs: plan.deadlineMs,
-      command: cmdString,
-      reportReady: ready,
-      cleanupComplete,
-      reportError: ready
-        ? undefined
-        : !cleanupComplete
-          ? `lane process tree did not reach a terminal state before ${plan.lane.id} cancellation completed`
-        : plan.reportPath
-          ? `report ${plan.reportPath} was not created or refreshed by the lane`
-          : 'coverage verification did not complete',
-      stdoutPath: evidence.stdoutPath,
-      stderrPath: evidence.stderrPath,
-    }
-  }).finally(trackDeadline.cancel)
+  })().finally(trackDeadline.cancel)
   return { result, cancel }
 }
 
@@ -609,12 +857,77 @@ function failedEvaluation(track: TrackConfig, reportError: string): TrackEvaluat
   }
 }
 
+export interface TrackArtifactReader {
+  readonly readText: (path: string) => string
+}
+
+export function evaluateTrackArtifacts(
+  track: TrackConfig,
+  artifacts: TrackArtifactReader,
+  run?: TrackRun,
+  today: Date = new Date(),
+  currentIdentity?: CurrentExecutionIdentity,
+): TrackEvaluation {
+  if (run?.cancelled) {
+    const state = run.reportReady ? 'report is ignored after cancellation' : run.reportError ?? 'report was not produced'
+    return failedEvaluation(track, `lane ${run.trackId} was cancelled ${run.cancellationReason ?? ''}; ${state}`)
+  }
+  if (run && !run.reportReady) {
+    return failedEvaluation(track, run.reportError ?? `report ${track.report} was not refreshed`)
+  }
+  if (track.executionLedger && run && !run.executionLedgerReady) {
+    return failedEvaluation(track, run.executionLedgerError ?? `execution ledger ${track.executionLedger} was not refreshed`)
+  }
+  try {
+    const trxCases = parseReport(track.reportFormat, artifacts.readText(track.report))
+    if (track.executionLedger) {
+      if (!track.executionProvenance) return failedEvaluation(track, 'execution provenance path is not configured')
+      const expected = parseExecutionProvenance(artifacts.readText(track.executionProvenance))
+      if (run?.executionLedgerExpectation) {
+        if (serializeExecutionProvenance(run.executionLedgerExpectation) !== serializeExecutionProvenance(expected)) {
+          return failedEvaluation(track, 'saved execution provenance does not match the current run')
+        }
+      } else {
+        if (!currentIdentity) return failedEvaluation(track, 'current execution identity was not captured for saved evidence')
+        const identityErrors = validateCurrentExecutionIdentity(expected, currentIdentity)
+        if (identityErrors.length > 0) {
+          return failedEvaluation(track, `saved execution provenance is stale: ${identityErrors.join('; ')}`)
+        }
+      }
+      const parsedLedger = parseExecutionLedger(artifacts.readText(track.executionLedger))
+      const evidence = validateExecutionEvidence(trxCases, parsedLedger, expected)
+      if (evidence.errors.length > 0) {
+        return failedEvaluation(track, `execution ledger contract failed: ${evidence.errors.join('; ')}`)
+      }
+      return evaluateTrack(track, evidence.cases, today)
+    }
+    return evaluateTrack(track, trxCases, today)
+  } catch (error) {
+    return failedEvaluation(track, `could not read report ${track.report}: ${(error as Error).message}`)
+  }
+}
+
 function evaluateFromPlans(
   track: TrackConfig,
   plans: readonly PlannedLane[],
   runsByLane: ReadonlyMap<string, TrackRun>,
   runtime: Pick<GuardRuntime, 'calendarNow'>,
+  artifactRoot: string,
+  currentIdentity?: CurrentExecutionIdentity,
 ): TrackEvaluation {
+  if (track.executionLedger) {
+    if (plans.length !== 1 || !plans[0].reportPath) {
+      return failedEvaluation(track, 'execution ledger track must map to exactly one report lane')
+    }
+    const plan = plans[0]
+    const run = runsByLane.get(plan.lane.id)
+    return evaluateTrackArtifacts(track, {
+      readText: (path) => readFileSync(
+        path === track.report ? plan.reportPath! : resolve(artifactRoot, path),
+        'utf8',
+      ),
+    }, run, calendarNowFor(runtime)(), currentIdentity)
+  }
   const cases = []
   for (const plan of plans) {
     if (!plan.reportPath) continue
@@ -634,6 +947,64 @@ function evaluateFromPlans(
     }
   }
   return evaluateTrackAtCalendarDate(track, cases, runtime)
+}
+
+async function readSavedTrackIdentity(
+  track: TrackConfig,
+  artifactRoot: string,
+  graceMs: number,
+  deadlines: SuiteDeadlines,
+  runtime: GuardRuntime,
+): Promise<CurrentExecutionIdentity> {
+  if (!track.executionSourceRoots?.length) {
+    throw new Error(`track "${track.id}" requires executionSourceRoots for execution ledger evidence`)
+  }
+  const plan = executionLedgerPlan(track)
+  return readCurrentExecutionIdentity({
+    assemblyPath: plan.assemblyPath,
+    sourceRoots: track.executionSourceRoots,
+    parallelism: parallelismFor(track),
+  }, {
+    readAssemblySha256: sha256File,
+    readSourceSha256: sha256Sources,
+    readDiscovery: async () => {
+      const evidence = evidenceFor(artifactRoot, `${track.id}.check-discovery`)
+      const child = spawnChild(plan.discovery.apphost, plan.discovery.args, process.env, evidence)
+      const remaining = Math.max(0, deadlines.executionDeadlineAt - runtime.now())
+      const timer = createTimeout(Math.min(track.deadlineMs, remaining), runtime.timeoutScheduler)
+      try {
+        const result = await runProcessWithDeadline({
+          child,
+          timeout: timer.promise.then(() => 'suite' as const),
+          kill: async () => {
+            await killTree(
+              child,
+              graceMs,
+              cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
+              { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
+            )
+          },
+          now: runtime.now,
+          hardDeadlineAt: deadlines.hardDeadlineAt,
+        })
+        if (result.status !== 'passed') {
+          throw new Error(result.status === 'timeout'
+            ? 'compiled discovery exceeded the suite deadline'
+            : `compiled discovery failed with exit ${result.exitCode}`)
+        }
+        const cleanupComplete = await killTree(
+          child,
+          graceMs,
+          cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
+          { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
+        )
+        if (!cleanupComplete) throw new Error('compiled discovery process tree did not reach a terminal state')
+        return result.stdout
+      } finally {
+        timer.cancel()
+      }
+    },
+  })
 }
 
 function focusedFlow(csprojPath: string, className: string): number {
@@ -1049,6 +1420,7 @@ export async function main(
           plansByPolicy.get(track.id) ?? [],
           runsByTrack,
           runtime,
+          artifactRoot,
         )
         const afterEvaluationFailure = reportEvaluationFailureReason(
           runtime.now(), deadlines, suiteAbortReason === 'external')
@@ -1101,11 +1473,31 @@ export async function main(
   }
 
   for (const track of selected) {
+    let currentIdentity: CurrentExecutionIdentity | undefined
+    if (track.executionLedger) {
+      try {
+        currentIdentity = await readSavedTrackIdentity(
+          track,
+          artifactRoot,
+          graceMs,
+          deadlines,
+          runtime,
+        )
+      } catch (error) {
+        evaluations.push(failedEvaluation(
+          track,
+          `could not validate current execution identity: ${(error as Error).message}`,
+        ))
+        continue
+      }
+    }
     evaluations.push(evaluateFromPlans(
       track,
       plansByPolicy.get(track.id) ?? [],
       new Map(),
       runtime,
+      artifactRoot,
+      currentIdentity,
     ))
   }
   console.log('budget:')

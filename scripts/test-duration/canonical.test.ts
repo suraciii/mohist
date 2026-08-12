@@ -12,6 +12,7 @@ interface RuntimeProbe {
   readonly durationClock: readonly (() => number)[]
   readonly writes: readonly string[]
   readonly reports: readonly string[]
+  readonly sourceIdentityCalls: () => number
 }
 
 function fakeRuntime(
@@ -26,12 +27,20 @@ function fakeRuntime(
   const durationClock: Array<() => number> = []
   const writes: string[] = []
   const reports: string[] = []
+  let sourceIdentityCalls = 0
   let now = 1000
   let phaseIndex = 0
-  const probe: RuntimeProbe = { root, artifactParents, phases, durationArgs, durationClock, writes, reports }
+  const probe: RuntimeProbe = {
+    root, artifactParents, phases, durationArgs, durationClock, writes, reports,
+    sourceIdentityCalls: () => sourceIdentityCalls,
+  }
   const runtime: CanonicalGateRuntime = {
     now: () => now,
     pid: () => 42,
+    sourceIdentity: () => {
+      sourceIdentityCalls += 1
+      return { revision: 'candidate-revision', changes: '' }
+    },
     createArtifactRoot: (runId, artifactParent) => {
       assert.equal(runId, '1000-42')
       artifactParents.push(artifactParent)
@@ -200,6 +209,30 @@ test('canonical propagates one external termination signal through phases and th
 
   assert.equal(await main(runtime), 1)
   assert.equal(disposed, true)
+})
+
+test('canonical fails before phases when build inputs are dirty or untracked', async () => {
+  const { runtime: base, probe } = fakeRuntime([], 0)
+  const runtime: CanonicalGateRuntime = {
+    ...base,
+    sourceIdentity: () => ({ revision: 'candidate-revision', changes: '?? packages/new-input.ts' }),
+  }
+
+  assert.equal(await main(runtime), 1)
+  assert.deepEqual(probe.phases, [])
+  assert.deepEqual(probe.durationArgs, [])
+  assert.ok(probe.writes.some((path) => path.endsWith('fatal-error.json')))
+  assert.match(probe.reports.at(-1) ?? '', /requires a clean index and worktree/)
+})
+
+test('canonical revalidates the same clean revision through build, boundaries, and duration', async () => {
+  const { runtime, probe } = fakeRuntime(
+    [{ exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }],
+    0,
+  )
+
+  assert.equal(await main(runtime), 0)
+  assert.equal(probe.sourceIdentityCalls(), 4)
 })
 
 test('canonical parser keeps explicit artifact roots as external parents', () => {

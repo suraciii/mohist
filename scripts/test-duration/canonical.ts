@@ -11,6 +11,7 @@ import {
 import { externalAbortCleanupDeadlineAt, suiteDeadlines, type SuiteDeadlines } from './deadline.js'
 import { main as runDurationGate, type GuardRuntime, type TimeoutScheduler } from './guard.js'
 import { nativeProcessTreeOps, terminateProcessTree } from './process-tree.js'
+import { resolveSpawnCommand } from './spawn-command.js'
 import { nativeTimeSource } from './time.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -29,10 +30,15 @@ export interface TerminationLease {
   readonly dispose: () => void
 }
 
+export interface SourceIdentity {
+  readonly revision: string
+  readonly changes: string
+}
+
 export interface CanonicalGateRuntime {
   readonly now: () => number
   readonly pid: () => number
-  readonly sourceRevision?: () => string
+  readonly sourceIdentity: () => SourceIdentity
   readonly createArtifactRoot: (runId: string, artifactParent?: string) => string
   readonly writeFile: (path: string, content: string) => void
   readonly runPhase: (
@@ -150,7 +156,8 @@ async function runPhase(
   mkdirSync(dirname(stdoutPath), { recursive: true })
   const stdout = createWriteStream(stdoutPath)
   const stderr = createWriteStream(stderrPath)
-  const child = spawn(command, args as string[], {
+  const resolvedCommand = resolveSpawnCommand(command, args)
+  const child = spawn(resolvedCommand.command, resolvedCommand.args as string[], {
     cwd: repoRoot,
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -220,6 +227,28 @@ async function runPhase(
   }
 }
 
+function nativeSourceIdentity(): SourceIdentity {
+  return {
+    revision: execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }).trim(),
+    changes: execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }).trim(),
+  }
+}
+
+function assertMatchingCleanSource(expected: SourceIdentity, actual: SourceIdentity): void {
+  if (actual.changes) {
+    throw new Error('canonical gate requires a clean index and worktree')
+  }
+  if (actual.revision !== expected.revision) {
+    throw new Error(`canonical source revision changed from ${expected.revision} to ${actual.revision}`)
+  }
+}
+
 export interface CanonicalArgs {
   readonly artifactParent?: string
 }
@@ -239,10 +268,7 @@ export function parseArgs(argv: readonly string[]): CanonicalArgs {
 const nativeRuntime: CanonicalGateRuntime = {
   now: nativeTimeSource.now,
   pid: () => process.pid,
-  sourceRevision: () => process.env.GITHUB_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  }).trim(),
+  sourceIdentity: nativeSourceIdentity,
   createArtifactRoot,
   writeFile: (path, content) => writeFileSync(path, content),
   runPhase,
@@ -263,13 +289,15 @@ export async function main(
     const startedAt = runtime.now()
     const runId = `${startedAt}-${runtime.pid()}`
     artifactRoot = runtime.createArtifactRoot(runId, artifactParent)
+    runtime.report(`canonical-gate diagnostics: ${artifactRoot}`)
     const deadlines = suiteDeadlines(startedAt, suiteDeadlineMs, killGraceMs)
-    const sourceRevision = runtime.sourceRevision?.()
+    const source = runtime.sourceIdentity()
+    assertMatchingCleanSource(source, source)
+    const sourceRevision = source.revision
     runtime.writeFile(
       resolve(artifactRoot, 'run.json'),
       JSON.stringify({ runId, startedAt, suiteDeadlineMs, sourceRevision }, null, 2) + '\n',
     )
-    runtime.report(`canonical-gate diagnostics: ${artifactRoot}`)
 
     const docs = await runtime.runPhase('docs', 'npm', ['run', 'docs:check'], artifactRoot, deadlines, runtime.now, abortSignal, runtime.timeoutScheduler)
     if (docs.timedOut || docs.cancelled || docs.cleanupComplete === false || docs.exitCode !== 0) return 1
@@ -278,6 +306,7 @@ export async function main(
     const build = await runtime.runPhase('build', 'npm', ['run', 'build'], artifactRoot, deadlines, runtime.now, abortSignal, runtime.timeoutScheduler)
     if (build.timedOut || build.cancelled || build.cleanupComplete === false || build.exitCode !== 0) return 1
     if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
+    assertMatchingCleanSource(source, runtime.sourceIdentity())
 
     runtime.writeFile(
       resolve(artifactRoot, 'build-stamp.json'),
@@ -286,6 +315,7 @@ export async function main(
     const boundary = await runtime.runPhase('script-boundaries', 'npm', ['run', 'archtest'], artifactRoot, deadlines, runtime.now, abortSignal, runtime.timeoutScheduler)
     if (boundary.timedOut || boundary.cancelled || boundary.cleanupComplete === false || boundary.exitCode !== 0) return 1
     if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
+    assertMatchingCleanSource(source, runtime.sourceIdentity())
 
     const durationCode = await runtime.runDurationGate(
       [
@@ -296,6 +326,7 @@ export async function main(
       ],
       { now: runtime.now, abortSignal, timeoutScheduler: runtime.timeoutScheduler },
     )
+    assertMatchingCleanSource(source, runtime.sourceIdentity())
     return durationCode === 0 && !abortSignal.aborted && runtime.now() < deadlines.hardDeadlineAt ? 0 : 1
   } catch (error) {
     if (artifactRoot !== undefined) {

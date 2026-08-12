@@ -18,7 +18,7 @@ export interface TreeChild {
 }
 
 export interface TaskkillOperation {
-  readonly done: Promise<void>
+  readonly done: Promise<{ readonly exitCode: number | null }>
   readonly cancel: () => void
 }
 
@@ -42,9 +42,15 @@ function startNativeTaskkill(pid: number): TaskkillOperation {
     stdio: 'ignore',
     windowsHide: true,
   })
-  const done = new Promise<void>((resolvePromise) => {
-    child.once('error', () => resolvePromise())
-    child.once('close', () => resolvePromise())
+  const done = new Promise<{ readonly exitCode: number | null }>((resolvePromise) => {
+    let settled = false
+    const settle = (exitCode: number | null) => {
+      if (settled) return
+      settled = true
+      resolvePromise({ exitCode })
+    }
+    child.once('error', () => settle(null))
+    child.once('close', (exitCode) => settle(exitCode))
   })
   return {
     done,
@@ -124,11 +130,17 @@ export async function terminateProcessTree(
 
   if (ops.platform === 'win32') {
     const taskkill = ops.startTaskkill(child.pid)
-    const taskkillFinished = await settlesBefore(hardDeadlineAt, taskkill.done, ops)
+    let taskkillExitCode: number | null | undefined
+    const taskkillFinished = await settlesBefore(
+      hardDeadlineAt,
+      taskkill.done.then((result) => { taskkillExitCode = result.exitCode }),
+      ops,
+    )
     if (!taskkillFinished) {
       taskkill.cancel()
       return false
     }
+    if (taskkillExitCode !== 0) return false
     return settlesBefore(hardDeadlineAt, child.done, ops)
   }
 

@@ -4,20 +4,33 @@ import { mock, test } from 'node:test'
 import {
   cleanupDeadlineAt,
   calendarNowFor,
-  evaluateTrackAtCalendarDate,
   commandFor,
   createTimeout,
+  DEFAULT_XUNIT_PARALLELISM,
+  evaluateTrackArtifacts,
+  evaluateTrackAtCalendarDate,
   isLaneSuccessful,
   laneSandbox,
   main,
   parseArgs,
+  parallelismFor,
   planTracks,
   prepareReportTarget,
   reportEvaluationFailureReason,
   specPartitionCommand,
+  writeExecutionProvenance,
 } from './guard.js'
 import { formatEvaluation, formatSummary, formatTrackRun, summarize } from './diagnostics.js'
-import type { TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
+import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+
+const fastCaseUid = '1'.repeat(64)
+
+function fastManifest() {
+  return manifestFromDiscovery(JSON.stringify([
+    { ID: fastCaseUid, DisplayName: 'Ns.Cli.Fast', Class: 'Ns.Cli', Method: 'Fast' },
+  ]))
+}
 
 function captureStderr(): { calls: () => string; restore: () => void } {
   const stderrMock = mock.method(process.stderr, 'write', () => true)
@@ -47,6 +60,187 @@ test('commandFor appends dotnet apphost arguments after the default report argum
   }
   const command = commandFor(track)
   assert.deepEqual(command.args.slice(-7), ['-noColor', '-noLogo', '-noAutoReporters', '-trx', `${process.cwd()}/reports/unit.trx`, '-parallel', 'none'])
+})
+
+test('parallelism provenance records every effective xUnit override', () => {
+  const track: TrackConfig = {
+    id: 'cli', kind: 'dotnet-apphost', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
+  }
+  assert.equal(parallelismFor(track), DEFAULT_XUNIT_PARALLELISM)
+  assert.equal(
+    parallelismFor({ ...track, apphostArgs: ['-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', '8'] }),
+    'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=8',
+  )
+  assert.throws(() => parallelismFor({ ...track, apphostArgs: ['-parallel', 'none', '-parallel', 'collections'] }), /duplicate xUnit option/)
+})
+
+test('execution provenance writer uses the injected artifact store', () => {
+  const calls: string[] = []
+  writeExecutionProvenance('/virtual/reports/cli.execution-provenance.json', {
+    runId: 'run-1',
+    manifest: fastManifest(),
+    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+    assemblySha256: 'a'.repeat(64),
+    sourceSha256: 'b'.repeat(64),
+    parallelism: DEFAULT_XUNIT_PARALLELISM,
+  }, {
+    ensureDirectory: (path) => calls.push(`mkdir:${path}`),
+    writeText: (path, content) => calls.push(`write:${path}:${JSON.parse(content).runId}`),
+  })
+  assert.deepEqual(calls, [
+    'mkdir:/virtual/reports',
+    'write:/virtual/reports/cli.execution-provenance.json:run-1',
+  ])
+})
+
+test('guard evaluates CLI duration from the execution ledger and fails closed when evidence is missing', () => {
+  const manifest = fastManifest()
+  const expected: ExecutionLedgerExpectation = {
+    runId: 'run-1',
+    manifest,
+    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+    assemblySha256: 'a'.repeat(64),
+    sourceSha256: 'b'.repeat(64),
+    parallelism: DEFAULT_XUNIT_PARALLELISM,
+  }
+  const track: TrackConfig = {
+    id: 'cli',
+    kind: 'dotnet-apphost',
+    csproj: 'virtual.csproj',
+    report: 'reports/cli.trx',
+    executionLedger: 'reports/cli.execution-ledger.json',
+    executionProvenance: 'reports/cli.execution-provenance.json',
+    executionSourceRoots: ['packages/cli'],
+    reportFormat: 'trx',
+    deadlineMs: 60_000,
+    enforce: true,
+    rules: [{ id: 'unit', absoluteMs: 500, percentile: 95, percentileMs: 50 }],
+  }
+  const artifacts = new Map<string, string>([
+    [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
+    [track.executionProvenance!, serializeExecutionProvenance(expected)],
+    [track.executionLedger!, JSON.stringify({
+      schemaVersion: 2,
+      runId: expected.runId,
+      manifestHash: manifest.hash,
+      manifestCount: 1,
+      assemblyPath: expected.assemblyPath,
+      assemblySha256: expected.assemblySha256,
+      sourceSha256: expected.sourceSha256,
+      xunitVersion: '3.2.2.0',
+      mtpVersion: '1.9.1.0',
+      parallelism: expected.parallelism,
+      durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
+      durationUnit: 'seconds',
+      cases: [{
+        uid: 'runtime-uid', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli',
+        collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01,
+        startTime: '2026-08-12T00:00:00Z', finishTime: '2026-08-12T00:00:01Z',
+      }],
+    })],
+  ])
+  const reader = { readText: (path: string) => {
+    const value = artifacts.get(path)
+    if (value === undefined) throw new Error(`missing ${path}`)
+    return value
+  } }
+
+  const evaluation = evaluateTrackArtifacts(track, reader, {
+    trackId: 'cli', timedOut: false, exitCode: 0, elapsedMs: 1, deadlineMs: 60_000,
+    command: 'cli', reportReady: true, cleanupComplete: true, executionLedgerReady: true,
+    executionLedgerExpectation: expected,
+  })
+  assert.equal(evaluation.passed, true)
+  assert.equal(evaluation.rules[0].maxMs, 10)
+
+  artifacts.delete(track.executionLedger!)
+  const missing = evaluateTrackArtifacts(track, reader, undefined, new Date(), expected)
+  assert.equal(missing.passed, false)
+  assert.match(missing.reportError ?? '', /missing reports\/cli\.execution-ledger\.json/)
+})
+
+function savedExecutionFixture(): {
+  readonly track: TrackConfig
+  readonly current: CurrentExecutionIdentity
+  readonly artifacts: Map<string, string>
+} {
+  const manifest = fastManifest()
+  const expected: ExecutionLedgerExpectation = {
+    runId: 'saved-run',
+    manifest,
+    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+    assemblySha256: 'a'.repeat(64),
+    sourceSha256: 'b'.repeat(64),
+    parallelism: DEFAULT_XUNIT_PARALLELISM,
+  }
+  const track: TrackConfig = {
+    id: 'cli', kind: 'dotnet-apphost', csproj: 'virtual.csproj',
+    report: 'reports/cli.trx', executionLedger: 'reports/cli.execution-ledger.json',
+    executionProvenance: 'reports/cli.execution-provenance.json', executionSourceRoots: ['packages/cli'],
+    reportFormat: 'trx', deadlineMs: 60_000, enforce: true, rules: [{ id: 'unit', absoluteMs: 50 }],
+  }
+  return {
+    track,
+    current: {
+      manifest,
+      assemblyPath: expected.assemblyPath,
+      assemblySha256: expected.assemblySha256,
+      sourceSha256: expected.sourceSha256,
+      parallelism: expected.parallelism,
+    },
+    artifacts: new Map([
+      [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
+      [track.executionProvenance!, serializeExecutionProvenance(expected)],
+      [track.executionLedger!, JSON.stringify({
+        schemaVersion: 2, runId: expected.runId, manifestHash: manifest.hash, manifestCount: 1,
+        assemblyPath: expected.assemblyPath, assemblySha256: expected.assemblySha256,
+        sourceSha256: expected.sourceSha256, xunitVersion: '3.2.2.0', mtpVersion: '1.9.1.0',
+        parallelism: expected.parallelism, durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
+        durationUnit: 'seconds', cases: [{
+          uid: 'runtime-uid', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli',
+          collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01,
+          startTime: '2026-08-12T00:00:00Z', finishTime: '2026-08-12T00:00:01Z',
+        }],
+      })],
+    ]),
+  }
+}
+
+function evaluateSavedFixture(fixture: ReturnType<typeof savedExecutionFixture>): TrackEvaluation {
+  return evaluateTrackArtifacts(fixture.track, {
+    readText: (path) => {
+      const value = fixture.artifacts.get(path)
+      if (value === undefined) throw new Error(`missing ${path}`)
+      return value
+    },
+  }, undefined, new Date('2026-08-12T00:00:00Z'), fixture.current)
+}
+
+test('--check rejects an empty TRX instead of treating Total=0 as green', () => {
+  const fixture = savedExecutionFixture()
+  fixture.artifacts.set(fixture.track.report, '<TestRun><Results></Results></TestRun>')
+  const result = evaluateSavedFixture(fixture)
+  assert.equal(result.total, 0)
+  assert.equal(result.passed, false)
+  assert.match(result.reportError ?? '', /TRX test count does not match execution ledger/)
+})
+
+test('--check rejects a TRX-ledger outcome mismatch', () => {
+  const fixture = savedExecutionFixture()
+  fixture.artifacts.set(fixture.track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Failed" duration="00:00:00.9000000"/></Results></TestRun>')
+  const result = evaluateSavedFixture(fixture)
+  assert.equal(result.passed, false)
+  assert.match(result.reportError ?? '', /TRX and execution ledger outcome mismatch/)
+})
+
+test('--check rejects a stale but internally complete artifact bundle', () => {
+  const fixture = savedExecutionFixture()
+  const result = evaluateSavedFixture({
+    ...fixture,
+    current: { ...fixture.current, sourceSha256: 'c'.repeat(64) },
+  })
+  assert.equal(result.passed, false)
+  assert.match(result.reportError ?? '', /saved execution provenance is stale:.*source hash/)
 })
 
 test('canonical lane commands keep reporter arguments on the final test process and reuse the built workflow graph', () => {

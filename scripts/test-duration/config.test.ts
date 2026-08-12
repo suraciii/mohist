@@ -70,9 +70,24 @@ test('validateConfig keeps execution ledgers on dotnet apphost tracks', () => {
     tracks: [{
       id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'reports/cli-ledger.json', executionProvenance: 'reports/cli-provenance.json', executionSourceRoots: ['packages/cli'],
       report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
+      status: 'baseline-pending', reason: 'fixture baseline',
     }],
   }))
   assert.deepEqual(validateConfig(config), [])
+})
+
+test('validateConfig rejects partitioned execution-ledger tracks before scheduling', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj',
+      executionLedger: 'reports/cli-ledger.json', executionProvenance: 'reports/cli-provenance.json',
+      executionSourceRoots: ['packages/cli'], report: 'reports/cli-{partition}.trx', reportFormat: 'trx',
+      partitions: 2, deadlineMs: 100, enforce: false,
+      status: 'baseline-pending', reason: 'fixture baseline',
+    }],
+  }))
+  assert.ok(validateConfig(config).some((error) => error.includes('executionLedger tracks cannot be partitioned')))
 })
 
 test('validateConfig requires source roots for execution-ledger freshness', () => {
