@@ -415,9 +415,12 @@ the target Turn. A stop verdict records only what that witness confirms:
   when the target Session exists with no Turn in flight, and stop-requested
   while the witness has not yet confirmed the effect. Requesting an abort is
   a claim; only the Runtime's confirmation settles it.
-- A stop that cannot reach its witness stays unavailable; a target that
-  provably cannot accept a stop records not-cancellable. A failure while
-  resolving the target is an unknown, never a not-cancellable verdict.
+- A stop that cannot reach its witness stays unavailable. The witness's
+  not-cancellable answer means the Turn is still executing; it is recorded
+  honestly and never rewritten. A failure while resolving the target is an
+  unknown, never a not-cancellable verdict. A target that provably has no
+  live Session settles ended by identity rather than reporting
+  not-cancellable.
 - A redelivered stop under an already-claimed operationId settles by identity
   first: it probes the target Turn and records the settled verdict. A
   redelivery never returns an unrecorded verdict and never records a
@@ -431,10 +434,10 @@ under the same identity. Stop differs because its intent is checkable —
 whether the target Turn still exists — while a Compact or Reset effect is not.
 
 Gap: the current handler accepts one runtime's abort acknowledgment as a
-confirmed stop, maps target-resolution failures to not-cancellable, returns
-redelivery verdicts without recording them, and leaves a corrupt journal
-permanently unavailable. Under the certainty vocabulary these are fabricate
-and estimate defects
+confirmed stop, maps target-resolution failures and absent live targets to
+not-cancellable, returns redelivery verdicts without recording them, and
+leaves a corrupt journal permanently unavailable. Under the certainty
+vocabulary these are fabricate and estimate defects
 ([`conventions.md`](conventions.md#facts-claims-and-settlement)), tracked for
 removal.
 
