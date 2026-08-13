@@ -391,31 +391,52 @@ reconstructed:
 | `runtime-events.json` | Runtime event outbox: Session events pending delivery to Server; snapshot written for each new fact | unreadable: mark outbox unhealthy and reload at local retry cadence; never overwrite the unreadable file. If retention is exceeded, discard reconstructible streaming increments first |
 | `followup-operations.json` | Follow-up operation idempotency log: operationId -> claimed / submitted; written on each transition | wrong version or shape: log unavailable and reject new operations (fail closed); missing file means a fresh start |
 | `session-commands.json` | Session command idempotency log: operationId -> started / completed plus result; same write behavior | same: corruption fails closed; missing file means a fresh start |
-| `cancel-operations.json` | Stop operation idempotency log: operationId -> claimed / completed plus verdict; same write behavior | same: corruption fails closed; missing file means a fresh start |
+| `cancel-operations.json` | Stop operation idempotency log: operationId -> claimed / completed plus verdict; same write behavior | unreadable: quarantine the file aside and restart empty; stop verdicts re-settle by identity, so the next redelivery rebuilds the lost record |
 | `named-workspaces.json` | current named Workspace materialization index: Project, Workspace name, path, phase, and materialization times | unreadable or corrupt: start with an empty index and rebuild on later materialization; Server remains the logical authority |
 | `workspaces.json` | legacy per-WorkflowRun materialization index used only by the fallback execution path | same fail-open behavior; remove with the fallback rather than treating it as a second identity model |
 
-Idempotency logs fail closed because losing them can repeat effects. The
-registries fail open because they can be reconstructed from disk. These files
-are Runner-private. The Server never reads or writes them directly;
-cross-process consistency comes from event delivery and poll recomputation, not
-shared files.
+Idempotency logs fail closed because losing them can repeat effects. The stop
+journal is the exception: its effect is checkable by identity, so corruption
+quarantines the file and the journal restarts empty instead of failing
+closed. The registries fail open because they can be reconstructed from disk.
+These files are Runner-private. The Server never reads or writes them
+directly; cross-process consistency comes from event delivery and poll
+recomputation, not shared files.
 
-### Stop Operations Stay Available and Reconcile by Identity
+### Stop Operations Stay Available and Settle by Identity
 
 Stop is the one Runner operation that must remain available while the event
-outbox snapshot is being recovered; its journal never gates on outbox health. A
-redelivered stop under an already-claimed operationId first reconciles by
-identity: it probes the target Turn. If the target Turn no longer exists, the
-stop intent is already fulfilled and the journal records the ended verdict. A
-redelivery never records a contradicting verdict — such as not-cancellable
-after stop-requested — for the same operationId.
+outbox snapshot is being recovered; its journal never gates on outbox health.
+
+Stop settlement has exactly one witness for the effect: the Runtime that owns
+the target Turn. A stop verdict records only what that witness confirms:
+
+- The settled verdict is ended when the target Turn no longer exists, idle
+  when the target Session exists with no Turn in flight, and stop-requested
+  while the witness has not yet confirmed the effect. Requesting an abort is
+  a claim; only the Runtime's confirmation settles it.
+- A stop that cannot reach its witness stays unavailable; a target that
+  provably cannot accept a stop records not-cancellable. A failure while
+  resolving the target is an unknown, never a not-cancellable verdict.
+- A redelivered stop under an already-claimed operationId settles by identity
+  first: it probes the target Turn and records the settled verdict. A
+  redelivery never returns an unrecorded verdict and never records a
+  contradicting verdict — such as not-cancellable after stop-requested — for
+  the same operationId.
 
 Session commands such as Compact and Reset fail closed on an uncertain start
 instead: after a Runner restart the Runtime cannot answer whether the effect
 occurred, so the original operation stays unavailable and Server retries it
 under the same identity. Stop differs because its intent is checkable —
 whether the target Turn still exists — while a Compact or Reset effect is not.
+
+Gap: the current handler accepts one runtime's abort acknowledgment as a
+confirmed stop, maps target-resolution failures to not-cancellable, returns
+redelivery verdicts without recording them, and leaves a corrupt journal
+permanently unavailable. Under the certainty vocabulary these are fabricate
+and estimate defects
+([`conventions.md`](conventions.md#facts-claims-and-settlement)), tracked for
+removal.
 
 The per-WorkflowRun Workspace manager and `workspaces.json` registry remain an
 implementation gap for dispatches that still lack a named Workspace. New code
