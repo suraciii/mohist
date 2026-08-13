@@ -124,12 +124,12 @@ export const realPiSdkFactory: PiSdkFactory = {
       },
       async createSession(sessionCwd) {
         const manager = SessionManager.create(sessionCwd)
-        const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager, noTools: "builtin" })).session
+        const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager })).session
         return wrapAgentSession(session)
       },
       async openSession(path, sessionCwd) {
         const manager = SessionManager.open(path, undefined, sessionCwd)
-        const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager, noTools: "builtin" })).session
+        const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager })).session
         return wrapAgentSession(session)
       },
       async validateSessionFile(path, expectedSessionId) {
