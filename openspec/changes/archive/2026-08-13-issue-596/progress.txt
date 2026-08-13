@@ -1,0 +1,40 @@
+## Codebase Patterns
+- `MohistCliCommands.Build` constructs the authoritative `System.CommandLine` tree, then installs local help and calls `CommandPresentations.AttachTo` on the same `Command` instances.
+- `CommandHelpRenderer` derives usage, arguments, visible options, and descriptor-backed JSON fields from live command objects; hidden commands/options are filtered at render time.
+- Existing CLI help tests use `CliTestFactory.Create(activeProjectId: null)` with recording/rejecting HTTP handlers and assert no requests for help.
+
+## T-001 Work
+- Baseline focused CLI help/workspace/session-schedule/otel/agent tests passed: 1,803 tests.
+- The visible root gaps are `audit`, `github`, `slack`, and `workspace`; recently registered nested gaps include `agent spawn`/`subscription`, `session tree`/`detach`/`schedule`, and `otel traces`.
+- The live tree also exposes older uncovered nested groups/leaves (`project workflow/prompt`, variable groups, issue prereq/comment/template/watch, run feedback/variable, routing rule, webhook event-types, event dead-letter, and similar direct leaves). T-001 needs explicit metadata for all visible nodes because renderer fallback is being removed.
+- T-002 structural validator and T-003 documentation are separate tasks and are not being implemented in this slice.
+- Added explicit root/group/leaf presentations for the complete current visible tree, including audit/github/slack/workspace, agent spawn/subscription, session tree/detach/schedule, and otel traces; `otel traces` keeps its descriptor-backed JSON fields.
+- Root/group/leaf renderers now use `CommandPresentationCatalog.Require`; missing metadata throws instead of filtering a command or falling back to registration `Description`. Root examples were removed so root help stays an area index.
+- Added `CliProgressiveHelpSpecs` for exact root classifications/counts, scoped groups/leaves, JSON fields, hidden options/children, local no-side-effect behavior, nested usage errors, strict metadata, and representative workspace execution.
+- Verification: full CLI test project passed 1,813 tests; `npm run test:fast` passed all typecheck, server, CLI, web, runner, and workflow lanes. The first fast-gate attempt was blocked because `node_modules` was absent (`concurrently` missing); `npm ci --ignore-scripts` restored the locked dependencies without tracked changes. npm reported 16 existing audit advisories during install.
+
+## T-002 Work
+- Added pure `CommandPresentationCoverageValidator.Validate(RootCommand)` traversal. It visits every non-hidden command node, requires a non-whitespace catalog summary, requires a defined capability for visible root children, constructs paths from `mo`, and returns diagnostics sorted by complete invocation path.
+- Diagnostics are structured as `CommandPresentationCoverageDiagnostic(InvocationPath, Message)` with stable messages; registration `Command.Description` is never consulted. Hidden nodes are excluded individually while visible descendants continue to be checked.
+- Made `CommandPresentation.Capability` nullable so synthetic tests can represent an attached presentation with missing root classification. Root rendering now uses `RequireRoot`, and all renderer coverage checks reject whitespace-only summaries.
+- Added real-tree structural coverage using fake HTTP/filesystem/process collaborators plus synthetic tests for missing root metadata, missing descendants, arbitrary-depth paths, hidden nodes, deterministic ordering, registration-description rejection, and empty summaries.
+- Baseline focused CLI tests passed before implementation; after implementation the focused and full CLI test project both pass 1,820 tests.
+- The first `npm run test:fast` attempt hit a parallel server build file-lock collision (`MSB3883` while copying `Mohist.Server.dll`); the changed CLI lane passed. A clean rerun passed all lanes: CLI 1,820, server unit 2,627, architecture 69, workflow 175, web 4,697, runner 1,613, and all typechecks.
+
+## T-003 Work
+- Manually compared `docs/cli-reference.md` with `CliProgressiveHelpSpecs.RootHelp_ListsEveryVisibleAreaExactlyOnceInItsCapability`: Work remains `project`, `repo`, `workspace`, `issue`, `epic`, `label`; Automation remains `workflow`, `run`, `agent`, `session`, `activity`, `routing`, `webhook`; Operations now includes `runner`, `server`, `service`, `event`, `audit`, `github`, `slack`, `notification`, `otel`, and `auth`; Tools remains `help`, `skill`, `install`, `update`, `info`. No missing, extra, duplicate, or differently classified root area was found.
+- Added the registered `audit list` action to the Operations command table and removed only the resolved root-help omission claim. Preserved the separate canonical `github edit` versus registered `github update` gap; no command contract changed.
+- Focused verification passed: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-restore` passed all 1,820 tests and `npm run docs:check` checked 90 active Markdown files. Full `npm run verify` passed docs, build, all .NET suites, Web (4,697), Runner (1,613), and Slack (70) tests.
+
+## Verification Repair
+- Initial inspection found a clean worktree and no diff; the three issue commits on this branch are the intended T-001 through T-003 task work, not verification side effects.
+- No separate failed-verification output was present in the repository. Historical progress identifies two environmental failures: a missing `node_modules` dependency (`concurrently`) and a transient parallel MSBuild output file-lock collision (`MSB3883`); neither indicates a source or test defect.
+- Reproduced the authoritative `npm run verify` successfully: docs checked 90 files, the solution build passed, CLI passed 1,820 tests, server suites passed 175/2,627/3,884/69 tests, Web passed 4,697, Runner 1,613, and Slack 70. The focused CLI test and docs checks passed again. Verification produced no Git-visible changes.
+
+## Verification Repair Follow-up
+- The first fresh full-gate rerun exposed two real SpecTests failures, both caused by test observation leaking across shared fixtures rather than issue-596 CLI behavior. `AgentSessionGrainInputBoundaryPersistSuccessSpecs` counted a lingering activation's transcript flush in the shared fake store; its assertion now filters flushes to the session created by the test. `AgentJobDispatchRouteSpecs` assumed the first global runner poll dispatch belonged to its job; it now uses the existing exact-job poll helper and drains unrelated dispatches.
+- Both affected classes passed in full, and the complete SpecTests assembly passed all 3,884 tests. The resulting test-source edits correctly changed the embedded spec-source digest required by the architecture ledger; the architecture lane initially reported the stale digest, so the matching digest was refreshed in `SpecUnitMigrationLedger.json`, `SpecUnitMigrationProvenance.json`, and `SpecUnitMigrationLedgerModel.cs` without changing provenance or weakening the rule.
+- Final `npm run verify` passed: docs 90 files, CLI 1,820, server unit 2,627, server specs 3,884, architecture 69, workflow 175, Web 4,697, Runner 1,613, and Slack 70. No verification-only untracked or generated Git-visible changes remained.
+
+## Review Follow-up
+- Fixed MF-001 by adding the visible `webhook` root area to the Automation row in `docs/cli-reference.md`; its existing Operations action table remains unchanged.

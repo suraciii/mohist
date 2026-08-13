@@ -67,9 +67,15 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
 
         await persistence.WaitAsync();
 
-        Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
-        var firstFlush = Fixture.TranscriptStore.Flushes[0];
-        var secondFlush = Fixture.TranscriptStore.Flushes[1];
+        var sessionFlushes = Fixture.TranscriptStore.Flushes
+            .Where(flush => string.Equals(
+                flush.Turn.SessionId,
+                grain.GetPrimaryKeyString(),
+                StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, sessionFlushes.Length);
+        var firstFlush = sessionFlushes[0];
+        var secondFlush = sessionFlushes[1];
         Assert.NotNull(firstFlush.Turn);
         Assert.NotNull(secondFlush.Turn);
         Assert.NotEqual(firstFlush.Turn, secondFlush.Turn);

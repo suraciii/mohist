@@ -58,7 +58,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     protected async Task<PollSnapshot> PollDispatchForSessionAsync(
         string agentJobId,
         string runnerId,
-        string expectedSessionId)
+        string? expectedSessionId)
     {
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
             agentJobId,

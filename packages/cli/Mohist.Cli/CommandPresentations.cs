@@ -57,6 +57,18 @@ internal static class CommandPresentations
         AttachToArea(root, "auth", CommandCapability.Operations,
             summary: "Manage authentication: personal access tokens for scripts, CI and external agents",
             boundary: "PATs belong to the calling account; the full token value is printed only once at issuance, and list never echoes it.");
+        AttachToArea(root, "audit", CommandCapability.Operations,
+            summary: "Inspect the authentication audit trail",
+            boundary: "Audit records cover authentication events and never contain token values.");
+        AttachToArea(root, "github", CommandCapability.Operations,
+            summary: "Connect GitHub repositories to Projects",
+            boundary: "GitHub integrations bind repository intake and review approval to a Project.");
+        AttachToArea(root, "slack", CommandCapability.Operations,
+            summary: "Manage Slack integrations for Agents and Projects",
+            boundary: "Slack commands manage the connection and delivery lifecycle for Project Agents.");
+        AttachToArea(root, "workspace", CommandCapability.Work,
+            summary: "Manage named workspaces in the active Project",
+            boundary: "Workspaces group Project Repositories and provide the execution context for Sessions.");
         AttachToArea(root, "service", CommandCapability.Operations,
             summary: "Install and operate Mohist as an OS service",
             boundary: "Service commands interact with systemd / Task Scheduler only; they never read or write Project state.");
@@ -81,6 +93,8 @@ internal static class CommandPresentations
             summary: "Print local environment, project, and runtime information");
         AttachToArea(root, "help", CommandCapability.Tools,
             summary: "Read a shared CLI rule (output, environment, exit-codes)");
+
+        AttachAdditionalCoverage(root);
     }
 
     private static void AttachRoot(RootCommand root)
@@ -112,6 +126,318 @@ internal static class CommandPresentations
 
     private static Command? Find(Command group, string action) =>
         group.Subcommands.FirstOrDefault(c => c.Name == action);
+
+    private static void AttachAdditionalCoverage(RootCommand root)
+    {
+        AttachGroup(root, ["auth"], CommandCapability.Operations, "Manage authentication and personal access tokens",
+            ("login", "Sign in to the Mohist Server and store the local session"),
+            ("status", "Show the current credential source and session state"),
+            ("logout", "Revoke the local session and clear it from this machine"),
+            ("token", "Manage personal access tokens"));
+        AttachGroup(root, ["auth", "token"], CommandCapability.Operations, "Manage personal access tokens",
+            ("create", "Issue a personal access token and show its value once"),
+            ("list", "List personal access tokens without revealing full values"),
+            ("revoke", "Revoke a personal access token immediately"));
+        AttachGroup(root, ["audit"], CommandCapability.Operations, "Inspect authentication events in newest-first order",
+            ("list", "List authentication audit events"));
+        AttachGroup(root, ["github"], CommandCapability.Operations, "Manage GitHub repository connections for a Project",
+            ("connect", "Connect a GitHub repository and print its webhook configuration"),
+            ("update", "Update a GitHub connection's approver list"));
+        AttachGroup(root, ["slack"], CommandCapability.Operations, "Manage Slack connections, Agent installations, and delivery recovery",
+            ("setup", "Install or resume the workspace Slack App"),
+            ("status", "Show the workspace Slack integration status"),
+            ("install-agent", "Install or resume an Agent's Slack installation"),
+            ("list", "List Slack Connections"),
+            ("view", "View a Slack Connection"),
+            ("claim-owner", "Generate a one-time Slack owner claim code"),
+            ("edit", "Edit Slack Connection presentation fields and channel access policy"),
+            ("transfer-owner", "Generate a one-time Slack owner transfer code"),
+            ("enable", "Enable a Slack Connection"),
+            ("disable", "Disable a Slack Connection"),
+            ("remove-binding", "Remove the Mohist Connection binding while retaining Agent App facts"),
+            ("permanent-delete", "Permanently delete the managed Agent App after its Connection binding was removed"),
+            ("deliveries", "List outbound Slack deliveries for a Connection"),
+            ("resend-delivery", "Re-queue an uncertain Slack delivery"),
+            ("clear-gap", "Dismiss a possible-messages-missed notice"),
+            ("reconcile-create", "Reconcile an unknown managed Agent App create"),
+            ("reconcile-delete", "Reconcile an unknown managed Agent App delete"),
+            ("message", "Send or read Slack messages on behalf of an Agent"));
+        AttachGroup(root, ["slack", "message"], CommandCapability.Operations, "Send or read Slack messages on behalf of an Agent",
+            ("send", "Send a reply to a Slack conversation"));
+        AttachGroup(root, ["workspace"], CommandCapability.Work, "Manage named workspaces in the active Project",
+            ("list", "List workspaces"),
+            ("view", "Read a workspace by name"),
+            ("create", "Create a workspace"),
+            ("close", "Close a workspace"),
+            ("repo", "Manage workspace Repository membership"));
+        AttachGroup(root, ["workspace", "repo"], CommandCapability.Work, "Manage workspace Repository membership",
+            ("add", "Add a Repository to a Workspace"),
+            ("remove", "Remove a Repository from a Workspace"));
+
+        AttachGroup(root, ["server"], CommandCapability.Operations, "Inspect and operate the Mohist Server",
+            ("status", "Show overall Server status"),
+            ("health", "Check Server health"),
+            ("info", "Show Server-side system diagnostics"),
+            ("logs", "Show the connected Server's application logs"));
+        AttachGroup(root, ["runner"], CommandCapability.Operations, "Inspect and operate registered Runners",
+            ("list", "List registered Runners"),
+            ("view", "Read a Runner by id"),
+            ("status", "Show online runner summary (id, heartbeat, idle/busy state)"),
+            ("revoke", "Revoke a Runner's machine credential"));
+        AttachGroup(root, ["service"], CommandCapability.Operations, "Install and operate Mohist as an OS service",
+            ("start", "Start a local managed service"),
+            ("stop", "Stop a local managed service"),
+            ("restart", "Restart a local managed service"),
+            ("status", "Print the Mohist service status"),
+            ("logs", "Tail Mohist service logs"),
+            ("uninstall", "Remove the Mohist OS service"));
+        AttachGroup(root, ["install"], CommandCapability.Tools, "Install Mohist components from source",
+            ("server", "Install the Server as a managed service"),
+            ("runner", "Install the Runner as a managed service"),
+            ("slack", "Install the mohist-slack adapter as a managed service"));
+        AttachGroup(root, ["update"], CommandCapability.Tools, "Update Mohist components from source",
+            ("cli", "Update the mo CLI from source"),
+            ("server", "Update the Server from source"),
+            ("runner", "Update the Runner from source"),
+            ("slack", "Update the mohist-slack adapter from source"));
+        AttachGroup(root, ["skill"], CommandCapability.Tools, "Manage coder Agent skills",
+            ("install", "Install packaged Skills into local Agent directories"),
+            ("list", "List packaged Mohist Skills"),
+            ("view", "Read a packaged Mohist Skill"),
+            ("path", "Print the packaged path of a Mohist Skill"),
+            ("sync", "Sync working-tree Skill data into the managed cache"));
+
+        AttachGroup(root, ["run"], CommandCapability.Automation, "Control and read WorkflowRuns",
+            ("approve", "Pass the approval gate for a WorkflowRun"),
+            ("reject", "Reject a WorkflowRun at its approval gate"),
+            ("retry", "Retry the current failure point of a WorkflowRun"),
+            ("rerun", "Rerun a WorkflowRun"),
+            ("pause", "Pause a WorkflowRun"),
+            ("resume", "Resume a paused WorkflowRun"),
+            ("stop", "Stop a WorkflowRun permanently"),
+            ("list", "List WorkflowRuns in the active Project"),
+            ("view", "Read a WorkflowRun by its Run ID"),
+            ("watch", "Follow a WorkflowRun until it reaches a terminal state"),
+            ("feedback", "Inspect or submit WorkflowRun feedback"),
+            ("variable", "Read or edit WorkflowRun-scoped Variables"));
+        AttachGroup(root, ["run", "feedback"], CommandCapability.Automation, "Inspect or submit WorkflowRun feedback",
+            ("list", "List approval feedback records"),
+            ("view", "Read one approval feedback record"));
+        AttachGroup(root, ["run", "variable"], CommandCapability.Automation, "Read or edit WorkflowRun-scoped Variables. Run-only --effective exposes the Project → Issue → Run merge.",
+            ("list", "List WorkflowRun Variables"),
+            ("get", "Read one WorkflowRun Variable"),
+            ("set", "Set one WorkflowRun Variable"),
+            ("unset", "Delete one WorkflowRun Variable"));
+        AttachGroup(root, ["workflow"], CommandCapability.Automation, "Manage Workflow Profiles in the active Project",
+            ("list", "List Workflow Profiles"),
+            ("view", "Read a Workflow Profile"),
+            ("create", "Create a Workflow Profile"),
+            ("edit", "Edit a Workflow Profile"),
+            ("delete", "Delete a custom Workflow Profile"),
+            ("validate", "Validate a local Workflow Definition"));
+        AttachGroup(root, ["event"], CommandCapability.Operations, "Tail event streams and recover failed deliveries",
+            ("tail", "Tail the event bus"),
+            ("dead-letter", "Inspect or recover dead-letter events"));
+        AttachGroup(root, ["event", "dead-letter"], CommandCapability.Operations, "Inspect current failed event deliveries",
+            ("list", "List current unresolved event deliveries for operator recovery. Redeliver retries the recorded failing handler and may repeat delivery side effects"),
+            ("redeliver", "Redeliver a failed event delivery and repeat its recorded handler side effects"));
+        AttachGroup(root, ["activity"], CommandCapability.Automation, "Inspect Activity across the active Project",
+            ("list", "List Activity entries"));
+        AttachGroup(root, ["routing"], CommandCapability.Automation, "Manage routing rules and event targets",
+            ("rule", "Manage the ordered routing rules"),
+            ("test", "Dry-run recent events through the routing table"));
+        AttachGroup(root, ["routing", "rule"], CommandCapability.Automation, "Manage the Project's ordered routing rules",
+            ("create", "Create a routing rule"),
+            ("list", "List routing rules in table order"),
+            ("view", "Read a routing rule"),
+            ("edit", "Edit a routing rule"),
+            ("archive", "Archive a routing rule"),
+            ("move", "Move a routing rule before or after another rule"));
+        AttachGroup(root, ["webhook"], CommandCapability.Automation, "Manage outbound webhook subscriptions",
+            ("subscription", "Manage Project webhook subscriptions"),
+            ("event-types", "List event types available to webhook subscriptions"));
+        AttachGroup(root, ["webhook", "subscription"], CommandCapability.Automation, "Manage Project webhook subscriptions",
+            ("create", "Create a webhook subscription"),
+            ("list", "List webhook subscriptions"),
+            ("view", "Read a webhook subscription"),
+            ("edit", "Edit a webhook subscription"),
+            ("enable", "Enable a webhook subscription"),
+            ("disable", "Disable a webhook subscription"),
+            ("delete", "Delete a webhook subscription"),
+            ("rotate-secret", "Rotate a webhook subscription secret"),
+            ("failures", "List webhook delivery failures"));
+
+        AttachGroup(root, ["project"], CommandCapability.Work, "Manage Projects and their state",
+            ("list", "List Projects known to the local CLI"),
+            ("create", "Create a Project from a local Git working tree"),
+            ("view", "Read a Project by name or ID"),
+            ("use", "Set the active Project"),
+            ("delete", "Delete a Project"),
+            ("repo", "Manage the Project's Repositories"),
+            ("workflow", "Set or read the Project default Workflow Profile"),
+            ("variable", "Read or edit Project-scoped Variables"));
+        AttachGroup(root, ["project", "repo"], CommandCapability.Work, "Manage Project Repository settings",
+            ("set-default", "Set a Repository as the Project default"));
+        AttachGroup(root, ["project", "workflow"], CommandCapability.Work, "Manage Project Workflow references and Prompts",
+            ("set-default", "Set the Project default Workflow Profile"),
+            ("prompt", "Manage Project Workflow Prompts"));
+        AttachGroup(root, ["project", "workflow", "prompt"], CommandCapability.Work, "Manage Project Workflow Prompts",
+            ("get", "Read a Project Workflow Prompt"),
+            ("set", "Set a Project Workflow Prompt"),
+            ("clear", "Clear a Project Workflow Prompt"),
+            ("preview", "Preview a Project Workflow Prompt"));
+        AttachGroup(root, ["project", "variable"], CommandCapability.Work, "Read or edit Project-scoped Variables",
+            ("list", "List Project Variables"),
+            ("get", "Read one Project Variable"),
+            ("set", "Set one Project Variable"),
+            ("unset", "Delete one Project Variable"));
+        AttachGroup(root, ["repo"], CommandCapability.Work, "Manage Repositories inside the active Project",
+            ("list", "List Repositories"),
+            ("create", "Create a Repository"),
+            ("edit", "Edit a Repository"),
+            ("set-default", "Set a Repository as the Project default"),
+            ("delete", "Delete a Repository"));
+
+        AttachGroup(root, ["issue"], CommandCapability.Work, "Track and drive Issue work",
+            ("list", "List Issues"),
+            ("create", "Create an Issue"),
+            ("view", "Read an Issue"),
+            ("edit", "Edit an Issue"),
+            ("start", "Mark an Issue as started"),
+            ("done", "Mark an Issue as done"),
+            ("close", "Close an Issue"),
+            ("reopen", "Reopen an Issue"),
+            ("rebase", "Rebase an Issue branch"),
+            ("archive", "Archive an Issue or completed Issues"),
+            ("restore", "Restore an archived Issue"),
+            ("logs", "Tail Issue-scoped logs"),
+            ("events", "Tail Issue-scoped events"),
+            ("diff", "Show an Issue branch diff"),
+            ("commits", "List Issue branch commits"),
+            ("prereq", "Manage Issue start prerequisites"),
+            ("comment", "Read or add Issue comments"),
+            ("template", "Inspect Issue templates"),
+            ("watch", "Subscribe to Issue updates"),
+            ("variable", "Read or edit Issue-scoped Variables"));
+        AttachGroup(root, ["issue", "prereq"], CommandCapability.Work, "Manage Issue start prerequisites",
+            ("add", "Add a start prerequisite to an Issue"),
+            ("remove", "Remove a start prerequisite from an Issue"));
+        AttachGroup(root, ["issue", "comment"], CommandCapability.Work, "Read or add Issue comments",
+            ("create", "Add a comment to an Issue"));
+        AttachGroup(root, ["issue", "template"], CommandCapability.Work, "Inspect Issue templates",
+            ("list", "List available Issue templates"),
+            ("view", "Read an Issue template by name"));
+        AttachGroup(root, ["issue", "watch"], CommandCapability.Work, "Subscribe to Issue updates",
+            ("add", "Add an Issue watching declaration"),
+            ("remove", "Remove an Issue watching declaration"),
+            ("list", "List Issue watching and muted Agents"));
+        AttachGroup(root, ["issue", "variable"], CommandCapability.Work, "Read or edit Issue-scoped Variables",
+            ("list", "List Issue Variables"),
+            ("get", "Read one Issue Variable"),
+            ("set", "Set one Issue Variable"),
+            ("unset", "Delete one Issue Variable"));
+
+        AttachGroup(root, ["agent"], CommandCapability.Automation, "Manage Agents and launch AgentSessions",
+            ("create", "Create an Agent profile"),
+            ("list", "List Agent profiles"),
+            ("view", "Read an Agent profile"),
+            ("edit", "Edit an Agent profile"),
+            ("archive", "Archive an Agent profile"),
+            ("launch", "Launch an AgentSession from an Agent profile"),
+            ("spawn", "Spawn an allowed child AgentSession"),
+            ("job", "Read AgentJobs"),
+            ("install", "Install a built-in Agent preset"),
+            ("subscription", "Manage an Agent's event subscriptions"),
+            ("model", "List available models for an Agent runtime"));
+        AttachGroup(root, ["agent", "job"], CommandCapability.Automation, "Read AgentJobs",
+            ("list", "List AgentJobs for an Agent profile"),
+            ("view", "Read an AgentJob's status and result"));
+        AttachGroup(root, ["agent", "subscription"], CommandCapability.Automation, "Manage an Agent's event subscriptions",
+            ("list", "List an Agent's subscriptions"),
+            ("create", "Create an Agent subscription"),
+            ("edit", "Edit an Agent subscription"),
+            ("delete", "Delete an Agent subscription"));
+        AttachGroup(root, ["agent", "model"], CommandCapability.Automation, "List available models for an Agent runtime",
+            ("list", "List available coder model IDs for the runtime (one per line; use with --model)"));
+
+        AttachGroup(root, ["session"], CommandCapability.Automation, "Locate and read Agent and Workflow Sessions",
+            ("list", "List AgentSessions by source"),
+            ("tree", "Show the AgentSession tree rooted at a session"),
+            ("view", "Read a Session by its stable ID"),
+            ("transcript", "Print a Session transcript"),
+            ("followup", "Send follow-up text to an AgentSession"),
+            ("compact", "Compact a Session in place"),
+            ("reset", "Reset a Session in place"),
+            ("stop", "Stop a Turn or cascade a Session tree"),
+            ("detach", "Detach a child Session"),
+            ("schedule", "Manage scheduled inputs for an AgentSession"));
+        AttachGroup(root, ["session", "schedule"], CommandCapability.Automation, "Manage scheduled inputs for an AgentSession",
+            ("create", "Schedule a follow-up input"),
+            ("list", "List scheduled inputs"),
+            ("cancel", "Cancel a scheduled input"));
+        AttachGroup(root, ["epic"], CommandCapability.Work, "Group Issues under Epics",
+            ("list", "List Epics"),
+            ("create", "Create an Epic"),
+            ("view", "Read an Epic"),
+            ("edit", "Edit an Epic"),
+            ("add", "Add an Issue to an Epic"),
+            ("remove", "Remove an Issue from an Epic"),
+            ("start", "Start autonomous progression on an Epic"),
+            ("pause", "Pause autonomous progression on an Epic"),
+            ("resume", "Resume autonomous progression on an Epic"),
+            ("done", "Mark an Epic as done"),
+            ("close", "Close an Epic"),
+            ("reopen", "Reopen a closed Epic"));
+        AttachGroup(root, ["label"], CommandCapability.Work, "Define label vocabulary",
+            ("list", "List label definitions"),
+            ("create", "Create a label definition"),
+            ("edit", "Edit a label definition"),
+            ("delete", "Delete a label definition"));
+        AttachGroup(root, ["notification"], CommandCapability.Operations, "Configure outgoing notification channels",
+            ("setup", "Configure outgoing notification channels"));
+        AttachGroup(root, ["otel"], CommandCapability.Operations, "Query OpenTelemetry traces through the Server",
+            ("query", "Run a SQL query against OpenTelemetry traces"),
+            ("status", "Show OTel collector status and database statistics"),
+            ("traces", "List recent traces (most-recent first) through the Server. Use --service to restrict to one service and --limit to request more rows; for arbitrary SQL exploration use 'mo otel query'."));
+        AttachGroup(root, ["help"], CommandCapability.Tools, "Read a shared CLI rule",
+            ("output", "Read the output and field-selection rule"),
+            ("environment", "Read the CLI environment rule"),
+            ("exit-codes", "Read the CLI exit-code rule"));
+    }
+
+    private static void AttachGroup(
+        RootCommand root,
+        string[] path,
+        CommandCapability capability,
+        string summary,
+        params (string Name, string Summary)[] children)
+    {
+        var group = FindPath(root, path);
+        if (group is null)
+            return;
+
+        AttachIfMissing(group, new CommandPresentation(capability, summary));
+        foreach (var child in children)
+            AttachIfMissing(Find(group, child.Name), new CommandPresentation(capability, child.Summary));
+    }
+
+    private static Command? FindPath(Command root, IReadOnlyList<string> path)
+    {
+        Command current = root;
+        foreach (var name in path)
+        {
+            current = Find(current, name)!;
+            if (current is null)
+                return null;
+        }
+        return current;
+    }
+
+    private static void AttachIfMissing(Command? command, CommandPresentation presentation)
+    {
+        if (command is not null && !CommandPresentationCatalog.Has(command))
+            CommandPresentationCatalog.Attach(command, presentation);
+    }
 
     private interface ILeafPresenter
     {
@@ -270,7 +596,7 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "feedback"), new CommandPresentation(
                     CommandCapability.Automation, "Inspect or submit WorkflowRun feedback"));
                 CommandPresentationCatalog.Attach(Find(group, "variable"), new CommandPresentation(
-                    CommandCapability.Automation, "Read or edit WorkflowRun-scoped Variables"));
+                    CommandCapability.Automation, "Read or edit WorkflowRun-scoped Variables. Run-only --effective exposes the Project → Issue → Run merge."));
             }
         }
 
