@@ -1,0 +1,77 @@
+{
+  "project": "mohist-local",
+  "description": "Make the registered CLI tree completely discoverable through local, progressively scoped help; enforce explicit presentation coverage for every visible command; and align the CLI reference with the executable command map.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Complete progressive help for the registered CLI tree",
+      "spec": "specs/cli-help/spec.md#root-help-is-a-complete-capability-index",
+      "description": "Complete `CommandPresentations` for every visible command in the tree built by `MohistCliCommands.Build`, including the missing root areas and uncovered nested commands, without changing registered syntax or execution behavior. Make root, group, and leaf renderers require the curated metadata and render the live tree at the appropriate scope, while preserving descriptor-backed JSON field help and the existing local help/usage path. Add focused tests for root classification, direct-child group discovery, exact-path leaf help, nested usage errors, hidden-node omission, and side-effect-free operation.",
+      "acceptanceCriteria": [
+        "`mo --help` lists every visible direct root command exactly once, classifies `workspace` under Work and `audit`, `github`, and `slack` under Operations, and does not render descendants, arguments, or leaf options.",
+        "Every visible group renders its own one-sentence purpose and every visible direct child with an explicit one-sentence presentation; `mo workspace --help` lists `list`, `view`, `create`, `close`, and `repo` without expanding repo actions, and `mo session schedule --help` lists `create`, `list`, and `cancel` with the complete invocation path.",
+        "Recently registered children including `agent spawn`, `agent subscription`, `session tree`, `session detach`, `session schedule`, and `otel traces` are explicitly presented in their parent help rather than supplied by registration-description fallback.",
+        "Every visible leaf renders its complete invocation, arguments, and visible options without unrelated commands; `mo workspace repo add --help` starts with its exact path, and `mo otel traces --help` includes its visible inputs and descriptor-backed JSON fields.",
+        "Root and group rendering require explicit presentation metadata instead of silently filtering an uncovered command or falling back to `Command.Description`; hidden commands and options remain absent.",
+        "Root, nested-group, and deep-leaf help succeed with no active Project while a rejecting HTTP handler and recording command executor observe no Server request, prompt, external process, or operational action.",
+        "An unknown action below a recognized nested group exits with code 2, writes nearest-group usage with the complete invocation path to stderr, and performs no operational side effect.",
+        "Focused CLI help tests cover capability placement, exact-once root entries, progressive group and leaf scope, JSON fields, local behavior, nested usage errors, and unchanged representative non-help command execution; relevant CLI tests and `npm run test:fast` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A complete explicit presentation catalog, progressively scoped root/group/leaf help rendering, local nearest-usage behavior, and passing focused CLI regression tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use the `Command` instances from `MohistCliCommands.Build` as the syntax authority. Do not add, remove, rename, or alias commands, and do not duplicate JSON field lists already supplied by resource descriptors."
+    },
+    {
+      "id": "T-002",
+      "title": "Enforce visible command presentation coverage",
+      "spec": "specs/cli-help/spec.md#help-presentations-cover-the-visible-registered-tree",
+      "description": "Add a pure presentation-coverage validator in the CLI assembly that traverses the registered command tree and returns stable diagnostics for every visible node missing explicit non-empty metadata. Require root children to have both a presentation and capability classification, identify every omission by its complete `mo ...` path, and cover the validator with real-tree and synthetic-tree tests so future command additions cannot become undiscoverable.",
+      "acceptanceCriteria": [
+        "The validator traverses every visible command node in the real tree, skips only currently hidden nodes, and returns no diagnostics for the completed T-001 catalog.",
+        "A visible direct root child without an explicit non-empty presentation or capability classification produces a stable diagnostic containing its complete `mo ...` invocation path.",
+        "A visible nested group, subarea, or leaf without an explicit non-empty presentation produces a stable diagnostic containing its complete invocation path.",
+        "Registration `Command.Description` text never satisfies coverage, and all uncovered nodes are reported rather than stopping after the first omission.",
+        "Synthetic-tree tests prove missing-root and missing-descendant diagnostics, full-path construction at arbitrary depth, hidden-node exclusion, deterministic ordering, and rejection of empty summaries.",
+        "A structural test builds the real root with fakes and requires an empty diagnostic set; adding any visible command without presentation metadata causes that test to fail without network, process, Project, prompt, or wall-clock dependencies.",
+        "Relevant CLI tests and `npm run test:fast` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A deterministic visible-tree presentation validator and automated real/synthetic tree coverage that rejects undiscoverable commands by full invocation path.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep completeness as a build/test gate rather than a new startup failure for normal CLI execution. The validator must read `CommandPresentationCatalog`, not infer coverage from syntax descriptions."
+    },
+    {
+      "id": "T-003",
+      "title": "Align the CLI reference with executable help",
+      "spec": "specs/cli-help/spec.md#cli-reference-matches-the-executable-help-surface",
+      "description": "Update `docs/cli-reference.md` so its root command map and capability placement match the completed executable help surface, including `audit` and its current `list` action. Remove the resolved implementation-gap claim that visible areas are absent from root help while preserving the separate documented `github edit` versus registered `github update` gap, then run the full repository verification gate.",
+      "acceptanceCriteria": [
+        "The CLI reference root map contains the complete visible registered root surface under the same capability classifications as `mo --help`, including `workspace` under Work and `audit`, `github`, and `slack` under Operations.",
+        "The Operations command table documents the registered `audit` area and its current `list` action without inventing or renaming command syntax.",
+        "The implementation-gap section no longer claims that `workspace`, `audit`, `github`, `slack`, or another covered visible area is missing from executable root help.",
+        "The unrelated canonical `github edit` versus currently registered `github update` gap remains documented and no command contract is changed as part of reference alignment.",
+        "A manual comparison of the reference map with the root-help test's visible command set finds no missing, extra, duplicated, or differently classified root area.",
+        "All CLI help and structural coverage tests pass, and the full `npm run verify` gate succeeds."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "An updated CLI reference consistent with the executable root help surface and a passing full repository verification gate.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Documentation remains curated; generating the full reference from runtime metadata is out of scope."
+    }
+  ]
+}
