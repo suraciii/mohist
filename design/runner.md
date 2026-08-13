@@ -422,10 +422,10 @@ the target Turn. A stop verdict records only what that witness confirms:
   live Session settles ended by identity rather than reporting
   not-cancellable.
 - A redelivered stop under an already-claimed operationId settles by identity
-  first: it probes the target Turn and records the settled verdict. A
-  redelivery never returns an unrecorded verdict and never records a
-  contradicting verdict — such as not-cancellable after stop-requested — for
-  the same operationId.
+  first: it probes the target Turn and records the settled verdict. An
+  outcome the witness cannot settle — stop-requested or unavailable — leaves
+  the claim outstanding and is never recorded as a verdict. Once a verdict
+  is recorded, every later redelivery returns it unchanged.
 
 Session commands such as Compact and Reset fail closed on an uncertain start
 instead: after a Runner restart the Runtime cannot answer whether the effect
