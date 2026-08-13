@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Runner.Services;
@@ -176,13 +177,12 @@ public sealed class TaskLogService : IScopedService
         if (!string.Equals(ownerKind, TaskLogOwnershipKinds.AgentJob, StringComparison.Ordinal))
             return false;
 
-        var active = (await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
+        if (terminal)
+            return await _agentJobs.IsTerminalWorkAsync(ownerId, runnerId, workId, ct);
+
+        return (await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
             .Any(work => string.Equals(work.JobKey, ownerId, StringComparison.Ordinal)
                 && string.Equals(work.WorkId, workId, StringComparison.Ordinal));
-        if (active)
-            return true;
-
-        return terminal && await _agentJobs.IsTerminalWorkAsync(ownerId, runnerId, workId, ct);
     }
 
     /// <summary>
@@ -240,6 +240,6 @@ internal sealed record TaskLogPublishScope(string TaskId, string? ProjectId);
 /// </summary>
 public static class TaskLogOwnershipKinds
 {
-    public const string Workflow = "workflow";
-    public const string AgentJob = "agent-job";
+    public const string Workflow = TerminalLogOwnerKinds.Workflow;
+    public const string AgentJob = TerminalLogOwnerKinds.AgentJob;
 }

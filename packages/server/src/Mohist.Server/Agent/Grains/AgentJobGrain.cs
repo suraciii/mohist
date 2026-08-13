@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -1512,6 +1513,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
+        if (State.TerminalLogOwnership is null
+            && !string.IsNullOrWhiteSpace(State.RunnerId)
+            && !string.IsNullOrWhiteSpace(State.WorkId))
+        {
+            State.TerminalLogOwnership = new AgentJobTerminalLogOwnership(
+                TerminalLogOwnerKinds.AgentJob,
+                Key,
+                State.WorkId,
+                State.RunnerId);
+        }
+
         State.Status = terminalStatus;
         State.FailureReason = failureReason;
         State.RunningSince = null;
@@ -2005,7 +2017,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             InitialInputId: State.Input?.InitialInputId,
             InitialTurnId: State.Input?.InitialTurnId,
             PinnedRunnerId: State.Input?.PinnedRunnerId,
-            LaunchVisibility: State.LaunchVisibility.ToString().ToLowerInvariant());
+            LaunchVisibility: State.LaunchVisibility.ToString().ToLowerInvariant(),
+            TerminalLogOwnership: State.TerminalLogOwnership is null
+                ? null
+                : new TerminalLogOwnership(
+                    State.TerminalLogOwnership.OwnerKind,
+                    State.TerminalLogOwnership.OwnerId,
+                    State.TerminalLogOwnership.WorkId,
+                    State.TerminalLogOwnership.RunnerId));
 
         if (_ledger is null)
         {
