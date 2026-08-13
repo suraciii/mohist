@@ -83,6 +83,21 @@ Log delivery failure is diagnostic state and must not rewrite TaskRun or
 AgentJob success. Conversely, a successful WorkResult does not imply that every
 live log delta reached every viewer.
 
+### Terminal Ownership
+
+Settlement records which work owns the terminal log. When a TaskRun or
+AgentJob settles, the settling owner persists the terminal-log ownership as
+part of the settlement record: owner kind, owner identity, work identity, and
+the producing Runner. The store accepts a terminal flush only when it matches
+a recorded ownership; it reads the record and never derives ownership from
+run status, task order, or task counts. Ownership that was never recorded is
+a missing fact, not a state to estimate
+([`conventions.md`](conventions.md#facts-claims-and-settlement)).
+
+Gap: the current store derives terminal ownership heuristically from run
+state, and acceptance tests lock that derivation. Replacing the derivation
+with the settlement record is tracked follow-up work.
+
 ## Read Contract
 
 Each entry exposes only monotonic `seq`, timestamp, source, and redacted text.

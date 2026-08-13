@@ -128,7 +128,7 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 - [../CONTEXT.md](../CONTEXT.md) — Cross-context unified language; single entry point for term definitions.
 - [architecture.md](architecture.md) — Runtime boundaries, control-plane/execution-plane responsibilities, placement rules.
 - [domain-analysis.md](domain-analysis.md) — Domain analysis and context mapping: subdomain split, bounded-context relations, dependency invariants.
-- [conventions.md](conventions.md) — Naming, layering, variable conventions.
+- [conventions.md](conventions.md) — Naming, layering, variable conventions, certainty vocabulary (facts, claims, settlement).
 - [cli.md](cli.md) — Command language for humans and agents: domain ownership, progressive help / Skill context, field-selection output, error and reliability contract.
 - [testing.md](testing.md) — Two test tracks (spec/unit), external dependencies, time dependencies, fake entry points.
 - [observability.md](observability.md) — Observability signal split, resource budget, degradation rules, high-frequency path cost constraints.
@@ -175,8 +175,8 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 - [issue-breakdown.md](issue-breakdown.md) — Composite Issue / sub-issue design: implemented parent-child model, status aggregation, composite advancement, and isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
 - [issue-templates.md](issue-templates.md) — Body structure and design rationale of the three issue templates (Feature / Bug / Refactor).
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt (**WIP**), builtin fallback, Workflow key reference.
-- [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, presence and runner-lost closeout.
-- [task-log.md](task-log.md) — Task execution log collection pipeline, report channel, storage ownership.
+- [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, presence and runner-lost closeout, stop settles by identity.
+- [task-log.md](task-log.md) — Task execution log collection pipeline, report channel, storage ownership, settlement-recorded terminal ownership.
 - [issue-list-read.md](issue-list-read.md) — Low-bandwidth issue-list reading and request isolation: list summary model, event invalidation, cold transport.
 - [web-ui.md](web-ui.md) — Web UI design boundary.
 - [session-timeline.md](session-timeline.md) — AgentSession timeline presentation model: transcript-fact-derived activity entries, phrasing and salience discipline, Mohist domain action recognition, raw view.
