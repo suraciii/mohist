@@ -133,7 +133,7 @@ Root help groups commands by user task. It must not show one long, flat list.
 | Group | Command Groups | Managed Objects |
 |---|---|---|
 | Work | `project`, `repo`, `workspace`, `issue`, `epic`, `label` | Project space, execution environments, work items, and organization relationships |
-| Automation | `workflow`, `run`, `agent`, `session`, `activity`, `routing` | Workflow definitions and execution, Agent work, conversations, and Project activity |
+| Automation | `workflow`, `run`, `agent`, `session`, `activity`, `routing`, `webhook` | Workflow definitions and execution, Agent work, conversations, Project activity, and outbound webhook subscriptions |
 | Operations | `runner`, `server`, `service`, `event`, `audit`, `github`, `slack`, `notification`, `otel`, `auth` | Execution resources, Server, integrations, event delivery, observability, and credentials |
 | Tools | `help`, `skill`, `install`, `update`, `info` | Help topics, Skills, installation, and maintenance |
 
