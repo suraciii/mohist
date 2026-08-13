@@ -15,6 +15,55 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 public partial class WorkflowRunStoreSpecs
 {
     [Fact]
+    public async Task SaveAsync_PersistsTerminalLogOwnershipRecordedByTaskSettlement()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var run = new WorkflowRun
+        {
+            Id = "wr_terminal_log_ownership",
+            Metadata = new WorkflowRunMetadata(null, FixedTime),
+            Status = WorkflowRunStatus.Ready,
+            Assignment = new WorkflowAssignment("worker-1", FixedTime),
+            CurrentStageId = "build",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Tasks =
+                    [
+                        new TaskRun
+                        {
+                            Id = "build.1",
+                            DefinitionId = "build",
+                            Attempt = 1,
+                            Title = "Build",
+                            Uses = "core/script",
+                            Status = TaskRunStatus.Pending,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        run.StartTask("work-terminal-log-ownership", "worker-1", FixedTime);
+        run.CompleteTask(FixedTime);
+        await store.SaveAsync(run);
+
+        await using var db = new MohistDbContext(database.Options);
+        var ownership = await db.TerminalLogOwnerships.SingleAsync(row =>
+            row.OwnerKind == "workflow"
+            && row.OwnerId == run.Id
+            && row.WorkId == "work-terminal-log-ownership");
+        Assert.Equal("worker-1", ownership.RunnerId);
+    }
+
+    [Fact]
     public async Task SaveAsync_RebuildsRunWideTaskMapAndActiveWorkProjection()
     {
         using var database = TestSqliteDatabase.CreateMigrated();

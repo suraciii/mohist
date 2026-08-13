@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Domain;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -31,6 +32,7 @@ public sealed class TaskRun
     public DateTimeOffset? FinishedAt { get; set; }
     public string? WorkerId { get; set; }
     public string? WorkId { get; set; }
+    public TerminalLogOwnership? TerminalLogOwnership { get; set; }
     public AgentResultSettlement? AgentResultSettlement { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }

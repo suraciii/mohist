@@ -7,6 +7,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -97,6 +98,42 @@ public class AgentJobStoreSpecs : IAsyncLifetime
     {
         var loaded = await _store.LoadAsync($"missing-{Guid.NewGuid():N}");
         Assert.Null(loaded);
+    }
+
+    [Fact]
+    public async Task IsTerminalWorkAsync_UsesRecordedSettlementOwnership()
+    {
+        const string jobKey = "job-terminal-log-ownership";
+        const string runnerId = "runner-terminal-log-ownership";
+        const string workId = "work-terminal-log-ownership";
+        var ownership = new TerminalLogOwnership(
+            TerminalLogOwnerKinds.AgentJob,
+            jobKey,
+            workId,
+            runnerId);
+
+        await _store.InsertLedgerAsync(new AgentJobLedgerRecord(
+            JobKey: jobKey,
+            StateJson: "{\"status\":\"completed\",\"runnerId\":\"runner-terminal-log-ownership\",\"workId\":\"work-terminal-log-ownership\"}",
+            Revision: 0,
+            AssignedRunnerId: runnerId,
+            WorkId: workId,
+            ReadySince: null,
+            RunningSince: null,
+            DispatchJson: null,
+            WorkType: "agent-job",
+            Stage: "agent",
+            Title: "Agent Job",
+            IssueProjectId: null,
+            IssueNumber: null,
+            AgentSessionId: null,
+            InitialInputId: null,
+            InitialTurnId: null,
+            TerminalLogOwnership: ownership));
+
+        Assert.True(await _store.IsTerminalWorkAsync(jobKey, runnerId, workId));
+        Assert.False(await _store.IsTerminalWorkAsync(jobKey, runnerId, "work-other"));
+        Assert.False(await _store.IsTerminalWorkAsync(jobKey, "runner-other", workId));
     }
 
     [Fact]

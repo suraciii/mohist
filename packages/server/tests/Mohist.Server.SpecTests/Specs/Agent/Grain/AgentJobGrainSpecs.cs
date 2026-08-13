@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Services;
@@ -98,6 +100,13 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         Assert.Equal(0, terminal.ExitCode);
         Assert.Equal(new[] { "artifact-1" }, terminal.ArtifactUploadIds);
         Assert.Null(terminal.FailureReason);
+
+        await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
+        var ownership = await db.TerminalLogOwnerships.SingleAsync(row =>
+            row.OwnerKind == TerminalLogOwnerKinds.AgentJob
+            && row.OwnerId == jobKey
+            && row.WorkId == workId);
+        Assert.Equal(runnerId, ownership.RunnerId);
     }
 
     [Fact]

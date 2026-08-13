@@ -98,6 +98,7 @@ public class MohistDbContext : DbContext
     public DbSet<InboxSubscriptionRow> InboxSubscriptions { get; set; } = null!;
     public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
     public DbSet<TaskLogBatchRow> TaskLogBatches { get; set; } = null!;
+    public DbSet<TerminalLogOwnershipRow> TerminalLogOwnerships { get; set; } = null!;
     public DbSet<AgentJobRow> AgentJobs { get; set; } = null!;
     public DbSet<WorkspaceRow> Workspaces { get; set; } = null!;
     public DbSet<StoredSecretRow> StoredSecrets { get; set; } = null!;
@@ -1808,6 +1809,16 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Terminal).IsRequired().IsConcurrencyToken();
             entity.Property(e => e.TerminalDigest).HasMaxLength(64);
             entity.Property(e => e.UploadedAt).IsRequired();
+        });
+
+        modelBuilder.Entity<TerminalLogOwnershipRow>(entity =>
+        {
+            entity.ToTable("TerminalLogOwnerships");
+            entity.HasKey(e => new { e.OwnerKind, e.OwnerId, e.WorkId });
+            entity.Property(e => e.OwnerKind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.OwnerId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.RunnerId).HasMaxLength(256).IsRequired();
         });
 
         modelBuilder.Entity<InboxItemRow>(entity =>

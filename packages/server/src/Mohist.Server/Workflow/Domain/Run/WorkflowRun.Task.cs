@@ -1,4 +1,5 @@
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Runner.Domain;
 namespace Mohist.Server.Workflow.Domain.Run;
 
 public static partial class WorkflowRunExtensions
@@ -53,6 +54,7 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Completed;
+            task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             var events = new List<WorkflowEvent>
             {
                 new TaskCompleted(current.Id, task.Id)
@@ -93,6 +95,7 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
+            task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: result.Reason, Error: result.Error);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
@@ -128,6 +131,7 @@ public static partial class WorkflowRunExtensions
             var message = string.IsNullOrWhiteSpace(reason) ? "stopped" : reason;
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
+            task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: message);
             run.Failure = current.Failure;
             return [new TaskFailed(current.Id, task.Id, message)];
@@ -145,6 +149,7 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Cancelled;
+            task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             return [new TaskCancelled(current.Id, task.Id)];
         }
 
@@ -190,4 +195,16 @@ public static partial class WorkflowRunExtensions
         string.Equals(uses, "mohist/agent", StringComparison.Ordinal)
         || string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
         || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
+
+    private static TerminalLogOwnership? TerminalLogOwnershipFor(this WorkflowRun run, TaskRun task)
+    {
+        if (string.IsNullOrWhiteSpace(task.WorkId) || string.IsNullOrWhiteSpace(task.WorkerId))
+            return null;
+
+        return new TerminalLogOwnership(
+            TerminalLogOwnerKinds.Workflow,
+            run.Id,
+            task.WorkId,
+            task.WorkerId);
+    }
 }

@@ -4,6 +4,8 @@ using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Orleans;
 
@@ -132,6 +134,10 @@ public class WorkflowRunStore : IWorkflowRunStore
             .Where(map => map.WorkflowRunId == workflowRunId)
             .ToListAsync(ct);
         db.WorkflowRunTaskMaps.RemoveRange(taskMapRows);
+        var ownershipRows = await db.TerminalLogOwnerships
+            .Where(row => row.OwnerKind == TerminalLogOwnerKinds.Workflow && row.OwnerId == workflowRunId)
+            .ToListAsync(ct);
+        db.TerminalLogOwnerships.RemoveRange(ownershipRows);
         db.WorkflowRuns.Remove(row);
         await db.SaveChangesAsync(ct);
         await _dispatchSnapshotStore.DeleteForRunAsync(workflowRunId, ct);
@@ -162,6 +168,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             db.WorkflowRuns.Add(newEntity);
             db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
             await StageTaskMapAsync(db, projection, ct);
+            await StageTerminalLogOwnershipAsync(db, run, ct);
             return;
         }
 
@@ -175,6 +182,24 @@ public class WorkflowRunStore : IWorkflowRunStore
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
         await StageTaskMapAsync(db, projection, ct);
+        await StageTerminalLogOwnershipAsync(db, run, ct);
+    }
+
+    private static async Task StageTerminalLogOwnershipAsync(
+        MohistDbContext db,
+        WorkflowRun run,
+        CancellationToken ct)
+    {
+        var ownership = run.Stages
+            .SelectMany(stage => stage.Tasks)
+            .Select(task => task.TerminalLogOwnership)
+            .Where(fact => fact is not null)
+            .Cast<TerminalLogOwnership>()
+            .Where(fact => fact.OwnerKind == TerminalLogOwnerKinds.Workflow
+                && fact.OwnerId == run.Id);
+
+        foreach (var fact in ownership)
+            await TerminalLogOwnershipPersistence.StageAsync(db, fact, ct);
     }
 
     private static async Task StageTaskMapAsync(

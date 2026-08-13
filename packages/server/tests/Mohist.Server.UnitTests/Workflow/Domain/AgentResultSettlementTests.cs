@@ -1,6 +1,7 @@
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Runner.Domain;
 using Mohist.Workflow.Definition;
 using Xunit;
 
@@ -284,6 +285,9 @@ public sealed class AgentResultSettlementTests
         var stop = run.Stop();
 
         Assert.Equal(TaskRunStatus.Cancelled, task.Status);
+        Assert.Equal(
+            new TerminalLogOwnership(TerminalLogOwnerKinds.Workflow, run.Id, "agent-work", "runner-1"),
+            task.TerminalLogOwnership);
         Assert.Equal(WorkflowRunStatus.Stopped, run.Status);
         Assert.Equal("agent-work", task.WorkId);
         Assert.Equal("runner-1", task.WorkerId);

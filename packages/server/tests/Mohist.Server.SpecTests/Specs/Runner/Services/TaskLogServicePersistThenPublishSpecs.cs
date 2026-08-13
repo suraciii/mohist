@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -177,15 +178,31 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     public async Task AppendAsync_TerminalBatchIsAcceptedAfterAgentWorkSettles()
     {
         await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.AgentJob, "owner-1", "work-terminal");
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+        var rejectedWhileRunning = await service.AppendAsync(
+            "runner-A",
+            TaskLogOwnershipKinds.AgentJob,
+            "owner-1",
+            "work-terminal",
+            NewEntries(1, 1),
+            truncated: false,
+            terminal: true);
+
         await using (var db = new MohistDbContext(_database.Options))
         {
             var row = await db.AgentJobs.SingleAsync(r => r.JobKey == "owner-1");
             row.State = "{\"status\":\"completed\",\"runnerId\":\"runner-A\",\"workId\":\"work-terminal\"}";
+            db.TerminalLogOwnerships.Add(new TerminalLogOwnershipRow
+            {
+                OwnerKind = TerminalLogOwnerKinds.AgentJob,
+                OwnerId = "owner-1",
+                WorkId = "work-terminal",
+                RunnerId = "runner-A",
+            });
             await db.SaveChangesAsync();
         }
 
-        var publisher = new RecordingPublisher();
-        var service = NewService(publisher);
         var entries = NewEntries(1, 2);
 
         var accepted = await service.AppendAsync(
@@ -213,6 +230,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             truncated: false,
             terminal: true);
 
+        Assert.Equal(TaskLogAppendResult.NotFound, rejectedWhileRunning);
         Assert.Equal(TaskLogAppendResult.Changed, accepted);
         Assert.Equal(TaskLogAppendResult.Duplicate, duplicate);
         Assert.Equal(TaskLogAppendResult.Conflict, different);
@@ -239,6 +257,13 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         {
             var row = await db.AgentJobs.SingleAsync(r => r.JobKey == "owner-1");
             row.State = "{\"status\":\"completed\",\"runnerId\":\"runner-A\",\"workId\":\"work-terminal-owner\"}";
+            db.TerminalLogOwnerships.Add(new TerminalLogOwnershipRow
+            {
+                OwnerKind = TerminalLogOwnerKinds.AgentJob,
+                OwnerId = "owner-1",
+                WorkId = "work-terminal-owner",
+                RunnerId = "runner-A",
+            });
             await db.SaveChangesAsync();
         }
 

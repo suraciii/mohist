@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Runner.Domain;
 
 namespace Mohist.Server.Infrastructure.Data.AgentJobs;
 
@@ -166,6 +168,7 @@ public class AgentJobStore : IAgentJobStore
         var row = ToRow(record);
         row.Revision = 1;
         db.AgentJobs.Add(row);
+        await StageTerminalLogOwnershipAsync(db, record, ct);
         await db.SaveChangesAsync(ct);
         return ToRecord(row);
     }
@@ -195,6 +198,7 @@ public class AgentJobStore : IAgentJobStore
 
         ApplyTo(existing, record);
         existing.Revision = record.Revision + 1;
+        await StageTerminalLogOwnershipAsync(db, record, ct);
         await db.SaveChangesAsync(ct);
         return ToRecord(existing);
     }
@@ -339,15 +343,12 @@ public class AgentJobStore : IAgentJobStore
             return false;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.JobKey == jobKey)
-            .Select(r => new { r.Status, r.AssignedRunnerId, r.WorkId })
-            .SingleOrDefaultAsync(ct);
-
-        return row is not null
-            && string.Equals(row.AssignedRunnerId, runnerId, StringComparison.Ordinal)
-            && string.Equals(row.WorkId, workId, StringComparison.Ordinal)
-            && row.Status is "completed" or "failed" or "cancelled";
+        return await db.TerminalLogOwnerships
+            .AsNoTracking()
+            .AnyAsync(row => row.OwnerKind == TerminalLogOwnerKinds.AgentJob
+                && row.OwnerId == jobKey
+                && row.WorkId == workId
+                && row.RunnerId == runnerId, ct);
     }
 
     public async Task<IReadOnlyList<AgentJobLedgerRecord>> ListAssignedPendingForRunnerAsync(
@@ -488,7 +489,8 @@ public class AgentJobStore : IAgentJobStore
         row.InitialInputId,
         row.InitialTurnId,
         row.PinnedRunnerId,
-        row.LaunchVisibility);
+        row.LaunchVisibility,
+        null);
 
     private static AgentJobLedgerRecord ToRecord(LedgerQueryRow row) => new(
         row.JobKey,
@@ -508,7 +510,16 @@ public class AgentJobStore : IAgentJobStore
         row.InitialInputId,
         row.InitialTurnId,
         row.PinnedRunnerId,
-        row.LaunchVisibility);
+        row.LaunchVisibility,
+        null);
+
+    private static Task StageTerminalLogOwnershipAsync(
+        MohistDbContext db,
+        AgentJobLedgerRecord record,
+        CancellationToken ct) =>
+        record.TerminalLogOwnership is null
+            ? Task.CompletedTask
+            : TerminalLogOwnershipPersistence.StageAsync(db, record.TerminalLogOwnership, ct);
 
     private sealed class LedgerQueryRow
     {

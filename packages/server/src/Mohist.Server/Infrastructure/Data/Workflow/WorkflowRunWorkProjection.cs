@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
@@ -135,54 +135,12 @@ public sealed class WorkflowRunWorkProjection : IWorkflowRunWorkProjection
             return false;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var state = await db.WorkflowRuns
+        return await db.TerminalLogOwnerships
             .AsNoTracking()
-            .Where(row => row.WorkflowRunId == workflowRunId)
-            .Select(row => row.State)
-            .SingleOrDefaultAsync(ct);
-        if (state is null)
-            return false;
-
-        var run = JSON.Deserialize<WorkflowRun>(state);
-        if (run is null)
-            return false;
-
-        var settledTask = FindSettledTask(run);
-        if (settledTask is null)
-            return false;
-
-        var settledWorkId = string.IsNullOrWhiteSpace(settledTask.WorkId)
-            ? settledTask.Id
-            : settledTask.WorkId;
-        return string.Equals(settledWorkId, workId, StringComparison.Ordinal)
-            && string.Equals(settledTask.WorkerId, runnerId, StringComparison.Ordinal);
-    }
-
-    private static TaskRun? FindSettledTask(WorkflowRun run)
-    {
-        if (!run.Status.IsTerminal() || string.IsNullOrWhiteSpace(run.CurrentStageId))
-            return null;
-
-        var currentStage = run.Stages.FirstOrDefault(
-            stage => string.Equals(stage.Id, run.CurrentStageId, StringComparison.Ordinal));
-        if (currentStage is null)
-            return null;
-
-        if (run.Status == WorkflowRunStatus.Stopped)
-        {
-            var interruptedTasks = currentStage.Tasks.Where(task =>
-                task.Status is TaskRunStatus.Running or TaskRunStatus.Cancelled
-                && !string.IsNullOrWhiteSpace(task.WorkerId)
-                && (!string.IsNullOrWhiteSpace(task.WorkId) || !string.IsNullOrWhiteSpace(task.Id)))
-                .Take(2)
-                .ToArray();
-            return interruptedTasks.Length == 1 ? interruptedTasks[0] : null;
-        }
-
-        return currentStage.Tasks.LastOrDefault(task =>
-            (task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled)
-            && !string.IsNullOrWhiteSpace(task.WorkerId)
-            && (!string.IsNullOrWhiteSpace(task.WorkId) || !string.IsNullOrWhiteSpace(task.Id)));
+            .AnyAsync(row => row.OwnerKind == TerminalLogOwnerKinds.Workflow
+                && row.OwnerId == workflowRunId
+                && row.WorkId == workId
+                && row.RunnerId == runnerId, ct);
     }
 
     public async Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default)

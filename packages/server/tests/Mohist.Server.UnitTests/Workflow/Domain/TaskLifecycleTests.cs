@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
@@ -53,6 +54,9 @@ public class TaskLifecycleTests
         Assert.Equal(TaskRunStatus.Completed, task.Status);
         Assert.NotNull(task.StartedAt);
         Assert.NotNull(task.FinishedAt);
+        Assert.Equal(
+            new TerminalLogOwnership(TerminalLogOwnerKinds.Workflow, run.Id, "work-1", "worker-1"),
+            task.TerminalLogOwnership);
         Assert.IsType<TaskCompleted>(WorkflowEventSerializer.Unwrap(events[0]));
     }
 
@@ -113,6 +117,9 @@ public class TaskLifecycleTests
 
         Assert.Equal(TaskRunStatus.Failed, task.Status);
         Assert.NotNull(task.FinishedAt);
+        Assert.Equal(
+            new TerminalLogOwnership(TerminalLogOwnerKinds.Workflow, run.Id, "work-1", "worker-1"),
+            task.TerminalLogOwnership);
         Assert.Equal("stopped", run.Failure?.Message);
         Assert.Equal(new TaskFailed("build", task.Id, "stopped"), WorkflowEventSerializer.Unwrap(Assert.Single(events)));
     }

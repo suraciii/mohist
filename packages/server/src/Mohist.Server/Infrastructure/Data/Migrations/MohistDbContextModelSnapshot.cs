@@ -1743,6 +1743,30 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("TaskLogBatches", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.TerminalLogOwnershipRow", b =>
+                {
+                    b.Property<string>("OwnerKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RunnerId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("OwnerKind", "OwnerId", "WorkId");
+
+                    b.ToTable("TerminalLogOwnerships", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.TaskLogEntryRow", b =>
                 {
                     b.Property<long>("Id")

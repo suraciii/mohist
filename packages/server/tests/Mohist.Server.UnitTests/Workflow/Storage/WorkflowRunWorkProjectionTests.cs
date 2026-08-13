@@ -80,7 +80,7 @@ public sealed class WorkflowRunWorkProjectionTests
     }
 
     [Fact]
-    public async Task TerminalWorkReadsAuthoritativeRunStateAfterActiveProjectionIsCleared()
+    public async Task TerminalWorkReadsRecordedOwnershipRegardlessOfRunStateOrTaskOrdering()
     {
         var connection = new SqliteConnection($"Data Source=workflow-terminal-work-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await connection.OpenAsync();
@@ -113,6 +113,13 @@ public sealed class WorkflowRunWorkProjectionTests
                     "TaskId" TEXT NOT NULL,
                     "WorkId" TEXT NOT NULL,
                     PRIMARY KEY ("WorkflowRunId", "TaskId")
+                );
+                CREATE TABLE "TerminalLogOwnerships" (
+                    "OwnerKind" TEXT NOT NULL,
+                    "OwnerId" TEXT NOT NULL,
+                    "WorkId" TEXT NOT NULL,
+                    "RunnerId" TEXT NOT NULL,
+                    PRIMARY KEY ("OwnerKind", "OwnerId", "WorkId")
                 );
                 """);
 
@@ -187,7 +194,7 @@ public sealed class WorkflowRunWorkProjectionTests
                                 Uses = "core/script",
                                 WorkId = "work-stopped-previous",
                                 WorkerId = "runner-stopped",
-                                Status = TaskRunStatus.Completed,
+                                Status = TaskRunStatus.Running,
                                 Classification = TaskClassification.Orchestration,
                             },
                             new TaskRun
@@ -211,6 +218,9 @@ public sealed class WorkflowRunWorkProjectionTests
                 INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "ActiveWorkId", "ActiveWorkerId", "ETag")
                 VALUES ('wr_terminal_projection', {JSON.Serialize(run)}, NULL, NULL, 1),
                        ('wr_stopped_projection', {JSON.Serialize(stoppedRun)}, 'work-interrupted', 'runner-stopped', 1);
+                INSERT INTO "TerminalLogOwnerships" ("OwnerKind", "OwnerId", "WorkId", "RunnerId")
+                VALUES ('workflow', 'wr_terminal_projection', 'work-terminal', 'runner-terminal'),
+                       ('workflow', 'wr_stopped_projection', 'work-interrupted', 'runner-stopped');
                 """);
         }
 
@@ -225,13 +235,13 @@ public sealed class WorkflowRunWorkProjectionTests
 
         stoppedRun.Stages[0].Tasks[0].Status = TaskRunStatus.Running;
         await UpdateStateAsync(options, stoppedRun);
-        Assert.False(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-interrupted", "runner-stopped"));
+        Assert.True(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-interrupted", "runner-stopped"));
         Assert.False(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-stopped-previous", "runner-stopped"));
 
         stoppedRun.Stages[0].Tasks[0].Status = TaskRunStatus.Completed;
         stoppedRun.Stages[0].Tasks[1].Status = TaskRunStatus.Completed;
         await UpdateStateAsync(options, stoppedRun);
-        Assert.False(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-interrupted", "runner-stopped"));
+        Assert.True(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-interrupted", "runner-stopped"));
         Assert.False(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-stopped-previous", "runner-stopped"));
     }
 

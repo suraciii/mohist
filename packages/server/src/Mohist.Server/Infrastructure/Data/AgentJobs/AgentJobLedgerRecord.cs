@@ -1,3 +1,5 @@
+using Mohist.Server.Runner.Domain;
+
 namespace Mohist.Server.Infrastructure.Data.AgentJobs;
 
 /// <summary>
@@ -24,7 +26,8 @@ public sealed record AgentJobLedgerRecord(
     string? InitialInputId,
     string? InitialTurnId,
     string? PinnedRunnerId = null,
-    string LaunchVisibility = "visible");
+    string LaunchVisibility = "visible",
+    TerminalLogOwnership? TerminalLogOwnership = null);
 
 /// <summary>
 /// Sentinel for an optimistic-concurrency conflict on a save. Thrown when
