@@ -297,11 +297,11 @@ describe("PiRuntime", () => {
     await new Promise<void>((resolve) => setImmediate(resolve))
     await followup
     session.emit({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read" })
-    expect(events.some((event) => (event as { type?: unknown }).type === "tool")).toBe(true)
+    expect(events.some((event) => (event as { type?: unknown }).type === "tool_call.started")).toBe(true)
     session.complete("done")
     await new Promise<void>((resolve) => setImmediate(resolve))
     session.emit({ type: "tool_execution_end", toolCallId: "tool-2", toolName: "read" })
-    expect(events.some((event) => (event as { type?: unknown }).type === "tool" && (event as { payload?: { toolCallId?: string } }).payload?.toolCallId === "tool-2")).toBe(false)
+    expect(events.some((event) => (event as { type?: unknown }).type === "tool_call.completed" && (event as { payload?: { toolCallId?: string } }).payload?.toolCallId === "tool-2")).toBe(false)
   })
 
   it("cancel reports missing-session with a Reset hint when the bound file is absent", async () => {
@@ -469,8 +469,8 @@ describe("Pi policy and projection", () => {
     const projector = createPiProjector("/virtual/session", "/workspace")
     const first = projector.project({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read" })
     expect(projector.project({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read" })).toEqual([])
-    expect(first[0]?.type).toBe("tool")
-    expect(projector.project({ type: "compaction_start", id: "compact-1" })[0]?.payload.phase).toBe("started")
+    expect(first[0]?.type).toBe("tool_call.started")
+    expect(projector.project({ type: "compaction_start", id: "compact-1" })[0]).toMatchObject({ type: "compaction", payload: { phase: "started" } })
     expect(projector.project({ type: "auto_retry_start", id: "retry-1", attempt: 1, maxAttempts: 5, delayMs: 10, errorMessage: "quota exhausted" })[0]?.type).toBe("provider.retry")
     expect(projector.reconcile([{ role: "assistant", content: "reconciled", usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, thought: 5, cost: { amount: 0.1, currency: "USD" } } }])).toHaveLength(1)
     projector.project({ type: "future_event" })

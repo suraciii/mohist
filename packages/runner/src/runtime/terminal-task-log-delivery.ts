@@ -124,6 +124,27 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
       const key = deliveryKey(record.identity)
       const existing = this.deliveries.get(key)
       if (existing) {
+        // A server-side terminal conflict is final for the previous snapshot,
+        // but it must not make a later execution fail before it can report.
+        // Replace that failed local delivery with the new snapshot so the
+        // executor can make one fresh delivery attempt.
+        if (existing.state === "failed"
+          && existing.failure?.kind === "conflict"
+          && existing.failure.code === "terminal_snapshot_conflict") {
+          const pending: TerminalTaskLogDeliveryRecord = {
+            identity: { ...record.identity },
+            batch: cloneBatch(record.batch),
+            state: "pending",
+          }
+          this.deliveries.set(key, pending)
+          try {
+            await this.persist()
+          } catch (error) {
+            this.deliveries.set(key, existing)
+            throw error
+          }
+          return cloneRecord(pending)
+        }
         if (!sameSnapshot(existing, record)) {
           throw new Error(`Terminal task-log payload changed for ${key}`)
         }

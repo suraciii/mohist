@@ -74,7 +74,7 @@ describe("PiRuntime compact channel", () => {
     )
     expect(result).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace" } })
     expect(session.compactCalls).toBe(1)
-    const compactionEvents = events.filter((event) => (event as { type?: unknown }).type === "compaction_event") as Array<{ payload?: { phase?: string } }>
+    const compactionEvents = events.filter((event) => (event as { type?: unknown }).type === "compaction") as Array<{ payload?: { phase?: string } }>
     expect(compactionEvents.map((event) => event.payload?.phase)).toEqual(["started", "completed"])
   })
 

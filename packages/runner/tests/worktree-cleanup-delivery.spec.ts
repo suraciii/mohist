@@ -358,4 +358,42 @@ describe("worktree cleanup before delivery", () => {
     expect(agentResult.message).toMatch(/worktree dirty after 3 cleanup attempt/i)
     expect(agentResult.message).toMatch(/untracked=\[src\/never-clean\.ts\]/)
   })
+
+  it("treats Pi-backed tasks as agent-backed for cleanup", async (resources) => {
+    const worktree = createFakeWorktree()
+    installExecutorGit(resources, worktree)
+    const connection = {
+      async report() {
+        return {}
+      },
+      async uploadArtifact() {
+        throw new Error("uploadArtifact should not be called in cleanup delivery tests")
+      },
+    } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
+    const cleanupPrompts: string[] = []
+    resources.cleanupAgentAction = async (_host, inputs) => {
+      cleanupPrompts.push(String(inputs.prompt ?? ""))
+      commitCleanup(worktree, ["openspec/changes/issue-596/proposal.md"], "pi-cleanup-sha")
+      return { output: { commitSha: "pi-cleanup-sha" } }
+    }
+
+    const registry = buildRegistry({
+      "mohist/pi": {
+        run: async () => {
+          worktree.untracked = ["openspec/changes/issue-596/proposal.md"]
+          return { output: null }
+        },
+        inputs: { prompt: { types: ["string", "object"] } },
+      },
+    })
+    const executor = buildExecutor(registry, worktree, connection)
+
+    const agentResult = await executor.execute(buildWork(worktree, { uses: "mohist/pi" }), new AbortController().signal)
+
+    expect(agentResult.status).toBe("completed")
+    expect(agentResult.cleanupAttempts).toBe(1)
+    expect(cleanupPrompts).toHaveLength(1)
+    expect(worktree.cleanupCommits).toEqual([{ files: ["openspec/changes/issue-596/proposal.md"], sha: "pi-cleanup-sha" }])
+    expect(worktree.untracked).toEqual([])
+  })
 })
