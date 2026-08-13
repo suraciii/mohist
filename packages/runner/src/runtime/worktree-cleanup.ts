@@ -2,6 +2,7 @@ import type { JsonObject, DispatchWorkItem } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 
 export const AGENT_BACKED_USES = "mohist/opencode"
+export const AGENT_BACKED_RUNTIME_USES = [AGENT_BACKED_USES, "mohist/pi"] as const
 export const DEFAULT_MAX_CLEANUP_ATTEMPTS = 3
 
 export interface WorktreeSnapshot {
@@ -14,7 +15,7 @@ export interface WorktreeSnapshot {
 export function isAgentBackedTask(work: Pick<DispatchWorkItem, "uses">): boolean {
   if (typeof work.uses !== "string") return false
   const normalized = work.uses.trim().toLowerCase()
-  return normalized === AGENT_BACKED_USES
+  return AGENT_BACKED_RUNTIME_USES.includes(normalized as (typeof AGENT_BACKED_RUNTIME_USES)[number])
 }
 
 export function resolveMaxCleanupAttempts(variables: JsonObject): number {

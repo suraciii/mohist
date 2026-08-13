@@ -86,6 +86,23 @@ describe("TerminalTaskLogDeliveryStore", () => {
     expect(JSON.parse(fileSystem.text!).deliveries["workflow:workflow-1:work-1"].state).toBe("failed")
   })
 
+  it("ReplacesAConflictSnapshotForTheNextExecution", async () => {
+    const { store } = await loadedStore()
+    await store.putPending(snapshot("first execution"))
+    await store.markFailed(workflowIdentity, {
+      kind: "conflict",
+      status: 409,
+      code: "terminal_snapshot_conflict",
+      message: "sealed content differs",
+    })
+
+    const replacement = await store.putPending(snapshot("next execution"))
+
+    expect(replacement.state).toBe("pending")
+    expect(replacement.batch.entries[0]?.text).toBe("next execution")
+    expect((await store.listPending())[0]?.batch.entries[0]?.text).toBe("next execution")
+  })
+
   it("SerializesConcurrentMutationsWithoutDroppingEitherWork", async () => {
     const { store } = await loadedStore()
     await Promise.all([
