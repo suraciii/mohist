@@ -35,7 +35,7 @@ export function makeFakeRuntime(): FakeRuntimeHandles {
   let nextCancel: RuntimeResult<RuntimeCancelResult> = {
     ok: true,
     value: {
-      facts: { runtimeSessionId: "ses_runtime", workDir: "/work/project", cancelled: true },
+      facts: { runtimeSessionId: "ses_runtime", workDir: "/work/project", cancelled: true, stopConfirmed: true },
       diagnostics: [],
     },
     diagnostics: [],

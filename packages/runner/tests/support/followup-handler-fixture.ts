@@ -86,6 +86,7 @@ export interface FakeConnection {
 export interface FakeRuntimeHandles {
   runtime: OpenCodeRuntime
   followupCalls: RuntimeFollowupRequest[]
+  setCancelResult: (result: RuntimeResult<RuntimeCancelResult>) => void
   setFollowupResult: (result: RuntimeResult<RuntimeFollowupResult>) => void
   setReady: (ready: boolean) => void
 }
@@ -168,6 +169,11 @@ export function makeFakeRuntime(): FakeRuntimeHandles {
     },
     diagnostics: [],
   }
+  let nextCancel: RuntimeResult<RuntimeCancelResult> = {
+    ok: true,
+    value: { facts: { runtimeSessionId: "ses_runtime", workDir: "/work/project", cancelled: true, stopConfirmed: true }, diagnostics: [] },
+    diagnostics: [],
+  }
   const runtime: Partial<OpenCodeRuntime> = {
     ready: () => ready,
     diagnostic: () => null,
@@ -176,16 +182,13 @@ export function makeFakeRuntime(): FakeRuntimeHandles {
       return nextResult
     },
     async cancel(_request: RuntimeCancelRequest): Promise<RuntimeResult<RuntimeCancelResult>> {
-      return {
-        ok: true,
-        value: { facts: { runtimeSessionId: "ses_runtime", workDir: "/work/project", cancelled: true }, diagnostics: [] },
-        diagnostics: [],
-      }
+      return nextCancel
     },
   }
   return {
     runtime: runtime as OpenCodeRuntime,
     followupCalls,
+    setCancelResult(result) { nextCancel = result },
     setFollowupResult(result) { nextResult = result },
     setReady(value) { ready = value },
   }
