@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -154,6 +155,11 @@ public class TaskLogRouteSpecs
                             WorkId = workId,
                             WorkerId = RunnerId,
                             Status = TaskRunStatus.Completed,
+                            TerminalLogOwnership = new TerminalLogOwnership(
+                                TerminalLogOwnerKinds.Workflow,
+                                workflowRunId,
+                                workId,
+                                RunnerId),
                             Classification = TaskClassification.Orchestration,
                         },
                     ],

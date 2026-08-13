@@ -1,4 +1,5 @@
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Runner.Domain;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -45,4 +46,12 @@ public sealed class AgentJobState
     [Id(30)] public bool ConcurrencyReleasePending { get; set; }
     [Id(31)] public string? ConcurrencyWaiterId { get; set; }
     [Id(32)] public PendingInitialTurnTerminalDelivery? PendingInitialTurnTerminalDelivery { get; set; }
+    [Id(33)] public AgentJobTerminalLogOwnership? TerminalLogOwnership { get; set; }
 }
+
+[GenerateSerializer]
+public sealed record AgentJobTerminalLogOwnership(
+    [property: Id(0)] string OwnerKind,
+    [property: Id(1)] string OwnerId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string RunnerId);
