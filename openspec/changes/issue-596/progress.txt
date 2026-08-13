@@ -1,0 +1,14 @@
+## Codebase Patterns
+- `MohistCliCommands.Build` constructs the authoritative `System.CommandLine` tree, then installs local help and calls `CommandPresentations.AttachTo` on the same `Command` instances.
+- `CommandHelpRenderer` derives usage, arguments, visible options, and descriptor-backed JSON fields from live command objects; hidden commands/options are filtered at render time.
+- Existing CLI help tests use `CliTestFactory.Create(activeProjectId: null)` with recording/rejecting HTTP handlers and assert no requests for help.
+
+## T-001 Work
+- Baseline focused CLI help/workspace/session-schedule/otel/agent tests passed: 1,803 tests.
+- The visible root gaps are `audit`, `github`, `slack`, and `workspace`; recently registered nested gaps include `agent spawn`/`subscription`, `session tree`/`detach`/`schedule`, and `otel traces`.
+- The live tree also exposes older uncovered nested groups/leaves (`project workflow/prompt`, variable groups, issue prereq/comment/template/watch, run feedback/variable, routing rule, webhook event-types, event dead-letter, and similar direct leaves). T-001 needs explicit metadata for all visible nodes because renderer fallback is being removed.
+- T-002 structural validator and T-003 documentation are separate tasks and are not being implemented in this slice.
+- Added explicit root/group/leaf presentations for the complete current visible tree, including audit/github/slack/workspace, agent spawn/subscription, session tree/detach/schedule, and otel traces; `otel traces` keeps its descriptor-backed JSON fields.
+- Root/group/leaf renderers now use `CommandPresentationCatalog.Require`; missing metadata throws instead of filtering a command or falling back to registration `Description`. Root examples were removed so root help stays an area index.
+- Added `CliProgressiveHelpSpecs` for exact root classifications/counts, scoped groups/leaves, JSON fields, hidden options/children, local no-side-effect behavior, nested usage errors, strict metadata, and representative workspace execution.
+- Verification: full CLI test project passed 1,813 tests; `npm run test:fast` passed all typecheck, server, CLI, web, runner, and workflow lanes. The first fast-gate attempt was blocked because `node_modules` was absent (`concurrently` missing); `npm ci --ignore-scripts` restored the locked dependencies without tracked changes. npm reported 16 existing audit advisories during install.

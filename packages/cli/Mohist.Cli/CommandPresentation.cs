@@ -43,6 +43,11 @@ internal static class CommandPresentationCatalog
     public static CommandPresentation? Get(Command? command) =>
         command is not null && Table.TryGetValue(command, out var presentation) ? presentation : null;
 
+    public static CommandPresentation Require(Command command) =>
+        Get(command) is { Summary: { Length: > 0 } } presentation
+            ? presentation
+            : throw new InvalidOperationException($"Missing explicit help presentation for command '{command.Name}'.");
+
     public static bool Has(Command? command) => command is not null && Table.TryGetValue(command, out _);
 
     public static void AttachJsonFields(Option option, ResourceDescriptor descriptor)
