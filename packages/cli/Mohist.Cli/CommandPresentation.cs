@@ -14,7 +14,7 @@ internal enum CommandCapability
 internal sealed record JsonFieldGroup(string Invocation, IReadOnlyList<string> Fields);
 
 internal sealed record CommandPresentation(
-    CommandCapability Capability,
+    CommandCapability? Capability,
     string Summary,
     string? Boundary = null,
     string? SeeAlso = null,
@@ -44,9 +44,18 @@ internal static class CommandPresentationCatalog
         command is not null && Table.TryGetValue(command, out var presentation) ? presentation : null;
 
     public static CommandPresentation Require(Command command) =>
-        Get(command) is { Summary: { Length: > 0 } } presentation
+        Get(command) is { } presentation && !string.IsNullOrWhiteSpace(presentation.Summary)
             ? presentation
             : throw new InvalidOperationException($"Missing explicit help presentation for command '{command.Name}'.");
+
+    public static CommandPresentation RequireRoot(Command command)
+    {
+        var presentation = Require(command);
+        if (presentation.Capability is not { } capability || !Enum.IsDefined(capability))
+            throw new InvalidOperationException($"Missing explicit help capability classification for command '{command.Name}'.");
+
+        return presentation;
+    }
 
     public static bool Has(Command? command) => command is not null && Table.TryGetValue(command, out _);
 

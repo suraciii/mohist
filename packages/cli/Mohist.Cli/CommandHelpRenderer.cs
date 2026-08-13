@@ -8,11 +8,11 @@ internal static class CommandHelpRenderer
     public static void RenderRoot(TextWriter writer, RootCommand root)
     {
         var capabilities = EnumerateVisibleTopLevel(root)
-            .Select(cmd => (Command: cmd, Presentation: CommandPresentationCatalog.Require(cmd)))
+            .Select(cmd => (Command: cmd, Presentation: CommandPresentationCatalog.RequireRoot(cmd)))
             .ToArray();
 
         var byCapability = capabilities
-            .GroupBy(pair => pair.Presentation!.Capability)
+            .GroupBy(pair => pair.Presentation.Capability!.Value)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Command.Name, StringComparer.Ordinal).ToArray());
 
         writer.WriteLine("mo — Mohist command line");
@@ -29,7 +29,7 @@ internal static class CommandHelpRenderer
             writer.WriteLine($"    {capability}");
             foreach (var (cmd, presentation) in entries)
             {
-                writer.WriteLine($"  {cmd.Name,-14} {presentation!.Summary}");
+                writer.WriteLine($"  {cmd.Name,-14} {presentation.Summary}");
             }
             writer.WriteLine();
         }
