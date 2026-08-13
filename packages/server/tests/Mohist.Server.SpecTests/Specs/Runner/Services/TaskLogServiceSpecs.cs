@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -181,6 +182,159 @@ public class TaskLogServiceSpecs : IAsyncLifetime
         Assert.Equal(TaskLogAppendResult.NotFound, result);
     }
 
+    [Fact]
+    public async Task AppendAsync_WorkflowTerminalSnapshotRequiresRecordedOwnership_WhenTasksWereRetried()
+    {
+        const string workflowRunId = "wr-terminal-task-log-retries";
+        const string runnerId = "runner-terminal-task-log-retries";
+        const string requestedWorkId = "work-retry-2";
+
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = workflowRunId,
+                State = JSON.Serialize(new WorkflowRun
+                {
+                    Id = workflowRunId,
+                    Metadata = new WorkflowRunMetadata("retried", _timeProvider.GetUtcNow()),
+                    Status = WorkflowRunStatus.Completed,
+                    CurrentStageId = "build",
+                    Stages =
+                    [
+                        new StageRun
+                        {
+                            Id = "build",
+                            Attempt = 1,
+                            RequiresApproval = false,
+                            Status = StageRunStatus.Completed,
+                            Tasks =
+                            [
+                                new TaskRun
+                                {
+                                    Id = "task-retry-1",
+                                    DefinitionId = "task-build",
+                                    Attempt = 1,
+                                    Title = "First attempt",
+                                    WorkId = "work-retry-1",
+                                    WorkerId = runnerId,
+                                    Status = TaskRunStatus.Failed,
+                                },
+                                new TaskRun
+                                {
+                                    Id = "task-retry-2",
+                                    DefinitionId = "task-build",
+                                    Attempt = 2,
+                                    Title = "Retry attempt",
+                                    WorkId = requestedWorkId,
+                                    WorkerId = runnerId,
+                                    Status = TaskRunStatus.Completed,
+                                },
+                            ],
+                        },
+                    ],
+                }),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await _service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            requestedWorkId,
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "unrecorded")],
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.NotFound, result);
+    }
+
+    [Fact]
+    public async Task AppendAsync_StoppedWorkflowWithMultipleInterruptedTasks_UsesRecordedOwner()
+    {
+        const string workflowRunId = "wr-stopped-task-log-multiple";
+        const string runnerId = "runner-stopped-task-log-multiple";
+        const string recordedWorkId = "work-interrupted-1";
+        const string unrecordedWorkId = "work-interrupted-2";
+
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = workflowRunId,
+                State = JSON.Serialize(new WorkflowRun
+                {
+                    Id = workflowRunId,
+                    Metadata = new WorkflowRunMetadata("stopped", _timeProvider.GetUtcNow()),
+                    Status = WorkflowRunStatus.Stopped,
+                    CurrentStageId = "build",
+                    Stages =
+                    [
+                        new StageRun
+                        {
+                            Id = "build",
+                            Attempt = 1,
+                            RequiresApproval = false,
+                            Status = StageRunStatus.Running,
+                            Tasks =
+                            [
+                                new TaskRun
+                                {
+                                    Id = "task-interrupted-1",
+                                    DefinitionId = "task-1",
+                                    Attempt = 1,
+                                    Title = "Interrupted first",
+                                    WorkId = recordedWorkId,
+                                    WorkerId = runnerId,
+                                    Status = TaskRunStatus.Cancelled,
+                                },
+                                new TaskRun
+                                {
+                                    Id = "task-interrupted-2",
+                                    DefinitionId = "task-2",
+                                    Attempt = 1,
+                                    Title = "Interrupted second",
+                                    WorkId = unrecordedWorkId,
+                                    WorkerId = runnerId,
+                                    Status = TaskRunStatus.Running,
+                                },
+                            ],
+                        },
+                    ],
+                }),
+            });
+            db.TerminalLogOwnerships.Add(new TerminalLogOwnershipRow
+            {
+                OwnerKind = TerminalLogOwnerKinds.Workflow,
+                OwnerId = workflowRunId,
+                WorkId = recordedWorkId,
+                RunnerId = runnerId,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var recorded = await _service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            recordedWorkId,
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "recorded")],
+            truncated: false,
+            terminal: true);
+        var unrecorded = await _service.AppendAsync(
+            runnerId,
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            unrecordedWorkId,
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "missing")],
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.Changed, recorded);
+        Assert.Equal(TaskLogAppendResult.NotFound, unrecorded);
+    }
+
     private TaskLogService NewService(ITaskLogDeltaPublisher publisher) => new(
         new TaskLogStore(new TestDbContextFactory(_database.Options), _timeProvider),
         new AgentJobStore(new TestDbContextFactory(_database.Options), NullLogger<AgentJobStore>.Instance, _timeProvider),
@@ -233,12 +387,24 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                 WorkId = workId,
                                 WorkerId = runnerId,
                                 Status = TaskRunStatus.Completed,
+                                TerminalLogOwnership = new TerminalLogOwnership(
+                                    TerminalLogOwnerKinds.Workflow,
+                                    workflowRunId,
+                                    workId,
+                                    runnerId),
                                 Classification = TaskClassification.Orchestration,
                             },
                         ],
                     },
                 ],
             }),
+        });
+        db.TerminalLogOwnerships.Add(new TerminalLogOwnershipRow
+        {
+            OwnerKind = TerminalLogOwnerKinds.Workflow,
+            OwnerId = workflowRunId,
+            WorkId = workId,
+            RunnerId = runnerId,
         });
         await db.SaveChangesAsync();
     }
