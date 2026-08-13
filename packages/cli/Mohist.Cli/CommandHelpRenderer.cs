@@ -8,12 +8,11 @@ internal static class CommandHelpRenderer
     public static void RenderRoot(TextWriter writer, RootCommand root)
     {
         var capabilities = EnumerateVisibleTopLevel(root)
-            .Select(cmd => (Command: cmd, Presentation: CommandPresentationCatalog.Get(cmd)))
-            .Where(pair => pair.Presentation is not null)
+            .Select(cmd => (Command: cmd, Presentation: CommandPresentationCatalog.RequireRoot(cmd)))
             .ToArray();
 
         var byCapability = capabilities
-            .GroupBy(pair => pair.Presentation!.Capability)
+            .GroupBy(pair => pair.Presentation.Capability!.Value)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Command.Name, StringComparer.Ordinal).ToArray());
 
         writer.WriteLine("mo — Mohist command line");
@@ -30,16 +29,11 @@ internal static class CommandHelpRenderer
             writer.WriteLine($"    {capability}");
             foreach (var (cmd, presentation) in entries)
             {
-                writer.WriteLine($"  {cmd.Name,-14} {presentation!.Summary}");
+                writer.WriteLine($"  {cmd.Name,-14} {presentation.Summary}");
             }
             writer.WriteLine();
         }
 
-        writer.WriteLine("EXAMPLES");
-        writer.WriteLine("    Discover Issue commands:    mo issue --help");
-        writer.WriteLine("    Read a specific Issue:      mo issue view 42");
-        writer.WriteLine("    Recover an archived Issue:  mo issue restore 42");
-        writer.WriteLine();
         writer.WriteLine("FURTHER HELP");
         writer.WriteLine("    mo help <topic>      Read a shared rule (output, environment, exit-codes).");
         writer.WriteLine("    mo <area> --help     Show the command group's actions and resource boundary.");
@@ -50,11 +44,11 @@ internal static class CommandHelpRenderer
 
     public static void RenderGroup(TextWriter writer, Command group, string[] invocationPath)
     {
-        var presentation = CommandPresentationCatalog.Get(group);
-        writer.WriteLine(presentation?.Summary ?? group.Description ?? group.Name);
+        var presentation = CommandPresentationCatalog.Require(group);
+        writer.WriteLine(presentation.Summary);
         writer.WriteLine();
 
-        if (presentation?.Boundary is { } boundary)
+        if (presentation.Boundary is { } boundary)
         {
             writer.WriteLine("BOUNDARY");
             writer.WriteLine($"    {Wrap(boundary, 76)}");
@@ -71,15 +65,13 @@ internal static class CommandHelpRenderer
             writer.WriteLine("ACTIONS");
             foreach (var action in visible)
             {
-                var summary = CommandPresentationCatalog.Get(action)?.Summary
-                    ?? action.Description
-                    ?? string.Empty;
+                var summary = CommandPresentationCatalog.Require(action).Summary;
                 writer.WriteLine($"  {action.Name,-14} {summary}");
             }
             writer.WriteLine();
         }
 
-        if (presentation?.SeeAlso is { } seeAlso)
+        if (presentation.SeeAlso is { } seeAlso)
         {
             writer.WriteLine("SEE ALSO");
             writer.WriteLine($"    {seeAlso}");
@@ -93,11 +85,11 @@ internal static class CommandHelpRenderer
 
     public static void RenderLeaf(TextWriter writer, Command leaf, string[] invocationPath)
     {
-        var presentation = CommandPresentationCatalog.Get(leaf);
-        writer.WriteLine(presentation?.Summary ?? leaf.Description ?? leaf.Name);
+        var presentation = CommandPresentationCatalog.Require(leaf);
+        writer.WriteLine(presentation.Summary);
         writer.WriteLine();
 
-        if (presentation?.Boundary is { } boundary)
+        if (presentation.Boundary is { } boundary)
         {
             writer.WriteLine("BOUNDARY");
             writer.WriteLine($"    {Wrap(boundary, 76)}");
@@ -128,14 +120,14 @@ internal static class CommandHelpRenderer
             writer.WriteLine();
         }
 
-        if (presentation?.Note is { } note)
+        if (presentation.Note is { } note)
         {
             writer.WriteLine("NOTE");
             writer.WriteLine($"    {Wrap(note, 76)}");
             writer.WriteLine();
         }
 
-        if (presentation?.Examples is { Count: > 0 } examples)
+        if (presentation.Examples is { Count: > 0 } examples)
         {
             writer.WriteLine("EXAMPLES");
             foreach (var example in examples.Take(3))
@@ -146,14 +138,14 @@ internal static class CommandHelpRenderer
         if (HasJsonSelection(leaf))
         {
             writer.WriteLine("JSON FIELDS");
-            if (presentation?.JsonFieldGroups is { Count: > 0 } groups)
+            if (presentation.JsonFieldGroups is { Count: > 0 } groups)
             {
                 foreach (var group in groups)
                     writer.WriteLine($"    {group.Invocation}: {string.Join(", ", group.Fields)}");
             }
             else
             {
-                var fields = presentation?.JsonFields ?? leaf.Options
+                var fields = presentation.JsonFields ?? leaf.Options
                     .Where(o => string.Equals(o.Name.TrimStart('-'), "json", StringComparison.Ordinal))
                     .Select(CommandPresentationCatalog.GetJsonFields)
                     .FirstOrDefault(candidate => candidate is { Count: > 0 });
@@ -164,7 +156,7 @@ internal static class CommandHelpRenderer
             writer.WriteLine();
         }
 
-        if (presentation?.SeeAlso is { } seeAlso)
+        if (presentation.SeeAlso is { } seeAlso)
         {
             writer.WriteLine("SEE ALSO");
             writer.WriteLine($"    {seeAlso}");
