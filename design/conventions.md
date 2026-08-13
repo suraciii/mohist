@@ -29,6 +29,36 @@ parent scope, the parent identity and the number within that scope form the iden
 - An external name may resolve to an identity, but the resolution must not create another entity
   identity.
 
+## Facts, Claims, and Settlement
+
+Uncertainty enters the system only at its edges; the interior is deterministic
+and decides from recorded facts alone.
+
+| Term | Meaning |
+|---|---|
+| Edge | A point where the system touches what it does not control: a peer process, an external runtime, a human-readable message, the clock. Uncertainty is born only here. |
+| Fact | Recorded once, by the one witness present when it became true. Interior state consists of facts alone. |
+| Witness | The party present when a fact became true; only the witness records it. |
+| Claim | Anything that crosses an edge asserting a fact but is not one yet. Claims are settled, never trusted. |
+| Settlement | The edge action that turns a claim into a fact or an explicit unknown. |
+| Unknown | A first-class value, not a failure. What settlement cannot establish stays an explicit unknown. |
+
+- Split facts until each has exactly one witness; a dispute means the fact was
+  too coarse.
+- Settlement is idempotent, records intent before acting, and replays
+  outstanding claims after a crash. It belongs to the witness closest to the
+  source; there is no central settlement layer.
+- An unknown is never rewritten into a convenient fact.
+- Facts record decisions; evidence such as logs and diagnostics is never
+  state.
+- Silence is made decidable by leases: an expiry is a fact, not a guess
+  about the peer.
+- State travels by propagation: events name what changed, and a consumer's
+  copy of another owner's state is either rebuildable or refetchable.
+
+Estimating unrecorded state and fabricating certainty are defects. Existing
+instances are known defects tracked for removal; new code must not add them.
+
 ## Role suffixes
 
 | Suffix | Scope | Example |
