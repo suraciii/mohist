@@ -167,9 +167,9 @@ export interface CancelAgentSessionPayload {
  *
  * `interruptUnconfirmed` is the honest
  * stop-confirmation flag the API needs to surface when a runtime
- * (currently Pi) could not confirm the turn actually stopped. OpenCode
- * replies never set the flag — the OpenCode abort is authoritative —
- * so confirmed-stop replies report `stopped`.
+ * (currently Pi) could not confirm the turn actually stopped. The
+ * internal runtime confirmation fact is reduced to the existing reply
+ * states; confirmed-stop replies report `stopped`.
  */
 export interface CancelAgentSessionReply {
   state: string

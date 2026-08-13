@@ -7,9 +7,8 @@
 //
 // The cancel reply carries `interruptUnconfirmed` whenever the bound
 // runtime reports a stop it could not confirm. The flag is surfaced end-to-end so the API/user is never told a
-// still-running turn has been safely stopped. OpenCode replies never
-// carry the flag because the OpenCode abort is authoritative (no
-// `stopConfirmed` field on the result); Pi's `cancel` reports
+// still-running turn has been safely stopped. OpenCode and Pi runtimes
+// report their confirmation outcome; Pi's `cancel` reports
 // `stopConfirmed: false` exactly when the upper layers must surface
 // `interruptUnconfirmed: true`.
 //
@@ -104,15 +103,14 @@ async function handleJournaledCancel(
         await journal.complete(sessionId, payload, reply)
         return reply
       }
-      if (reconciliation === "indeterminate") return { state: "stop-requested" }
+      if (reconciliation === "indeterminate") {
+        return { state: "unavailable" }
+      }
     } else {
       await journal.start(sessionId, payload)
     }
     const reply = await handleCancel(payload, deps)
     if (reply.state === "stop-requested" || reply.state === "unavailable") return reply
-    if (existing?.state === "started" && reply.state === "not-cancellable") {
-      return { state: "stop-requested" }
-    }
     await journal.complete(sessionId, payload, reply)
     return reply
   } catch (error) {
@@ -167,23 +165,21 @@ async function handleCancel(
   deps: CancelHandlerDeps,
 ): Promise<CancelAgentSessionReply> {
   if (!payload || !payload.target) {
-    return { state: "not-cancellable" }
+    return { state: "unavailable" }
   }
 
   const sessionTarget = sessionTargetFromWireTarget(payload.target)
-  if (!sessionTarget) return { state: "not-cancellable" }
+  if (!sessionTarget) return { state: "unavailable" }
   const binding = sessionTarget.binding
-  if (!binding) return { state: "not-cancellable" }
+  if (!binding) return { state: "unavailable" }
 
   const resolver = deps.followupTargetResolver ?? null
-  if (!resolver) {
-    return { state: "not-cancellable" }
-  }
+  if (!resolver) return { state: "unavailable" }
   const handle = resolveCommandRuntime(binding, {
     openCode: deps.openCodeRuntime,
     pi: deps.piRuntime,
   })
-  if (!handle) return { state: "not-cancellable" }
+  if (!handle) return { state: "unavailable" }
   if (!await ensureCommandRuntimeReady(handle)) {
     return { state: "unavailable" }
   }
@@ -193,16 +189,16 @@ async function handleCancel(
     resolved = await resolver(sessionTarget)
   } catch (error) {
     log.error("cancel target resolver threw", { exception: error })
-    return { state: "not-cancellable" }
+    return { state: "unavailable" }
   }
 
   if (!resolved) {
-    return { state: "not-cancellable" }
+    return settleWithoutLiveTarget(payload, deps)
   }
 
   try {
     const workDir = binding.workDir
-    if (!workDir) return { state: "not-cancellable" }
+    if (!workDir) return { state: "unavailable" }
     const cancelTarget: CancelCallTarget = {
       runtime: binding.runtime,
       runtimeSessionId: binding.runtimeSessionId,
@@ -215,7 +211,7 @@ async function handleCancel(
         return { state: "unavailable" }
       }
       if (kind === "missing-session") {
-        return { state: "not-cancellable" }
+        return settleWithoutLiveTarget(payload, deps)
       }
       log.error("cancel runtime.cancel rejected", { reason: readErrorMessage(result), session: binding.runtimeSessionId })
       return { state: "stop-requested" }
@@ -224,7 +220,7 @@ async function handleCancel(
     if (!facts || !facts.cancelled) {
       return { state: "not-cancellable" }
     }
-    const confirmed = handle.kind === "opencode" || facts.stopConfirmed === true
+    const confirmed = facts.stopConfirmed === true
     try {
       await recordCancelActivity(
         deps.agentSessionRuntimeEventOutbox ?? null,
@@ -238,7 +234,7 @@ async function handleCancel(
       log.error("failed to persist cancel activity", { session: binding.runtimeSessionId, exception: outboxError })
       return { state: "stop-requested" }
     }
-    return facts.stopConfirmed === false
+    return handle.kind === "pi" && facts.stopConfirmed === false
       ? { state: "unknown", interruptUnconfirmed: true }
       : confirmed
         ? { state: "stopped" }
@@ -247,6 +243,17 @@ async function handleCancel(
     log.error("cancel runtime.cancel threw", { exception: error, session: binding.runtimeSessionId })
     return { state: "stop-requested" }
   }
+}
+
+async function settleWithoutLiveTarget(
+  payload: CancelAgentSessionPayload,
+  deps: CancelHandlerDeps,
+): Promise<CancelAgentSessionReply> {
+  const reconciliation = await reconcileStartedStop(payload, deps)
+  if (reconciliation === "missing") return { state: "ended" }
+  if (reconciliation === "idle") return { state: "idle" }
+  if (reconciliation === "active") return { state: "not-cancellable" }
+  return { state: "unavailable" }
 }
 
 async function recordCancelActivity(

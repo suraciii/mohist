@@ -19,6 +19,13 @@ class InMemoryJournalFileSystem implements CancelOperationJournalFileSystem {
   async writeAtomicText(path: string, body: string): Promise<void> {
     this.files.set(path, body)
   }
+
+  async rename(source: string, destination: string): Promise<void> {
+    const body = this.files.get(source)
+    if (body === undefined) throw new Error("source missing")
+    this.files.delete(source)
+    this.files.set(destination, body)
+  }
 }
 
 function request(): CancelAgentSessionPayload {
@@ -69,12 +76,30 @@ describe("CancelOperationJournal", () => {
     await expect(restarted.get("session-1", "stop-1")).resolves.toMatchObject({ state: "started" })
   })
 
-  it("fails closed for corrupt state", async () => {
+  it("quarantines corrupt state and starts empty", async () => {
     const fileSystem = new InMemoryJournalFileSystem()
     await fileSystem.writeAtomicText(journalPath, "not-json")
     const journal = new CancelOperationJournal(root, journalPath, fileSystem)
     await journal.load()
 
-    await expect(journal.get("session-1", "stop-1")).rejects.toThrow("unavailable")
+    await expect(journal.get("session-1", "stop-1")).resolves.toBeNull()
+    expect(fileSystem.files.get(`${journalPath}.corrupt`)).toBe("not-json")
+    await expect(journal.start("session-1", request())).resolves.toMatchObject({ state: "started" })
+  })
+
+  it("discards entries loaded before a corrupt entry", async () => {
+    const fileSystem = new InMemoryJournalFileSystem()
+    await fileSystem.writeAtomicText(journalPath, JSON.stringify({
+      version: 1,
+      operations: {
+        "session-1": { "stop-1": { request: request(), state: "started" } },
+        "session-2": { "stop-2": { request: request(), state: "invalid" } },
+      },
+    }))
+    const journal = new CancelOperationJournal(root, journalPath, fileSystem)
+    await journal.load()
+
+    await expect(journal.get("session-1", "stop-1")).resolves.toBeNull()
+    expect(fileSystem.files.has(`${journalPath}.corrupt`)).toBe(true)
   })
 })
