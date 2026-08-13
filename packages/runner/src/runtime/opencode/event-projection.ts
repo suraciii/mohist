@@ -220,7 +220,12 @@ export function createRuntimeTurnEventProjector(
   const projectRuntimeFailure = (event: RuntimeGlobalEvent): RuntimeTurnEvent[] => {
     const payload = event.payload ?? {}
     const error = recordValue(payload["error"])
-    const message = stringValue(error?.["message"])
+    // OpenCode's session.error DTO stores provider failures under error.data.message.
+    // Keep legacy top-level and string forms as tolerant fallbacks for older
+    // server versions, but never discard the structured provider message.
+    const errorData = recordValue(error?.["data"])
+    const message = stringValue(errorData?.["message"])
+      ?? stringValue(error?.["message"])
       ?? stringValue(payload["error"])
       ?? stringValue(payload["message"])
       ?? "OpenCode Session failed"

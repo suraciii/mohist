@@ -7,6 +7,48 @@ function event(type: string, payload: Record<string, unknown>): RuntimeGlobalEve
 }
 
 describe("OpenCode runtime event projection", () => {
+  it("preserves the provider message from the standard session.error DTO", () => {
+    const projector = createRuntimeTurnEventProjector("ses_1", "/work")
+
+    const projected = projector.project(event("session.error", {
+      sessionID: "ses_1",
+      error: {
+        name: "APIError",
+        data: {
+          message: "Insufficient balance",
+          statusCode: 402,
+          isRetryable: false,
+        },
+      },
+    }))
+
+    expect(projected).toMatchObject([{
+      type: "turn.failed",
+      payload: {
+        code: "turn-failed",
+        failureReason: "Insufficient balance",
+        message: "Insufficient balance",
+        source: "session.error",
+      },
+    }])
+  })
+
+  it("keeps tolerant fallbacks for legacy and malformed session error payloads", () => {
+    const projector = createRuntimeTurnEventProjector("ses_1", "/work")
+
+    const legacy = projector.project(event("session.error", {
+      error: { message: "legacy provider failure" },
+    }))
+    const stringPayload = projector.project(event("session.next.step.failed", {
+      error: "string provider failure",
+    }))
+    const unknown = projector.project(event("session.error", { error: { name: "UnknownError" } }))
+
+    expect(legacy[0]?.payload.failureReason).toBe("legacy provider failure")
+    expect(stringPayload[0]?.payload.failureReason).toBe("string provider failure")
+    expect(unknown[0]?.payload.failureReason).toBe("OpenCode Session failed")
+  })
+
   it("projects assistant model and incremental usage into Mohist events", () => {
     const projector = createRuntimeTurnEventProjector("ses_1", "/work")
 

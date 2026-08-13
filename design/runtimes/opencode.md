@@ -381,6 +381,13 @@ failure; Mohist does not fail early. Failure signals come from
 Prompt rejection. Do not scan logs. Two unrecoverable decisions both normalize
 to aborting and failing the current execution:
 
+OpenCode's `session.error` event uses the SDK error DTO shape
+`{ name, data: { message, ... } }`. The Runner uses `data.message` as the
+primary failure reason, retaining the legacy top-level `message` and string
+forms only as compatibility fallbacks. A cleanup or stop-confirmation failure
+is an additional diagnostic and must not replace a provider message already
+reported by this event.
+
 - Intrinsically unrecoverable: prefer structured `action.reason` from retry
   status. Without a usable classification, match `message` against quota,
   credit, billing, usage limit, allowance, balance, and limit-reset patterns.

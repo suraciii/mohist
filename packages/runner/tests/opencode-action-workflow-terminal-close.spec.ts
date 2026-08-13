@@ -213,6 +213,37 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     },
   )
 
+  it("keeps the standard provider error message in the terminal activity reason", async () => {
+    const { runtime } = buildRuntime({
+      emitDuringPrompt: (subscription, sessionId) => {
+        subscription.emit({
+          type: "session.error",
+          sessionID: sessionId,
+          payload: {
+            error: {
+              name: "APIError",
+              data: { message: "Insufficient balance", statusCode: 402, isRetryable: false },
+            },
+          },
+        })
+      },
+    })
+    await ensureReady(runtime)
+    const handles = makeRecordingOutbox()
+
+    const result = await callAction(opencodeAction, baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
+    }))
+
+    expect(result.error?.message).toBe("Insufficient balance")
+    expect(handles.eventsByType("session.activity")[0]?.event.payload).toMatchObject({
+      status: "failed",
+      failureReason: "Insufficient balance",
+    })
+  })
+
   it("settles close after reconciled events when no live deltas fire but final-response reconciliation emits after prompt returns", async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
