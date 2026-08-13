@@ -297,6 +297,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     buildClient({ resolver, outbox: readyOutbox(), openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
     await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "stop-requested" })
+    await expect(journal.get("gen-session-1", "stop-1")).resolves.toMatchObject({ state: "started" })
 
     runtime.setCancelResult({
       ok: true,
@@ -459,7 +460,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     })
   })
 
-  it("StartedCancel_ReplayedNotCancellable_CompletesAsStopRequested", async () => {
+  it("StartedCancel_ReplayedNotCancellable_CompletesAsNotCancellable", async () => {
     const runtime = makeFakeRuntime()
     runtime.setCancelResult({
       ok: true,
@@ -477,11 +478,29 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     await journal.start(payload.sessionId!, payload)
     buildClient({ resolver, openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
-    await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "stop-requested" })
+    await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "not-cancellable" })
     await expect(journal.get("gen-session-1", "stop-not-cancellable")).resolves.toMatchObject({
       state: "completed",
-      reply: { state: "stop-requested" },
+      reply: { state: "not-cancellable" },
     })
+  })
+
+  it("StartedCancel_ReplayedWithIndeterminateProbe_LeavesUnavailableOutstanding", async () => {
+    const runtime = makeFakeRuntime()
+    runtime.setReady(false)
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    const journal = new MemoryCancelOperationJournal()
+    const payload: CancelAgentSessionPayload = {
+      ...genericCancelPayload("gen-session-1"),
+      sessionId: "gen-session-1",
+      turnId: "turn-1",
+      operationId: "stop-probe-unavailable",
+    }
+
+    await journal.start(payload.sessionId!, payload)
+    buildClient({ resolver, openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
+    await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "unavailable" })
+    await expect(journal.get("gen-session-1", "stop-probe-unavailable")).resolves.toMatchObject({ state: "started" })
   })
 
   it("NoResolverRegistered_RepliesUnavailable", async () => {

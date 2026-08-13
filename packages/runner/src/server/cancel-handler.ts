@@ -104,19 +104,12 @@ async function handleJournaledCancel(
         return reply
       }
       if (reconciliation === "indeterminate") {
-        const reply = { state: "unavailable" } as const
-        await journal.complete(sessionId, payload, reply)
-        return reply
+        return { state: "unavailable" }
       }
     } else {
       await journal.start(sessionId, payload)
     }
     const reply = await handleCancel(payload, deps)
-    if (existing?.state === "started") {
-      const settledReply = reply.state === "not-cancellable" ? { state: "stop-requested" } as const : reply
-      await journal.complete(sessionId, payload, settledReply)
-      return settledReply
-    }
     if (reply.state === "stop-requested" || reply.state === "unavailable") return reply
     await journal.complete(sessionId, payload, reply)
     return reply
