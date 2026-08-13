@@ -87,7 +87,7 @@ describe("Pi runtime projector model.resolved", () => {
     expect(second).toEqual([])
   })
 
-  it("keeps thinking_level_changed and turn lifecycle events as status without a model field", () => {
+  it("ignores Pi lifecycle events that have no Mohist transcript representation", () => {
     const projector = createPiProjector("/virtual/session", "/workspace")
     const thinking = projector.project({ type: "thinking_level_changed", id: "think-1", level: "high" })
     const turnStart = projector.project({ type: "turn_start", id: "turn-start-1" })
@@ -95,13 +95,7 @@ describe("Pi runtime projector model.resolved", () => {
     const agentEnd = projector.project({ type: "agent_end", id: "agent-end-1" })
 
     for (const facts of [thinking, turnStart, turnEnd, agentEnd]) {
-      expect(facts).toHaveLength(1)
-      expect(facts[0]?.type).toBe("status")
-      expect(facts[0]?.payload).not.toHaveProperty("model")
+      expect(facts).toEqual([])
     }
-    expect(thinking[0]?.payload).toMatchObject({ source: "thinking_level_changed", variant: "high" })
-    expect(turnStart[0]?.payload).toMatchObject({ source: "turn_start" })
-    expect(turnEnd[0]?.payload).toMatchObject({ source: "turn_end", stopReason: "stop" })
-    expect(agentEnd[0]?.payload).toMatchObject({ source: "agent_end" })
   })
 })
