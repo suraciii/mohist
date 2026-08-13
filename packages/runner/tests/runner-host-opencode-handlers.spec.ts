@@ -169,7 +169,7 @@ function installStubRuntimeFactory(resources: OpenCodeRuntimeTestResources, _opt
   }))
   const cancelImpl = _options.cancel ?? (() => ({
     ok: true as const,
-    value: { facts: { runtimeSessionId: "ses_runtime", workDir: "/work", cancelled: true }, diagnostics: [] },
+    value: { facts: { runtimeSessionId: "ses_runtime", workDir: "/work", cancelled: true, stopConfirmed: true }, diagnostics: [] },
     diagnostics: [],
   }))
   const stub: OpenCodeRuntime = {

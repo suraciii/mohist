@@ -86,7 +86,7 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
       error.status = 404
       throw error
     }
-    return { data: { ok: true, sessionID: params.sessionID } }
+    return { data: true }
   })
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })) },
@@ -342,16 +342,32 @@ describe("OpenCodeRuntime.cancel", () => {
     const request: RuntimeCancelRequest = {
       target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
     }
+    client.sessionStatus.mockResolvedValueOnce({ data: { ses_existing: { type: "idle" } } })
     const result = await runtime.cancel(request)
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error("expected ok")
     expect(result.value.facts.cancelled).toBe(true)
+    expect(result.value.facts.stopConfirmed).toBe(true)
     expect(result.value.facts.runtimeSessionId).toBe("ses_existing")
     expect(result.value.facts.workDir).toBe("/tmp/work")
     expect(client.sessionAbort).toHaveBeenCalledWith({
       sessionID: "ses_existing",
       directory: "/tmp/work",
     }, { throwOnError: true })
+    expect(client.sessionStatus).toHaveBeenCalledWith({ directory: "/tmp/work" }, { throwOnError: true })
+  })
+
+  it("returns a cancelled fact without confirmation when the Session remains busy", async () => {
+    const { deps, client } = buildDeps()
+    client.sessionStatus.mockResolvedValueOnce({ data: { ses_existing: { type: "busy" } } })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.cancel({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+
+    expect(result).toMatchObject({ ok: true, value: { facts: { cancelled: true, stopConfirmed: false } } })
   })
 
   it("fails with unavailable-runtime when the runtime is not ready", async () => {
@@ -394,7 +410,7 @@ describe("OpenCodeRuntime.cancel", () => {
     expect(result.error.message.toLowerCase()).toContain("reset")
   })
 
-  it("fails with turn-failed when client.session.abort throws a non-404 error", async () => {
+  it("returns an unconfirmed cancel fact when client.session.abort throws a non-404 error", async () => {
     const { deps } = buildDeps({ failAbort: true })
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
@@ -402,8 +418,6 @@ describe("OpenCodeRuntime.cancel", () => {
     const result = await runtime.cancel({
       target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
     })
-    expect(result.ok).toBe(false)
-    if (result.ok) throw new Error("expected failure")
-    expect(result.error.kind).toBe("turn-failed")
+    expect(result).toMatchObject({ ok: true, value: { facts: { cancelled: true, stopConfirmed: false } } })
   })
 })

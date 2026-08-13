@@ -141,9 +141,9 @@ export function callCancel(
 /**
  * Uniform facts projection across OpenCode and Pi cancel results.
  * OpenCode's `RuntimeCancelResult` wraps `facts: RuntimeCancelFacts`
- * which carries `cancelled: true`; Pi's `PiCancelFacts` is the
- * flattened result and adds `stopConfirmed: boolean` for the
- * interrupt-unconfirmed honesty signal.
+ * which carries `cancelled` and `stopConfirmed`; Pi's `PiCancelFacts`
+ * is the flattened equivalent used for the interrupt-unconfirmed
+ * honesty signal.
  */
 export interface CancelCallFacts {
   readonly cancelled: boolean

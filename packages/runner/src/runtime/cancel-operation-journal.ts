@@ -20,6 +20,7 @@ export interface CancelOperationJournalStore {
 export interface CancelOperationJournalFileSystem {
   readText(path: string): Promise<string | null>
   writeAtomicText(path: string, body: string): Promise<void>
+  rename(source: string, destination: string): Promise<void>
 }
 
 interface JournalFile {
@@ -44,19 +45,20 @@ export class CancelOperationJournal implements CancelOperationJournalStore {
 
   async load(): Promise<void> {
     this.operations = new Map()
+    this.unavailable = false
     try {
       const raw = await this.fileSystem.readText(this.filePath)
       if (raw === null) return
       const file = parse(raw)
       if (!file) {
-        this.unavailable = true
+        await this.quarantine()
         return
       }
       for (const [sessionId, values] of Object.entries(file.operations)) {
         const entries = new Map<string, CancelOperationJournalEntry>()
         for (const [operationId, entry] of Object.entries(values)) {
           if (!isEntry(entry) || entry.request.sessionId !== sessionId || entry.request.operationId !== operationId) {
-            this.unavailable = true
+            await this.quarantine()
             return
           }
           entries.set(operationId, clone(entry))
@@ -64,9 +66,18 @@ export class CancelOperationJournal implements CancelOperationJournalStore {
         this.operations.set(sessionId, entries)
       }
     } catch {
-      this.unavailable = true
+      await this.quarantine()
     } finally {
       this.loaded = true
+    }
+  }
+
+  private async quarantine(): Promise<void> {
+    this.operations = new Map()
+    try {
+      await this.fileSystem.rename(this.filePath, `${this.filePath}.corrupt`)
+    } catch {
+      // Corrupt state is still discarded in memory if quarantine cannot finish.
     }
   }
 
@@ -141,6 +152,10 @@ export class NodeCancelOperationJournalFileSystem implements CancelOperationJour
     const temporary = `${path}.tmp`
     await fileSystem.writeText(temporary, body)
     await fileSystem.rename(temporary, path)
+  }
+
+  async rename(source: string, destination: string): Promise<void> {
+    await currentRunnerFileSystem().rename(source, destination)
   }
 }
 

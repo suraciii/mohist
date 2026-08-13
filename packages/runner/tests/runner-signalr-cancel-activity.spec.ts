@@ -162,6 +162,26 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     })
   })
 
+  followupIt("OpenCodeUnconfirmedCancel_RecordsStopConfirmationFalse", async ({ runtime, recording }) => {
+    runtime.setCancelResult({
+      ok: true,
+      value: { facts: { runtimeSessionId: "runtime-1", workDir: "/work/project", cancelled: true, stopConfirmed: false }, diagnostics: [] },
+      diagnostics: [],
+    })
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
+
+    const reply = (await emitCancel(lastBuilder(), opencodePayload())) as { state: string }
+
+    expect(reply).toEqual({ state: "stop-requested" })
+    expect(recording.producedFactCalls[0].event.payload).toMatchObject({
+      activity: "unknown",
+      status: "failed",
+      stopConfirmed: false,
+      source: "cancel",
+    })
+  })
+
   followupIt("CancelFactForSupersededBinding_CarriesTheOutboundBindingRuntimeSessionId_AndAcknowledgementPolicyIsSuccessfulResponse", async ({ runtime, recording }) => {
     const pi = makeFakePiRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
@@ -195,7 +215,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
       diagnostic: () => null,
       async cancel(request: unknown) {
         cancelCalls.push(request)
-        return { ok: true, value: { facts: { runtimeSessionId: "runtime-1", workDir: "/work/project", cancelled: true }, diagnostics: [] }, diagnostics: [] }
+        return { ok: true, value: { facts: { runtimeSessionId: "runtime-1", workDir: "/work/project", cancelled: true, stopConfirmed: true }, diagnostics: [] }, diagnostics: [] }
       },
       async createSession() {
         createSessionCalls()

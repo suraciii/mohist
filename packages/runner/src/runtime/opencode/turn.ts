@@ -747,11 +747,11 @@ function extractFinalAssistantText(response: unknown): string | null {
   return joined.length > 0 ? joined : null
 }
 
-async function abortAndConfirmSession(
+export async function abortAndConfirmSession(
   client: OpencodeClient,
   sessionId: string,
   directory: string,
-): Promise<{ ok: true } | { ok: false; code: "abort-unconfirmed" | "abort-cleanup-timeout" | "status-cleanup-timeout"; message: string }> {
+): Promise<{ ok: true } | { ok: false; code: "abort-unconfirmed" | "abort-cleanup-timeout" | "status-cleanup-timeout"; message: string; missingSession?: boolean }> {
   let aborted: Awaited<ReturnType<OpencodeClient["session"]["abort"]>>
   try {
     aborted = await withCleanupTimeout(
@@ -763,9 +763,11 @@ async function abortAndConfirmSession(
     )
   } catch (cause) {
     const timedOut = isCleanupTimeout(cause, "abort")
+    const missingSession = (cause as { status?: number } | undefined)?.status === 404
     return {
       ok: false,
       code: timedOut ? "abort-cleanup-timeout" : "abort-unconfirmed",
+      ...(missingSession ? { missingSession: true } : {}),
       message: timedOut
         ? `OpenCode session.abort cleanup timed out after ${CLEANUP_OPERATION_TIMEOUT_MS}ms`
         : `OpenCode session.abort failed to confirm the turn was stopped: ${errorMessage(cause, "unknown abort error")}`,

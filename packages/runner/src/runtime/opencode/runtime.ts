@@ -43,7 +43,7 @@ import { errorKindFor, hasUnconfirmedCleanup, normalizeInvalidInput, normalizeMi
 import type { OpencodeServerHandle } from "./server-process.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
 import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
-import { runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
+import { abortAndConfirmSession, runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
 import {
   OpenCodeDirectoryInstances,
   type DirectoryReclaimResult,
@@ -457,13 +457,10 @@ export class OpenCodeRuntime {
   /**
    * Cancel an active Runtime Session turn.
    *
-   * Wraps `client.session.abort`. The
-   * runtime resolves the binding first; a stale binding surfaces as
-   * `missing-session` with the existing Reset hint. `cancelled: true`
-   * is the authoritative reply — whether the agent honours the
-   * cancellation is the agent's decision; the runtime reports the
-   * attempt honestly (matches the `not-cancellable` vs `cancelled`
-   * taxonomy the cancel handler already speaks).
+   * Resolves the binding first, then uses the same abort-and-status
+   * confirmation as turn cleanup. An accepted abort is not itself proof
+   * that the turn stopped; that fact crosses the runtime boundary as
+   * `stopConfirmed`.
    */
   async cancel(request: RuntimeCancelRequest): Promise<RuntimeResult<RuntimeCancelResult>> {
     const diagnostics: RuntimeDiagnostic[] = []
@@ -493,25 +490,24 @@ export class OpenCodeRuntime {
         return { ok: false, error, diagnostics: error.diagnostics }
       }
       lease.markUsed()
-      try {
-        await server.client.session.abort({
-          sessionID: runtimeSessionId,
-          directory: request.target.workDir,
-        }, { throwOnError: true })
-        const facts: RuntimeCancelFacts = {
-          runtimeSessionId,
-          workDir: request.target.workDir,
-          cancelled: true,
-        }
-        return { ok: true, value: { facts, diagnostics }, diagnostics }
-      } catch (cause) {
-        const status = (cause as { status?: number } | undefined)?.status
-        if (status === 404) {
-          const error = normalizeMissingSession()
-          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-        }
-        const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode cancel failed") })
+      const confirmation = await abortAndConfirmSession(server.client, runtimeSessionId, request.target.workDir)
+      if (!confirmation.ok && confirmation.missingSession) {
+        const error = normalizeMissingSession()
         return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+      }
+      const confirmationDiagnostics = confirmation.ok
+        ? []
+        : [{ severity: "error" as const, code: confirmation.code, message: confirmation.message }]
+      const facts: RuntimeCancelFacts = {
+        runtimeSessionId,
+        workDir: request.target.workDir,
+        cancelled: true,
+        stopConfirmed: confirmation.ok,
+      }
+      return {
+        ok: true,
+        value: { facts, diagnostics: [...diagnostics, ...confirmationDiagnostics] },
+        diagnostics: [...diagnostics, ...confirmationDiagnostics],
       }
     }))
   }

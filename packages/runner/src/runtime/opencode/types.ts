@@ -162,9 +162,9 @@ export interface RuntimeFollowupResult {
  * Inputs for a Cancel against an active Runtime Session turn. Wraps
  * `client.session.abort`. The runtime
  * resolves the binding first; a stale binding surfaces as
- * `missing-session` (the existing Reset hint). `cancelled: true` is
- * the authoritative reply — whether the agent honours the cancellation
- * is the agent's decision; the runtime reports the attempt honestly.
+ * `missing-session` (the existing Reset hint). `cancelled: true` records
+ * the abort attempt, while `stopConfirmed` records the follow-up status
+ * confirmation honestly.
  */
 export interface RuntimeCancelRequest {
   readonly target: RuntimeSessionTarget
@@ -174,6 +174,7 @@ export interface RuntimeCancelFacts {
   readonly runtimeSessionId: string
   readonly workDir: string
   readonly cancelled: true
+  readonly stopConfirmed: boolean
 }
 
 export interface RuntimeCancelResult {
