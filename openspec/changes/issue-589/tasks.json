@@ -90,7 +90,7 @@
       "type": "WRITE",
       "output": "Full-identity runtime-event persistence/batching, frozen-Turn observation handoff, #562-compatible stop reconciliation, and passing Session-reuse/replay tests.",
       "dependsOn": ["T-001", "T-002", "T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "A batch may still contain many streaming deltas, but only for one exact execution identity. Do not redesign physical stop delivery or move its reminder into Workflow."
     },
     {
