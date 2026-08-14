@@ -15,6 +15,14 @@ the receipt against the current Workflow settlement before applying it.
   original execution identity
 - **AND** the Server SHALL apply that result at most once
 
+#### Scenario: Host abort follows a returned result
+
+- **WHEN** the run-lifetime cancellation signal fires after an Action has
+  returned a normalized result
+- **THEN** the Runner SHALL durably record and replay that result through the
+  existing result-report acknowledgement path
+- **AND** it SHALL NOT execute the Action again after restart
+
 #### Scenario: Process loss leaves only a started fence
 
 - **WHEN** a Runner process is lost after a dispatch is journaled as started

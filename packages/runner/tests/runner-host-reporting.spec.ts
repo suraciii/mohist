@@ -238,6 +238,111 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('AbortAfterReturnedResult_PersistsAndRedrivesTheReceiptWithoutReexecution', async () => {
+    const executionStarted = deferred<void>()
+    const receiptAcknowledged = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-abort-receipt',
+      workId: 'work-abort-receipt',
+      taskRunId: 'task-abort-receipt',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    let executions = 0
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (_work, signal, collector) => {
+        executions += 1
+        executionStarted.resolve()
+        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+        return {
+          result: {
+            status: 'failed',
+            message: 'runtime returned terminal failure after cancellation',
+            error: { code: 'action-failed', message: 'runtime returned terminal failure after cancellation' },
+            exitCode: 1,
+          },
+          collector: collector!,
+        }
+      })
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    report.mockRejectedValueOnce(new Error('first report transport failed'))
+
+    const firstController = new AbortController()
+    const firstHost = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const firstRun = firstHost.run(firstController.signal)
+    const originalAcknowledge = WorkResultJournal.prototype.acknowledge
+    const acknowledge = vi.spyOn(WorkResultJournal.prototype, 'acknowledge').mockImplementation(async function (
+      this: WorkResultJournal,
+      acknowledged,
+    ) {
+      await originalAcknowledge.call(this, acknowledged)
+      if (acknowledged.workId === work.workId) receiptAcknowledged.resolve()
+    })
+    let restarted: { controller: AbortController; run: Promise<void> } | null = null
+
+    try {
+      await executionStarted.promise
+      firstController.abort()
+      await expect(firstRun).resolves.toBeUndefined()
+
+      const persisted = new WorkResultJournal('/virtual/mohist-runner-test')
+      await persisted.load()
+      expect(persisted.completed()).toEqual([
+        expect.objectContaining({
+          work: expect.objectContaining({ workflowRunId: work.workflowRunId, workId: work.workId }),
+          state: 'completed',
+          result: expect.objectContaining({
+            status: 'failed',
+            message: 'runtime returned terminal failure after cancellation',
+          }),
+        }),
+      ])
+
+      report.mockResolvedValue({ tracked: true })
+      poll.mockResolvedValue([])
+      const controller = new AbortController()
+      const host = new RunnerHost({
+        serverUrl: 'https://runner.test',
+        runnerId: 'runner-test',
+        projectId: 'project-1',
+        runnerRoot: '/virtual/mohist-runner-test',
+        pollIntervalMs: QUIET_INTERVAL_MS,
+        heartbeatIntervalMs: QUIET_INTERVAL_MS,
+        dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+      })
+      restarted = { controller, run: host.run(controller.signal) }
+
+      await receiptAcknowledged.promise
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'failed', message: 'runtime returned terminal failure after cancellation' }),
+        expect.any(AbortSignal),
+      )
+      expect(executions).toBe(1)
+      const acknowledged = new WorkResultJournal('/virtual/mohist-runner-test')
+      await acknowledged.load()
+      expect(acknowledged.completed()).toEqual([])
+    } finally {
+      firstController.abort()
+      await firstRun.catch(() => undefined)
+      restarted?.controller.abort()
+      await restarted?.run.catch(() => undefined)
+      acknowledge.mockRestore()
+      executeWithLog.mockRestore()
+    }
+  })
+
   it('PollBody_CarriesInFlightAndAwaitingAck_Keys', async () => {
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()
