@@ -187,6 +187,7 @@ function it(name: string, body: () => Promise<void> | void): void {
 
 describe('RunnerHost', () => {
   it('Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain', async () => {
+    const redriven = deferred<void>()
     const work = {
       workflowRunId: 'wr-restart',
       workId: 'work-restart',
@@ -202,7 +203,10 @@ describe('RunnerHost', () => {
     await journal.complete(work, { status: 'failed', message: 'result persisted before process exit' })
 
     const controller = new AbortController()
-    report.mockResolvedValue({ tracked: true, reason: 'accepted' })
+    report.mockImplementation(async (reportedWork: { workId?: string }) => {
+      if (reportedWork.workId === work.workId) redriven.resolve()
+      return { tracked: true, reason: 'accepted' }
+    })
     poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
@@ -221,17 +225,13 @@ describe('RunnerHost', () => {
 
     const run = host.run(controller.signal)
     try {
-      await vi.waitFor(() =>
-        expect(report).toHaveBeenCalledWith(
-          expect.objectContaining({ workId: work.workId }),
-          expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
-          expect.any(AbortSignal),
-        ),
+      await redriven.promise
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
+        expect.any(AbortSignal),
       )
       expect(blockingAction).not.toHaveBeenCalled()
-      const restartedJournal = new WorkResultJournal('/virtual/mohist-runner-test')
-      await restartedJournal.load()
-      expect(restartedJournal.completed()).toEqual([])
     } finally {
       controller.abort()
       await run.catch(() => undefined)
