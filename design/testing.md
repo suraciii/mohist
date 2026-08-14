@@ -134,13 +134,14 @@ readable; do not compress statements onto one line to satisfy the counter.
 
 ### Repository CI time budget
 
-The whole CI job and the local canonical gate must each finish within five
-minutes. The test-duration guard enforces one absolute five-minute deadline
+The canonical gate and its local equivalent must finish within five minutes.
+The test-duration guard enforces one absolute five-minute deadline
 (cross-platform Node-spawned kill; never the Linux `timeout` binary as the only
 executor) plus the per-track deadlines above. CI and local run the same guard.
-Their outer process walls reserve different setup and cleanup margins, but both
-are stricter than the guard's deadline. Reaching any deadline is an abnormal
-condition to diagnose, not a normal way to finish a test run.
+The CI job has a separate outer margin for checkout, cold restore/build,
+diagnostic upload, and bounded process-tree cleanup; that margin is not part of
+the measured gate budget. Reaching the guard deadline is an abnormal condition
+to diagnose, not a normal way to finish a test run.
 
 ### Canonical local gate
 
@@ -151,10 +152,11 @@ contract is:
 timeout -k 10s 270s npm run verify
 ```
 
-CI applies a five-minute job deadline to checkout, setup, install, the gate, and
-diagnostic upload together. Its gate step uses `timeout -k 10s 270s npm run
-verify`, leaving the remaining job wall for those non-gate phases and for
-bounded process-tree convergence.
+CI applies a seven-minute outer job deadline to checkout, setup, install, the
+gate, diagnostic upload, and bounded process-tree convergence. Its gate step
+uses `timeout -k 10s 270s npm run verify`; the canonical executor still owns
+the five-minute measured deadline, while the outer job wall supplies setup and
+cleanup margin.
 
 It is not followed by `npm test` or `npm run test:budget -- --all`: the
 canonical gate already covers their controlled work. Focused commands,
