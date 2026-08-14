@@ -520,10 +520,15 @@ function applyServerSpecPhase(planned: readonly PlannedLane[]): PlannedLane[] {
 
   const coverage = planned.find((plan) => plan.lane.id === 'server-spec-coverage')
   if (coverage === undefined) return [...planned]
+  const architecture = planned.find((plan) => plan.policyTrack?.id === 'server-arch')
+  const architectureLaneId = architecture?.lane.id
 
   return planned.map((plan) => {
     if (plan.policyTrack?.id === 'cli') return plan
-    if (plan.partition !== undefined && plan.policyTrack?.id === 'server-spec') return plan
+    if (plan.policyTrack?.id === 'server-arch') return plan
+    if (plan.partition !== undefined && plan.policyTrack?.id === 'server-spec') {
+      return withLaneConstraints(plan, architectureLaneId === undefined ? [] : [architectureLaneId])
+    }
     if (plan.lane.id === coverage.lane.id) return plan
     return withLaneConstraints(plan, [coverage.lane.id])
   })
