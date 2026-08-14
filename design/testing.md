@@ -189,7 +189,9 @@ them. This keeps a failed run inspectable without leaving Git-visible generated
 files in the worktree; callers may remove the printed directory after they have
 collected the evidence.
 
-The retained directory contains `run.json` and `build-stamp.json` provenance,
+The retained directory contains `setup.json`, `run.json`, and
+`build-stamp.json` provenance. `setup.json` records the setup start and source;
+`run.json` records the measured duration start and deadline. It also contains
 `plan.json` with the selected tracks and resource/dependency claims, raw lane
 logs and reports, and `summary.json` with every lane result, every parsed track
 count, cleanup status, deadline result, and the first failure. Failure to write
@@ -213,9 +215,12 @@ docs check
                                                   +--> shared report and duration evaluation
 ```
 
-The full 300-second absolute deadline starts before the build and is shared by
-build, script checks, lane execution, process-tree cleanup, report parsing, and
-summary formatting. It is never rebased as a later phase's relative timeout.
+Setup has its own bounded clock for the docs check, fresh build, and script
+boundary checks. After the matching build stamp exists, the canonical duration
+gate starts a new full 300-second absolute deadline. That measured deadline is
+shared by lane execution, process-tree cleanup, report parsing, and summary
+formatting; setup time is not subtracted from it. The measured deadline is never
+rebased as a later phase's relative timeout.
 Duration logic receives a `now` seam and the canonical absolute deadline; only
 the CLI composition adapter binds that seam to process-monotonic time. No guard,
 scheduler, lane, or duration test reads `Date.now()` directly.
