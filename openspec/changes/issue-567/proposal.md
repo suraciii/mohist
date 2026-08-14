@@ -15,6 +15,11 @@ unchanged when that precondition is not confirmed. If staging has already
 moved a candidate into a release and fails before active-pointer activation,
 remove only that transaction's exact staged release so a retry can rebuild it.
 
+This is the admission-fence phase. The subsequent runtime-recovery phase is
+specified in [`recovery.md`](recovery.md): it requires a durable,
+execution-bound receipt before an interrupted Agent attempt can be recovered.
+That phase is deliberately not satisfied by a Runner drain or reconnect.
+
 ## Safety Boundary
 
 This change closes admission before a managed Runner restart; it does not
