@@ -1,0 +1,57 @@
+## Requirements
+
+### Requirement: Only a runtime-owned receipt can resolve future interrupted Agent work
+
+For an Agent Workflow execution, a Runner SHALL report a terminal result or
+update interruption only through a durable receipt carrying the complete
+frozen execution binding and a stable receipt id. The Server SHALL validate
+the receipt against the current Workflow settlement before applying it.
+
+#### Scenario: Terminal result delivery is interrupted
+
+- **WHEN** the runtime has produced a normalized terminal result and the
+  Runner loses the report transport before acknowledgement
+- **THEN** the Runner SHALL retain the same receipt and redeliver it with the
+  original execution identity
+- **AND** the Server SHALL apply that result at most once
+
+#### Scenario: Process loss leaves only a started fence
+
+- **WHEN** a Runner process is lost after a dispatch is journaled as started
+  but before it has durably written a receipt
+- **THEN** no runtime activity, session history, or reconnect SHALL create a
+  task outcome or replacement dispatch
+- **AND** the Workflow SHALL retain its existing unresolved recovery state
+
+### Requirement: Confirmed update interruption creates a distinct attempt
+
+A confirmed update interruption SHALL be a physical-stop fact rather than a
+task result. Only a receipt matching a durable update-operation fence may
+allow the Server to create a replacement attempt.
+
+#### Scenario: Old turn event arrives after a replacement starts
+
+- **WHEN** the Server has accepted a confirmed interruption receipt and
+  created a new AgentTurn for the replacement execution
+- **THEN** an event or report carrying the original AgentTurn identity SHALL
+  be stale
+- **AND** it SHALL NOT settle or change the replacement attempt
+
+#### Scenario: Interruption receipt is replayed
+
+- **WHEN** the same confirmed interruption receipt is delivered more than
+  once
+- **THEN** the Server SHALL return the same durable acknowledgement
+- **AND** it SHALL NOT create more than one replacement attempt
+
+### Requirement: Update status remains explicit when a receipt is unavailable
+
+The managed update workflow SHALL require acknowledgement of an exact receipt
+for every affected active Agent work before it reports that work as recovered.
+
+#### Scenario: Old Runner is lost during update interruption
+
+- **WHEN** the old Runner exits or becomes unreachable before it has written
+  an exact receipt for an affected work item
+- **THEN** the update result SHALL identify that work as unresolved
+- **AND** it SHALL NOT claim that the work was recovered or re-dispatch it
