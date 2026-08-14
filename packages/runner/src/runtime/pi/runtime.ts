@@ -552,7 +552,10 @@ export class PiRuntime {
           })),
         }
       } catch (cause) {
-        this.state.diagnostic = diagnostic("pi-catalog-failed", `Pi model catalog unavailable: ${this.mask(message(cause))}`, "warning")
+        this.state.diagnostic = diagnostic("pi-catalog-failed", `Pi model catalog unavailable: ${this.mask(message(cause))}`)
+        this.state.services = null
+        await services.close().catch(() => undefined)
+        return this.unavailable()
       }
       this.state.ready = true
       return { ok: true, value: this.readyState(), diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [] }

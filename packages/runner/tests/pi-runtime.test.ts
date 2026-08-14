@@ -93,25 +93,6 @@ describe("PiRuntime", () => {
     expect(catalogReads.count).toBe(1)
   })
 
-  it("keeps the runtime ready when catalog discovery fails", async () => {
-    const catalogFailure: PiSdkFactory = {
-      create: async () => ({
-        catalog: async () => { throw new Error("catalog unavailable") },
-      } as unknown as PiSdkServices),
-    }
-    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: catalogFailure })
-    const result = await runtime.start()
-    expect(result).toMatchObject({
-      ok: true,
-      value: {
-        ready: true,
-        catalog: null,
-        diagnostic: { severity: "warning", code: "pi-catalog-failed" },
-      },
-    })
-    expect(runtime.ready()).toBe(true)
-  })
-
   it.each([
     [true, true],
     [false, false],
