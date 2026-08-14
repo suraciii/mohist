@@ -153,7 +153,7 @@ tree cleanup, so callers must not add a shorter shell timeout around it:
 npm run verify
 ```
 
-CI applies an eight-minute outer job deadline to checkout, setup, install, the
+CI applies a nine-minute outer job deadline to checkout, setup, install, the
 gate, diagnostic upload, and bounded process-tree convergence. The canonical
 executor still owns the five-minute measured deadline; the job boundary is
 only a final external safeguard and is not a test or performance threshold.
