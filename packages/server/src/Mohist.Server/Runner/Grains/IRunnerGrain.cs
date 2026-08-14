@@ -12,9 +12,9 @@ public interface IRunnerGrain : IGrainWithStringKey
 {
     Task RegisterAsync(RunnerInfo info);
     Task UnregisterAsync();
-    /// <summary>Legacy heartbeat with no info payload. Does not refresh presence.</summary>
+    /// <summary>Refreshes presence for control-plane heartbeat callers.</summary>
     Task HeartbeatAsync();
-    /// <summary>Refreshes runner information. Does not refresh presence.</summary>
+    /// <summary>Refreshes runner information and presence under the lifecycle gate.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
     /// <summary>Atomically admits one poll round and captures its capacity.</summary>
     Task<RunnerPollAdmission> TryBeginPollAsync();
@@ -40,10 +40,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// <summary>Claims one AgentJob from its owner ledger during a poll.</summary>
     Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId);
     /// <summary>
-    /// Marks the runner present. Poll IS the heartbeat under the
-    /// reconciliation model: the
-    /// DispatchService calls this on every poll; the HTTP heartbeat degrades
-    /// to an info-refresh channel.
+    /// Marks the runner present. Poll and control-plane heartbeat both refresh
+    /// presence; the former also participates in dispatch reconciliation.
     /// </summary>
     Task TouchPresenceAsync();
 

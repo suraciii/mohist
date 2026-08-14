@@ -91,6 +91,31 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task Heartbeat_RefreshesPresenceWhilePollIsGated_AndPreventsRunnerCloseout()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        await runner.BeginDrainAsync();
+        var before = await runner.GetRuntimeStateAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        await runner.HeartbeatAsync();
+
+        var afterHeartbeat = await runner.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, afterHeartbeat.Status);
+        Assert.Equal(before.LastHeartbeatAt.AddMinutes(1), afterHeartbeat.LastHeartbeatAt);
+
+        // This is beyond the original presence interval, but within the
+        // interval renewed by the control-plane heartbeat.
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1.5));
+        var afterInterval = await runner.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, afterInterval.Status);
+        Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+    }
+
+    [Fact]
     public async Task Reactivation_WithPersistedRunningTask_RecoversAssignmentButLeavesWorkDrainToRunnerSide()
     {
         var workflowId = $"wf-orphan-{Guid.NewGuid():N}";
@@ -120,7 +145,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task HeartbeatRepair_OfflineGrain_RefreshesInfoButPollPresenceRestoresOnline()
+    public async Task HeartbeatRepair_OfflineGrain_RefreshesInfoAndPresence()
     {
         var runnerId = $"repair-runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -135,10 +160,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var info = await runner.GetInfoAsync();
         Assert.NotNull(info);
         Assert.Equal(2, info!.CoderModels?.Length);
-        Assert.Equal(RunnerStatus.Offline, (await runner.GetRuntimeStateAsync()).Status);
-
-        await runner.TouchPresenceAsync();
-
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
