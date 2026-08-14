@@ -196,10 +196,13 @@ export function discoverManifest(process: DiscoveryProcess): ExecutionManifest {
 
 export function createExecutionRunId(clock: GateClock, idFactory: () => string): string {
   const now = clock.now()
-  if (!Number.isSafeInteger(now) || now < 0) throw new Error('gate clock returned an invalid timestamp')
+  if (!Number.isFinite(now) || now < 0 || now > Number.MAX_SAFE_INTEGER) {
+    throw new Error('gate clock returned an invalid timestamp')
+  }
+  const timestamp = Math.floor(now)
   const id = idFactory()
   if (!id) throw new Error('run id factory returned an empty value')
-  return `${now.toString(36)}-${id}`
+  return `${timestamp.toString(36)}-${id}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
