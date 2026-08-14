@@ -720,8 +720,9 @@ export class RunnerHost {
       log.error('work failed before report', { work: work.workId, exception: error })
       result = { status: 'failed', message: String(error) }
     }
-    if (signal.aborted) return
-
+    // A returned result is authoritative even when shutdown raced with its
+    // delivery. Persist it before the host releases the work; only an abort
+    // that prevented a result from returning stays as the started fence above.
     try {
       await this.workResultJournal.complete(work, result)
     } catch (error) {

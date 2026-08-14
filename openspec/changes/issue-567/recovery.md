@@ -108,6 +108,21 @@ Focused tests must cover terminal replay, interruption replay, mismatched
 binding rejection, stale old-turn events after replacement, duplicate receipt
 idempotence, update timeout without receipt, and OOM with only `started`.
 
+### Implementable Receipt Slice
+
+The first implementation slice is narrower than update recovery: when an
+Action has already returned a normalized `WorkItemResult`, a run-lifetime
+abort does not discard that result. `RunnerHost` persists it through the
+existing `WorkResultJournal` before attempting the existing durable report.
+If the first report fails, normal startup reload replays that completed entry
+with the original work identity and never executes the Action again.
+
+This path is runtime-neutral and does not classify cancellation as success.
+An Action that throws after the abort, a process OOM, and every historical
+`started` entry still have no receipt and retain the unresolved fence. It does
+not create an update operation, a replacement AgentTurn, or a replacement
+dispatch; those remain the four-part recovery protocol above.
+
 ## Rejected Alternatives
 
 - **Replay every `started` dispatch:** a prior runtime may have performed
