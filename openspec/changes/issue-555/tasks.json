@@ -1,0 +1,197 @@
+{
+  "project": "mohist-local",
+  "description": "External Agent direct API (/api/v1): Bearer-PAT-only caller resolution with Project grants, idempotent launch/follow-up/stop, strict PublicExecutionRead served from a durable checkpointed projection, and resumable per-Session public events.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "PAT Project grant model and grant-aware issuance (server + CLI)",
+      "spec": "specs/external-agent-auth/spec.md#PAT Project grant model",
+      "description": "Add the persisted direct-API Project grant to credentials per D2/D10: a DirectApiProjectGrantKind column on CredentialRow plus a CredentialProjectGrants child table (unique per pair), with invariants explicit ⇒ non-empty set, operator_all ⇒ empty set, absent kind ⇒ direct API denied (pre-existing PAT behavior). Extend POST /api/auth/tokens with projectIds[]/allProjects validated in order (mutual exclusion → allProjects requires operator scope → every ID resolves as a private Project) and persisted in one transaction, and add `--project` (repeatable) / `--all-projects` to `mo auth token create` with client-side mirrors of the same rules.",
+      "acceptanceCriteria": [
+        "An additive EF Core migration adds DirectApiProjectGrantKind and CredentialProjectGrants (unique index on CredentialId+ProjectId) without semantically altering existing tables; existing nullable ProjectId integration binding is untouched",
+        "Grant issuance is atomic: a failed binding (both grant forms, --all-projects without operator scope, or an unknown/non-private Project) returns 403 and persists neither Credential nor grant rows, verified by asserting zero rows after failure",
+        "Issuance with repeated --project persists an explicit grant with exactly the listed set; --scope operator --all-projects persists an operator_all grant with an empty set; operator_all is persisted explicitly and never inferred from an operator scope at resolution time",
+        "A PAT created without grant options remains fully usable on existing control-plane surfaces (existing auth spec tests stay green)",
+        "The full token is shown exactly once by the CLI and only its hash is stored; CLI option parsing rejects --project together with --all-projects and --all-projects without operator scope before any request",
+        "Spec-test scenarios for the PAT Project grant model and Grant-aware PAT issuance requirements pass, including explicit-grant scoping, absent-grant denial, and atomic unknown-Project failure"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Auth (Credential grant model, issuance validation, migration), packages/cli grant options, unit + spec tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Grant is a property of one credential and dies with revocation; the child table gives per-pair uniqueness and issuance-time FK validation against Projects (ProjectRefResolver)."
+    },
+    {
+      "id": "T-002",
+      "title": "Bearer-only /api/v1 sub-surface: ExternalAgentCaller resolution and authorization ordering",
+      "spec": "specs/external-agent-auth/spec.md#ExternalAgentCaller resolution for the direct boundary",
+      "description": "Create the ExternalAgent module and /api/v1 route group per D1/D3: AuthResolutionMiddleware gains a BearerOnlySurface rule so /api/v1 skips the mohist_session cookie fallback, and a new ExternalAgentCallerResolver endpoint filter loads the Credential's scopes and persisted Project grant into a per-request ExternalAgentCaller (callerKeyId, principalId, scopes, projectGrant, allowedProjectIds). Implement the shared procedural authorization pipeline (caller → route scope → Project grant without resolving the Project → resource membership → header/JSON validation) so every route mapped into the group enforces the security contract by construction.",
+      "acceptanceCriteria": [
+        "A request to any /api/v1 path carrying only the mohist_session cookie and no Bearer PAT returns 401 unauthenticated with WWW-Authenticate: Bearer and resolves no ExternalAgentCaller; trusted Agent Connection identities are never consulted on this surface",
+        "Missing, malformed, expired, and revoked Bearer tokens are indistinguishable: uniform 401 unauthenticated with the same Bearer challenge",
+        "An out-of-grant projectId returns 403 forbidden without any Project-resolution lookup (403-before-404 verified against a nonexistent Project), and grant checks read only the persisted grant",
+        "Write endpoints require operator scope and read endpoints accept readonly or operator: a readonly caller on a write route gets 403 before any resource lookup, idempotency, or admission work",
+        "401/403 paths create zero durable side effects: no request-mapping read or write, no rejection tombstone, no canonical record, no outbox item, no public event, no Runner/provider contact — asserted against every relevant store, with only the AuthAuditEvent written",
+        "Pipeline unit/integration tests pin the ordering caller → scope → grant → membership → validation as observable behavior"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/ExternalAgent (module scaffold, route group, Identity resolver + ordering pipeline), AuthResolutionMiddleware BearerOnlySurface rule, tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuse the existing middleware rather than a MapWhen branch or per-route re-resolution: one authentication path makes 'cookie cannot substitute' a property of the surface. Resource-membership (404) conventions are exercised end-to-end by the route tasks T-005..T-008."
+    },
+    {
+      "id": "T-003",
+      "title": "PublicExecutionRead strict allowlist DTO and five-state aggregate evaluator",
+      "spec": "specs/external-agent-execution-read/spec.md#PublicExecutionRead is a strict allowlist",
+      "description": "Implement D8 as a pure, dependency-free component: a dedicated 22-property PublicExecutionRead DTO serialized by its own writer (every key always present, nulls only where the canonical fact does not exist, observedAt always, output null or {\"text\"}, error null or {code,message}), plus PublicStatusProjector.Evaluate implementing the fixed precedence exactly as specified. This is the privacy boundary every route and the projection will serialize — never AgentJobLaunchRead/AgentSessionRead/SessionInputRead/TurnResultRead/SessionOperationRead.",
+      "acceptanceCriteria": [
+        "Exhaustive serializer tests assert the response key set is exactly the 22 allowlisted properties — no extra key, no missing key — across accepted/queued/running/terminal/unknown fact combinations",
+        "Precedence unit tests cover each spec scenario: fenced terminal wins over late observations; durable rejection is terminal with outcome=rejected and null live IDs; unresolved acceptance/dispatch/binding/stop/outcome facts project unknown (admission=blocked when a Session exists); outcome_pending is running with admission=blocked; retryable dispatch block stays queued+blocked; running beats queued beats accepted",
+        "Input/Turn evaluation is anchored to the requested record: a terminal target stays terminal inside an active Session and sessionActivity is reported as context",
+        "No-internal-leak tests: no code path emits runtimeSessionId, Runner IDs, runtime names, binding epochs/fences, operation/attempt IDs, dispatch details, prompt or input text, memory, workspace, paths, or raw provider/Runner errors",
+        "Direct-API error envelope {\"error\":{\"code\",\"message\"}} with safe codes/messages is defined alongside the DTO and covered by tests"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/ExternalAgent (PublicExecutionRead DTO + dedicated serializer, PublicStatusProjector.Evaluate), unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Allowlist DTO, not a deny-list over product read DTOs — deny-lists rot as product DTOs grow fields. unknown/outcome_pending must expose no code path that authorizes replay."
+    },
+    {
+      "id": "T-004",
+      "title": "Durable checkpointed public projection: projector, journal, stream states, snapshots",
+      "spec": "specs/external-agent-execution-read/spec.md#A durable checkpointed public projection serves all reads",
+      "description": "Implement D7 plus the projector-side event-resume facts: four new tables (PublicExecutionSnapshots, PublicSessionEvents, PublicStreamStates, PublicProjectionCheckpoints) with an additive migration, and a single projector hosted background service that consumes AgentJobEventRow/AgentSessionEventRow plus canonical row snapshots (EventPushQueue wakes it; a durable poll loop is the source of truth) and commits affected snapshots + journal entries + stream allocation + checkpoint in one EF transaction. Snapshots are T-003's PublicExecutionRead; the journal uses exactly the eight-type public vocabulary with per-Session strictly increasing sequences and generation one created on first commit.",
+      "acceptanceCriteria": [
+        "One projection transaction commits snapshot + journal + sequence + checkpoint together: a crash before commit leaves no partial state and a crash after commit resumes past the checkpoint without emitting a second sequence for the same normalized source transition (kill-between-transactions test)",
+        "Journal vocabulary is exactly input.accepted, input.rejected, turn.queued, turn.running, turn.outcome_pending, turn.terminal, session.unknown, session.context_reset; execution events carry an execution field that is exactly PublicExecutionRead; session.context_reset carries only the smaller session payload with no jobId/inputId/turnId/output/error/prompt",
+        "Sequences are strictly increasing per Session across generations and never reused or renumbered; stream generation is stable across restart, crash recovery, and outbox replay",
+        "Terminal snapshots store the internal terminal fence/revision and stale, delayed, or replayed outbox facts cannot un-terminal a target or replace recorded outcome/output/error",
+        "Job-anchored snapshot rows exist from the Job prepare fact onward (addressable before Session acceptance with null live IDs) and are updated in place after acceptance",
+        "A route-facing required-watermark check distinguishes lag from unknown and drives the 503 projection_lag decision; unknown is emitted only from consumed, inconclusive durable facts",
+        "First-deploy backfill replays existing durable history from checkpoint zero in bounded, throttled batches without starving request-path writes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/ExternalAgent/Projection + Infrastructure/Data/ExternalAgent stores + migration + hosted projector service, spec/unit tests",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Projector must not source from SignalR/the event bus — the bus only wakes it. Keep transactions small and batched per wake-up (SQLite single-writer). Rebuild/generation-swap is future work; generation plumbing lands now so cursors can bind to it."
+    },
+    {
+      "id": "T-005",
+      "title": "Launch and follow-up routes with durable idempotency mappings",
+      "spec": "specs/external-agent-write-idempotency/spec.md#The first request durably maps key and fingerprint to its canonical outcome",
+      "description": "Implement the two write commands per D4/D5 plus the follow-up derivation rule: POST .../agents/{agentId}/launch and POST .../agent-sessions/{sessionId}/inputs behind the T-002 pipeline, with required Idempotency-Key validation (400 idempotency_key_required/_invalid), strict single JSON parse rejecting unknown/duplicate properties (400 invalid_request, v1 body only required non-empty text), a versioned SHA-256 fingerprint over contract version + command kind + canonical scope IDs + canonical body JSON (text preserved byte-exactly), and the DirectAgentRequestMappings table driven by the reserve (pre-minted canonical IDs) → drive (IAgentLauncher.LaunchIdempotentAsync / Session follow-up path with pre-minted Input/Turn IDs) → finalize protocol. Responses are 200 PublicExecutionRead served from the projection with the watermark check.",
+      "acceptanceCriteria": [
+        "A lost launch or follow-up response retried with the same key and identical payload returns the same canonical Job/Session/Input/Turn (or Input/Turn) identities and creates no second Job, Session, Input, Turn, queue entry, or outbox item (identity-idempotent replay test)",
+        "A key reused with a different normalized fingerprint — including text differing only by whitespace or case — returns a stable 409 idempotency_key_reused with no new effect; semantically identical bodies differing only in JSON key order or insignificant whitespace match the same fingerprint",
+        "Only the fingerprint is persisted; the raw body is never stored and the fingerprint never appears in any response or public event",
+        "A definitive canonical admission rejection is finalized as the mapping outcome and replayed as 200 status=terminal outcome=rejected with null live Input/Turn IDs forever, including after capacity recovery; it is never turned into a newly accepted execution",
+        "A pending mapping (crash between reserve and finalize) re-drives the identity-idempotent pipeline or returns the current observation / 503 projection_lag — never a second execution",
+        "The follow-up resolves the Session first and derives Project and Agent from the canonical Session record; no body or query value can select a different Agent, and unknown properties, attachment references, or caller-selected execution options fail 400 invalid_request before admission",
+        "Command routes return 200 once the durable keyed outcome is known and the body's status field, not the HTTP code, is authoritative; an ahead watermark yields 503 projection_lag with no stale state"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/ExternalAgent (Routes + Idempotency: mapping table + migration, fingerprint, reserve/drive/finalize, launch + inputs routes), spec tests",
+      "dependsOn": ["T-002", "T-004"],
+      "passes": false,
+      "notes": "Direct fingerprint is its own versioned gate (the launcher trims the prompt, the direct contract must not) while launch still funnels through the same coordinator. Recommendation for the open question: extend AgentSessionFollowupReservation to adopt pre-minted Input/Turn IDs, mirroring the launch coordinator."
+    },
+    {
+      "id": "T-006",
+      "title": "Keyed stop route: caller-bound mapping to one canonical fenced stop operation",
+      "spec": "specs/external-agent-write-idempotency/spec.md#A keyed stop maps to one canonical fenced stop operation",
+      "description": "Implement POST .../agent-turns/{turnId}/stop per D6 on top of the T-005 mapping infrastructure: the stop mapping is caller-bound (turnId scope plus callerKeyId/projectId/sessionId columns), the reserve transaction freezes the stop target (Turn revision, context generation, binding-or-explicit-null, deadline) and the Server-generated internal operationId as internal-only columns, and the route drives the existing canonical lifecycle — already-terminal Turn is a durable no-op with no Runner call, queued Turn ends locally via StopQueuedTurnAsync recorded cancelled without Runtime contact, running Turn goes through ClaimTurnStopAsync → dispatched → CompleteTurnStopAsync with the frozen facts. A different key while the fenced outcome is unknown returns 409 stop_outcome_unknown; the same key recovers a lost response.",
+      "acceptanceCriteria": [
+        "The first keyed stop durably freezes the target before any Runner effect; a later binding, context, or owner change cannot redirect the stop to replacement work, and a matching retry returns the current Turn observation without re-reading the binding or recomputing the deadline",
+        "An already-terminal Turn produces a durable no-op observation with no Runner call; a queued Turn ends locally recorded cancelled without contacting Runtime",
+        "While a stop outcome is unknown, a different Idempotency-Key on the same Turn returns 409 stop_outcome_unknown with no new stop operation or external effect, and the caller reads the Turn; the same key resolves the same mapping and never creates a replacement effect",
+        "A different caller reusing another caller's key against the same Turn does not resolve the first caller's mapping — it is evaluated as a fresh keyed stop subject to the unresolved-stop conflict rule",
+        "Completion-vs-stop races resolve through the terminal fence (MarkTurnTerminal): exactly one terminal fact wins, at most one terminal public event, and a late observation cannot replace the winner's outcome, output, error, or sequence",
+        "Frozen facts (revision, context generation, binding, deadline, internal operationId) never appear in any response or public event; the route accepts no caller-named Runner, Runtime Session, dispatch attempt, or operation ID",
+        "Session admission stays blocked while a stop is unresolved and no automatic replay occurs; recovery is the existing stop-recovery reminder bounded by the frozen deadline"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/ExternalAgent (stop route + caller-bound frozen-target mapping), spec tests",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Composes the current claim/complete contract and adopts #562's fence semantics when it lands — the direct mapping layer stays independent of that internal evolution. The key is the caller-visible identity; internal operation IDs are never caller-facing."
+    },
+    {
+      "id": "T-007",
+      "title": "Per-Session public events route with opaque tamper-evident cursors",
+      "spec": "specs/external-agent-event-resume/spec.md#One persisted public event route per Session",
+      "description": "Implement GET .../agent-sessions/{sessionId}/events per D9, served exclusively from the persisted PublicSessionEvents journal: optional opaque `after` cursor and `limit` (default/max 100), pages carrying sessionId, ascending events, nextCursor, and highWaterSequence, with strictly-after resume. Cursors are base64url(canonicalJson({v, keyId, projectId, sessionId, generation, after}) || hmac) signed from the secret-store keyring with key-id rotation support; decode failure, tampering, cross-Project/Session, or old-generation binding returns 400 cursor_invalid. Closed-stream tombstones and the retention floor return 410 cursor_expired with safe bounds.",
+      "acceptanceCriteria": [
+        "A cursorless first page returns the earliest retained events of the current generation ascending with a nextCursor after the last event; resume with `after` returns only strictly greater sequences; limit is clamped to default 100 and max 100",
+        "nextCursor equals the last event's cursor on a non-empty page and sits at highWaterSequence on an empty page; each event carries exactly sequence, cursor, type, and occurredAt",
+        "A tampered, malformed, cross-Project, cross-Session, or superseded-generation cursor returns 400 cursor_invalid with no fallback, no translation, and no event read",
+        "A valid current-generation cursor resuming before the earliestSequence floor returns 410 cursor_expired including the safe earliestSequence and latestSequence bounds; the Server never silently restarts at the stream start or head",
+        "Control-plane Session deletion closes the stream with a minimal tombstone: a valid current-generation cursor gets 410 cursor_expired with earliestSequence=null and the last safe latestSequence, a cursorless read gets 404 session_not_found, and a purged tombstone yields 400 cursor_invalid",
+        "The route reads only the persisted projection — an in-flight Runner or in-memory notification arriving before the projection transaction commits mints no cursor, sequence, or payload for this route",
+        "HMAC key rotation is additive: old key ids verify for the cursor-retention window without mass-invalidating live cursors"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/ExternalAgent (events route + Cursors module), spec tests",
+      "dependsOn": ["T-002", "T-004"],
+      "passes": false,
+      "notes": "v1 retains all events while the Session lives; transcript compaction must not touch the journal. Cursor content contains only IDs the caller already knows but stays documented as opaque data."
+    },
+    {
+      "id": "T-008",
+      "title": "Job, Input, and Turn read routes and the pinned seven-route surface",
+      "spec": "specs/external-agent-execution-read/spec.md#Job read is the status recovery path",
+      "description": "Implement the three resource reads — GET .../agent-jobs/{jobId}, GET .../agent-inputs/{inputId}, GET .../agent-turns/{turnId} — served only from the projection with one strict PublicExecutionRead each, behind the full T-002 pipeline. The Job read is the status recovery path (prepared-before-acceptance, durable rejection, post-acceptance progression, lost-launch retry anchoring). With this task all seven v1 routes exist, so the route surface is pinned by a route-enumeration test.",
+      "acceptanceCriteria": [
+        "A prepared Job before Session acceptance returns 200 with jobId, status=accepted, jobStatus=preparing, and null sessionId/inputId/turnId; a durably rejected Job returns 200 status=terminal outcome=rejected with safe error/reasonCode and null live IDs; after acceptance the same read exposes the public Session/Input/Turn references and later status/output/error as projected",
+        "An absent or cross-Project Job/Input/Turn returns 404 job_not_found / input_not_found / turn_not_found only after the grant and scope pass, and is never confused with the public state unknown",
+        "A lost launch response is recovered by repeating the launch with the same key (same Job anchor or 503 projection_lag) followed by the Job read, with no replacement Job created (end-to-end recovery test)",
+        "Reads are anchored to the requested record: a terminal Input/Turn stays terminal inside an active Session with sessionActivity as context; a readonly PAT with a valid grant can observe all three reads",
+        "A route-enumeration test asserts the /api/v1 surface contains exactly the seven specified routes and no Runner, Runtime, workspace, transcript, operation, or internal-event route",
+        "An ahead required watermark on any read returns 503 projection_lag and never serves stale projection state as current"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/ExternalAgent/Routes (job/input/turn reads), route-enumeration + spec tests",
+      "dependsOn": ["T-005", "T-006", "T-007"],
+      "passes": false,
+      "notes": "The enumeration test lands here because this task completes the seven-route surface; the API adds no second execution lifecycle, queue, or event bus."
+    },
+    {
+      "id": "T-009",
+      "title": "Flip docs and design status to implemented and document caller resume rules",
+      "spec": "specs/external-agent-event-resume/spec.md#Documented dedup and ordering rules for resuming callers",
+      "description": "Per D11, after routes, issuance, and the projection are demonstrably wired, flip docs/agent-api.md from wip-not-implemented to implemented, document the grant options in docs/auth.md, update the Status sections of design/agent-api.md and design/auth.md, refresh `mo auth token create` CLI help, and document the caller-side resume rules (store nextCursor only after durably processing a page, dedup by (sessionId, sequence), apply in ascending order, resume from the last contiguous cursor or reread the target Input/Turn on a gap).",
+      "acceptanceCriteria": [
+        "docs/agent-api.md status flips from wip-not-implemented to implemented with no remaining 'do not build against this' warning, and its route/idiom documentation matches the shipped seven-route surface",
+        "docs/auth.md documents --project/--all-projects grant options, mutual exclusion, the operator-scope requirement for --all-projects, and that ungranted PATs cannot call the direct API",
+        "design/agent-api.md and design/auth.md Status sections move from wip/target to implemented",
+        "The documented caller resume rules state: a retried GET may repeat a page, concurrent pages may arrive out of order, dedup by (sessionId, sequence), apply ascending, never infer a missing transition from a later sequence, and store nextCursor only after durable processing",
+        "CLI help text for mo auth token create covers the new grant options"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "docs/agent-api.md, docs/auth.md, design/agent-api.md, design/auth.md status sections, CLI help",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008"],
+      "passes": false,
+      "notes": "Docs are the shipping signal, not the starting artifact — they flip last, after the surface they describe exists and its tests pass."
+    }
+  ]
+}
