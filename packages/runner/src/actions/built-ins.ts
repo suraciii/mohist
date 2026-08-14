@@ -195,6 +195,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         changeDir: { types: ['string'], required: true, description: 'Path to the OpenSpec change directory' },
         archiveHint: {
           types: ['string'],
+          engineSource: 'vars.archive',
           description:
             'Persisted archive destination (relative) from a prior run; when present and the destination still exists, the archive is treated as already complete',
         },

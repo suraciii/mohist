@@ -26,13 +26,21 @@ export function validCapabilities(): ReadonlyArray<ActionCapability> {
 
 export type InputRenderTiming = 'immediate' | 'deferred'
 
+export type EngineInputSource = `${string}.${string}`
+
+const ENGINE_INPUT_SOURCE_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)+$/
+
+export function isEngineInputSource(value: unknown): value is EngineInputSource {
+  return typeof value === 'string' && ENGINE_INPUT_SOURCE_PATTERN.test(value)
+}
+
 export interface ActionInputDeclaration {
   readonly types: ReadonlyArray<ActionInputKind>
   readonly required?: true
   readonly default?: JsonValue
   readonly description?: string
   readonly render?: InputRenderTiming
-  readonly engineSource?: 'prompts.build'
+  readonly engineSource?: EngineInputSource
 }
 
 export interface ActionOutputDeclaration {

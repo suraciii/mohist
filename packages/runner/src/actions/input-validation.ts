@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from "../core/types.js"
-import { stringAt } from "../core/json-path.js"
+import { getSegments } from "../core/json-path.js"
 import {
   type ActionInputKind,
   type ActionManifest,
@@ -24,10 +24,10 @@ export function injectEngineInputs(
 ): JsonObject | null {
   const injected: JsonObject = { ...(withInput ?? {}) }
   for (const [name, declaration] of Object.entries(manifest.inputs)) {
-    if (declaration.engineSource !== "prompts.build") continue
-    const buildPrompt = stringAt(variables, ["prompts", "build"])
-    if (buildPrompt === undefined) delete injected[name]
-    else injected[name] = buildPrompt
+    if (declaration.engineSource === undefined) continue
+    const value = getSegments(variables, declaration.engineSource.split(".")) as JsonValue | undefined
+    if (value === undefined) delete injected[name]
+    else injected[name] = value
   }
   return Object.keys(injected).length > 0 ? injected : null
 }

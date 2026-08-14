@@ -165,15 +165,16 @@ describe("WorkExecutor action input boundary", () => {
     expect(unavailable.message).toContain("${{ foo }}")
   })
 
-  it("derives engine-sourced inputs from variables without exposing the variable map", async (workDir) => {
-    let capturedInputs: JsonObject | null = null
+  it("derives optional engine-sourced inputs from the dispatch snapshot", async (workDir) => {
+    const capturedInputs: JsonObject[] = []
     const registry = new ActionRegistry([
       defineTestAction("test/engine-input", async (inputs) => {
-        capturedInputs = inputs
+        capturedInputs.push(inputs)
         return { output: null }
       }, {
         inputs: {
           buildPrompt: { types: ["string"], engineSource: "prompts.build" },
+          archiveHint: { types: ["string"], engineSource: "vars.archive" },
         },
       }),
     ])
@@ -191,16 +192,38 @@ describe("WorkExecutor action input boundary", () => {
       workType: "task",
       title: "Engine input",
       uses: "test/engine-input",
-      with: {},
+      with: { archiveHint: "profile-provided value" },
       variables: {
         workspace: { path: workDir, branch: null },
         prompts: { build: "build instructions" },
+        vars: {},
       },
     }, new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(capturedInputs).toEqual({ buildPrompt: "build instructions" })
-    expect(capturedInputs).not.toHaveProperty("variables")
+
+    const replay = await executor.execute({
+      workflowRunId: "wf-engine-input-replay",
+      workId: "work-engine-input-replay",
+      workType: "task",
+      title: "Engine input replay",
+      uses: "test/engine-input",
+      with: { archiveHint: "profile-provided value" },
+      variables: {
+        workspace: { path: workDir, branch: null },
+        prompts: { build: "build instructions" },
+        vars: { archive: "openspec/changes/archive/2026-08-14-issue-589" },
+      },
+    }, new AbortController().signal)
+
+    expect(replay.status).toBe("completed")
+    expect(capturedInputs).toEqual([
+      { buildPrompt: "build instructions" },
+      {
+        buildPrompt: "build instructions",
+        archiveHint: "openspec/changes/archive/2026-08-14-issue-589",
+      },
+    ])
   })
 })
 

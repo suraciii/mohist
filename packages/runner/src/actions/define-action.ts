@@ -7,7 +7,7 @@ import type {
   ActionManifest,
   ActionOutputDeclaration,
 } from "./manifest.js"
-import { RESERVED_PLATFORM_ERROR_CODES, canonicalKindOrder, validCapabilities } from "./manifest.js"
+import { RESERVED_PLATFORM_ERROR_CODES, canonicalKindOrder, isEngineInputSource, validCapabilities } from "./manifest.js"
 import type { JsonValue } from "../core/types.js"
 
 const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -154,8 +154,8 @@ function validateInputDeclaration(
   if (declaration.description !== undefined && typeof declaration.description !== "string") {
     throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' description must be a string when provided`)
   }
-  if (declaration.engineSource !== undefined && declaration.engineSource !== "prompts.build") {
-    throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' declares an unsupported engine source '${String(declaration.engineSource)}'`)
+  if (declaration.engineSource !== undefined && !isEngineInputSource(declaration.engineSource)) {
+    throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' engine source must be a dotted dispatch snapshot path, received '${String(declaration.engineSource)}'`)
   }
   if (declaration.engineSource !== undefined && declaration.required === true) {
     throw new ActionDefinitionError(`Action '${actionName}' engine-sourced input '${inputName}' must not be required`)
