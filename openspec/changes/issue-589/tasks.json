@@ -45,7 +45,7 @@
       "type": "WRITE",
       "output": "Durable fixed-deadline reminder, blocked transition, unresolved control fences, explicit cancellation/stop settlement, and passing fake-time recovery tests.",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Do not poll AgentSession or issue a stop from the Workflow reminder. Issue #562 may redeliver only the existing stop operation after positive reconciliation proves the exact recorded target remains active."
     },
     {
