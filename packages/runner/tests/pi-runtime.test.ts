@@ -78,7 +78,7 @@ function factory(
 }
 
 describe("PiRuntime", () => {
-  it("gates readiness without reading a model catalog, and retries startup failure", async () => {
+  it("loads a model catalog at startup, and retries startup failure", async () => {
     const failing: PiSdkFactory = { create: async () => { throw new Error("credential boundary failed") } }
     const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: failing })
     expect((await runtime.start()).ok).toBe(false)
@@ -89,8 +89,8 @@ describe("PiRuntime", () => {
     const result = await empty.start()
     expect(result.ok).toBe(true)
     expect(empty.diagnostic()).toBeNull()
-    expect(empty.catalog()).toBeNull()
-    expect(catalogReads.count).toBe(0)
+    expect(empty.catalog()).toEqual({ models: [] })
+    expect(catalogReads.count).toBe(1)
   })
 
   it.each([
