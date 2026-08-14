@@ -1498,7 +1498,6 @@ public class MohistDbContext : DbContext
             // This declares the model-side projection only.
             entity.Property(e => e.Status)
                 .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", stored: true);
-            entity.Property(e => e.AttentionStatus).HasMaxLength(32);
             entity.Property(e => e.IssueNumber)
                 .HasComputedColumnSql(
                     "CAST(COALESCE(json_extract(State, '$.metadata.issueNumber'), json_extract(State, '$.Metadata.IssueNumber')) AS INTEGER)",
@@ -1525,8 +1524,6 @@ public class MohistDbContext : DbContext
             // the round-robin scan is index-only.
             entity.HasIndex(e => new { e.Status, e.AssignedWorkerId, e.ReadySince })
                 .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
-            entity.HasIndex(e => new { e.MetadataProjectId, e.AttentionStatus, e.CreatedAt })
-                .HasDatabaseName("IX_WorkflowRuns_ProjectId_AttentionStatus_CreatedAt");
             // Run's nullable custom-Profile backing key.
             // The terminalization transaction clears this column while
             // keeping the public Profile ID in State. Built-in bindings
@@ -1826,12 +1823,6 @@ public class MohistDbContext : DbContext
 
         modelBuilder.Entity<InboxItemRow>(entity =>
         {
-            entity.ToTable("InboxItems", table =>
-            {
-                table.HasCheckConstraint(
-                    "CK_InboxItems_NotificationKind",
-                    "\"NotificationKind\" IN ('workflow_failed', 'agent_result_unconfirmed', 'approval_requested', 'issue_started', 'issue_completed', 'agent_response_failed')");
-            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
@@ -1861,7 +1852,6 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkflowFailedEnabled).IsRequired();
-            entity.Property(e => e.AgentResultUnconfirmedEnabled).IsRequired();
             entity.Property(e => e.ApprovalRequestedEnabled).IsRequired();
             entity.Property(e => e.IssueStartedEnabled).IsRequired();
             entity.Property(e => e.IssueCompletedEnabled).IsRequired();
@@ -2113,6 +2103,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.CredentialFingerprint).HasMaxLength(64);
             entity.Property(e => e.UpdatedAt).IsRequired();
         });
+
+        WorkflowAttentionModelConfiguration.Apply(modelBuilder);
     }
 
     private static bool DictionaryEqual(Dictionary<string, string>? left, Dictionary<string, string>? right)
