@@ -240,9 +240,10 @@ a gate recovery mechanism.
 
 The scheduler has explicit lane ownership rather than opening every command at
 once. `test-duration.config.jsonc` declares the reproducible host limits. The
-default is four host lanes, with at most three .NET lanes and two Node lanes;
-this keeps the outer lane budget separate from each test runner's inner
-parallelism while allowing a Node lane to overlap a compatible .NET lane. A lane starts only when its
+default is four host lanes, with four bounded .NET lanes during the isolated
+Server Spec phase and at most two Node lanes in the remaining fan-out; this
+keeps the outer lane budget separate from each test runner's inner parallelism.
+A lane starts only when its
 dependencies and all claimed resources are available, and an already-aborted
 schedule admits none. Node duration commands place reporter arguments on their
 terminal `vitest run` invocation, and execute TypeScript boundary checks through
@@ -266,16 +267,16 @@ reporter; the legacy xUnit v2 workflow-definition lane reuses its build through
 `canonical.durationMeasurementTracks` is an ordered, small set of tracks whose
 per-test duration policy must not share CPU or I/O with another test executor.
 Every member claims the `duration-measurement` resource and depends on the
-previous member. The optional `canonical.durationIsolationTrack` is admitted
-after that prefix and gates only other Vitest lanes; .NET and Spec lanes resume
-the normal bounded fan-out immediately after the measurement prefix. The
-current measurement set is the CLI track, with Runner as the isolated Node
-track. Server Unit remains fully budgeted but is admitted with the bounded
-.NET fan-out to keep the complete gate within its existing wall. This changes
-neither test behavior, thresholds, nor internal test-runner settings, and does
-not globally serialize the suite. The phase is applied only when the complete
-configured set is selected, so focused `--track` execution has no hidden
-prerequisite work.
+previous member. The current measurement set is the CLI track. After that
+prefix, the four Server Spec partitions run as a bounded phase and the coverage
+lane completes before the remaining Unit, Node, Web, and integration fan-out is
+admitted. This prevents cold Spec host/SQLite work from competing with the
+other executors while retaining four-way partition parallelism. The optional
+`canonical.durationIsolationTrack` still gates the remaining Vitest lanes within
+that fan-out. This changes neither test behavior, thresholds, nor internal
+test-runner settings, and does not globally serialize the suite. The phase is
+applied only when the complete configured set is selected, so focused `--track`
+execution has no hidden prerequisite work.
 
 #### Host exclusivity for duration evidence
 
