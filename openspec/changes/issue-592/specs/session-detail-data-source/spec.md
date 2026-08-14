@@ -15,7 +15,7 @@ The web session detail page SHALL obtain all of its session data from a single d
 
 ### Requirement: The hook's inferred return type is the data contract
 
-The contract between `pages/session/data` and `SessionDetailShell` SHALL be the concrete return type inferred from `useUnifiedSessionDataSource`'s implementation. `pages/session/data` MUST NOT maintain a hand-written interface that re-declares the hook's result shape, including the former `SessionDataSourceResult` and `SessionTurnControlHandle` interfaces. The contract SHALL contain exactly the fields the hook returns; fields that exist only in a parallel declaration and that no consumer reads (such as the runtime-lineage fields) MUST NOT appear in the contract.
+The contract between `pages/session/data` and `SessionDetailShell` SHALL be the concrete return type inferred from `useUnifiedSessionDataSource`'s implementation. `pages/session/data` MUST NOT maintain a hand-written interface that re-declares the hook's result shape, including the former `SessionDataSourceResult` and `SessionTurnControlHandle` interfaces. The contract SHALL contain exactly the fields the hook returns; fields that exist only in a parallel declaration and that no consumer reads (such as the runtime-lineage fields) MUST NOT appear in the contract, and fields whose only producer fills them with a constant empty value MUST NOT be returned, destructured, or rendered.
 
 #### Scenario: The shell types its data prop from the hook
 
@@ -28,6 +28,12 @@ The contract between `pages/session/data` and `SessionDetailShell` SHALL be the 
 - **WHEN** the modules under `pages/session/data` are inspected after this change
 - **THEN** no standalone interface re-declaring the hook's result or turn-control shape SHALL exist
 - **AND** fields the hook never returns SHALL be absent from the shell's data contract
+
+#### Scenario: Always-empty fields and their render branches are gone
+
+- **WHEN** the hook's return object and the session detail shell are inspected after this change
+- **THEN** no field the hook fills with a constant empty value (the former `siblingNav`, `siblingSidebar`, `issueTitle`) SHALL remain in the hook's return, the shell's destructuring, or the shell's header props
+- **AND** the shell SHALL render no empty branch for them, including the narrow-viewport sibling-navigation slot and the sibling-sidebar slot
 
 ### Requirement: Unified session clients are the only session-detail data clients
 
