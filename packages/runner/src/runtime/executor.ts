@@ -1,57 +1,66 @@
-import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionError, ActionResult, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from "../core/types.js"
-import { isObject, stringInput } from "../core/json.js"
-import { errorMessage } from "../core/errors.js"
-import { stringAt } from "../core/json-path.js"
-import { renderTemplate, renderWithSkippedFields, unresolvedReferences } from "../core/template.js"
-import { ensureDir } from "../system/process.js"
-import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
-import type { NamedWorkspaceManager } from "./workspace-entity.js"
-import type { ActionRegistry } from "../actions/registry.js"
-import type { ServerConnection } from "../server/connection.js"
-import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
-import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnResult } from "./opencode/index.js"
-import type { PiRuntime } from "./pi/index.js"
-import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
-import { applySetVarsForWork } from "./set-vars-apply.js"
-import { captureOutputs } from "./output-capture.js"
-import { checkBranchStability, expectedWorkspaceBranch } from "./branch-stability.js"
-import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.js"
-import { tryRecovery } from "./recovery.js"
-import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enforcement.js"
-import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
-import { fail as actionFail, isActionFailure, succeed as actionSucceed } from "../actions/action-result.js"
-import type { ActionDefinition, ActionManifest, ActionCapabilitySet } from "../actions/manifest.js"
-import { validateActionInput, deferredInputFields, injectEngineInputs } from "../actions/input-validation.js"
-import { malformedToUnexpectedError, normalizeActionResult, passThroughExitCode, passThroughOutcome, passThroughTurnFact } from "../actions/result-validation.js"
+import { isAbsolute, join, relative, resolve } from 'node:path'
+import type {
+  ActionError,
+  ActionResult,
+  JsonObject,
+  JsonValue,
+  DispatchWorkItem,
+  WorkItemResult,
+} from '../core/types.js'
+import { isObject, stringInput } from '../core/json.js'
+import { errorMessage } from '../core/errors.js'
+import { stringAt } from '../core/json-path.js'
+import { renderTemplate, renderWithSkippedFields, unresolvedReferences } from '../core/template.js'
+import { ensureDir } from '../system/process.js'
+import { WorkspaceManager, WorkspaceNetworkTimeoutError } from './workspace.js'
+import type { NamedWorkspaceManager } from './workspace-entity.js'
+import type { ActionRegistry } from '../actions/registry.js'
+import type { ServerConnection } from '../server/connection.js'
+import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
+import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnResult } from './opencode/index.js'
+import type { PiRuntime } from './pi/index.js'
+import { captureAndUploadArtifactsForWork } from './artifact-side-effects.js'
+import { applySetVarsForWork } from './set-vars-apply.js'
+import { captureOutputs } from './output-capture.js'
+import { checkBranchStability, expectedWorkspaceBranch } from './branch-stability.js'
+import { executeCheckDispatch, type CheckDeclaration } from './check-execution.js'
+import { tryRecovery } from './recovery.js'
+import { enforceCleanWorktree, resolveCleanupAgentAction } from './worktree-enforcement.js'
+import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from './task-log.js'
+import { fail as actionFail, isActionFailure, succeed as actionSucceed } from '../actions/action-result.js'
+import type { ActionDefinition, ActionManifest, ActionCapabilitySet } from '../actions/manifest.js'
+import { validateActionInput, deferredInputFields, injectEngineInputs } from '../actions/input-validation.js'
 import {
-  evaluateCompletion,
-  promiseValue,
-  type CompletionEvaluation,
-} from "../actions/expectations.js"
-import type { AgentJobExecutor } from "./agent-job-executor.js"
-import type { ActionHost, ActionEffects, AgentTurnRequest } from "../actions/host.js"
-import { capabilitySet } from "../actions/host.js"
-import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from "../actions/opencode.js"
-import { composePiPrompt, piAction } from "../actions/pi.js"
-import { WorkflowAgentSessionReporter } from "../actions/workflow-agent-session-reporter.js"
-import { hasUnconfirmedCleanup, parseModelIdentifier } from "./opencode/index.js"
-import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "./binding-recovery.js"
-import { resolveIssueFields, type IssueFields } from "../actions/issue-fields.js"
-import { createHash } from "node:crypto"
-import { SkillResolver } from "./skill-resolver.js"
-import { buildExecutionEnvelope } from "./execution-envelope.js"
+  malformedToUnexpectedError,
+  normalizeActionResult,
+  passThroughExitCode,
+  passThroughOutcome,
+  passThroughTurnFact,
+} from '../actions/result-validation.js'
+import { evaluateCompletion, promiseValue, type CompletionEvaluation } from '../actions/expectations.js'
+import type { AgentJobExecutor } from './agent-job-executor.js'
+import type { ActionHost, ActionEffects, AgentTurnRequest } from '../actions/host.js'
+import { capabilitySet } from '../actions/host.js'
+import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from '../actions/opencode.js'
+import { composePiPrompt, piAction } from '../actions/pi.js'
+import { WorkflowAgentSessionReporter } from '../actions/workflow-agent-session-reporter.js'
+import { hasUnconfirmedCleanup, parseModelIdentifier } from './opencode/index.js'
+import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from './binding-recovery.js'
+import { resolveIssueFields, type IssueFields } from '../actions/issue-fields.js'
+import { createHash } from 'node:crypto'
+import { SkillResolver } from './skill-resolver.js'
+import { buildExecutionEnvelope } from './execution-envelope.js'
 
-const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
+const COMPLETED_STATUSES = new Set(['completed', 'success', 'succeeded', 'pass', 'passed'])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
-  ["pass", "pass"],
-  ["passed", "pass"],
-  ["success", "pass"],
-  ["succeeded", "pass"],
-  ["completed", "pass"],
-  ["pending", "pending"],
+  ['pass', 'pass'],
+  ['passed', 'pass'],
+  ['success', 'pass'],
+  ['succeeded', 'pass'],
+  ['completed', 'pass'],
+  ['pending', 'pending'],
 ])
-const CHECK_WORK_TYPES = new Set(["check", "checks"])
+const CHECK_WORK_TYPES = new Set(['check', 'checks'])
 
 export class WorkExecutor {
   constructor(
@@ -82,19 +91,23 @@ export class WorkExecutor {
     return this.executeWithLog(work, signal, null).then((exec) => exec.result)
   }
 
-  async executeWithLog(work: DispatchWorkItem, signal: AbortSignal, collector: TaskLogCollector | null): Promise<WorkExecution> {
+  async executeWithLog(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+    collector: TaskLogCollector | null,
+  ): Promise<WorkExecution> {
     const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
     const logger = new TaskLogger({ collector: ownedCollector, masker: createCredentialMaskerFromEnvironment() })
     let resolvedWorkspace: ResolvedWorkspace
-    if (work.ownerKind !== "agent-job") {
+    if (work.ownerKind !== 'agent-job') {
       const precheck = await this.prepareWorkspace(work, signal, logger)
-      if (precheck.kind === "failure") return { result: precheck.result, collector: ownedCollector }
+      if (precheck.kind === 'failure') return { result: precheck.result, collector: ownedCollector }
       resolvedWorkspace = precheck.workspace
     } else {
       resolvedWorkspace = this.workspaceFromVariables(work)
     }
 
-    if (work.workType === "checks") {
+    if (work.workType === 'checks') {
       const result = await this.executeChecks(work, resolvedWorkspace, signal, logger)
       return { result, collector: ownedCollector }
     }
@@ -102,12 +115,16 @@ export class WorkExecutor {
     return { result, collector: ownedCollector }
   }
 
-  private async prepareWorkspace(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+  private async prepareWorkspace(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+    log: TaskLogger,
+  ): Promise<{ kind: 'ok'; workspace: ResolvedWorkspace } | { kind: 'failure'; result: WorkItemResult }> {
     try {
       const wsName = readWorkspaceName(work)
       if (wsName && this.namedWorkspaceManager && work.projectId) {
-        const gitUrl = stringInput(work.variables ?? {}, "repository.gitUrl")
-        const baseBranch = stringInput(work.variables ?? {}, "repository.baseBranch")
+        const gitUrl = stringInput(work.variables ?? {}, 'repository.gitUrl')
+        const baseBranch = stringInput(work.variables ?? {}, 'repository.baseBranch')
         if (gitUrl && baseBranch) {
           const info = await this.namedWorkspaceManager.materializeForIssue(
             work.projectId,
@@ -116,20 +133,25 @@ export class WorkExecutor {
             baseBranch,
             signal,
           )
-          return { kind: "ok", workspace: { path: info.path, branch: `mohist/ws-${wsName}` } }
+          return { kind: 'ok', workspace: { path: info.path, branch: `mohist/ws-${wsName}` } }
         }
       }
       const info = await this.workspaceManager.prepare(work, signal, log)
-      return { kind: "ok", workspace: infoToResolved(info) }
+      return { kind: 'ok', workspace: infoToResolved(info) }
     } catch (error) {
-      return { kind: "failure", result: workspaceSetupFailure(work, error) }
+      return { kind: 'failure', result: workspaceSetupFailure(work, error) }
     }
   }
 
-  private async executeOne(work: DispatchWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
-    if (work.ownerKind === "agent-job") {
+  private async executeOne(
+    work: DispatchWorkItem,
+    resolvedWorkspace: ResolvedWorkspace,
+    signal: AbortSignal,
+    log: TaskLogger,
+  ): Promise<WorkItemResult> {
+    if (work.ownerKind === 'agent-job') {
       if (!this.agentJobExecutor) {
-        return failure(work, "AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor")
+        return failure(work, 'AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor')
       }
       try {
         return await this.agentJobExecutor.execute(work, signal)
@@ -139,10 +161,10 @@ export class WorkExecutor {
     }
 
     const resolved = this.actions.resolve(work.uses)
-    if (resolved.kind === "unknown") {
-      return failure(work, `No action found for '${work.uses ?? ""}'`)
+    if (resolved.kind === 'unknown') {
+      return failure(work, `No action found for '${work.uses ?? ''}'`)
     }
-    if (resolved.kind === "tombstone") {
+    if (resolved.kind === 'tombstone') {
       return failure(work, removedActionMessage(work.uses ?? resolved.canonicalName, resolved.tombstone))
     }
     const definition = resolved.definition
@@ -162,7 +184,7 @@ export class WorkExecutor {
 
       const renderedWith = this.renderWithDeferred(actionWith, variables, deferred)
       const validation = validateActionInput(definition.manifest, renderedWith)
-      if (validation.kind === "failure") {
+      if (validation.kind === 'failure') {
         const validationFailure = validationFailureResult(work, validation.error)
         const recoveryResult = tryRecovery(work, validationFailure, variables)
         if (recoveryResult) return recoveryResult
@@ -173,8 +195,8 @@ export class WorkExecutor {
       const workspaceRoot = this.workspaceRoot(variables)
       const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
       const expectedBranch = expectedWorkspaceBranch(variables)
-      const startCheck = await checkBranchStability(work, workDir, expectedBranch, "start", signal, log)
-      if (startCheck.kind === "violation") {
+      const startCheck = await checkBranchStability(work, workDir, expectedBranch, 'start', signal, log)
+      if (startCheck.kind === 'violation') {
         return startCheck.result
       }
       const caps = capabilitySet(definition.manifest)
@@ -192,9 +214,9 @@ export class WorkExecutor {
       const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
       let effects: ActionEffects = {}
       let validatedResult: ActionResult
-      if (normalized.kind === "malformed") {
+      if (normalized.kind === 'malformed') {
         validatedResult = malformedToUnexpectedError(normalized.message) as ActionResult
-      } else if (normalized.kind === "ok") {
+      } else if (normalized.kind === 'ok') {
         validatedResult = { output: normalized.output } as ActionResult
         effects = normalized.effects
       } else {
@@ -205,7 +227,7 @@ export class WorkExecutor {
         ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
       }
       if (outcome) {
-        ;(validatedResult as { outcome?: "unknown" }).outcome = outcome
+        ;(validatedResult as { outcome?: 'unknown' }).outcome = outcome
       }
       const actionSucceeded = !isActionFailure(validatedResult)
       const completion = actionSucceeded
@@ -214,16 +236,25 @@ export class WorkExecutor {
       const projected = projectTaskOutput(work, validatedResult, completion, caps)
       const resultForRecovery = projected
       if (isActionFailure(validatedResult)) {
-        if (resultForRecovery.status === "unknown") return resultForRecovery
+        if (resultForRecovery.status === 'unknown') return resultForRecovery
         const recoveryResult = tryRecovery(work, resultForRecovery, variables)
         if (recoveryResult) return recoveryResult
         return resultForRecovery
       }
-      const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
-      if (endCheck.kind === "violation") {
+      const endCheck = await checkBranchStability(work, workDir, expectedBranch, 'end', signal, log)
+      if (endCheck.kind === 'violation') {
         return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
       }
-      const artifactResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, resultForRecovery, validatedResult, variables, signal)
+      const artifactResult = await captureAndUploadArtifactsForWork(
+        this.connection,
+        work,
+        workspaceRoot,
+        workDir,
+        resultForRecovery,
+        validatedResult,
+        variables,
+        signal,
+      )
       const worktreeHostBuilder = (cleanupWork: DispatchWorkItem, cleanupSignal: AbortSignal, cleanupWorkDir: string) =>
         this.buildActionHost(cleanupWork, cleanupWorkDir, cleanupSignal, log, caps)
       const worktreeResult = await enforceCleanWorktree(
@@ -239,12 +270,18 @@ export class WorkExecutor {
       )
       const recoveryResult = tryRecovery(work, worktreeResult, variables)
       if (recoveryResult) return recoveryResult
-      if (worktreeResult.status !== "completed") {
+      if (worktreeResult.status !== 'completed') {
         return worktreeResult
       }
       const withCapturedOutputs = this.captureDeclaredOutputs(work, worktreeResult, validatedResult)
-      const withVarsResult = await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal, effects.writeVars ?? {})
-      if (withVarsResult.status !== "completed") return withVarsResult
+      const withVarsResult = await applySetVarsForWork(
+        this.connection,
+        work,
+        withCapturedOutputs,
+        signal,
+        effects.writeVars ?? {},
+      )
+      if (withVarsResult.status !== 'completed') return withVarsResult
       return effects.addTasks && effects.addTasks.length > 0
         ? { ...withVarsResult, addTasks: effects.addTasks }
         : withVarsResult
@@ -276,21 +313,21 @@ export class WorkExecutor {
       skillResolver: this.skillResolver,
       agentDefinition: work.agentDefinition,
       exec: async (command, args) => {
-        const { runCommand } = await import("../system/process.js")
+        const { runCommand } = await import('../system/process.js')
         const result = await runCommand(command, args?.map(String) ?? [], workDir, signal)
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }
       },
     }
 
-    if (caps.has("agent-turn")) {
+    if (caps.has('agent-turn')) {
       host.agent = this.buildAgentTurnCapability(work, workDir, signal)
     }
 
-    if (caps.has("issue-fields")) {
+    if (caps.has('issue-fields')) {
       host.issue = this.buildIssueFieldsCapability(work, workDir, signal)
     }
 
-    if (caps.has("workflow-checkpoint")) {
+    if (caps.has('workflow-checkpoint')) {
       host.checkpoint = this.buildCheckpointCapability(work)
     }
 
@@ -301,7 +338,7 @@ export class WorkExecutor {
     const self = this
     return {
       async turn(request: AgentTurnRequest): Promise<ActionResult> {
-        if (work.uses?.trim().toLowerCase() === "mohist/pi") {
+        if (work.uses?.trim().toLowerCase() === 'mohist/pi') {
           return await self.runPiAgentTurn(work, workDir, signal, request)
         }
         const definition = work.agentDefinition
@@ -318,7 +355,13 @@ export class WorkExecutor {
 
         const runtime = self.openCodeRuntime
         const sessionName = request.session ?? work.workId
-        let binding: { agentSessionId: string; runtimeSessionId: string | null; workDir: string; runnerId: string; runtime: "opencode" } | null = null
+        let binding: {
+          agentSessionId: string
+          runtimeSessionId: string | null
+          workDir: string
+          runnerId: string
+          runtime: 'opencode'
+        } | null = null
         let freshRuntimeSessionRequired = false
         let freshBindingCreated = false
         if (self.connection && work.projectId) {
@@ -335,7 +378,7 @@ export class WorkExecutor {
                 issueNumber: work.issueNumber,
                 epicNumber: work.epicNumber,
                 workDir,
-                runtime: "opencode",
+                runtime: 'opencode',
               },
               signal,
             )
@@ -344,7 +387,12 @@ export class WorkExecutor {
                 work.projectId,
                 work.workflowRunId,
                 sessionName,
-                { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+                {
+                  workId: work.workId,
+                  taskRunId: work.taskRunId ?? '',
+                  workType: work.workType,
+                  stage: work.stage ?? null,
+                },
                 self.connection.runnerId,
                 opened.sessionId,
                 opened.runtimeSessionId ?? null,
@@ -354,13 +402,13 @@ export class WorkExecutor {
               return await workflowActionFailure(
                 mismatchReporter,
                 opened.runtimeSessionId ?? null,
-                "session-workspace-mismatch",
-                "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying",
+                'session-workspace-mismatch',
+                'Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying',
               )
             }
             if (opened.runtimeSessionId && isUnsettledWorkflowSessionStatus(opened.status)) {
               return runtimeActionFailure(
-                "session-binding-failed",
+                'session-binding-failed',
                 `Workflow AgentSession is ${opened.status}; the previous Runtime Session has not reached a terminal state, so retry is fail-closed`,
               )
             }
@@ -369,22 +417,31 @@ export class WorkExecutor {
               runtimeSessionId: opened.runtimeSessionId ?? null,
               workDir: opened.workDir || workDir,
               runnerId: self.connection.runnerId,
-              runtime: "opencode",
+              runtime: 'opencode',
             }
             freshRuntimeSessionRequired = opened.needsFreshRuntimeSession === true
           } catch (error) {
-            return runtimeActionFailure("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${errorMessage(error)}`)
+            return runtimeActionFailure(
+              'session-binding-failed',
+              `Failed to resolve the Workflow AgentSession binding: ${errorMessage(error)}`,
+            )
           }
         }
         if (!binding) {
-          binding = { agentSessionId: "", runtimeSessionId: null, workDir, runnerId: self.connection?.runnerId ?? "", runtime: "opencode" }
+          binding = {
+            agentSessionId: '',
+            runtimeSessionId: null,
+            workDir,
+            runnerId: self.connection?.runnerId ?? '',
+            runtime: 'opencode',
+          }
         }
 
         let reporter = createWorkflowReporter(
           work.projectId ?? null,
           work.workflowRunId,
           sessionName,
-          { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+          { workId: work.workId, taskRunId: work.taskRunId ?? '', workType: work.workType, stage: work.stage ?? null },
           binding.runnerId,
           binding.agentSessionId,
           binding.runtimeSessionId,
@@ -396,8 +453,8 @@ export class WorkExecutor {
           return await workflowActionFailure(
             reporter,
             binding.runtimeSessionId,
-            "runtime-unavailable",
-            "agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding",
+            'runtime-unavailable',
+            'agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding',
           )
         }
         if (!runtime.ready()) {
@@ -405,26 +462,30 @@ export class WorkExecutor {
           return await workflowActionFailure(
             reporter,
             binding.runtimeSessionId,
-            "runtime-unavailable",
-            `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`,
+            'runtime-unavailable',
+            `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
           )
         }
 
         if (binding.runtimeSessionId === null && sessionName && self.connection && work.projectId) {
           const modelResult = modelName ? parseModelIdentifier(modelName) : null
-          const model = modelResult?.kind === "ok" ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID } : null
-          let created: Awaited<ReturnType<OpenCodeRuntime["createSession"]>>
+          const model =
+            modelResult?.kind === 'ok'
+              ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID }
+              : null
+          let created: Awaited<ReturnType<OpenCodeRuntime['createSession']>>
           try {
             created = await runtime.createSession({
-              target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
+              target: { runtime: 'opencode', runtimeSessionId: null, workDir: binding.workDir },
               model,
             })
           } catch (error) {
-            return runtimeActionFailure("turn-failed", `OpenCode session creation failed: ${errorMessage(error)}`)
+            return runtimeActionFailure('turn-failed', `OpenCode session creation failed: ${errorMessage(error)}`)
           }
           if (!created.ok) {
             const kind = created.error.kind
-            const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
+            const code =
+              kind === 'deadline-exceeded' ? 'timeout' : kind === 'missing-session' ? 'runtime-session-missing' : kind
             return runtimeActionFailure(code, created.error.message)
           }
           try {
@@ -438,26 +499,31 @@ export class WorkExecutor {
                 processPid: null,
                 model: modelName ?? null,
                 workId: work.workId,
-                runtime: "opencode",
+                runtime: 'opencode',
               },
               signal,
             )
           } catch (error) {
             const attachReporter = createWorkflowReporter(
               work.projectId,
-                work.workflowRunId,
-                sessionName,
-                { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
-                self.connection.runnerId,
-                binding.agentSessionId,
-                created.value.runtimeSessionId,
+              work.workflowRunId,
+              sessionName,
+              {
+                workId: work.workId,
+                taskRunId: work.taskRunId ?? '',
+                workType: work.workType,
+                stage: work.stage ?? null,
+              },
+              self.connection.runnerId,
+              binding.agentSessionId,
+              created.value.runtimeSessionId,
               self.agentSessionRuntimeEventOutbox,
               self.runtimeEventRecordId,
             )
             return await workflowActionFailure(
               attachReporter,
               created.value.runtimeSessionId,
-              "session-binding-failed",
+              'session-binding-failed',
               `Failed to persist the Workflow AgentSession binding: ${errorMessage(error)}`,
             )
           }
@@ -466,13 +532,18 @@ export class WorkExecutor {
             runtimeSessionId: created.value.runtimeSessionId,
             workDir: created.value.workDir,
             runnerId: self.connection.runnerId,
-            runtime: "opencode",
+            runtime: 'opencode',
           }
           reporter = createWorkflowReporter(
             work.projectId ?? null,
             work.workflowRunId,
             sessionName,
-            { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+            {
+              workId: work.workId,
+              taskRunId: work.taskRunId ?? '',
+              workType: work.workType,
+              stage: work.stage ?? null,
+            },
             binding.runnerId,
             binding.agentSessionId,
             binding.runtimeSessionId,
@@ -481,21 +552,31 @@ export class WorkExecutor {
           )
         }
 
-        if (freshRuntimeSessionRequired && binding.runtimeSessionId && sessionName && self.connection && work.projectId) {
+        if (
+          freshRuntimeSessionRequired &&
+          binding.runtimeSessionId &&
+          sessionName &&
+          self.connection &&
+          work.projectId
+        ) {
           const modelResult = modelName ? parseModelIdentifier(modelName) : null
-          const model = modelResult?.kind === "ok" ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID } : null
-          let created: Awaited<ReturnType<OpenCodeRuntime["createSession"]>>
+          const model =
+            modelResult?.kind === 'ok'
+              ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID }
+              : null
+          let created: Awaited<ReturnType<OpenCodeRuntime['createSession']>>
           try {
             created = await runtime.createSession({
-              target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
+              target: { runtime: 'opencode', runtimeSessionId: null, workDir: binding.workDir },
               model,
             })
           } catch (error) {
-            return runtimeActionFailure("turn-failed", `OpenCode retry session creation failed: ${errorMessage(error)}`)
+            return runtimeActionFailure('turn-failed', `OpenCode retry session creation failed: ${errorMessage(error)}`)
           }
           if (!created.ok) {
             const kind = created.error.kind
-            const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
+            const code =
+              kind === 'deadline-exceeded' ? 'timeout' : kind === 'missing-session' ? 'runtime-session-missing' : kind
             return runtimeActionFailure(code, created.error.message)
           }
 
@@ -509,13 +590,13 @@ export class WorkExecutor {
                 expectedRuntime: binding.runtime,
                 expectedRuntimeSessionId: binding.runtimeSessionId,
                 replacementRuntimeSessionId: created.value.runtimeSessionId,
-                replacementRuntime: "opencode",
+                replacementRuntime: 'opencode',
               },
               signal,
             )
           } catch (error) {
             return runtimeActionFailure(
-              "session-binding-failed",
+              'session-binding-failed',
               `Failed to persist the fresh Workflow AgentSession binding: ${errorMessage(error)}`,
             )
           }
@@ -525,7 +606,7 @@ export class WorkExecutor {
             runtimeSessionId: created.value.runtimeSessionId,
             workDir: created.value.workDir,
             runnerId: self.connection.runnerId,
-            runtime: "opencode",
+            runtime: 'opencode',
           }
           freshRuntimeSessionRequired = false
           freshBindingCreated = true
@@ -533,7 +614,12 @@ export class WorkExecutor {
             work.projectId ?? null,
             work.workflowRunId,
             sessionName,
-            { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+            {
+              workId: work.workId,
+              taskRunId: work.taskRunId ?? '',
+              workType: work.workType,
+              stage: work.stage ?? null,
+            },
             binding.runnerId,
             binding.agentSessionId,
             binding.runtimeSessionId,
@@ -544,24 +630,36 @@ export class WorkExecutor {
 
         const deadlineMs = request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS
         const modelOptions = modelName ? parseModelIdentifier(modelName) : null
-        if (!freshRuntimeSessionRequired && !freshBindingCreated && binding.runtimeSessionId && self.connection && work.projectId) {
+        if (
+          !freshRuntimeSessionRequired &&
+          !freshBindingCreated &&
+          binding.runtimeSessionId &&
+          self.connection &&
+          work.projectId
+        ) {
           const expected = binding
           let recovery: Awaited<ReturnType<typeof resolveOrRecoverBinding>>
           try {
             recovery = await resolveOrRecoverBinding({
               runnerId: self.connection.runnerId,
               expected,
-              runtime: { kind: "opencode", runtime },
+              runtime: { kind: 'opencode', runtime },
               probe: async (candidate) => {
                 const result = await runtime.resolveSession({
-                  target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
+                  target: {
+                    runtime: 'opencode',
+                    runtimeSessionId: candidate.runtimeSessionId,
+                    workDir: candidate.workDir,
+                  },
                 })
                 if (result.ok) return { ok: true, activeTurn: result.value.activeTurn }
                 return { ok: false, kind: result.error.kind, message: result.error.message }
               },
               replace: async (current, replacement) => {
                 await self.connection!.recoverMissingWorkflowAgentSession(
-                  work.projectId!, work.workflowRunId, sessionName,
+                  work.projectId!,
+                  work.workflowRunId,
+                  sessionName,
                   {
                     expectedRunnerId: current.runnerId,
                     expectedRuntime: current.runtime,
@@ -571,7 +669,10 @@ export class WorkExecutor {
                   signal,
                 )
               },
-              model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
+              model:
+                modelOptions?.kind === 'ok'
+                  ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID }
+                  : null,
               rejectActiveTurn: true,
               recoveryKey: expected.runtimeSessionId!,
               coordinator: self.bindingRecoveryCoordinator ?? undefined,
@@ -580,34 +681,37 @@ export class WorkExecutor {
             return await workflowActionFailure(
               reporter,
               binding.runtimeSessionId,
-              "session-binding-failed",
+              'session-binding-failed',
               `Workflow AgentSession binding recovery failed: ${errorMessage(error)}`,
             )
           }
           if (!recovery.ok) {
-            if (recovery.kind === "active-turn") {
-              return runtimeActionFailure("session-binding-failed", recovery.message)
+            if (recovery.kind === 'active-turn') {
+              return runtimeActionFailure('session-binding-failed', recovery.message)
             }
             return await workflowActionFailure(reporter, binding.runtimeSessionId, recovery.kind, recovery.message)
           }
           binding = {
             ...recovery.binding,
             agentSessionId: binding.agentSessionId,
-            runtime: "opencode",
+            runtime: 'opencode',
           }
         }
 
         const selectedBinding = binding
         const runtimeRequest = {
           target: {
-            runtime: "opencode" as const,
+            runtime: 'opencode' as const,
             runtimeSessionId: selectedBinding.runtimeSessionId,
             workDir: selectedBinding.workDir,
           },
           prompt,
           deadlineMs,
           options: {
-            model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
+            model:
+              modelOptions?.kind === 'ok'
+                ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID }
+                : null,
             variant: variant ?? null,
             ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
             unknownKeys: undefined as readonly string[] | undefined,
@@ -618,7 +722,7 @@ export class WorkExecutor {
           work.projectId ?? null,
           work.workflowRunId,
           sessionName,
-          { workId: work.workId, taskRunId: work.taskRunId ?? "", workType: work.workType, stage: work.stage ?? null },
+          { workId: work.workId, taskRunId: work.taskRunId ?? '', workType: work.workType, stage: work.stage ?? null },
           selectedBinding.runnerId,
           selectedBinding.agentSessionId,
           selectedBinding.runtimeSessionId,
@@ -633,7 +737,7 @@ export class WorkExecutor {
             return await workflowActionFailure(
               reporter,
               selectedBinding.runtimeSessionId,
-              "execution-unavailable",
+              'execution-unavailable',
               `failed to durably enqueue the Workflow AgentSession input: ${errorMessage(error)}`,
             )
           }
@@ -652,18 +756,19 @@ export class WorkExecutor {
 
         if (!result.ok) {
           const kind = result.error.kind
-          const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
+          const code =
+            kind === 'deadline-exceeded' ? 'timeout' : kind === 'missing-session' ? 'runtime-session-missing' : kind
           return runtimeActionFailure(
             code,
             result.error.message,
-            hasUnconfirmedCleanup(result.diagnostics ?? result.error.diagnostics ?? []) ? "unknown" : undefined,
+            hasUnconfirmedCleanup(result.diagnostics ?? result.error.diagnostics ?? []) ? 'unknown' : undefined,
           )
         }
 
         const facts = result.value.facts
         const output: JsonObject = {
-          kind: "opencode",
-          status: "success",
+          kind: 'opencode',
+          status: 'success',
           runtimeSessionId: facts.runtimeSessionId,
           model: request.options?.model ?? null,
           variant: request.options?.variant ?? null,
@@ -707,7 +812,7 @@ export class WorkExecutor {
   }
 
   private buildIssueFieldsCapability(work: DispatchWorkItem, workDir: string, signal: AbortSignal) {
-    const issueNumber = typeof work.issueNumber === "number" && work.issueNumber > 0 ? work.issueNumber : null
+    const issueNumber = typeof work.issueNumber === 'number' && work.issueNumber > 0 ? work.issueNumber : null
     const projectId = work.projectId ?? null
     return {
       async fields(): Promise<IssueFields> {
@@ -724,12 +829,17 @@ export class WorkExecutor {
   private buildCheckpointCapability(work: DispatchWorkItem) {
     return {
       async token(scope: string): Promise<string> {
-        return `cp_${createHash("sha256").update(`${work.workflowRunId}\0${scope}`).digest("hex").slice(0, 32)}`
+        return `cp_${createHash('sha256').update(`${work.workflowRunId}\0${scope}`).digest('hex').slice(0, 32)}`
       },
     }
   }
 
-  private async executeChecks(work: DispatchWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
+  private async executeChecks(
+    work: DispatchWorkItem,
+    resolvedWorkspace: ResolvedWorkspace,
+    signal: AbortSignal,
+    log: TaskLogger,
+  ): Promise<WorkItemResult> {
     const variables = await this.variables(work, resolvedWorkspace, signal)
     const rawChecks: unknown[] = Array.isArray(work.with?.checks) ? work.with.checks : []
     const checks = rawChecks.filter(isCheck)
@@ -737,8 +847,12 @@ export class WorkExecutor {
     const builder = this.buildCheckHost.bind(this)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      buildHost: (checkWork: DispatchWorkItem, checkSignal: AbortSignal, checkWorkDir: string, caps: ActionCapabilitySet) =>
-        this.buildActionHost(checkWork, checkWorkDir, checkSignal, log, caps),
+      buildHost: (
+        checkWork: DispatchWorkItem,
+        checkSignal: AbortSignal,
+        checkWorkDir: string,
+        caps: ActionCapabilitySet,
+      ) => this.buildActionHost(checkWork, checkWorkDir, checkSignal, log, caps),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -749,13 +863,17 @@ export class WorkExecutor {
     return {}
   }
 
-  private async variables(work: DispatchWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
+  private async variables(
+    work: DispatchWorkItem,
+    resolvedWorkspace: ResolvedWorkspace,
+    signal: AbortSignal,
+  ): Promise<JsonObject> {
     const workspace = resolvedWorkspaceToVariables(resolvedWorkspace)
     const source = work.variables ?? {}
-    const roots = ["workflow", "stage", "work", "issue", "repository", "workspace", "vars", "tasks", "prompts"]
+    const roots = ['workflow', 'stage', 'work', 'issue', 'repository', 'workspace', 'vars', 'tasks', 'prompts']
     const variables: JsonObject = {}
     for (const root of roots) {
-      if (root !== "workspace" && source[root] !== undefined) variables[root] = source[root]
+      if (root !== 'workspace' && source[root] !== undefined) variables[root] = source[root]
     }
     variables.workspace = workspace
     return variables
@@ -763,34 +881,38 @@ export class WorkExecutor {
 
   private workspaceFromVariables(work: DispatchWorkItem): ResolvedWorkspace {
     const variables = work.variables ?? {}
-    const ws = variables["workspace"]
+    const ws = variables['workspace']
     if (!isObject(ws)) {
-      return { path: "", branch: null }
+      return { path: '', branch: null }
     }
-    const name = stringField(ws, "name")
+    const name = stringField(ws, 'name')
     if (name) {
       return { path: name, branch: `mohist/ws-${name}` }
     }
     return {
-      path: stringField(ws, "path") ?? "",
-      branch: stringField(ws, "branch"),
+      path: stringField(ws, 'path') ?? '',
+      branch: stringField(ws, 'branch'),
     }
   }
 
   private workspaceRoot(variables: JsonObject) {
-    return stringAt(variables, ["workspace", "path"]) ?? join(this.fallbackWorkDir, "default")
+    return stringAt(variables, ['workspace', 'path']) ?? join(this.fallbackWorkDir, 'default')
   }
 
   private async resolveWorkDir(withInput: JsonObject | null, workspaceRoot: string) {
-    const requested = stringInput(withInput, "working-directory")
+    const requested = stringInput(withInput, 'working-directory')
     const root = resolve(workspaceRoot)
     const workDir = requested ? resolveWorkspacePath(root, requested) : root
     await ensureDir(workDir)
     return workDir
   }
 
-  private captureDeclaredOutputs(work: DispatchWorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
-    if (result.status !== "completed") return result
+  private captureDeclaredOutputs(
+    work: DispatchWorkItem,
+    result: WorkItemResult,
+    actionResult: ActionResult,
+  ): WorkItemResult {
+    if (result.status !== 'completed') return result
     const capturedOutputs = captureOutputs(work.outputs, actionResult)
     return capturedOutputs ? { ...result, capturedOutputs } : result
   }
@@ -800,7 +922,7 @@ export function stripRunnerPrivateFacts(result: ActionResult): {
   publicActionResult: ActionResult
   turnFact: { finalAssistantText?: string | null } | null
 } {
-  if (!result || typeof result !== "object" || !("turnFact" in result)) {
+  if (!result || typeof result !== 'object' || !('turnFact' in result)) {
     return { publicActionResult: result, turnFact: null }
   }
   const turnFact = result.turnFact ?? null
@@ -814,9 +936,9 @@ function projectTaskOutput(
   completion: CompletionEvaluation | null,
   caps: ActionCapabilitySet,
 ): WorkItemResult {
-  if (result.outcome === "unknown") {
+  if (result.outcome === 'unknown') {
     return {
-      status: "unknown",
+      status: 'unknown',
       message: isActionFailure(result) ? result.error.message : null,
       error: isActionFailure(result) ? result.error : null,
       exitCode: result.exitCode,
@@ -830,32 +952,32 @@ function projectTaskOutput(
       exitCode: result.exitCode,
     }
   }
-  if (caps.has("agent-turn")) {
-    if (completion === null) return { status: "completed", output: null, exitCode: result.exitCode }
+  if (caps.has('agent-turn')) {
+    if (completion === null) return { status: 'completed', output: null, exitCode: result.exitCode }
     const value = promiseValue(completion.matched ?? null)
     const projectedOutput: JsonObject | null = value !== null ? { promise: value } : null
     if (!completion.satisfied) {
       return {
         status: failureStatus(work),
         message: completion.message,
-        error: { code: "expectation-failed", message: completion.message },
+        error: { code: 'expectation-failed', message: completion.message },
         output: projectedOutput,
         exitCode: result.exitCode,
       }
     }
-    return { status: "completed", output: projectedOutput, exitCode: result.exitCode }
+    return { status: 'completed', output: projectedOutput, exitCode: result.exitCode }
   }
-  if (completion === null) return { status: "completed", output: result.output, exitCode: result.exitCode }
+  if (completion === null) return { status: 'completed', output: result.output, exitCode: result.exitCode }
   if (!completion.satisfied) {
     return {
       status: failureStatus(work),
       message: completion.message,
-      error: { code: "expectation-failed", message: completion.message },
+      error: { code: 'expectation-failed', message: completion.message },
       output: result.output,
       exitCode: result.exitCode,
     }
   }
-  return { status: "completed", output: result.output, exitCode: result.exitCode }
+  return { status: 'completed', output: result.output, exitCode: result.exitCode }
 }
 
 export interface WorkExecution {
@@ -863,9 +985,9 @@ export interface WorkExecution {
   collector: TaskLogCollector
 }
 
-type ResolvedWorkspace = { path: string, branch: string | null }
+type ResolvedWorkspace = { path: string; branch: string | null }
 
-function infoToResolved(info: { path: string, branch?: string | null }): ResolvedWorkspace {
+function infoToResolved(info: { path: string; branch?: string | null }): ResolvedWorkspace {
   return { path: info.path, branch: info.branch ?? null }
 }
 
@@ -875,10 +997,10 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
 
 function readWorkspaceName(work: DispatchWorkItem): string | null {
   const variables = work.variables ?? {}
-  const ws = variables["workspace"]
+  const ws = variables['workspace']
   if (!isObject(ws)) return null
-  const name = ws["name"]
-  return typeof name === "string" && name.trim().length > 0 ? name.trim() : null
+  const name = ws['name']
+  return typeof name === 'string' && name.trim().length > 0 ? name.trim() : null
 }
 
 function defaultRuntimeEventRecordId(): string {
@@ -887,19 +1009,20 @@ function defaultRuntimeEventRecordId(): string {
 
 function workspaceSetupFailure(work: DispatchWorkItem, error: unknown): WorkItemResult {
   const message = error instanceof Error ? error.message : String(error)
-  const detail = error instanceof WorkspaceNetworkTimeoutError
-    ? `workspace preparation timed out: ${message}`
-    : `could not prepare workflow workspace: ${message}`
+  const detail =
+    error instanceof WorkspaceNetworkTimeoutError
+      ? `workspace preparation timed out: ${message}`
+      : `could not prepare workflow workspace: ${message}`
   const failureMessage = detail.slice(0, 4000)
   return {
     status: failureStatus(work),
     message: failureMessage,
-    error: { code: "workspace-setup", message: failureMessage },
+    error: { code: 'workspace-setup', message: failureMessage },
   }
 }
 
 function failure(work: DispatchWorkItem, message: string): WorkItemResult {
-  return { status: failureStatus(work), message, error: { code: "runner-failed", message } }
+  return { status: failureStatus(work), message, error: { code: 'runner-failed', message } }
 }
 
 function removeDeferredFields(withInput: JsonObject | null | undefined, deferred: Set<string>): JsonObject | null {
@@ -911,8 +1034,8 @@ function removeDeferredFields(withInput: JsonObject | null | undefined, deferred
   return immediate
 }
 
-function failureStatus(work: DispatchWorkItem): "fail" | "failed" {
-  return CHECK_WORK_TYPES.has(work.workType) ? "fail" : "failed"
+function failureStatus(work: DispatchWorkItem): 'fail' | 'failed' {
+  return CHECK_WORK_TYPES.has(work.workType) ? 'fail' : 'failed'
 }
 
 function removedActionMessage(uses: string, tombstone: { name: string; guidance: string }): string {
@@ -928,17 +1051,17 @@ function validationFailureResult(work: DispatchWorkItem, error: ActionError): Wo
 }
 
 function toCheckStatus(status: string) {
-  return CHECK_STATUS_BY_ACTION_STATUS.get(status.toLowerCase()) ?? "fail"
+  return CHECK_STATUS_BY_ACTION_STATUS.get(status.toLowerCase()) ?? 'fail'
 }
 
 function isCheck(value: unknown): value is CheckDeclaration {
-  return isObject(value) && typeof value.uses === "string"
+  return isObject(value) && typeof value.uses === 'string'
 }
 
 function resolveWorkspacePath(workspaceRoot: string, requested: string) {
   const resolved = isAbsolute(requested) ? resolve(requested) : resolve(workspaceRoot, requested)
   const rel = relative(workspaceRoot, resolved)
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`working-directory '${requested}' escapes workspace.path`)
   }
   return resolved
@@ -946,27 +1069,39 @@ function resolveWorkspacePath(workspaceRoot: string, requested: string) {
 
 function formatUnresolvedError(work: DispatchWorkItem, unresolved: string[]): string {
   const label = work.title?.trim() || work.uses || work.workId
-  const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
-  return "Task " + work.workId + " (" + label + ") references undefined variable(s): " + refs + ". " +
-    "Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}."
+  const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(', ')
+  return (
+    'Task ' +
+    work.workId +
+    ' (' +
+    label +
+    ') references undefined variable(s): ' +
+    refs +
+    '. ' +
+    'Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}.'
+  )
 }
 
 function formatCheckUnresolvedError(unresolved: string[]): string {
-  const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
-  return "check references undefined variable(s): " + refs + ". " +
-    "Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}."
+  const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(', ')
+  return (
+    'check references undefined variable(s): ' +
+    refs +
+    '. ' +
+    'Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}.'
+  )
 }
 
 function stringField(obj: JsonObject, key: string): string | null {
   const value = obj[key]
-  return typeof value === "string" ? value : null
+  return typeof value === 'string' ? value : null
 }
 
-function isUnsettledWorkflowSessionStatus(status: string | null | undefined): status is "active" | "unknown" {
-  return status === "active" || status === "unknown"
+function isUnsettledWorkflowSessionStatus(status: string | null | undefined): status is 'active' | 'unknown' {
+  return status === 'active' || status === 'unknown'
 }
 
-function runtimeActionFailure(code: string, message: string, outcome?: "unknown"): ActionResult {
+function runtimeActionFailure(code: string, message: string, outcome?: 'unknown'): ActionResult {
   return actionFail(code, message, { exitCode: 1, outcome, turnFact: { finalAssistantText: null } })
 }
 
@@ -982,7 +1117,7 @@ async function workflowActionFailure(
 }
 
 function failedRuntimeTurn(message: string): RuntimeResult<RuntimeTurnResult> {
-  const error = { kind: "turn-failed" as const, message, diagnostics: [] }
+  const error = { kind: 'turn-failed' as const, message, diagnostics: [] }
   return { ok: false, error, diagnostics: [] }
 }
 
@@ -1007,7 +1142,7 @@ function createWorkflowReporter(
     workflowRunId,
     sessionName,
     workMetadata: { ...workMetadata, runnerId, agentSessionId },
-    runtime: "opencode",
+    runtime: 'opencode',
     randomId: runtimeEventRecordId,
   })
 }
@@ -1030,11 +1165,11 @@ function enqueueTerminalClose(
   if (reporter.inputWasRejected()) return
   if (runtimeSessionId === null) return
   if (result.ok) {
-    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId })
+    reporter.registerClose({ status: 'completed', exitCode: 0, runtimeSessionId })
     return
   }
   reporter.registerClose({
-    status: hasUnconfirmedCleanup(result.diagnostics ?? result.error?.diagnostics ?? []) ? "unknown" : "failed",
+    status: hasUnconfirmedCleanup(result.diagnostics ?? result.error?.diagnostics ?? []) ? 'unknown' : 'failed',
     exitCode: 1,
     failureReason: result.error.message,
     runtimeSessionId,

@@ -43,7 +43,7 @@
  * runtime never adds a deterministic Prompt ID.
  */
 
-import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type {
   RuntimeDiagnostic,
   RuntimeProviderErrorPolicy,
@@ -55,7 +55,7 @@ import type {
   RuntimeTurnRequest,
   RuntimeTurnResult,
   RuntimeFilePart,
-} from "./types.js"
+} from './types.js'
 import {
   DEFAULT_PROVIDER_ERROR_POLICY,
   isNonRecoverableProviderRetry,
@@ -68,11 +68,11 @@ import {
   normalizePermissionRequired,
   normalizeTurnFailed,
   normalizeUnavailableRuntime,
-} from "./errors.js"
-import { parseModelIdentifier } from "./model-string.js"
-import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "./event-subscription.js"
-import { createTimeoutSignal } from "../../system/timeout-signal.js"
-import { createRuntimeTurnEventProjector } from "./event-projection.js"
+} from './errors.js'
+import { parseModelIdentifier } from './model-string.js'
+import type { RuntimeEventSubscription, RuntimeGlobalEvent } from './event-subscription.js'
+import { createTimeoutSignal } from '../../system/timeout-signal.js'
+import { createRuntimeTurnEventProjector } from './event-projection.js'
 
 export interface TurnExecutionDeps {
   readonly client: OpencodeClient
@@ -98,11 +98,11 @@ export interface TurnExecutionDeps {
  * scenario; do not edit without updating the spec.
  */
 export const DEADLINE_WARNING_TEXT = [
-  "You will be interrupted in approximately 5 minutes.",
-  "Stop starting any new work now. Commit your current changes,",
+  'You will be interrupted in approximately 5 minutes.',
+  'Stop starting any new work now. Commit your current changes,',
   "leave a progress record in this task's progress channel,",
-  "and end the turn.",
-].join(" ")
+  'and end the turn.',
+].join(' ')
 
 export const WARNING_WINDOW_MS = 5 * 60 * 1000
 /**
@@ -120,7 +120,7 @@ export async function runTurn(
   const diagnostics: RuntimeDiagnostic[] = []
 
   const validated = validateTurnInput(request, diagnostics)
-  if (validated.kind === "failure") {
+  if (validated.kind === 'failure') {
     return { ok: false, error: validated.error, diagnostics: [...diagnostics, ...validated.error.diagnostics] }
   }
   const { model, variant } = validated.value
@@ -131,14 +131,14 @@ export async function runTurn(
 
   try {
     const sessionId = await resolvePhysicalSession(request.target, model, deps, effectiveSignal)
-    if (typeof sessionId !== "string") {
+    if (typeof sessionId !== 'string') {
       return sessionId
     }
     if (observer?.onSessionReady) {
       try {
         await observer.onSessionReady({ runtimeSessionId: sessionId, workDir: request.target.workDir })
       } catch (cause) {
-        const error = normalizeTurnFailed({ message: errorMessage(cause, "Runtime Session readiness observer failed") })
+        const error = normalizeTurnFailed({ message: errorMessage(cause, 'Runtime Session readiness observer failed') })
         return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
       }
     }
@@ -149,24 +149,27 @@ export async function runTurn(
         observer?.onEvent?.(event)
       } catch (cause) {
         diagnostics.push({
-          severity: "warning",
-          code: "turn-event-observer-failed",
-          message: errorMessage(cause, "Runtime turn event observer failed"),
+          severity: 'warning',
+          code: 'turn-event-observer-failed',
+          message: errorMessage(cause, 'Runtime turn event observer failed'),
         })
       }
     }
-    const runtimeFailureFromEvent = (event: ReturnType<typeof eventProjector.project>[number]): RuntimeEventFailure | null => {
-      if (event.type !== "turn.failed") return null
-      const message = typeof event.payload["failureReason"] === "string"
-        ? event.payload["failureReason"]
-        : typeof event.payload["message"] === "string"
-          ? event.payload["message"]
-          : "OpenCode turn failed"
+    const runtimeFailureFromEvent = (
+      event: ReturnType<typeof eventProjector.project>[number],
+    ): RuntimeEventFailure | null => {
+      if (event.type !== 'turn.failed') return null
+      const message =
+        typeof event.payload['failureReason'] === 'string'
+          ? event.payload['failureReason']
+          : typeof event.payload['message'] === 'string'
+            ? event.payload['message']
+            : 'OpenCode turn failed'
       const diagnostic = {
-        severity: "error" as const,
-        code: "turn-failed",
+        severity: 'error' as const,
+        code: 'turn-failed',
         message,
-        details: { source: event.payload["source"] },
+        details: { source: event.payload['source'] },
       }
       return normalizeTurnFailed({ message }, [diagnostic])
     }
@@ -188,8 +191,8 @@ export async function runTurn(
       trackPendingOperation: deps.trackPendingOperation,
       onEvent: (event) => {
         deps.onEvent?.(event)
-        const eventSessionId = event.sessionID
-          ?? (typeof event.payload?.["sessionID"] === "string" ? event.payload["sessionID"] : undefined)
+        const eventSessionId =
+          event.sessionID ?? (typeof event.payload?.['sessionID'] === 'string' ? event.payload['sessionID'] : undefined)
         if (eventSessionId !== sessionId) return
         let failure: RuntimeEventFailure | null = null
         for (const projected of eventProjector.project(event)) {
@@ -203,7 +206,7 @@ export async function runTurn(
         return failure
       },
     })
-    if (promptResult.kind === "failure") {
+    if (promptResult.kind === 'failure') {
       const errorWithDiagnostics: typeof promptResult.error = {
         ...promptResult.error,
         diagnostics: [...promptResult.error.diagnostics, ...promptResult.diagnostics],
@@ -223,7 +226,7 @@ export async function runTurn(
 
 function normalizeDeadline(value: number | null | undefined): number | undefined {
   if (value === undefined || value === null) return undefined
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
   return value
 }
 
@@ -248,38 +251,44 @@ export function bindTurnInFlightTracker(): {
   }
 }
 
-type ValidationOk = { kind: "ok"; value: { model: { providerID: string; modelID: string } | null; variant: string | null } }
-type ValidationFailure = { kind: "failure"; error: ReturnType<typeof normalizeInvalidInput> }
+type ValidationOk = {
+  kind: 'ok'
+  value: { model: { providerID: string; modelID: string } | null; variant: string | null }
+}
+type ValidationFailure = { kind: 'failure'; error: ReturnType<typeof normalizeInvalidInput> }
 type ValidationResult = ValidationOk | ValidationFailure
 
 function validateTurnInput(request: RuntimeTurnRequest, diagnostics: RuntimeDiagnostic[]): ValidationResult {
   const options: RuntimeTurnOptions | undefined | null = request.options ?? undefined
   if (options?.unknownKeys && options.unknownKeys.length > 0) {
     diagnostics.push({
-      severity: "info",
-      code: "options-unknown-keys",
-      message: `Ignored unknown option keys: ${options.unknownKeys.join(", ")}`,
+      severity: 'info',
+      code: 'options-unknown-keys',
+      message: `Ignored unknown option keys: ${options.unknownKeys.join(', ')}`,
       details: { keys: options.unknownKeys },
     })
   }
   let model: { providerID: string; modelID: string } | null = null
   if (options?.model !== undefined && options.model !== null) {
-    if (typeof options.model !== "object") {
-      return { kind: "failure", error: normalizeInvalidInput("options.model must be an object with providerID and modelID when present") }
+    if (typeof options.model !== 'object') {
+      return {
+        kind: 'failure',
+        error: normalizeInvalidInput('options.model must be an object with providerID and modelID when present'),
+      }
     }
     model = options.model
   }
   let variant: string | null = null
   if (options?.variant !== undefined && options.variant !== null) {
-    if (typeof options.variant !== "string") {
-      return { kind: "failure", error: normalizeInvalidInput("options.variant must be a string when present") }
+    if (typeof options.variant !== 'string') {
+      return { kind: 'failure', error: normalizeInvalidInput('options.variant must be a string when present') }
     }
     variant = options.variant
   }
   if (model === null && options?.model !== undefined && options.model !== null) {
-    return { kind: "failure", error: normalizeInvalidInput("options.model must not be null when present") }
+    return { kind: 'failure', error: normalizeInvalidInput('options.model must not be null when present') }
   }
-  return { kind: "ok", value: { model, variant } }
+  return { kind: 'ok', value: { model, variant } }
 }
 
 async function resolvePhysicalSession(
@@ -295,10 +304,13 @@ async function resolvePhysicalSession(
   deps.markDirectoryUsed?.()
   if (target.runtimeSessionId) {
     try {
-      const resolved = await deps.client.session.get({
-        sessionID: target.runtimeSessionId,
-        directory: target.workDir,
-      }, { throwOnError: true })
+      const resolved = await deps.client.session.get(
+        {
+          sessionID: target.runtimeSessionId,
+          directory: target.workDir,
+        },
+        { throwOnError: true },
+      )
       const resolvedData = (resolved as { data?: { id?: string } } | undefined)?.data
       if (!resolvedData || resolvedData.id !== target.runtimeSessionId) {
         const error = normalizeMissingSession()
@@ -306,23 +318,26 @@ async function resolvePhysicalSession(
       }
       return target.runtimeSessionId
     } catch (cause) {
-      const error = toUnavailableOrTurnError(cause, "Failed to restore persisted Runtime Session")
+      const error = toUnavailableOrTurnError(cause, 'Failed to restore persisted Runtime Session')
       return { ok: false, error, diagnostics: error.diagnostics }
     }
   }
   try {
-    const created = await deps.client.session.create({
-      directory: target.workDir,
-      ...(model ? { model: { providerID: model.providerID, id: model.modelID } } : {}),
-    }, { throwOnError: true })
+    const created = await deps.client.session.create(
+      {
+        directory: target.workDir,
+        ...(model ? { model: { providerID: model.providerID, id: model.modelID } } : {}),
+      },
+      { throwOnError: true },
+    )
     const data = (created as { data?: { id?: string } } | undefined)?.data
-    if (!data || typeof data.id !== "string") {
-      const error = normalizeTurnFailed({ message: "session.create returned no id" })
+    if (!data || typeof data.id !== 'string') {
+      const error = normalizeTurnFailed({ message: 'session.create returned no id' })
       return { ok: false, error, diagnostics: error.diagnostics }
     }
     return data.id
   } catch (cause) {
-    const error = toUnavailableOrTurnError(cause, "Failed to create physical Session")
+    const error = toUnavailableOrTurnError(cause, 'Failed to create physical Session')
     return { ok: false, error, diagnostics: error.diagnostics }
   }
 }
@@ -344,16 +359,32 @@ interface ExecutePromptArgs {
   readonly onEvent?: (event: RuntimeGlobalEvent) => void
 }
 
-type PromptSuccess = { kind: "success"; value: { facts: RuntimeTurnFacts; diagnostics: RuntimeDiagnostic[]; response: unknown } }
+type PromptSuccess = {
+  kind: 'success'
+  value: { facts: RuntimeTurnFacts; diagnostics: RuntimeDiagnostic[]; response: unknown }
+}
 type PromptFailure = {
-  kind: "failure"
-  error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeDeadlineExceeded> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession> | ReturnType<typeof normalizePermissionRequired> | ReturnType<typeof normalizeAbortUnconfirmed>
+  kind: 'failure'
+  error:
+    | ReturnType<typeof normalizeInterrupted>
+    | ReturnType<typeof normalizeDeadlineExceeded>
+    | ReturnType<typeof normalizeTurnFailed>
+    | ReturnType<typeof normalizeUnavailableRuntime>
+    | ReturnType<typeof normalizeMissingSession>
+    | ReturnType<typeof normalizePermissionRequired>
+    | ReturnType<typeof normalizeAbortUnconfirmed>
   diagnostics: RuntimeDiagnostic[]
 }
 type PromptResult = PromptSuccess | PromptFailure
 
 type RuntimeEventFailure = ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime>
-type AbortReason = "provider" | "reconciliation-failed" | "permission-reply-failed" | "runtime-failure" | "deadline" | "signal"
+type AbortReason =
+  | 'provider'
+  | 'reconciliation-failed'
+  | 'permission-reply-failed'
+  | 'runtime-failure'
+  | 'deadline'
+  | 'signal'
 
 interface ProviderRetryStatus {
   readonly type?: string
@@ -379,21 +410,18 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
   const resolveRuntimeFailure = (failure: RuntimeEventFailure) => {
     if (runtimeFailure !== null) return
     runtimeFailure = failure
-    resolveAbort("runtime-failure")
+    resolveAbort('runtime-failure')
   }
   const resolveProviderAbort = () => {
     if (retryTracker.abortedDueToNonRecoverable() || retryTracker.abortedDueToThreshold()) {
-      resolveAbort("provider")
+      resolveAbort('provider')
     }
   }
   const reconcileRetryStatus = async () => {
-    const response = await args.client.session.status(
-      { directory: args.directory },
-      { throwOnError: true },
-    )
+    const response = await args.client.session.status({ directory: args.directory }, { throwOnError: true })
     const statuses = response.data
-    if (!statuses || typeof statuses !== "object") {
-      throw new Error("session.status returned no status map")
+    if (!statuses || typeof statuses !== 'object') {
+      throw new Error('session.status returned no status map')
     }
     retryTracker.observeStatus((statuses as Record<string, ProviderRetryStatus>)[args.sessionId])
     resolveProviderAbort()
@@ -402,7 +430,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     if (reconciliationInFlight !== null) return
     const pending = reconcileRetryStatus().catch((cause) => {
       reconciliationFailure = providerStatusDiagnostic(cause)
-      resolveAbort("reconciliation-failed")
+      resolveAbort('reconciliation-failed')
     })
     reconciliationInFlight = pending
     args.trackPendingOperation?.(pending)
@@ -414,26 +442,32 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     const requestId = permissionRequestIdFor(event, args.sessionId, args.directory)
     if (requestId === null || repliedPermissionIds.has(requestId)) return
     repliedPermissionIds.add(requestId)
-    const pendingReply = args.client.permission.reply({
-      requestID: requestId,
-      directory: args.directory,
-      reply: "once",
-    }, { throwOnError: true }).then((response) => {
-      if (response.data !== true) {
-        throw new Error("OpenCode permission.reply did not confirm the permission was handled")
-      }
-    }).catch((cause) => {
-      permissionFailure = {
-        severity: "error",
-        code: "permission-reply-failed",
-        message: `Failed to reply to OpenCode permission request: ${errorMessage(cause, "unknown permission error")}`,
-      }
-      resolveAbort("permission-reply-failed")
-    })
+    const pendingReply = args.client.permission
+      .reply(
+        {
+          requestID: requestId,
+          directory: args.directory,
+          reply: 'once',
+        },
+        { throwOnError: true },
+      )
+      .then((response) => {
+        if (response.data !== true) {
+          throw new Error('OpenCode permission.reply did not confirm the permission was handled')
+        }
+      })
+      .catch((cause) => {
+        permissionFailure = {
+          severity: 'error',
+          code: 'permission-reply-failed',
+          message: `Failed to reply to OpenCode permission request: ${errorMessage(cause, 'unknown permission error')}`,
+        }
+        resolveAbort('permission-reply-failed')
+      })
     args.trackPendingOperation?.(pendingReply)
   }
   const unsubscribe = args.events.subscribe((event) => {
-    if (event.type === "server.connected") startReconciliation()
+    if (event.type === 'server.connected') startReconciliation()
     respondToPermissionRequest(event)
     retryTracker.observe(event)
     resolveProviderAbort()
@@ -443,13 +477,13 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
 
   let abortHandler: (() => void) | null = null
   const onAbort = () => {
-    resolveAbort(args.deadlineExpired() ? "deadline" : "signal")
+    resolveAbort(args.deadlineExpired() ? 'deadline' : 'signal')
   }
   if (args.signal.aborted) {
     onAbort()
   } else {
-    args.signal.addEventListener("abort", onAbort, { once: true })
-    abortHandler = () => args.signal.removeEventListener("abort", onAbort)
+    args.signal.addEventListener('abort', onAbort, { once: true })
+    abortHandler = () => args.signal.removeEventListener('abort', onAbort)
   }
 
   const promptDiagnostics: RuntimeDiagnostic[] = []
@@ -463,30 +497,59 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     )
     args.trackPendingOperation?.(initialStatus)
     const initialRace = await Promise.race([initialStatus, abortPromise.promise])
-    if (typeof initialRace === "string") {
-      return finishAbortedTurn(args, retryTracker, initialRace, reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+    if (typeof initialRace === 'string') {
+      return finishAbortedTurn(
+        args,
+        retryTracker,
+        initialRace,
+        reconciliationFailure,
+        permissionFailure,
+        promptDiagnostics,
+        runtimeFailure,
+      )
     }
     if (!initialRace.ok) {
       const diagnostic = providerStatusDiagnostic(initialRace.cause)
       const error = normalizeUnavailableRuntime([diagnostic])
-      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
+      return { kind: 'failure', error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
     }
     if (requestedAbort !== null) {
-      return finishAbortedTurn(args, retryTracker, requestedAbort, reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+      return finishAbortedTurn(
+        args,
+        retryTracker,
+        requestedAbort,
+        reconciliationFailure,
+        permissionFailure,
+        promptDiagnostics,
+        runtimeFailure,
+      )
     }
 
-    const promptCall = args.client.session.prompt({
-      sessionID: args.sessionId,
-      directory: args.directory,
-      ...buildPromptBody(args.prompt, args.fileParts, args.model, args.variant),
-    }, { throwOnError: true }).then(
-      (response: unknown) => ({ ok: true as const, response }),
-      (cause: unknown) => ({ ok: false as const, cause }),
-    )
+    const promptCall = args.client.session
+      .prompt(
+        {
+          sessionID: args.sessionId,
+          directory: args.directory,
+          ...buildPromptBody(args.prompt, args.fileParts, args.model, args.variant),
+        },
+        { throwOnError: true },
+      )
+      .then(
+        (response: unknown) => ({ ok: true as const, response }),
+        (cause: unknown) => ({ ok: false as const, cause }),
+      )
     args.trackPendingOperation?.(promptCall)
     const raced = await Promise.race([promptCall, abortPromise.promise])
-    if (typeof raced === "string") {
-      return finishAbortedTurn(args, retryTracker, raced, reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+    if (typeof raced === 'string') {
+      return finishAbortedTurn(
+        args,
+        retryTracker,
+        raced,
+        reconciliationFailure,
+        permissionFailure,
+        promptDiagnostics,
+        runtimeFailure,
+      )
     }
     promptOutcome = raced as { ok: true; response: unknown } | { ok: false; cause: unknown }
   } finally {
@@ -496,24 +559,56 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
   }
 
   if (runtimeFailure !== null) {
-    return finishAbortedTurn(args, retryTracker, "runtime-failure", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+    return finishAbortedTurn(
+      args,
+      retryTracker,
+      'runtime-failure',
+      reconciliationFailure,
+      permissionFailure,
+      promptDiagnostics,
+      runtimeFailure,
+    )
   }
 
   if (!promptOutcome.ok) {
     if (retryTracker.abortedDueToNonRecoverable() || retryTracker.abortedDueToThreshold()) {
-      return finishAbortedTurn(args, retryTracker, "provider", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+      return finishAbortedTurn(
+        args,
+        retryTracker,
+        'provider',
+        reconciliationFailure,
+        permissionFailure,
+        promptDiagnostics,
+        runtimeFailure,
+      )
     }
     if (reconciliationFailure !== null) {
-      return finishAbortedTurn(args, retryTracker, "reconciliation-failed", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+      return finishAbortedTurn(
+        args,
+        retryTracker,
+        'reconciliation-failed',
+        reconciliationFailure,
+        permissionFailure,
+        promptDiagnostics,
+        runtimeFailure,
+      )
     }
     if (args.signal.aborted) {
-      return finishAbortedTurn(args, retryTracker, args.deadlineExpired() ? "deadline" : "signal", reconciliationFailure, permissionFailure, promptDiagnostics, runtimeFailure)
+      return finishAbortedTurn(
+        args,
+        retryTracker,
+        args.deadlineExpired() ? 'deadline' : 'signal',
+        reconciliationFailure,
+        permissionFailure,
+        promptDiagnostics,
+        runtimeFailure,
+      )
     }
     if (isTransportFailure(promptOutcome.cause)) {
       return finishTransportFailure(args, promptOutcome.cause, promptDiagnostics)
     }
-    const error = toUnavailableOrTurnError(promptOutcome.cause, "OpenCode prompt failed")
-    return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
+    const error = toUnavailableOrTurnError(promptOutcome.cause, 'OpenCode prompt failed')
+    return { kind: 'failure', error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
   }
 
   const finalText = extractFinalAssistantText(promptOutcome.response)
@@ -522,7 +617,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     runtimeSessionId: args.sessionId,
     workDir: args.directory,
   }
-  return { kind: "success", value: { facts, diagnostics: [...promptDiagnostics], response: promptOutcome.response } }
+  return { kind: 'success', value: { facts, diagnostics: [...promptDiagnostics], response: promptOutcome.response } }
 }
 
 async function finishTransportFailure(
@@ -531,17 +626,21 @@ async function finishTransportFailure(
   promptDiagnostics: RuntimeDiagnostic[],
 ): Promise<PromptFailure> {
   const transportDiagnostic: RuntimeDiagnostic = {
-    severity: "error",
-    code: "opencode-transport-failed",
-    message: `OpenCode local transport failed: ${errorMessage(cause, "unknown transport error")}`,
+    severity: 'error',
+    code: 'opencode-transport-failed',
+    message: `OpenCode local transport failed: ${errorMessage(cause, 'unknown transport error')}`,
   }
   const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
   if (!abortResult.ok) {
-    const error = normalizeAbortUnconfirmed(abortResult.message, [...promptDiagnostics, transportDiagnostic], abortResult.code)
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    const error = normalizeAbortUnconfirmed(
+      abortResult.message,
+      [...promptDiagnostics, transportDiagnostic],
+      abortResult.code,
+    )
+    return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
   }
-  const error = toUnavailableOrTurnError(cause, "OpenCode local transport failed")
-  return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics, transportDiagnostic] }
+  const error = toUnavailableOrTurnError(cause, 'OpenCode local transport failed')
+  return { kind: 'failure', error, diagnostics: [...error.diagnostics, ...promptDiagnostics, transportDiagnostic] }
 }
 
 interface RetryTracker {
@@ -558,11 +657,11 @@ function permissionRequestIdFor(
   expectedSessionId: string,
   expectedDirectory: string,
 ): string | null {
-  if (event.type !== "permission.asked") return null
+  if (event.type !== 'permission.asked') return null
   if (event.sessionID !== expectedSessionId) return null
   if (event.directory !== undefined && event.directory !== expectedDirectory) return null
-  const requestId = event.payload?.["id"]
-  return typeof requestId === "string" && requestId.length > 0 ? requestId : null
+  const requestId = event.payload?.['id']
+  return typeof requestId === 'string' && requestId.length > 0 ? requestId : null
 }
 
 function createRetryTracker(
@@ -573,16 +672,19 @@ function createRetryTracker(
   let lastAttempt = 0
   let nonRecoverableHit = false
   let thresholdHit = false
-  let nonRecoverableMessage = ""
-  let thresholdMessage = ""
+  let nonRecoverableMessage = ''
+  let thresholdMessage = ''
   let nonRecoverableActionReason: string | undefined
 
   const observeStatus = (status: ProviderRetryStatus | undefined) => {
-    if (!status || status.type !== "retry") return
-    const attempt = typeof status.attempt === "number" ? status.attempt : 0
-    const message = typeof status.message === "string" ? status.message : ""
+    if (!status || status.type !== 'retry') return
+    const attempt = typeof status.attempt === 'number' ? status.attempt : 0
+    const message = typeof status.message === 'string' ? status.message : ''
     lastAttempt = attempt
-    if (!nonRecoverableHit && isNonRecoverableProviderRetry({ message, action: status.action }, policy.nonRecoverablePatterns)) {
+    if (
+      !nonRecoverableHit &&
+      isNonRecoverableProviderRetry({ message, action: status.action }, policy.nonRecoverablePatterns)
+    ) {
       nonRecoverableHit = true
       nonRecoverableMessage = message
       nonRecoverableActionReason = status.action?.reason
@@ -594,12 +696,12 @@ function createRetryTracker(
   }
 
   const observe = (event: RuntimeGlobalEvent) => {
-    if (event.type !== "session.status") return
+    if (event.type !== 'session.status') return
     const props = event.payload ?? {}
-    const sessionID = (props["sessionID"] as string | undefined) ?? event.sessionID
+    const sessionID = (props['sessionID'] as string | undefined) ?? event.sessionID
     if (sessionID !== expectedSessionId) return
     if (event.directory !== undefined && event.directory !== expectedDirectory) return
-    observeStatus(props["status"] as ProviderRetryStatus | undefined)
+    observeStatus(props['status'] as ProviderRetryStatus | undefined)
   }
 
   return {
@@ -607,23 +709,33 @@ function createRetryTracker(
     observeStatus,
     abortedDueToNonRecoverable: () => nonRecoverableHit,
     abortedDueToThreshold: () => thresholdHit,
-    nonRecoverableVerdict: () => nonRecoverableHit ? {
-      message: nonRecoverableMessage,
-      diagnostics: [{
-        severity: "error",
-        code: "provider-quota-exhausted",
-        message: `Provider error judged non-recoverable on retry attempt ${lastAttempt}: ${nonRecoverableMessage}`,
-        ...(nonRecoverableActionReason ? { details: { actionReason: nonRecoverableActionReason } } : {}),
-      }],
-    } : null,
-    thresholdVerdict: () => thresholdHit ? {
-      message: thresholdMessage,
-      diagnostics: [{
-        severity: "error",
-        code: "provider-retry-threshold",
-        message: `Provider error retry attempt reached ${lastAttempt} (>= ${policy.consecutiveRetryThreshold}) without completion: ${thresholdMessage}`,
-      }],
-    } : null,
+    nonRecoverableVerdict: () =>
+      nonRecoverableHit
+        ? {
+            message: nonRecoverableMessage,
+            diagnostics: [
+              {
+                severity: 'error',
+                code: 'provider-quota-exhausted',
+                message: `Provider error judged non-recoverable on retry attempt ${lastAttempt}: ${nonRecoverableMessage}`,
+                ...(nonRecoverableActionReason ? { details: { actionReason: nonRecoverableActionReason } } : {}),
+              },
+            ],
+          }
+        : null,
+    thresholdVerdict: () =>
+      thresholdHit
+        ? {
+            message: thresholdMessage,
+            diagnostics: [
+              {
+                severity: 'error',
+                code: 'provider-retry-threshold',
+                message: `Provider error retry attempt reached ${lastAttempt} (>= ${policy.consecutiveRetryThreshold}) without completion: ${thresholdMessage}`,
+              },
+            ],
+          }
+        : null,
   }
 }
 
@@ -644,69 +756,69 @@ async function finishAbortedTurn(
     ...promptDiagnostics,
   ]
   const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
-  if (reason === "deadline") {
+  if (reason === 'deadline') {
     const diagnostics = abortResult.ok
       ? contextDiagnostics
-      : [...contextDiagnostics, { severity: "error" as const, code: abortResult.code, message: abortResult.message }]
+      : [...contextDiagnostics, { severity: 'error' as const, code: abortResult.code, message: abortResult.message }]
     const error = normalizeDeadlineExceeded(args.deadlineMs ?? 0, diagnostics)
     const finalError = abortResult.ok
       ? error
       : { ...error, message: `${error.message}; cleanup: ${abortResult.message}` }
-    return { kind: "failure", error: finalError, diagnostics: [...finalError.diagnostics] }
+    return { kind: 'failure', error: finalError, diagnostics: [...finalError.diagnostics] }
   }
-  if (reason === "runtime-failure" && runtimeFailure) {
+  if (reason === 'runtime-failure' && runtimeFailure) {
     if (!abortResult.ok) {
       const error = {
         ...runtimeFailure,
         message: `${runtimeFailure.message}; cleanup: ${abortResult.message}`,
-        diagnostics: [...runtimeFailure.diagnostics, { severity: "error" as const, code: abortResult.code, message: abortResult.message }],
+        diagnostics: [
+          ...runtimeFailure.diagnostics,
+          { severity: 'error' as const, code: abortResult.code, message: abortResult.message },
+        ],
       }
-      return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+      return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
     }
-    return { kind: "failure", error: runtimeFailure, diagnostics: [...runtimeFailure.diagnostics] }
+    return { kind: 'failure', error: runtimeFailure, diagnostics: [...runtimeFailure.diagnostics] }
   }
   if (!abortResult.ok) {
     const error = normalizeAbortUnconfirmed(abortResult.message, contextDiagnostics, abortResult.code)
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
   }
 
   const nonRecoverable = retryTracker.nonRecoverableVerdict()
   if (nonRecoverable) {
-    const error = normalizeTurnFailed(
-      { message: nonRecoverable.message },
-      [...nonRecoverable.diagnostics, ...promptDiagnostics],
-    )
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    const error = normalizeTurnFailed({ message: nonRecoverable.message }, [
+      ...nonRecoverable.diagnostics,
+      ...promptDiagnostics,
+    ])
+    return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
   }
 
   const threshold = retryTracker.thresholdVerdict()
   if (threshold) {
-    const error = normalizeTurnFailed(
-      { message: threshold.message },
-      [...threshold.diagnostics, ...promptDiagnostics],
-    )
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    const error = normalizeTurnFailed({ message: threshold.message }, [...threshold.diagnostics, ...promptDiagnostics])
+    return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
   }
 
-  if (reason === "reconciliation-failed" && reconciliationFailure) {
+  if (reason === 'reconciliation-failed' && reconciliationFailure) {
     const error = normalizeUnavailableRuntime([reconciliationFailure, ...promptDiagnostics])
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
   }
 
-  if (reason === "permission-reply-failed" && permissionFailure) {
+  if (reason === 'permission-reply-failed' && permissionFailure) {
     const error = normalizePermissionRequired([permissionFailure, ...promptDiagnostics])
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
   }
 
   const error = normalizeInterrupted(promptDiagnostics)
-  return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  return { kind: 'failure', error, diagnostics: [...error.diagnostics] }
 }
 
 function providerStatusDiagnostic(cause: unknown): RuntimeDiagnostic {
   return {
-    severity: "error",
-    code: "status-reconciliation-failed",
-    message: `Failed to reconcile OpenCode Session status: ${errorMessage(cause, "unknown status error")}`,
+    severity: 'error',
+    code: 'status-reconciliation-failed',
+    message: `Failed to reconcile OpenCode Session status: ${errorMessage(cause, 'unknown status error')}`,
   }
 }
 
@@ -716,12 +828,12 @@ function buildPromptBody(
   model: { providerID: string; modelID: string } | null,
   variant: string | null,
 ) {
-  const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; filename: string; url: string }> = [
-    { type: "text", text: prompt },
+  const parts: Array<{ type: 'text'; text: string } | { type: 'file'; mime: string; filename: string; url: string }> = [
+    { type: 'text', text: prompt },
   ]
   if (fileParts) {
     for (const part of fileParts) {
-      parts.push({ type: "file", mime: part.mime, filename: part.filename, url: part.url })
+      parts.push({ type: 'file', mime: part.mime, filename: part.filename, url: part.url })
     }
   }
   return {
@@ -732,18 +844,18 @@ function buildPromptBody(
 }
 
 function extractFinalAssistantText(response: unknown): string | null {
-  if (!response || typeof response !== "object") return null
+  if (!response || typeof response !== 'object') return null
   const data = (response as { data?: unknown }).data
-  if (!data || typeof data !== "object") return null
+  if (!data || typeof data !== 'object') return null
   const parts = (data as { parts?: unknown }).parts
   if (!Array.isArray(parts)) return null
   const chunks: string[] = []
   for (const part of parts) {
-    if (!part || typeof part !== "object") continue
+    if (!part || typeof part !== 'object') continue
     const text = (part as { text?: unknown }).text
-    if (typeof text === "string") chunks.push(text)
+    if (typeof text === 'string') chunks.push(text)
   }
-  const joined = chunks.join("").trim()
+  const joined = chunks.join('').trim()
   return joined.length > 0 ? joined : null
 }
 
@@ -751,69 +863,86 @@ export async function abortAndConfirmSession(
   client: OpencodeClient,
   sessionId: string,
   directory: string,
-): Promise<{ ok: true } | { ok: false; code: "abort-unconfirmed" | "abort-cleanup-timeout" | "status-cleanup-timeout"; message: string; missingSession?: boolean }> {
-  let aborted: Awaited<ReturnType<OpencodeClient["session"]["abort"]>>
+): Promise<
+  | { ok: true }
+  | {
+      ok: false
+      code: 'abort-unconfirmed' | 'abort-cleanup-timeout' | 'status-cleanup-timeout'
+      message: string
+      missingSession?: boolean
+    }
+> {
+  let aborted: Awaited<ReturnType<OpencodeClient['session']['abort']>>
   try {
     aborted = await withCleanupTimeout(
-      () => client.session.abort(
-        { sessionID: sessionId, directory },
-        { throwOnError: true },
-      ),
-      "abort",
+      () => client.session.abort({ sessionID: sessionId, directory }, { throwOnError: true }),
+      'abort',
     )
   } catch (cause) {
-    const timedOut = isCleanupTimeout(cause, "abort")
+    const timedOut = isCleanupTimeout(cause, 'abort')
     const missingSession = (cause as { status?: number } | undefined)?.status === 404
     return {
       ok: false,
-      code: timedOut ? "abort-cleanup-timeout" : "abort-unconfirmed",
+      code: timedOut ? 'abort-cleanup-timeout' : 'abort-unconfirmed',
       ...(missingSession ? { missingSession: true } : {}),
       message: timedOut
         ? `OpenCode session.abort cleanup timed out after ${CLEANUP_OPERATION_TIMEOUT_MS}ms`
-        : `OpenCode session.abort failed to confirm the turn was stopped: ${errorMessage(cause, "unknown abort error")}`,
+        : `OpenCode session.abort failed to confirm the turn was stopped: ${errorMessage(cause, 'unknown abort error')}`,
     }
   }
 
   if (aborted.data !== true) {
-    return { ok: false, code: "abort-unconfirmed", message: "OpenCode session.abort did not confirm the turn was stopped" }
+    return {
+      ok: false,
+      code: 'abort-unconfirmed',
+      message: 'OpenCode session.abort did not confirm the turn was stopped',
+    }
   }
 
   try {
     const statusResponse = await withCleanupTimeout(
-      () => client.session.status(
-        { directory },
-        { throwOnError: true },
-      ),
-      "status",
+      () => client.session.status({ directory }, { throwOnError: true }),
+      'status',
     )
     const statuses = statusResponse.data
-    if (!statuses || typeof statuses !== "object") {
-      return { ok: false, code: "abort-unconfirmed", message: "OpenCode session.status returned no status map after abort" }
+    if (!statuses || typeof statuses !== 'object') {
+      return {
+        ok: false,
+        code: 'abort-unconfirmed',
+        message: 'OpenCode session.status returned no status map after abort',
+      }
     }
     const status = (statuses as Record<string, ProviderRetryStatus>)[sessionId]
-    if (status !== undefined && status.type !== "idle") {
-      return { ok: false, code: "abort-unconfirmed", message: `OpenCode Session remained ${status.type ?? "active"} after abort` }
+    if (status !== undefined && status.type !== 'idle') {
+      return {
+        ok: false,
+        code: 'abort-unconfirmed',
+        message: `OpenCode Session remained ${status.type ?? 'active'} after abort`,
+      }
     }
     return { ok: true }
   } catch (cause) {
-    const timedOut = isCleanupTimeout(cause, "status")
+    const timedOut = isCleanupTimeout(cause, 'status')
     return {
       ok: false,
-      code: timedOut ? "status-cleanup-timeout" : "abort-unconfirmed",
+      code: timedOut ? 'status-cleanup-timeout' : 'abort-unconfirmed',
       message: timedOut
         ? `OpenCode session.status cleanup timed out after ${CLEANUP_OPERATION_TIMEOUT_MS}ms`
-        : `OpenCode session.status failed after abort: ${errorMessage(cause, "unknown status error")}`,
+        : `OpenCode session.status failed after abort: ${errorMessage(cause, 'unknown status error')}`,
     }
   }
 }
 
-async function withCleanupTimeout<T>(operation: () => Promise<T>, operationName: "abort" | "status"): Promise<T> {
+async function withCleanupTimeout<T>(operation: () => Promise<T>, operationName: 'abort' | 'status'): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
       operation(),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`session.${operationName} cleanup timeout`)), CLEANUP_OPERATION_TIMEOUT_MS)
+        timer = setTimeout(
+          () => reject(new Error(`session.${operationName} cleanup timeout`)),
+          CLEANUP_OPERATION_TIMEOUT_MS,
+        )
       }),
     ])
   } finally {
@@ -821,7 +950,7 @@ async function withCleanupTimeout<T>(operation: () => Promise<T>, operationName:
   }
 }
 
-function isCleanupTimeout(cause: unknown, operationName: "abort" | "status"): boolean {
+function isCleanupTimeout(cause: unknown, operationName: 'abort' | 'status'): boolean {
   return cause instanceof Error && cause.message === `session.${operationName} cleanup timeout`
 }
 
@@ -860,15 +989,18 @@ async function injectDeadlineWarning(
   diagnostics: RuntimeDiagnostic[],
 ): Promise<void> {
   try {
-    await client.session.promptAsync({
-      sessionID: args.sessionId,
-      directory: args.directory,
-      parts: [{ type: "text", text: DEADLINE_WARNING_TEXT }],
-    }, { throwOnError: true })
+    await client.session.promptAsync(
+      {
+        sessionID: args.sessionId,
+        directory: args.directory,
+        parts: [{ type: 'text', text: DEADLINE_WARNING_TEXT }],
+      },
+      { throwOnError: true },
+    )
   } catch (cause) {
     diagnostics.push({
-      severity: "info",
-      code: "deadline-warning-injection-failed",
+      severity: 'info',
+      code: 'deadline-warning-injection-failed',
       message: `Failed to inject deadline wrap-up warning; the turn continues without it: ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
@@ -889,8 +1021,8 @@ function toRawSdkError(cause: unknown, fallback: string) {
     const error = cause as Error & { status?: number; code?: string; cause?: unknown }
     return {
       message: error.message || fallback,
-      ...(typeof error.status === "number" ? { status: error.status } : {}),
-      ...(typeof error.code === "string" ? { code: error.code } : {}),
+      ...(typeof error.status === 'number' ? { status: error.status } : {}),
+      ...(typeof error.code === 'string' ? { code: error.code } : {}),
       ...(error.cause === undefined ? {} : { cause: error.cause }),
     }
   }

@@ -11,7 +11,12 @@ import { useMswServer } from '../../../../tests/support/msw'
 
 function LocationProbe() {
   const location = useLocation()
-  return <div data-testid="current-path">{location.pathname}{location.search}</div>
+  return (
+    <div data-testid="current-path">
+      {location.pathname}
+      {location.search}
+    </div>
+  )
 }
 
 let _epicsData: unknown[] = []
@@ -32,7 +37,7 @@ useMswServer(
     return HttpResponse.json({ success: true, data: _epicsData })
   }),
   http.post('*/api/projects/:projectId/epics', async ({ request }) => {
-    const body = await request.json() as Record<string, string>
+    const body = (await request.json()) as Record<string, string>
     _createEpicHandler(body)
     return HttpResponse.json({ success: true, data: { projectId: 'proj-1', number: 999, ...body } })
   }),
@@ -40,12 +45,12 @@ useMswServer(
     _startIssueHandler(Number(params.issueNumber))
     if (_blockStartIssue) return new Promise(() => {})
     if (_startIssueError) {
-      return HttpResponse.json(
-        { success: false, error: _startIssueError.error },
-        { status: _startIssueError.status },
-      )
+      return HttpResponse.json({ success: false, error: _startIssueError.error }, { status: _startIssueError.status })
     }
-    return HttpResponse.json({ success: true, data: { issue: { number: Number(params.issueNumber) }, message: 'started' } })
+    return HttpResponse.json({
+      success: true,
+      data: { issue: { number: Number(params.issueNumber) }, message: 'started' },
+    })
   }),
 )
 
@@ -191,8 +196,16 @@ function renderPage() {
 }
 
 async function waitForList() {
-  const sections = ['epic-section-running', 'epic-section-ready', 'epic-section-waiting', 'epic-section-idle', 'epic-section-done', 'epic-section-closed', 'epic-section-paused']
-  await Promise.any(sections.map(id => screen.findByTestId(id, {}, { timeout: 5000 })))
+  const sections = [
+    'epic-section-running',
+    'epic-section-ready',
+    'epic-section-waiting',
+    'epic-section-idle',
+    'epic-section-done',
+    'epic-section-closed',
+    'epic-section-paused',
+  ]
+  await Promise.any(sections.map((id) => screen.findByTestId(id, {}, { timeout: 5000 })))
 }
 
 describe('EpicListPage four-group rendering', () => {
@@ -213,8 +226,8 @@ describe('EpicListPage four-group rendering', () => {
     await waitForList()
 
     const headings = screen.getAllByRole('heading', { level: 2 })
-    const headingTexts = headings.map(h => h.textContent ?? '')
-    const orderOf = (prefix: string) => headingTexts.findIndex(t => t.startsWith(prefix))
+    const headingTexts = headings.map((h) => h.textContent ?? '')
+    const orderOf = (prefix: string) => headingTexts.findIndex((t) => t.startsWith(prefix))
 
     const runningIdx = orderOf('Running')
     const readyIdx = orderOf('Ready to start')
@@ -310,7 +323,15 @@ describe('EpicListPage four-group rendering', () => {
   })
 
   it('does not change server data when toggling sections', async () => {
-    const dataSnapshot = [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic, doneEpic, closedEpic]
+    const dataSnapshot = [
+      runningEpic,
+      readyToStartEpic,
+      waitingBlockedEpic,
+      idleReadyEpic,
+      idleEmptyEpic,
+      doneEpic,
+      closedEpic,
+    ]
     _epicsData = dataSnapshot
 
     renderPage()
@@ -569,10 +590,10 @@ describe('EpicListPage basic actions', () => {
     await waitForList()
 
     const sections = screen.getAllByRole('heading', { level: 2 })
-    const sectionTexts = sections.map(h => h.textContent)
-    const readyIdx = sectionTexts.findIndex(t => t?.startsWith('Ready to start'))
-    const pausedIdx = sectionTexts.findIndex(t => t?.startsWith('Paused'))
-    const doneIdx = sectionTexts.findIndex(t => t?.startsWith('Done'))
+    const sectionTexts = sections.map((h) => h.textContent)
+    const readyIdx = sectionTexts.findIndex((t) => t?.startsWith('Ready to start'))
+    const pausedIdx = sectionTexts.findIndex((t) => t?.startsWith('Paused'))
+    const doneIdx = sectionTexts.findIndex((t) => t?.startsWith('Done'))
 
     expect(readyIdx).not.toBe(-1)
     expect(pausedIdx).not.toBe(-1)
@@ -586,7 +607,7 @@ describe('EpicListPage basic actions', () => {
 
     const badges = screen.getAllByText('Paused')
     expect(badges.length).toBeGreaterThan(0)
-    const pausedBadge = badges.find(b => b.tagName !== 'H2') as HTMLElement
+    const pausedBadge = badges.find((b) => b.tagName !== 'H2') as HTMLElement
     expect(pausedBadge).toBeTruthy()
     expect(pausedCard!.textContent).toContain('Next: #11')
     expect(pausedCard!.textContent).toContain('Resume-ready paused work')
@@ -673,9 +694,11 @@ describe('EpicListPage basic actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Epic' }))
 
     await vi.waitFor(() => {
-      expect(_createEpicHandler).toHaveBeenCalledWith(
-        { title: 'New Goal', description: 'Ship the goal', priority: 'p1' },
-      )
+      expect(_createEpicHandler).toHaveBeenCalledWith({
+        title: 'New Goal',
+        description: 'Ship the goal',
+        priority: 'p1',
+      })
     })
   })
 
@@ -723,8 +746,8 @@ describe('EpicListPage numbered display', () => {
 
     const numbers = screen.getAllByTestId('epic-number')
     expect(numbers.length).toBeGreaterThanOrEqual(2)
-    expect(numbers.some(n => n.textContent === '#7')).toBe(true)
-    expect(numbers.some(n => n.textContent === '#8')).toBe(true)
+    expect(numbers.some((n) => n.textContent === '#7')).toBe(true)
+    expect(numbers.some((n) => n.textContent === '#8')).toBe(true)
   })
 
   it('displays the canonical epic number', async () => {
@@ -789,25 +812,36 @@ describe('EpicListPage responsive markup', () => {
   it('keeps status badge and current/next issue number visible (state-bearing strings not truncated)', async () => {
     _epicsData = [
       makeEpic({
-        title: 'A very long epic title that should wrap across multiple lines on narrow viewports without clipping the badge',
+        title:
+          'A very long epic title that should wrap across multiple lines on narrow viewports without clipping the badge',
         progress: {
           deliveredCount: 0,
           totalIssueCount: 1,
           blockedIssues: [],
-          activeIssues: [{ number: 12345, title: 'A current issue with a very long descriptive title that may otherwise be truncated', health: 'active' }],
+          activeIssues: [
+            {
+              number: 12345,
+              title: 'A current issue with a very long descriptive title that may otherwise be truncated',
+              health: 'active',
+            },
+          ],
           nextIssue: null,
           nextIssueReason: null,
           readyToMarkDone: false,
         },
       }),
       makeEpic({
-        title: 'Another long ready-to-start epic title used to confirm that wrapping also keeps the next issue number visible',
+        title:
+          'Another long ready-to-start epic title used to confirm that wrapping also keeps the next issue number visible',
         progress: {
           deliveredCount: 0,
           totalIssueCount: 1,
           blockedIssues: [],
           activeIssues: [],
-          nextIssue: { number: 67890, title: 'A queued next issue with a long descriptive title that may otherwise be truncated' },
+          nextIssue: {
+            number: 67890,
+            title: 'A queued next issue with a long descriptive title that may otherwise be truncated',
+          },
           nextIssueReason: null,
           readyToMarkDone: false,
         },
@@ -825,7 +859,9 @@ describe('EpicListPage responsive markup', () => {
     expect(next.textContent).toContain('#67890')
     expect(next.className).not.toContain('truncate')
 
-    const heading = screen.getByText('A very long epic title that should wrap across multiple lines on narrow viewports without clipping the badge')
+    const heading = screen.getByText(
+      'A very long epic title that should wrap across multiple lines on narrow viewports without clipping the badge',
+    )
     expect(heading.className).toContain('break-words')
   })
 })

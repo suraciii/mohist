@@ -1,10 +1,6 @@
-import { errorMessage } from "../core/errors.js"
-import type {
-  JsonObject,
-  DispatchWorkItem,
-  WorkItemResult,
-} from "../core/types.js"
-import { isObject } from "../core/json.js"
+import { errorMessage } from '../core/errors.js'
+import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import { isObject } from '../core/json.js'
 import {
   parseModelIdentifier,
   type OpenCodeRuntime,
@@ -13,22 +9,15 @@ import {
   type RuntimeTurnRequest,
   type RuntimeTurnResult,
   type RuntimeFilePart,
-} from "./opencode/index.js"
-import type {
-  PiRuntime,
-  PiRuntimeEvent,
-  PiResult,
-  PiTurnObserver,
-  PiTurnRequest,
-  PiTurnResult,
-} from "./pi/index.js"
-import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime.js"
-import type { ServerConnection } from "../server/connection.js"
-import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
-import { SkillResolver, type ResolvedSkill } from "./skill-resolver.js"
-import { runnerLogger } from "../system/logger.js"
-import { buildExecutionEnvelope } from "./execution-envelope.js"
-import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
+} from './opencode/index.js'
+import type { PiRuntime, PiRuntimeEvent, PiResult, PiTurnObserver, PiTurnRequest, PiTurnResult } from './pi/index.js'
+import { resolveAccessor, type RuntimeAccessor } from '../server/command-runtime.js'
+import type { ServerConnection } from '../server/connection.js'
+import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from './binding-recovery.js'
+import { SkillResolver, type ResolvedSkill } from './skill-resolver.js'
+import { runnerLogger } from '../system/logger.js'
+import { buildExecutionEnvelope } from './execution-envelope.js'
+import { inlineSlackCollaborationSkill, readSlackExecutionContext } from './slack-execution-context.js'
 import {
   attachmentManifestEnvelope,
   buildAttachmentContext,
@@ -36,22 +25,18 @@ import {
   readAttachmentDescriptors,
   type AttachmentDescriptor,
   type DeliveredAttachment,
-} from "./attachment-delivery.js"
+} from './attachment-delivery.js'
 import {
   type NamedWorkspaceManager,
   type NamedWorkspaceRepository,
   WorkspaceHomeClaimedError,
-} from "./workspace-entity.js"
+} from './workspace-entity.js'
 
-const log = runnerLogger.child("job")
+const log = runnerLogger.child('job')
 
 const DEFAULT_MODEL_RETRY_INITIAL_DELAY_MS = 1_000
 const DEFAULT_MODEL_RETRY_MAX_DELAY_MS = 30_000
-const MODEL_UNAVAILABLE_CODES = new Set([
-  "model-unavailable",
-  "model-not-found",
-  "model-not-available",
-])
+const MODEL_UNAVAILABLE_CODES = new Set(['model-unavailable', 'model-not-found', 'model-not-available'])
 
 export type ModelRetryWaiter = (delayMs: number, signal: AbortSignal) => Promise<boolean>
 
@@ -104,29 +89,34 @@ export class AgentJobExecutor {
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
-    if (work.ownerKind !== "agent-job") {
-      return failureResult("invalid-dispatch", `AgentJobExecutor received non-agent-job work (ownerKind=${work.ownerKind ?? "null"})`)
+    if (work.ownerKind !== 'agent-job') {
+      return failureResult(
+        'invalid-dispatch',
+        `AgentJobExecutor received non-agent-job work (ownerKind=${work.ownerKind ?? 'null'})`,
+      )
     }
 
     const payload = work.with ?? null
     const prompt = readPrompt(payload)
     const attachmentDescriptors = readAttachmentDescriptors(payload)
     if (!prompt && attachmentDescriptors.length === 0) {
-      return failureResult("invalid-input", "AgentJob requires 'prompt' or at least one accepted attachment in dispatch with-payload")
+      return failureResult(
+        'invalid-input',
+        "AgentJob requires 'prompt' or at least one accepted attachment in dispatch with-payload",
+      )
     }
 
-    const instructions = readOptionalString(payload, "instructions")
+    const instructions = readOptionalString(payload, 'instructions')
     const skillNames = readSkillNames(payload)
     const slackContext = readSlackExecutionContext(payload)
-    if (slackContext.kind === "invalid")
-      return failureResult("invalid-input", slackContext.message)
+    if (slackContext.kind === 'invalid') return failureResult('invalid-input', slackContext.message)
 
     const runtimeName = readRuntime(payload)
-    const modelInput = readOptionalString(payload, "model")
-    const variant = readOptionalString(payload, "variant")
+    const modelInput = readOptionalString(payload, 'model')
+    const variant = readOptionalString(payload, 'variant')
     const model = parseModel(modelInput)
-    if (modelInput && model.kind === "failure") {
-      return failureResult("invalid-input", `AgentJob ${model.message}`)
+    if (modelInput && model.kind === 'failure') {
+      return failureResult('invalid-input', `AgentJob ${model.message}`)
     }
 
     let workspaceBinding: WorkspaceBindingResolution
@@ -134,53 +124,82 @@ export class AgentJobExecutor {
       workspaceBinding = await resolveWorkspaceBinding(work, signal, this.namedWorkspaceManager)
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) {
-        return failureResult("workspace-home-claimed", "AgentJob yielded: the workspace is materialized on another runner; the job retries against the home runner")
+        return failureResult(
+          'workspace-home-claimed',
+          'AgentJob yielded: the workspace is materialized on another runner; the job retries against the home runner',
+        )
       }
       throw error
     }
-    if (workspaceBinding.kind === "invalid") {
-      return failureResult("invalid-input", "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables")
+    if (workspaceBinding.kind === 'invalid') {
+      return failureResult(
+        'invalid-input',
+        "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables",
+      )
     }
-    if (workspaceBinding.kind === "materialization-failed") {
-      return failureResult("workspace-materialization-failed", `AgentJob failed to materialize the named workspace: ${workspaceBinding.message}`)
+    if (workspaceBinding.kind === 'materialization-failed') {
+      return failureResult(
+        'workspace-materialization-failed',
+        `AgentJob failed to materialize the named workspace: ${workspaceBinding.message}`,
+      )
     }
-    const workDir = workspaceBinding.kind === "default" ? this.defaultWorkDir : workspaceBinding.workDir
+    const workDir = workspaceBinding.kind === 'default' ? this.defaultWorkDir : workspaceBinding.workDir
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
-    const skills = slackContext.kind === "resolved"
-      ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext.value)]
-      : resolvedSkills.skills
+    const skills =
+      slackContext.kind === 'resolved'
+        ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext.value)]
+        : resolvedSkills.skills
 
     let attachmentDelivery: readonly DeliveredAttachment[]
     try {
       const delivery = await this.resolveAttachments(work, workDir, attachmentDescriptors, signal)
       attachmentDelivery = delivery.attachments
     } catch (error) {
-      return failureResult("attachment-delivery-failed", `AgentJob failed to resolve attachments: ${errorMessage(error)}`)
+      return failureResult(
+        'attachment-delivery-failed',
+        `AgentJob failed to resolve attachments: ${errorMessage(error)}`,
+      )
     }
     const composed = attachmentManifestEnvelope(
       buildExecutionEnvelope(
-        prompt ?? "",
+        prompt ?? '',
         instructions,
         skills,
-        slackContext.kind === "resolved" ? slackContext.value : null,
+        slackContext.kind === 'resolved' ? slackContext.value : null,
         work.agentSessionStartup,
-        workspaceBinding.kind === "named" ? buildWorkspaceAnchor(workspaceBinding.workDir) : null,
+        workspaceBinding.kind === 'named' ? buildWorkspaceAnchor(workspaceBinding.workDir) : null,
       ),
-      attachmentDelivery)
+      attachmentDelivery,
+    )
 
     let binding: BindingResolution
     try {
       binding = await resolveBinding(work, this.connection, signal)
     } catch (error) {
-      return failureResult("session-binding-failed", `AgentJob failed to resolve the AgentSession binding: ${errorMessage(error)}`)
+      return failureResult(
+        'session-binding-failed',
+        `AgentJob failed to resolve the AgentSession binding: ${errorMessage(error)}`,
+      )
     }
 
-    if (runtimeName === "pi") {
+    if (runtimeName === 'pi') {
       return this.executePi(work, signal, payload, composed, model, modelInput, variant, workDir, binding, skills)
     }
-    return this.executeOpenCode(work, signal, payload, composed, model, modelInput, variant, workDir, binding, skills, attachmentDelivery)
+    return this.executeOpenCode(
+      work,
+      signal,
+      payload,
+      composed,
+      model,
+      modelInput,
+      variant,
+      workDir,
+      binding,
+      skills,
+      attachmentDelivery,
+    )
   }
 
   private async resolveAttachments(
@@ -192,14 +211,17 @@ export class AgentJobExecutor {
     if (descriptors.length === 0 || !work.projectId || !work.agentSessionId || !work.initialInputId) {
       return deliverAcceptedAttachments(buildAttachmentContext(this.connection, work, workDir, signal), descriptors)
     }
-    return deliverAcceptedAttachments({
-      projectId: work.projectId,
-      agentSessionId: work.agentSessionId,
-      inputId: work.initialInputId,
-      workDir,
-      connection: this.connection,
-      signal,
-    }, descriptors)
+    return deliverAcceptedAttachments(
+      {
+        projectId: work.projectId,
+        agentSessionId: work.agentSessionId,
+        inputId: work.initialInputId,
+        workDir,
+        connection: this.connection,
+        signal,
+      },
+      descriptors,
+    )
   }
 
   private async executeOpenCode(
@@ -217,59 +239,79 @@ export class AgentJobExecutor {
   ): Promise<WorkItemResult> {
     const runtime = resolveAccessor(this.runtimes.openCode)
     if (!runtime) {
-      return failureResult("runtime-unavailable", "AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding", "opencode")
+      return failureResult(
+        'runtime-unavailable',
+        'AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding',
+        'opencode',
+      )
     }
     if (!runtime.ready()) {
       const diagnostic = runtime.diagnostic()
-      return failureResult("runtime-unavailable", `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`, "opencode")
+      return failureResult(
+        'runtime-unavailable',
+        `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
+        'opencode',
+      )
     }
 
     let selected = binding.runtimeSessionId
-    if (binding.agentSessionId && work.projectId && selected && typeof runtime.resolveSession === "function") {
+    if (binding.agentSessionId && work.projectId && selected && typeof runtime.resolveSession === 'function') {
       const expected: RuntimeBinding = {
         runnerId: binding.runnerId,
-        runtime: "opencode",
+        runtime: 'opencode',
         runtimeSessionId: selected,
         workDir,
       }
       const recovery = await resolveOrRecoverBinding({
         runnerId: this.connection.runnerId,
         expected,
-        runtime: { kind: "opencode", runtime },
+        runtime: { kind: 'opencode', runtime },
         probe: async (candidate) => {
-          const result = await runtime.resolveSession({ target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-          return result.ok ? { ok: true, activeTurn: result.value.activeTurn } : { ok: false, kind: result.error.kind, message: result.error.message }
+          const result = await runtime.resolveSession({
+            target: { runtime: 'opencode', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
+          })
+          return result.ok
+            ? { ok: true, activeTurn: result.value.activeTurn }
+            : { ok: false, kind: result.error.kind, message: result.error.message }
         },
         replace: async (current, replacement) => {
-          await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {
-            expectedRunnerId: current.runnerId,
-            expectedRuntime: current.runtime,
-            expectedRuntimeSessionId: current.runtimeSessionId,
-            replacementRuntimeSessionId: replacement.runtimeSessionId,
-          }, signal)
+          await this.connection.recoverMissingAgentSession(
+            work.projectId!,
+            binding.agentSessionId!,
+            {
+              expectedRunnerId: current.runnerId,
+              expectedRuntime: current.runtime,
+              expectedRuntimeSessionId: current.runtimeSessionId,
+              replacementRuntimeSessionId: replacement.runtimeSessionId,
+            },
+            signal,
+          )
         },
-        model: model.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
+        model: model.kind === 'ok' ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
         recoveryKey: expected.runtimeSessionId!,
         coordinator: this.bindingRecoveryCoordinator ?? undefined,
       })
-      if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "opencode")
+      if (!recovery.ok) return failureResult(recovery.kind, recovery.message, 'opencode')
       selected = recovery.binding.runtimeSessionId
     }
 
     const fileParts = attachments
-      .filter((entry): entry is Extract<DeliveredAttachment, { status: "delivered" }> => entry.status === "delivered" && entry.filePart !== null)
+      .filter(
+        (entry): entry is Extract<DeliveredAttachment, { status: 'delivered' }> =>
+          entry.status === 'delivered' && entry.filePart !== null,
+      )
       .map((entry) => entry.filePart as RuntimeFilePart)
 
     const turnRequest: RuntimeTurnRequest = {
       target: {
-        runtime: "opencode",
+        runtime: 'opencode',
         runtimeSessionId: selected,
         workDir,
       },
       prompt: composed,
       ...(fileParts.length > 0 ? { fileParts } : {}),
       options: {
-        model: model.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
+        model: model.kind === 'ok' ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
         variant: variant ?? null,
         ...(skills.length > 0 ? { skills } : {}),
         unknownKeys: collectUnknownKeys(payload),
@@ -288,34 +330,40 @@ export class AgentJobExecutor {
     let attachedInputPublished = false
     const observer: RuntimeTurnObserver | undefined = binding.agentSessionId
       ? {
-        onSessionReady: async (session) => {
-          attachedRuntimeSessionId = session.runtimeSessionId
-          await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
-          if (!skipInitialInput && !attachedInputPublished) {
-            attachedInputPublished = true
-            await eventSink.publishSessionInput(composed, session.runtimeSessionId)
-          }
-        },
-        onEvent: (event) => {
-          eventSink.observeEvent(event)
-        },
-      }
+          onSessionReady: async (session) => {
+            attachedRuntimeSessionId = session.runtimeSessionId
+            await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
+            if (!skipInitialInput && !attachedInputPublished) {
+              attachedInputPublished = true
+              await eventSink.publishSessionInput(composed, session.runtimeSessionId)
+            }
+          },
+          onEvent: (event) => {
+            eventSink.observeEvent(event)
+          },
+        }
       : undefined
 
     let result: RuntimeResult<RuntimeTurnResult>
     try {
-      result = await this.runWithModelRetry(work, modelInput, variant, signal, () => runtime.runTurn({
-        ...turnRequest,
-        target: {
-          ...turnRequest.target,
-          runtimeSessionId: attachedRuntimeSessionId ?? selected,
-        },
-      }, signal, observer))
+      result = await this.runWithModelRetry(work, modelInput, variant, signal, () =>
+        runtime.runTurn(
+          {
+            ...turnRequest,
+            target: {
+              ...turnRequest.target,
+              runtimeSessionId: attachedRuntimeSessionId ?? selected,
+            },
+          },
+          signal,
+          observer,
+        ),
+      )
     } catch (error) {
-      return failureResult("turn-failed", `AgentJob turn threw: ${errorMessage(error)}`)
+      return failureResult('turn-failed', `AgentJob turn threw: ${errorMessage(error)}`)
     }
     await eventSink.drain()
-    return projectTurnToWorkItemResult(result, "opencode", modelInput, variant)
+    return projectTurnToWorkItemResult(result, 'opencode', modelInput, variant)
   }
 
   private async executePi(
@@ -332,44 +380,61 @@ export class AgentJobExecutor {
   ): Promise<WorkItemResult> {
     const runtime = resolveAccessor(this.runtimes.pi)
     if (!runtime) {
-      return failureResult("runtime-unavailable", "AgentJob requires the Pi runtime; the runner has not yet established the runtime or it is rebuilding", "pi")
+      return failureResult(
+        'runtime-unavailable',
+        'AgentJob requires the Pi runtime; the runner has not yet established the runtime or it is rebuilding',
+        'pi',
+      )
     }
     if (!runtime.ready()) {
       const diagnostic = runtime.diagnostic()
-      return failureResult("runtime-unavailable", `AgentJob requires the Pi runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`, "pi")
+      return failureResult(
+        'runtime-unavailable',
+        `AgentJob requires the Pi runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
+        'pi',
+      )
     }
 
     const eventSink = createAgentSessionEventSink(this.connection, work, signal, binding.agentSessionId)
     let runtimeSessionId = binding.runtimeSessionId
-    if (binding.agentSessionId && work.projectId && runtimeSessionId && typeof runtime.resolveSession === "function") {
-      const expected: RuntimeBinding = { runnerId: binding.runnerId, runtime: "pi", runtimeSessionId, workDir }
+    if (binding.agentSessionId && work.projectId && runtimeSessionId && typeof runtime.resolveSession === 'function') {
+      const expected: RuntimeBinding = { runnerId: binding.runnerId, runtime: 'pi', runtimeSessionId, workDir }
       const recovery = await resolveOrRecoverBinding({
         runnerId: this.connection.runnerId,
         expected,
-        runtime: { kind: "pi", runtime },
+        runtime: { kind: 'pi', runtime },
         probe: async (candidate) => {
-          const result = await runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-          return result.ok ? { ok: true, activeTurn: result.value.activeTurn } : { ok: false, kind: result.error.kind, message: result.error.message }
+          const result = await runtime.resolveSession({
+            target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
+          })
+          return result.ok
+            ? { ok: true, activeTurn: result.value.activeTurn }
+            : { ok: false, kind: result.error.kind, message: result.error.message }
         },
         replace: async (current, replacement) => {
-          await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {
-            expectedRunnerId: current.runnerId,
-            expectedRuntime: current.runtime,
-            expectedRuntimeSessionId: current.runtimeSessionId,
-            replacementRuntimeSessionId: replacement.runtimeSessionId,
-          }, signal)
+          await this.connection.recoverMissingAgentSession(
+            work.projectId!,
+            binding.agentSessionId!,
+            {
+              expectedRunnerId: current.runnerId,
+              expectedRuntime: current.runtime,
+              expectedRuntimeSessionId: current.runtimeSessionId,
+              replacementRuntimeSessionId: replacement.runtimeSessionId,
+            },
+            signal,
+          )
         },
         recoveryKey: expected.runtimeSessionId!,
         coordinator: this.bindingRecoveryCoordinator ?? undefined,
       })
-      if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "pi")
+      if (!recovery.ok) return failureResult(recovery.kind, recovery.message, 'pi')
       runtimeSessionId = recovery.binding.runtimeSessionId
     }
     if (!runtimeSessionId) {
-      const created = await runtime.createSession({ target: { runtime: "pi", runtimeSessionId: null, workDir } })
+      const created = await runtime.createSession({ target: { runtime: 'pi', runtimeSessionId: null, workDir } })
       if (!created.ok) {
         const code = mapPiErrorKind(created.error.kind)
-        return failureResult(code, created.error.message, "pi", created.error.diagnostics)
+        return failureResult(code, created.error.message, 'pi', created.error.diagnostics)
       }
       runtimeSessionId = created.value.runtimeSessionId
     }
@@ -379,10 +444,10 @@ export class AgentJobExecutor {
     }
 
     const request: PiTurnRequest = {
-      target: { runtime: "pi", runtimeSessionId, workDir },
+      target: { runtime: 'pi', runtimeSessionId, workDir },
       prompt: composed,
       options: {
-        model: model.kind === "ok" ? `${model.value.providerID}/${model.value.modelID}` : null,
+        model: model.kind === 'ok' ? `${model.value.providerID}/${model.value.modelID}` : null,
         variant: variant ?? null,
         ...(skills.length > 0 ? { skills } : {}),
         unknownKeys: collectUnknownKeys(payload),
@@ -390,20 +455,22 @@ export class AgentJobExecutor {
     }
     const observer: PiTurnObserver | undefined = binding.agentSessionId
       ? {
-        onEvent: (event) => {
-          eventSink.observePiEvent(event)
-        },
-      }
+          onEvent: (event) => {
+            eventSink.observePiEvent(event)
+          },
+        }
       : undefined
 
     let result: PiResult<PiTurnResult>
     try {
-      result = await this.runWithModelRetry(work, modelInput, variant, signal, () => runtime.runTurn(request, signal, observer))
+      result = await this.runWithModelRetry(work, modelInput, variant, signal, () =>
+        runtime.runTurn(request, signal, observer),
+      )
     } catch (error) {
-      return failureResult("turn-failed", `AgentJob turn threw: ${errorMessage(error)}`)
+      return failureResult('turn-failed', `AgentJob turn threw: ${errorMessage(error)}`)
     }
     await eventSink.drain()
-    return projectPiTurnToWorkItemResult(result, "pi", modelInput, variant)
+    return projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant)
   }
 
   private async runWithModelRetry<T extends ModelTurnResult>(
@@ -420,7 +487,7 @@ export class AgentJobExecutor {
 
       retryAttempt += 1
       const delayMs = modelRetryDelay(this.options, retryAttempt)
-      log.warn("specified AgentJob model unavailable; retrying same work", {
+      log.warn('specified AgentJob model unavailable; retrying same work', {
         workId: work.workId,
         model: modelInput,
         variant,
@@ -428,7 +495,7 @@ export class AgentJobExecutor {
         delayMs,
       })
       const wait = this.options.waitForModelRetry ?? waitForModelRetry
-      if (signal.aborted || !await wait(delayMs, signal) || signal.aborted) return result
+      if (signal.aborted || !(await wait(delayMs, signal)) || signal.aborted) return result
     }
   }
 }
@@ -440,7 +507,9 @@ function isModelUnavailableResult(result: ModelTurnResult): boolean {
   const diagnostics = [...result.error.diagnostics, ...result.diagnostics]
   if (diagnostics.some((entry) => MODEL_UNAVAILABLE_CODES.has(entry.code.toLowerCase()))) return true
   const messages = diagnostics.map((entry) => entry.message).concat(result.error.message)
-  return messages.some((message) => /\bmodel\b.{0,80}\b(?:unavailable|not available|not found|does not exist)\b/i.test(message))
+  return messages.some((message) =>
+    /\bmodel\b.{0,80}\b(?:unavailable|not available|not found|does not exist)\b/i.test(message),
+  )
 }
 
 function modelRetryDelay(options: AgentJobExecutorOptions, attempt: number): number {
@@ -466,7 +535,7 @@ function waitForModelRetry(delayMs: number, signal: AbortSignal): Promise<boolea
     const finish = (ready: boolean) => {
       if (settled) return
       settled = true
-      signal.removeEventListener("abort", onAbort)
+      signal.removeEventListener('abort', onAbort)
       resolve(ready)
     }
     onAbort = () => {
@@ -474,11 +543,16 @@ function waitForModelRetry(delayMs: number, signal: AbortSignal): Promise<boolea
       finish(false)
     }
     timer = setTimeout(() => finish(true), delayMs)
-    signal.addEventListener("abort", onAbort, { once: true })
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
-type BindingResolution = { agentSessionId: string | null; runnerId: string; runtime: string | null; runtimeSessionId: string | null }
+type BindingResolution = {
+  agentSessionId: string | null
+  runnerId: string
+  runtime: string | null
+  runtimeSessionId: string | null
+}
 
 async function resolveBinding(
   work: DispatchWorkItem,
@@ -499,11 +573,11 @@ async function resolveBinding(
 }
 
 type WorkspaceBindingResolution =
-  | { kind: "default" }
-  | { kind: "invalid" }
-  | { kind: "path"; workDir: string }
-  | { kind: "named"; workDir: string; projectId: string; workspaceName: string }
-  | { kind: "materialization-failed"; message: string }
+  | { kind: 'default' }
+  | { kind: 'invalid' }
+  | { kind: 'path'; workDir: string }
+  | { kind: 'named'; workDir: string; projectId: string; workspaceName: string }
+  | { kind: 'materialization-failed'; message: string }
 
 // Resolve the execution working directory from the dispatch's
 // `variables.workspace`:
@@ -519,36 +593,34 @@ async function resolveWorkspaceBinding(
   signal: AbortSignal,
   namedWorkspaceManager: NamedWorkspaceManager | null,
 ): Promise<WorkspaceBindingResolution> {
-  const ws = work.variables?.["workspace"]
-  if (ws === undefined) return { kind: "default" }
-  if (!isObject(ws)) return { kind: "invalid" }
+  const ws = work.variables?.['workspace']
+  if (ws === undefined) return { kind: 'default' }
+  if (!isObject(ws)) return { kind: 'invalid' }
 
-  const name = ws["name"]
-  if (typeof name === "string" && name.trim().length > 0) {
-    if (!namedWorkspaceManager) return { kind: "invalid" }
+  const name = ws['name']
+  if (typeof name === 'string' && name.trim().length > 0) {
+    if (!namedWorkspaceManager) return { kind: 'invalid' }
     try {
       const materialized = await namedWorkspaceManager.materialize(
-        work.projectId ?? "",
+        work.projectId ?? '',
         name,
         readWorkspaceRepositories(ws),
         signal,
       )
       return {
-        kind: "named",
+        kind: 'named',
         workDir: materialized.path,
-        projectId: work.projectId ?? "",
+        projectId: work.projectId ?? '',
         workspaceName: name,
       }
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) throw error
-      return { kind: "materialization-failed", message: error instanceof Error ? error.message : String(error) }
+      return { kind: 'materialization-failed', message: error instanceof Error ? error.message : String(error) }
     }
   }
 
-  const path = ws["path"]
-  return typeof path === "string" && path.trim().length > 0
-    ? { kind: "path", workDir: path }
-    : { kind: "invalid" }
+  const path = ws['path']
+  return typeof path === 'string' && path.trim().length > 0 ? { kind: 'path', workDir: path } : { kind: 'invalid' }
 }
 
 // The prompt anchor injected when the execution is bound to a named
@@ -561,14 +633,14 @@ function buildWorkspaceAnchor(workDir: string): string {
 }
 
 function readWorkspaceRepositories(ws: Record<string, unknown>): readonly NamedWorkspaceRepository[] {
-  const value = ws["repositories"]
+  const value = ws['repositories']
   if (!Array.isArray(value)) return []
   const repositories: NamedWorkspaceRepository[] = []
   for (const item of value) {
     if (!isObject(item)) continue
-    const name = item["name"]
-    const gitUrl = item["gitUrl"]
-    if (typeof name === "string" && name.length > 0 && typeof gitUrl === "string" && gitUrl.length > 0) {
+    const name = item['name']
+    const gitUrl = item['gitUrl']
+    if (typeof name === 'string' && name.length > 0 && typeof gitUrl === 'string' && gitUrl.length > 0) {
       repositories.push({ name, gitUrl })
     }
   }
@@ -576,8 +648,8 @@ function readWorkspaceRepositories(ws: Record<string, unknown>): readonly NamedW
 }
 
 function readPrompt(payload: JsonObject | null): string | null {
-  const prompt = payload?.["prompt"]
-  if (typeof prompt === "string") {
+  const prompt = payload?.['prompt']
+  if (typeof prompt === 'string') {
     const trimmed = prompt.trim()
     return trimmed.length > 0 ? prompt : null
   }
@@ -586,7 +658,7 @@ function readPrompt(payload: JsonObject | null): string | null {
 
 function readOptionalString(payload: JsonObject | null, key: string): string | null {
   const value = payload?.[key]
-  if (typeof value !== "string") return null
+  if (typeof value !== 'string') return null
   return value.length > 0 ? value : null
 }
 
@@ -596,10 +668,10 @@ function readOptionalString(payload: JsonObject | null, key: string): string | n
  * absent is treated as `opencode` so legacy / partial-rollout
  * dispatches keep their existing behavior.
  */
-function readRuntime(payload: JsonObject | null): "opencode" | "pi" {
-  const value = payload?.["runtime"]
-  if (value === "pi") return "pi"
-  return "opencode"
+function readRuntime(payload: JsonObject | null): 'opencode' | 'pi' {
+  const value = payload?.['runtime']
+  if (value === 'pi') return 'pi'
+  return 'opencode'
 }
 
 function composePrompt(prompt: string, instructions: string | null): string {
@@ -608,20 +680,29 @@ function composePrompt(prompt: string, instructions: string | null): string {
 }
 
 type ParsedModel =
-  | { kind: "ok"; value: { providerID: string; modelID: string } }
-  | { kind: "failure"; message: string }
-  | { kind: "absent" }
+  | { kind: 'ok'; value: { providerID: string; modelID: string } }
+  | { kind: 'failure'; message: string }
+  | { kind: 'absent' }
 
 function parseModel(input: string | null): ParsedModel {
-  if (!input) return { kind: "absent" }
+  if (!input) return { kind: 'absent' }
   const parsed = parseModelIdentifier(input)
-  if (parsed.kind === "failure") return { kind: "failure", message: parsed.message }
-  return { kind: "ok", value: parsed.value }
+  if (parsed.kind === 'failure') return { kind: 'failure', message: parsed.message }
+  return { kind: 'ok', value: parsed.value }
 }
 
 function collectUnknownKeys(payload: JsonObject | null): readonly string[] | undefined {
-  if (!payload || typeof payload !== "object") return undefined
-  const known = new Set(["prompt", "instructions", "model", "variant", "runtime", "skills", "attachments", "slackExecutionContext"])
+  if (!payload || typeof payload !== 'object') return undefined
+  const known = new Set([
+    'prompt',
+    'instructions',
+    'model',
+    'variant',
+    'runtime',
+    'skills',
+    'attachments',
+    'slackExecutionContext',
+  ])
   const unknown: string[] = []
   for (const key of Object.keys(payload)) {
     if (!known.has(key)) unknown.push(key)
@@ -630,15 +711,19 @@ function collectUnknownKeys(payload: JsonObject | null): readonly string[] | und
 }
 
 function readSkillNames(payload: JsonObject | null): readonly string[] {
-  const value = payload?.["skills"]
+  const value = payload?.['skills']
   if (value === undefined || value === null) return []
-  return Array.isArray(value) ? value as string[] : [String(value)]
+  return Array.isArray(value) ? (value as string[]) : [String(value)]
 }
 
 interface AgentSessionEventSink {
   attachSession(runtimeSessionId: string, workDir: string, model: string | null): Promise<void>
   publishSessionInput(text: string, runtimeSessionId: string): Promise<void>
-  observeEvent(event: { readonly type: string; readonly runtimeSessionId: string; readonly payload: Record<string, unknown> }): void
+  observeEvent(event: {
+    readonly type: string
+    readonly runtimeSessionId: string
+    readonly payload: Record<string, unknown>
+  }): void
   observePiEvent(event: PiRuntimeEvent): void
   drain(): Promise<void>
 }
@@ -664,12 +749,7 @@ function createAgentSessionEventSink(
   return {
     async attachSession(runtimeSessionId, workDir, model) {
       try {
-        await connection.openAgentSession(
-          projectId!,
-          agentSessionId,
-          { workDir },
-          signal,
-        )
+        await connection.openAgentSession(projectId!, agentSessionId, { workDir }, signal)
         await connection.attachAgentSession(
           projectId!,
           agentSessionId,
@@ -684,7 +764,11 @@ function createAgentSessionEventSink(
           signal,
         )
       } catch (error) {
-        log.error("agent-session open/attach failed", { job: work.agentJobId, session: agentSessionId, exception: error })
+        log.error('agent-session open/attach failed', {
+          job: work.agentJobId,
+          session: agentSessionId,
+          exception: error,
+        })
         throw error
       }
     },
@@ -698,58 +782,80 @@ function createAgentSessionEventSink(
             workType: work.workType,
             stage: work.stage,
             runtimeSessionId,
-            runtimeEvents: [{
-              type: "session.input",
-              payload: {
-                text,
-                kind: "task",
-                source: "agent-job",
-                role: "user",
-                runtimeSessionId,
+            runtimeEvents: [
+              {
+                type: 'session.input',
+                payload: {
+                  text,
+                  kind: 'task',
+                  source: 'agent-job',
+                  role: 'user',
+                  runtimeSessionId,
+                },
               },
-            }],
+            ],
           },
           signal,
         )
       } catch (error) {
-        log.error("agent-session input publish failed", { job: work.agentJobId, session: agentSessionId, exception: error })
+        log.error('agent-session input publish failed', {
+          job: work.agentJobId,
+          session: agentSessionId,
+          exception: error,
+        })
         throw error
       }
     },
     observeEvent(event) {
       pending = pending
-        .then(() => connection.agentSessionRuntimeEvents(
-          projectId!,
-          agentSessionId,
-          {
-            workId: work.workId,
-            workType: work.workType,
-            stage: work.stage,
-            runtimeSessionId: event.runtimeSessionId,
-            runtimeEvents: [{ type: event.type, payload: event.payload }],
-          },
-          signal,
-        ).then(() => undefined))
+        .then(() =>
+          connection
+            .agentSessionRuntimeEvents(
+              projectId!,
+              agentSessionId,
+              {
+                workId: work.workId,
+                workType: work.workType,
+                stage: work.stage,
+                runtimeSessionId: event.runtimeSessionId,
+                runtimeEvents: [{ type: event.type, payload: event.payload }],
+              },
+              signal,
+            )
+            .then(() => undefined),
+        )
         .catch((error) => {
-          log.error("agent-session runtime event failed", { job: work.agentJobId, session: agentSessionId, exception: error })
+          log.error('agent-session runtime event failed', {
+            job: work.agentJobId,
+            session: agentSessionId,
+            exception: error,
+          })
         })
     },
     observePiEvent(event) {
       pending = pending
-        .then(() => connection.agentSessionRuntimeEvents(
-          projectId!,
-          agentSessionId,
-          {
-            workId: work.workId,
-            workType: work.workType,
-            stage: work.stage,
-            runtimeSessionId: event.runtimeSessionId,
-            runtimeEvents: [{ type: event.type, payload: event.payload }],
-          },
-          signal,
-        ).then(() => undefined))
+        .then(() =>
+          connection
+            .agentSessionRuntimeEvents(
+              projectId!,
+              agentSessionId,
+              {
+                workId: work.workId,
+                workType: work.workType,
+                stage: work.stage,
+                runtimeSessionId: event.runtimeSessionId,
+                runtimeEvents: [{ type: event.type, payload: event.payload }],
+              },
+              signal,
+            )
+            .then(() => undefined),
+        )
         .catch((error) => {
-          log.error("agent-session runtime event failed", { job: work.agentJobId, session: agentSessionId, exception: error })
+          log.error('agent-session runtime event failed', {
+            job: work.agentJobId,
+            session: agentSessionId,
+            exception: error,
+          })
         })
     },
     async drain() {
@@ -761,16 +867,14 @@ function createAgentSessionEventSink(
 function failureResult(
   code: string,
   message: string,
-  runtime: "opencode" | "pi" = "opencode",
+  runtime: 'opencode' | 'pi' = 'opencode',
   diagnostics?: readonly { code: string; message: string }[],
 ): WorkItemResult {
   return {
-    status: "failed",
+    status: 'failed',
     message,
     error: { code, message },
-    output: diagnostics
-      ? buildAgentJobOutput(false, null, runtime, null, null, null, message, diagnostics)
-      : undefined,
+    output: diagnostics ? buildAgentJobOutput(false, null, runtime, null, null, null, message, diagnostics) : undefined,
     exitCode: 1,
   }
 }
@@ -778,17 +882,17 @@ function failureResult(
 function buildAgentJobOutput(
   ok: boolean,
   runtimeSessionId: string | null,
-  runtime: "opencode" | "pi",
+  runtime: 'opencode' | 'pi',
   model: string | null,
   variant: string | null,
   text: string | null,
   error: string | null,
   diagnostics: readonly { code: string; message: string }[],
-  hint?: "reset",
+  hint?: 'reset',
 ): JsonObject {
   return {
     kind: runtime,
-    status: ok ? "success" : "failure",
+    status: ok ? 'success' : 'failure',
     runtimeSessionId,
     model,
     variant,
@@ -805,7 +909,7 @@ function buildAgentJobOutput(
  */
 export function projectTurnToWorkItemResult(
   result: RuntimeResult<RuntimeTurnResult>,
-  runtime: "opencode" | "pi",
+  runtime: 'opencode' | 'pi',
   model: string | null,
   variant: string | null,
 ): WorkItemResult {
@@ -820,10 +924,10 @@ export function projectTurnToWorkItemResult(
       null,
       error.message,
       result.diagnostics,
-      error.kind === "missing-session" ? "reset" : undefined,
+      error.kind === 'missing-session' ? 'reset' : undefined,
     )
     return {
-      status: "failed",
+      status: 'failed',
       message: error.message,
       error: { code: error.kind, message: error.message },
       output,
@@ -842,8 +946,8 @@ export function projectTurnToWorkItemResult(
     result.value.diagnostics,
   )
   return {
-    status: "completed",
-    message: "AgentJob completed",
+    status: 'completed',
+    message: 'AgentJob completed',
     output,
     exitCode: 0,
   }
@@ -851,14 +955,14 @@ export function projectTurnToWorkItemResult(
 
 export function projectPiTurnToWorkItemResult(
   result: PiResult<PiTurnResult>,
-  runtime: "opencode" | "pi",
+  runtime: 'opencode' | 'pi',
   model: string | null,
   variant: string | null,
 ): WorkItemResult {
   if (!result.ok) {
     const error = result.error
     const code = mapPiErrorKind(error.kind)
-    const hint = error.kind === "missing-session" ? "reset" as const : undefined
+    const hint = error.kind === 'missing-session' ? ('reset' as const) : undefined
     const output = buildAgentJobOutput(
       false,
       null,
@@ -871,7 +975,7 @@ export function projectPiTurnToWorkItemResult(
       hint,
     )
     return {
-      status: "failed",
+      status: 'failed',
       message: error.message,
       error: { code, message: error.message },
       output,
@@ -890,15 +994,15 @@ export function projectPiTurnToWorkItemResult(
     result.value.diagnostics,
   )
   return {
-    status: "completed",
-    message: "AgentJob completed",
+    status: 'completed',
+    message: 'AgentJob completed',
     output,
     exitCode: 0,
   }
 }
 
 function mapPiErrorKind(kind: string): string {
-  if (kind === "deadline-exceeded") return "timeout"
-  if (kind === "missing-session") return "runtime-session-missing"
+  if (kind === 'deadline-exceeded') return 'timeout'
+  if (kind === 'missing-session') return 'runtime-session-missing'
   return kind
 }
