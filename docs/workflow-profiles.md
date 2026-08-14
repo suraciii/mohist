@@ -164,6 +164,10 @@ WorkflowRun fixes the effective Action when it starts. Changing the Project
 binding later affects only new Runs; later Stages of the active Run continue to
 use the Action already bound to that Run.
 
+A completed or stopped Run is an immutable execution record. It cannot be
+retried, rerun, or resumed in place. Starting the Issue again creates a new Run
+and binds the Profile and Agent Action that are effective for that new start.
+
 While a bound Run is active, the Issue model selector uses that Run's Runtime
 for both Workflow-wide and Stage-specific model controls. After the Run becomes
 terminal, it uses the Runtime projected from the Profile selected for the next
@@ -213,8 +217,8 @@ approval points as `mohist/local`, but it delivers the result differently:
   checks and performs a squash merge.
 - Mohist rebases automatically when the base branch advances and applies the
   declared Profile recovery when pull request checks fail.
-- When automatic recovery is exhausted, Mohist stops and exposes the failure.
-  The user can fix the cause and retry.
+- When automatic recovery is exhausted, Mohist leaves the Run in `failed` and
+  exposes the failure. The user can fix the cause and retry.
 
 The pull request is the review surface for the published Workflow branch. It is
 not responsible for publishing code. A publish failure retries only the

@@ -188,7 +188,12 @@ The following uses are in scope:
 - `WorkflowProfileReferenceCoordinator` serializes Profile deletion, custom Profile source updates, writes
   to a Project's default Profile, Project Agent Action override changes, and WorkflowRun start binding within
   a Project. Profile updates and override changes share this order with Run binding so a Run observes the
-  complete configuration before or after a mutation, never an intermediate version. Reference commands
+  complete configuration before or after a mutation, never an intermediate version. The start request
+  carries the Issue's explicit Profile selection snapshot. Under its fence the coordinator resolves the
+  effective Profile, materializes one `BoundWorkflowStart`, persists that resolved command payload, and
+  invokes `IWorkflowRunBindingParticipant`. The participant creates the initial Run state with Profile ID,
+  concrete Agent Action, and ordered Stage ID/approval facts in one transaction; no caller may create or
+  save a partial Run before this command. Reference commands
   establish or break Profile references. Each persisted custom Profile reference has a nullable backing key
   and a restrictive foreign key to `(ProjectId, ProfileId)`. Builtin references keep a null backing key
   because they cannot be deleted. This foreign key is the primary mechanism that makes concurrent deletion correct.
@@ -203,9 +208,10 @@ Each coordinator serializes by Project key. They use narrow participant interfac
 `IIssueBindingParticipant`, `IProjectBindingParticipant`, `IProjectWorkflowProfileBindingParticipant`,
 `IWorkflowProfileMutationParticipant`, and `IWorkflowRunBindingParticipant`. The Workflow Profile Project
 participant owns default and Agent Action override writes; the Profile participant owns custom source writes;
-the Run participant owns the Profile ID and concrete Action captured at start. An `ArchTest` prevents
-production code from bypassing the coordinators. The coordinators **do not** call each other or share a
-transaction. Each synchronous coordinator call chain enters only one participant aggregate.
+the Run participant owns the Profile ID, concrete Action, and initial Stage skeleton captured at start. A
+duplicate start returns the identical persisted binding, while conflicting startup facts are rejected. An
+`ArchTest` prevents production code from bypassing the coordinators. The coordinators **do not** call each
+other or share a transaction. Each synchronous coordinator call chain enters only one participant aggregate.
 Issue selection belongs to the Issue coordinator. Project default, Profile mutation, Agent Action override,
 and Run binding belong to the Profile coordinator.
 
@@ -213,6 +219,10 @@ The coordinators do not reimplement invariant validation. The Profile coordinato
 Profile compiler, Action-contract validator, active-Run binding query, and one participant commit under its
 fence. Coordinators do not handle eventually consistent progress across aggregates, UI pushes, or Session and
 Runtime binding.
+
+`Completed` and `Stopped` WorkflowRuns are immutable terminal aggregates. Workflow control rejects retry,
+rerun, rerun-from-stage, and resume for them. Re-executing Issue work creates a new WorkflowRun and enters the
+same Profile start-binding coordinator; a terminal Run never regains an active Profile backing key.
 
 ## Persistence
 

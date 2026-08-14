@@ -102,10 +102,11 @@ need all three commands for symmetry. User shell aliases are not part of the
   the full automatic recovery budget.
 - `rerun` executes the complete Run again from the start.
   `--from-stage <stage>` invalidates and executes only that Stage and all later
-  results.
+  results. Both forms apply only to a non-terminal Run.
 - `pause` interrupts current advancement but preserves a recovery path.
   `resume` continues the same Run.
-- `stop` ends the Run permanently. The Run must not resume.
+- `stop` ends the Run permanently. Completed and stopped Runs cannot retry,
+  rerun, or resume. Starting Issue work again creates a new WorkflowRun.
 
 ### Flag Conventions
 

@@ -155,11 +155,13 @@ be changed or cleared explicitly.
 
 ## Selection
 
-An Issue makes one selection when it starts a WorkflowRun:
+An Issue start request snapshots its explicit Profile selection before durable delivery creates the
+WorkflowRun. The Profile coordinator resolves the effective selection at the Run-binding linearization
+point:
 
 ```text literal
 selectedProfileId =
-  issue.workflowProfileId ?? project.defaultWorkflowProfileId
+  startRequest.workflowProfileId ?? project.defaultWorkflowProfileId
 ```
 
 - The Project default must reference a Profile that the Project owns.
@@ -169,6 +171,9 @@ selectedProfileId =
 - WorkflowRun stores the Profile ID and effective Agent Action selected at start. A later change to the
   Issue selection, Project default, or Profile Agent Action override affects only future WorkflowRuns. It
   does not switch an active Run to another Profile or Agent Action.
+- `Completed` and `Stopped` WorkflowRuns are immutable terminal records. Retry, rerun, rerun-from-stage,
+  and resume reject them. Starting work again creates a new WorkflowRun ID and resolves the then-current
+  Profile and Agent Action through the normal start-binding path.
 - After the Definition for the same Profile ID changes, an active Run reads the new version when it
   initializes a later Stage.
 - If an active Run has a bound Agent Action, a custom Profile update must remain a bound Profile and must
@@ -208,17 +213,28 @@ WorkflowRun stage initialization -> IWorkflowProfileProvider
                               ProjectWorkflowProfileProvider
 ```
 
-At WorkflowRun creation, `IWorkflowProfileProvider` resolves the current Profile source and effective
-Agent Action. At each Stage initialization it provides the current, validated `WorkflowDefinition` by
-Project, Profile ID, and the Run-bound Agent Action. WorkflowRun does not store the Definition body. The
-Provider does not read Variables or Prompts and does not select the Profile.
+At WorkflowRun creation, the Profile coordinator uses `IWorkflowProfileProvider` to resolve the Profile
+source and effective Agent Action. At each Stage initialization the Provider supplies the current,
+validated `WorkflowDefinition` by Project, Profile ID, and the Run-bound Agent Action. WorkflowRun does
+not store the Definition body. The Provider does not read Variables or Prompts and does not select the
+Profile outside the start-binding command.
 
 The existing Project-scoped `WorkflowProfileReferenceCoordinator` serializes custom Profile updates,
 Project Agent Action override changes, and WorkflowRun binding. An update validates the future effective
 Action and the distinct bound Actions read from active Run state before it writes the Profile. A Run bind
-then reads one accepted Profile version, materializes it, and persists the selected Action with the Run.
-The coordinator order is the linearization point: a concurrent Run starts entirely before or after a
-Profile or override change, never between its validation and write.
+reads one accepted Profile version and materializes one `BoundWorkflowStart` containing the Profile ID,
+concrete Agent Action, and ordered `StageStructure { stage, requiresApproval }` values. The coordinator
+persists that resolved command payload in its pending fence before delivery.
+`IWorkflowRunBindingParticipant` then creates the `Created` Run row with that complete binding and Stage
+skeleton in one transaction. It never patches a separately created Run. The Workflow grain does not resolve
+startup structure or save a partial Run before this command; after the participant commit it loads the
+persisted Run and continues the ordinary idempotent start transition.
+
+Redelivery uses the `BoundWorkflowStart` captured in the fence. The participant returns the same persisted
+binding when the Run already exists with identical startup facts and rejects a conflicting existing Run.
+A crash before participant commit is replayed; a crash after commit is observed as already applied. The
+coordinator order is therefore the linearization point: a concurrent Run starts entirely before or after a
+Profile or override change, never between its resolution, validation, and initial persistence.
 
 ## API
 
