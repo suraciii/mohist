@@ -68,7 +68,7 @@
       "type": "WRITE",
       "output": "Stable input delivery identity, durable AgentTurn/Workflow binding handshake, receipt-gated Runner execution, and passing cross-boundary replay tests.",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Local outbox persistence is necessary but is not the execution fence. The fence is the Server receipt issued after both grain-owned bindings are durable. Keep calls one-way from AgentSession to Workflow to avoid a grain cycle."
     },
     {
