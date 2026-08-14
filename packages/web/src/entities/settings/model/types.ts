@@ -118,6 +118,7 @@ export interface WorkflowProfileInfo {
   displayName: string
   description: string
   isDefault: boolean
+  isBuiltIn?: boolean
   agentRuntime?: AgentRuntime | null
 }
 

@@ -42,6 +42,7 @@ export interface ModelSelectProps {
   valueVariant?: string | null
   onChangeVariant?: (variant: string | null) => void
   onChangeModelVariant?: (model: string, variant: string | null) => void
+  disabled?: boolean
 }
 
 function normalizeModels(models: SelectableModel[] | string[]): SelectableModel[] {
@@ -74,6 +75,7 @@ export function ModelSelect({
   valueVariant,
   onChangeVariant,
   onChangeModelVariant,
+  disabled = false,
 }: ModelSelectProps) {
   const [open, setOpen] = useState(false)
 
@@ -120,12 +122,13 @@ export function ModelSelect({
 
   return (
     <div className="flex items-center gap-2">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={disabled ? false : open} onOpenChange={(nextOpen) => !disabled && setOpen(nextOpen)}>
         <PopoverTrigger
           render={
             <Button
               variant="outline"
               id={id}
+              disabled={disabled}
               aria-labelledby={ariaLabelledby}
               className={`flex-1 justify-between gap-1.5 min-h-[44px] md:min-h-0 ${
                 open

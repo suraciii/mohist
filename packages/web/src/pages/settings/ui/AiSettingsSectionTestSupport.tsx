@@ -100,7 +100,7 @@ export function arrangeLoaded(options: ArrangeOptions = {}) {
     sourceProvenance: 'BuiltIn',
     isBuiltIn: true,
     definitionSource: null,
-    agentRuntime: options.profileRuntime ?? 'opencode',
+    agentRuntime: options.profileRuntime === undefined ? 'opencode' : options.profileRuntime,
   }]
   projectWorkflowProfile = { projectId: 'proj_test', defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }
 }

@@ -4,6 +4,7 @@ import { server, useMswServer } from '../../../../tests/support/msw'
 import { toast } from 'sonner'
 import {
   availableModelIdsQueryOptions,
+  getWorkflowProfileAgentRuntime,
   projectDefaultWorkflowProfileQueryOptions,
   resolveEffectiveDefaultWorkflowProfile,
   selectModelVariants,
@@ -54,6 +55,17 @@ describe('availableModelIdsQueryOptions', () => {
     const options = availableModelIdsQueryOptions('proj-1', null)
     expect(options.queryKey).toEqual(['opencode-model-ids', null, 'proj-1'])
     expect(options.enabled).toBe(false)
+  })
+})
+
+describe('getWorkflowProfileAgentRuntime', () => {
+  it('matches profile ids without regard to casing', () => {
+    expect(
+      getWorkflowProfileAgentRuntime(
+        [{ id: 'mohist/local', displayName: 'Mohist Local', description: '', isDefault: true, agentRuntime: 'opencode' }],
+        'MOHIST/LOCAL',
+      ),
+    ).toBe('opencode')
   })
 })
 

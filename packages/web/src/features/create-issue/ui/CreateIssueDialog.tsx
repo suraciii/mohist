@@ -61,6 +61,7 @@ function ModelPresetSelect({
   const modelVariantsMap = availableModels?.modelVariants ?? {}
   const availableVariants = value ? modelVariantsMap[value] ?? [] : []
   const resolvedVariant = variant && availableVariants.includes(variant) ? variant : null
+  const readOnly = runtime === null
 
   return (
     <div>
@@ -68,7 +69,7 @@ function ModelPresetSelect({
         id="create-issue-model-trigger"
         value={value}
         placeholder="Use default"
-        models={allModels}
+        models={readOnly ? [] : allModels}
         onChange={(modelId) => {
           onChange(modelId)
           onVariantChange(null)
@@ -84,6 +85,7 @@ function ModelPresetSelect({
           onChange(modelId)
           onVariantChange(chipVariant)
         }}
+        disabled={readOnly}
       />
     </div>
   )
@@ -491,17 +493,19 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
             </select>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
-            <ModelPresetSelect
-              runtime={selectedWorkflowRuntime}
-              value={model}
-              variant={modelVariant}
-              onChange={setModel}
-              onVariantChange={setModelVariant}
-              onClear={() => setModel(null)}
-            />
-          </div>
+          {(selectedWorkflowRuntime !== null || model) && (
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
+              <ModelPresetSelect
+                runtime={selectedWorkflowRuntime}
+                value={model}
+                variant={modelVariant}
+                onChange={setModel}
+                onVariantChange={setModelVariant}
+                onClear={() => setModel(null)}
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Priority</label>

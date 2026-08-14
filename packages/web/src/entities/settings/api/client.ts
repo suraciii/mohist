@@ -255,6 +255,7 @@ function mapWorkflowProfileInfo(profile: WorkflowProfileCollectionEntryResponse)
     displayName: profile.name,
     description: profile.description,
     isDefault: profile.profileId === 'mohist/local',
+    isBuiltIn: profile.isBuiltIn,
     agentRuntime: profile.agentRuntime ?? null,
   }
 }

@@ -53,7 +53,7 @@ describe('IssueModelSelector default-model variant chips', () => {
     expect(mocks.useModelVariants).not.toHaveBeenCalled()
   })
 
-  it('passes a null runtime without hiding an existing custom model', async () => {
+  it('keeps an existing custom model visible without exposing a selector for a null runtime', async () => {
     mocks.useWorkflowProfiles.mockReturnValue({
       data: [{ id: 'team/unknown', displayName: 'Unknown', description: '', isDefault: false, agentRuntime: null }],
     })
@@ -63,7 +63,9 @@ describe('IssueModelSelector default-model variant chips', () => {
     renderSelector({ currentModel: 'vendor/custom-model' })
 
     await waitFor(() => expect(mocks.useAvailableModelIds).toHaveBeenCalledWith(null))
-    expect(screen.getByTestId('issue-coder-model-trigger')).toHaveTextContent('custom-model')
+    expect(screen.getByTestId('issue-model-read-only')).toBeInTheDocument()
+    expect(document.getElementById('issue-coder-model-read-only')).toBeDisabled()
+    expect(screen.queryByTestId('issue-coder-model-trigger')).not.toBeInTheDocument()
   })
 
   it('does not expose a named-Agent Runtime override', async () => {

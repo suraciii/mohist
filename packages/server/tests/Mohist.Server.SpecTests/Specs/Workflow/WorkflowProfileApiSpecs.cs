@@ -4,6 +4,7 @@ using System.Text.Json;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow;
@@ -51,6 +52,8 @@ public class WorkflowProfileApiSpecs
         var detail = await _client.GetDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/workflow-profiles/mohist%2Flocal");
 
+        Assert.Equal(WorkflowProfileCatalog.Profile.Name, builtin.GetProperty("name").GetString());
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, builtin.GetProperty("description").GetString());
         Assert.Equal("opencode", builtin.GetProperty("agentRuntime").GetString());
         Assert.Equal("opencode", detail.GetProperty("agentRuntime").GetString());
         Assert.Equal("mohist/local", detail.GetProperty("profileId").GetString());

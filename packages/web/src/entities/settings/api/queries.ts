@@ -3,7 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
-import { includesWorkflowProfileId } from '../model/workflowProfileIds'
+import { includesWorkflowProfileId, workflowProfileIdEquals } from '../model/workflowProfileIds'
 import { useProject } from '../../project/@x/project-context'
 import type { OpencodeModelVariants, ProjectDefaultWorkflowProfile } from './client'
 import { DEFAULT_AGENT_RUNTIME, isAgentRuntime, type AgentRuntime } from './client'
@@ -300,7 +300,7 @@ export function getWorkflowProfileAgentRuntime(
   profileId: string | null | undefined,
 ): AgentRuntime | null {
   if (!profileId) return null
-  return profiles?.find((profile) => profile.id === profileId)?.agentRuntime ?? null
+  return profiles?.find((profile) => workflowProfileIdEquals(profile.id, profileId))?.agentRuntime ?? null
 }
 
 export type WorkflowProfileFetcher = typeof getWorkflowProfile

@@ -68,8 +68,12 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
 
         var entries = await _provider.ListAsync(projectId);
 
-        Assert.Contains(entries, e => e.IsBuiltIn && e.ProfileId == "mohist/local");
-        Assert.Contains(entries, e => e.IsBuiltIn && e.ProfileId == "mohist/github-pr");
+        var local = Assert.Single(entries, e => e.IsBuiltIn && e.ProfileId == WorkflowProfileCatalog.LocalId);
+        var githubPr = Assert.Single(entries, e => e.IsBuiltIn && e.ProfileId == WorkflowProfileCatalog.GithubPrId);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Name, local.Name);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, local.Description);
+        Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Name, githubPr.Name);
+        Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Description, githubPr.Description);
         Assert.Contains(entries, e => !e.IsBuiltIn && e.ProfileId == "delivery/review");
     }
 

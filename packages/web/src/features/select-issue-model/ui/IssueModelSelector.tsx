@@ -404,6 +404,60 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     ? describeModel(resolvedModelId).fullId + (resolvedVariant ? `:${resolvedVariant}` : '')
     : null
 
+  if (selectedRuntime === null) {
+    const configuredStageEntries = ISSUE_STAGES.filter((stage) => !!localStageModels[stage])
+    if (!resolvedModelId && configuredStageEntries.length === 0) return null
+
+    return (
+      <div className="space-y-1" data-testid="issue-model-read-only">
+        {resolvedModelId && (
+          <div>
+            <label className="block text-sm text-muted-foreground">Coder Model</label>
+            <ModelSelect
+              id="issue-coder-model-read-only"
+              value={resolvedModelId}
+              placeholder="Use default"
+              models={[]}
+              onChange={() => undefined}
+              modelVariants={resolvedVariant ? { [resolvedModelId]: [resolvedVariant] } : {}}
+              valueVariant={resolvedVariant}
+              disabled
+            />
+          </div>
+        )}
+        {configuredStageEntries.length > 0 && (
+          <div className="pt-2 border-t">
+            <span className="text-xs text-muted-foreground">Per-stage overrides</span>
+            <div className="mt-3 space-y-2 pl-5">
+              {configuredStageEntries.map((stage) => {
+                const stageModel = localStageModels[stage]
+                const stageVariant = localStageVariants[stage] ?? null
+                return (
+                  <div key={stage} className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-muted-foreground w-16 capitalize shrink-0">{stage}</span>
+                    <div className="flex-1">
+                      <ModelSelect
+                        id={`issue-stage-model-${stage}`}
+                        value={stageModel}
+                        placeholder="Default"
+                        models={[]}
+                        onChange={() => undefined}
+                        size="compact"
+                        modelVariants={stageVariant ? { [stageModel]: [stageVariant] } : {}}
+                        valueVariant={stageVariant}
+                        disabled
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-1">
       <label className="block text-sm text-muted-foreground">Coder Model</label>

@@ -137,8 +137,8 @@ public sealed record WorkflowProfileCollectionEntry(
         return new(
             ProjectId: string.Empty,
             ProfileId: profileId,
-            Name: profileId,
-            Description: string.Empty,
+            Name: profile.Name,
+            Description: profile.Description,
             SourceProvenance: WorkflowProfileSourceProvenance.BuiltIn,
             IsBuiltIn: true,
             DefinitionSource: WorkflowProfileCanonicalYamlRenderer.Render(profile))

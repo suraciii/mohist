@@ -16,7 +16,9 @@ let _issueData: any = null
 let _workflowProfileData: any = null
 let _workflowProfileLoading = false
 let _workflowProfileError: string | null = null
-let _workflowProfilesListData: any = null
+let _workflowProfilesListData: any = [
+  { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
+]
 let _retryError: string | null = null
 let _uploads: Array<{ id: string; fileName: string; contentType: string; size: number }> = []
 let _addCommentHandler = vi.fn()
@@ -195,7 +197,9 @@ beforeEach(() => {
   _workflowProfileData = null
   _workflowProfileLoading = false
   _workflowProfileError = null
-  _workflowProfilesListData = null
+  _workflowProfilesListData = [
+    { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
+  ]
   _retryError = null
   _uploads = []
   _addCommentHandler = vi.fn()
