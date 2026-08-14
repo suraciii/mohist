@@ -1,13 +1,34 @@
-import { constants } from "node:fs"
-import { homedir, tmpdir } from "node:os"
-import { isAbsolute, join, relative, resolve } from "node:path"
-import type { JsonObject, DispatchWorkItem } from "../core/types.js"
-import { getSegments, stringAt } from "../core/json-path.js"
-import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
-import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from "../system/process.js"
-import { currentRunnerFileSystem, type RunnerDirectoryHandle } from "../system/filesystem.js"
-import type { WorkspaceBindingIdentity, WorkspaceRegistry } from "./workspace-registry.js"
-import { createCredentialMaskerFromEnvironment, type TaskLogger } from "./task-log.js"
+import { constants } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { isAbsolute, join, relative, resolve } from 'node:path'
+import type { JsonObject, DispatchWorkItem } from '../core/types.js'
+import { getSegments, stringAt } from '../core/json-path.js'
+import { NETWORK_COMMAND_TIMEOUT_MS } from '../actions/git.js'
+import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from '../system/process.js'
+import { currentRunnerFileSystem, type RunnerDirectoryHandle } from '../system/filesystem.js'
+import type { WorkspaceBindingIdentity, WorkspaceRegistry } from './workspace-registry.js'
+import { createCredentialMaskerFromEnvironment, type TaskLogger } from './task-log.js'
+import {
+  redactWorkspaceDiagnostic,
+  sanitizeWorkspaceDiagnostic,
+  workspaceNetworkTimeout,
+  WorkspaceBranchMismatchError,
+  WorkspaceCorruptError,
+  WorkspaceIdentityMismatchError,
+  WorkspaceMissingError,
+} from './workspace-errors.js'
+import {
+  issueWorkspacePath,
+  markerPath,
+  readMarker,
+  workspaceBindingIdentity,
+  workspaceIdentity,
+  type IssueWorkspaceMarker,
+} from './workspace-identity.js'
+
+export { issueWorkspacePath, readMarkerWorkflowRunId } from './workspace-identity.js'
+export type { IssueWorkspaceMarker } from './workspace-identity.js'
+export { WorkspaceNetworkTimeoutError } from './workspace-errors.js'
 
 /**
  * `source` tag recorded against every captured workspace-preparation
@@ -15,72 +36,10 @@ import { createCredentialMaskerFromEnvironment, type TaskLogger } from "./task-l
  * viewer can phase-distinguish the clone / branch / worktree setup
  * from the action itself.
  */
-export const WORKSPACE_PREP_SOURCE = "workspace-prep"
+export const WORKSPACE_PREP_SOURCE = 'workspace-prep'
 
 function workspacePrepSink(log: TaskLogger | null | undefined) {
   return log ? { log, source: WORKSPACE_PREP_SOURCE } : undefined
-}
-
-export class WorkspaceMissingError extends Error {
-  readonly kind = "workspace-missing"
-  constructor(message: string, readonly workspacePath?: string, readonly cause?: unknown) {
-    super(message)
-    this.name = "WorkspaceMissingError"
-  }
-}
-
-export class WorkspaceCorruptError extends Error {
-  readonly kind = "workspace-corrupt"
-  constructor(message: string, readonly workspacePath?: string, readonly cause?: unknown) {
-    super(message)
-    this.name = "WorkspaceCorruptError"
-  }
-}
-
-export class WorkspaceIdentityMismatchError extends Error {
-  readonly kind = "workspace-identity-mismatch"
-  constructor(
-    message: string,
-    readonly workspacePath?: string,
-    readonly expected?: IssueWorkspaceMarker,
-    readonly actual?: Partial<IssueWorkspaceMarker>,
-    readonly cause?: unknown,
-    readonly originDiagnostic?: WorkspaceOriginDiagnostic,
-  ) {
-    super(message)
-    this.name = "WorkspaceIdentityMismatchError"
-  }
-}
-
-export interface WorkspaceOriginDiagnostic {
-  kind: "probe-failed" | "value-mismatch"
-  exitCode: number
-  diagnostic: string
-}
-
-export class WorkspaceBranchMismatchError extends Error {
-  readonly kind = "branch-invariant-violation"
-  constructor(message: string, readonly workspacePath: string, readonly expectedBranch: string, readonly observedBranch: string | null, readonly observedRef: string | null = null, readonly detail?: string) {
-    super(message)
-    this.name = "WorkspaceBranchMismatchError"
-  }
-}
-
-export interface WorkspaceNetworkTimeoutStep {
-  name: string
-  command: string
-  exitCode: number
-  output: string
-  status: "timeout"
-  timeoutMs?: number
-}
-
-export class WorkspaceNetworkTimeoutError extends Error {
-  readonly kind = "workspace-network-timeout"
-  constructor(message: string, readonly step: WorkspaceNetworkTimeoutStep) {
-    super(message)
-    this.name = "WorkspaceNetworkTimeoutError"
-  }
 }
 
 // The workflow workspace is just a clone of the project repo checked out
@@ -100,7 +59,7 @@ export class WorkspaceManager {
   constructor(
     private readonly runnerRoot = defaultRunnerRoot(),
     private readonly registry: WorkspaceRegistry | null = null,
-    private readonly runnerId = "unknown",
+    private readonly runnerId = 'unknown',
   ) {}
 
   // Ensure this run has a usable workspace: a clone of the repo on the
@@ -109,11 +68,13 @@ export class WorkspaceManager {
   // latest base.
   async prepare(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
-    const gitUrl = stringAt(variables, ["repository", "gitUrl"])
-    const baseBranch = stringAt(variables, ["repository", "baseBranch"])
-    const issueNumber = numberAt(variables, ["issue", "number"])
+    const gitUrl = stringAt(variables, ['repository', 'gitUrl'])
+    const baseBranch = stringAt(variables, ['repository', 'baseBranch'])
+    const issueNumber = numberAt(variables, ['issue', 'number'])
     if (!gitUrl || !baseBranch || issueNumber === undefined) {
-      throw new Error(`Workspace requires repository.gitUrl, repository.baseBranch, and issue.number. Got gitUrl=${gitUrl ?? "null"}, baseBranch=${baseBranch ?? "null"}, issueNumber=${issueNumber ?? "undefined"}`)
+      throw new Error(
+        `Workspace requires repository.gitUrl, repository.baseBranch, and issue.number. Got gitUrl=${gitUrl ?? 'null'}, baseBranch=${baseBranch ?? 'null'}, issueNumber=${issueNumber ?? 'undefined'}`,
+      )
     }
 
     const runId = work.workflowRunId
@@ -129,12 +90,25 @@ export class WorkspaceManager {
     await withManagedWorkspaceHandle(this.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
       if (await pathExists(managedWorkspacePath)) {
         await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log, undefined, workspacePath)
-        if (!await this.hasRunBranch(managedWorkspacePath, runBranch, signal, log)) {
-          throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`, workspacePath, expected)
+        if (!(await this.hasRunBranch(managedWorkspacePath, runBranch, signal, log))) {
+          throw new WorkspaceIdentityMismatchError(
+            `Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`,
+            workspacePath,
+            expected,
+          )
         }
         await this.reenterRunBranch(managedWorkspacePath, workspacePath, runBranch, signal, log)
       } else {
-        await this.bootstrap(managedWorkspacePath, workspacePath, gitUrl, baseBranch, expected, signal, log, workspaceExistedBeforePreparation)
+        await this.bootstrap(
+          managedWorkspacePath,
+          workspacePath,
+          gitUrl,
+          baseBranch,
+          expected,
+          signal,
+          log,
+          workspaceExistedBeforePreparation,
+        )
       }
     })
 
@@ -152,12 +126,12 @@ export class WorkspaceManager {
 
   async verify(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
-    const issueNumber = numberAt(variables, ["issue", "number"])
+    const issueNumber = numberAt(variables, ['issue', 'number'])
     const runId = work.workflowRunId
-    const gitUrl = stringAt(variables, ["repository", "gitUrl"])
-    const baseBranch = stringAt(variables, ["repository", "baseBranch"])
+    const gitUrl = stringAt(variables, ['repository', 'gitUrl'])
+    const baseBranch = stringAt(variables, ['repository', 'baseBranch'])
     if (!gitUrl || !baseBranch || issueNumber === undefined) {
-      throw new WorkspaceIdentityMismatchError("Issue workspace identity is incomplete")
+      throw new WorkspaceIdentityMismatchError('Issue workspace identity is incomplete')
     }
     const expected = workspaceIdentity(runId)
     const binding = workspaceBindingIdentity(this.runnerRoot, this.runnerId, runId, gitUrl, baseBranch)
@@ -197,7 +171,16 @@ export class WorkspaceManager {
     }
   }
 
-  private async bootstrap(operationPath: string, displayPath: string, gitUrl: string, baseBranch: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null, verifyBaseBranch: boolean): Promise<void> {
+  private async bootstrap(
+    operationPath: string,
+    displayPath: string,
+    gitUrl: string,
+    baseBranch: string,
+    expected: IssueWorkspaceMarker,
+    signal: AbortSignal,
+    log: TaskLogger | null,
+    verifyBaseBranch: boolean,
+  ): Promise<void> {
     const managedPreparationPath = `${operationPath}.preparing`
     if (await pathExists(managedPreparationPath)) await deleteDirectory(managedPreparationPath)
     try {
@@ -205,7 +188,14 @@ export class WorkspaceManager {
       if (verifyBaseBranch) await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
       await this.cloneFresh(managedPreparationPath, displayPath, gitUrl, signal, log)
       await validateWorkspaceOrigin(managedPreparationPath, gitUrl, signal, log, displayPath)
-      await this.restoreOrCreateRunBranch(managedPreparationPath, displayPath, baseBranch, expected.runBranch, signal, log)
+      await this.restoreOrCreateRunBranch(
+        managedPreparationPath,
+        displayPath,
+        baseBranch,
+        expected.runBranch,
+        signal,
+        log,
+      )
       await ensureMarkerExcluded(managedPreparationPath)
       await writeText(markerPath(managedPreparationPath), JSON.stringify(expected, null, 2))
       await validateWorkspaceIdentity(managedPreparationPath, expected, gitUrl, signal, log, undefined, displayPath)
@@ -222,34 +212,100 @@ export class WorkspaceManager {
   // True only when <path> is a git clone that already has <runBranch> —
   // i.e. this run is already set up here. Everything else (missing dir,
   // non-git dir, a previous run's clone) is treated as "not prepared".
-  private async hasRunBranch(workspacePath: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<boolean> {
-    if (!exists(workspacePath) || !exists(join(workspacePath, ".git"))) return false
+  private async hasRunBranch(
+    workspacePath: string,
+    runBranch: string,
+    signal: AbortSignal,
+    log: TaskLogger | null = null,
+  ): Promise<boolean> {
+    if (!exists(workspacePath) || !exists(join(workspacePath, '.git'))) return false
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["-C", workspacePath, "rev-parse", "--verify", `refs/heads/${runBranch}`], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const result = await runCommand(
+      'git',
+      ['-C', workspacePath, 'rev-parse', '--verify', `refs/heads/${runBranch}`],
+      '.',
+      signal,
+      undefined,
+      sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined,
+    )
     return result.exitCode === 0
   }
 
-  private async cloneFresh(workspacePath: string, displayPath: string, gitUrl: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  private async cloneFresh(
+    workspacePath: string,
+    displayPath: string,
+    gitUrl: string,
+    signal: AbortSignal,
+    log: TaskLogger | null = null,
+  ): Promise<void> {
     if (exists(workspacePath)) await deleteDirectory(workspacePath)
-    await ensureDir(join(workspacePath, ".."))
+    await ensureDir(join(workspacePath, '..'))
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["clone", "--filter=blob:none", "--no-checkout", "--no-tags", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
+    const result = await runCommand(
+      'git',
+      ['clone', '--filter=blob:none', '--no-checkout', '--no-tags', gitUrl, workspacePath],
+      '.',
+      signal,
+      undefined,
+      sink
+        ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+        : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS },
+    )
     if (result.exitCode !== 0) {
-      if (result.status === "timeout") throw workspaceNetworkTimeout("git-clone", `clone --filter=blob:none --no-checkout --no-tags ${gitUrl} ${displayPath}`, result, workspacePath, displayPath)
-      throw new Error(`git clone failed for ${redactWorkspaceDiagnostic(gitUrl)}: ${sanitizeWorkspaceDiagnostic(result.stderr || result.stdout, workspacePath, displayPath)}`)
+      if (result.status === 'timeout')
+        throw workspaceNetworkTimeout(
+          'git-clone',
+          `clone --filter=blob:none --no-checkout --no-tags ${gitUrl} ${displayPath}`,
+          result,
+          workspacePath,
+          displayPath,
+        )
+      throw new Error(
+        `git clone failed for ${redactWorkspaceDiagnostic(gitUrl)}: ${sanitizeWorkspaceDiagnostic(result.stderr || result.stdout, workspacePath, displayPath)}`,
+      )
     }
   }
 
   // Create the run branch off the latest base. A fresh clone already has
   // up-to-date origin/<base> refs, so no separate fetch is needed.
-  private async restoreOrCreateRunBranch(workspacePath: string, displayPath: string, baseBranch: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  private async restoreOrCreateRunBranch(
+    workspacePath: string,
+    displayPath: string,
+    baseBranch: string,
+    runBranch: string,
+    signal: AbortSignal,
+    log: TaskLogger | null = null,
+  ): Promise<void> {
     const sink = workspacePrepSink(log)
     const branchRef = `refs/remotes/origin/${runBranch}`
-    const existing = await runCommand("git", ["-C", workspacePath, "show-ref", "--verify", "--quiet", branchRef], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const existing = await runCommand(
+      'git',
+      ['-C', workspacePath, 'show-ref', '--verify', '--quiet', branchRef],
+      workspacePath,
+      signal,
+      undefined,
+      sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined,
+    )
     const source = existing.exitCode === 0 ? `origin/${runBranch}` : `origin/${baseBranch}`
-    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-B", runBranch, source], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
+    const create = await runCommand(
+      'git',
+      ['-C', workspacePath, 'checkout', '-B', runBranch, source],
+      workspacePath,
+      signal,
+      undefined,
+      sink
+        ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+        : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS },
+    )
     if (create.exitCode !== 0) {
-      if (create.status === "timeout") throw workspaceNetworkTimeout("git-checkout", `checkout -B ${runBranch} ${source}`, create, workspacePath, displayPath)
+      if (create.status === 'timeout')
+        throw workspaceNetworkTimeout(
+          'git-checkout',
+          `checkout -B ${runBranch} ${source}`,
+          create,
+          workspacePath,
+          displayPath,
+        )
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
   }
@@ -258,11 +314,26 @@ export class WorkspaceManager {
   // base branch genuinely does not exist at the source. A non-zero exit
   // (repo unreachable / auth) is left for the clone step to surface with
   // its own error; only a reachable repo with an absent branch fails here.
-  private async verifyBaseBranch(gitUrl: string, baseBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  private async verifyBaseBranch(
+    gitUrl: string,
+    baseBranch: string,
+    signal: AbortSignal,
+    log: TaskLogger | null = null,
+  ): Promise<void> {
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["ls-remote", "--heads", gitUrl, baseBranch], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
-    if (result.status === "timeout") throw workspaceNetworkTimeout("git-ls-remote", `ls-remote --heads ${gitUrl} ${baseBranch}`, result)
-    if (result.exitCode === 0 && result.stdout.trim() === "") {
+    const result = await runCommand(
+      'git',
+      ['ls-remote', '--heads', gitUrl, baseBranch],
+      '.',
+      signal,
+      undefined,
+      sink
+        ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+        : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS },
+    )
+    if (result.status === 'timeout')
+      throw workspaceNetworkTimeout('git-ls-remote', `ls-remote --heads ${gitUrl} ${baseBranch}`, result)
+    if (result.exitCode === 0 && result.stdout.trim() === '') {
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
   }
@@ -272,24 +343,80 @@ export class WorkspaceManager {
   // unusable; the run branch ref itself is untouched (git only advances it
   // on success), so aborting the op and resetting to the ref realigns the
   // tree without losing the run's commits.
-  private async reenterRunBranch(workspacePath: string, displayPath: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  private async reenterRunBranch(
+    workspacePath: string,
+    displayPath: string,
+    runBranch: string,
+    signal: AbortSignal,
+    log: TaskLogger | null = null,
+  ): Promise<void> {
     const sink = workspacePrepSink(log)
     const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
-    const checkout = await runCommand("git", ["-C", workspacePath, "checkout", runBranch], workspacePath, signal, undefined, lineOptions)
+    const checkout = await runCommand(
+      'git',
+      ['-C', workspacePath, 'checkout', runBranch],
+      workspacePath,
+      signal,
+      undefined,
+      lineOptions,
+    )
     if (checkout.exitCode === 0) return
-    await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal, undefined, lineOptions).catch(() => {})
-    await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal, undefined, lineOptions).catch(() => {})
-    await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal, undefined, lineOptions).catch(() => {})
-    await runCommand("git", ["-C", workspacePath, "checkout", runBranch], workspacePath, signal, undefined, lineOptions).catch(() => {})
-    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal, undefined, lineOptions)
+    await runCommand(
+      'git',
+      ['-C', workspacePath, 'rebase', '--abort'],
+      workspacePath,
+      signal,
+      undefined,
+      lineOptions,
+    ).catch(() => {})
+    await runCommand(
+      'git',
+      ['-C', workspacePath, 'merge', '--abort'],
+      workspacePath,
+      signal,
+      undefined,
+      lineOptions,
+    ).catch(() => {})
+    await runCommand(
+      'git',
+      ['-C', workspacePath, 'cherry-pick', '--abort'],
+      workspacePath,
+      signal,
+      undefined,
+      lineOptions,
+    ).catch(() => {})
+    await runCommand(
+      'git',
+      ['-C', workspacePath, 'checkout', runBranch],
+      workspacePath,
+      signal,
+      undefined,
+      lineOptions,
+    ).catch(() => {})
+    const reset = await runCommand(
+      'git',
+      ['-C', workspacePath, 'reset', '--hard', runBranch],
+      workspacePath,
+      signal,
+      undefined,
+      lineOptions,
+    )
     if (reset.exitCode !== 0) {
-      throw new Error(`Could not restore workspace to run branch ${runBranch}: ${sanitizeWorkspaceDiagnostic(checkout.stderr || reset.stderr || reset.stdout, workspacePath, displayPath)}`)
+      throw new Error(
+        `Could not restore workspace to run branch ${runBranch}: ${sanitizeWorkspaceDiagnostic(checkout.stderr || reset.stderr || reset.stdout, workspacePath, displayPath)}`,
+      )
     }
   }
 
-  private async runHealthGate(workspacePath: string, displayPath: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  private async runHealthGate(
+    workspacePath: string,
+    displayPath: string,
+    runBranch: string,
+    signal: AbortSignal,
+    log: TaskLogger | null = null,
+  ): Promise<void> {
     if (!exists(workspacePath)) return
-    if (!exists(join(workspacePath, ".git"))) return
+    if (!exists(join(workspacePath, '.git'))) return
 
     const residual = await this.detectResidualState(workspacePath, signal)
     if (!residual) return
@@ -297,29 +424,48 @@ export class WorkspaceManager {
     const sink = workspacePrepSink(log)
     const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
 
-    if (residual === "rebase") {
-      await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal, undefined, lineOptions)
-    } else if (residual === "merge") {
-      await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal, undefined, lineOptions)
-    } else if (residual === "cherry-pick") {
-      await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal, undefined, lineOptions)
+    if (residual === 'rebase') {
+      await runCommand('git', ['-C', workspacePath, 'rebase', '--abort'], workspacePath, signal, undefined, lineOptions)
+    } else if (residual === 'merge') {
+      await runCommand('git', ['-C', workspacePath, 'merge', '--abort'], workspacePath, signal, undefined, lineOptions)
+    } else if (residual === 'cherry-pick') {
+      await runCommand(
+        'git',
+        ['-C', workspacePath, 'cherry-pick', '--abort'],
+        workspacePath,
+        signal,
+        undefined,
+        lineOptions,
+      )
     }
 
-    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal, undefined, lineOptions)
+    const reset = await runCommand(
+      'git',
+      ['-C', workspacePath, 'reset', '--hard', runBranch],
+      workspacePath,
+      signal,
+      undefined,
+      lineOptions,
+    )
     if (reset.exitCode !== 0) {
-      throw new Error(`runHealthGate: could not reset workspace to ${runBranch}: ${sanitizeWorkspaceDiagnostic(reset.stderr || reset.stdout, workspacePath, displayPath)}`)
+      throw new Error(
+        `runHealthGate: could not reset workspace to ${runBranch}: ${sanitizeWorkspaceDiagnostic(reset.stderr || reset.stdout, workspacePath, displayPath)}`,
+      )
     }
   }
 
-  private async detectResidualState(workspacePath: string, signal: AbortSignal): Promise<"rebase" | "merge" | "cherry-pick" | null> {
-    if (exists(join(workspacePath, ".git", "rebase-merge")) || exists(join(workspacePath, ".git", "rebase-apply"))) {
-      return "rebase"
+  private async detectResidualState(
+    workspacePath: string,
+    signal: AbortSignal,
+  ): Promise<'rebase' | 'merge' | 'cherry-pick' | null> {
+    if (exists(join(workspacePath, '.git', 'rebase-merge')) || exists(join(workspacePath, '.git', 'rebase-apply'))) {
+      return 'rebase'
     }
-    if (exists(join(workspacePath, ".git", "MERGE_HEAD"))) {
-      return "merge"
+    if (exists(join(workspacePath, '.git', 'MERGE_HEAD'))) {
+      return 'merge'
     }
-    if (exists(join(workspacePath, ".git", "CHERRY_PICK_HEAD"))) {
-      return "cherry-pick"
+    if (exists(join(workspacePath, '.git', 'CHERRY_PICK_HEAD'))) {
+      return 'cherry-pick'
     }
     return null
   }
@@ -328,11 +474,12 @@ export class WorkspaceManager {
     const existing = this.registry?.get(expected.workflowRunId)
     const binding = existing?.binding
     if (!binding) return
-    const matches = binding.runnerId === expected.runnerId
-      && resolve(binding.runnerRoot) === resolve(expected.runnerRoot)
-      && binding.workflowRunId === expected.workflowRunId
-      && binding.gitUrl === expected.gitUrl
-      && binding.baseBranch === expected.baseBranch
+    const matches =
+      binding.runnerId === expected.runnerId &&
+      resolve(binding.runnerRoot) === resolve(expected.runnerRoot) &&
+      binding.workflowRunId === expected.workflowRunId &&
+      binding.gitUrl === expected.gitUrl &&
+      binding.baseBranch === expected.baseBranch
     if (!matches) {
       throw new WorkspaceIdentityMismatchError(
         `Workflow workspace ${issueWorkspacePath(this.runnerRoot, expected.workflowRunId)} binding identity does not match the requested runner or repository`,
@@ -342,112 +489,78 @@ export class WorkspaceManager {
   }
 }
 
-function workspaceNetworkTimeout(name: string, command: string, result: CommandResult, managedPath?: string, displayPath?: string): WorkspaceNetworkTimeoutError {
-  const output = sanitizeWorkspaceDiagnostic([result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n"), managedPath, displayPath)
-  const visibleCommand = redactWorkspaceDiagnostic(command)
-  return new WorkspaceNetworkTimeoutError(
-    `Workspace preparation network command timed out: ${name} (${visibleCommand}) after ${(result.timeoutMs ?? NETWORK_COMMAND_TIMEOUT_MS) / 1000}s`,
-    { name, command: visibleCommand, exitCode: result.exitCode, output, status: "timeout", timeoutMs: result.timeoutMs },
-  )
-}
-
 export function defaultRunnerRoot() {
-  return process.env.MOHIST_RUNNER_ROOT ?? process.env.MOHIST_WORKSPACE_ROOT ?? join(homedir(), ".mohist", "projects")
+  return process.env.MOHIST_RUNNER_ROOT ?? process.env.MOHIST_WORKSPACE_ROOT ?? join(homedir(), '.mohist', 'projects')
 }
 
 export function runnerVariables() {
-  return { os: process.platform, hostname: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "unknown", temp: tmpdir() }
-}
-
-export function issueWorkspacePath(runnerRoot: string, workflowRunId: string) {
-  if (!/^wr[-_A-Za-z0-9]+$/.test(workflowRunId)) throw new WorkspaceIdentityMismatchError("Invalid workflow run id")
-  return resolve(join(runnerRoot, "workspaces", workflowRunId))
-}
-
-function runBranchName(runId: string | null | undefined) {
-  const safe = (runId ?? "").replace(/[^A-Za-z0-9_-]/g, "")
-  return safe ? `mohist/run-${safe}` : "mohist/run"
-}
-
-export interface IssueWorkspaceMarker {
-  workflowRunId: string
-  runBranch: string
-}
-
-function workspaceIdentity(workflowRunId: string): IssueWorkspaceMarker {
   return {
-    workflowRunId,
-    runBranch: runBranchName(workflowRunId),
+    os: process.platform,
+    hostname: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? 'unknown',
+    temp: tmpdir(),
   }
 }
 
-function workspaceBindingIdentity(
-  runnerRoot: string,
-  runnerId: string,
-  workflowRunId: string,
+export async function validateWorkspaceIdentity(
+  workspacePath: string,
+  expected: IssueWorkspaceMarker,
   gitUrl: string,
-  baseBranch: string,
-): WorkspaceBindingIdentity {
-  return {
-    runnerId,
-    runnerRoot: resolve(runnerRoot),
-    workflowRunId,
-    gitUrl: gitUrl.trim(),
-    baseBranch: baseBranch.trim(),
-  }
-}
-
-// Read the workspace marker from disk. Returns `null` when the marker
-// is missing or unreadable; the caller decides what kind of failure
-// that is (corrupt vs missing). Used by both `verify()` (which needs
-// to distinguish missing / corrupt / mismatch) and `planResolution()`
-// (which just needs a yes/no answer).
-export async function readMarker(workspacePath: string): Promise<Partial<IssueWorkspaceMarker> | null> {
-  const path = markerPath(workspacePath)
-  if (!exists(path)) return null
-  try {
-    const raw = await readText(path)
-    return JSON.parse(raw) as Partial<IssueWorkspaceMarker>
-  } catch {
-    return null
-  }
-}
-
-export async function readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {
-  const marker = await readMarker(workspacePath)
-  return marker?.workflowRunId
-}
-
-export async function validateWorkspaceIdentity(workspacePath: string, expected: IssueWorkspaceMarker, gitUrl: string, signal: AbortSignal, log: TaskLogger | null = null, runnerRoot?: string, displayPath = workspacePath): Promise<void> {
+  signal: AbortSignal,
+  log: TaskLogger | null = null,
+  runnerRoot?: string,
+  displayPath = workspacePath,
+): Promise<void> {
   if (runnerRoot) await assertManagedWorkspacePath(runnerRoot, workspacePath, true)
   const marker = await readMarker(workspacePath)
   if (!marker) {
     throw new WorkspaceCorruptError(`Workflow workspace ${displayPath} has no readable identity marker`, displayPath)
   }
-  const fields: (keyof IssueWorkspaceMarker)[] = ["workflowRunId", "runBranch"]
+  const fields: (keyof IssueWorkspaceMarker)[] = ['workflowRunId', 'runBranch']
   if (fields.some((field) => marker[field] !== expected[field])) {
-    throw new WorkspaceIdentityMismatchError(`Workflow workspace ${displayPath} marker identity does not match the requested run`, displayPath, expected, marker)
+    throw new WorkspaceIdentityMismatchError(
+      `Workflow workspace ${displayPath} marker identity does not match the requested run`,
+      displayPath,
+      expected,
+      marker,
+    )
   }
   await validateWorkspaceOrigin(workspacePath, gitUrl, signal, log, displayPath)
 }
 
-async function validateWorkspaceOrigin(workspacePath: string, gitUrl: string, signal: AbortSignal, log: TaskLogger | null = null, displayPath = workspacePath): Promise<void> {
+async function validateWorkspaceOrigin(
+  workspacePath: string,
+  gitUrl: string,
+  signal: AbortSignal,
+  log: TaskLogger | null = null,
+  displayPath = workspacePath,
+): Promise<void> {
   const sink = workspacePrepSink(log)
   const options = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
-  const result = await runCommand("git", ["-C", workspacePath, "remote", "get-url", "origin"], ".", signal, undefined, options)
-  const diagnostic = sanitizeWorkspaceDiagnostic([result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n"), workspacePath, displayPath)
+  const result = await runCommand(
+    'git',
+    ['-C', workspacePath, 'remote', 'get-url', 'origin'],
+    '.',
+    signal,
+    undefined,
+    options,
+  )
+  const diagnostic = sanitizeWorkspaceDiagnostic(
+    [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n'),
+    workspacePath,
+    displayPath,
+  )
   if (result.exitCode !== 0) {
     throw new WorkspaceIdentityMismatchError(
-      `Workflow workspace ${displayPath} origin probe failed (exit ${result.exitCode}): ${diagnostic || "no diagnostic"}`,
+      `Workflow workspace ${displayPath} origin probe failed (exit ${result.exitCode}): ${diagnostic || 'no diagnostic'}`,
       displayPath,
       undefined,
       undefined,
       undefined,
-      { kind: "probe-failed", exitCode: result.exitCode, diagnostic: diagnostic || `exit ${result.exitCode}` },
+      { kind: 'probe-failed', exitCode: result.exitCode, diagnostic: diagnostic || `exit ${result.exitCode}` },
     )
   }
   if (result.stdout.trim() !== gitUrl.trim()) {
-    const observedOrigin = sanitizeWorkspaceDiagnostic(result.stdout.trim() || "<empty>", workspacePath, displayPath)
+    const observedOrigin = sanitizeWorkspaceDiagnostic(result.stdout.trim() || '<empty>', workspacePath, displayPath)
     const expectedOrigin = sanitizeWorkspaceDiagnostic(gitUrl.trim(), workspacePath, displayPath)
     const mismatch = `observed=${observedOrigin} expected=${expectedOrigin}`
     throw new WorkspaceIdentityMismatchError(
@@ -456,22 +569,27 @@ async function validateWorkspaceOrigin(workspacePath: string, gitUrl: string, si
       undefined,
       undefined,
       undefined,
-      { kind: "value-mismatch", exitCode: result.exitCode, diagnostic: mismatch },
+      { kind: 'value-mismatch', exitCode: result.exitCode, diagnostic: mismatch },
     )
   }
 }
 
-export async function assertManagedWorkspacePath(runnerRoot: string, candidate: string, requireFinal: boolean): Promise<void> {
+export async function assertManagedWorkspacePath(
+  runnerRoot: string,
+  candidate: string,
+  requireFinal: boolean,
+): Promise<void> {
   const root = resolve(runnerRoot)
   const target = resolve(candidate)
   const rel = relative(root, target)
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
     throw new WorkspaceIdentityMismatchError(`Workspace path ${target} is outside runner root ${root}`, target)
   }
   try {
-    if ((await currentRunnerFileSystem().lstat(root)).isSymbolicLink()) throw new WorkspaceIdentityMismatchError(`Runner root ${root} is symlinked`, target)
+    if ((await currentRunnerFileSystem().lstat(root)).isSymbolicLink())
+      throw new WorkspaceIdentityMismatchError(`Runner root ${root} is symlinked`, target)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
   const components = rel.split(/[\\/]+/).filter(Boolean)
   let current = root
@@ -479,9 +597,10 @@ export async function assertManagedWorkspacePath(runnerRoot: string, candidate: 
     current = join(current, components[i]!)
     try {
       const stat = await currentRunnerFileSystem().lstat(current)
-      if (stat.isSymbolicLink()) throw new WorkspaceIdentityMismatchError(`Workspace path ${current} is symlinked`, target)
+      if (stat.isSymbolicLink())
+        throw new WorkspaceIdentityMismatchError(`Workspace path ${current} is symlinked`, target)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         if (i === components.length - 1 && !requireFinal) return
         continue
       }
@@ -513,15 +632,18 @@ export async function withManagedWorkspaceHandle<T>(
   operation: (managedWorkspacePath: string) => Promise<T>,
 ): Promise<T> {
   const root = resolve(runnerRoot)
-  const workspaceParent = join(root, "workspaces")
+  const workspaceParent = join(root, 'workspaces')
   const target = resolve(workspacePath)
   const name = relative(workspaceParent, target)
-  if (!name || name.includes("/") || name.includes("\\") || isAbsolute(name)) {
-    throw new WorkspaceIdentityMismatchError(`Workspace path ${target} is outside managed workspace parent ${workspaceParent}`, target)
+  if (!name || name.includes('/') || name.includes('\\') || isAbsolute(name)) {
+    throw new WorkspaceIdentityMismatchError(
+      `Workspace path ${target} is outside managed workspace parent ${workspaceParent}`,
+      target,
+    )
   }
 
   const fileSystem = currentRunnerFileSystem()
-  if (process.platform !== "linux" || !fileSystem.supportsDirectoryHandles || !fileSystem.openDirectory) {
+  if (process.platform !== 'linux' || !fileSystem.supportsDirectoryHandles || !fileSystem.openDirectory) {
     await assertManagedWorkspacePath(root, target, requireFinal)
     return await operation(target)
   }
@@ -533,15 +655,24 @@ export async function withManagedWorkspaceHandle<T>(
   try {
     rootHandle = await fileSystem.openDirectory(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
     const stableRoot = rootHandle.path
-    await fileSystem.ensureDir(join(stableRoot, "workspaces"))
-    workspaceHandle = await fileSystem.openDirectory(join(stableRoot, "workspaces"), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    await fileSystem.ensureDir(join(stableRoot, 'workspaces'))
+    workspaceHandle = await fileSystem.openDirectory(
+      join(stableRoot, 'workspaces'),
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    )
     managedWorkspacePath = join(workspaceHandle.path, name)
     await assertManagedWorkspaceEntry(managedWorkspacePath, target, requireFinal)
   } catch (error) {
     await workspaceHandle?.close()
     await rootHandle?.close()
     if (error instanceof WorkspaceMissingError || error instanceof WorkspaceIdentityMismatchError) throw error
-    throw new WorkspaceIdentityMismatchError(`Managed workspace parent ${workspaceParent} is unavailable or symlinked`, target, undefined, undefined, error)
+    throw new WorkspaceIdentityMismatchError(
+      `Managed workspace parent ${workspaceParent} is unavailable or symlinked`,
+      target,
+      undefined,
+      undefined,
+      error,
+    )
   }
 
   try {
@@ -554,13 +685,17 @@ export async function withManagedWorkspaceHandle<T>(
   }
 }
 
-async function assertManagedWorkspaceEntry(managedWorkspacePath: string, workspacePath: string, requireFinal: boolean): Promise<void> {
+async function assertManagedWorkspaceEntry(
+  managedWorkspacePath: string,
+  workspacePath: string,
+  requireFinal: boolean,
+): Promise<void> {
   try {
     if ((await currentRunnerFileSystem().lstat(managedWorkspacePath)).isSymbolicLink()) {
       throw new WorkspaceIdentityMismatchError(`Workspace path ${workspacePath} is symlinked`, workspacePath)
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     if (requireFinal) throw new WorkspaceMissingError(`Workflow workspace ${workspacePath} is missing`, workspacePath)
   }
 }
@@ -571,7 +706,7 @@ async function assertNotSymlink(path: string, displayPath = path): Promise<void>
       throw new WorkspaceIdentityMismatchError(`Preparation path ${displayPath} is symlinked`, displayPath)
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
 }
 
@@ -579,10 +714,23 @@ function pathExists(path: string): boolean {
   return exists(path)
 }
 
-async function verifyWorkspaceBranch(workspacePath: string, displayPath: string, expectedBranch: string, signal: AbortSignal, log: TaskLogger | null = null) {
+async function verifyWorkspaceBranch(
+  workspacePath: string,
+  displayPath: string,
+  expectedBranch: string,
+  signal: AbortSignal,
+  log: TaskLogger | null = null,
+) {
   const sink = workspacePrepSink(log)
   const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
-  const branch = await runCommand("git", ["-C", workspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal, undefined, lineOptions)
+  const branch = await runCommand(
+    'git',
+    ['-C', workspacePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+    '.',
+    signal,
+    undefined,
+    lineOptions,
+  )
   if (branch.exitCode !== 0) {
     throw new WorkspaceBranchMismatchError(
       `Workflow workspace ${displayPath} branch probe failed; expected ${expectedBranch}.`,
@@ -590,13 +738,17 @@ async function verifyWorkspaceBranch(workspacePath: string, displayPath: string,
       expectedBranch,
       null,
       null,
-      sanitizeWorkspaceDiagnostic(branch.stderr || branch.stdout || `exit ${branch.exitCode}`, workspacePath, displayPath),
+      sanitizeWorkspaceDiagnostic(
+        branch.stderr || branch.stdout || `exit ${branch.exitCode}`,
+        workspacePath,
+        displayPath,
+      ),
     )
   }
   const observed = sanitizeWorkspaceDiagnostic(branch.stdout.trim(), workspacePath, displayPath)
   if (observed === expectedBranch) return
-  if (observed === "HEAD") {
-    const ref = await runCommand("git", ["-C", workspacePath, "rev-parse", "HEAD"], ".", signal, undefined, lineOptions)
+  if (observed === 'HEAD') {
+    const ref = await runCommand('git', ['-C', workspacePath, 'rev-parse', 'HEAD'], '.', signal, undefined, lineOptions)
     throw new WorkspaceBranchMismatchError(
       `Workflow workspace ${displayPath} is detached; expected branch ${expectedBranch}.`,
       displayPath,
@@ -617,11 +769,11 @@ function sanitizeManagedWorkspaceError(error: unknown, managedPath: string, disp
   if (!(error instanceof Error)) return error
   const message = sanitizeWorkspaceDiagnostic(error.message, managedPath, displayPath)
   if (message !== error.message) {
-    Object.defineProperty(error, "message", { configurable: true, value: message, writable: true })
+    Object.defineProperty(error, 'message', { configurable: true, value: message, writable: true })
   }
   const withWorkspacePath = error as Error & { workspacePath?: unknown }
-  if (typeof withWorkspacePath.workspacePath === "string") {
-    Object.defineProperty(error, "workspacePath", {
+  if (typeof withWorkspacePath.workspacePath === 'string') {
+    Object.defineProperty(error, 'workspacePath', {
       configurable: true,
       value: sanitizeWorkspaceDiagnostic(withWorkspacePath.workspacePath, managedPath, displayPath),
       writable: true,
@@ -630,31 +782,17 @@ function sanitizeManagedWorkspaceError(error: unknown, managedPath: string, disp
   return error
 }
 
-function sanitizeWorkspaceDiagnostic(value: string, managedPath?: string, displayPath?: string): string {
-  let sanitized = value
-  if (managedPath && displayPath && sanitized.includes(managedPath)) sanitized = sanitized.split(managedPath).join(displayPath)
-  return redactWorkspaceDiagnostic(sanitized)
-}
-
-function redactWorkspaceDiagnostic(value: string): string {
-  return createCredentialMaskerFromEnvironment().mask(value)
-}
-
-function markerPath(workspacePath: string) {
-  return join(workspacePath, ".mohist", "workspace.json")
-}
-
 async function ensureMarkerExcluded(workspacePath: string) {
-  const excludePath = join(workspacePath, ".git", "info", "exclude")
-  const markerRule = ".mohist/"
-  let raw = ""
+  const excludePath = join(workspacePath, '.git', 'info', 'exclude')
+  const markerRule = '.mohist/'
+  let raw = ''
   try {
     raw = await readText(excludePath)
   } catch {
     // ignore
   }
-  if (raw.split(/\r?\n/).some((line) => line.trim() === markerRule || line.trim() === ".mohist")) return
-  const suffix = raw.endsWith("\n") || raw.length === 0 ? "" : "\n"
+  if (raw.split(/\r?\n/).some((line) => line.trim() === markerRule || line.trim() === '.mohist')) return
+  const suffix = raw.endsWith('\n') || raw.length === 0 ? '' : '\n'
   await writeText(excludePath, `${raw}${suffix}${markerRule}\n`)
 }
 
@@ -663,7 +801,7 @@ async function ensureMarkerExcluded(workspacePath: string) {
 // throwing, so the caller can decide how to surface an unreadable cache
 // (treat as identity mismatch → replacement candidate).
 async function readCacheOrigin(cachePath: string, signal: AbortSignal) {
-  const result = await runCommand("git", ["-C", cachePath, "remote", "get-url", "origin"], ".", signal)
+  const result = await runCommand('git', ['-C', cachePath, 'remote', 'get-url', 'origin'], '.', signal)
   if (result.exitCode !== 0) return undefined
   return result.stdout.trim() || undefined
 }
@@ -673,12 +811,12 @@ async function readCacheOrigin(cachePath: string, signal: AbortSignal) {
 // The scan follows transitive alternates so deleting the cache cannot
 // corrupt active workspace object stores.
 async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot: string, signal: AbortSignal) {
-  const target = resolve(join(cachePath, "objects"))
-  const cloneRoots = [join(projectRoot, "workspaces")]
+  const target = resolve(join(cachePath, 'objects'))
+  const cloneRoots = [join(projectRoot, 'workspaces')]
 
   async function readAlternates(objectsDir: string): Promise<string[]> {
-    const gitDir = objectsDir.replace(/[\\/]objects$/, "")
-    const alternatesPath = join(gitDir, "objects", "info", "alternates")
+    const gitDir = objectsDir.replace(/[\\/]objects$/, '')
+    const alternatesPath = join(gitDir, 'objects', 'info', 'alternates')
     if (!exists(alternatesPath)) return []
     let raw: string
     try {
@@ -689,7 +827,7 @@ async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot
     const out: string[] = []
     for (const line of raw.split(/\r?\n/)) {
       const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith("#")) continue
+      if (!trimmed || trimmed.startsWith('#')) continue
       try {
         out.push(resolve(trimmed))
       } catch {
@@ -704,7 +842,7 @@ async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot
     const entries = await currentRunnerFileSystem().readdir(dir)
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
-      const gitDir = join(dir, entry.name, ".git")
+      const gitDir = join(dir, entry.name, '.git')
       if (!exists(gitDir)) continue
       // BFS the alternates chain rooted at this clone. An alternates
       // entry is a `<git_dir>/objects` path; if it equals the target,
@@ -712,7 +850,7 @@ async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot
       // itself a `.git/objects` path belonging to another clone, we
       // enqueue that clone's alternates to follow the chain further.
       const visited = new Set<string>()
-      const queue: string[] = await readAlternates(join(gitDir, "objects"))
+      const queue: string[] = await readAlternates(join(gitDir, 'objects'))
       while (queue.length > 0) {
         const current = queue.shift()!
         if (visited.has(current)) continue
@@ -737,32 +875,42 @@ async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot
 // replacement (per the spec's "origin URL mismatch OR verified
 // corruption" rule).
 async function isCacheCorrupt(cachePath: string, baseBranch: string, signal: AbortSignal) {
-  const result = await runCommand("git", ["-C", cachePath, "fsck", "--full", "--no-progress"], ".", signal)
+  const result = await runCommand('git', ['-C', cachePath, 'fsck', '--full', '--no-progress'], '.', signal)
   if (result.exitCode !== 0) return true
-  const base = await runCommand("git", ["-C", cachePath, "rev-parse", "--verify", `refs/heads/${baseBranch}^{commit}`], ".", signal)
+  const base = await runCommand(
+    'git',
+    ['-C', cachePath, 'rev-parse', '--verify', `refs/heads/${baseBranch}^{commit}`],
+    '.',
+    signal,
+  )
   if (base.exitCode !== 0) return true
-  const baseType = await runCommand("git", ["-C", cachePath, "cat-file", "-t", base.stdout.trim()], ".", signal)
+  const baseType = await runCommand('git', ['-C', cachePath, 'cat-file', '-t', base.stdout.trim()], '.', signal)
   if (baseType.exitCode !== 0) return true
-  const refs = await runCommand("git", ["-C", cachePath, "show-ref", "--heads", "--dereference"], ".", signal)
+  const refs = await runCommand('git', ['-C', cachePath, 'show-ref', '--heads', '--dereference'], '.', signal)
   if (refs.exitCode !== 0) return true
   for (const line of refs.stdout.split(/\r?\n/)) {
     const oid = line.trim().split(/\s+/)[0]
     if (!oid) continue
-    const object = await runCommand("git", ["-C", cachePath, "cat-file", "-e", `${oid}^{object}`], ".", signal)
+    const object = await runCommand('git', ['-C', cachePath, 'cat-file', '-e', `${oid}^{object}`], '.', signal)
     if (object.exitCode !== 0) return true
-    const tree = await runCommand("git", ["-C", cachePath, "ls-tree", "-r", oid], ".", signal)
+    const tree = await runCommand('git', ['-C', cachePath, 'ls-tree', '-r', oid], '.', signal)
     if (tree.exitCode !== 0) return true
   }
   return false
 }
 
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project"
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'project'
+  )
 }
 
 export { slug as slugify }
 
 function numberAt(value: JsonObject | undefined, path: string[]): number | undefined {
   const found = getSegments(value, path)
-  return typeof found === "number" ? found : undefined
+  return typeof found === 'number' ? found : undefined
 }
