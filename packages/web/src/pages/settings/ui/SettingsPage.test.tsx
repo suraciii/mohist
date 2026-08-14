@@ -46,6 +46,31 @@ useMswServer(
   http.get('/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
   ),
+  http.get('/api/projects/:projectId/workflow-profiles', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: [{
+        projectId: params.projectId,
+        profileId: 'mohist/local',
+        name: 'Mohist Local',
+        description: 'Standard staged workflow.',
+        sourceProvenance: 'BuiltIn',
+        isBuiltIn: true,
+        definitionSource: null,
+        agentRuntime: 'opencode',
+      }],
+    }),
+  ),
+  http.get('/api/projects/:projectId/workflow-profile/default', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        projectId: params.projectId,
+        defaultWorkflowProfileId: 'mohist/local',
+        disabledWorkflowProfileIds: [],
+      },
+    }),
+  ),
   http.get('/api/projects/:projectId/variables', () =>
     HttpResponse.json({ success: true, data: { vars: null, stages: null } }),
   ),

@@ -22,8 +22,8 @@ import {
   useParentIssueCandidates,
 } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
-import { AGENT_RUNTIME_OPENCODE, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
-import type { WorkflowProfileInfo } from '../../../entities/settings'
+import { getWorkflowProfileAgentRuntime, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
+import type { AgentRuntime, WorkflowProfileInfo } from '../../../entities/settings'
 import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
@@ -42,19 +42,21 @@ interface Props {
 }
 
 function ModelPresetSelect({
+  runtime,
   value,
   variant,
   onChange,
   onVariantChange,
   onClear,
 }: {
+  runtime: AgentRuntime | null
   value: string | null
   variant: string | null
   onChange: (id: string) => void
   onVariantChange: (variant: string | null) => void
   onClear: () => void
 }) {
-  const { data: availableModels } = useAvailableModelIds(AGENT_RUNTIME_OPENCODE)
+  const { data: availableModels } = useAvailableModelIds(runtime)
   const allModels: string[] = availableModels?.models ?? []
   const modelVariantsMap = availableModels?.modelVariants ?? {}
   const availableVariants = value ? modelVariantsMap[value] ?? [] : []
@@ -206,9 +208,10 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
   const recommendedWorkflowProfileId = recommendation && recommendationIsEnabled && !workflowTouched
     ? recommendation.workflow
     : null
+  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
   const submittedWorkflowProfileId = workflowTouched
     ? workflowProfileId
-    : recommendedWorkflowProfileId
+    : recommendedWorkflowProfileId ?? defaultProfileId ?? null
   const effectiveRisk = riskTouched ? risk : frontmatterRisk
 
   useEffect(() => {
@@ -217,10 +220,10 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
     }
   }, [selectedTemplate])
 
-  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
   const workflowSelectValue = workflowTouched
     ? workflowProfileId ?? ''
     : recommendedWorkflowProfileId ?? defaultProfileId ?? ''
+  const selectedWorkflowRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, workflowSelectValue || null)
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -491,6 +494,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
             <ModelPresetSelect
+              runtime={selectedWorkflowRuntime}
               value={model}
               variant={modelVariant}
               onChange={setModel}

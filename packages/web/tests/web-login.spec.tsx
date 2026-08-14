@@ -74,10 +74,10 @@ useMswServer(
   http.get('*/api/projects/:projectId/repositories', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
-  http.get('*/api/projects/:projectId/workflow-profile', ({ params }) =>
+  http.get('*/api/projects/:projectId/workflow-profile/default', ({ params }) =>
     HttpResponse.json({
       success: true,
-      data: { projectId: params.projectId, defaultTemplateId: null, disabledWorkflowProfileIds: [] },
+      data: { projectId: params.projectId, defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] },
     }),
   ),
   http.get('*/api/projects/:projectId/variables', () =>
@@ -86,8 +86,20 @@ useMswServer(
   http.get('*/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
   ),
-  http.get('*/api/workflow-templates/system', () =>
-    HttpResponse.json({ success: true, data: [] }),
+  http.get('*/api/projects/:projectId/workflow-profiles', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: [{
+        projectId: params.projectId,
+        profileId: 'mohist/local',
+        name: 'Default',
+        description: '',
+        sourceProvenance: 'BuiltIn',
+        isBuiltIn: true,
+        definitionSource: null,
+        agentRuntime: 'opencode',
+      }],
+    }),
   ),
   http.get('*/api/issue-templates', () =>
     HttpResponse.json({ success: true, data: [] }),

@@ -17,6 +17,8 @@ export interface AgentRuntimeConfig {
   pollInterval: number
 }
 
+export type AgentRuntime = 'opencode' | 'pi'
+
 export interface SystemInfo {
   running: {
     version: string | null
@@ -116,6 +118,7 @@ export interface WorkflowProfileInfo {
   displayName: string
   description: string
   isDefault: boolean
+  agentRuntime?: AgentRuntime | null
 }
 
 export interface WorkflowProfileStageSummary {
@@ -130,8 +133,13 @@ export interface WorkflowProfileDetail {
   displayName: string
   description: string
   isDefault: boolean
+  projectId?: string
+  sourceProvenance?: string
+  isBuiltIn?: boolean
+  definitionSource?: string | null
   yaml: string
   stages: WorkflowProfileStageSummary[]
+  agentRuntime?: AgentRuntime | null
 }
 
 export type ModelBadge = 'free' | 'latest'

@@ -34,7 +34,7 @@ describe('AiSettingsSection', () => {
     })
 
     expect(screen.getByText('3 models available')).toBeInTheDocument()
-    expect(screen.getByText('Opencode default')).toBeInTheDocument()
+    expect(screen.getByText('Runtime default')).toBeInTheDocument()
   })
 
   it('keeps the Stage Model Overrides section available', async () => {

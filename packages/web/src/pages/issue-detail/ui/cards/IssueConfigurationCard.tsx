@@ -6,7 +6,7 @@ import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
 
 export type IssueConfigurationCardIssue = Pick<
   Issue,
-  'number' | 'model' | 'stageModels' | 'canStart' | 'blocker'
+  'number' | 'model' | 'stageModels' | 'workflowProfileId' | 'canStart' | 'blocker'
 > & {
   prerequisites?: IssuePrerequisiteSummary[]
   isBacklog: boolean
@@ -36,7 +36,12 @@ export function IssueConfigurationCard({
 
   const content = (
     <div className="space-y-4">
-      <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} currentStageModels={issue.stageModels} />
+      <IssueModelSelector
+        issueNumber={issue.number}
+        workflowProfileId={issue.workflowProfileId}
+        currentModel={issue.model}
+        currentStageModels={issue.stageModels}
+      />
 
       {issue.isBacklog && (
         <div className="border-t border-border/60 pt-4" data-testid="prerequisite-configuration-controls">

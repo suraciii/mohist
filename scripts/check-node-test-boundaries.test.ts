@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { resolve } from 'node:path'
 import {
+  nodeTestFileBaselineAllowance,
+  nodeTestFileBaselineSlack,
   scanRunnerSourceFile,
   scanSourceFile,
 } from './check-node-test-boundaries.js'
@@ -9,6 +11,11 @@ import {
 function rules(violations: Array<{ rule: string }>): Set<string> {
   return new Set(violations.map((violation) => violation.rule))
 }
+
+test('Node test baselines keep a small maintenance buffer', () => {
+  assert.equal(nodeTestFileBaselineSlack, 100)
+  assert.equal(nodeTestFileBaselineAllowance(864), 964)
+})
 
 test('Web test scanner rejects every guarded boundary', () => {
   const violations = scanSourceFile(

@@ -1,30 +1,23 @@
 import { useProject } from '../../../entities/project'
 import {
-  useClearProjectDefaultWorkflowProfile,
   useProjectDefaultWorkflowProfile,
   useSetProjectDefaultWorkflowProfile,
   useAllWorkflowProfiles,
-  useWorkflowProfiles,
 } from '../../../entities/settings'
 import { includesWorkflowProfileId, workflowProfileIdEquals } from '../../../entities/settings'
-import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Label } from '@/shared/ui/components/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 
-const DEFAULT_VALUE = '__inherit__'
-
 export function ProjectDefaultWorkflowControl() {
   const { currentProject } = useProject()
   const { data: profiles, isLoading: profilesLoading, isError: profilesError } = useAllWorkflowProfiles()
-  const { data: enabledProfiles, isLoading: enabledProfilesLoading, isError: enabledProfilesError } = useWorkflowProfiles()
   const {
     data: projectProfile,
     isLoading: profileLoading,
     isError,
   } = useProjectDefaultWorkflowProfile()
   const setDefault = useSetProjectDefaultWorkflowProfile()
-  const clearDefault = useClearProjectDefaultWorkflowProfile()
 
   if (!currentProject) {
     return (
@@ -39,8 +32,8 @@ export function ProjectDefaultWorkflowControl() {
 
   const configuredTemplateId = projectProfile?.defaultTemplateId ?? null
   const disabledIds = projectProfile?.disabledWorkflowProfileIds ?? []
-  const inheritedDefaultId = enabledProfiles?.find((p) => p.isDefault)?.id
-    ?? enabledProfiles?.[0]?.id
+  const inheritedDefaultId = profiles?.find((p) => p.isDefault && !includesWorkflowProfileId(disabledIds, p.id))?.id
+    ?? profiles?.find((p) => !includesWorkflowProfileId(disabledIds, p.id))?.id
     ?? 'none'
   const isConfiguredInCatalog = configuredTemplateId
     ? profiles?.some((p) => workflowProfileIdEquals(p.id, configuredTemplateId)) ?? true
@@ -48,29 +41,19 @@ export function ProjectDefaultWorkflowControl() {
   const isDefaultDisabled = configuredTemplateId
     ? includesWorkflowProfileId(disabledIds, configuredTemplateId)
     : false
-  const isLoading = profileLoading || profilesLoading || enabledProfilesLoading
+  const isLoading = profileLoading || profilesLoading
 
   function handleValueChange(value: string | null) {
-    if (!value || value === DEFAULT_VALUE) {
-      if (configuredTemplateId) {
-        clearDefault.mutate()
-      }
-    } else {
+    if (value) {
       setDefault.mutate({ templateId: value })
     }
   }
-
-  function handleClear() {
-    clearDefault.mutate()
-  }
-
-  const selectValue = configuredTemplateId ?? DEFAULT_VALUE
 
   return (
     <CardSection title="Project default workflow" titleAs="h3" tone="blue">
       {isLoading ? (
         <div className="text-sm text-muted-foreground">Loading...</div>
-      ) : isError || profilesError || enabledProfilesError ? (
+      ) : isError || profilesError ? (
         <div className="text-sm text-red-700">Failed to load project default workflow.</div>
       ) : (
         <div className="space-y-3">
@@ -129,9 +112,9 @@ export function ProjectDefaultWorkflowControl() {
                 Default workflow
               </Label>
               <Select
-                value={selectValue}
+                value={configuredTemplateId ?? ''}
                 onValueChange={handleValueChange}
-                disabled={setDefault.isPending || clearDefault.isPending}
+                disabled={setDefault.isPending}
               >
                 <SelectTrigger
                   id="project-default-workflow-select"
@@ -141,9 +124,6 @@ export function ProjectDefaultWorkflowControl() {
                   <SelectValue placeholder="Select workflow" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={DEFAULT_VALUE}>
-                    Inherit system default ({inheritedDefaultId})
-                  </SelectItem>
                   {profiles?.map((profile) => {
                     const isDisabled = includesWorkflowProfileId(disabledIds, profile.id)
                     return (
@@ -164,15 +144,6 @@ export function ProjectDefaultWorkflowControl() {
                 </SelectContent>
               </Select>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="project-default-workflow-clear"
-              disabled={!configuredTemplateId || clearDefault.isPending || setDefault.isPending}
-              onClick={handleClear}
-            >
-              Clear
-            </Button>
           </div>
         </div>
       )}

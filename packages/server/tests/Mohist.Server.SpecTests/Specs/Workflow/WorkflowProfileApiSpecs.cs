@@ -41,6 +41,27 @@ public class WorkflowProfileApiSpecs
     }
 
     [Fact]
+    public async Task ListAndGet_ExposeAgentRuntime()
+    {
+        var project = await CreateProjectAsync();
+
+        var profiles = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
+        var builtin = profiles.EnumerateArray()
+            .Single(profile => profile.GetProperty("profileId").GetString() == "mohist/local");
+        var detail = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/workflow-profiles/mohist%2Flocal");
+
+        Assert.Equal("opencode", builtin.GetProperty("agentRuntime").GetString());
+        Assert.Equal("opencode", detail.GetProperty("agentRuntime").GetString());
+        Assert.Equal("mohist/local", detail.GetProperty("profileId").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(detail.GetProperty("definitionSource").GetString()));
+        var stage = detail.GetProperty("stages").EnumerateArray()
+            .Single(candidate => candidate.GetProperty("stage").GetString() == "plan");
+        Assert.Equal("plan", stage.GetProperty("stage").GetString());
+        Assert.NotEmpty(stage.GetProperty("tasks").EnumerateArray());
+    }
+
+    [Fact]
     public async Task PutMalformedYaml_ReturnsDefinitionValidationAndPreservesStoredProfile()
     {
         var project = await CreateProjectAsync();

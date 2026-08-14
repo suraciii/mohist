@@ -4,7 +4,6 @@ import { server, useMswServer } from '../../../../tests/support/msw'
 import { toast } from 'sonner'
 import {
   availableModelIdsQueryOptions,
-  clearProjectDefaultWorkflowProfileMutationOptions,
   projectDefaultWorkflowProfileQueryOptions,
   resolveEffectiveDefaultWorkflowProfile,
   selectModelVariants,
@@ -50,6 +49,12 @@ describe('availableModelIdsQueryOptions', () => {
     expect(availableModelIdsQueryOptions('proj-1').queryKey).toEqual(['opencode-model-ids', 'opencode', 'proj-1'])
     expect(availableModelIdsQueryOptions('proj-1').enabled).toBe(true)
   })
+
+  it('does not enable model discovery when the selected profile has no runtime', () => {
+    const options = availableModelIdsQueryOptions('proj-1', null)
+    expect(options.queryKey).toEqual(['opencode-model-ids', null, 'proj-1'])
+    expect(options.enabled).toBe(false)
+  })
 })
 
 describe('projectDefaultWorkflowProfileQueryOptions', () => {
@@ -67,18 +72,18 @@ describe('projectDefaultWorkflowProfileQueryOptions', () => {
   it('invokes getProjectDefaultWorkflowProfile(projectId) as the query function', async () => {
     const captured: string[] = []
     server.use(
-      http.get('*/api/projects/:projectId/workflow-profile', ({ request }) => {
+      http.get('*/api/projects/:projectId/workflow-profile/default', ({ request }) => {
         captured.push(new URL(request.url).pathname)
         return HttpResponse.json({
           success: true,
-          data: { projectId: 'proj-1', defaultTemplateId: 'mohist/github-pr' },
+          data: { projectId: 'proj-1', defaultWorkflowProfileId: 'mohist/github-pr' },
         })
       }),
     )
 
     const data = await projectDefaultWorkflowProfileQueryOptions('proj-1').queryFn()
 
-    expect(captured).toEqual(['/api/projects/proj-1/workflow-profile'])
+    expect(captured).toEqual(['/api/projects/proj-1/workflow-profile/default'])
     expect(data).toEqual({
       projectId: 'proj-1',
       defaultTemplateId: 'mohist/github-pr',
@@ -91,11 +96,11 @@ describe('setProjectDefaultWorkflowProfileMutationOptions', () => {
   it('passes the input through to setProjectDefaultWorkflowProfile for the active project', async () => {
     const captured: { url: string; method: string; body: unknown }[] = []
     server.use(
-      http.put('*/api/projects/:projectId/workflow-profile/default-template', async ({ request }) => {
+      http.put('*/api/projects/:projectId/workflow-profile/default', async ({ request }) => {
         captured.push({ url: new URL(request.url).pathname, method: request.method, body: await request.json() })
         return HttpResponse.json({
           success: true,
-          data: { projectId: 'proj-1', defaultTemplateId: 'mohist/github-pr' },
+          data: { projectId: 'proj-1', profileId: 'mohist/github-pr' },
         })
       }),
     )
@@ -106,9 +111,9 @@ describe('setProjectDefaultWorkflowProfileMutationOptions', () => {
 
     expect(captured).toEqual([
       {
-        url: '/api/projects/proj-1/workflow-profile/default-template',
+        url: '/api/projects/proj-1/workflow-profile/default',
         method: 'PUT',
-        body: { templateId: 'mohist/github-pr' },
+        body: { profileId: 'mohist/github-pr' },
       },
     ])
   })
@@ -126,43 +131,6 @@ describe('setProjectDefaultWorkflowProfileMutationOptions', () => {
 
   it('shows an error toast on failure', () => {
     setProjectDefaultWorkflowProfileMutationOptions('proj-1', createInvalidationClient()).onError(new Error('boom'))
-    expect(toast.error).toHaveBeenCalledWith('boom')
-  })
-})
-
-describe('clearProjectDefaultWorkflowProfileMutationOptions', () => {
-  it('calls clearProjectDefaultWorkflowProfile for the active project', async () => {
-    const captured: { url: string; method: string }[] = []
-    server.use(
-      http.delete('*/api/projects/:projectId/workflow-profile/default-template', ({ request }) => {
-        captured.push({ url: new URL(request.url).pathname, method: request.method })
-        return HttpResponse.json({
-          success: true,
-          data: { projectId: 'proj-1', defaultTemplateId: null },
-        })
-      }),
-    )
-
-    await clearProjectDefaultWorkflowProfileMutationOptions('proj-1', createInvalidationClient()).mutationFn()
-
-    expect(captured).toEqual([
-      { url: '/api/projects/proj-1/workflow-profile/default-template', method: 'DELETE' },
-    ])
-  })
-
-  it('invalidates the project workflow-profile query on success', () => {
-    const qc = createInvalidationClient()
-    clearProjectDefaultWorkflowProfileMutationOptions('proj-1', qc).onSuccess()
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['project-workflow-profile', 'proj-1'] })
-  })
-
-  it('toasts "Project default workflow cleared" on success', () => {
-    clearProjectDefaultWorkflowProfileMutationOptions('proj-1', createInvalidationClient()).onSuccess()
-    expect(toast.success).toHaveBeenCalledWith('Project default workflow cleared')
-  })
-
-  it('shows an error toast on failure', () => {
-    clearProjectDefaultWorkflowProfileMutationOptions('proj-1', createInvalidationClient()).onError(new Error('boom'))
     expect(toast.error).toHaveBeenCalledWith('boom')
   })
 })
@@ -199,6 +167,22 @@ describe('resolveEffectiveDefaultWorkflowProfile', () => {
       resolveEffectiveDefaultWorkflowProfile(
         { projectId: 'proj-1', defaultTemplateId: 'mohist/local', disabledWorkflowProfileIds: ['mohist/local'] },
         [{ id: 'mohist/github-pr', displayName: 'mohist/github-pr', description: '', isDefault: false }],
+      ),
+    ).toEqual({
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'system',
+      configuredTemplateId: 'mohist/local',
+    })
+  })
+
+  it('does not return a disabled system default', () => {
+    expect(
+      resolveEffectiveDefaultWorkflowProfile(
+        { projectId: 'proj-1', defaultTemplateId: 'mohist/local', disabledWorkflowProfileIds: ['mohist/local'] },
+        [
+          { id: 'mohist/local', displayName: 'mohist/local', description: '', isDefault: true },
+          { id: 'mohist/github-pr', displayName: 'mohist/github-pr', description: '', isDefault: false },
+        ],
       ),
     ).toEqual({
       effectiveTemplateId: 'mohist/github-pr',

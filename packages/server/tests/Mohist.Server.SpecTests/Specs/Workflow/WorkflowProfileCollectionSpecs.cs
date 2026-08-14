@@ -74,6 +74,31 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ListAndGet_ComputesAgentRuntimeFromTheDefinition()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await _provider.CreateAsync(projectId, BuildCustom("delivery/pi", yaml: """
+            id: delivery/pi
+            stages:
+              - stage: build
+                tasks:
+                  - id: run
+                    uses: mohist/pi
+                    with: {}
+                checks: []
+            """));
+
+        var entries = await _provider.ListAsync(projectId);
+        var custom = Assert.Single(entries, e => e.ProfileId == "delivery/pi");
+        var builtin = Assert.Single(entries, e => e.ProfileId == WorkflowProfileCatalog.LocalId);
+        var detail = await _provider.GetAsync(projectId, "delivery/pi");
+
+        Assert.Equal("pi", custom.AgentRuntime);
+        Assert.Equal("opencode", builtin.AgentRuntime);
+        Assert.Equal("pi", detail?.AgentRuntime);
+    }
+
+    [Fact]
     public async Task BuiltInProfile_ReturnsCanonicalDefinitionSource()
     {
         var (projectId, _, _) = await SeedProjectAsync();

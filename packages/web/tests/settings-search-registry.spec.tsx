@@ -80,6 +80,23 @@ const REPOSITORIES = [
   },
 ]
 
+const WORKFLOW_PROFILES = [
+  {
+    id: 'mohist/local',
+    displayName: 'Default',
+    description: 'Standard staged workflow.',
+    isDefault: true,
+    agentRuntime: 'opencode' as const,
+  },
+  {
+    id: 'mohist/quick-fix',
+    displayName: 'Quick Fix',
+    description: 'Short repair workflow.',
+    isDefault: false,
+    agentRuntime: 'opencode' as const,
+  },
+]
+
 function makeQueryClient() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -100,8 +117,18 @@ function makeQueryClient() {
   queryClient.setQueryData(['repositories', 'proj-1'], REPOSITORIES)
   queryClient.setQueryData(['system-info'], SYSTEM_INFO)
   queryClient.setQueryData(['system-update-status'], { hasJob: false, job: null })
-  queryClient.setQueryData(['workflow-templates', 'system'], [])
-  queryClient.setQueryData(['workflow-templates', 'system', 'proj-1'], [])
+  queryClient.setQueryData(['workflow-profiles', 'proj-1'], WORKFLOW_PROFILES)
+  for (const profile of WORKFLOW_PROFILES) {
+    queryClient.setQueryData(['workflow-profile', 'proj-1', profile.id], {
+      ...profile,
+      projectId: 'proj-1',
+      sourceProvenance: 'BuiltIn',
+      isBuiltIn: true,
+      definitionSource: `id: ${profile.id}`,
+      yaml: `id: ${profile.id}`,
+      stages: [],
+    })
+  }
   queryClient.setQueryData(['project-workflow-profile', 'proj-1'], {
     projectId: 'proj-1',
     defaultTemplateId: null,

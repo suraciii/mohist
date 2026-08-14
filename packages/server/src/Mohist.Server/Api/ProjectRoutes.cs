@@ -138,9 +138,29 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             var id = Uri.UnescapeDataString(profileId);
             var profile = await provider.GetAsync(project.Id, id);
-            return profile is null
-                ? ApiResults.NotFound($"WorkflowProfile '{id}' was not found")
-                : ApiResults.Ok(profile);
+            if (profile is null)
+                return ApiResults.NotFound($"WorkflowProfile '{id}' was not found");
+
+            var definition = await provider.GetDefinitionAsync(project.Id, id);
+            if (definition is null)
+                return ApiResults.NotFound($"WorkflowProfile '{id}' has no readable definition");
+
+            return ApiResults.Ok(new WorkflowProfileDetailResponse(
+                profile.ProjectId,
+                profile.ProfileId,
+                profile.Name,
+                profile.Description,
+                profile.SourceProvenance,
+                profile.IsBuiltIn,
+                profile.DefinitionSource,
+                profile.AgentRuntime,
+                definition.Stages
+                    .Select(stage => new WorkflowProfileStageSummary(
+                        stage.Stage,
+                        stage.RequiresApproval,
+                        stage.Tasks.Select(task => task.Id).ToArray(),
+                        stage.Checks.Select(check => check.Id).ToArray()))
+                    .ToArray()));
         });
 
         byRef.MapPut("/workflow-profiles/{*profileId}", async (
@@ -194,6 +214,21 @@ public static class ProjectRoutes
             };
         });
 
+        byRef.MapGet("/workflow-profile/default", async (
+            HttpContext context,
+            IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            return ApiResults.Ok(new
+            {
+                projectId = project.Id,
+                defaultWorkflowProfileId = await provider.GetDefaultProfileIdAsync(project.Id),
+                disabledWorkflowProfileIds = (await provider.GetDisabledProfileIdsAsync(project.Id))
+                    .Order(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+            });
+        });
+
         byRef.MapPut("/workflow-profile/default", async (
             HttpContext context,
             SetDefaultWorkflowProfileRequest request,
@@ -216,6 +251,50 @@ public static class ProjectRoutes
                     ApiResults.NotFound(result.Message ?? $"WorkflowProfile '{request.ProfileId}' was not found"),
                 _ => ApiResults.Conflict(result.Message ?? "WorkflowProfile selection rejected", "workflow_profile_selection_rejected"),
             };
+        });
+
+        byRef.MapPost("/workflow-profile/disable", async (
+            HttpContext context,
+            ToggleWorkflowProfileRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.ProfileId))
+                return ApiResults.BadRequest("profileId is required", "workflow_profile_required");
+
+            var project = context.GetResolvedProject();
+            try
+            {
+                await provider.SetProfileEnabledAsync(project.Id, request.ProfileId, enabled: false);
+                return ApiResults.Ok(new { profileId = request.ProfileId, enabled = false });
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "last_enabled_workflow_profile");
+            }
+        });
+
+        byRef.MapPost("/workflow-profile/enable", async (
+            HttpContext context,
+            ToggleWorkflowProfileRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.ProfileId))
+                return ApiResults.BadRequest("profileId is required", "workflow_profile_required");
+
+            var project = context.GetResolvedProject();
+            try
+            {
+                await provider.SetProfileEnabledAsync(project.Id, request.ProfileId, enabled: true);
+                return ApiResults.Ok(new { profileId = request.ProfileId, enabled = true });
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+            }
         });
 
         byRef.MapPost("/use", async (HttpContext context) =>
@@ -583,6 +662,23 @@ public static class ProjectRoutes
 
 public sealed record ProjectWorkflowProfileResponse(string ProjectId, string ProfileId);
 
+public sealed record WorkflowProfileDetailResponse(
+    string ProjectId,
+    string ProfileId,
+    string Name,
+    string Description,
+    WorkflowProfileSourceProvenance SourceProvenance,
+    bool IsBuiltIn,
+    string? DefinitionSource,
+    string? AgentRuntime,
+    IReadOnlyList<WorkflowProfileStageSummary> Stages);
+
+public sealed record WorkflowProfileStageSummary(
+    string Stage,
+    bool RequiresApproval,
+    IReadOnlyList<string> Tasks,
+    IReadOnlyList<string> Checks);
+
 public sealed record PromptUpsertRequest(string? Body);
 
 public sealed record ProjectPromptOverrideRequest(
@@ -624,6 +720,7 @@ public record UpdateRepositoryRequest(
     JsonElement Remote = default,
     JsonElement ResolvedPath = default);
 public sealed record SetDefaultWorkflowProfileRequest(string ProfileId);
+public sealed record ToggleWorkflowProfileRequest(string ProfileId);
 
 public sealed record WorkflowProfileSaveRequest(
     string ProfileId,

@@ -25,6 +25,7 @@ let _configData: Record<string, unknown> = {
 let _workflowVariablesData: any = { vars: null, stages: null }
 
 let _opencodeModelsData: any = { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} }
+let _opencodeModelsError: string | null = null
 
 let _systemInfoData: any = null
 let _systemInfoLoading = false
@@ -76,9 +77,12 @@ useMswServer(
     }
     return HttpResponse.json({ success: true, data: _workflowVariablesData })
   }),
-  http.get('*/api/projects/:projectId/opencode/models', () =>
-    HttpResponse.json({ success: true, data: _opencodeModelsData }),
-  ),
+  http.get('*/api/projects/:projectId/opencode/models', () => {
+    if (_opencodeModelsError) {
+      return HttpResponse.json({ success: false, error: _opencodeModelsError }, { status: 500 })
+    }
+    return HttpResponse.json({ success: true, data: _opencodeModelsData })
+  }),
   http.get('*/api/system/info', () => {
     if (_systemInfoLoading) return new Promise(() => {})
     if (_systemInfoError) {
@@ -95,8 +99,30 @@ useMswServer(
   http.get('*/api/templates/system', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
-  http.get('*/api/workflow-templates/system', () =>
-    HttpResponse.json({ success: true, data: [] }),
+  http.get('*/api/projects/:projectId/workflow-profiles', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: [{
+        projectId: params.projectId,
+        profileId: 'mohist/local',
+        name: 'Default',
+        description: '',
+        sourceProvenance: 'BuiltIn',
+        isBuiltIn: true,
+        definitionSource: null,
+        agentRuntime: 'opencode',
+      }],
+    }),
+  ),
+  http.get('*/api/projects/:projectId/workflow-profile/default', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        projectId: params.projectId,
+        defaultWorkflowProfileId: 'mohist/local',
+        disabledWorkflowProfileIds: [],
+      },
+    }),
   ),
 )
 
@@ -175,6 +201,7 @@ beforeEach(() => {
   }
   _workflowVariablesData = { vars: null, stages: null }
   _opencodeModelsData = { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} }
+  _opencodeModelsError = null
   _systemInfoData = null
   _systemInfoLoading = false
   _systemInfoError = null
@@ -309,13 +336,13 @@ describe('SettingsPage', () => {
   })
 
   describe('Error state', () => {
-    it('should display error message when opencode runtime query fails', async () => {
-      _opencodeRuntimeError = 'Failed to load opencode runtime'
+    it('should display error message when the selected runtime model catalog query fails', async () => {
+      _opencodeModelsError = 'Failed to load opencode models'
 
       renderWithQueryClient(<SettingsPage />)
 
       await waitFor(() => {
-        expect(screen.getAllByText(/Failed to load opencode runtime/i)[0]).toBeInTheDocument()
+        expect(screen.getAllByText(/Failed to load opencode models/i)[0]).toBeInTheDocument()
       })
     })
   })

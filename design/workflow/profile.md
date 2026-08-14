@@ -176,6 +176,11 @@ and Prompts use separate APIs. They are not children of `/workflow-profiles/{*pr
 `GET` and the collection list return both builtin and Project-managed Profiles. `POST` does not accept a
 `mohist/*` ID. `PUT` or `DELETE` on a builtin Profile must return a domain error.
 
+The collection read models expose `agentRuntime` as a nullable derived field. Project settings read the
+effective default and disabled Profile IDs through `/workflow-profile/default`; the Web client resolves
+the effective Profile, reads its `agentRuntime`, and requests that Runtime's model catalog. The Project
+default mutation uses `PUT /workflow-profile/default` with `{ "profileId": "..." }`.
+
 ## Status
 
 Implemented: the Project-scoped WorkflowProfile collection, including builtin `mohist/*` and
@@ -184,5 +189,7 @@ Project-managed Profiles; the Project default and explicit Issue selection, incl
 during an active Run with an effect only on the next Run; a fixed Profile ID for a Run with live Definition
 reads at Stage initialization and no Definition snapshot; and separate Variables and Prompts resources.
 
-Not yet implemented: the `agentRuntime` list/detail projection and its use by
-Project, Issue, and create-Issue model selectors.
+Implemented: the nullable `agentRuntime` list/detail projection and its use by Project, Issue, create-Issue,
+and stage model selectors. The projection is derived recursively from static `uses` declarations and the
+browser does not parse Workflow YAML. Runtime-specific model catalogs remain isolated; a missing catalog
+or a Profile with no single resolved Runtime does not fall back to another Runtime.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
-import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings'
+import { getWorkflowProfileAgentRuntime, resolveEffectiveDefaultWorkflowProfile, useAvailableModelIds, useOpencodeModel, useProjectDefaultWorkflowProfile, useSetStageModels, useStageModels, useUpdateOpencodeModel, useWorkflowProfiles } from '../../../entities/settings'
 import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { resolveVariantAgainstModel } from '../../../shared/ui/model-variants'
@@ -37,8 +37,13 @@ export const AI_SETTINGS_DESCRIPTORS: SettingsSearchEntry[] = [
 ]
 
 export function AiSettingsSection() {
-  const { isLoading: runtimeLoading, error: runtimeError } = useOpencodeRuntime()
-  const { data: availableModelIds, isLoading: modelsLoading, error: modelsError } = useAvailableModelIds()
+  const { data: workflowProfiles, isLoading: profilesLoading, error: profilesError } = useWorkflowProfiles()
+  const { data: projectWorkflowProfile, isLoading: defaultProfileLoading, error: defaultProfileError } = useProjectDefaultWorkflowProfile()
+  const { effectiveTemplateId } = resolveEffectiveDefaultWorkflowProfile(projectWorkflowProfile, workflowProfiles)
+  const selectedRuntime = profilesLoading || defaultProfileLoading
+    ? null
+    : getWorkflowProfileAgentRuntime(workflowProfiles, effectiveTemplateId)
+  const { data: availableModelIds, isLoading: modelsLoading, error: modelsError } = useAvailableModelIds(selectedRuntime)
   const { data: opencodeModelData } = useOpencodeModel()
   const setOpencodeModel = useUpdateOpencodeModel()
   const { data: stageModelsData } = useStageModels()
@@ -122,17 +127,17 @@ export function AiSettingsSection() {
     setStageModels.mutate({ stage, model: stageModel, variant })
   }
 
-  if (runtimeLoading || modelsLoading) {
+  if (profilesLoading || defaultProfileLoading || modelsLoading) {
     return <SectionState variant="loading" title={sectionLabel} skeletonRows={2} />
   }
 
-  const error = runtimeError ?? modelsError
+  const error = profilesError ?? defaultProfileError ?? modelsError
   if (error) {
     return (
       <SectionState
         variant="error"
         title={sectionLabel}
-        message={`Failed to load opencode runtime: ${(error as Error).message}`}
+        message={`Failed to load workflow profile models: ${(error as Error).message}`}
       />
     )
   }
@@ -146,11 +151,11 @@ export function AiSettingsSection() {
               <label id={DEFAULT_MODEL_LABEL_ID} className="block text-xs font-medium text-muted-foreground">Default Coder Agent Model</label>
               <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
             </div>
-            <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
+            <p className="text-xs text-muted-foreground">Passed to the selected workflow profile runtime when tasks run.</p>
             <ModelSelect
               id="settings-default-model"
               value={storedDefaultModel}
-              placeholder="Opencode default"
+              placeholder="Runtime default"
               models={coderModels}
               onChange={handleSetOpencodeModel}
               onClear={storedDefaultModel ? handleClearOpencodeModel : undefined}
