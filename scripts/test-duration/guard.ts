@@ -938,6 +938,7 @@ export async function main(
       policyTrackId: plan.policyTrack?.id,
       dependsOn: plan.lane.dependsOn ?? [],
       resources: plan.lane.resources ?? [],
+      resourceWeights: plan.lane.resourceWeights ?? {},
       reportPath: plan.reportPath,
       partition: plan.partition,
       sandboxOrdinal: plan.sandboxOrdinal,
