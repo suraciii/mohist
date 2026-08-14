@@ -2074,7 +2074,7 @@ public partial class MohistDbContext : DbContext
             entity.Property(e => e.UpdatedAt).IsRequired();
         });
 
-        WorkflowAttentionModelConfiguration.Apply(modelBuilder);
+        ConfigureAdditionalModels(modelBuilder);
     }
 
     private static bool DictionaryEqual(Dictionary<string, string>? left, Dictionary<string, string>? right)

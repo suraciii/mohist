@@ -102,6 +102,7 @@ public sealed class CredentialStoreTests
         Assert.Equal("ci", result.Credential.Name);
         Assert.Equal(setup.Time.GetUtcNow().AddDays(30), result.Credential.ExpiresAt);
         Assert.Null(result.Credential.RevokedAt);
+        Assert.Null(result.Credential.DirectApiProjectGrant);
 
         // The full token is not persisted — only its hash and a short
         // display prefix are, so the value shown once cannot be recovered
@@ -112,6 +113,84 @@ public sealed class CredentialStoreTests
 
         var resolved = await setup.Store.FindActiveAsync(CredentialToken.Hash(result.Token));
         Assert.NotNull(resolved);
+    }
+
+    [Fact]
+    public async Task CreatePat_WithExplicitGrant_PersistsTheKindAndExactlyTheChildSet()
+    {
+        using var setup = CreateStore();
+
+        var result = await setup.Store.CreatePatAsync(
+            "admin",
+            "direct-explicit",
+            [Scope.Operator],
+            setup.Time.GetUtcNow().AddDays(30),
+            directApiProjectGrant: DirectApiProjectGrant.Explicit(["proj_a", "proj_b"]));
+
+        Assert.Equal(PatCreateStatus.Created, result.Status);
+        Assert.Equal(
+            DirectApiProjectGrantKind.Explicit,
+            result.Credential!.DirectApiProjectGrant!.Kind);
+        Assert.Equal(
+            ["proj_a", "proj_b"],
+            result.Credential.DirectApiProjectGrant.AllowedProjectIds);
+
+        var storedKind = await ScalarAsync(
+            setup.Connection,
+            "SELECT \"DirectApiProjectGrantKind\" FROM \"Credentials\" WHERE \"Id\" = $id",
+            ("$id", result.Credential.Id));
+        Assert.Equal("explicit", storedKind);
+
+        var storedProjects = await ReadProjectGrantsAsync(setup.Connection, result.Credential.Id);
+        Assert.Equal(["proj_a", "proj_b"], storedProjects);
+
+        var resolved = await setup.Store.FindActiveAsync(CredentialToken.Hash(result.Token!));
+        Assert.Equal(
+            ["proj_a", "proj_b"],
+            resolved!.DirectApiProjectGrant!.AllowedProjectIds);
+    }
+
+    [Fact]
+    public async Task CreatePat_WithOperatorAllGrant_PersistsAnExplicitEmptyGrant()
+    {
+        using var setup = CreateStore();
+
+        var result = await setup.Store.CreatePatAsync(
+            "admin",
+            "direct-all",
+            [Scope.Operator],
+            setup.Time.GetUtcNow().AddDays(30),
+            directApiProjectGrant: DirectApiProjectGrant.OperatorAll);
+
+        Assert.Equal(PatCreateStatus.Created, result.Status);
+        Assert.Equal(
+            DirectApiProjectGrantKind.OperatorAll,
+            result.Credential!.DirectApiProjectGrant!.Kind);
+        Assert.Empty(result.Credential.DirectApiProjectGrant.AllowedProjectIds);
+        Assert.Equal(
+            "operator_all",
+            await ScalarAsync(
+                setup.Connection,
+                "SELECT \"DirectApiProjectGrantKind\" FROM \"Credentials\" WHERE \"Id\" = $id",
+                ("$id", result.Credential.Id)));
+        Assert.Empty(await ReadProjectGrantsAsync(setup.Connection, result.Credential.Id));
+    }
+
+    [Fact]
+    public async Task CreatePat_WithInvalidGrant_IsRejectedWithoutCredentialOrChildRows()
+    {
+        using var setup = CreateStore();
+
+        var result = await setup.Store.CreatePatAsync(
+            "admin",
+            "invalid-grant",
+            [Scope.Operator],
+            setup.Time.GetUtcNow().AddDays(30),
+            directApiProjectGrant: new DirectApiProjectGrant(DirectApiProjectGrantKind.Explicit, []));
+
+        Assert.Equal(PatCreateStatus.InvalidGrant, result.Status);
+        Assert.Equal(0, await CountAsync(setup.Connection, "Credentials", "Name", "invalid-grant"));
+        Assert.Equal(0, await CountAsync(setup.Connection, "CredentialProjectGrants"));
     }
 
     [Fact]
@@ -365,6 +444,44 @@ public sealed class CredentialStoreTests
         Assert.NotNull(await setup.Store.FindActiveAsync("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
     }
 
+    private static async Task<List<string>> ReadProjectGrantsAsync(SqliteConnection connection, string credentialId)
+    {
+        var values = new List<string>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT \"ProjectId\" FROM \"CredentialProjectGrants\" WHERE \"CredentialId\" = $id ORDER BY \"ProjectId\";";
+        command.Parameters.AddWithValue("$id", credentialId);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            values.Add(reader.GetString(0));
+        return values;
+    }
+
+    private static async Task<string?> ScalarAsync(
+        SqliteConnection connection,
+        string sql,
+        (string Name, object Value) parameter)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        return (string?)await command.ExecuteScalarAsync();
+    }
+
+    private static async Task<int> CountAsync(
+        SqliteConnection connection,
+        string table,
+        string? column = null,
+        object? value = null)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = column is null
+            ? $"SELECT COUNT(*) FROM \"{table}\";"
+            : $"SELECT COUNT(*) FROM \"{table}\" WHERE \"{column}\" = $value;";
+        if (column is not null)
+            command.Parameters.AddWithValue("$value", value!);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static async Task<CredentialRow> ReadRowAsync(SqliteConnection connection, string name = "ci")
     {
         await using var command = connection.CreateCommand();
@@ -386,6 +503,7 @@ public sealed class CredentialStoreTests
             RevokedAt = reader.IsDBNull(9) ? null : DateTimeOffset.Parse(reader.GetString(9)),
             CreatedAt = DateTimeOffset.Parse(reader.GetString(10)),
             ProjectId = reader.IsDBNull(11) ? null : reader.GetString(11),
+            DirectApiProjectGrantKind = reader.IsDBNull(12) ? null : reader.GetString(12),
         };
     }
 
@@ -409,10 +527,17 @@ public sealed class CredentialStoreTests
                     "ExpiresAt" TEXT NULL,
                     "RevokedAt" TEXT NULL,
                     "CreatedAt" TEXT NOT NULL,
-                    "ProjectId" TEXT NULL
+                    "ProjectId" TEXT NULL,
+                    "DirectApiProjectGrantKind" TEXT NULL
                 );
                 CREATE UNIQUE INDEX "IX_Credentials_TokenHash" ON "Credentials" ("TokenHash");
                 CREATE UNIQUE INDEX "IX_Credentials_PrincipalId_Name" ON "Credentials" ("PrincipalId", "Name") WHERE "RevokedAt" IS NULL;
+                CREATE TABLE "CredentialProjectGrants" (
+                    "CredentialId" TEXT NOT NULL,
+                    "ProjectId" TEXT NOT NULL,
+                    CONSTRAINT "PK_CredentialProjectGrants" PRIMARY KEY ("CredentialId", "ProjectId")
+                );
+                CREATE UNIQUE INDEX "UX_CredentialProjectGrants_CredentialId_ProjectId" ON "CredentialProjectGrants" ("CredentialId", "ProjectId");
                 """;
             command.ExecuteNonQuery();
         }

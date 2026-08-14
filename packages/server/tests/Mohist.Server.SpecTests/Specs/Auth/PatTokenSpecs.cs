@@ -2,6 +2,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Auth;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -58,6 +63,76 @@ public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
             fixture.TimeProvider.GetUtcNow().AddDays(90),
             data.GetProperty("expiresAt").GetDateTimeOffset());
         Assert.Equal("operator", data.GetProperty("scope").GetString());
+    }
+
+    [Fact]
+    public async Task Create_WithRepeatedProjects_PersistsAnExplicitGrantWithExactlyThatSet()
+    {
+        await SeedProjectAsync("pat-grant-a");
+        await SeedProjectAsync("pat-grant-b");
+
+        using var response = await fixture.Client.PostAsJsonAsync(CreatePath, new
+        {
+            name = "explicit-grant",
+            scope = "operator",
+            projectIds = new[] { "pat-grant-a", "pat-grant-b" },
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var data = JsonDocument.Parse(await response.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("data");
+        var credentialId = data.GetProperty("id").GetString()!;
+        var grant = await ReadGrantAsync(credentialId);
+        Assert.Equal("explicit", grant.Kind);
+        Assert.Equal(new[] { "pat-grant-a", "pat-grant-b" }, grant.ProjectIds);
+    }
+
+    [Fact]
+    public async Task Create_WithAllProjects_PersistsOperatorAllWithAnEmptyChildSet()
+    {
+        await SeedProjectAsync("pat-grant-all");
+
+        using var response = await fixture.Client.PostAsJsonAsync(CreatePath, new
+        {
+            name = "operator-all-grant",
+            scope = "operator",
+            allProjects = true,
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var data = JsonDocument.Parse(await response.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("data");
+        var grant = await ReadGrantAsync(data.GetProperty("id").GetString()!);
+        Assert.Equal("operator_all", grant.Kind);
+        Assert.Empty(grant.ProjectIds);
+    }
+
+    [Fact]
+    public async Task Create_WithInvalidGrantBinding_IsForbiddenAndPersistsNothing()
+    {
+        var requests = new[]
+        {
+            (Name: "grant-both", Body: (object)new { name = "grant-both", scope = "operator", projectIds = new[] { "missing-a" }, allProjects = true }),
+            (Name: "grant-readonly-all", Body: (object)new { name = "grant-readonly-all", scope = "readonly", allProjects = true }),
+            (Name: "grant-unknown", Body: (object)new { name = "grant-unknown", scope = "operator", projectIds = new[] { "missing-project" } }),
+        };
+
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var grantsBefore = await db.CredentialProjectGrants.CountAsync();
+
+        foreach (var request in requests)
+        {
+            using var response = await fixture.Client.PostAsJsonAsync(CreatePath, request.Body);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+
+        foreach (var request in requests)
+        {
+            Assert.Equal(0, await db.Credentials.CountAsync(row => row.Name == request.Name));
+        }
+
+        Assert.Equal(grantsBefore, await db.CredentialProjectGrants.CountAsync());
     }
 
     [Fact]
@@ -215,6 +290,37 @@ public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
 
         var revokedAt = item.GetProperty("revokedAt").GetDateTimeOffset();
         Assert.NotEqual(default, revokedAt);
+    }
+
+    private async Task SeedProjectAsync(string projectId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        if (await db.Projects.AnyAsync(project => project.Id == projectId))
+            return;
+
+        db.Projects.Add(new ProjectRow
+        {
+            Id = projectId,
+            Name = projectId,
+            RepositoriesJson = "[]",
+            CreatedAt = fixture.TimeProvider.GetUtcNow(),
+            UpdatedAt = fixture.TimeProvider.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<(string Kind, string[] ProjectIds)> ReadGrantAsync(string credentialId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var credential = await db.Credentials.SingleAsync(row => row.Id == credentialId);
+        var projectIds = await db.CredentialProjectGrants
+            .Where(grant => grant.CredentialId == credentialId)
+            .OrderBy(grant => grant.ProjectId)
+            .Select(grant => grant.ProjectId)
+            .ToArrayAsync();
+        return (credential.DirectApiProjectGrantKind!, projectIds);
     }
 
     private async Task<HttpResponseMessage> CreatePatAsync(string name, string scope)

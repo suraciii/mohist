@@ -12,4 +12,11 @@ public sealed record Credential(
     string? FamilyId,
     DateTimeOffset? ExpiresAt,
     DateTimeOffset? RevokedAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt)
+{
+    /// <summary>
+    /// The credential-owned grant for the direct external Agent API. A null
+    /// value is intentional for older and control-plane-only PATs.
+    /// </summary>
+    public DirectApiProjectGrant? DirectApiProjectGrant { get; init; }
+}

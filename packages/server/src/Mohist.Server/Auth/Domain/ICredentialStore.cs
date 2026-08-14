@@ -4,6 +4,7 @@ public enum PatCreateStatus
 {
     Created,
     DuplicateName,
+    InvalidGrant,
 }
 
 public sealed record PatCreateResult(PatCreateStatus Status, Credential? Credential, string? Token);
@@ -40,7 +41,8 @@ public interface ICredentialStore
         string name,
         IReadOnlyList<Scope> scopes,
         DateTimeOffset expiresAt,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        DirectApiProjectGrant? directApiProjectGrant = null);
 
     /// <summary>
     /// All PATs of the principal, revoked or not, newest first. Full token

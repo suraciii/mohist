@@ -11,6 +11,7 @@ public class CredentialRow
     public string? Prefix { get; set; }
     public string? ProjectId { get; set; }
     public string? FamilyId { get; set; }
+    public string? DirectApiProjectGrantKind { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

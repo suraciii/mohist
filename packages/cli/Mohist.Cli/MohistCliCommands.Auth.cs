@@ -48,9 +48,20 @@ internal static class AuthCommands
         {
             Description = $"Lifetime in hours (default {DefaultTtlHours}, max {MaxTtlHours}); a token can never be permanent",
         };
+        var project = new Option<string[]?>("--project")
+        {
+            Description = "Grant direct Agent API access to a private Project; repeat for multiple Projects",
+            AllowMultipleArgumentsPerToken = true,
+        };
+        var allProjects = new Option<bool>("--all-projects")
+        {
+            Description = "Grant direct Agent API access to all current private Projects (operator scope only)",
+        };
         cmd.Options.Add(name);
         cmd.Options.Add(scope);
         cmd.Options.Add(ttl);
+        cmd.Options.Add(project);
+        cmd.Options.Add(allProjects);
         cmd.SetAction(async ctx =>
         {
             var tokenName = ctx.GetValue(name);
@@ -69,6 +80,26 @@ internal static class AuthCommands
                 return 1;
             }
 
+            var projectIds = ctx.GetValue(project) ?? [];
+            var grantAllProjects = ctx.GetValue(allProjects);
+            if (projectIds.Length > 0 && grantAllProjects)
+            {
+                api.Error.WriteLine("--project cannot be combined with --all-projects");
+                return 1;
+            }
+
+            if (grantAllProjects && !string.Equals(scopeValue, "operator", StringComparison.OrdinalIgnoreCase))
+            {
+                api.Error.WriteLine("--all-projects requires --scope operator");
+                return 1;
+            }
+
+            if (projectIds.Any(string.IsNullOrWhiteSpace))
+            {
+                api.Error.WriteLine("--project requires a project id");
+                return 1;
+            }
+
             var ttlHours = ctx.GetValue(ttl);
             if (ttlHours is < 1 or > MaxTtlHours)
             {
@@ -81,6 +112,8 @@ internal static class AuthCommands
                 name = tokenName,
                 scope = scopeValue!.ToLowerInvariant(),
                 ttlHours,
+                projectIds = projectIds.Length == 0 ? null : projectIds,
+                allProjects = grantAllProjects,
             });
             return result.ExitCode;
         });
