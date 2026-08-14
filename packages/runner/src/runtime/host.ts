@@ -784,10 +784,9 @@ export class RunnerHost {
   }
 
   /**
-   * Reports a single awaitingAck entry. On ack (any non-throwing response
-   * from the owner — Accepted or Stale are both acks), removes the entry.
-   * Throws on transport failure so the caller can schedule
-   * the next attempt.
+   * Reports a single awaitingAck entry. Accepted and stale reports are both
+   * durable acknowledgements. An untracked response leaves the original
+   * result in place for reconciliation rather than silently dropping it.
    */
   private async reportOnce(key: string): Promise<void> {
     const held = this.awaitingAck.get(key)
@@ -797,7 +796,13 @@ export class RunnerHost {
     timeout.unref?.()
     held.entry.attempts += 1
     try {
-      await this.connection.report(held.work, held.entry.result, controller.signal)
+      const acknowledgement = await this.connection.report(held.work, held.entry.result, controller.signal)
+      if (acknowledgement["tracked"] !== true) {
+        const reason = typeof acknowledgement["reason"] === "string"
+          ? `: ${acknowledgement["reason"]}`
+          : ""
+        throw new Error(`work report was not durably acknowledged${reason}`)
+      }
     } finally {
       clearTimeout(timeout)
     }

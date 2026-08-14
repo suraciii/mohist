@@ -112,7 +112,7 @@
       "type": "WRITE",
       "output": "End-to-end unknown result semantics, Agent-aware Runner loss/reconnect reconciliation, preserved non-Agent failures, and passing regression tests for the observed incidents.",
       "dependsOn": ["T-002", "T-004"],
-      "passes": false,
+      "passes": true,
       "notes": "Connectivity and Session activity are observations, never authoritative results. Do not add blind retry, replacement execution, or an `Unknown` member to `TaskReportStatus`."
     },
     {

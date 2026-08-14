@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { describe, expect, it as vitestIt, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
+import { WorkExecutor } from "../src/runtime/executor.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
 import { capturedLogs, onCapturedLog } from "./support/logger-test.js"
@@ -69,7 +70,7 @@ function createReportingMocks(): ReportingMocks {
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
-    report: vi.fn(async () => ({})),
+    report: vi.fn(async () => ({ tracked: true })),
     uploadTaskLog: vi.fn(async () => ({ status: "changed", accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     startSignalR: vi.fn(async () => undefined),
@@ -305,7 +306,7 @@ describe("RunnerHost", () => {
         throw secondFailure
       }
       thirdReport.resolve()
-      return {}
+      return { tracked: true }
     })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
@@ -356,6 +357,83 @@ describe("RunnerHost", () => {
     } finally {
       controller.abort()
       await run.catch(() => undefined)
+      stopLog()
+    }
+  })
+
+  it("UnknownResult_RetainsItsOriginalWorkUntilTheServerDurablyAcknowledgesIt", async () => {
+    const firstReport = deferred<void>()
+    const firstFailureLogged = deferred<void>()
+    const replayedReport = deferred<void>()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    let reportAttempt = 0
+    const reportedStatuses: string[] = []
+    report.mockImplementation(async (_work, result: { status: string }) => {
+      reportAttempt += 1
+      reportedStatuses.push(result.status)
+      if (reportAttempt === 1) {
+        firstReport.resolve()
+        return { tracked: false, reason: "observation-not-durable" }
+      }
+      replayedReport.resolve()
+      return { tracked: true, reason: "accepted" }
+    })
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const work = {
+      workflowRunId: "wr-unknown-replay",
+      workId: "work-unknown-replay",
+      workType: "task",
+      uses: "test/block",
+      ownerKind: "workflow",
+      variables: { workspace: { path: "/virtual/mohist-runner-test" } },
+    }
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    const executeWithLog = vi.spyOn(WorkExecutor.prototype, "executeWithLog")
+      .mockImplementation(async (_work, _signal, collector) => ({
+        result: {
+          status: "unknown",
+          message: "Agent cleanup was not confirmed",
+          error: { code: "timeout", message: "Agent cleanup was not confirmed" },
+        },
+        collector: collector!,
+      }))
+    const host = new RunnerHost({
+      serverUrl: "https://runner.test",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/virtual/mohist-runner-test",
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const stopLog = onCapturedLog((record) => {
+      if (record.message === "first work report failed; will retry") firstFailureLogged.resolve()
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await firstReport.promise
+      await firstFailureLogged.promise
+      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
+      await replayedReport.promise
+
+      expect(report).toHaveBeenCalledTimes(2)
+      expect(reportedStatuses).toEqual(["unknown", "unknown"])
+      expect(executeWithLog).toHaveBeenCalledTimes(1)
+
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      executeWithLog.mockRestore()
       stopLog()
     }
   })

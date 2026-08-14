@@ -111,3 +111,9 @@
 - The complete T-004 implementation and its coverage already exist in the current upstream base through merged issue #514 (`5037b3bb1`). Workflow runtime-event outbox records retain the frozen Runner, task-run, work, input-delivery, Agent-turn, runtime, and runtime-session identity; delivery sequences and production batches are keyed and validated by that complete identity.
 - AgentSession terminal, idle, cancelled, stopped, unconfirmed-stop, missing/replaced-target, recovery, and Runner-disconnect paths use the frozen turn binding to send `ObserveAgentExecutionAsync`. Stop recovery retains the recorded operation id and dispatches it again only when the exact persisted target remains actively matched; all other reconciliation states leave the Workflow result unconfirmed.
 - Focused verification on this branch passed: Runner runtime-event outbox/delivery coverage 46/46; Server recovery, execution-boundary, and settlement specs 26/26; settlement domain tests 19/19; architecture 69/69; TypeScript typecheck passed. `npm run test:fast` also passed with 2,640 Server unit, 69 architecture, 175 Workflow definition, 1,820 CLI, 4,701 Web, and 1,625 Runner tests, all with zero failures or skips.
+
+### T-005 Completion
+
+- Runner report retirement now requires the Server's explicit `tracked: true` durable acknowledgement. An untracked response keeps the original `awaitingAck` result and retries it; it cannot free the key for replacement dispatch.
+- `runner-host-reporting.spec.ts` covers an `unknown` result receiving `tracked: false` before replaying and accepting the same result, with one executor invocation. Focused Runner host, OpenCode/Pi cleanup, and native xUnit settlement/Runner-loss specs passed.
+- `npm run test:fast` passed: typechecks, 2,640 Server unit, 69 architecture, 175 Workflow definition, 1,820 CLI, 4,701 Web, and 1,626 Runner tests all completed with zero failures or skips.
