@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseSourceFile, ts } from './node-test-ast.js'
@@ -1060,10 +1059,6 @@ export function collectRunnerVitestFiles(runnerRoot = resolve(repositoryRoot, 'p
 export function collectRunnerIntegrationVitestFiles(runnerRoot = resolve(repositoryRoot, 'packages/runner')) {
   return walkFiles(resolve(runnerRoot, 'tests/integration'))
     .filter((filePath) => isActiveRunnerIntegrationVitestFile(relative(runnerRoot, filePath).replaceAll('\\', '/')))
-}
-
-function repositoryRelativePath(filePath) {
-  return relative(repositoryRoot, filePath).replaceAll('\\', '/')
 }
 
 function isGlobalTimerCall(call) {

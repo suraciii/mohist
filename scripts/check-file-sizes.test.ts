@@ -32,14 +32,13 @@ test('evaluateFileSize separates organic edits from growth', () => {
   assert.deepEqual(evaluateFileSize({ baseLines: 800, candidateLines: 1200 }), { limit: 1000, violates: true })
 })
 
-test('governance covers first-party source only', () => {
+test('governance covers first-party source under packages/, excluding EF-generated migrations', () => {
   assert.equal(isGovernedPath('packages/server/src/Mohist.Server/Api/Routes.cs'), true)
   assert.equal(isGovernedPath('packages/web/src/pages/epics/ui/EpicListPage.test.tsx'), true)
   assert.equal(isGovernedPath('packages/runner/src/runtime/host.ts'), true)
+  assert.equal(isGovernedPath('packages/cli/Mohist.Cli/MohistCliCommands.Slack.cs'), true)
   assert.equal(isGovernedPath('scripts/check-file-sizes.ts'), false)
   assert.equal(isGovernedPath('packages/web/src/pages/page.md'), false)
-  assert.equal(isGovernedPath('packages/server/src/Mohist.Server/obj/Debug/Generated.cs'), false)
-  assert.equal(isGovernedPath('packages/web/node_modules/lib/index.ts'), false)
   assert.equal(isGovernedPath('packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs'), false)
 })
 

@@ -10,7 +10,6 @@ const governedRoot = 'packages/'
 // EF regenerates the snapshot and *.Designer.cs wholesale on every model
 // change, so their line counts track the schema, not authoring discipline.
 const generatedExcludedPrefix = 'packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/'
-const excludedSegments = ['/bin/', '/obj/', '/node_modules/', '/dist/', '/__snapshots__/']
 
 export function countLines(content: string): number {
   if (content.length === 0) return 0
@@ -32,7 +31,6 @@ export function evaluateFileSize({ baseLines, candidateLines }: {
 export function isGovernedPath(filePath: string): boolean {
   if (!filePath.startsWith(governedRoot)) return false
   if (filePath.startsWith(generatedExcludedPrefix)) return false
-  if (excludedSegments.some((segment) => filePath.includes(segment))) return false
   return governedExtensions.has(extname(filePath))
 }
 
@@ -43,7 +41,7 @@ export function parseChangedFiles(output: string): Array<{ status: string, path:
   for (let index = 0; index < fields.length - 1;) {
     const status = fields[index]
     index += 1
-    if (status.startsWith('R') || status.startsWith('C')) {
+    if (status.startsWith('R')) {
       changes.push({ status: status[0], oldPath: fields[index], path: fields[index + 1] })
       index += 2
     } else {
@@ -67,9 +65,16 @@ function git(args: string[]): string {
 function resolveBaseRef(env: NodeJS.ProcessEnv = process.env): string {
   if (env.FILE_SIZE_BASE_REF) return env.FILE_SIZE_BASE_REF
 
-  const mergeBase = git(['merge-base', 'origin/master', 'HEAD']).trim()
-  const head = git(['rev-parse', 'HEAD']).trim()
-  return mergeBase === head ? head : mergeBase
+  try {
+    const mergeBase = git(['merge-base', 'origin/master', 'HEAD']).trim()
+    const head = git(['rev-parse', 'HEAD']).trim()
+    return mergeBase === head ? head : mergeBase
+  } catch (error) {
+    throw new Error(
+      `Could not resolve the file-size base from origin/master: ${error instanceof Error ? error.message : String(error)}. `
+      + 'Fetch origin/master or set FILE_SIZE_BASE_REF to an explicit commit.',
+    )
+  }
 }
 
 function readBaseFile(baseRef: string, filePath: string): string | null {
