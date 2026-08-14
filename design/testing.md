@@ -149,12 +149,12 @@ to diagnose, not a normal way to finish a test run.
 contract is:
 
 ```bash
-timeout -k 10s 330s npm run verify
+timeout -k 10s 390s npm run verify
 ```
 
-CI applies a seven-minute outer job deadline to checkout, setup, install, the
+CI applies an eight-minute outer job deadline to checkout, setup, install, the
 gate, diagnostic upload, and bounded process-tree convergence. Its gate step
-uses `timeout -k 10s 330s npm run verify`; the canonical executor still owns
+uses `timeout -k 10s 390s npm run verify`; the canonical executor still owns
 the five-minute measured deadline, while the outer wrapper supplies enough
 time for the executor to finish its own bounded cleanup and emit evidence.
 
@@ -323,7 +323,7 @@ are deliberately per-run claims: they prevent this gate from oversubscribing
 itself, but cannot reserve CPU, Orleans scheduling, or ports from an arbitrary
 direct apphost, build, or test loop in another worktree. A local duration
 acceptance run therefore has a host-exclusive precondition: before starting
-`timeout -k 10s 330s npm run verify`, its operator obtains a host with no other
+`timeout -k 10s 390s npm run verify`, its operator obtains a host with no other
 Mohist build or Server Spec host running. A result captured while that condition
 is false remains useful raw failure evidence, but is not a valid performance
 baseline or a basis for changing the p95 policy. The foreign process is stopped
