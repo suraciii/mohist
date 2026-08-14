@@ -1,0 +1,24 @@
+# Self-review disposition (issue-555) — in progress
+
+## MF-1 — Launch drive step coordinator-key derivation (must-fix)
+
+Status: FIXED (design.md + tasks.json T-005).
+
+Verified evidence in code before fixing:
+- `AgentLaunchCoordinatorCodec.KeyFor(projectId, idempotencyKey)` → `agent-launch-coord/{projectId}/{trimmedKey}` — no agent dimension (`Agent/Grains/AgentLaunchCoordinatorTypes.cs:254`).
+- `AgentLauncher.LaunchIdempotentCoreAsync` feeds the launcher's `idempotencyKey` param straight into that key (`Agent/Services/AgentLauncher.cs:267-269`); `IAgentLauncher.LaunchIdempotentAsync` has no other key/scope parameter.
+- Different fingerprint on the same grain raises `LaunchIdempotencyConflictException` (`Agent/Grains/AgentLaunchCoordinatorGrain.cs:102,194,227`).
+- Product route forwards the raw trimmed caller key (`Api/AgentSessionLaunchRoutes.cs:470-476` `ReadIdempotencyKey` → trim).
+- Coordinator request already supports `ExactPromptFingerprint` (byte-exact prompt in the coordinator fingerprint, `AgentLaunchCoordinatorTypes.cs:173,300`), used by the fix.
+
+Fixes applied:
+1. design.md Context: noted the coordinator key has no agent dimension and pointed at D4's derived key.
+2. design.md D4 drive step: specified the deterministic, scope-qualified derived coordinator key — SHA-256 over `"direct-launch-v1" || projectId || agentId || callerKey` (exactly the launch idempotency scope; no fingerprint, no callerKeyId), `\u001f`-delimited tag (control char cannot appear in a direct key — validated printable ASCII — nor in an HTTP header value), passed as the launcher's `idempotencyKey` argument; same key/different agent ⇒ different grain ⇒ fresh execution; direct key == product raw key string ⇒ different grain ⇒ no interference. Also: byte-exact prompt with `ExactPromptFingerprint=true`. `LaunchIdempotencyConflictException` from below the direct layer is unreachable in correct operation and is surfaced as 500 `internal_error`, never a caller 409.
+3. design.md Risks: rewrote the "Dual idempotency surfaces" bullet — the coordinator *engine* (pre-minted adoption, replay-to-same-identities) is shared, the *key space* is per-surface via the derived key.
+4. tasks.json T-005: description now names the derived key + ExactPromptFingerprint; three new acceptance criteria — (a) same key different agent ⇒ fresh execution, no 409/stuck mapping; (b) direct key vs product launch key string ⇒ no interference either direction; (c) below-layer `LaunchIdempotencyConflictException` ⇒ 500 invariant violation, never caller 409. Notes updated to match.
+
+No spec change needed: the write-idempotency spec already pins the correct scope `(projectId, agentId, Idempotency-Key)`; the defect was the design/tasks composition.
+
+## Observations — no action required (per task instructions)
+
+1–8 left as-is; the next self-review may re-raise them.

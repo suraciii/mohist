@@ -19,7 +19,9 @@ to build against it. What exists today:
   `AgentLaunchCoordinatorGrain` keyed `(projectId, Idempotency-Key)`, which durably persists the
   launch plan, mints Job/Session/Input/Turn IDs, detects fingerprint conflicts
   (`LaunchIdempencyConflictException`), supports pre-minted IDs, and replays to the same
-  identities. Follow-up goes through `AgentSessionGrain.BeginFollowupAsync` (reservation lease) and
+  identities. That key has **no agent dimension** — D4 therefore derives a scope-qualified
+  coordinator key for direct launches instead of forwarding the caller's raw key. Follow-up goes
+  through `AgentSessionGrain.BeginFollowupAsync` (reservation lease) and
   `AgentSessionFollowupDispatcher`. Stop has a canonical claim lifecycle:
   `ClaimTurnStopAsync(turnId, operationId)` → `MarkTurnStopDispatchedAsync` → `CompleteTurnStopAsync`
   with `StopOperationDeadline`, plus `StopQueuedTurnAsync` for queued turns and a terminal fence in
@@ -165,6 +167,33 @@ Protocol (reserve → drive → finalize):
    `IAgentLauncher.LaunchIdempotentAsync` (the coordinator adopts pre-minted session/input/turn
    IDs verbatim today), follow-up through the Session follow-up path with the pre-minted pair, so
    a crash between reserve and finalize cannot mint a second execution on replay.
+   **Coordinator-key derivation (launch):** the direct layer never passes the caller's raw
+   `Idempotency-Key` into the launcher. The coordinator grain is keyed
+   `(projectId, idempotencyKey)` with no agent dimension (`AgentLaunchCoordinatorCodec.KeyFor`),
+   so a raw key would make the same key collide across Agents in one Project (surfacing as a
+   spurious `LaunchIdempotencyConflictException` or a stuck `pending` mapping) and would share
+   one key space with product-route launches that forward raw keys verbatim. Instead the direct
+   layer derives a deterministic, scope-qualified coordinator key — SHA-256 over
+   `"direct-launch-v1" || projectId || agentId || callerKey`, i.e. exactly the launch
+   idempotency scope and nothing else (no fingerprint input, no `callerKeyId`: two callers
+   sharing a key on one Agent also share the direct mapping, so they must share the grain) —
+   tagged with a `\u001f`-delimited prefix (the codec's own unit-separator convention) and passed
+   as the launcher's `idempotencyKey` argument, so grain key, persisted plan `IdempotencyKey`,
+   and replays stay consistent. The delimiter is a control character that cannot appear in a
+   direct key (the direct surface validates printable ASCII) and cannot be carried in an HTTP
+   header value at all, so no caller-suppliable product key can equal a derived key — a
+   cross-surface or cross-Agent grain-key collision is impossible, not merely improbable: same
+   key on a different Agent ⇒ different grain ⇒ fresh execution, never a 409; a product launch
+   using the identical key string in the same Project ⇒ different grain ⇒ no interference in
+   either direction. The drive also passes the byte-exact prompt with
+   `ExactPromptFingerprint = true` (the coordinator request already supports it) so the
+   canonical fingerprint preserves text identity the same way the direct fingerprint does.
+   **`LaunchIdempotencyConflictException` surfacing:** with D5's fingerprint gate at reserve and
+   a coordinator key that is a pure function of scope + key, the same scope+key+fingerprint
+   always rebuilds the same envelope on the same grain, so a coordinator conflict is unreachable
+   in correct operation; if one ever surfaces it is treated as an internal invariant violation
+   (500 `internal_error`), never translated into a caller-facing 409 — the direct mapping owns
+   fingerprint semantics on this surface.
 3. **Finalize** (one transaction): record the canonical outcome — accepted identities, or the
    durable admission rejection (capacity gate verdict) — in the mapping, then respond.
 
@@ -366,9 +395,11 @@ signal, not the starting artifact.
   spec's chosen safety trade (no supersession of unknown effects), surfaced as a documented
   `reasonCode`.
 - [Dual idempotency surfaces (product `Idempotency-Key` routes vs direct API) drift] -> the
-  direct mapping table is direct-only; launch delegation funnels through the same coordinator,
-  so identity rules stay shared while fingerprint rules stay per-contract; documented in the
-  module.
+  direct mapping table is direct-only; launch delegation funnels through the same coordinator
+  *engine* — pre-minted-ID adoption and replay-to-same-identities stay shared — while each
+  surface keeps its own key space: direct launches address the coordinator through the D4
+  derived, scope-qualified key, so the raw caller key never reaches the canonical layer and the
+  two surfaces can neither collide nor replay each other; documented in the module.
 
 ## Migration Plan
 
