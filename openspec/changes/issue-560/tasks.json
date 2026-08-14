@@ -1,0 +1,231 @@
+{
+  "project": "mohist-local",
+  "description": "Issue #560: task-oriented Agent creation and launch — task-profile definition fields with a closed permission vocabulary, four-state executability diagnosis with launch gating, purpose-aware model guidance, and a confirmed launch-scope projection persisted as per-launch facts, rendered consistently across Web and CLI.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server: task-profile definition fields and closed permission vocabulary",
+      "spec": "specs/agent-task-profile/spec.md#requirement-the-agent-definition-carries-the-full-task-profile",
+      "description": "Add Purpose and Permissions as top-level fields on Domain.Agent, AgentCreateData/AgentUpdateData (presence-tracked Fields entries), AgentGrain create/update, and the AgentInfo projection using append-only Orleans ids. Define the closed seven-term permission vocabulary (repo:read, repo:write, issue:read, issue:write, epic:read, epic:write, artifact:publish) in Infrastructure beside AgentConfigSchema and validate it at the AgentDefinitionRoutes write boundary, rejecting unknown terms with an error naming the offending term and the accepted vocabulary while persisting nothing. Description, allowedSubagentAgentIds, and maxConcurrentRuns already exist server-side; this task makes every task-profile field accept, persist, clear, and project identically (design D1, D2).",
+      "acceptanceCriteria": [
+        "Agent create accepts purpose, description, instructions, permissions, collaborators, and maxConcurrentRuns and the create response returns every task-profile field",
+        "Updating only one task field (e.g. purpose) persists it and leaves description, instructions, permissions, collaborators, and concurrency unchanged; presence-based clears (purpose: null, permissions: []) persist durably",
+        "A declaration containing a term outside the vocabulary is rejected with a validation error naming the offending term and the accepted vocabulary, and the previously persisted definition remains unchanged",
+        "Omitting the permission declaration is accepted and records its absence; every Agent list/detail projection includes purpose, permissions, collaborators, and concurrency",
+        "AgentRow/AgentGrain serialization round-trips the new fields; old Agents.State JSON rows deserialize with Purpose = null and Permissions = []",
+        "Unit/integration tests cover vocabulary validation, binder presence semantics, partial update, clear, and projection reads, and pass via npm run verify"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server: Domain.Agent, AgentCreateData/AgentUpdateData, AgentGrain, AgentInfo, permission vocabulary class in Infrastructure, AgentDefinitionRoutes binders + validation, with passing tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Permissions stay a top-level field, not an agentConfig key (D1). Validation mirrors the ValidateMaxConcurrentRuns pattern (D2). No DB migration — schema-less JSON State."
+    },
+    {
+      "id": "T-002",
+      "title": "Server: four-state executability derivation, gap entry points, and launch gate",
+      "spec": "specs/agent-executability-status/spec.md#requirement-four-executability-states-derived-by-the-server",
+      "description": "Replace the readiness conclusion vocabulary in AgentReadinessService.Evaluate with exactly four states — not-configured (one gap per structural defect), not-executable (latest matching evidence failed with a configuration category), unknown (no matching evidence, with a pending-launch note), executable — using the design's precedence. Rename the projection to ExecutabilityResult { State, Gaps[], PendingLaunchNote }, give each AgentReadinessGap a FixEntryPoint (/agents/{id} and `mo agent edit <ref>`), expose it as AgentInfo.Executability (old Readiness member removed, no compat layer), and keep derivation on-read so edits re-derive. Gate EnsureLaunchableAsync / AgentConnectionDispatchDecision / route error mapping on the new states with distinct error codes agent_not_configured and agent_not_executable, both carrying the full gap list, while leaving AgentAvailabilityService and /availability untouched (design D3, D8 constraints).",
+      "acceptanceCriteria": [
+        "Structural gaps (missing instructions, missing/malformed model, unsupported runtime) derive not-configured with one gap per defect, each carrying a message, next action, and fix entry point",
+        "Structurally complete + latest matching execution-config failure (IsConfigurationFailure on MatchesCurrentDefinition evidence) derives not-executable with a gap that identifies it as an execution-configuration failure, distinct from setup gaps",
+        "No matching evidence derives unknown whose projection copy states a launch is accepted and waits for Runner verification; matching successful evidence derives executable",
+        "Dispatch rejects not-configured and not-executable before any AgentJob or AgentSession exists, with error codes agent_not_configured / agent_not_executable carrying each gap's message, action, and fix entry point; unknown and executable launches are accepted",
+        "Availability remains a separate service/endpoint that neither reads nor is read by executability; an executable agent with no runner stays executable",
+        "Existing AgentReadinessService tests are ported to the four states and extended (all four states, precedence, gate codes, re-derivation after a definition fix) and pass via npm run verify"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server: AgentReadinessService/AgentReadiness (four-state Evaluate), ExecutabilityResult projection, AgentInfo.Executability, EnsureLaunchableAsync gate + error codes, AgentConnectionDispatchDecision, with passing tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Class names stay (proposal pins AgentReadinessService/Deriver); only the wire vocabulary changes. All in-tree consumers of Readiness are updated in this task or the surface tasks below; the server-side ones here."
+    },
+    {
+      "id": "T-003",
+      "title": "Server: launch-scope resolver, preview route, and persisted per-launch facts",
+      "spec": "specs/agent-launch-scope/spec.md#requirement-one-confirmed-scope-projection-before-dispatch",
+      "description": "Extract the inline resolution in AgentSessionLaunchRoutes into an AgentLaunchScopeResolver producing ConfirmedLaunchScope { AgentId, AgentName, Runtime, Repository{Name,GitUrl,BaseBranch}?, WorkspaceName?, Issue?, Epic?, Permissions } — workspace via existing explicit>CLI-default>Web-per-session rules, issue/epic number resolved to title, repository validated against project repositories, unknown/archived references failing with actionable errors naming the reference. Add POST /api/projects/{projectRef}/agents/{agentRef}/launch-scope/preview (body = launch context block) returning the scope plus the agent's current executability; make the dispatch route call the same resolver. Capture the resolved scope as an append-only LaunchScope field on AgentJobInput, echo it on the 201 AgentSessionLaunchResponse and AgentLaunchObservationDto, snapshot definition Permissions at launch, and rely on existing snapshot/idempotency discipline so replays return the originally recorded scope (design D5, D6).",
+      "acceptanceCriteria": [
+        "Preview with an Issue context returns the resolved repository, workspace, and Issue context plus the agent's declared permission scope and current executability; preview and dispatch use the identical resolver",
+        "An unknown Issue/Epic/repository or archived workspace fails scope resolution with an actionable error naming the reference, and dispatch creates no AgentJob or AgentSession",
+        "Dispatch persists the resolved scope as an AgentJob-owned LaunchScope fact (append-only [property: Id(n)] on AgentJobInput) surfaced on the 201 response and the launch observation DTO",
+        "Idempotent replay with the same key returns the originally recorded scope and creates no second launch; editing the definition (including permissions) after a launch does not rewrite that launch's recorded facts while the next launch records its own scope",
+        "The launch body binder still accepts only prompt/context/attachments and rejects override fields (e.g. model, runtime) before any session/job with an error naming the unsupported field and accepted fields; permissions are echoed from the definition, never chosen at launch",
+        "Route/resolver tests cover happy path, each unresolvable-reference failure, replay, definition-edit immutability, and override rejection, and pass via npm run verify"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server: AgentLaunchScopeResolver + ConfirmedLaunchScope, launch-scope/preview route, LaunchScope on AgentJobInput, updated AgentSessionLaunchRoutes/AgentLauncher and 201/observation projections, with passing tests",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "POST for preview because it mirrors the launch body; it creates nothing. No scope-confirmation token (D6 alternative rejected). Epic refs: normalize string vs integer per open question before implementing."
+    },
+    {
+      "id": "T-004",
+      "title": "Model guidance: server recommendation catalog, endpoint, and CLI consumption",
+      "spec": "specs/agent-model-guidance/spec.md#requirement-purpose-aware-model-recommendations-during-authoring",
+      "description": "Add a static AgentModelRecommendations catalog in the Server keyed by (runtime, purposeKind) over the closed archetype set coding/review/research/writing/general, each entry { modelId, fit } with fit in task language, and expose GET /api/projects/{projectRef}/agent-model-recommendations?runtime=&purpose= with entries filtered against the live model catalog for the runtime (stale entries demote themselves, never block choice). Consume it from the CLI: `mo agent model list` gains --purpose and prints recommended entries with fit text first, then the full catalog. Guidance stays advisory — no save-time validation of model choice and no catalog-membership gap (design D4).",
+      "acceptanceCriteria": [
+        "The recommendations endpoint returns ordered { modelId, fit } entries for the requested runtime and purpose archetype, filtered against the runtime's live catalog so recommendations naming absent models are dropped",
+        "Switching the runtime parameter returns recommendations for the new runtime only; no previous-runtime recommendation remains",
+        "`mo agent model list --purpose <archetype>` prints recommended models with plain-language fit descriptions before the full catalog; without the flag the command is unchanged and the full catalog remains listed",
+        "Saving an Agent without a model succeeds and surfaces only as the not-configured model gap; saving a valid unrecommended catalog model is accepted and never treated as an executability gap (advisory, not validation)",
+        "Endpoint tests (per-archetype, runtime filtering, catalog filtering) and CLI output tests pass via npm run verify"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server: AgentModelRecommendations catalog + GET agent-model-recommendations endpoint; packages/cli: mo agent model list --purpose, with passing tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Server-owned catalog so Web and CLI cannot drift (D4). The Web editor consumption of this endpoint lands in T-005. Archetype is advisory UI state, not persisted on the definition."
+    },
+    {
+      "id": "T-005",
+      "title": "Web: task-first Agent profile editor with authoring parity",
+      "spec": "specs/agent-task-profile/spec.md#requirement-web-and-cli-authoring-parity",
+      "description": "Restructure widgets/agent-profile-editor into a Task section (name, purpose, description, instructions, permissions multi-select over the closed vocabulary, collaborators, concurrency) followed by an Execution section (runtime, model + variant, skills), so runtime/model are purpose-guided secondary choices and the raw provider/model string is never the leading prompt. Extend entities/agent API/model to send description, collaborators, maxConcurrentRuns, purpose, and permissions (closing the CLI/Web parity gap) with clearing semantics matching the PATCH presence model. Add the purpose-archetype selector ('What is this agent for?') that drives a 'Recommended for <purpose>' group above the full catalog in ModelSelect (consuming T-004's endpoint, re-querying on runtime switch), and extend the save dialog's effective-time statement to permissions (design D7).",
+      "acceptanceCriteria": [
+        "Setting description, collaborators, concurrency, purpose, and permissions in the Web editor persists, and `mo agent view` of the same Agent shows the same values (parity with CLI-set definitions verified against the server projection)",
+        "Clearing an optional task field in the Web editor persists the cleared state and a subsequent read from the other surface does not resurrect the previous value",
+        "The editor presents task-profile fields as the primary structure with runtime/model as a secondary purpose-guided choice; the permissions control offers exactly the seven vocabulary terms and rejects free text",
+        "ModelSelect shows a 'Recommended for <purpose>' group with fit text above the full catalog; switching runtime refreshes recommendations; any full-catalog model remains selectable and persists on save",
+        "Saving states the effective-time semantics (edits apply to Jobs launched afterwards; running Jobs keep their launch facts), extended to the permission declaration",
+        "Widget/entity component tests cover parity payloads, clear semantics, section ordering, recommendations group, and save statement, and pass via npm run verify"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web: entities/agent model/API (purpose, permissions, description, collaborators, concurrency), restructured widgets/agent-profile-editor, ModelSelect recommendations group, save dialog copy, with passing tests",
+      "dependsOn": ["T-001", "T-004"],
+      "passes": false,
+      "notes": "Both surfaces use the same PATCH path so cleared-in-one-surface-stays-cleared holds by construction (D1). No model required to save."
+    },
+    {
+      "id": "T-006",
+      "title": "Web: executability and availability rendering in agent list and detail",
+      "spec": "specs/agent-executability-status/spec.md#requirement-actionable-gaps-and-next-actions-in-list-and-detail",
+      "description": "Replace the 'Readiness:' inline text on pages/agent-list with an executability state chip for the four states plus the leading gap's next action linking to the gap's fix entry point; on pages/agent-detail render the full diagnosis (state, every gap with next action and fix entry point) and the Availability signal as its own labeled row. Drop the local conclusion fallback in web entities/agent so both surfaces render only the Server's AgentInfo.Executability projection, and keep the two signals visually and semantically separate — no synthesized badge (design D8).",
+      "acceptanceCriteria": [
+        "The agent list shows the executability state for all four states and leads to the gap's next action; following the action navigates to the fix entry point (web path /agents/{id})",
+        "Agent detail shows state, all gaps with next actions and fix entry points for not-configured/not-executable, and renders Availability as its own labeled signal; executability and Availability are never merged into one badge or verdict",
+        "The unknown state renders neutrally with the projection's pending-launch note (launch accepted, waits for Runner verification) and is never styled or worded as an error or failure",
+        "The web client derives no verdict of its own — the local readiness-conclusion fallback is removed and rendering is driven entirely by the server projection",
+        "Component tests pin all four states, entry-point links, availability separation, and neutral unknown rendering, and pass via npm run verify"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web: pages/agent-list executability chip + gap action, pages/agent-detail full diagnosis + separate availability row, entities/agent projection cleanup, with passing tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Availability rendering stays grounded in the existing /availability projection; do not touch its semantics or endpoint."
+    },
+    {
+      "id": "T-007",
+      "title": "Web: composer confirmed-scope step before dispatch",
+      "spec": "specs/agent-launch-scope/spec.md#requirement-the-caller-confirms-the-scope-before-dispatch",
+      "description": "In pages/agent-session-composer, submitting fetches the launch-scope preview using the same idempotency key the dispatch will use and opens a confirmed-scope panel showing the resolved repository, workspace, Issue/Epic context, and the agent's declared permission scope; the Launch button dispatches the original prompt/context/attachments only after the panel is shown. Map the new gate error codes agent_not_configured / agent_not_executable in launch-feedback so dispatch rejections render the gap list and next actions, and surface unresolvable-reference errors actionably. The composer must not gain any launch-time configuration inputs (design D6, D7).",
+      "acceptanceCriteria": [
+        "Submitting with context references presents the confirmed scope (repository, workspace, Issue/Epic, permission scope) before dispatch, and dispatch occurs only after the user confirms the presented panel",
+        "The preview request reuses the dispatch idempotency key so the per-session workspace name is identical at preview and dispatch",
+        "An unresolvable context reference renders an actionable error naming the reference and no dispatch occurs",
+        "Dispatch rejections with agent_not_configured / agent_not_executable render the server-provided gaps and next actions via updated launch-feedback error mapping",
+        "The composer still sends only prompt, context references, and attachments — no model, runtime, instructions, or permissions inputs are added",
+        "Component tests cover the confirm-before-dispatch flow, scope rendering, gate-error mapping, and unchanged launch body, and pass via npm run verify"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web: pages/agent-session-composer confirmed-scope panel + confirm flow, launch-feedback error mapping for agent_not_configured/agent_not_executable, with passing tests",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Confirmation is a surface behavior; no server token is introduced. The scope panel must not become a configuration override surface."
+    },
+    {
+      "id": "T-008",
+      "title": "CLI: task-profile authoring in mo agent create/edit",
+      "spec": "specs/agent-task-profile/spec.md#requirement-web-and-cli-authoring-parity",
+      "description": "In MohistCliCommands.Agent.cs, register the task options (--name, --purpose, --description, --instructions/-file, --permissions, --allowed-subagent, --max-concurrent-runs) before the execution options (--runtime, --model, --variant, --skills) so help output leads with task language, and add --purpose/--permissions with their --clear-* counterparts for full parity with the Web editor. Make `mo agent view` print the full task profile including the declared permission scope, and print the effective-time semantics statement in the save success output of create/edit (design D7).",
+      "acceptanceCriteria": [
+        "mo agent create/edit sets purpose, description, permissions, collaborators, and concurrency, persisting values identical to what the Web editor produces for the same inputs (verified against the server definition projection)",
+        "--clear-purpose / --clear-permissions clear durably and a subsequent Web read does not resurrect the previous values; mo agent create --help lists task options before execution options",
+        "mo agent view renders purpose, description, the declared permission scope, collaborators, and concurrency intent",
+        "The create/edit success output states that saved edits apply to Jobs launched afterwards and running Jobs keep their launch facts",
+        "CLI tests cover option registration/help order, set/clear persistence, view rendering, and the save statement, and pass via npm run verify"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli: MohistCliCommands.Agent.cs task-first options + clears, view renderer task-profile output, save effective-time statement, with passing tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "--agent-config stays retired. Same PATCH path as Web guarantees parity by construction."
+    },
+    {
+      "id": "T-009",
+      "title": "CLI: executability and availability rendering in agent list and view",
+      "spec": "specs/agent-executability-status/spec.md#requirement-one-server-projection-drives-web-and-cli",
+      "description": "Add an executability column to the `mo agent list` table and extend `mo agent view` to print the state, every gap with its next action and fix entry point (e.g. `mo agent edit <ref>`), rendering only the Server's AgentInfo.Executability projection with no client-side verdicts. Render Availability as its own separately labeled section from the existing availability projection, never merged with executability, and print the unknown state's pending-launch note neutrally (design D8).",
+      "acceptanceCriteria": [
+        "mo agent list shows the executability state for every agent in a dedicated column across all four states",
+        "mo agent view prints state, gaps with next actions and fix entry points for not-configured/not-executable, matching exactly what the Web detail shows for the same agent",
+        "Availability is printed as its own labeled signal (e.g. waiting reasons) and is never combined with executability into a single verdict or badge",
+        "The unknown state prints the pending-launch note (launch accepted, waits for Runner verification) without error styling or failure wording",
+        "CLI renderer tests pin all four states, entry points, availability separation, and projection-only rendering, and pass via npm run verify"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli: agent list executability column, mo agent view diagnosis + separate availability section, with passing tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "mo agent view already prints the server-authoritative projection — extend it, do not fork the rendering."
+    },
+    {
+      "id": "T-010",
+      "title": "CLI: launch scope confirmation in mo agent launch",
+      "spec": "specs/agent-launch-scope/spec.md#requirement-the-caller-confirms-the-scope-before-dispatch",
+      "description": "Make `mo agent launch` resolve the launch scope first via the shared preview projection, print the resolved repository, workspace, Issue/Epic context, and declared permission scope, and require confirmation — interactive prompt, or --yes for scripts — before POSTing the dispatch with the same context references. Render executability gate rejections (agent_not_configured / agent_not_executable) and unresolvable-reference failures with their gap lists and actionable errors, and show the recorded launch facts in the launch/observation output (design D6; foundation for #556).",
+      "acceptanceCriteria": [
+        "mo agent launch prints the confirmed scope (repository, workspace, Issue/Epic context, permission scope) and dispatches only after interactive confirmation or --yes",
+        "The printed scope comes from the server preview projection — the CLI derives no resolution of its own — and the dispatched context references match what was confirmed",
+        "Gate rejections and unresolvable references render the server-provided gaps/next actions or the actionable error naming the reference; no dispatch occurs in either case",
+        "Post-dispatch output shows the launch's recorded scope facts from the launch/observation projection",
+        "CLI tests cover scope printing, confirm/--yes gating, rejection rendering, and observation output, and pass via npm run verify"
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli: mo agent launch scope preview print + confirm/--yes flow, gate and reference error rendering, recorded-facts output, with passing tests",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Exact flag shape (--yes vs --confirm) per design open question — pick --yes and document. Preview-only mode is #556 territory; do not expand here."
+    },
+    {
+      "id": "T-011",
+      "title": "Cross-surface verification of the agent creation and launch experience",
+      "spec": "specs/agent-executability-status/spec.md#requirement-one-server-projection-drives-web-and-cli",
+      "description": "Review-level integration pass over the whole change: run npm run verify across server, web, and CLI; audit that every spec scenario in the four capability specs maps to a passing test; and verify the cross-surface invariants — Web/CLI authoring parity, identical executability rendering from one projection, the same confirmed-scope projection serving composer and CLI launch, launch facts immutable across definition edits and idempotent replays, and availability never merged into executability. Fix any seams missed by the per-capability tasks.",
+      "acceptanceCriteria": [
+        "npm run verify passes for packages/server, packages/web, and packages/cli with zero failing tests",
+        "Every scenario in specs/agent-task-profile, agent-executability-status, agent-model-guidance, and agent-launch-scope is traceable to a passing automated test",
+        "An end-to-end parity check: a field set in one surface is visible identically in the other, and a cleared field stays cleared in both",
+        "A launch dispatched after preview records the confirmed scope, survives a definition edit and an idempotent replay unchanged, and is readable from the observation surface",
+        "No surface synthesizes a combined executability+availability badge or a client-side verdict"
+      ],
+      "priority": 11,
+      "mode": "AFK",
+      "type": "REVIEW",
+      "output": "Green npm run verify plus a scenario-to-test trace summary for all four capability specs; seam fixes if any",
+      "dependsOn": ["T-005", "T-006", "T-007", "T-008", "T-009", "T-010"],
+      "passes": false,
+      "notes": "This is an integration review of seams between the per-capability tasks, not a standalone test-authoring task; only seam-level fixes belong here."
+    }
+  ]
+}
