@@ -186,7 +186,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await CloseoutLostAsync();
     }
 
-    public Task HeartbeatAsync() => Task.CompletedTask;
+    public Task HeartbeatAsync() => TouchPresenceAsync();
 
     public async Task HeartbeatRepairAsync(RunnerInfo info)
     {
@@ -196,8 +196,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             SetRunnerInfo(InfoForHeartbeat(info));
             _pendingBuildGitHash = null;
             await PersistAsync();
-            if (_status == RunnerStatus.Online)
-                await UpsertRegistryAsync();
+            await TouchPresenceUnderGateAsync(refreshRegistry: true);
         }
         finally
         {
@@ -215,18 +214,29 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            _lastPresenceAt = _timeProvider.GetUtcNow();
-            EnsurePresenceTimer();
-            if (_status == RunnerStatus.Online || _info is null)
-                return;
-
-            _status = RunnerStatus.Online;
-            await UpsertRegistryAsync();
+            await TouchPresenceUnderGateAsync();
         }
         finally
         {
             _lifecycleGate.Release();
         }
+    }
+
+    private async Task TouchPresenceUnderGateAsync(bool refreshRegistry = false)
+    {
+        _lastPresenceAt = _timeProvider.GetUtcNow();
+        EnsurePresenceTimer();
+        if (_status == RunnerStatus.Online)
+        {
+            if (refreshRegistry)
+                await UpsertRegistryAsync();
+            return;
+        }
+        if (_info is null)
+            return;
+
+        _status = RunnerStatus.Online;
+        await UpsertRegistryAsync();
     }
 
     public async Task<RunnerPollAdmission> TryBeginPollAsync()

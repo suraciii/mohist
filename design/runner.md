@@ -70,8 +70,8 @@ maintained here:
 Register(info)          state=online, lastSeen=now, populate info, write registry
 Unregister()            state=offline, clear info;
                         close out by reporting FAILED("runner-lost") to owners
-TouchPresence()         successful poll: lastSeen=now; restore online registry state
-HeartbeatRepair(info)   refresh info only; never refresh presence
+TouchPresence()         successful poll or heartbeat: lastSeen=now; restore online registry state
+HeartbeatRepair(info)   refresh info and presence atomically; keep the same gate
 Update(slots)           write-through
 ```
 
@@ -259,9 +259,10 @@ whether normally or after a timeout, or RunnerGrain closeout.
 | work times out | no Server-side timer | reported in-flight work is alive; only the process judges progress. Owner timers, including AgentJob execution and dispatch timeouts, are decided by owner reminders and are unrelated to dispatch |
 
 Register establishes initial presence and persists the last registration
-profile. HTTP heartbeat is an info-repair channel and must never refresh
-presence. After activation loss, the first successful poll uses the persisted
-profile to restore presence and registry state without an additional heartbeat.
+profile. HTTP heartbeat refreshes presence even when the Runner process cannot
+complete a poll; a payload heartbeat also refreshes the persisted info under
+the same lifecycle gate. After activation loss, the first successful poll uses
+the persisted profile to restore presence and registry state.
 Explicit unregister clears the profile. The registry is written only when
 state or info changes, never on each poll.
 
