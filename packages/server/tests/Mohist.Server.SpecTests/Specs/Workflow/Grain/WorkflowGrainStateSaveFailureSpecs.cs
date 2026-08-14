@@ -451,8 +451,12 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
     {
         public bool FailNextEnsure { get; set; }
         public bool FailNextRemove { get; set; }
+        public bool FailNextSnapshotDelete { get; set; }
+        public bool FailNextLockRelease { get; set; }
         public int EnsureAttempts { get; set; }
         public int RemoveAttempts { get; set; }
+        public int SnapshotDeleteAttempts { get; set; }
+        public int LockReleaseAttempts { get; set; }
     }
 
     private sealed class ReminderWorkflowGrain : WorkflowGrain
@@ -496,6 +500,30 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             {
                 _calls.FailNextRemove = false;
                 throw new InvalidOperationException("simulated reminder removal failure");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        protected override Task DeleteAgentResultSettlementSnapshotAsync(string workId)
+        {
+            _calls.SnapshotDeleteAttempts++;
+            if (_calls.FailNextSnapshotDelete)
+            {
+                _calls.FailNextSnapshotDelete = false;
+                return Task.CompletedTask;
+            }
+
+            return base.DeleteAgentResultSettlementSnapshotAsync(workId);
+        }
+
+        protected override Task ReleaseUnresolvedAgentResultSettlementStageLocksAsync(string stage)
+        {
+            _calls.LockReleaseAttempts++;
+            if (_calls.FailNextLockRelease)
+            {
+                _calls.FailNextLockRelease = false;
+                throw new InvalidOperationException("simulated stage lock release failure");
             }
 
             return Task.CompletedTask;

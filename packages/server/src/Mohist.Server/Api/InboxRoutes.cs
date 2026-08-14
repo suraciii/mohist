@@ -163,6 +163,9 @@ public sealed class InboxSubscriptionDto
     [JsonPropertyName("workflow_failed")]
     public bool WorkflowFailed { get; init; }
 
+    [JsonPropertyName("agent_result_unconfirmed")]
+    public bool AgentResultUnconfirmed { get; init; } = true;
+
     [JsonPropertyName("approval_requested")]
     public bool ApprovalRequested { get; init; }
 
@@ -178,6 +181,7 @@ public sealed class InboxSubscriptionDto
     public static InboxSubscriptionDto FromState(InboxSubscriptionState state) => new()
     {
         WorkflowFailed = state.WorkflowFailedEnabled,
+        AgentResultUnconfirmed = state.AgentResultUnconfirmedEnabled,
         ApprovalRequested = state.ApprovalRequestedEnabled,
         IssueStarted = state.IssueStartedEnabled,
         IssueCompleted = state.IssueCompletedEnabled,
@@ -186,6 +190,7 @@ public sealed class InboxSubscriptionDto
 
     public InboxSubscriptionState ToState() => new(
         WorkflowFailedEnabled: WorkflowFailed,
+        AgentResultUnconfirmedEnabled: AgentResultUnconfirmed,
         ApprovalRequestedEnabled: ApprovalRequested,
         IssueStartedEnabled: IssueStarted,
         IssueCompletedEnabled: IssueCompleted,

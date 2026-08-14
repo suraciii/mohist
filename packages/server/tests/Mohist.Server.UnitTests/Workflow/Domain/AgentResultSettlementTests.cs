@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Runner.Domain;
 using Mohist.Workflow.Definition;
@@ -252,6 +253,46 @@ public sealed class AgentResultSettlementTests
             @event => Assert.IsType<TaskBlocked>(WorkflowEventSerializer.Unwrap(@event)),
             @event => Assert.IsType<StageBlocked>(WorkflowEventSerializer.Unwrap(@event)),
             @event => Assert.IsType<WorkflowRunBlocked>(WorkflowEventSerializer.Unwrap(@event)));
+    }
+
+    [Fact]
+    public void BlockedEvents_HaveDistinctCatalogTypesAndWorkflowLineage()
+    {
+        var run = BuildRun(new TaskDefinition("agent", "Agent", "mohist/agent"));
+        run.Metadata = new WorkflowRunMetadata(null, Now, ProjectId: "proj_event", IssueNumber: 589);
+        var task = StartTask(run, "agent-work");
+        task.AgentResultSettlement!.State = AgentResultSettlementState.Blocked;
+        task.AgentResultSettlement.DeadlineAt = Now.Add(SettlementTimeout);
+
+        WorkflowEvent[] events =
+        [
+            new AgentTaskResultUnconfirmed("build", task.Id, "agent-work", "stop-unconfirmed", Now.Add(SettlementTimeout)),
+            new TaskBlocked("build", task.Id, "agent-result-unconfirmed", Now.Add(SettlementTimeout)),
+            new StageBlocked("build", task.Id, "agent-result-unconfirmed"),
+            new WorkflowRunBlocked("build", task.Id, "agent-result-unconfirmed", Now.Add(SettlementTimeout)),
+        ];
+
+        var types = events.Select(WorkflowEventSerializer.BusType).ToArray();
+        Assert.Equal(types.Length, types.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(
+            [
+                EventCatalog.ReverseDns.AgentTaskResultUnconfirmed,
+                EventCatalog.ReverseDns.TaskBlocked,
+                EventCatalog.ReverseDns.StageBlocked,
+                EventCatalog.ReverseDns.WorkflowRunBlocked,
+            ],
+            types);
+        Assert.All(events, @event =>
+        {
+            Assert.Contains(WorkflowEventSerializer.BusType(@event), EventCatalog.All);
+            var lineage = WorkflowRunLineage.BuildExtensions(run, @event);
+            Assert.Equal("build", lineage[EventCatalog.Lineage.Stage]);
+            Assert.Equal(run.Id, lineage[EventCatalog.Lineage.WorkflowRunId]);
+            var restored = WorkflowEventSerializer.FromData(
+                WorkflowEventSerializer.Type(@event),
+                WorkflowEventSerializer.ToData(@event));
+            Assert.Equal(WorkflowEventSerializer.Type(@event), WorkflowEventSerializer.Type(restored));
+        });
     }
 
     [Fact]

@@ -88,6 +88,12 @@ Archives an OpenSpec change directory and commits the resulting move.
 | Field | Required | Default | Meaning |
 |---|---:|---|---|
 | `changeDir` | Yes | - | Path to the OpenSpec change directory. The value is text. |
+| `archiveHint` | No | `vars.archive` when present | Runner-owned archive destination from a prior successful attempt. It is injected from the dispatch snapshot, not declared in profile `with`. |
+
+When no `archive` Run Variable exists, Runner omits `archiveHint` and the Action selects a fresh
+dated destination. A successful Action writes the chosen workspace-relative destination to the Run
+Variables. A later retry or rerun then receives that destination as `archiveHint` and succeeds
+idempotently when the source is already archived.
 
 ### Outputs
 

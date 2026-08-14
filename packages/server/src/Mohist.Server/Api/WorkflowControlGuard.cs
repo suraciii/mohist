@@ -15,6 +15,7 @@ public static class WorkflowControlGuard
         {
             "stopped" or "completed" => false,
             "failed" => action is WorkflowControlAction.RetryOrRerun or WorkflowControlAction.Stop,
+            "blocked" => action is WorkflowControlAction.Stop,
             null => false,
             _ => true,
         };

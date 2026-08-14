@@ -62,6 +62,22 @@ public sealed class HermesIssueNotificationTests : HermesIssueNotificationTestSu
     }
 
     [Fact]
+    public async Task BlockedAgentResult_IsNotAHermesFailureNotification()
+    {
+        var fixture = CreateFixture();
+        var evt = WorkflowEvent(
+            EventCatalog.ReverseDns.WorkflowRunBlocked,
+            "run_1",
+            new WorkflowRunBlocked("build", "build.1", "agent-result-unconfirmed", TestTime.UtcNow));
+
+        Assert.False(fixture.Handler.Filter(evt));
+        await fixture.Handler.HandleAsync(evt, CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        Assert.Empty(fixture.Client.Sent);
+    }
+
+    [Fact]
     public async Task AgentJobFailed_IsEnabledByDefaultAndSendsFailurePayload()
     {
         var fixture = CreateFixture();

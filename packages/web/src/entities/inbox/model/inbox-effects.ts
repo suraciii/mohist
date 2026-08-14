@@ -105,7 +105,7 @@ export function applyInboxHint(
  */
 export const INBOX_HINT_IDENTITY_KEYS: readonly string[] = KNOWN_IDENTITY_KEYS
 
-const HIGH_ATTENTION_KINDS = ['workflow_failed', 'approval_requested'] as const
+const HIGH_ATTENTION_KINDS = ['workflow_failed', 'agent_result_unconfirmed', 'approval_requested'] as const
 
 export function isHighAttentionKind(kind: string): boolean {
   return (HIGH_ATTENTION_KINDS as readonly string[]).includes(kind)

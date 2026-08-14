@@ -298,6 +298,21 @@ public sealed class GitHubWriteBackHandlerTests
     }
 
     [Fact]
+    public async Task BlockedAgentResult_IsNotAWriteBackFailureEvent()
+    {
+        var harness = new Harness();
+        var handler = await harness.NewHandlerAsync();
+        var evt = Event(EventCatalog.ReverseDns.WorkflowRunBlocked);
+
+        Assert.False(handler.Filter(evt));
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(harness.Port.StateLabels);
+        Assert.Empty(harness.Port.Comments);
+        Assert.Empty(harness.Port.Closes);
+    }
+
+    [Fact]
     public async Task Completed_CommentsLabelsDoneAndClosesWithCompletedReason()
     {
         var harness = new Harness();

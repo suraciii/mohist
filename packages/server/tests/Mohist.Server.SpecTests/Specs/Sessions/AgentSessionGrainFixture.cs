@@ -113,11 +113,13 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     {
         public List<SessionWorkflowExecutionBinding> ExecutionBindings { get; } = [];
         public List<SessionWorkflowExecutionObservation> Observations { get; } = [];
+        public bool BindingAccepted { get; set; } = true;
 
         public void Reset()
         {
             ExecutionBindings.Clear();
             Observations.Clear();
+            BindingAccepted = true;
         }
 
         public Task<bool> BindAgentExecutionAsync(
@@ -125,7 +127,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             CancellationToken cancellationToken = default)
         {
             ExecutionBindings.Add(binding);
-            return Task.FromResult(true);
+            return Task.FromResult(BindingAccepted);
         }
 
         public Task ObserveAgentExecutionAsync(

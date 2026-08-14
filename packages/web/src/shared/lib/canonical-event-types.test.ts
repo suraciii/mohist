@@ -64,10 +64,15 @@ describe('canonical event types', () => {
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageApprovalResolved)
   })
 
-  it('includes task lifecycle and artifact events used by live Activity', () => {
+  it('includes task lifecycle, non-failure attention, and artifact events used by live Activity', () => {
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskStarted)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskCompleted)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskFailed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskCancelled)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentTaskResultUnconfirmed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskBlocked)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageBlocked)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunBlocked)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.ArtifactRecorded)
   })
 

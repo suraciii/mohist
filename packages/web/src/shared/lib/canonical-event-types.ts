@@ -15,6 +15,11 @@ export const REVERSE_DNS_EVENT_TYPES = {
   TaskStarted: 'com.mohist.workflow.task.started',
   TaskCompleted: 'com.mohist.workflow.task.completed',
   TaskFailed: 'com.mohist.workflow.task.failed',
+  TaskCancelled: 'com.mohist.workflow.task.cancelled',
+  AgentTaskResultUnconfirmed: 'com.mohist.workflow.agent-result-unconfirmed',
+  TaskBlocked: 'com.mohist.workflow.task.blocked',
+  StageBlocked: 'com.mohist.workflow.stage.blocked',
+  WorkflowRunBlocked: 'com.mohist.workflow.run.blocked',
   ArtifactRecorded: 'com.mohist.workflow.artifact.recorded',
   IssueCreated: 'com.mohist.issue.created',
   IssueEpicChanged: 'com.mohist.issue.epic-changed',
@@ -43,8 +48,7 @@ export const REVERSE_DNS_EVENT_TYPES = {
   AgentSessionContextHealthUpdated: 'com.mohist.agent-session.context-health-updated',
 } as const
 
-export type ReverseDnsEventType =
-  (typeof REVERSE_DNS_EVENT_TYPES)[keyof typeof REVERSE_DNS_EVENT_TYPES]
+export type ReverseDnsEventType = (typeof REVERSE_DNS_EVENT_TYPES)[keyof typeof REVERSE_DNS_EVENT_TYPES]
 
 export const REVERSE_DNS_AGENT_SESSION_EVENT_TYPES = [
   REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,

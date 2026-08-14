@@ -155,6 +155,46 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
     }
 
     [Fact]
+    public async Task AcceptWorkflowInput_ReplaysTheDurableTurnUntilWorkflowBindingSucceeds()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var command = new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-binding-retry",
+            "implement the task",
+            "workflow-1",
+            "task-1.1",
+            "work-1",
+            "runner-1",
+            "opencode",
+            "runtime-1",
+            "{\"text\":\"implement the task\"}");
+
+        Fixture.SessionWork.BindingAccepted = false;
+        var first = await grain.AcceptWorkflowInputAsync(command);
+
+        Assert.False(first.WorkflowBindingAccepted);
+        var persisted = Assert.IsType<Mohist.Server.Sessions.Domain.AgentSession>(Fixture.StateStore.State);
+        var firstTurn = Assert.Single(persisted.Status.Turns!);
+        Assert.Equal(first.AgentTurnId, firstTurn.Id);
+        var firstBinding = Assert.Single(Fixture.SessionWork.ExecutionBindings);
+        Assert.Equal(firstTurn.WorkflowExecution, firstBinding);
+
+        Fixture.SessionWork.BindingAccepted = true;
+        var replay = await grain.AcceptWorkflowInputAsync(command);
+
+        Assert.True(replay.WorkflowBindingAccepted);
+        Assert.Equal(first.AgentTurnId, replay.AgentTurnId);
+        Assert.Single((await grain.ListTurnsAsync()));
+        Assert.Equal(2, Fixture.SessionWork.ExecutionBindings.Count);
+        Assert.All(Fixture.SessionWork.ExecutionBindings, binding =>
+            Assert.Equal(firstTurn.WorkflowExecution, binding));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.AcceptWorkflowInputAsync(command with { WorkId = "work-other" }));
+        Assert.Single(await grain.ListTurnsAsync());
+    }
+
+    [Fact]
     public async Task AppendWorkflowRuntimeEvents_PreservesFailureWhenTheCloseBatchAlsoReportsIdle()
     {
         var grain = await OpenBoundGrainAsync("opencode");

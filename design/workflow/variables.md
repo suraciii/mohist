@@ -161,10 +161,13 @@ The Run Variables resource still lets other callers modify `stages` explicitly.
 - Task `setVars` runs after the Action returns successfully and before the task reports completion. If any
   output projection fails, Run Variables remain unchanged and the task fails.
 
-Effective Variables enter task `with`, task-level `expect`, or another template-enabled declaration only
-through an explicit `${{ vars.* }}` reference. Template evaluation occurs at the Runner execution entry
-point before it calls the Action. It does not occur during dispatch. The Action sees only input that the
-Runner has rendered and validated. It cannot read the Variables resource again.
+Profile-owned template declarations receive Effective Variables only through an explicit
+`${{ vars.* }}` reference. A manifest-owned engine input is separate: Runner derives that declared
+Action input from the immutable dispatch snapshot under
+[`task-dispatch.md`](task-dispatch.md#engine-sourced-action-inputs), without adding a profile
+reference. Template evaluation occurs at the Runner execution entry point before it calls the
+Action. The Action sees only input that Runner has rendered and validated; it cannot read the
+Variables resource again.
 
 Runtime context such as `workflow.*`, `stage.*`, `issue.*`, and `repository.*`, plus
 `tasks.<id>.outputs.*` and `prompts.*`, are separate namespaces. They do not participate in the Variables

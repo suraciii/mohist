@@ -19,13 +19,20 @@ Run startup SHALL NOT seed any `archive` variable key. The effective Run variabl
 - **THEN** the Run's effective variables SHALL NOT contain an `archive` key
 
 ### Requirement: Archive action defines explicit absent-hint behavior
-The `mohist/archive-change` Action SHALL define and spec-cover its behavior when `archiveHint` is absent. The user-visible result when `archiveHint` is absent SHALL match the result before this change: the Action computes a fresh dated archive destination, moves the change directory, and records the destination for subsequent idempotency.
+The `mohist/archive-change` Action SHALL define and spec-cover its behavior when `archiveHint` is absent. Its optional `archiveHint` input SHALL be engine-sourced from `vars.archive` in the immutable dispatch snapshot, rather than from a profile `with` template. When the variable is absent, Runner SHALL omit the input. The user-visible result when `archiveHint` is absent SHALL match the result before this change: the Action computes a fresh dated archive destination, moves the change directory, and records the destination for subsequent idempotency.
 
 #### Scenario: Archive with no hint computes a fresh destination
 - **WHEN** the `mohist/archive-change` Action runs with no `archiveHint` input
 - **AND** the source change directory exists and contains files
 - **THEN** the Action SHALL compute a fresh archive destination under the archive root using the current date
 - **AND** SHALL move the change directory to that destination
+
+#### Scenario: Replay derives the persisted archive destination without a profile default
+- **WHEN** a prior archive attempt has written its workspace-relative destination to Run `vars.archive`
+- **AND** a retry or rerun receives a new dispatch snapshot with that variable
+- **THEN** Runner SHALL inject that value as the `archiveHint` Action input
+- **AND** the profile task SHALL NOT need an `archiveHint` entry or `${{ vars.archive }}` reference in `with`
+- **AND** when the destination exists and the source directory is gone, the Action SHALL succeed idempotently
 
 #### Scenario: Archive idempotency with a hint is unchanged
 - **WHEN** the `mohist/archive-change` Action runs with an `archiveHint` pointing to an existing destination

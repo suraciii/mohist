@@ -2,55 +2,53 @@
 
 ## Verdict
 
-PASS. The final proposal, capability spec, design, and seven-task graph cover the live issue contract and the implementation-review corrections. No must-fix planning defect remains.
+PASS. The current proposal, design, capability spec, and seven-task graph remain complete and correct against issue 589 after the post-review artifact edits. The plan is ready to build.
 
 ## Must-Fix Findings
 
 None.
 
-## Issue Acceptance Coverage
+## Re-Review Dispositions
 
-**Checked, no issue.** The normative spec and tasks cover each required behavior:
+- The previous review reported no must-fix findings, so there are no must-fix dispositions to verify.
+- The previous static-planning observation is now stale: the current codebase contains settlement-related implementation and focused tests. This review assesses the plan and does not certify implementation completion.
+- The previous tooling observation still holds in this worktree: `node_modules/.bin/tsx` is absent, so a repository test gate was not run here. T-007 still requires both `npm run test:fast` and `npm run verify` after implementation.
+- The changes since the previous review introduce no must-fix regression. The spec now states the runtime acknowledgement and stop-redelivery fences with unambiguous MUST/MUST NOT language; the design additions clarify context and resolved questions; shortened task descriptions retain their detailed acceptance criteria; and T-007 now links to the containing blocked-state requirement.
 
-- Inconclusive stop, activity, target, transport, and Runner-loss facts remain physical observations; they cannot produce a Workflow task success or failure (T-001, T-004, T-005).
-- The first unknown observation retains the original execution identity and fixed deadline, becomes blocked rather than failed after the configured five-minute default, and remains eligible for a late result (T-001, T-002, T-006).
-- A stable input delivery is acknowledged only after AgentSession and Workflow bindings are durable. The receipt returns the canonical AgentTurn identity, and later events and batches use the full immutable identity (T-003, T-004).
-- Recovery reuses issue #562's recorded stop operation and may redeliver it only after positive reconciliation proves the exact physical target is still active (T-004).
-- Runner disconnect/reconnect preserves unknown work without replacement dispatch while retained in-flight and awaiting-ack keys still consume capacity (T-002, T-005).
-- Explicit Workflow stop atomically cancels the task and stops the run; post-commit snapshot, reminder, and lock cleanup is idempotently repaired by replay or activation (T-002).
-- The first authoritative result wins once. All later reports are stale and side-effect free, and artifact replay is keyed by uniquely indexed `SourceUploadId` with real `TaskRun.Id` attribution (T-006).
-- Blocked attention is projected with reason `agent-result-unconfirmed` to Issue, Inbox, Web, and CLI, while failure fields, failed-task retry, and failure-only GitHub, Hermes, and Agent subscribers remain excluded (T-007).
+## Coverage Regression Check
 
-## Correctness
+**Checked, no issue.** Every issue acceptance criterion still has normative behavior and executable task coverage:
 
-**Checked, no issue.** The design resolves the principal races and ownership hazards:
+- T-001, T-004, and T-005 preserve an unknown outcome for unconfirmed stops and idle/completed physical sessions without emitting `TaskFailed`.
+- T-003 through T-005 retain the original task/work/Runner/Session/Turn/target identity across delivery failure, disconnect, replay, and reconnect.
+- T-003 and T-004 make repeated input, event, observation, and stop-operation delivery idempotent; stop redelivery is permitted only after positive reconciliation of the same recorded target.
+- T-002 fixes one durable five-minute-default deadline and transitions unresolved work to nonterminal blocked attention rather than success or failure.
+- T-006 accepts the first matching authoritative result before or after blocking and makes every later report and stale physical observation side-effect free.
+- T-005 explicitly tests the five observed plan/build failure shapes through the documented result, deadline, or explicit-stop recovery paths.
+- T-007 projects the actionable `agent-result-unconfirmed` state to API, events, Issue, Inbox, Web, and CLI while excluding failure fields, failed retry, terminal polling, and failure-only subscribers.
 
-- `TaskRun.AgentResultSettlement.State` is the single arbitration authority. Task and stage status are derived; only the minimum run-level blocked value needed by indexed queries is persisted separately.
-- The Server receipt, not local Runner snapshot persistence, is the pre-execution fence. Lost acknowledgements replay the same input and Turn.
-- AgentSession observations are built from the frozen Turn binding rather than mutable Session labels, and mixed-identity batches are rejected or partitioned.
-- Deadline and reminder repair use persisted absolute time and injected `TimeProvider`; duplicate observations and activation repair registration without extending the deadline.
-- Stop cleanup is deliberately post-commit and crash-convergent, so external cleanup cannot roll back or replace the committed stopped outcome.
-- Result arbitration happens inside the serialized Workflow grain before artifacts, follow-up projection, output, events, or advancement can have effects.
+## Correctness Regression Check
 
-## Current-Code Consistency
+**Checked, no issue.** The approach still closes the adversarial races implied by the issue:
 
-**Checked, no issue.** Every required change has an existing boundary and an owning task:
+- Workflow aggregate state is the sole outcome arbiter; AgentSession and Runner supply identity-fenced physical observations only.
+- Runtime start waits for the durable Server receipt, and a lost receipt reuses the same delivery and AgentTurn rather than creating another execution.
+- Frozen Turn binding and homogeneous runtime-event batches prevent a reused named Session or delayed event from selecting later work.
+- Persisted absolute time plus reminder replay prevents reconnect, duplicate observation, or restart from extending the deadline.
+- Serialized grain arbitration precedes report side effects, with durable upload identity covering artifact replay after a failed aggregate save.
+- Unknown and blocked settlements prevent replacement dispatch while retaining late-result eligibility; explicit stop is separately ordered and crash-repairable.
 
-- T-001 extends `TaskRun`/`WorkflowRun` and the Workflow grain with the settlement, identity-fenced bind/observe commands, and reportable-attempt lookup.
-- T-002 owns the reminder, unresolved dispatch/control fences, capacity accounting, and explicit-stop cleanup recovery.
-- T-003 extends Workflow dispatch/runtime-event metadata, `RunnerRoutes`, AgentSession input acceptance, the Runner reporter, and the receipt contract.
-- T-004 replaces `ISessionWorkPort.AbandonActiveWorkAsync` outcome coupling and fixes outbox sequence/batch identity while preserving #562 stop ownership.
-- T-005 changes Agent executor unknown results, report translation, `RunnerGrain.CloseoutLostAsync`, and reconnect reconciliation without weakening non-Agent failures.
-- T-006 moves report side effects behind grain arbitration and adds the nullable, uniquely indexed `WorkflowArtifactRow.SourceUploadId` migration.
-- T-007 updates events, indexed/read projections, Issue/Inbox, Web, CLI, and subscriber routing, and owns the full repository gate.
+## Current-Code Consistency Regression Check
 
-## Task Breakdown
+**Checked, no issue.** The named implementation boundaries exist and match local conventions: `TaskRun` and WorkflowRun JSON state, serialized `WorkflowGrain` commands and reminders, injected `TimeProvider`, Runner `inFlight`/`awaitingAck` reconciliation, AgentSession's identity-based stop operation from issue 562, transactional Workflow events, artifact EF migrations, and existing Server/CLI/Web status projections. The plan keeps physical stop ownership in AgentSession and outcome ownership in Workflow rather than introducing a conflicting lifecycle authority.
 
-**Checked, no issue.** Tasks are source-ordered and dependency-ordered: T-001 establishes authority; T-002 and T-003 independently add deadline/control and pre-execution binding; T-004 joins both for immutable observations; T-005 adds Runner-loss semantics; T-006 adds late-result and artifact arbitration; T-007 adds public blocked projections. Every task embeds focused tests and `npm run test:fast`; the final task also requires `npm run verify`.
+## Task Breakdown Regression Check
+
+**Checked, no issue.** Task IDs and dependencies are valid, unique, acyclic, and source ordered. T-001 establishes settlement authority; T-002 and T-003 independently establish deadline/control and pre-execution binding; T-004 joins those identities to physical observations; T-005 handles Runner loss; T-006 handles authoritative-result side effects; and T-007 owns coordinated public projection and the full gate. Each task has behavior-specific tests and a verifiable output, and all spec references resolve to existing requirements.
 
 ## Observations
 
-- This is a static planning review; implementation tests do not exist yet.
-- The plan worktree did not have `tsx`, so the earlier broad repository gate could not start there. This is not green evidence. T-007 retains the required full gate after implementation in the prepared workflow workspace.
+- The standalone `openspec` validator is not installed in this worktree. Direct checks confirmed valid JSON, valid task references/dependencies, resolvable spec anchors, and no whitespace errors in the artifact changes.
+- No implementation or repository test suite was run as part of this plan re-review because the current worktree lacks the Node test prerequisite noted above.
 
 <promise>PASS</promise>

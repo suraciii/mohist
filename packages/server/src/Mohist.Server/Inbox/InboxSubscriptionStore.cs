@@ -66,6 +66,7 @@ public sealed class InboxSubscriptionStore : IScopedService
             {
                 ProjectId = projectId,
                 WorkflowFailedEnabled = state.WorkflowFailedEnabled,
+                AgentResultUnconfirmedEnabled = state.AgentResultUnconfirmedEnabled,
                 ApprovalRequestedEnabled = state.ApprovalRequestedEnabled,
                 IssueStartedEnabled = state.IssueStartedEnabled,
                 IssueCompletedEnabled = state.IssueCompletedEnabled,
@@ -77,6 +78,7 @@ public sealed class InboxSubscriptionStore : IScopedService
         else
         {
             row.WorkflowFailedEnabled = state.WorkflowFailedEnabled;
+            row.AgentResultUnconfirmedEnabled = state.AgentResultUnconfirmedEnabled;
             row.ApprovalRequestedEnabled = state.ApprovalRequestedEnabled;
             row.IssueStartedEnabled = state.IssueStartedEnabled;
             row.IssueCompletedEnabled = state.IssueCompletedEnabled;
@@ -90,6 +92,7 @@ public sealed class InboxSubscriptionStore : IScopedService
 
     private static InboxSubscriptionState ToState(InboxSubscriptionRow row) => new(
         WorkflowFailedEnabled: row.WorkflowFailedEnabled,
+        AgentResultUnconfirmedEnabled: row.AgentResultUnconfirmedEnabled,
         ApprovalRequestedEnabled: row.ApprovalRequestedEnabled,
         IssueStartedEnabled: row.IssueStartedEnabled,
         IssueCompletedEnabled: row.IssueCompletedEnabled,

@@ -18,6 +18,43 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     }
 
     [Fact]
+    public async Task WorkflowInput_WithoutAnAcceptedWorkflowBinding_ReturnsNoReceiptAndReusesItsTurn()
+    {
+        var (_, _, work, session) = await CreateStartedAgentSessionAsync("workflow-input-binding-rejected");
+        var request = new
+        {
+            runtimeSessionId = session.Id,
+            runtime = "opencode",
+            agentSessionId = session.Id,
+            inputDeliveryId = "delivery-binding-rejected",
+            taskRunId = "task-binding-rejected.1",
+            workId = work.WorkId,
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.SessionInput, payload = new { text = "do not start" } }
+            }
+        };
+
+        using var firstResponse = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(session), request);
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        using var firstReceipt = JsonDocument.Parse(await firstResponse.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, firstReceipt.RootElement.ValueKind);
+        Assert.Empty(firstReceipt.RootElement.EnumerateArray());
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var firstTurn = Assert.Single(await grain.ListTurnsAsync());
+        Assert.Equal("delivery-binding-rejected", firstTurn.WorkflowExecution?.InputDeliveryId);
+        Assert.Equal("task-binding-rejected.1", firstTurn.WorkflowExecution?.TaskRunId);
+
+        using var replayResponse = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(session), request);
+        Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        using var replayReceipt = JsonDocument.Parse(await replayResponse.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, replayReceipt.RootElement.ValueKind);
+        Assert.Empty(replayReceipt.RootElement.EnumerateArray());
+        Assert.Equal(firstTurn.Id, Assert.Single(await grain.ListTurnsAsync()).Id);
+    }
+
+    [Fact]
     public async Task WorkflowRuntimeEvents_WithoutExecutionIdentity_FailClosed()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("workflow-runtime-no-identity");

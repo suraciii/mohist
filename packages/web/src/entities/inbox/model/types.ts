@@ -1,15 +1,16 @@
 export const NOTIFICATION_KINDS = {
   WorkflowFailed: 'workflow_failed',
+  AgentResultUnconfirmed: 'agent_result_unconfirmed',
   ApprovalRequested: 'approval_requested',
   IssueStarted: 'issue_started',
   IssueCompleted: 'issue_completed',
 } as const
 
-export type NotificationKind =
-  (typeof NOTIFICATION_KINDS)[keyof typeof NOTIFICATION_KINDS]
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[keyof typeof NOTIFICATION_KINDS]
 
 export const NOTIFICATION_KIND_VALUES: readonly NotificationKind[] = [
   NOTIFICATION_KINDS.WorkflowFailed,
+  NOTIFICATION_KINDS.AgentResultUnconfirmed,
   NOTIFICATION_KINDS.ApprovalRequested,
   NOTIFICATION_KINDS.IssueStarted,
   NOTIFICATION_KINDS.IssueCompleted,
@@ -19,9 +20,7 @@ export function isNotificationKind(value: string): value is NotificationKind {
   return (NOTIFICATION_KIND_VALUES as readonly string[]).includes(value)
 }
 
-export function parseNotificationKind(
-  value: string | null | undefined,
-): NotificationKind {
+export function parseNotificationKind(value: string | null | undefined): NotificationKind {
   if (value && isNotificationKind(value)) {
     return value
   }
@@ -30,6 +29,7 @@ export function parseNotificationKind(
 
 export interface InboxSubscription {
   workflow_failed: boolean
+  agent_result_unconfirmed?: boolean
   approval_requested: boolean
   issue_started: boolean
   issue_completed: boolean

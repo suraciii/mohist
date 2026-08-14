@@ -214,6 +214,32 @@ public sealed class WorkflowRunQuerier
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Returns nonterminal runs whose authoritative Agent settlement reached
+    /// blocked. The indexed row projection is rebuilt with the WorkflowRun and
+    /// intentionally does not become a second state-machine authority.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> FindBlockedAsync(
+        string? projectId = null,
+        int limit = 20,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var query = db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.AttentionStatus == "blocked");
+
+        if (!string.IsNullOrWhiteSpace(projectId))
+            query = query.Where(row => row.MetadataProjectId == projectId);
+
+        return await query
+            .OrderBy(row => row.CreatedAt)
+            .ThenBy(row => row.WorkflowRunId)
+            .Take(limit)
+            .Select(row => row.WorkflowRunId)
+            .ToListAsync(ct);
+    }
+
     // The STORED Status computed column is the lowercase JSON enum
     // value (D3). This helper is the single point that knows the
     // SQLite column == lowercase canonical form contract; every

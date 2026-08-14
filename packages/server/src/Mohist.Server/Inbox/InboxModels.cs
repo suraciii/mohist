@@ -8,6 +8,7 @@ namespace Mohist.Server.Inbox;
 public static class NotificationKinds
 {
     public const string WorkflowFailed = "workflow_failed";
+    public const string AgentResultUnconfirmed = "agent_result_unconfirmed";
     public const string ApprovalRequested = "approval_requested";
     public const string IssueStarted = "issue_started";
     public const string IssueCompleted = "issue_completed";
@@ -15,6 +16,7 @@ public static class NotificationKinds
 
     public static bool IsDefined(string? value) => value is
         WorkflowFailed or
+        AgentResultUnconfirmed or
         ApprovalRequested or
         IssueStarted or
         IssueCompleted or
@@ -78,6 +80,7 @@ public sealed record InboxUnreadCount(int UnreadCount);
 /// </summary>
 public sealed record InboxSubscriptionState(
     bool WorkflowFailedEnabled = true,
+    bool AgentResultUnconfirmedEnabled = true,
     bool ApprovalRequestedEnabled = true,
     bool IssueStartedEnabled = true,
     bool IssueCompletedEnabled = true,
@@ -86,6 +89,7 @@ public sealed record InboxSubscriptionState(
     public bool IsEnabled(string kind) => kind switch
     {
         NotificationKinds.WorkflowFailed => WorkflowFailedEnabled,
+        NotificationKinds.AgentResultUnconfirmed => AgentResultUnconfirmedEnabled,
         NotificationKinds.ApprovalRequested => ApprovalRequestedEnabled,
         NotificationKinds.IssueStarted => IssueStartedEnabled,
         NotificationKinds.IssueCompleted => IssueCompletedEnabled,

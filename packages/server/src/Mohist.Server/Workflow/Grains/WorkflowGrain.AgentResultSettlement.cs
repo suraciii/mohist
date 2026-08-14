@@ -45,7 +45,7 @@ public partial class WorkflowGrain
             if (EnsureSettlementDeadline(settlement))
                 await CommitAsync([]);
 
-            await DeleteSnapshotBestEffortAsync(settlement.WorkId);
+            await DeleteAgentResultSettlementSnapshotAsync(settlement.WorkId);
             if (settlement.DeadlineAt <= Now())
             {
                 await BlockUnresolvedAgentResultIfDueAsync();
@@ -58,7 +58,7 @@ public partial class WorkflowGrain
 
         if (settlement.State == AgentResultSettlementState.Blocked)
         {
-            await DeleteSnapshotBestEffortAsync(settlement.WorkId);
+            await DeleteAgentResultSettlementSnapshotAsync(settlement.WorkId);
             await RemoveAgentResultSettlementReminderAsync();
         }
     }
@@ -82,9 +82,9 @@ public partial class WorkflowGrain
         if (_run?.FindCancelledAgentResultSettlementTask() is not { } cancelled)
             return;
 
-        await DeleteSnapshotBestEffortAsync(cancelled.Task.AgentResultSettlement!.WorkId);
+        await DeleteAgentResultSettlementSnapshotAsync(cancelled.Task.AgentResultSettlement!.WorkId);
         await RemoveAgentResultSettlementReminderAsync();
-        await ReleaseStageLocksAsync(cancelled.Stage, "stopped-unresolved-agent-result");
+        await ReleaseUnresolvedAgentResultSettlementStageLocksAsync(cancelled.Stage);
     }
 
     private async Task ReconcileTerminalAgentResultSettlementAsync()
@@ -92,7 +92,7 @@ public partial class WorkflowGrain
         if (_run?.FindTerminalAgentResultSettlementTask() is not { } terminal)
             return;
 
-        await DeleteSnapshotBestEffortAsync(terminal.Task.AgentResultSettlement!.WorkId);
+        await DeleteAgentResultSettlementSnapshotAsync(terminal.Task.AgentResultSettlement!.WorkId);
         await RemoveAgentResultSettlementReminderAsync();
         terminal.Task.AgentResultSettlement = null;
         await CommitAsync([]);
@@ -126,4 +126,10 @@ public partial class WorkflowGrain
         if (reminder is not null)
             await this.UnregisterReminder(reminder);
     }
+
+    protected virtual Task DeleteAgentResultSettlementSnapshotAsync(string workId) =>
+        DeleteSnapshotBestEffortAsync(workId);
+
+    protected virtual Task ReleaseUnresolvedAgentResultSettlementStageLocksAsync(string stage) =>
+        ReleaseStageLocksAsync(stage, "stopped-unresolved-agent-result");
 }

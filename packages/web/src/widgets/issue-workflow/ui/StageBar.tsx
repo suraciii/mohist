@@ -4,13 +4,18 @@ import type { Issue, StageStateRead, StageCheckState } from '../../../entities/i
 import { formatDuration } from './format'
 import { StageStatusIcon } from './StageStatusIcons'
 
-export const WORKFLOW_STAGES: readonly WorkflowStage[] = [WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Integrate]
+export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
+  WorkflowStage.Plan,
+  WorkflowStage.Build,
+  WorkflowStage.Check,
+  WorkflowStage.Integrate,
+]
 
 export function getStageStatus(
   stage: WorkflowStage,
   stageStateMap: Map<string, StageStateRead>,
   issue: Issue,
-): 'pending' | 'running' | 'completed' | 'failed' | 'awaiting-approval' {
+): 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'awaiting-approval' {
   const stageState = stageStateMap.get(stage)
   const stageOrder = WORKFLOW_STAGES.indexOf(stage)
   const currentStageIdx = issue.workflowStage ? WORKFLOW_STAGES.indexOf(issue.workflowStage) : -1
@@ -20,6 +25,7 @@ export function getStageStatus(
     if (stageState.status === 'awaiting-approval') return 'awaiting-approval'
     if (stageState.status === 'completed' || stageState.status === 'passed') return 'completed'
     if (stageState.status === 'failed') return 'failed'
+    if (stageState.status === 'blocked') return 'blocked'
     if (stageState.status === 'skipped') return 'pending'
   }
 
@@ -45,7 +51,9 @@ export function getStageDuration(stage: WorkflowStage, stageStateMap: Map<string
   return total > 0 ? total : null
 }
 
-export function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflowTimeline>['data']): Map<string, StageStateRead> {
+export function workflowTimelineToStageStateMap(
+  timeline: ReturnType<typeof useWorkflowTimeline>['data'],
+): Map<string, StageStateRead> {
   const map = new Map<string, StageStateRead>()
   if (!timeline) return map
 
@@ -72,6 +80,7 @@ export function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useW
         origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
         requiredFiles: task.requiredFiles,
         classification: task.classification,
+        agentResultSettlement: task.agentResultSettlement,
       })),
       checks: stage.checks.map((check) => ({
         checkName: check.name,
@@ -146,10 +155,7 @@ export function StageBar({
   onSelectStage: (stage: WorkflowStage) => void
 }) {
   return (
-    <div
-      className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4"
-      data-testid="workflow-stage-bar"
-    >
+    <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" data-testid="workflow-stage-bar">
       {WORKFLOW_STAGES.map((stage) => {
         const status = getStageStatus(stage, stageStateMap, issue)
         const duration = getStageDuration(stage, stageStateMap)

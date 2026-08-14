@@ -79,6 +79,26 @@ public sealed class IssueWatchDispatchSpecs
     }
 
     [Fact]
+    public async Task WatchLaunch_OnBlockedAgentResult_DoesNotLaunchFailureSubscriber()
+    {
+        var (harness, projectId, agentId, issueNumber) = await SeedAsync(
+            purpose: "watch-blocked",
+            workflowRunId: "wf_watch_blocked");
+        await harness.WatchStore.AddAsync(projectId, issueNumber, agentId);
+
+        var evt = RoutingDispatchTestSupport.BuildEvent(
+            type: EventCatalog.ReverseDns.WorkflowRunBlocked,
+            projectId: projectId,
+            issueNumber: issueNumber,
+            eventId: "evt-run-blocked-1",
+            workflowRunId: "wf_watch_blocked");
+
+        await harness.Handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(harness.Launcher.RoutedLaunches);
+    }
+
+    [Fact]
     public async Task WatchLaunch_OnUnrelatedEventType_DoesNotLaunch()
     {
         var (harness, projectId, agentId, issueNumber) = await SeedAsync(

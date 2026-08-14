@@ -95,7 +95,9 @@ public static class MohistDefaultWorkflowProjection
     {
         if (issueStatus == "done") return "done";
         if (issueStatus == "cancelled") return "cancelled";
-        if (attention?.Reason is WorkflowAttentionReason.Blocked or WorkflowAttentionReason.WorkflowFailed) return "blocked";
+        if (attention?.Reason is WorkflowAttentionReason.Blocked
+            or WorkflowAttentionReason.AgentResultUnconfirmed
+            or WorkflowAttentionReason.WorkflowFailed) return "blocked";
         if (attention is not null) return "attention";
         return workflowStatus switch
         {

@@ -14,19 +14,18 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.Inbox.Subscriptions;
 
 /// <summary>
-/// Server-side projection that turns the four authoritative "operator
-/// signal" CloudEvents into project-scoped inbox items:
+/// Server-side projection that turns authoritative operator-signal
+/// CloudEvents into project-scoped inbox items:
 /// <list type="bullet">
 ///   <item><c>com.mohist.workflow.run.failed</c>             → <c>workflow_failed</c></item>
+///   <item><c>com.mohist.workflow.run.blocked</c>             → <c>agent_result_unconfirmed</c></item>
 ///   <item><c>com.mohist.workflow.stage.approval-requested</c> → <c>approval_requested</c></item>
 ///   <item><c>com.mohist.issue.work-started</c>               → <c>issue_started</c></item>
 ///   <item><c>com.mohist.issue.completed</c>                  → <c>issue_completed</c></item>
 /// </list>
 /// The handler is a single <see cref="ICloudEventHandler"/> over a
-/// pipe-separated <see cref="SubscriptionAttribute"/> because the four
-/// payload types (<see cref="WorkflowRunFailed"/>,
-/// <see cref="StageApprovalRequested"/>, <see cref="IssueWorkStarted"/>,
-/// <see cref="IssueCompleted"/>) have disjoint shapes and we only
+/// pipe-separated <see cref="SubscriptionAttribute"/> because the payload
+/// types have disjoint shapes and we only
 /// need a small number of fields from each. Branches dispatch through
 /// canonical envelope extensions
 /// for workflow events, or read the issue-event
@@ -59,6 +58,7 @@ namespace Mohist.Server.Inbox.Subscriptions;
 [Subscription(
     Type =
         "com.mohist.workflow.run.failed|" +
+        "com.mohist.workflow.run.blocked|" +
         "com.mohist.workflow.stage.approval-requested|" +
         "com.mohist.issue.work-started|" +
         EventCatalog.ReverseDns.IssueCompleted + "|" +
@@ -95,6 +95,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
         var resolved = evt.Type switch
         {
             EventCatalog.ReverseDns.WorkflowRunFailed => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.WorkflowRunBlocked => ResolveFromEnvelope(evt),
             EventCatalog.ReverseDns.StageApprovalRequested => ResolveFromEnvelope(evt),
             EventCatalog.ReverseDns.IssueWorkStarted => ResolveFromEnvelope(evt),
             EventCatalog.ReverseDns.IssueCompleted => ResolveFromEnvelope(evt),
@@ -199,6 +200,9 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
         {
             case EventCatalog.ReverseDns.WorkflowRunFailed:
                 kind = NotificationKinds.WorkflowFailed;
+                return true;
+            case EventCatalog.ReverseDns.WorkflowRunBlocked:
+                kind = NotificationKinds.AgentResultUnconfirmed;
                 return true;
             case EventCatalog.ReverseDns.StageApprovalRequested:
                 kind = NotificationKinds.ApprovalRequested;

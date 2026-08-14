@@ -2,13 +2,25 @@ import { describe, expect, it } from 'vitest'
 import { classifyEvent } from './classify'
 import type { TimelineCategory } from './types'
 
-function expectCategory(type: string, payload: Record<string, unknown>, expected: TimelineCategory, attention: boolean) {
+function expectCategory(
+  type: string,
+  payload: Record<string, unknown>,
+  expected: TimelineCategory,
+  attention: boolean,
+) {
   const result = classifyEvent(type, payload)
   expect(result.category).toBe(expected)
   expect(result.attention).toBe(attention)
 }
 
 describe('classifyEvent priority ordering', () => {
+  it('classifies Agent-result blocked events as actionable attention, not failure', () => {
+    expectCategory('com.mohist.workflow.agent-result-unconfirmed', {}, 'attention', true)
+    expectCategory('com.mohist.workflow.task.blocked', {}, 'attention', true)
+    expectCategory('com.mohist.workflow.stage.blocked', {}, 'attention', true)
+    expectCategory('com.mohist.workflow.run.blocked', {}, 'attention', true)
+  })
+
   it('classifies failures before integration/success (merge_failed)', () => {
     expectCategory('merge_failed', {}, 'failure', true)
   })

@@ -1,4 +1,11 @@
-export type TimelineCategory = 'workflow' | 'approval' | 'integration' | 'success' | 'failure' | 'metadata'
+export type TimelineCategory =
+  | 'workflow'
+  | 'attention'
+  | 'approval'
+  | 'integration'
+  | 'success'
+  | 'failure'
+  | 'metadata'
 
 export type TimelineSource = 'ISSUE' | 'WORKFLOW'
 
@@ -36,6 +43,15 @@ export const CATEGORY_STYLES: Record<TimelineCategory, CategoryStyle> = {
     border: 'border-border',
     label: 'Workflow',
     tone: 'neutral',
+  },
+  attention: {
+    dot: 'bg-warning',
+    accentDot: 'bg-warning',
+    bg: 'bg-warning-subtle',
+    text: 'text-warning',
+    border: 'border-warning-border',
+    label: 'Attention',
+    tone: 'warning',
   },
   approval: {
     dot: NEUTRAL_DOT,

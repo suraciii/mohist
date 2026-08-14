@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -133,6 +134,54 @@ public partial class WorkflowArtifactBindingSpecs
         Assert.Equal("stale", report.Ack);
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
         Assert.Equal("Running", await workflow.GetRunStatusAsync());
+        await using var db = CreateDb();
+        Assert.Empty(await db.WorkflowArtifacts
+            .Where(row => row.WorkflowRunId == work.WorkflowRunId)
+            .ToListAsync());
+        Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+    }
+
+    [Fact]
+    public async Task TerminalTask_ConflictingReportIsStaleWithoutOutputFollowUpOrArtifactSideEffects()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var service = Services.GetRequiredService<WorkflowReportService>();
+
+        var first = await service.ReportAsync(
+            runnerId,
+            work.WorkflowRunId,
+            work.WorkId,
+            work.TaskRunId,
+            new WorkResult("completed"));
+        Assert.Equal("accepted", first.Ack);
+        var eventCount = (await EventStore.ListAsync(work.WorkflowRunId)).Count;
+
+        var uploadId = await SeedPendingUploadAsync(
+            work.WorkflowRunId,
+            work.WorkId,
+            work.TaskRunId!,
+            "late.txt");
+        var late = await service.ReportAsync(
+            runnerId,
+            work.WorkflowRunId,
+            work.WorkId,
+            work.TaskRunId,
+            new WorkResult(
+                "failed",
+                "conflicting late result",
+                Output: System.Text.Json.JsonSerializer.SerializeToElement(new { late = true }),
+                ArtifactUploadIds: [uploadId],
+                AddTasks: [new RuntimeTaskInput("late-follow-up", "Late follow-up", "spec/task")]));
+
+        Assert.Equal("stale", late.Ack);
+        var run = await LoadRunAsync(work.WorkflowRunId);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Completed, task.Status);
+        Assert.Null(task.Output);
+        Assert.Equal(eventCount, (await EventStore.ListAsync(work.WorkflowRunId)).Count);
         await using var db = CreateDb();
         Assert.Empty(await db.WorkflowArtifacts
             .Where(row => row.WorkflowRunId == work.WorkflowRunId)

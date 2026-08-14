@@ -11,7 +11,15 @@ export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 
  * blocked Agent settlement in the stage (nonterminal attention); it is not a
  * server enum value.
  */
-export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'completed' | 'passed' | 'failed' | 'skipped' | 'blocked'
+export type StageStateStatus =
+  | 'pending'
+  | 'running'
+  | 'awaiting-approval'
+  | 'completed'
+  | 'passed'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
 
 export interface StageTaskCause {
   type: 'check-failure' | 'health-check-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown'
@@ -47,6 +55,30 @@ export interface WorkflowExecutionError {
   message: string
 }
 
+export interface WorkflowAgentResultSettlement {
+  state: 'awaiting-result' | 'unknown' | 'blocked'
+  reason?: string | null
+  message?: string | null
+  firstUnknownAt?: string | null
+  deadlineAt?: string | null
+  taskRunId: string
+  workId: string
+  runnerId?: string | null
+  agentSessionId?: string | null
+  agentTurnId?: string | null
+  runtime?: string | null
+  runtimeSessionId?: string | null
+  stopOperationId?: string | null
+  nextAction?: string | null
+  recoveryActions?: string[] | null
+}
+
+export interface WorkflowAgentResultAttention extends WorkflowAgentResultSettlement {
+  state: 'blocked'
+  reason: 'agent-result-unconfirmed'
+  deadlineAt: string
+}
+
 export interface StageTaskState {
   taskId: string
   title: string
@@ -68,6 +100,7 @@ export interface StageTaskState {
   causedBy?: StageTaskCause
   requiredFiles?: WorkflowTaskRequiredFile[]
   classification?: 'UserFacing' | 'Orchestration'
+  agentResultSettlement?: WorkflowAgentResultSettlement | null
 }
 
 export interface StageCheckState {

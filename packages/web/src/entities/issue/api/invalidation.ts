@@ -39,6 +39,11 @@ const STRUCTURAL_ISSUE_EVENTS = new Set<string>([
   REVERSE_DNS_EVENT_TYPES.TaskStarted,
   REVERSE_DNS_EVENT_TYPES.TaskCompleted,
   REVERSE_DNS_EVENT_TYPES.TaskFailed,
+  REVERSE_DNS_EVENT_TYPES.TaskCancelled,
+  REVERSE_DNS_EVENT_TYPES.AgentTaskResultUnconfirmed,
+  REVERSE_DNS_EVENT_TYPES.TaskBlocked,
+  REVERSE_DNS_EVENT_TYPES.StageBlocked,
+  REVERSE_DNS_EVENT_TYPES.WorkflowRunBlocked,
 ])
 
 const DETAIL_EVENTS = new Set<string>([
@@ -76,6 +81,11 @@ const WORKFLOW_EVENTS = new Set<string>([
   REVERSE_DNS_EVENT_TYPES.TaskStarted,
   REVERSE_DNS_EVENT_TYPES.TaskCompleted,
   REVERSE_DNS_EVENT_TYPES.TaskFailed,
+  REVERSE_DNS_EVENT_TYPES.TaskCancelled,
+  REVERSE_DNS_EVENT_TYPES.AgentTaskResultUnconfirmed,
+  REVERSE_DNS_EVENT_TYPES.TaskBlocked,
+  REVERSE_DNS_EVENT_TYPES.StageBlocked,
+  REVERSE_DNS_EVENT_TYPES.WorkflowRunBlocked,
   REVERSE_DNS_EVENT_TYPES.ArtifactRecorded,
   REVERSE_DNS_EVENT_TYPES.IssueWorkflowProfileChanged,
   ...Object.values(REVERSE_DNS_EVENT_TYPES).filter((eventName) => eventName.startsWith('com.mohist.agent-session.')),
@@ -101,15 +111,15 @@ export function invalidateIssueEvent(
   }
 
   if (eventName === REVERSE_DNS_EVENT_TYPES.IssueParentChanged) {
-    const relatedParents = new Set([
-      parsed.previousParentIssueNumber,
-      parsed.parentIssueNumber,
-    ])
+    const relatedParents = new Set([parsed.previousParentIssueNumber, parsed.parentIssueNumber])
     for (const relatedIssueNumber of relatedParents) {
-      if (typeof relatedIssueNumber !== 'number'
-        || !Number.isSafeInteger(relatedIssueNumber)
-        || relatedIssueNumber <= 0
-        || relatedIssueNumber === issueNumber) continue
+      if (
+        typeof relatedIssueNumber !== 'number' ||
+        !Number.isSafeInteger(relatedIssueNumber) ||
+        relatedIssueNumber <= 0 ||
+        relatedIssueNumber === issueNumber
+      )
+        continue
       queryClient.invalidateQueries({
         queryKey: issueDetailKeys.detail(currentProjectId, relatedIssueNumber),
         exact: true,
