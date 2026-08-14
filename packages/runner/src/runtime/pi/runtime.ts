@@ -537,13 +537,25 @@ export class PiRuntime {
 
   private async attemptStart(): Promise<PiResult<PiReadyState>> {
     this.state.ready = false
+    this.state.catalog = null
+    this.state.diagnostic = null
     try {
       const services = await (this.deps.sdkFactory ?? realPiSdkFactory).create({ cwd: process.cwd(), agentDir: this.deps.agentDir })
       this.state.services = services
-      this.state.catalog = null
-      this.state.diagnostic = null
+      try {
+        const models = await services.catalog()
+        this.state.catalog = {
+          models: models.map((model) => ({
+            provider: model.provider,
+            id: model.id,
+            thinkingLevels: [...(model.thinkingLevels ?? ["off"])],
+          })),
+        }
+      } catch (cause) {
+        this.state.diagnostic = diagnostic("pi-catalog-failed", `Pi model catalog unavailable: ${this.mask(message(cause))}`, "warning")
+      }
       this.state.ready = true
-      return { ok: true, value: this.readyState(), diagnostics: [] }
+      return { ok: true, value: this.readyState(), diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [] }
     } catch (cause) { this.state.services = null; this.state.diagnostic = diagnostic("pi-start-failed", this.mask(message(cause))); return this.unavailable() }
   }
 

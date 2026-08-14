@@ -208,9 +208,9 @@ describe("RunnerHost", () => {
         projectId: "project-1",
         runnerId: "runner-test",
       })
-      expect(registration).not.toHaveProperty("coderModels")
-      expect(registration).not.toHaveProperty("coderModelVariants")
-      expect(registration).not.toHaveProperty("runtimeCatalogs")
+      expect(registration).toMatchObject({
+        runtimeCatalogs: { pi: { models: [], variants: {} } },
+      })
       for (const identityField of [
         "buildGitHash",
         "component",
