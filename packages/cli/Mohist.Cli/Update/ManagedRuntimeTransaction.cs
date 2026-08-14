@@ -57,6 +57,7 @@ internal sealed class ManagedRuntimeTransaction
         string scope,
         string transactionId,
         string? cliPath,
+        Func<CancellationToken, Task<string?>>? beforeActivation = null,
         CancellationToken cancellationToken = default)
     {
         var resolved = await _sourceResolver.ResolveAsync(
@@ -81,6 +82,7 @@ internal sealed class ManagedRuntimeTransaction
         ManagedRuntimeSnapshot? sourceSnapshot = null;
         ManagedCliLauncherState? cliLauncher = null;
         var activePointerWritten = false;
+        var activationPreconditionInvoked = false;
 
         try
         {
@@ -170,6 +172,18 @@ internal sealed class ManagedRuntimeTransaction
                 cancellationToken);
             targets = targets with { SourceSnapshot = sourceSnapshot };
 
+            // The candidate is complete and the current launch state is captured,
+            // but no active target or unit has changed yet. This is the only safe
+            // point to require runner interruption before service activation.
+            activatedTargets = targets;
+            if (beforeActivation is not null)
+            {
+                activationPreconditionInvoked = true;
+                var preconditionError = await beforeActivation(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(preconditionError))
+                    return (null, preconditionError);
+            }
+
             var transactionPath = Path.Combine(
                 context.RuntimeRoot,
                 "transactions",
@@ -179,7 +193,6 @@ internal sealed class ManagedRuntimeTransaction
             WriteAtomic(
                 Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
                 targets with { Status = "candidate-activated", Previous = null });
-            activatedTargets = targets;
             activePointerWritten = true;
 
             if (Includes(scope, "cli"))
@@ -237,7 +250,7 @@ internal sealed class ManagedRuntimeTransaction
         }
         catch (OperationCanceledException)
         {
-            if (activePointerWritten && activatedTargets is not null)
+            if ((activePointerWritten || activationPreconditionInvoked) && activatedTargets is not null)
                 await RestoreAfterFailureAsync(
                     context,
                     activatedTargets,
@@ -252,7 +265,7 @@ internal sealed class ManagedRuntimeTransaction
         }
         catch (Exception ex)
         {
-            if (activePointerWritten && activatedTargets is not null)
+            if ((activePointerWritten || activationPreconditionInvoked) && activatedTargets is not null)
                 await RestoreAfterFailureAsync(
                     context,
                     activatedTargets,
