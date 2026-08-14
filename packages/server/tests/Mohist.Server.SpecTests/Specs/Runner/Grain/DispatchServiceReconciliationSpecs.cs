@@ -65,6 +65,32 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
+    public async Task RunnerReconnectReport_ResolvesOriginalUnknownWorkWithoutRedelivery()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
+            checks: []));
+        var runnerId = _runnerId!;
+        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+            runnerId,
+            work.WorkId,
+            new TaskReport(
+                work.WorkId,
+                TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                TaskRunId: work.TaskRunId)));
+
+        var recovered = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Completed, Assert.Single(recovered.CurrentStage().Tasks).Status);
+    }
+
+    [Fact]
     public async Task Redelivery_RedeliversRunningWork_WhenProcessDoesNotReportIt()
     {
         await StartWorkflowAsync(SingleStage(checks: []));

@@ -29,6 +29,7 @@ import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from '.
 import { SessionCommandJournal } from './session-command-journal.js'
 import { FollowupOperationJournal } from './followup-operation-journal.js'
 import { CancelOperationJournal } from './cancel-operation-journal.js'
+import { WorkResultJournal, workKey as journalWorkKey } from './work-result-journal.js'
 import { loadBuildInfo } from './build-info.js'
 import type { DispatchWorkItem } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
@@ -82,11 +83,7 @@ interface AwaitingAckEntry {
  * work, the workflowRunId for workflow work. Matches the server-side
  * `workKey` convention.
  */
-function workKey(work: DispatchWorkItem): string {
-  const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
-  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
-  return `${ownerKind}:${ownerId}:${work.workId}`
-}
+const workKey = journalWorkKey
 
 function usesOpenCode(work: DispatchWorkItem): boolean {
   if (work.ownerKind === 'agent-job') {
@@ -145,6 +142,7 @@ export class RunnerHost {
   private readonly sessionCommandJournal: SessionCommandJournal
   private readonly followupOperationJournal: FollowupOperationJournal
   private readonly cancelOperationJournal: CancelOperationJournal
+  private readonly workResultJournal: WorkResultJournal
   private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
@@ -225,6 +223,7 @@ export class RunnerHost {
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
     this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
+    this.workResultJournal = new WorkResultJournal(options.runnerRoot)
     this.terminalTaskLogDelivery =
       dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? delay
@@ -311,6 +310,7 @@ export class RunnerHost {
       if (!this.terminalTaskLogDelivery.ready()) {
         log.warn('terminal task-log delivery store unavailable; runner admission gated')
       }
+      await this.loadWorkResultJournal()
       // Load the AgentSession runtime-event outbox BEFORE accepting
       // SignalR commands or claiming work. An unreadable snapshot is
       // never replaced with empty state — the outbox loads itself once
@@ -465,6 +465,26 @@ export class RunnerHost {
     }
   }
 
+  private async loadWorkResultJournal(): Promise<void> {
+    try {
+      await this.workResultJournal.load()
+    } catch (error) {
+      log.error('work result journal failed to load', { exception: error })
+    }
+    if (!this.workResultJournal.ready()) {
+      log.warn('work result journal unavailable; runner admission gated')
+      return
+    }
+    for (const entry of this.workResultJournal.completed()) {
+      const key = workKey(entry.work)
+      if (this.awaitingAck.has(key)) continue
+      this.awaitingAck.set(key, {
+        work: entry.work,
+        entry: { result: entry.result!, attempts: 0, retryAt: 0 },
+      })
+    }
+  }
+
   private async shutdownSharedConnection() {
     this.workExecutor = null
     if (this.openCodeRuntime !== null) {
@@ -545,6 +565,24 @@ export class RunnerHost {
         // better.
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
+        let admission: Awaited<ReturnType<WorkResultJournal['begin']>>
+        try {
+          admission = await this.workResultJournal.begin(work)
+        } catch (error) {
+          log.error('work result journal could not fence dispatch; skipping work', {
+            work: work.workId,
+            exception: error,
+          })
+          continue
+        }
+        if (admission !== 'new') {
+          log.warn('work dispatch has a durable unfinished result; refusing replay', {
+            work: work.workId,
+            state: admission,
+          })
+          continue
+        }
+
         const done = this.executeAndTransition(work, signal, key)
         this.inFlight.set(key, { done, work })
         this.syncOpenCodeWorkOwners()
@@ -575,6 +613,7 @@ export class RunnerHost {
       this.providerPolicyDiagnostic === null &&
       this.terminalTaskLogDelivery.ready() &&
       this.agentSessionRuntimeEventOutbox.ready() &&
+      this.workResultJournal.ready() &&
       this.piRuntime !== null &&
       this.piRuntime.ready() &&
       (runtime?.ready() === true || runtime?.canPollWhileCold() === true)
@@ -683,6 +722,16 @@ export class RunnerHost {
     }
     if (signal.aborted) return
 
+    try {
+      await this.workResultJournal.complete(work, result)
+    } catch (error) {
+      log.error('work result journal could not persist settled result', { work: work.workId, exception: error })
+      // Keep the work in `inFlight` and stop admission. Reporting a result
+      // without a durable local copy would turn a restart into result loss.
+      this.workResultJournal.disable()
+      return
+    }
+
     // Move to awaitingAck regardless of outcome. A transport failure on
     // the first attempt is retried by the reconciliation loop; the result is the
     // final verdict (success or the failure captured above).
@@ -708,6 +757,7 @@ export class RunnerHost {
     if (!held) return
     held.entry.attempts += 1
     await reportAndRequireDurableAck(this.connection, held.work, held.entry.result)
+    await this.workResultJournal.acknowledge(held.work)
     this.awaitingAck.delete(key)
     this.syncOpenCodeWorkOwners()
   }

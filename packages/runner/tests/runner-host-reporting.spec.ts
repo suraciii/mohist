@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import { WorkResultJournal } from '../src/runtime/work-result-journal.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import { deferred } from './support/deferred.js'
@@ -185,6 +186,58 @@ function it(name: string, body: () => Promise<void> | void): void {
 }
 
 describe('RunnerHost', () => {
+  it('Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain', async () => {
+    const redriven = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-restart',
+      workId: 'work-restart',
+      taskRunId: 'task-restart',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+    await journal.complete(work, { status: 'failed', message: 'result persisted before process exit' })
+
+    const controller = new AbortController()
+    report.mockImplementation(async (reportedWork: { workId?: string }) => {
+      if (reportedWork.workId === work.workId) redriven.resolve()
+      return { tracked: true, reason: 'accepted' }
+    })
+    poll.mockResolvedValue([])
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+
+    const run = host.run(controller.signal)
+    try {
+      await redriven.promise
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
+        expect.any(AbortSignal),
+      )
+      expect(blockingAction).not.toHaveBeenCalled()
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
   it('PollBody_CarriesInFlightAndAwaitingAck_Keys', async () => {
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()
