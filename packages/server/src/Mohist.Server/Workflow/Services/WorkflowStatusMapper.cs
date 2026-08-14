@@ -56,6 +56,8 @@ public static class WorkflowStatusMapper
     {
         if (run is null) return null;
 
+        var blocked = FindBlockedSettlement(run);
+
         var stages = run.Stages.Select((s, i) =>
         {
             var stageFailure = s.Failure is not null
@@ -70,7 +72,7 @@ public static class WorkflowStatusMapper
 
             return new StageStatusView(
                 s.Id,
-                WireStatus(s.Status),
+                DeriveStageStatus(s, blocked),
                 i,
                 MapTasks(s, definition),
                 MapChecks(s, definition),
@@ -95,17 +97,66 @@ public static class WorkflowStatusMapper
             : null;
 
         var actions = BuildAvailableActions(run, effectiveFailure);
+        if (blocked is not null)
+            actions.Add(new AvailableActionView("stop", "Stop workflow", null));
 
         return new WorkflowStatusView(
             run.Id,
-            WireStatus(run.Status),
+            blocked is not null ? "blocked" : WireStatus(run.Status),
             run.CurrentStageId,
             stages,
             pending,
             failure,
             actions,
             run.AssignedTo,
-            run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt));
+            run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt),
+            MapAgentResultAttention(blocked));
+    }
+
+    /// <summary>
+    /// The run's blocked wire status is derived from the settlement, never
+    /// stored on the run: a blocked settlement is nonterminal attention, and
+    /// the run's persisted status keeps its own lifecycle value.
+    /// </summary>
+    private static WorkflowAgentResultSettlementTask? FindBlockedSettlement(WorkflowRun run)
+    {
+        foreach (var stage in run.Stages)
+        foreach (var task in stage.Tasks)
+        {
+            if (task.Status == TaskRunStatus.Running
+                && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked)
+            {
+                return new WorkflowAgentResultSettlementTask(stage.Id, task);
+            }
+        }
+
+        return null;
+    }
+
+    private static string DeriveTaskStatus(TaskRun task) =>
+        task.Status == TaskRunStatus.Running
+        && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked
+            ? "blocked"
+            : WireStatus(task.Status);
+
+    private static string DeriveStageStatus(StageRun stage, WorkflowAgentResultSettlementTask? blocked) =>
+        blocked is not null && blocked.Stage == stage.Id
+            ? "blocked"
+            : WireStatus(stage.Status);
+
+    private static AgentResultAttentionView? MapAgentResultAttention(WorkflowAgentResultSettlementTask? blocked)
+    {
+        if (blocked is null) return null;
+        var settlement = blocked.Task.AgentResultSettlement!;
+        return new AgentResultAttentionView(
+            "agent-result-unconfirmed",
+            settlement.Message ?? "Agent result unconfirmed; stop the workflow to abandon this task.",
+            settlement.DeadlineAt,
+            settlement.TaskRunId,
+            settlement.WorkId,
+            settlement.RunnerId,
+            settlement.AgentSessionId,
+            settlement.AgentTurnId);
     }
 
     public static List<StageFeedbackView> MapFeedback(WorkflowRun run, string stageId)
@@ -140,7 +191,7 @@ public static class WorkflowStatusMapper
                     t.Id,
                     t.Title,
                     t.Uses,
-                    WireStatus(t.Status),
+                    DeriveTaskStatus(t),
                     t.RequiredFiles,
                     t.Classification,
                     TaskRunExtensions.ExtractSessionName(t.WithInput),

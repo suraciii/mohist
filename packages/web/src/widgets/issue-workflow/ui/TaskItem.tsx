@@ -7,7 +7,7 @@ import { useProject, useProjectPath } from '../../../entities/project'
 import { ArtifactContentViewer, type ArtifactContentHook } from './ArtifactContentViewer'
 import { getDeliveryFailureGuidance } from '../../../shared/lib/delivery-failure'
 import { formatClock, formatDuration, formatOriginLabel, formatOriginTitle } from './format'
-import { CheckmarkIcon, CrossIcon, EmptyCircleIcon, SpinnerIcon } from './StageStatusIcons'
+import { CheckmarkIcon, CrossIcon, EmptyCircleIcon, HourglassIcon, SpinnerIcon } from './StageStatusIcons'
 import { DeliveryFailureBanner } from './failure-panels'
 import { TaskLogPanel, useDefaultTaskLogData, type TaskLogDataHook, type WorkflowRunSessionsHook } from './TaskLogPanel'
 
@@ -233,6 +233,8 @@ export function TaskItem({
     icon = <CheckmarkIcon className="h-4 w-4 text-success flex-shrink-0" />
   } else if (isFailed) {
     icon = <CrossIcon className="h-4 w-4 text-danger flex-shrink-0" />
+  } else if (task.status === 'blocked') {
+    icon = <HourglassIcon className="h-4 w-4 text-warning flex-shrink-0" />
   } else if (isRunning) {
     icon = <SpinnerIcon className="h-4 w-4 text-info animate-spin flex-shrink-0" />
   } else {

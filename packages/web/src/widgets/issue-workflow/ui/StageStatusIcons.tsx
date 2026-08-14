@@ -63,6 +63,7 @@ export function StageStatusIcon({ status }: { status: string }) {
       return <SpinnerIcon />
     case 'failed':
       return <CrossIcon />
+    case 'blocked':
     case 'awaiting-approval':
       return <HourglassIcon />
     default:

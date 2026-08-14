@@ -26,4 +26,13 @@ public sealed class WorkflowAttention
         WorkflowRunId = workflowRunId,
         AvailableActions = ["retry", "cancel"],
     };
+
+    public static WorkflowAttention AgentResultUnconfirmed(string? workflowRunId, string? message = null) => new()
+    {
+        Reason = WorkflowAttentionReason.Blocked,
+        Message = message,
+        Source = "workflow",
+        WorkflowRunId = workflowRunId,
+        AvailableActions = ["stop"],
+    };
 }

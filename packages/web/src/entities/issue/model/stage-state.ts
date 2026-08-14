@@ -2,16 +2,16 @@ import type { WorkflowStage } from './issue'
 import type { WorkflowArtifactSummary, WorkflowTaskRequiredFile } from './artifact'
 import type { BaseDriftInfo } from './drift'
 
-export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'blocked'
 export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 'failed' | 'error'
 
 /**
- * Tracks server `StageRunStatus` (packages/server .../StageRun.cs).
- * Each value MUST be the wire token emitted by `WorkflowStatusMapper.WireStatus(StageRunStatus)`.
- * `passed` and `skipped` are client-only projections that no server enum value emits.
- * Source of truth is the server enum — extend this union when that enum gains a value.
+ * Tracks the wire status of a workflow stage as emitted by
+ * `WorkflowStatusMapper.BuildStatusView`. `blocked` is derived there from a
+ * blocked Agent settlement in the stage (nonterminal attention); it is not a
+ * server enum value.
  */
-export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'completed' | 'passed' | 'failed' | 'skipped'
+export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'completed' | 'passed' | 'failed' | 'skipped' | 'blocked'
 
 export interface StageTaskCause {
   type: 'check-failure' | 'health-check-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown'

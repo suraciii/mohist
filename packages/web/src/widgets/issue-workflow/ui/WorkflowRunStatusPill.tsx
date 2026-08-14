@@ -1,4 +1,4 @@
-import { ActivityIcon, CheckCircle2Icon, CircleDashedIcon, ClockIcon, PauseCircleIcon, PlayCircleIcon, XCircleIcon } from 'lucide-react'
+import { ActivityIcon, CheckCircle2Icon, CircleDashedIcon, ClockIcon, HourglassIcon, PauseCircleIcon, PlayCircleIcon, XCircleIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import type { WorkflowRunStatus } from '../../../entities/issue'
 
@@ -88,6 +88,15 @@ const FAILED_PRESENTATION: StatusPresentation = {
   testId: 'workflow-run-status-failed',
 }
 
+const BLOCKED_PRESENTATION: StatusPresentation = {
+  label: 'Blocked — agent result unconfirmed',
+  bg: 'bg-amber-100',
+  text: 'text-amber-800',
+  dot: 'bg-amber-500',
+  icon: HourglassIcon,
+  testId: 'workflow-run-status-blocked',
+}
+
 const CREATED_PRESENTATION: StatusPresentation = {
   label: 'Created',
   bg: 'bg-gray-100',
@@ -116,6 +125,7 @@ const PRESENTATION_BY_STATUS: Record<WorkflowRunStatus, StatusPresentation> = {
   stopped: STOPPED_PRESENTATION,
   completed: COMPLETED_PRESENTATION,
   failed: FAILED_PRESENTATION,
+  blocked: BLOCKED_PRESENTATION,
 }
 
 function isKnownRunStatus(value: string): value is WorkflowRunStatus {

@@ -20,7 +20,25 @@ public sealed record WorkflowStatusView(
     FailureStatusView? Failure,
     List<AvailableActionView> AvailableActions,
     string? AssignedTo = null,
-    MetadataView? Metadata = null);
+    MetadataView? Metadata = null,
+    AgentResultAttentionView? AgentResultAttention = null);
+
+/// <summary>
+/// Non-failure attention for a Workflow-owned Agent task whose result could
+/// not be confirmed before its settlement deadline. Populated only while the
+/// settlement is blocked; a late authoritative result clears it by settling
+/// the task through the normal terminal path.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentResultAttentionView(
+    string Reason,
+    string Message,
+    DateTimeOffset? DeadlineAt,
+    string TaskRunId,
+    string WorkId,
+    string? RunnerId = null,
+    string? AgentSessionId = null,
+    string? AgentTurnId = null);
 
 [GenerateSerializer]
 public sealed record StageStatusView(
