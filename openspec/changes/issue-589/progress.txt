@@ -117,3 +117,10 @@
 - Runner report retirement now requires the Server's explicit `tracked: true` durable acknowledgement. An untracked response keeps the original `awaitingAck` result and retries it; it cannot free the key for replacement dispatch.
 - `runner-host-reporting.spec.ts` covers an `unknown` result receiving `tracked: false` before replaying and accepting the same result, with one executor invocation. Focused Runner host, OpenCode/Pi cleanup, and native xUnit settlement/Runner-loss specs passed.
 - `npm run test:fast` passed: typechecks, 2,640 Server unit, 69 architecture, 175 Workflow definition, 1,820 CLI, 4,701 Web, and 1,626 Runner tests all completed with zero failures or skips.
+
+### T-006 Completion
+
+- The serialized grain-side report winner fence, `SourceUploadId` migration/index, replay-safe artifact binding, original `TaskRun.Id` attribution, blocked late-result eligibility, and stale acknowledgement behavior are already present in the current upstream baseline through merged issue #514 (`5037b3bb1`). No production code change was necessary on this workflow branch.
+- Added `TerminalTask_ConflictingReportIsStaleWithoutOutputFollowUpOrArtifactSideEffects` to explicitly cover a sequential conflicting terminal result carrying output, a follow-up, and an upload. It proves the acknowledgement is stale and that task output, task count, event count, artifact rows, and the pending upload remain unchanged.
+- The native xUnit runner passed the focused T-006 Server coverage 45/45, including artifact binding/replay, save-failure recovery, unknown/blocked late settlement, explicit-stop stale handling, and the new terminal-conflict case. The guarded Server test inventory remains 845 files with digest `25a3604a158c29d890e79a64652facd42ada65e9b49ac2b3a142bfdae24ff044`; full architecture passed 69/69.
+- Final `npm run test:fast` passed: typechecks, 2,640 Server unit, 69 architecture, 175 Workflow definition, 1,820 CLI, 4,701 Web, and 1,626 Runner tests, all with zero failed or skipped tests.
