@@ -47,8 +47,28 @@ function ledger(overrides: Record<string, unknown> = {}): string {
     durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
     durationUnit: 'seconds',
     cases: [
-      { uid: 'uid-fast', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli', collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T06:00:00Z', finishTime: '2026-08-11T06:00:00.010Z' },
-      { uid: 'uid-theory', testCaseUid: theoryCaseUid, name: 'Ns.Cli.Theory(value: 1)', className: 'Ns.Cli', collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.02, startTime: '2026-08-11T06:00:00Z', finishTime: '2026-08-11T06:00:00.020Z' },
+      {
+        uid: 'uid-fast',
+        testCaseUid: fastCaseUid,
+        name: 'Ns.Cli.Fast',
+        className: 'Ns.Cli',
+        collectionName: 'Ns.Cli collection',
+        outcome: 'passed',
+        executionTimeSeconds: 0.01,
+        startTime: '2026-08-11T06:00:00Z',
+        finishTime: '2026-08-11T06:00:00.010Z',
+      },
+      {
+        uid: 'uid-theory',
+        testCaseUid: theoryCaseUid,
+        name: 'Ns.Cli.Theory(value: 1)',
+        className: 'Ns.Cli',
+        collectionName: 'Ns.Cli collection',
+        outcome: 'passed',
+        executionTimeSeconds: 0.02,
+        startTime: '2026-08-11T06:00:00Z',
+        finishTime: '2026-08-11T06:00:00.020Z',
+      },
     ],
     ...overrides,
   })
@@ -60,9 +80,18 @@ const trxCases: TestCase[] = [
 ]
 
 test('discovery and run ids use fake process and monotonic clock seams', () => {
-  assert.deepEqual(manifest.cases.map((item) => item.uid), [fastCaseUid, theoryCaseUid])
-  assert.equal(createExecutionRunId({ now: () => 1234 }, () => 'fixed'), 'ya-fixed')
-  assert.equal(createExecutionRunId({ now: () => 1234.987 }, () => 'fractional'), 'ya-fractional')
+  assert.deepEqual(
+    manifest.cases.map((item) => item.uid),
+    [fastCaseUid, theoryCaseUid],
+  )
+  assert.equal(
+    createExecutionRunId({ now: () => 1234 }, () => 'fixed'),
+    'ya-fixed',
+  )
+  assert.equal(
+    createExecutionRunId({ now: () => 1234.987 }, () => 'fractional'),
+    'ya-fractional',
+  )
   for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, -0.1, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => createExecutionRunId({ now: () => invalid }, () => 'invalid'), /invalid timestamp/)
   }
@@ -75,15 +104,27 @@ test('discovery and run ids use fake process and monotonic clock seams', () => {
 
 test('current identity reads assembly source and discovery through injected seams', async () => {
   const calls: string[] = []
-  const current = await readCurrentExecutionIdentity({
-    assemblyPath: expectation.assemblyPath,
-    sourceRoots: ['packages/cli'],
-    parallelism: expectation.parallelism,
-  }, {
-    readAssemblySha256: (path) => { calls.push(`assembly:${path}`); return expectation.assemblySha256 },
-    readSourceSha256: (roots) => { calls.push(`source:${roots.join(',')}`); return expectation.sourceSha256 },
-    readDiscovery: async () => { calls.push('discovery'); return discovery },
-  })
+  const current = await readCurrentExecutionIdentity(
+    {
+      assemblyPath: expectation.assemblyPath,
+      sourceRoots: ['packages/cli'],
+      parallelism: expectation.parallelism,
+    },
+    {
+      readAssemblySha256: (path) => {
+        calls.push(`assembly:${path}`)
+        return expectation.assemblySha256
+      },
+      readSourceSha256: (roots) => {
+        calls.push(`source:${roots.join(',')}`)
+        return expectation.sourceSha256
+      },
+      readDiscovery: async () => {
+        calls.push('discovery')
+        return discovery
+      },
+    },
+  )
 
   assert.deepEqual(current, {
     manifest,
@@ -92,11 +133,7 @@ test('current identity reads assembly source and discovery through injected seam
     sourceSha256: expectation.sourceSha256,
     parallelism: expectation.parallelism,
   })
-  assert.deepEqual(calls.sort(), [
-    `assembly:${expectation.assemblyPath}`,
-    'discovery',
-    'source:packages/cli',
-  ])
+  assert.deepEqual(calls.sort(), [`assembly:${expectation.assemblyPath}`, 'discovery', 'source:packages/cli'])
   assert.deepEqual(validateCurrentExecutionIdentity(expectation, current), [])
 })
 
@@ -105,7 +142,10 @@ test('execution evidence uses xUnit ExecutionTime seconds, never TRX duration', 
   const result = validateExecutionEvidence(trxCases, parsed, expectation)
 
   assert.deepEqual(result.errors, [])
-  assert.deepEqual(result.cases.map((item) => item.durationMs), [10, 20])
+  assert.deepEqual(
+    result.cases.map((item) => item.durationMs),
+    [10, 20],
+  )
 })
 
 test('execution evidence maps multiple runtime test UIDs to one discovered theory case UID', () => {
@@ -116,24 +156,30 @@ test('execution evidence maps multiple runtime test UIDs to one discovered theor
     name: 'Ns.Cli.Theory(value: 2)',
     executionTimeSeconds: 0.03,
   })
-  const result = validateExecutionEvidence([
-    ...trxCases,
-    { name: 'Ns.Cli.Theory(value: 2)', durationMs: 700, outcome: 'passed' },
-  ], parseExecutionLedger(JSON.stringify(expanded)), expectation)
+  const result = validateExecutionEvidence(
+    [...trxCases, { name: 'Ns.Cli.Theory(value: 2)', durationMs: 700, outcome: 'passed' }],
+    parseExecutionLedger(JSON.stringify(expanded)),
+    expectation,
+  )
 
   assert.deepEqual(result.errors, [])
-  assert.deepEqual(result.cases.map((item) => item.durationMs), [10, 20, 30])
+  assert.deepEqual(
+    result.cases.map((item) => item.durationMs),
+    [10, 20, 30],
+  )
 })
 
 test('execution evidence fails closed for run, manifest, identity, and outcome mismatches', () => {
-  const parsed = parseExecutionLedger(ledger({
-    runId: 'stale-run',
-    manifestHash: 'b'.repeat(64),
-    assemblyPath: '/stale/test.dll',
-    assemblySha256: 'c'.repeat(64),
-    sourceSha256: 'd'.repeat(64),
-    parallelism: 'xunit-none',
-  }))
+  const parsed = parseExecutionLedger(
+    ledger({
+      runId: 'stale-run',
+      manifestHash: 'b'.repeat(64),
+      assemblyPath: '/stale/test.dll',
+      assemblySha256: 'c'.repeat(64),
+      sourceSha256: 'd'.repeat(64),
+      parallelism: 'xunit-none',
+    }),
+  )
   const result = validateExecutionEvidence(trxCases, parsed, expectation)
 
   assert.ok(result.errors.some((error) => error.includes('run ID')))
@@ -166,7 +212,7 @@ test('execution evidence rejects an unsupported timing contract before evaluatio
 
 test('execution evidence rejects a TRX-ledger outcome mismatch', () => {
   const parsed = parseExecutionLedger(ledger())
-  const mismatchedTrx = trxCases.map((item, index) => index === 0 ? { ...item, outcome: 'failed' as const } : item)
+  const mismatchedTrx = trxCases.map((item, index) => (index === 0 ? { ...item, outcome: 'failed' as const } : item))
   const result = validateExecutionEvidence(mismatchedTrx, parsed, expectation)
 
   assert.ok(result.errors.some((error) => error.includes('outcome mismatch for Ns.Cli.Fast')))
@@ -175,7 +221,9 @@ test('execution evidence rejects a TRX-ledger outcome mismatch', () => {
 test('execution evidence rejects duplicate names and missing partial records', () => {
   const duplicateName = JSON.parse(ledger()) as { cases: Array<Record<string, unknown>> }
   duplicateName.cases[1].name = duplicateName.cases[0].name
-  assert.ok(parseExecutionLedger(JSON.stringify(duplicateName)).errors.some((error) => error.includes('duplicate test name')))
+  assert.ok(
+    parseExecutionLedger(JSON.stringify(duplicateName)).errors.some((error) => error.includes('duplicate test name')),
+  )
 
   const partial = JSON.parse(ledger()) as { cases: Array<Record<string, unknown>> }
   partial.cases.pop()
@@ -191,7 +239,10 @@ test('saved provenance is self-authenticating, non-empty, and round trips exactl
   const stale = JSON.parse(serializeExecutionProvenance(expectation)) as Record<string, unknown>
   stale.manifestHash = 'b'.repeat(64)
   assert.throws(() => parseExecutionProvenance(JSON.stringify(stale)), /manifestHash does not match/)
-  assert.throws(() => parseExecutionProvenance(JSON.stringify({ ...stale, manifestCases: [], manifestCount: 0 })), /positive integer|no test cases/)
+  assert.throws(
+    () => parseExecutionProvenance(JSON.stringify({ ...stale, manifestCases: [], manifestCount: 0 })),
+    /positive integer|no test cases/,
+  )
 })
 
 test('ledger environment carries every provenance field to the reporter', () => {

@@ -29,7 +29,10 @@ test('parseTrx keeps skipped, not-run, and error outcomes distinct', () => {
     <UnitTestResult testName="Ns.NotRun" outcome="NotRun" duration="00:00:00.0000000" />
     <UnitTestResult testName="Ns.Error" outcome="Error" duration="00:00:00.1000000" />
   </Results></TestRun>`)
-  assert.deepEqual(cases.map((case_) => case_.outcome), ['skipped', 'not-run', 'error'])
+  assert.deepEqual(
+    cases.map((case_) => case_.outcome),
+    ['skipped', 'not-run', 'error'],
+  )
 })
 
 test('parseTrx ignores UnitTest definitions and only reads UnitTestResult', () => {
@@ -38,7 +41,10 @@ test('parseTrx ignores UnitTest definitions and only reads UnitTestResult', () =
   </TestDefinitions>
   <Results><UnitTestResult testName="Ns.A.P" outcome="Passed" duration="00:00:00.0100000"/></Results></TestRun>`
   const cases = parseTrx(withDefinition)
-  assert.deepEqual(cases.map((c) => c.name), ['Ns.A.P'])
+  assert.deepEqual(
+    cases.map((c) => c.name),
+    ['Ns.A.P'],
+  )
 })
 
 test('parseTrx parses result blocks that carry child elements (failed test output)', () => {
@@ -52,7 +58,8 @@ test('parseTrx parses result blocks that carry child elements (failed test outpu
 })
 
 test('parseTrx decodes XML entities in parameterized test display names', () => {
-  const xml = '<TestRun><Results><UnitTestResult testName="Ns.Theory(value: \\&quot;a &amp; b\\&quot;, symbol: &#x3C;)" outcome="Passed" duration="00:00:00.0010000"/></Results></TestRun>'
+  const xml =
+    '<TestRun><Results><UnitTestResult testName="Ns.Theory(value: \\&quot;a &amp; b\\&quot;, symbol: &#x3C;)" outcome="Passed" duration="00:00:00.0010000"/></Results></TestRun>'
   assert.equal(parseTrx(xml)[0].name, 'Ns.Theory(value: "a & b", symbol: <)')
 })
 

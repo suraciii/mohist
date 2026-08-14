@@ -111,7 +111,9 @@ test('runWithDeadline waits for suite-timeout child cleanup before returning', a
 test('runWithDeadline treats a child completion at the hard cutoff as timeout and converges it', async () => {
   const harness = makeHarness()
   let startRelease!: (result: { exitCode: number | null }) => void
-  const startPromise = new Promise<{ exitCode: number | null }>((resolvePromise) => { startRelease = resolvePromise })
+  const startPromise = new Promise<{ exitCode: number | null }>((resolvePromise) => {
+    startRelease = resolvePromise
+  })
   const pending = runWithDeadline({
     ...deps(harness, startPromise, new Promise<void>(() => {})),
     hardDeadlineAt: 1_200,

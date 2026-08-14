@@ -106,7 +106,10 @@ function validateTrack(track: TrackConfig): string[] {
   if (track.partitions !== undefined && !track.report.includes('{partition}')) {
     errors.push(`${prefix}: partitioned reports must include {partition}`)
   }
-  if (track.partitionMaxThreads !== undefined && (!Number.isInteger(track.partitionMaxThreads) || track.partitionMaxThreads <= 0)) {
+  if (
+    track.partitionMaxThreads !== undefined &&
+    (!Number.isInteger(track.partitionMaxThreads) || track.partitionMaxThreads <= 0)
+  ) {
     errors.push(`${prefix}: partitionMaxThreads must be a positive integer`)
   }
   if (track.partitionMaxThreads !== undefined && track.partitions === undefined) {
@@ -155,7 +158,11 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
   if (!Number.isInteger(config.maxConcurrentLanes) || config.maxConcurrentLanes <= 0) {
     errors.push('canonical.maxConcurrentLanes must be a positive integer')
   }
-  if (config.resourceLimits === null || typeof config.resourceLimits !== 'object' || Array.isArray(config.resourceLimits)) {
+  if (
+    config.resourceLimits === null ||
+    typeof config.resourceLimits !== 'object' ||
+    Array.isArray(config.resourceLimits)
+  ) {
     errors.push('canonical.resourceLimits must be an object')
     return errors
   }
@@ -209,9 +216,14 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
       errors.push('canonical.durationIsolationTrack must be a non-empty track id')
     } else {
       const track = new Map(tracks.map((candidate) => [candidate.id, candidate])).get(config.durationIsolationTrack)
-      if (!track) errors.push(`canonical.durationIsolationTrack references unknown track: ${config.durationIsolationTrack}`)
-      else if (track.partitions !== undefined) errors.push(`canonical.durationIsolationTrack cannot include partitioned track: ${config.durationIsolationTrack}`)
-      else if (track.kind !== 'vitest') errors.push(`canonical.durationIsolationTrack must reference a vitest track: ${config.durationIsolationTrack}`)
+      if (!track)
+        errors.push(`canonical.durationIsolationTrack references unknown track: ${config.durationIsolationTrack}`)
+      else if (track.partitions !== undefined)
+        errors.push(
+          `canonical.durationIsolationTrack cannot include partitioned track: ${config.durationIsolationTrack}`,
+        )
+      else if (track.kind !== 'vitest')
+        errors.push(`canonical.durationIsolationTrack must reference a vitest track: ${config.durationIsolationTrack}`)
     }
   }
   return errors
@@ -222,10 +234,7 @@ function validateRule(rule: BudgetRule, prefix: string): string[] {
   const rp = `${prefix}: rule "${rule.id}"`
   if (!rule.id) errors.push(`${rp}: missing id`)
   if (rule.absoluteMs <= 0) errors.push(`${rp}: absoluteMs must be positive`)
-  if (
-    rule.percentile !== undefined &&
-    (rule.percentileMs === undefined || rule.percentileMs < 0)
-  ) {
+  if (rule.percentile !== undefined && (rule.percentileMs === undefined || rule.percentileMs < 0)) {
     errors.push(`${rp}: percentile set without a valid percentileMs`)
   }
   for (const entry of rule.allowlist ?? []) {
