@@ -122,7 +122,10 @@ async function mockApi(page: Page) {
     if (method === 'GET' && path.endsWith('/workspace-status')) return route.fulfill({ json: apiResponse(null) })
     if (method === 'GET' && path.endsWith('/opencode/models')) return route.fulfill({ json: apiResponse({ models: [], modelVariants: {} }) })
     if (method === 'GET' && path === `/projects/${project.id}/issues`) return route.fulfill({ json: apiResponse([]) })
-    if (method === 'GET' && path === '/workflow-templates/system') return route.fulfill({ json: apiResponse([]) })
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/default`) {
+      return route.fulfill({ json: apiResponse({ projectId: project.id, defaultWorkflowProfileId: 'mohist/github-pr', disabledWorkflowProfileIds: [] }) })
+    }
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`) return route.fulfill({ json: apiResponse([]) })
 
     return route.fulfill({ status: 404, json: { success: false, error: `Unhandled browser fixture: ${method} ${path}` } })
   })

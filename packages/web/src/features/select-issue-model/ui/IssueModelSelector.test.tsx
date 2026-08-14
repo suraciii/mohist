@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
-import { mocks, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
+import { mocks, openAdvanced, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
 
 beforeEach(() => {
   cleanup()
@@ -9,6 +9,65 @@ beforeEach(() => {
 })
 
 describe('IssueModelSelector default-model variant chips', () => {
+  it('requests the catalog for the selected Profile runtime', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
+    mocks.useAvailableModelIds.mockImplementation((runtime: string | null) => ({
+      data: {
+        models: runtime === 'pi' ? ['pi/anthropic/claude'] : [],
+        modelVariants: {},
+      },
+      isLoading: false,
+      error: null,
+    }))
+    renderSelector()
+
+    await waitFor(() => expect(mocks.useAvailableModelIds).toHaveBeenCalledWith('pi'))
+  })
+
+  it('reuses one runtime catalog for all stage selectors', async () => {
+    const catalog = {
+      data: {
+        models: ['pi/anthropic/claude'],
+        modelVariants: { 'pi/anthropic/claude': ['low'] },
+      },
+      isLoading: false,
+      error: null,
+    }
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
+    mocks.useAvailableModelIds.mockReturnValue(catalog)
+
+    renderSelector()
+    await waitFor(() => expect(mocks.useAvailableModelIds).toHaveBeenCalledWith('pi'))
+
+    openAdvanced()
+    expect(document.getElementById('issue-stage-model-plan')).toBeInTheDocument()
+    expect(document.getElementById('issue-stage-model-build')).toBeInTheDocument()
+    expect(document.getElementById('issue-stage-model-check')).toBeInTheDocument()
+    expect(document.getElementById('issue-stage-model-integrate')).toBeInTheDocument()
+    expect(mocks.useModelVariants).not.toHaveBeenCalled()
+  })
+
+  it('keeps an existing custom model visible without exposing a selector for a null runtime', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/unknown', displayName: 'Unknown', description: '', isDefault: false, agentRuntime: null }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/unknown' })
+    mocks.useAvailableModelIds.mockReturnValue({ data: undefined, isLoading: false, error: null })
+
+    renderSelector({ currentModel: 'vendor/custom-model' })
+
+    await waitFor(() => expect(mocks.useAvailableModelIds).toHaveBeenCalledWith(null))
+    expect(screen.getByTestId('issue-model-read-only')).toBeInTheDocument()
+    expect(document.getElementById('issue-coder-model-read-only')).toBeDisabled()
+    expect(screen.queryByTestId('issue-coder-model-trigger')).not.toBeInTheDocument()
+  })
+
   it('does not expose a named-Agent Runtime override', async () => {
     mocks.useAvailableModelIds.mockImplementation((runtime: string) => ({
       data: {

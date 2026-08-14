@@ -37,6 +37,14 @@ const SYSTEM_TEMPLATES = [
   },
 ]
 
+const CUSTOM_PROFILE = {
+  id: 'team/custom',
+  displayName: 'Team Custom',
+  description: 'Project-specific workflow.',
+  isDefault: false,
+  isBuiltIn: false,
+}
+
 const DEFAULT_DETAIL = {
   id: 'mohist/local',
   name: 'Mohist Local',
@@ -77,12 +85,16 @@ const DETAILS = {
 const disableRequests: string[] = []
 
 const dataHook: WorkflowProfilesSectionDataHook = () => ({
-  allProfiles: SYSTEM_TEMPLATES.map((profile) => ({
-    id: profile.id,
-    displayName: profile.name,
-    description: profile.description,
-    isDefault: profile.isDefault,
-  })),
+  allProfiles: [
+    ...SYSTEM_TEMPLATES.map((profile) => ({
+      id: profile.id,
+      displayName: profile.name,
+      description: profile.description,
+      isDefault: profile.isDefault,
+      isBuiltIn: true,
+    })),
+    CUSTOM_PROFILE,
+  ],
   profilesLoading: false,
   profilesError: false,
   projectProfile: {
@@ -150,6 +162,15 @@ describe('WorkflowProfilesSection', () => {
         expect(disableRequests).toEqual(['mohist/quick-fix'])
       })
       expect(screen.queryByText('At least one workflow profile must remain enabled.')).not.toBeInTheDocument()
+    })
+
+    it('does not render the built-in enable/disable switch for a custom profile', async () => {
+      render(<WorkflowProfilesSection />)
+
+      const customCard = await waitFor(() => screen.getByTestId('workflow-profile-team/custom'))
+
+      expect(within(customCard).queryByRole('switch')).not.toBeInTheDocument()
+      expect(within(customCard).getByRole('button', { name: 'View details' })).toBeInTheDocument()
     })
 
     it('renders one card per profile with display name, id, and multi-line description', async () => {

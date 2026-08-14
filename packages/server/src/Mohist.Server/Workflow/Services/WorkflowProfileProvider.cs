@@ -363,19 +363,40 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
                 Description: profile.Description,
                 SourceProvenance: WorkflowProfileSourceProvenance.Verbatim,
                 IsBuiltIn: false,
-                DefinitionSource: request.DefinitionSource),
+                DefinitionSource: request.DefinitionSource)
+            {
+                AgentRuntime = WorkflowProfileAgentRuntimeProjection.Project(profile.Definition),
+            },
             validation);
     }
 
-    private static WorkflowProfileCollectionEntry ToEntry(WorkflowProfileRecordRow row) =>
-        new(
+    private static WorkflowProfileCollectionEntry ToEntry(WorkflowProfileRecordRow row)
+    {
+        return new(
             ProjectId: row.ProjectId,
             ProfileId: row.ProfileId,
             Name: row.Name,
             Description: row.Description,
             SourceProvenance: ParseProvenance(row.SourceProvenance),
             IsBuiltIn: false,
-            DefinitionSource: row.DefinitionSource);
+            DefinitionSource: row.DefinitionSource)
+        {
+            AgentRuntime = TryProjectAgentRuntime(row.DefinitionSource, row.ProfileId),
+        };
+    }
+
+    private static string? TryProjectAgentRuntime(string definitionSource, string profileId)
+    {
+        try
+        {
+            var definition = WorkflowProfileYamlParser.Parse(definitionSource, profileId).Definition;
+            return WorkflowProfileAgentRuntimeProjection.Project(definition);
+        }
+        catch (WorkflowDefinitionValidationException)
+        {
+            return null;
+        }
+    }
 
     private static WorkflowProfileSourceProvenance ParseProvenance(string value) =>
         Enum.TryParse<WorkflowProfileSourceProvenance>(value, ignoreCase: false, out var parsed)

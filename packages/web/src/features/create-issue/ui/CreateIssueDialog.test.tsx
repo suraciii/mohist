@@ -57,8 +57,22 @@ let _issuesData: Issue[] = []
 let _createIssueResponse: Pick<Issue, 'number'> = { number: 42 }
 const _repositoriesData = [{ name: 'main', isDefault: true }]
 const _modelsData = { models: [] as string[], modelVariants: {} as Record<string, string[]> }
-const _workflowProfilesData: { id: string; displayName: string; description: string; isDefault: boolean }[] = []
-const _projectWorkflowProfile: { projectId: string; defaultTemplateId: string | null; disabledWorkflowProfileIds: string[] } = { projectId: 'proj_create', defaultTemplateId: null, disabledWorkflowProfileIds: [] }
+const _workflowProfilesData: {
+  id: string
+  displayName: string
+  description: string
+  isDefault: boolean
+  agentRuntime?: 'opencode' | 'pi' | null
+}[] = []
+const _projectWorkflowProfile: {
+  projectId: string
+  defaultTemplateId: string | null
+  disabledWorkflowProfileIds: string[]
+} = {
+  projectId: 'proj_create',
+  defaultTemplateId: null,
+  disabledWorkflowProfileIds: [],
+}
 const _issueTemplatesData: { id: string; name: string; description: string; body: string; source: string }[] = []
 
 const createIssueHandler = vi.fn(async (info: { request: Request }) => {
@@ -72,33 +86,52 @@ const issuesHandler = vi.fn((info: { request: Request }) => {
   return HttpResponse.json({ success: true, data: _issuesData })
 })
 
-const parentCandidatesHandler = vi.fn((info: { request: Request }) => {
-  void info
-  return HttpResponse.json({ success: true, data: _issuesData.filter((issue) => issue.canBeParent).map(({ number, title }) => ({ number, title })) })
+const parentCandidatesHandler = vi.fn(() => {
+  return HttpResponse.json({
+    success: true,
+    data: _issuesData
+      .filter((issue) => issue.canBeParent)
+      .map(({ number, title }) => ({ number, title })),
+  })
 })
 
 const repositoriesHandler = vi.fn(() =>
   HttpResponse.json({ success: true, data: _repositoriesData }),
 )
 
-const modelsHandler = vi.fn(() =>
-  HttpResponse.json({ success: true, data: _modelsData }),
-)
+const modelsHandler = vi.fn((info: { request: Request }) => {
+  void info.request.url
+  return HttpResponse.json({ success: true, data: _modelsData })
+})
 
 const workflowProfilesHandler = vi.fn(() =>
   HttpResponse.json({
     success: true,
-    data: _workflowProfilesData.map((t) => ({
-      id: t.id,
-      name: t.displayName,
-      description: t.description,
-      isDefault: t.isDefault,
+    data: (_workflowProfilesData.length > 0
+      ? _workflowProfilesData
+      : [{ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' as const }]
+    ).map((profile) => ({
+      projectId: 'proj_create',
+      profileId: profile.id,
+      name: profile.displayName,
+      description: profile.description,
+      sourceProvenance: 'BuiltIn',
+      isBuiltIn: true,
+      definitionSource: null,
+      agentRuntime: profile.agentRuntime ?? null,
     })),
   }),
 )
 
 const projectWorkflowProfileHandler = vi.fn(() =>
-  HttpResponse.json({ success: true, data: _projectWorkflowProfile }),
+  HttpResponse.json({
+    success: true,
+    data: {
+      projectId: _projectWorkflowProfile.projectId,
+      defaultWorkflowProfileId: _projectWorkflowProfile.defaultTemplateId,
+      disabledWorkflowProfileIds: _projectWorkflowProfile.disabledWorkflowProfileIds,
+    },
+  }),
 )
 
 const issueTemplatesHandler = vi.fn((info: { request: Request }) => {
@@ -117,8 +150,8 @@ useMswServer(
   http.get('*/api/projects/:projectId/issues', issuesHandler),
   http.get('*/api/projects/:projectId/repositories', repositoriesHandler),
   http.get('*/api/projects/:projectId/opencode/models', modelsHandler),
-  http.get('*/api/workflow-templates/system', workflowProfilesHandler),
-  http.get('*/api/projects/:projectId/workflow-profile', projectWorkflowProfileHandler),
+  http.get('*/api/projects/:projectId/workflow-profiles', workflowProfilesHandler),
+  http.get('*/api/projects/:projectId/workflow-profile/default', projectWorkflowProfileHandler),
   http.get('*/api/issue-templates*', issueTemplatesHandler),
 )
 
@@ -154,19 +187,21 @@ describe('CreateIssueDialog', () => {
     _issueTemplatesData.length = 0
   })
 
-  it('does not serialize inherited default workflow as an explicit create selection', async () => {
+  it('serializes the configured default workflow as the current create selection', async () => {
     _projectWorkflowProfile.defaultTemplateId = 'mohist/local'
-    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false })
-    _workflowProfilesData.push({ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true })
+    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false, agentRuntime: 'opencode' })
+    _workflowProfilesData.push({ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' })
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Disabled default fallback' } })
+    const workflowSelect = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    await waitFor(() => expect(workflowSelect.value).toBe('mohist/local'))
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).not.toHaveProperty('workflowProfileId')
+    expect(callBody.workflowProfileId).toBe('mohist/local')
   })
 })
 
@@ -353,7 +388,7 @@ describe('CreateIssueDialog template selector', () => {
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
     expect(callBody).not.toHaveProperty('risk')
-    expect(callBody).not.toHaveProperty('workflowProfileId')
+    expect(callBody.workflowProfileId).toBe('mohist/local')
     expect(callBody).not.toHaveProperty('labels')
   })
 })
@@ -372,10 +407,12 @@ describe('CreateIssueDialog model + variant chips', () => {
     _issueTemplatesData.length = 0
   })
 
-  function modelTrigger() {
-    const trigger = document.getElementById('create-issue-model-trigger')
-    if (!trigger) throw new Error('model trigger not found')
-    return trigger
+  async function modelTrigger() {
+    return waitFor(() => {
+      const trigger = document.getElementById('create-issue-model-trigger')
+      if (!trigger) throw new Error('model trigger not found')
+      return trigger
+    })
   }
 
   it('does not render a standalone variant picker anywhere', () => {
@@ -390,7 +427,7 @@ describe('CreateIssueDialog model + variant chips', () => {
     _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
     const user = userEvent.setup()
     renderDialog()
-    await user.click(modelTrigger())
+    await user.click(await modelTrigger())
 
     for (const variant of ['low', 'medium', 'high']) {
       const chip = document.querySelector(
@@ -410,7 +447,7 @@ describe('CreateIssueDialog model + variant chips', () => {
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
 
-    await user.click(modelTrigger())
+    await user.click(await modelTrigger())
 
     const highChip = await screen.findByTestId(
       'create-issue-model-trigger-row-anthropic/claude-variant-high',
@@ -445,7 +482,7 @@ describe('CreateIssueDialog model + variant chips', () => {
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
-    await user.click(modelTrigger())
+    await user.click(await modelTrigger())
     await user.click(await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high'))
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
@@ -457,6 +494,44 @@ describe('CreateIssueDialog model + variant chips', () => {
     })
   })
 
+  it('uses the selected profile runtime without clearing the chosen model', async () => {
+    _workflowProfilesData.push(
+      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
+      { id: 'team/pi', displayName: 'Pi', description: '', isDefault: false, agentRuntime: 'pi' },
+    )
+    _modelsData.models = ['anthropic/claude']
+    const user = userEvent.setup()
+    renderDialog()
+
+    const workflow = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    await user.click(await modelTrigger())
+    await user.click(await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement))
+    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
+
+    fireEvent.change(workflow, { target: { value: 'team/pi' } })
+
+    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
+    const runtimes = modelsHandler.mock.calls.map(([call]) => new URL(call.request.url).searchParams.get('runtime'))
+    expect(runtimes).toEqual(expect.arrayContaining(['opencode', 'pi']))
+  })
+
+  it('does not render a model selector when the selected profile has no runtime', async () => {
+    _workflowProfilesData.push({
+      id: 'team/unknown',
+      displayName: 'Unknown',
+      description: '',
+      isDefault: true,
+      agentRuntime: null,
+    })
+    _projectWorkflowProfile.defaultTemplateId = 'team/unknown'
+    _modelsData.models = ['vendor/custom-model']
+    renderDialog()
+
+    const workflow = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    await waitFor(() => expect(workflow.value).toBe('team/unknown'))
+    expect(screen.queryByRole('button', { name: 'Coder Model' })).not.toBeInTheDocument()
+  })
+
   it('does not include modelVariant when a model body click selects the default variant', async () => {
     _modelsData.models = ['anthropic/claude']
     _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
@@ -465,7 +540,7 @@ describe('CreateIssueDialog model + variant chips', () => {
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
 
-    await user.click(modelTrigger())
+    await user.click(await modelTrigger())
 
     const modelRow = await screen.findByText('claude', { selector: 'span' })
     const rowEl = modelRow.closest('[data-model-id]') as HTMLElement
@@ -488,14 +563,14 @@ describe('CreateIssueDialog model + variant chips', () => {
     const user = userEvent.setup()
     renderDialog()
 
-    await user.click(modelTrigger())
+    await user.click(await modelTrigger())
 
     const mediumChip = await screen.findByTestId(
       'create-issue-model-trigger-row-anthropic/claude-variant-medium',
     )
     await user.click(mediumChip)
 
-    await user.click(modelTrigger())
+    await user.click(await modelTrigger())
 
     const active = document.querySelector(
       '[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-medium"][data-variant-active="true"]',
@@ -515,7 +590,7 @@ describe('CreateIssueDialog model + variant chips', () => {
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Keyboard' } })
-    await user.click(modelTrigger())
+    await user.click(await modelTrigger())
 
     const search = await screen.findByPlaceholderText('Search models...')
     fireEvent.keyDown(search, { key: 'ArrowRight' })
@@ -553,12 +628,12 @@ describe('CreateIssueDialog workflow profile default', () => {
   function setupProfiles() {
     _workflowProfilesData.length = 0
     _workflowProfilesData.push(
-      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
-      { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
+      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
+      { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false, agentRuntime: 'opencode' },
     )
   }
 
-  it('shows the project-configured default workflow profile but does not send it as an explicit selection', async () => {
+  it('shows and submits the project-configured default workflow profile', async () => {
     setupProfiles()
     _projectWorkflowProfile.defaultTemplateId = 'mohist/github-pr'
 
@@ -572,7 +647,7 @@ describe('CreateIssueDialog workflow profile default', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).not.toHaveProperty('workflowProfileId')
+    expect(callBody.workflowProfileId).toBe('mohist/github-pr')
   })
 
   it('falls back to the system default workflow profile when the project default is unset', async () => {
@@ -585,7 +660,7 @@ describe('CreateIssueDialog workflow profile default', () => {
   })
 
   it('does not prefill or submit a frontmatter recommendation that is not enabled', async () => {
-    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false })
+    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false, agentRuntime: 'opencode' })
     _projectWorkflowProfile.defaultTemplateId = null
 
     renderDialog()
@@ -615,7 +690,7 @@ describe('CreateIssueDialog workflow profile default', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).not.toHaveProperty('workflowProfileId')
+    expect(callBody.workflowProfileId).toBe('mohist/github-pr')
     expect(callBody.risk).toBe('medium')
   })
 })

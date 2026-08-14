@@ -81,11 +81,37 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
     if (method === 'GET' && path === '/config') {
       return route.fulfill({ json: apiResponse(config) })
     }
-    if (method === 'GET' && path === '/workflow-templates/system') {
-      return route.fulfill({ json: apiResponse([workflowTemplate]) })
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/default`) {
+      return route.fulfill({ json: apiResponse({ projectId: project.id, defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }) })
     }
-    if (method === 'GET' && decodeURIComponent(path) === '/workflow-templates/system/mohist/local') {
-      return route.fulfill({ json: apiResponse(workflowTemplate) })
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`) {
+      return route.fulfill({
+        json: apiResponse([{
+          projectId: project.id,
+          profileId: workflowTemplate.id,
+          name: workflowTemplate.name,
+          description: workflowTemplate.description,
+          sourceProvenance: 'BuiltIn',
+          isBuiltIn: true,
+          definitionSource: workflowTemplate.yaml,
+          agentRuntime: 'opencode',
+        }]),
+      })
+    }
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles/mohist/local`) {
+      return route.fulfill({
+        json: apiResponse({
+          projectId: project.id,
+          profileId: workflowTemplate.id,
+          name: workflowTemplate.name,
+          description: workflowTemplate.description,
+          sourceProvenance: 'BuiltIn',
+          isBuiltIn: true,
+          definitionSource: workflowTemplate.yaml,
+          agentRuntime: 'opencode',
+          stages: workflowTemplate.stages,
+        }),
+      })
     }
     if (method === 'GET' && path === '/templates/system') {
       return route.fulfill({ json: apiResponse([systemTemplate]) })

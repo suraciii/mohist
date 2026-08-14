@@ -34,7 +34,7 @@ describe('AiSettingsSection', () => {
     })
 
     expect(screen.getByText('3 models available')).toBeInTheDocument()
-    expect(screen.getByText('Opencode default')).toBeInTheDocument()
+    expect(screen.getByText('Runtime default')).toBeInTheDocument()
   })
 
   it('keeps the Stage Model Overrides section available', async () => {
@@ -44,6 +44,16 @@ describe('AiSettingsSection', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Stage Model Overrides/i })).toBeInTheDocument()
     })
+  })
+
+  it('keeps a configured model read-only when the selected profile has no runtime', async () => {
+    arrangeLoaded({ profileRuntime: null, defaultModel: 'vendor/custom-model' })
+    renderSection()
+
+    const modelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
+    expect(modelButton).toBeDisabled()
+    expect(modelButton).toHaveTextContent('custom-model')
+    expect(screen.queryByRole('button', { name: /Stage Model Overrides/i })).not.toBeInTheDocument()
   })
 
   it('exposes and updates the Stage Model Overrides disclosure state', async () => {

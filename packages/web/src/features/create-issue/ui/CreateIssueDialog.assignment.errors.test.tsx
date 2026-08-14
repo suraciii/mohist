@@ -58,7 +58,7 @@ const workflowProfilesHandler = vi.fn(() =>
 )
 
 const projectWorkflowProfileHandler = vi.fn(() =>
-  HttpResponse.json({ success: true, data: { projectId: _projectId, defaultTemplateId: null, disabledWorkflowProfileIds: [] } }),
+  HttpResponse.json({ success: true, data: { projectId: _projectId, defaultWorkflowProfileId: null, disabledWorkflowProfileIds: [] } }),
 )
 
 const issueTemplatesHandler = vi.fn(() =>
@@ -71,8 +71,8 @@ useMswServer(
   http.get(`*/api/projects/:projectId/issues`, issuesHandler),
   http.get(`*/api/projects/:projectId/repositories`, repositoriesHandler),
   http.get(`*/api/projects/:projectId/opencode/models`, modelsHandler),
-  http.get(`*/api/workflow-templates/system`, workflowProfilesHandler),
-  http.get(`*/api/projects/:projectId/workflow-profile`, projectWorkflowProfileHandler),
+  http.get(`*/api/projects/:projectId/workflow-profiles`, workflowProfilesHandler),
+  http.get(`*/api/projects/:projectId/workflow-profile/default`, projectWorkflowProfileHandler),
   http.get(`*/api/issue-templates*`, issueTemplatesHandler),
 )
 

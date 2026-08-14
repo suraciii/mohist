@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 
@@ -125,17 +126,26 @@ public sealed record WorkflowProfileCollectionEntry(
     bool IsBuiltIn,
     string? DefinitionSource)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? AgentRuntime { get; init; }
+
     public static WorkflowProfileCollectionEntry BuiltIn(string profileId)
-        => new(
+    {
+        var profile = WorkflowProfileCatalog.GetProfile(profileId)
+            ?? throw new InvalidOperationException($"Unknown built-in Profile '{profileId}'");
+
+        return new(
             ProjectId: string.Empty,
             ProfileId: profileId,
-            Name: profileId,
-            Description: string.Empty,
+            Name: profile.Name,
+            Description: profile.Description,
             SourceProvenance: WorkflowProfileSourceProvenance.BuiltIn,
             IsBuiltIn: true,
-            DefinitionSource: WorkflowProfileCanonicalYamlRenderer.Render(
-                WorkflowProfileCatalog.GetProfile(profileId)
-                    ?? throw new InvalidOperationException($"Unknown built-in Profile '{profileId}'")));
+            DefinitionSource: WorkflowProfileCanonicalYamlRenderer.Render(profile))
+        {
+            AgentRuntime = WorkflowProfileAgentRuntimeProjection.Project(profile.Definition),
+        };
+    }
 }
 
 public enum WorkflowProfileSourceProvenance

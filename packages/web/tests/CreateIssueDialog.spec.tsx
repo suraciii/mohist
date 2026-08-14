@@ -9,8 +9,8 @@ const PROFILES = [
   { id: 'feature-flow', name: 'Feature Flow', description: 'Feature work', isDefault: false },
 ]
 
-const PROFILES_PATH = '*/api/workflow-templates/system*'
-const PROJECT_PROFILE_PATH = '*/api/projects/:projectId/workflow-profile'
+const PROFILES_PATH = '*/api/projects/:projectId/workflow-profiles'
+const PROJECT_PROFILE_PATH = '*/api/projects/:projectId/workflow-profile/default'
 const MODELS_PATH = '*/api/projects/:projectId/opencode/models'
 const REPOS_PATH = '*/api/projects/:projectId/repositories'
 const ISSUE_TEMPLATES_PATH = '*/api/issue-templates*'
@@ -21,11 +21,23 @@ let createRequests: Array<Record<string, unknown>> = []
 let createdIssue: Record<string, unknown>
 
 const defaultHandlers = [
-  http.get(PROFILES_PATH, () => HttpResponse.json({ success: true, data: PROFILES })),
+  http.get(PROFILES_PATH, ({ params }) => HttpResponse.json({
+    success: true,
+    data: PROFILES.map((profile) => ({
+      projectId: params.projectId,
+      profileId: profile.id,
+      name: profile.name,
+      description: profile.description,
+      sourceProvenance: 'BuiltIn',
+      isBuiltIn: true,
+      definitionSource: null,
+      agentRuntime: 'opencode',
+    })),
+  })),
   http.get(PROJECT_PROFILE_PATH, () =>
     HttpResponse.json({
       success: true,
-      data: { projectId: 'test-project', defaultTemplateId: null, disabledWorkflowProfileIds: [] },
+      data: { projectId: 'test-project', defaultWorkflowProfileId: null, disabledWorkflowProfileIds: [] },
     }),
   ),
   http.get(MODELS_PATH, () => HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } })),
@@ -43,7 +55,19 @@ const defaultHandlers = [
 useMswServer(...defaultHandlers)
 
 function mockProfiles(profiles: { id: string; name: string; description: string; isDefault: boolean }[]) {
-  server.use(http.get(PROFILES_PATH, () => HttpResponse.json({ success: true, data: profiles })))
+  server.use(http.get(PROFILES_PATH, ({ params }) => HttpResponse.json({
+    success: true,
+    data: profiles.map((profile) => ({
+      projectId: params.projectId,
+      profileId: profile.id,
+      name: profile.name,
+      description: profile.description,
+      sourceProvenance: 'BuiltIn',
+      isBuiltIn: true,
+      definitionSource: null,
+      agentRuntime: 'opencode',
+    })),
+  })))
 }
 
 function mockProjectDefault(templateId: string) {
@@ -51,7 +75,7 @@ function mockProjectDefault(templateId: string) {
     http.get(PROJECT_PROFILE_PATH, () =>
       HttpResponse.json({
         success: true,
-        data: { projectId: 'test-project', defaultTemplateId: templateId, disabledWorkflowProfileIds: [] },
+        data: { projectId: 'test-project', defaultWorkflowProfileId: templateId, disabledWorkflowProfileIds: [] },
       }),
     ),
   )
@@ -215,7 +239,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     expect(payload.workflowProfileId).toBeUndefined()
   })
 
-  it('shows the project-configured default workflowProfileId but does not serialize it unless manually changed', async () => {
+  it('shows and serializes the project-configured default workflowProfileId', async () => {
     mockProfiles([
       { id: 'mohist/local', name: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', name: 'PR', description: '', isDefault: false },
@@ -236,7 +260,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(createRequests).toHaveLength(1)
     })
     const payload = createRequests[0]
-    expect(payload.workflowProfileId).toBeUndefined()
+    expect(payload.workflowProfileId).toBe('mohist/github-pr')
   })
 
   it('sends workflowProfileId=mohist/github-pr when the user explicitly selects it', async () => {

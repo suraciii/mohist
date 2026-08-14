@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import { render, screen, waitFor, within } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
@@ -33,65 +33,52 @@ let currentDisabledIds: string[] = []
 const requests: { method: string; url: string; body: unknown }[] = []
 
 const handlers = [
-  http.get('/api/workflow-templates/system', ({ request }) => {
-    const url = new URL(request.url)
-    if (url.searchParams.has('project')) {
-      return HttpResponse.json({
-        success: true,
-        data: SYSTEM_TEMPLATES.filter((template) => !currentDisabledIds.includes(template.id)),
-      })
-    }
-    return HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES })
-  }),
-  http.get('/api/projects/test-project/workflow-profile', () =>
-    HttpResponse.json({
+  http.get('/api/projects/test-project/workflow-profiles', () => {
+    return HttpResponse.json({
       success: true,
-      data: { projectId: 'test-project', defaultTemplateId: currentDefault, disabledWorkflowProfileIds: currentDisabledIds },
-    }),
-  ),
-  http.get('/api/workflow-templates/system/:scope/:name', ({ params }) => {
-    const id = `${params.scope}/${params.name}`
-    const stageMap: Record<string, Array<{ stage: string; requiresApproval: boolean; tasks: string[]; checks: string[] }>> = {
-      'mohist/local': [
-        { stage: 'plan', requiresApproval: true, tasks: [], checks: [] },
-        { stage: 'build', requiresApproval: false, tasks: [], checks: [] },
-      ],
-      'mohist/github-pr': [
-        { stage: 'review', requiresApproval: true, tasks: [], checks: [] },
-        { stage: 'merge', requiresApproval: false, tasks: [], checks: [] },
-      ],
-      'mohist/quick-fix': [
-        { stage: 'fix', requiresApproval: false, tasks: [], checks: [] },
-      ],
-    }
-    const template = SYSTEM_TEMPLATES.find((item) => item.id === id)
+      data: SYSTEM_TEMPLATES.map((template) => ({
+        projectId: 'test-project',
+        profileId: template.id,
+        name: template.name,
+        description: template.description,
+        sourceProvenance: 'BuiltIn',
+        isBuiltIn: true,
+        definitionSource: null,
+        agentRuntime: 'opencode',
+      })),
+    })
+  }),
+  http.get(/\/api\/projects\/test-project\/workflow-profiles\/.+$/, ({ request }) => {
+    const profileId = decodeURIComponent(new URL(request.url).pathname.split('/workflow-profiles/')[1] ?? '')
+    const profile = SYSTEM_TEMPLATES.find((template) => template.id === profileId)
     return HttpResponse.json({
       success: true,
       data: {
-        id,
-        displayName: template?.name ?? id,
-        description: template?.description ?? '',
-        isDefault: template?.isDefault ?? false,
-        stages: stageMap[id] ?? [],
-        yaml: `id: ${id}`,
+        projectId: 'test-project',
+        profileId,
+        name: profile?.name ?? profileId,
+        description: profile?.description ?? '',
+        sourceProvenance: 'BuiltIn',
+        isBuiltIn: true,
+        definitionSource: `id: ${profileId}`,
+        agentRuntime: 'opencode',
+        stages: [],
       },
     })
   }),
-  http.put('/api/projects/test-project/workflow-profile/default-template', async ({ request }) => {
+  http.get('/api/projects/test-project/workflow-profile/default', () =>
+    HttpResponse.json({
+      success: true,
+      data: { projectId: 'test-project', defaultWorkflowProfileId: currentDefault, disabledWorkflowProfileIds: currentDisabledIds },
+    }),
+  ),
+  http.put('/api/projects/test-project/workflow-profile/default', async ({ request }) => {
     const body = await request.json()
     requests.push({ method: 'PUT', url: request.url, body })
-    currentDefault = (body as { templateId: string }).templateId
+    currentDefault = (body as { profileId: string }).profileId
     return HttpResponse.json({
       success: true,
-      data: { projectId: 'test-project', defaultTemplateId: currentDefault },
-    })
-  }),
-  http.delete('/api/projects/test-project/workflow-profile/default-template', ({ request }) => {
-    requests.push({ method: 'DELETE', url: request.url, body: null })
-    currentDefault = null
-    return HttpResponse.json({
-      success: true,
-      data: { projectId: 'test-project', defaultTemplateId: null },
+      data: { projectId: 'test-project', profileId: currentDefault },
     })
   }),
   http.post('/api/projects/test-project/workflow-profile/disable', async ({ request }) => {
@@ -166,58 +153,14 @@ describe('ProjectDefaultWorkflowControl', () => {
     await waitFor(() => expect(requests).toHaveLength(1),
     )
     expect(requests[0].method).toBe('PUT')
-    expect(requests[0].body).toEqual({ templateId: 'mohist/github-pr' })
+    expect(requests[0].body).toEqual({ profileId: 'mohist/github-pr' })
 
     await waitFor(() =>
       expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/github-pr'),
     )
   })
 
-  it('clearing the project default sends DELETE and returns to the inherit state', async () => {
-    currentDefault = 'mohist/github-pr'
-    renderSection()
-
-    await waitFor(() =>
-      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/github-pr'),
-    )
-
-    fireEvent.click(screen.getByTestId('project-default-workflow-clear'))
-
-    await waitFor(() => expect(requests).toHaveLength(1),
-    )
-    expect(requests[0].method).toBe('DELETE')
-
-    await waitFor(() =>
-      expect(screen.getByTestId('project-default-workflow-system-default')).toHaveTextContent(
-        'mohist/local',
-      ),
-    )
-    expect(screen.queryByTestId('project-default-workflow-value')).not.toBeInTheDocument()
-  })
-
-  it('selecting inherit system default sends DELETE and returns to the inherit state', async () => {
-    const user = userEvent.setup()
-    currentDefault = 'mohist/github-pr'
-    renderSection()
-
-    const trigger = await screen.findByTestId('project-default-workflow-select')
-
-    await user.click(trigger)
-
-    const option = await screen.findByRole('option', { name: /Inherit system default/ })
-    await user.click(option)
-
-    await waitFor(() => expect(requests).toHaveLength(1))
-    expect(requests[0].method).toBe('DELETE')
-
-    await waitFor(() =>
-      expect(screen.getByTestId('project-default-workflow-system-default')).toHaveTextContent(
-        'mohist/local',
-      ),
-    )
-  })
-
-  it('warns when the configured default is absent from the system catalog and offers Clear', async () => {
+  it('warns when the configured default is absent from the project catalog', async () => {
     currentDefault = 'mohist/unknown'
     renderSection()
 
@@ -227,7 +170,7 @@ describe('ProjectDefaultWorkflowControl', () => {
       ),
     )
 
-    expect(screen.getByTestId('project-default-workflow-clear')).not.toBeDisabled()
+    expect(screen.queryByTestId('project-default-workflow-clear')).not.toBeInTheDocument()
   })
 
   it('shows the inherited default from the filtered enabled profiles when the system default is disabled', async () => {
@@ -245,21 +188,17 @@ describe('ProjectDefaultWorkflowControl', () => {
 
   it('shows an error when the project-scoped enabled profiles query fails', async () => {
     server.use(
-      http.get('/api/workflow-templates/system', ({ request }) => {
-        const url = new URL(request.url)
-        if (url.searchParams.has('project')) {
-          return HttpResponse.json({ success: false, error: 'boom' }, { status: 500 })
-        }
-        return HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES })
-      }),
+      http.get('/api/projects/test-project/workflow-profiles', () =>
+        HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }),
+      ),
     )
 
     renderSection()
 
     await waitFor(() =>
-      expect(screen.getByText('Failed to load project default workflow.')).toBeInTheDocument(),
+      expect(screen.getByText('Failed to load workflow profile settings.')).toBeInTheDocument(),
     )
-    expect(screen.queryByTestId('project-default-workflow-system-default')).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
   })
 
   it('shows an amber warning and disabled dropdown item when the configured default is disabled', async () => {
@@ -308,11 +247,11 @@ describe('ProjectDefaultWorkflowControl', () => {
       releaseResponse = resolve
     })
     server.use(
-      http.get('/api/projects/test-project/workflow-profile', async () => {
+      http.get('/api/projects/test-project/workflow-profile/default', async () => {
         await response
         return HttpResponse.json({
           success: true,
-          data: { projectId: 'test-project', defaultTemplateId: null, disabledWorkflowProfileIds: ['mohist/local'] },
+          data: { projectId: 'test-project', defaultWorkflowProfileId: null, disabledWorkflowProfileIds: ['mohist/local'] },
         })
       }),
     )
@@ -329,7 +268,7 @@ describe('ProjectDefaultWorkflowControl', () => {
 
   it('shows an error instead of defaulting switches to enabled when the blacklist fails to load', async () => {
     server.use(
-      http.get('/api/projects/test-project/workflow-profile', () =>
+      http.get('/api/projects/test-project/workflow-profile/default', () =>
         HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }),
       ),
     )

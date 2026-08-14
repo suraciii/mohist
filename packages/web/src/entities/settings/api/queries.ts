@@ -3,11 +3,11 @@ import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
-import { includesWorkflowProfileId } from '../model/workflowProfileIds'
+import { includesWorkflowProfileId, workflowProfileIdEquals } from '../model/workflowProfileIds'
 import { useProject } from '../../project/@x/project-context'
 import type { OpencodeModelVariants, ProjectDefaultWorkflowProfile } from './client'
 import { DEFAULT_AGENT_RUNTIME, isAgentRuntime, type AgentRuntime } from './client'
-import { clearProjectDefaultWorkflowProfile, disableWorkflowProfile, enableWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, getModels, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import { disableWorkflowProfile, enableWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, getModels, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
@@ -87,19 +87,20 @@ export function useUpdateOpencodeModel() {
   })
 }
 
-export function availableModelIdsQueryOptions(projectId: string | null | undefined, runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
-  const normalized = isAgentRuntime(runtime) ? runtime : DEFAULT_AGENT_RUNTIME
+export function availableModelIdsQueryOptions(projectId: string | null | undefined, runtime: AgentRuntime | string | null = DEFAULT_AGENT_RUNTIME) {
+  const normalized = runtime === null ? null : isAgentRuntime(runtime) ? runtime : DEFAULT_AGENT_RUNTIME
   return {
     queryKey: ['opencode-model-ids', normalized, projectId],
     queryFn: async () => {
+      if (normalized === null) return { models: [], modelVariants: {} }
       const response = await getModels(projectId, normalized)
       return { models: response.models, modelVariants: response.modelVariants ?? {} }
     },
-    enabled: !!projectId,
+    enabled: !!projectId && normalized !== null,
   }
 }
 
-export function useAvailableModelIds(runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
+export function useAvailableModelIds(runtime: AgentRuntime | string | null = DEFAULT_AGENT_RUNTIME) {
   const { projectId } = useProject()
   return useQuery<{ models: string[]; modelVariants: OpencodeModelVariants }>(availableModelIdsQueryOptions(projectId, runtime))
 }
@@ -108,7 +109,7 @@ export function selectModelVariants(data: { models: string[]; modelVariants: Ope
   return data?.modelVariants ?? {}
 }
 
-export function useModelVariants(runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
+export function useModelVariants(runtime: AgentRuntime | string | null = DEFAULT_AGENT_RUNTIME) {
   const { data } = useAvailableModelIds(runtime)
   return selectModelVariants(data)
 }
@@ -284,17 +285,22 @@ export function useRuntimeConsistency(enabled = true) {
 export function useWorkflowProfiles() {
   const { projectId } = useProject()
   return useQuery<WorkflowProfileInfo[]>({
-    queryKey: ['workflow-templates', 'system', projectId],
-    queryFn: () => getWorkflowProfiles(projectId),
+    queryKey: ['workflow-profiles', projectId],
+    queryFn: () => getWorkflowProfiles(projectId!),
     enabled: !!projectId,
   })
 }
 
 export function useAllWorkflowProfiles() {
-  return useQuery<WorkflowProfileInfo[]>({
-    queryKey: ['workflow-templates', 'system'],
-    queryFn: () => getWorkflowProfiles(),
-  })
+  return useWorkflowProfiles()
+}
+
+export function getWorkflowProfileAgentRuntime(
+  profiles: WorkflowProfileInfo[] | undefined,
+  profileId: string | null | undefined,
+): AgentRuntime | null {
+  if (!profileId) return null
+  return profiles?.find((profile) => workflowProfileIdEquals(profile.id, profileId))?.agentRuntime ?? null
 }
 
 export type WorkflowProfileFetcher = typeof getWorkflowProfile
@@ -303,10 +309,11 @@ export function useWorkflowProfile(
   id: string | null,
   fetcher: WorkflowProfileFetcher = getWorkflowProfile,
 ) {
+  const { projectId } = useProject()
   return useQuery<WorkflowProfileDetail>({
-    queryKey: ['workflow-profile', id],
-    queryFn: () => fetcher(id!),
-    enabled: !!id,
+    queryKey: ['workflow-profile', projectId, id],
+    queryFn: () => fetcher(projectId!, id!),
+    enabled: !!projectId && !!id,
   })
 }
 
@@ -342,32 +349,13 @@ export function useSetProjectDefaultWorkflowProfile() {
   return useMutation(setProjectDefaultWorkflowProfileMutationOptions(projectId, queryClient))
 }
 
-export function clearProjectDefaultWorkflowProfileMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
-  return {
-    mutationFn: () => clearProjectDefaultWorkflowProfile(projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['project-workflow-profile', projectId] })
-      toast.success('Project default workflow cleared')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  }
-}
-
-export function useClearProjectDefaultWorkflowProfile() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation(clearProjectDefaultWorkflowProfileMutationOptions(projectId, queryClient))
-}
-
 export function useDisableWorkflowProfile() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation<void, Error, string>({
     mutationFn: (profileId) => disableWorkflowProfile(projectId, profileId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workflow-templates', 'system', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['workflow-profiles', projectId] })
       queryClient.invalidateQueries({ queryKey: ['project-workflow-profile', projectId] })
     },
     onError: (err: Error) => {
@@ -382,7 +370,7 @@ export function useEnableWorkflowProfile() {
   return useMutation<void, Error, string>({
     mutationFn: (profileId) => enableWorkflowProfile(projectId, profileId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workflow-templates', 'system', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['workflow-profiles', projectId] })
       queryClient.invalidateQueries({ queryKey: ['project-workflow-profile', projectId] })
     },
     onError: (err: Error) => {
@@ -412,7 +400,8 @@ export function resolveEffectiveDefaultWorkflowProfile(
     }
   }
 
-  const systemDefaultId = profiles?.find((p) => p.isDefault)?.id
+  const enabledProfiles = profiles?.filter((profile) => !includesWorkflowProfileId(disabledIds, profile.id))
+  const systemDefaultId = enabledProfiles?.find((p) => p.isDefault)?.id ?? enabledProfiles?.[0]?.id
   if (systemDefaultId) {
     return {
       effectiveTemplateId: systemDefaultId,

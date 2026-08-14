@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
 import { Command as CommandRoot } from 'cmdk'
-import { AGENT_RUNTIME_OPENCODE, useAvailableModelIds, useModelVariants, useOpencodeModel } from '../../../entities/settings'
+import { getWorkflowProfileAgentRuntime, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useModelVariants, useOpencodeModel, useWorkflowProfiles } from '../../../entities/settings'
+import type { AgentRuntime } from '../../../entities/settings'
 import { getIssueWorkflowVariables, issueDetailKeys, issueListKeys, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
@@ -20,6 +21,7 @@ interface Props {
   issueNumber: number
   currentModel?: string | null
   currentStageModels?: Record<string, string> | null
+  workflowProfileId?: string | null
   dependencies?: IssueModelSelectorDependencies
 }
 
@@ -27,6 +29,8 @@ export interface IssueModelSelectorDependencies {
   useAvailableModelIds: typeof useAvailableModelIds
   useModelVariants: typeof useModelVariants
   useOpencodeModel: typeof useOpencodeModel
+  useWorkflowProfiles: typeof useWorkflowProfiles
+  useEffectiveDefaultWorkflowProfile: typeof useEffectiveDefaultWorkflowProfile
   getIssueWorkflowVariables: typeof getIssueWorkflowVariables
   patchIssueWorkflowDefinitionVar: typeof patchIssueWorkflowDefinitionVar
   patchIssueWorkflowStageDefinitionVar: typeof patchIssueWorkflowStageDefinitionVar
@@ -36,6 +40,8 @@ const defaultDependencies: IssueModelSelectorDependencies = {
   useAvailableModelIds,
   useModelVariants,
   useOpencodeModel,
+  useWorkflowProfiles,
+  useEffectiveDefaultWorkflowProfile,
   getIssueWorkflowVariables,
   patchIssueWorkflowDefinitionVar,
   patchIssueWorkflowStageDefinitionVar,
@@ -125,24 +131,26 @@ function modelDisplayName(modelId: string): string {
   return describeModel(modelId).name
 }
 
-export function IssueModelSelector({ issueNumber, currentModel, currentStageModels, dependencies = defaultDependencies }: Props) {
+export function IssueModelSelector({ issueNumber, currentModel, currentStageModels, workflowProfileId, dependencies = defaultDependencies }: Props) {
   const {
     useAvailableModelIds,
-    useModelVariants,
     useOpencodeModel,
+    useWorkflowProfiles,
+    useEffectiveDefaultWorkflowProfile,
     getIssueWorkflowVariables,
     patchIssueWorkflowDefinitionVar,
     patchIssueWorkflowStageDefinitionVar,
   } = dependencies
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  const { data: availableModels, isLoading, error } = useAvailableModelIds(AGENT_RUNTIME_OPENCODE)
+  const { data: workflowProfiles } = useWorkflowProfiles()
+  const { effectiveTemplateId } = useEffectiveDefaultWorkflowProfile()
+  const selectedProfileId = workflowProfileId ?? effectiveTemplateId
+  const selectedRuntime: AgentRuntime | null = getWorkflowProfileAgentRuntime(workflowProfiles, selectedProfileId)
+  const catalog = useAvailableModelIds(selectedRuntime)
+  const { data: availableModels, isLoading, error } = catalog
   const { data: opencodeModelData } = useOpencodeModel()
-  const modelVariantsMap = useModelVariants(AGENT_RUNTIME_OPENCODE)
-  const planModels = useAvailableModelIds(AGENT_RUNTIME_OPENCODE)
-  const buildModels = useAvailableModelIds(AGENT_RUNTIME_OPENCODE)
-  const checkModels = useAvailableModelIds(AGENT_RUNTIME_OPENCODE)
-  const integrateModels = useAvailableModelIds(AGENT_RUNTIME_OPENCODE)
+  const modelVariantsMap = availableModels?.modelVariants ?? {}
   const [searchQuery, setSearchQuery] = useState('')
   const chipRefs = useRef<Record<string, Array<HTMLButtonElement | null>>>({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -183,10 +191,10 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   }, [issueNumber, projectId, currentStageModels])
 
   const stageCatalogs = {
-    plan: planModels,
-    build: buildModels,
-    check: checkModels,
-    integrate: integrateModels,
+    plan: catalog,
+    build: catalog,
+    check: catalog,
+    integrate: catalog,
   }
 
   const allModels: string[] = availableModels?.models ?? []
@@ -395,6 +403,60 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const currentModelFullId = resolvedModelId
     ? describeModel(resolvedModelId).fullId + (resolvedVariant ? `:${resolvedVariant}` : '')
     : null
+
+  if (selectedRuntime === null) {
+    const configuredStageEntries = ISSUE_STAGES.filter((stage) => !!localStageModels[stage])
+    if (!resolvedModelId && configuredStageEntries.length === 0) return null
+
+    return (
+      <div className="space-y-1" data-testid="issue-model-read-only">
+        {resolvedModelId && (
+          <div>
+            <label className="block text-sm text-muted-foreground">Coder Model</label>
+            <ModelSelect
+              id="issue-coder-model-read-only"
+              value={resolvedModelId}
+              placeholder="Use default"
+              models={[]}
+              onChange={() => undefined}
+              modelVariants={resolvedVariant ? { [resolvedModelId]: [resolvedVariant] } : {}}
+              valueVariant={resolvedVariant}
+              disabled
+            />
+          </div>
+        )}
+        {configuredStageEntries.length > 0 && (
+          <div className="pt-2 border-t">
+            <span className="text-xs text-muted-foreground">Per-stage overrides</span>
+            <div className="mt-3 space-y-2 pl-5">
+              {configuredStageEntries.map((stage) => {
+                const stageModel = localStageModels[stage]
+                const stageVariant = localStageVariants[stage] ?? null
+                return (
+                  <div key={stage} className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-muted-foreground w-16 capitalize shrink-0">{stage}</span>
+                    <div className="flex-1">
+                      <ModelSelect
+                        id={`issue-stage-model-${stage}`}
+                        value={stageModel}
+                        placeholder="Default"
+                        models={[]}
+                        onChange={() => undefined}
+                        size="compact"
+                        modelVariants={stageVariant ? { [stageModel]: [stageVariant] } : {}}
+                        valueVariant={stageVariant}
+                        disabled
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-1">
