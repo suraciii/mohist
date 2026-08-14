@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "Workflow-owned Agent settlement model, identity-fenced bind/observe commands, reportable-attempt lookup, derived unresolved predicates, and passing state-machine tests.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Keep arbitration inside `WorkflowRun` JSON state so settlement and Workflow events use the existing transaction. `TaskRun.AgentResultSettlement.State` is authoritative; add only the minimum run-level blocked value later required for indexed queries. Physical stop delivery remains owned by issue #562."
     },
     {
