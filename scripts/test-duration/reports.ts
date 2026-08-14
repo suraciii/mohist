@@ -9,10 +9,14 @@ function decodeXmlAttribute(value: string): string {
   return value.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|(quot|apos|lt|gt|amp));/gi, (entity, hex, decimal, named) => {
     if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16))
     if (decimal !== undefined) return String.fromCodePoint(Number.parseInt(decimal, 10))
-    return named.toLowerCase() === 'quot' ? '"'
-      : named.toLowerCase() === 'apos' ? "'"
-        : named.toLowerCase() === 'lt' ? '<'
-          : named.toLowerCase() === 'gt' ? '>'
+    return named.toLowerCase() === 'quot'
+      ? '"'
+      : named.toLowerCase() === 'apos'
+        ? "'"
+        : named.toLowerCase() === 'lt'
+          ? '<'
+          : named.toLowerCase() === 'gt'
+            ? '>'
             : '&'
   })
 }
@@ -101,8 +105,7 @@ export function parseVitestJson(json: string): TestCase[] {
   for (const file of report.testResults ?? []) {
     for (const assertion of file.assertionResults ?? []) {
       const name =
-        assertion.fullName ??
-        [...(assertion.ancestorTitles ?? []), assertion.title].filter(Boolean).join(' ')
+        assertion.fullName ?? [...(assertion.ancestorTitles ?? []), assertion.title].filter(Boolean).join(' ')
       if (!name) continue
       cases.push({
         name,

@@ -43,79 +43,151 @@ test('validateConfig accepts a well-formed enforce track with a default rule', (
 })
 
 test('validateConfig rejects non-array apphostArgs', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    tracks: [{
-      id: 't', kind: 'dotnet-apphost', apphostArgs: '-parallel', report: 'r', reportFormat: 'trx',
-      deadlineMs: 100, enforce: false,
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 't',
+          kind: 'dotnet-apphost',
+          apphostArgs: '-parallel',
+          report: 'r',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   assert.ok(validateConfig(config).some((e) => e.includes('apphostArgs must be an array of strings')))
 })
 
 test('validateConfig rejects non-string apphostArgs items', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    tracks: [{
-      id: 't', kind: 'dotnet-apphost', apphostArgs: ['-parallel', 1], report: 'r', reportFormat: 'trx',
-      deadlineMs: 100, enforce: false,
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 't',
+          kind: 'dotnet-apphost',
+          apphostArgs: ['-parallel', 1],
+          report: 'r',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   assert.ok(validateConfig(config).some((e) => e.includes('apphostArgs must contain only strings')))
 })
 
 test('validateConfig keeps execution ledgers on dotnet apphost tracks', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    tracks: [{
-      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'reports/cli-ledger.json', executionProvenance: 'reports/cli-provenance.json', executionSourceRoots: ['packages/cli'],
-      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false, status: 'baseline-pending', reason: 'fixture',
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 'cli',
+          kind: 'dotnet-apphost',
+          csproj: 'cli.csproj',
+          executionLedger: 'reports/cli-ledger.json',
+          executionProvenance: 'reports/cli-provenance.json',
+          executionSourceRoots: ['packages/cli'],
+          report: 'reports/cli.trx',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+          status: 'baseline-pending',
+          reason: 'fixture',
+        },
+      ],
+    }),
+  )
   assert.deepEqual(validateConfig(config), [])
 })
 
 test('validateConfig requires source roots for execution-ledger freshness', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    tracks: [{
-      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'ledger.json', executionProvenance: 'provenance.json',
-      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 'cli',
+          kind: 'dotnet-apphost',
+          csproj: 'cli.csproj',
+          executionLedger: 'ledger.json',
+          executionProvenance: 'provenance.json',
+          report: 'reports/cli.trx',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   assert.ok(validateConfig(config).some((e) => e.includes('requires non-empty executionSourceRoots')))
 })
 
 test('validateConfig rejects execution ledgers on non-apphost tracks', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    tracks: [{
-      id: 'unit', kind: 'report-only', executionLedger: 'ledger.json',
-      report: 'reports/unit.json', reportFormat: 'vitest', deadlineMs: 100, enforce: false,
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 'unit',
+          kind: 'report-only',
+          executionLedger: 'ledger.json',
+          report: 'reports/unit.json',
+          reportFormat: 'vitest',
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   assert.ok(validateConfig(config).some((e) => e.includes('executionLedger requires kind=dotnet-apphost')))
 })
 
 test('validateConfig requires paired execution ledger provenance', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    tracks: [{
-      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'ledger.json',
-      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 'cli',
+          kind: 'dotnet-apphost',
+          csproj: 'cli.csproj',
+          executionLedger: 'ledger.json',
+          report: 'reports/cli.trx',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   assert.ok(validateConfig(config).some((e) => e.includes('executionLedger requires executionProvenance')))
 })
 
 test('validateConfig rejects execution ledgers without a TRX report', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    tracks: [{
-      id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'ledger.json',
-      report: 'reports/cli.json', reportFormat: 'vitest', deadlineMs: 100, enforce: false,
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 'cli',
+          kind: 'dotnet-apphost',
+          csproj: 'cli.csproj',
+          executionLedger: 'ledger.json',
+          report: 'reports/cli.json',
+          reportFormat: 'vitest',
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   assert.ok(validateConfig(config).some((e) => e.includes('executionLedger requires reportFormat=trx')))
 })
 
@@ -137,8 +209,14 @@ test('validateConfig fails closed when an unenforced track is not explicitly bas
       tracks: [
         { id: 'silent', kind: 'report-only', report: 'r', reportFormat: 'trx', deadlineMs: 100, enforce: false },
         {
-          id: 'rules-ignored', kind: 'report-only', report: 's', reportFormat: 'trx', deadlineMs: 100,
-          enforce: false, status: 'baseline-pending', reason: 'capture a baseline',
+          id: 'rules-ignored',
+          kind: 'report-only',
+          report: 's',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+          status: 'baseline-pending',
+          reason: 'capture a baseline',
           rules: [{ id: 'unit', absoluteMs: 500 }],
         },
       ],
@@ -148,36 +226,73 @@ test('validateConfig fails closed when an unenforced track is not explicitly bas
   const errors = validateConfig(config)
 
   assert.ok(errors.some((error) => error.includes('track "silent": enforce=false requires status baseline-pending')))
-  assert.ok(errors.some((error) => error.includes('track "silent": enforce=false requires a non-empty baseline-pending reason')))
-  assert.ok(errors.some((error) => error.includes('track "rules-ignored": enforce=false must not carry unenforced rules')))
+  assert.ok(
+    errors.some((error) =>
+      error.includes('track "silent": enforce=false requires a non-empty baseline-pending reason'),
+    ),
+  )
+  assert.ok(
+    errors.some((error) => error.includes('track "rules-ignored": enforce=false must not carry unenforced rules')),
+  )
 })
 
 test('validateConfig accepts canonical resource limits and partitioned apphost tracks', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    canonical: { maxConcurrentLanes: 4, resourceLimits: { host: 4, dotnet: 3, 'server-spec': 3 } },
-    tracks: [{
-      id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx',
-      reportFormat: 'trx', partitions: 4, partitionMaxThreads: 1, deadlineMs: 100, enforce: true,
-      rules: [{ id: 'spec', absoluteMs: 5000 }],
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      canonical: { maxConcurrentLanes: 4, resourceLimits: { host: 4, dotnet: 3, 'server-spec': 3 } },
+      tracks: [
+        {
+          id: 'spec',
+          kind: 'dotnet-apphost',
+          apphost: 'bin/spec',
+          report: 'reports/spec-{partition}.trx',
+          reportFormat: 'trx',
+          partitions: 4,
+          partitionMaxThreads: 1,
+          deadlineMs: 100,
+          enforce: true,
+          rules: [{ id: 'spec', absoluteMs: 5000 }],
+        },
+      ],
+    }),
+  )
   assert.deepEqual(validateConfig(config), [])
 })
 
 test('validateConfig requires a valid non-partitioned duration-measurement phase', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    canonical: {
-      maxConcurrentLanes: 4,
-      resourceLimits: { host: 4 },
-      durationMeasurementTracks: ['unit', 'unit', 'missing', 'spec'],
-    },
-    tracks: [
-      { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
-      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 1, deadlineMs: 100, enforce: false },
-    ],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      canonical: {
+        maxConcurrentLanes: 4,
+        resourceLimits: { host: 4 },
+        durationMeasurementTracks: ['unit', 'unit', 'missing', 'spec'],
+      },
+      tracks: [
+        {
+          id: 'unit',
+          kind: 'dotnet-apphost',
+          apphost: 'bin/unit',
+          report: 'reports/unit.trx',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+        },
+        {
+          id: 'spec',
+          kind: 'dotnet-apphost',
+          apphost: 'bin/spec',
+          report: 'reports/spec-{partition}.trx',
+          reportFormat: 'trx',
+          partitions: 2,
+          partitionMaxThreads: 1,
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   const errors = validateConfig(config)
   assert.ok(errors.some((error) => error.includes('requires canonical.resourceLimits.duration-measurement')))
   assert.ok(errors.some((error) => error.includes('duplicate track id: unit')))
@@ -186,32 +301,62 @@ test('validateConfig requires a valid non-partitioned duration-measurement phase
 })
 
 test('validateConfig requires duration isolation to target a non-partitioned Vitest track', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    canonical: {
-      maxConcurrentLanes: 4,
-      resourceLimits: { host: 4, 'duration-measurement': 1 },
-      durationMeasurementTracks: ['unit'],
-      durationIsolationTrack: 'spec',
-    },
-    tracks: [
-      { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
-      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 1, deadlineMs: 100, enforce: false },
-    ],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      canonical: {
+        maxConcurrentLanes: 4,
+        resourceLimits: { host: 4, 'duration-measurement': 1 },
+        durationMeasurementTracks: ['unit'],
+        durationIsolationTrack: 'spec',
+      },
+      tracks: [
+        {
+          id: 'unit',
+          kind: 'dotnet-apphost',
+          apphost: 'bin/unit',
+          report: 'reports/unit.trx',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: false,
+        },
+        {
+          id: 'spec',
+          kind: 'dotnet-apphost',
+          apphost: 'bin/spec',
+          report: 'reports/spec-{partition}.trx',
+          reportFormat: 'trx',
+          partitions: 2,
+          partitionMaxThreads: 1,
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   const errors = validateConfig(config)
   assert.ok(errors.some((error) => error.includes('cannot include partitioned track: spec')))
 })
 
 test('validateConfig rejects invalid canonical limits and non-apphost partitioning', () => {
-  const config = parseSuiteConfig(JSON.stringify({
-    suiteDeadlineMs: 1000,
-    canonical: { maxConcurrentLanes: 0, resourceLimits: { host: 0 } },
-    tracks: [{
-      id: 'spec', kind: 'vitest', run: ['npm', 'test'], report: 'reports/spec.json', reportFormat: 'vitest',
-      partitions: 1, deadlineMs: 100, enforce: false,
-    }],
-  }))
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      canonical: { maxConcurrentLanes: 0, resourceLimits: { host: 0 } },
+      tracks: [
+        {
+          id: 'spec',
+          kind: 'vitest',
+          run: ['npm', 'test'],
+          report: 'reports/spec.json',
+          reportFormat: 'vitest',
+          partitions: 1,
+          deadlineMs: 100,
+          enforce: false,
+        },
+      ],
+    }),
+  )
   const errors = validateConfig(config)
   assert.ok(errors.some((error) => error.includes('canonical.maxConcurrentLanes')))
   assert.ok(errors.some((error) => error.includes('canonical.resourceLimits.host')))

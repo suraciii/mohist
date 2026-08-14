@@ -19,12 +19,24 @@ function countOutcomes(cases: readonly TestCase[]) {
   let other = 0
   for (const test of cases) {
     switch (test.outcome) {
-      case 'passed': passed++; break
-      case 'failed': failed++; break
-      case 'error': errors++; break
-      case 'skipped': skipped++; break
-      case 'not-run': notRun++; break
-      default: other++; break
+      case 'passed':
+        passed++
+        break
+      case 'failed':
+        failed++
+        break
+      case 'error':
+        errors++
+        break
+      case 'skipped':
+        skipped++
+        break
+      case 'not-run':
+        notRun++
+        break
+      default:
+        other++
+        break
     }
   }
   return { total: cases.length, passed, failed, errors, skipped, notRun, other }
@@ -33,10 +45,7 @@ function countOutcomes(cases: readonly TestCase[]) {
 export function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return 0
   const sorted = [...values].sort((a, b) => a - b)
-  const idx = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil((p / 100) * sorted.length) - 1),
-  )
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))
   return sorted[idx]
 }
 
@@ -96,7 +105,14 @@ export function evaluateRule(rule: BudgetRule, cases: readonly TestCase[], today
       if (entry) {
         governed.push(toGoverned(c, entry))
       } else {
-        absoluteViolations.push({ name: c.name, durationMs: c.durationMs, reason: '', owner: '', deadline: '', observedMs: c.durationMs })
+        absoluteViolations.push({
+          name: c.name,
+          durationMs: c.durationMs,
+          reason: '',
+          owner: '',
+          deadline: '',
+          observedMs: c.durationMs,
+        })
       }
     }
   }

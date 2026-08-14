@@ -13,10 +13,7 @@ test('artifact roots reject repository parents and use a unique child below an e
     },
   }
 
-  assert.throws(
-    () => createArtifactRoot('run-1', '/repo', '/repo/artifacts', ops),
-    /outside the repository/,
-  )
+  assert.throws(() => createArtifactRoot('run-1', '/repo', '/repo/artifacts', ops), /outside the repository/)
   assert.equal(
     createArtifactRoot('run-2', '/repo', '/diagnostics', ops),
     '/diagnostics/mohist-canonical-gate-run-2-random',
@@ -35,6 +32,12 @@ test('build stamps are accepted only when they carry the owning run identity', (
 
 test('source revision is part of the build provenance when the run records one', () => {
   const run = JSON.stringify({ runId: 'run-1', startedAt: 1000, suiteDeadlineMs: 300000, sourceRevision: 'c093' })
-  assert.equal(buildStampMatchesRun(run, JSON.stringify({ runId: 'run-1', builtAt: 2000, sourceRevision: 'c093' })), true)
-  assert.equal(buildStampMatchesRun(run, JSON.stringify({ runId: 'run-1', builtAt: 2000, sourceRevision: 'other' })), false)
+  assert.equal(
+    buildStampMatchesRun(run, JSON.stringify({ runId: 'run-1', builtAt: 2000, sourceRevision: 'c093' })),
+    true,
+  )
+  assert.equal(
+    buildStampMatchesRun(run, JSON.stringify({ runId: 'run-1', builtAt: 2000, sourceRevision: 'other' })),
+    false,
+  )
 })

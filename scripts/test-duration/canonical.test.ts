@@ -7,7 +7,12 @@ import { createArtifactRoot, main, parseArgs, type CanonicalGateRuntime, type Ph
 interface RuntimeProbe {
   readonly root: string
   readonly artifactParents: readonly (string | undefined)[]
-  readonly phases: Array<{ readonly name: string; readonly artifactRoot: string; readonly executionDeadlineAt: number; readonly hardDeadlineAt: number }>
+  readonly phases: Array<{
+    readonly name: string
+    readonly artifactRoot: string
+    readonly executionDeadlineAt: number
+    readonly hardDeadlineAt: number
+  }>
   readonly durationArgs: readonly string[][]
   readonly durationClock: readonly (() => number)[]
   readonly writes: readonly string[]
@@ -37,7 +42,9 @@ function fakeRuntime(
       artifactParents.push(artifactParent)
       return root
     },
-    writeFile: (path) => { writes.push(path) },
+    writeFile: (path) => {
+      writes.push(path)
+    },
     runPhase: async (name, _command, _args, artifactRoot, deadlines, phaseNow) => {
       assert.equal(phaseNow(), now)
       phases.push({
@@ -57,7 +64,9 @@ function fakeRuntime(
       durationClock.push(guardRuntime.now)
       return durationResult
     },
-    report: (line) => { reports.push(line) },
+    report: (line) => {
+      reports.push(line)
+    },
   }
   return { runtime, probe }
 }
@@ -96,7 +105,11 @@ test('canonical gate retains an external diagnostic root for success, failure, a
   }> = [
     {
       name: 'success',
-      phases: [{ exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }],
+      phases: [
+        { exitCode: 0, timedOut: false },
+        { exitCode: 0, timedOut: false },
+        { exitCode: 0, timedOut: false },
+      ],
       durationResult: 0,
       expectedCode: 0,
       expectedPhaseCount: 3,
@@ -136,9 +149,11 @@ test('canonical gate retains an external diagnostic root for success, failure, a
       if (scenario.durationRuns) {
         assert.deepEqual(probe.durationArgs[0], [
           '--all',
-          '--run-root', probe.root,
+          '--run-root',
+          probe.root,
           '--require-build-stamp',
-          '--suite-deadline-at-ms', '301000',
+          '--suite-deadline-at-ms',
+          '301000',
         ])
         assert.equal(probe.durationClock[0], runtime.now)
       }
@@ -148,7 +163,11 @@ test('canonical gate retains an external diagnostic root for success, failure, a
 
 test('canonical gate passes its fake clock and absolute deadline into the guard boundary', async () => {
   const { runtime, probe } = fakeRuntime(
-    [{ exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }],
+    [
+      { exitCode: 0, timedOut: false },
+      { exitCode: 0, timedOut: false },
+      { exitCode: 0, timedOut: false },
+    ],
     0,
   )
 
@@ -162,16 +181,15 @@ test('canonical gate passes its fake clock and absolute deadline into the guard 
 })
 
 test('canonical gate uses the injected clock to stop before a new phase at the absolute execution cutoff', async () => {
-  const { runtime, probe } = fakeRuntime(
-    [{ exitCode: 0, timedOut: false }],
-    0,
-    [289_000],
-  )
+  const { runtime, probe } = fakeRuntime([{ exitCode: 0, timedOut: false }], 0, [289_000])
 
   const code = await main(runtime)
 
   assert.equal(code, 1)
-  assert.deepEqual(probe.phases.map((phase) => phase.name), ['docs'])
+  assert.deepEqual(
+    probe.phases.map((phase) => phase.name),
+    ['docs'],
+  )
   assert.equal(probe.phases[0].executionDeadlineAt, 290_000)
   assert.equal(probe.phases[0].hardDeadlineAt, 301_000)
   assert.deepEqual(probe.durationArgs, [])
@@ -181,12 +199,21 @@ test('canonical propagates one external termination signal through phases and th
   const controller = new AbortController()
   let disposed = false
   const { runtime: base } = fakeRuntime(
-    [{ exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }, { exitCode: 0, timedOut: false }],
+    [
+      { exitCode: 0, timedOut: false },
+      { exitCode: 0, timedOut: false },
+      { exitCode: 0, timedOut: false },
+    ],
     0,
   )
   const runtime: CanonicalGateRuntime = {
     ...base,
-    createTerminationSignal: () => ({ signal: controller.signal, dispose: () => { disposed = true } }),
+    createTerminationSignal: () => ({
+      signal: controller.signal,
+      dispose: () => {
+        disposed = true
+      },
+    }),
     runPhase: async (_name, _command, _args, _artifactRoot, _deadlines, _now, abortSignal) => {
       assert.equal(abortSignal, controller.signal)
       return { exitCode: 0, timedOut: false }

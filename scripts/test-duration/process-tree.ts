@@ -87,7 +87,10 @@ async function settlesBefore(deadlineAt: number, operation: Promise<unknown>, op
   const timeout = ops.createTimeout(remainingMs)
   try {
     const settled = await Promise.race([
-      operation.then(() => true, () => true),
+      operation.then(
+        () => true,
+        () => true,
+      ),
       timeout.promise.then(() => false),
     ])
     // A completion that wins the race after the absolute cutoff is not a
@@ -134,7 +137,7 @@ export async function terminateProcessTree(
 
   ops.signalProcessGroup(child.pid, 'SIGTERM')
   const termDeadlineAt = Math.min(hardDeadlineAt, ops.now() + graceMs)
-  if (await settlesBefore(termDeadlineAt, child.done, ops) && !ops.isProcessGroupAlive(child.pid)) {
+  if ((await settlesBefore(termDeadlineAt, child.done, ops)) && !ops.isProcessGroupAlive(child.pid)) {
     return true
   }
   if (ops.now() < termDeadlineAt) {
