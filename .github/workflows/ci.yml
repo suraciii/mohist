@@ -167,7 +167,7 @@ jobs:
       - name: Install dependencies
         run: timeout --signal=TERM --kill-after=30s 300s npm ci
 
-      - name: Resolve Node test budget base
+      - name: Resolve file size ratchet base
         shell: bash
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -185,7 +185,10 @@ jobs:
           fi
 
           git rev-parse --verify "${base_ref}^{commit}" >/dev/null
-          printf 'NODE_TEST_BUDGET_BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
+          printf 'FILE_SIZE_BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
+
+      - name: Check file sizes
+        run: timeout --signal=TERM --kill-after=30s 60s npm run check:filesizes
 
       - name: Check Node architecture scripts
         run: |

@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseSourceFile, ts } from './node-test-ast.js'
@@ -15,7 +14,6 @@ const runnerExecutableScriptImportRule = 'no-default-runner-executable-script-im
 const runnerProcessPolicyMockRule = 'no-default-runner-process-policy-mock'
 const runnerTestModifierRule = 'no-runner-test-modifier'
 const historicalTestTitleRule = 'no-historical-ticket-test-title'
-const testFileBudgetRule = 'test-file-size-budget'
 const jsdomGeometryRule = 'no-jsdom-page-geometry-assertion'
 const webFetchGlobalStubRule = 'no-web-fetch-global-stub'
 const webFetchGlobalMutationRule = 'no-web-fetch-global-mutation'
@@ -82,16 +80,6 @@ const runnerTestModifierNames = new Set(['skip', 'only', 'todo', 'skipIf'])
 const testApiFunctionNames = new Set(['it', 'test', 'describe', 'suite', 'context'])
 const runnerDefaultTrack = 'default'
 const runnerIntegrationTrack = 'integration'
-const testFileBudgetBaselineRelativePath = 'scripts/node-test-file-budget-baseline.json'
-const testFileLineBudgets = Object.freeze({ test: 500, spec: 850 })
-export const nodeTestFileBaselineSlack = 100
-
-type BudgetRecord = {
-  filePath: string
-  relativePath: string
-  budget: number
-  lines: number
-}
 
 function unwrapExpression(expression) {
   let current = expression
@@ -1073,384 +1061,6 @@ export function collectRunnerIntegrationVitestFiles(runnerRoot = resolve(reposit
     .filter((filePath) => isActiveRunnerIntegrationVitestFile(relative(runnerRoot, filePath).replaceAll('\\', '/')))
 }
 
-function repositoryRelativePath(filePath) {
-  return relative(repositoryRoot, filePath).replaceAll('\\', '/')
-}
-
-function testFileLineBudget(filePath) {
-  if (/\.test\.[^/]+$/.test(filePath)) return testFileLineBudgets.test
-  if (/\.spec\.[^/]+$/.test(filePath)) return testFileLineBudgets.spec
-  return undefined
-}
-
-function budgetScopeForRepositoryPath(filePath) {
-  if (filePath.startsWith('packages/runner/')) return 'runner'
-  if (filePath.startsWith('packages/web/')) return 'web'
-  return undefined
-}
-
-function isActiveNodeVitestRepositoryPath(filePath) {
-  if (filePath.startsWith('packages/runner/')) {
-    const runnerRelativePath = filePath.slice('packages/runner/'.length)
-    return isActiveRunnerVitestFile(runnerRelativePath) || isActiveRunnerIntegrationVitestFile(runnerRelativePath)
-  }
-
-  if (filePath.startsWith('packages/web/')) {
-    return isActiveWebVitestFile(filePath.slice('packages/web/'.length))
-  }
-
-  return false
-}
-
-function countSourceLines(sourceText) {
-  if (sourceText.length === 0) return 0
-  const lineBreaks = sourceText.match(/\r\n|\r|\n/g)?.length ?? 0
-  return lineBreaks + (/(?:\r\n|\r|\n)$/.test(sourceText) ? 0 : 1)
-}
-
-function createBudgetRecord(filePath, sourceText = readFileSync(filePath, 'utf8')): BudgetRecord {
-  const relativePath = repositoryRelativePath(filePath)
-  const budget = testFileLineBudget(relativePath)
-  if (budget === undefined) throw new Error(`No file-size budget is configured for ${relativePath}`)
-
-  return {
-    filePath,
-    relativePath,
-    budget,
-    lines: countSourceLines(sourceText),
-  }
-}
-
-function budgetRecordsForFiles(files): BudgetRecord[] {
-  return files.map((filePath) => createBudgetRecord(filePath))
-}
-
-function budgetBaselineFilePath() {
-  return resolve(repositoryRoot, testFileBudgetBaselineRelativePath)
-}
-
-export function nodeTestFileBaselineAllowance(observedLines: number) {
-  return observedLines + nodeTestFileBaselineSlack
-}
-
-function validateBudgetBaselinePath(filePath, sourceName) {
-  if (
-    filePath.startsWith('/')
-    || filePath.includes('\\')
-    || filePath.split('/').some((segment) => segment.length === 0 || segment === '.' || segment === '..')
-    || !isActiveNodeVitestRepositoryPath(filePath)
-  ) {
-    throw new Error(`${sourceName} has an invalid test-file path: ${filePath}`)
-  }
-}
-
-function parseBudgetBaseline(sourceText, sourceName) {
-  let parsed
-  try {
-    parsed = JSON.parse(sourceText)
-  } catch (error) {
-    throw new Error(`${sourceName} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
-  }
-
-  if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error(`${sourceName} must be an object from repository-relative test paths to allowed line counts`)
-  }
-
-  const entries = new Map<string, number>()
-  for (const [filePath, allowedLines] of Object.entries(parsed as Record<string, number>)) {
-    validateBudgetBaselinePath(filePath, sourceName)
-    if (!Number.isSafeInteger(allowedLines)) {
-      throw new Error(`${sourceName} must allow a positive integer line count for ${filePath}`)
-    }
-    const budget = testFileLineBudget(filePath)
-    if (allowedLines <= budget) continue
-    entries.set(filePath, allowedLines)
-  }
-  return entries
-}
-
-function readBudgetBaseline() {
-  const baselinePath = budgetBaselineFilePath()
-  if (!existsSync(baselinePath)) return new Map<string, number>()
-  return parseBudgetBaseline(readFileSync(baselinePath, 'utf8'), testFileBudgetBaselineRelativePath)
-}
-
-function readBudgetBaselineFromGitTree(commit) {
-  if (!gitFileExists(commit, testFileBudgetBaselineRelativePath)) {
-    throw new Error(`${testFileBudgetBaselineRelativePath} must be committed before --budget-base-ref can compare Git history`)
-  }
-  return parseBudgetBaseline(
-    readGitFile(commit, testFileBudgetBaselineRelativePath),
-    `${commit}:${testFileBudgetBaselineRelativePath}`,
-  )
-}
-
-function formatBudgetBaseline(entries) {
-  return `${JSON.stringify(Object.fromEntries([...entries].sort(([left], [right]) => left.localeCompare(right))), null, 2)}\n`
-}
-
-function createBudgetViolation(relativePath, description, fix) {
-  return {
-    filePath: resolve(repositoryRoot, relativePath),
-    line: 1,
-    column: 1,
-    rule: testFileBudgetRule,
-    description,
-    fix,
-  }
-}
-
-function validateBudgetRecords(records: BudgetRecord[], baseline: Map<string, number>, scope) {
-  const recordsByPath = new Map<string, BudgetRecord>(records.map((record) => [record.relativePath, record]))
-  const violations = []
-
-  for (const record of records) {
-    if (budgetScopeForRepositoryPath(record.relativePath) !== scope) continue
-    if (record.lines <= record.budget) continue
-    const allowedLines = baseline.get(record.relativePath)
-    if (allowedLines === undefined) {
-      violations.push(createBudgetViolation(
-        record.relativePath,
-        `has ${record.lines} lines, exceeding the ${record.budget}-line limit without a baseline allowance`,
-        `Split the file below ${record.budget} lines; do not add a new baseline entry.`,
-      ))
-      continue
-    }
-    const effectiveAllowedLines = nodeTestFileBaselineAllowance(allowedLines)
-    if (record.lines > effectiveAllowedLines) {
-      violations.push(createBudgetViolation(
-        record.relativePath,
-        `has ${record.lines} lines, exceeding its baseline allowance of ${effectiveAllowedLines} lines (${allowedLines} observed plus ${nodeTestFileBaselineSlack} maintenance slack)`,
-        `Split the file or lower it to at most ${effectiveAllowedLines} lines, then lower or remove the baseline entry.`,
-      ))
-    }
-  }
-
-  for (const [relativePath, allowedLines] of baseline) {
-    if (budgetScopeForRepositoryPath(relativePath) !== scope) continue
-    const record = recordsByPath.get(relativePath)
-    if (record === undefined) {
-      violations.push(createBudgetViolation(
-        relativePath,
-        `has a baseline allowance of ${allowedLines} lines but no active test file at that path`,
-        'Remove the stale baseline entry; a renamed over-budget file must be split instead of receiving a new allowance.',
-      ))
-      continue
-    }
-    if (record.lines <= record.budget) {
-      violations.push(createBudgetViolation(
-        relativePath,
-        `has ${record.lines} lines and no longer needs its ${allowedLines}-line baseline allowance`,
-        'Remove the baseline entry now that the file satisfies the absolute limit.',
-      ))
-    }
-  }
-
-  return violations
-}
-
-function resolveGitCommit(ref, optionName) {
-  if (ref.length === 0 || ref.startsWith('-')) throw new Error(`${optionName} must name a Git commit or ref`)
-  try {
-    return execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim()
-  } catch {
-    throw new Error(`${optionName} does not resolve to a Git commit: ${ref}`)
-  }
-}
-
-function readGitFile(commit, relativePath) {
-  return execFileSync('git', ['show', `${commit}:${relativePath}`], {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-}
-
-function gitFileExists(commit, relativePath) {
-  try {
-    execFileSync('git', ['cat-file', '-e', `${commit}:${relativePath}`], {
-      cwd: repositoryRoot,
-      stdio: 'ignore',
-    })
-    return true
-  } catch {
-    return false
-  }
-}
-
-function collectBudgetRecordsFromGitTree(commit) {
-  let output
-  try {
-    output = execFileSync('git', [
-      'ls-tree',
-      '-r',
-      '-z',
-      '--name-only',
-      commit,
-      '--',
-      'packages/runner',
-      'packages/web',
-    ], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } catch {
-    throw new Error(`Could not read test files from trusted Git commit ${commit}`)
-  }
-
-  return output
-    .split('\0')
-    .filter((filePath) => filePath.length > 0 && isActiveNodeVitestRepositoryPath(filePath))
-    .map((relativePath) => {
-      const budget = testFileLineBudget(relativePath)
-      if (budget === undefined) throw new Error(`No file-size budget is configured for ${relativePath}`)
-      return {
-        filePath: resolve(repositoryRoot, relativePath),
-        relativePath,
-        budget,
-        lines: countSourceLines(readGitFile(commit, relativePath)),
-      }
-    })
-}
-
-function budgetBaselineFromRecords(records) {
-  return new Map(records
-    .filter((record) => record.lines > record.budget)
-    .map((record) => [record.relativePath, record.lines]))
-}
-
-function gitRenameMap(sourceCommit, targetCommit) {
-  let output
-  try {
-    output = execFileSync('git', [
-      'diff',
-      '--name-status',
-      '-z',
-      '--find-renames=90%',
-      sourceCommit,
-      targetCommit,
-      '--',
-      'packages/runner',
-      'packages/web',
-    ], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } catch {
-    throw new Error(`Could not read test-file renames from ${sourceCommit} to ${targetCommit}`)
-  }
-
-  const values = output.split('\0')
-  const renames = new Map()
-  const renamedTargets = new Set()
-  for (let index = 0; index < values.length - 1;) {
-    const status = values[index]
-    index += 1
-    if (status.length === 0) continue
-
-    const sourcePath = values[index]
-    index += 1
-    if (status.startsWith('R') || status.startsWith('C')) {
-      const targetPath = values[index]
-      index += 1
-      if (!status.startsWith('R')) continue
-      if (renames.has(sourcePath) || renamedTargets.has(targetPath)) {
-        throw new Error(`Ambiguous test-file rename from ${sourceCommit} to ${targetCommit}`)
-      }
-      renames.set(sourcePath, targetPath)
-      renamedTargets.add(targetPath)
-    }
-  }
-  return renames
-}
-
-function remapBudgetBaseline(sourceBaseline, currentRecords, renamedPaths, useCurrentHeadAllowance) {
-  const remapped = new Map()
-
-  for (const [sourcePath, sourceAllowedLines] of sourceBaseline) {
-    const currentPath = renamedPaths.get(sourcePath) ?? sourcePath
-    const currentRecord = currentRecords.get(currentPath)
-    if (
-      currentRecord === undefined
-      || currentRecord.lines <= currentRecord.budget
-      || testFileLineBudget(sourcePath) !== currentRecord.budget
-    ) continue
-    if (remapped.has(currentPath)) {
-      throw new Error(`Multiple trusted baseline paths map to ${currentPath}`)
-    }
-    remapped.set(currentPath, useCurrentHeadAllowance ? currentRecord.lines : sourceAllowedLines)
-  }
-
-  return remapped
-}
-
-function remapBaselineToCurrentHead(sourceBaseline, sourceCommit, currentHead, useCurrentHeadAllowance) {
-  const currentRecords = new Map(collectBudgetRecordsFromGitTree(currentHead)
-    .map((record) => [record.relativePath, record]))
-  return remapBudgetBaseline(
-    sourceBaseline,
-    currentRecords,
-    gitRenameMap(sourceCommit, currentHead),
-    useCurrentHeadAllowance,
-  )
-}
-
-function trustedBudgetBaseline(sourceCommit, currentHead) {
-  if (gitFileExists(sourceCommit, testFileBudgetBaselineRelativePath)) {
-    const baseline = parseBudgetBaseline(
-      readGitFile(sourceCommit, testFileBudgetBaselineRelativePath),
-      `${sourceCommit}:${testFileBudgetBaselineRelativePath}`,
-    )
-    return remapBaselineToCurrentHead(baseline, sourceCommit, currentHead, false)
-  }
-
-  const sourceOffenders = budgetBaselineFromRecords(collectBudgetRecordsFromGitTree(sourceCommit))
-  return remapBaselineToCurrentHead(sourceOffenders, sourceCommit, currentHead, true)
-}
-
-function baselineRegressionViolations(currentBaseline, trustedBaseline, scope) {
-  const violations = []
-  for (const [relativePath, allowedLines] of currentBaseline) {
-    if (budgetScopeForRepositoryPath(relativePath) !== scope) continue
-    const trustedAllowedLines = trustedBaseline.get(relativePath)
-    if (trustedAllowedLines === undefined) {
-      violations.push(createBudgetViolation(
-        relativePath,
-        `adds a ${allowedLines}-line baseline allowance that is absent from the trusted base`,
-        'Do not add baseline entries. Split a newly over-budget file below its absolute limit.',
-      ))
-      continue
-    }
-    if (allowedLines > trustedAllowedLines) {
-      violations.push(createBudgetViolation(
-        relativePath,
-        `raises its baseline allowance from ${trustedAllowedLines} to ${allowedLines} lines`,
-        'Baseline allowances may only decrease; split the file instead.',
-      ))
-    }
-  }
-  return violations
-}
-
-function writeBudgetBaseline(sourceRef) {
-  const baselinePath = budgetBaselineFilePath()
-  if (existsSync(baselinePath)) {
-    throw new Error(`${testFileBudgetBaselineRelativePath} already exists; bootstrap may only create it once`)
-  }
-
-  const sourceCommit = resolveGitCommit(sourceRef, '--source-ref')
-  const currentHead = resolveGitCommit('HEAD', 'current HEAD')
-  const baseline = trustedBudgetBaseline(sourceCommit, currentHead)
-  writeFileSync(baselinePath, formatBudgetBaseline(baseline))
-  console.log(`node test file budget baseline: wrote ${baseline.size} allowance(s) from ${sourceCommit} to committed ${currentHead}`)
-}
-
 function isGlobalTimerCall(call) {
   if (isGlobalBuiltin(call.expression, 'setTimeout')) return true
   const member = getMember(call.expression)
@@ -2076,9 +1686,6 @@ function printViolations(violations) {
 
 function parseArguments(args) {
   let scope = null
-  let budgetBaseRef = null
-  let writeBudgetBaseline = false
-  let sourceRef = null
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index]
@@ -2089,83 +1696,29 @@ function parseArguments(args) {
       index += 1
       continue
     }
-    if (argument === '--budget-base-ref') {
-      const value = args[index + 1]
-      if (value === undefined) throw new Error('--budget-base-ref requires a Git ref')
-      budgetBaseRef = value
-      index += 1
-      continue
-    }
-    if (argument === '--write-budget-baseline') {
-      writeBudgetBaseline = true
-      continue
-    }
-    if (argument === '--source-ref') {
-      const value = args[index + 1]
-      if (value === undefined) throw new Error('--source-ref requires a Git ref')
-      sourceRef = value
-      index += 1
-      continue
-    }
     throw new Error(`Unknown argument: ${argument}`)
   }
 
-  if (writeBudgetBaseline) {
-    if (scope !== null || budgetBaseRef !== null || sourceRef === null) {
-      throw new Error('Usage: tsx scripts/check-node-test-boundaries.ts --write-budget-baseline --source-ref <git-ref>')
-    }
-    if (sourceRef.length === 0) throw new Error('--source-ref requires a Git ref')
-    return { writeBudgetBaseline, sourceRef }
-  }
-  if (sourceRef !== null) {
-    throw new Error('--source-ref is only valid with --write-budget-baseline')
-  }
   if (scope !== 'web' && scope !== 'runner') {
-    throw new Error('Usage: tsx scripts/check-node-test-boundaries.ts --scope web|runner [--budget-base-ref <git-ref>]')
+    throw new Error('Usage: tsx scripts/check-node-test-boundaries.ts --scope web|runner')
   }
-  if (budgetBaseRef !== null && budgetBaseRef.length === 0) throw new Error('--budget-base-ref requires a Git ref')
-  return { scope, budgetBaseRef }
+  return { scope }
 }
 
 function main() {
-  const options = parseArguments(process.argv.slice(2))
-  if (options.writeBudgetBaseline) {
-    writeBudgetBaseline(options.sourceRef)
-    return
-  }
-
-  const { scope, budgetBaseRef: argumentBudgetBaseRef } = options
-  const budgetBaseRef = argumentBudgetBaseRef ?? process.env.NODE_TEST_BUDGET_BASE_REF ?? null
-  if (budgetBaseRef !== null && budgetBaseRef.length === 0) {
-    throw new Error('NODE_TEST_BUDGET_BASE_REF must not be empty')
-  }
+  const { scope } = parseArguments(process.argv.slice(2))
 
   const { files, violations } = scope === 'runner'
     ? checkRunnerTestBoundaries()
     : checkWebTestBoundaries()
-  const baseline = readBudgetBaseline()
-  const budgetViolations = validateBudgetRecords(budgetRecordsForFiles(files), baseline, scope)
-  if (budgetBaseRef !== null) {
-    const trustedCommit = resolveGitCommit(budgetBaseRef, '--budget-base-ref')
-    const currentHead = resolveGitCommit('HEAD', 'current HEAD')
-    const committedBaseline = readBudgetBaselineFromGitTree(currentHead)
-    const committedRecords = collectBudgetRecordsFromGitTree(currentHead)
-    budgetViolations.push(...validateBudgetRecords(committedRecords, committedBaseline, scope))
-    budgetViolations.push(...baselineRegressionViolations(
-      committedBaseline,
-      trustedBudgetBaseline(trustedCommit, currentHead),
-      scope,
-    ))
-  }
-  const allViolations = [...violations, ...budgetViolations]
   const scopeName = scope === 'runner' ? 'Runner' : 'Web'
-  if (allViolations.length === 0) {
-    console.log(`node test boundaries: checked ${files.length} active ${scopeName} Vitest files and file-size budgets`)
+  if (violations.length === 0) {
+    console.log(`node test boundaries: checked ${files.length} active ${scopeName} Vitest files`)
     return
   }
 
-  printViolations(allViolations)
-  console.error(`${allViolations.length} node test boundary or file-size budget violation(s) found in ${files.length} active ${scopeName} Vitest files.`)
+  printViolations(violations)
+  console.error(`${violations.length} node test boundary violation(s) found in ${files.length} active ${scopeName} Vitest files.`)
   process.exitCode = 1
 }
 
