@@ -69,7 +69,7 @@ test('validateConfig keeps execution ledgers on dotnet apphost tracks', () => {
     suiteDeadlineMs: 1000,
     tracks: [{
       id: 'cli', kind: 'dotnet-apphost', csproj: 'cli.csproj', executionLedger: 'reports/cli-ledger.json', executionProvenance: 'reports/cli-provenance.json', executionSourceRoots: ['packages/cli'],
-      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false,
+      report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false, status: 'baseline-pending', reason: 'fixture',
     }],
   }))
   assert.deepEqual(validateConfig(config), [])
@@ -155,10 +155,10 @@ test('validateConfig fails closed when an unenforced track is not explicitly bas
 test('validateConfig accepts canonical resource limits and partitioned apphost tracks', () => {
   const config = parseSuiteConfig(JSON.stringify({
     suiteDeadlineMs: 1000,
-    canonical: { maxConcurrentLanes: 4, resourceLimits: { host: 4, dotnet: 3 } },
+    canonical: { maxConcurrentLanes: 4, resourceLimits: { host: 4, dotnet: 3, 'server-spec': 3 } },
     tracks: [{
       id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx',
-      reportFormat: 'trx', partitions: 4, deadlineMs: 100, enforce: true,
+      reportFormat: 'trx', partitions: 4, partitionMaxThreads: 1, deadlineMs: 100, enforce: true,
       rules: [{ id: 'spec', absoluteMs: 5000 }],
     }],
   }))
@@ -175,7 +175,7 @@ test('validateConfig requires a valid non-partitioned duration-measurement phase
     },
     tracks: [
       { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
-      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 100, enforce: false },
+      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 1, deadlineMs: 100, enforce: false },
     ],
   }))
   const errors = validateConfig(config)
@@ -196,7 +196,7 @@ test('validateConfig requires duration isolation to target a non-partitioned Vit
     },
     tracks: [
       { id: 'unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 100, enforce: false },
-      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, deadlineMs: 100, enforce: false },
+      { id: 'spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 1, deadlineMs: 100, enforce: false },
     ],
   }))
   const errors = validateConfig(config)

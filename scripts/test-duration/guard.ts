@@ -375,6 +375,7 @@ export function planTracks(
         lane: {
           id,
           resources: [...laneResources(track), 'server-spec', `spec-report-${partition}`, `spec-temp-${partition}`, `spec-port-${partition}`],
+          resourceWeights: { 'server-spec': track.partitionMaxThreads ?? 1 },
         },
         policyTrack: track,
         executionTrack: { ...track, id, report },
@@ -496,6 +497,9 @@ function startLane(
         String(plan.executionTrack.partitions),
         manifestDir,
         plan.reportPath!,
+        ...(plan.executionTrack.partitionMaxThreads === undefined
+          ? []
+          : [String(plan.executionTrack.partitionMaxThreads)]),
       ]))
     } else if (plan.executionTrack) {
       ({ command, args } = commandFor(plan.executionTrack, artifactRoot))
