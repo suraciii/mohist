@@ -31,6 +31,10 @@ public static class AgentDefinitionRoutes
             if (agentConfigError is not null)
                 return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
 
+            var permissionsError = AgentPermissionVocabulary.Validate(req.Raw);
+            if (permissionsError is not null)
+                return ApiResults.BadRequest(permissionsError, "invalid_agent_permissions");
+
             var projectId = context.GetResolvedProject().Id;
             var agentId = $"agent_{Guid.NewGuid():N}";
             var grain = grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId));
@@ -46,7 +50,9 @@ public static class AgentDefinitionRoutes
                     req.Skills,
                     req.MaxConcurrentRuns,
                     req.AllowedSubagentAgentIds,
-                    req.Avatar));
+                    req.Avatar,
+                    req.Purpose,
+                    req.Permissions));
                 return Results.Json(new ApiResponse<AgentInfo>(true, created), statusCode: 201);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -98,6 +104,13 @@ public static class AgentDefinitionRoutes
                     return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
             }
 
+            if (req.Fields.Contains(nameof(AgentUpdateRequest.Permissions)))
+            {
+                var permissionsError = AgentPermissionVocabulary.Validate(req.Raw);
+                if (permissionsError is not null)
+                    return ApiResults.BadRequest(permissionsError, "invalid_agent_permissions");
+            }
+
             var maxConcurrentRunsError = ValidateMaxConcurrentRuns(req.Raw);
             if (maxConcurrentRunsError is not null)
                 return ApiResults.BadRequest(maxConcurrentRunsError, "invalid_max_concurrent_runs");
@@ -118,7 +131,9 @@ public static class AgentDefinitionRoutes
                     req.MaxConcurrentRuns,
                     req.Fields,
                     req.AllowedSubagentAgentIds,
-                    req.Avatar));
+                    req.Avatar,
+                    req.Purpose,
+                    req.Permissions));
                 return updated is null ? ApiResults.NotFound($"Agent {id} not found") : ApiResults.Ok(updated);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -196,7 +211,9 @@ public sealed record AgentCreateRequest(
     int? MaxConcurrentRuns = null,
     IReadOnlyList<string>? AllowedSubagentAgentIds = null,
     string? Avatar = null,
-    JsonElement Raw = default)
+    JsonElement Raw = default,
+    string? Purpose = null,
+    IReadOnlyList<string>? Permissions = null)
 {
     public static async ValueTask<AgentCreateRequest?> BindAsync(HttpContext context)
     {
@@ -210,7 +227,9 @@ public sealed record AgentCreateRequest(
             AgentDefinitionRequestBinding.GetInt(raw, "maxConcurrentRuns"),
             AgentDefinitionRequestBinding.GetStringList(raw, "allowedSubagentAgentIds"),
             AgentDefinitionRequestBinding.GetString(raw, "avatar"),
-            raw);
+            raw,
+            AgentDefinitionRequestBinding.GetString(raw, "purpose"),
+            AgentDefinitionRequestBinding.GetStringList(raw, "permissions"));
     }
 }
 
@@ -224,7 +243,9 @@ public sealed record AgentUpdateRequest(
     IReadOnlyList<string>? AllowedSubagentAgentIds,
     IReadOnlySet<string> Fields,
     JsonElement Raw,
-    string? Avatar = null)
+    string? Avatar = null,
+    string? Purpose = null,
+    IReadOnlyList<string>? Permissions = null)
 {
     public static async ValueTask<AgentUpdateRequest?> BindAsync(HttpContext context)
     {
@@ -239,7 +260,9 @@ public sealed record AgentUpdateRequest(
             AgentDefinitionRequestBinding.GetStringList(raw, "allowedSubagentAgentIds"),
             GetFields(raw),
             raw,
-            AgentDefinitionRequestBinding.GetString(raw, "avatar"));
+            AgentDefinitionRequestBinding.GetString(raw, "avatar"),
+            AgentDefinitionRequestBinding.GetString(raw, "purpose"),
+            AgentDefinitionRequestBinding.GetStringList(raw, "permissions"));
     }
 
     private static IReadOnlySet<string> GetFields(JsonElement raw)
@@ -248,10 +271,12 @@ public sealed record AgentUpdateRequest(
         if (raw.ValueKind != JsonValueKind.Object) return fields;
         if (raw.TryGetProperty("name", out _)) fields.Add(nameof(Name));
         if (raw.TryGetProperty("avatar", out _)) fields.Add(nameof(Avatar));
+        if (raw.TryGetProperty("purpose", out _)) fields.Add(nameof(Purpose));
         if (raw.TryGetProperty("description", out _)) fields.Add(nameof(Description));
         if (raw.TryGetProperty("instructions", out _)) fields.Add(nameof(Instructions));
         if (raw.TryGetProperty("agentConfig", out _)) fields.Add(nameof(AgentConfig));
         if (raw.TryGetProperty("skills", out _)) fields.Add(nameof(Skills));
+        if (raw.TryGetProperty("permissions", out _)) fields.Add(nameof(Permissions));
         if (raw.TryGetProperty("maxConcurrentRuns", out _)) fields.Add(nameof(MaxConcurrentRuns));
         if (raw.TryGetProperty("allowedSubagentAgentIds", out _)) fields.Add(nameof(AllowedSubagentAgentIds));
         return fields;

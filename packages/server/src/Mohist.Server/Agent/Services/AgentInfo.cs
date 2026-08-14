@@ -31,4 +31,8 @@ public sealed record AgentInfo(
     [property: Id(12)]
     IReadOnlyList<string>? AllowedSubagentAgentIds = null,
     [property: Id(13)]
-    string? Avatar = null);
+    string? Avatar = null,
+    [property: Id(14)]
+    string? Purpose = null,
+    [property: Id(15)]
+    IReadOnlyList<string>? Permissions = null);
