@@ -556,6 +556,15 @@ test('planTracks isolates duration measurements and gates non-Spec fan-out after
     deadlineMs: 1000,
     enforce: false,
   }
+  const architecture: TrackConfig = {
+    id: 'server-arch',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/arch',
+    report: 'reports/arch.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
+  }
   const web: TrackConfig = {
     id: 'web',
     kind: 'vitest',
@@ -575,7 +584,7 @@ test('planTracks isolates duration measurements and gates non-Spec fan-out after
     deadlineMs: 1000,
     enforce: false,
   }
-  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli'], 'runner')
+  const planned = planTracks([cli, architecture, unit, runner, web, spec], '/evidence', ['cli'], 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
@@ -585,7 +594,8 @@ test('planTracks isolates duration measurements and gates non-Spec fan-out after
   assert.deepEqual(byId.get('runner')?.dependsOn, ['cli', 'server-spec-coverage'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner', 'server-spec-coverage'])
-  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['cli'])
+  assert.deepEqual(byId.get('server-arch')?.dependsOn, ['cli'])
+  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['cli', 'server-arch'])
   assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'cli'])
 
   const focused = planTracks([unit], '/evidence', ['cli'], 'runner')
