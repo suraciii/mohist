@@ -1,10 +1,14 @@
 ## Context
 
+The [proposal](proposal.md) documents five WorkflowRuns that recorded false `TaskFailed` outcomes after stop confirmation or Runner transport became inconclusive. The [workflow-agent-result-settlement specification](specs/workflow-agent-result-settlement/spec.md) requires Workflow to preserve that uncertainty under the original execution identity, reconcile an authoritative result exactly once, and expose bounded unresolved work as blocked rather than failed.
+
 Workflow currently has one path for two different facts. A conclusive Runner result reaches `ReceiveTaskReportAsync` and settles the task, while AgentSession stop, turn, and activity observations reach `AbandonActiveWorkAsync` and also settle the task. `RunnerGrain.CloseoutLostAsync` has the same problem: it sends `FailActiveWorkAsync(..., "runner-lost")` for every assigned Workflow. Both paths eventually call `WorkflowRun.FailTask`, so an unconfirmed physical stop or lost Runner becomes `TaskFailed` without an authoritative Agent result.
 
 The report path cannot repair this after the fact. `WorkflowReportService` and `WorkflowGrain.ReceiveTaskReportAsync` accept only `FindActiveWork(workId, workerId)`. Once an inconclusive observation removes or fails active work, a matching late result is stale. The Runner then retires its in-memory `awaitingAck` entry because both `Accepted` and `Stale` are successful acknowledgements.
 
 Issue #562 already gives AgentSession a durable stop-operation identity, target, disposition, deadline, and recovery reminder. This change must consume those physical facts without taking ownership of stop delivery. WorkflowRun remains the only owner of task outcome.
+
+The primary stakeholders are operators recovering blocked runs, owners of the Workflow, AgentSession, Runner, and stop-operation lifecycles, and API, CLI, Web, Issue, Inbox, and event subscribers that consume Workflow status.
 
 The following existing boundaries constrain the design:
 
@@ -204,7 +208,9 @@ Add an `AgentResultSettlementView` to the task status view with `state`, stable 
 
 **Rollback:** take the normal consistent SQLite backup before deployment. Once any run writes the new enum values or blocked event types, rollback to an older binary requires restoring that pre-deployment backup; no live reverse conversion is provided. Before the first new-state write, the release can be reverted normally.
 
-## Resolved Parameters
+## Open Questions
+
+No open questions remain for implementation. Two parameters raised during design are resolved:
 
 - `AgentResultSettlementTimeout` has a configured five-minute default. Each settlement persists its absolute deadline, so later configuration changes do not alter in-flight work.
 - `WorkflowRunBlocked` is available on the event bus and projects attention to Issue, Inbox, Web, and CLI. It is not routed through failure-only GitHub, Hermes, or Agent subscribers.
