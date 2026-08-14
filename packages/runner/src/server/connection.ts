@@ -1,5 +1,5 @@
 import { hostname } from "node:os"
-import type { CleanupPolicy, DispatchWorkItem, JsonObject, RunnerConfigResponse, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
+import type { CleanupPolicy, DispatchWorkItem, JsonObject, RunnerConfigResponse, RunnerOptions, RunnerRegistration, RuntimeReadinessWitness, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
 import type { BuildInfo } from "../runtime/build-info.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
@@ -64,7 +64,13 @@ export class ServerConnection {
    */
   async poll(
     signal: AbortSignal,
-    report: { inFlight: string[]; awaitingAck: string[] } = { inFlight: [], awaitingAck: [] },
+    report: {
+      inFlight: string[]
+      awaitingAck: string[]
+      runtimeReadiness?: RuntimeReadinessWitness[]
+      connectionId?: string | null
+      admissionReady?: boolean
+    } = { inFlight: [], awaitingAck: [], admissionReady: false },
   ): Promise<DispatchWorkItem[]> {
     const response = await this.fetchWithAuth(this.url("poll"), {
       method: "POST",

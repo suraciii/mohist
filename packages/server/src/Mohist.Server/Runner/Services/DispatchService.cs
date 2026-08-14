@@ -73,6 +73,10 @@ public sealed class DispatchService : IScopedService
 
         await _pollObserver.AfterRunnerInfoAsync(runnerId);
 
+        var readiness = await runner.ObserveRuntimeReadinessAsync(
+            req.ConnectionGeneration,
+            req.RuntimeReadiness ?? []);
+
         var dispatches = new List<WorkDispatch>();
         var reportedWorkKeys = ReportedWorkKeys(req);
         var activeWorkKeys = await AddMissingRedeliveriesAsync(
@@ -88,6 +92,12 @@ public sealed class DispatchService : IScopedService
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
 
+        // A runner with unhealthy durable admission state can still reconcile
+        // held work, but it must not receive fresh claims until its local
+        // journals and terminal delivery are writable again.
+        if (req.AdmissionReady is false)
+            return new RunnerPollResponse(dispatches);
+
         spare = await AddPendingDispatchesAsync(
             runner,
             info.ProjectId,
@@ -95,6 +105,7 @@ public sealed class DispatchService : IScopedService
             assigned: true,
             spare,
             dispatches,
+            readiness,
             ct);
         if (spare > 0)
         {
@@ -105,6 +116,7 @@ public sealed class DispatchService : IScopedService
                 assigned: false,
                 spare,
                 dispatches,
+                readiness,
                 ct);
         }
 
@@ -159,6 +171,7 @@ public sealed class DispatchService : IScopedService
         bool assigned,
         int availableSlots,
         List<WorkDispatch> dispatches,
+        RunnerRuntimeReadinessSnapshot readiness,
         CancellationToken ct)
     {
         var candidateLimit = Math.Max(availableSlots, 20);
@@ -201,11 +214,22 @@ public sealed class DispatchService : IScopedService
             WorkDispatch? dispatch;
             if (candidate.OwnerKind == WorkDispatchOwnerKinds.AgentJob)
             {
+                var record = await _agentJobs.LoadLedgerAsync(candidate.OwnerId, ct);
+                var requiredRuntimes = record is null
+                    ? null
+                    : RuntimeRequirementsFromDispatch(DeserializeAgentDispatch(record));
+                if (!readiness.Allows(requiredRuntimes))
+                    continue;
+
                 var claim = await runner.TryClaimAgentJobAsync(candidate.OwnerId, projectId);
                 dispatch = claim?.Dispatch;
             }
             else
             {
+                var requiredRuntimes = await ResolveWorkflowRuntimeRequirementsAsync(candidate.OwnerId, ct);
+                if (!readiness.Allows(requiredRuntimes))
+                    continue;
+
                 dispatch = await ClaimAndRenderWorkflowAsync(
                     runner,
                     candidate.OwnerId,
@@ -342,6 +366,51 @@ public sealed class DispatchService : IScopedService
         {
             return null;
         }
+    }
+
+    private async Task<IReadOnlyList<string>?> ResolveWorkflowRuntimeRequirementsAsync(
+        string workflowRunId,
+        CancellationToken ct)
+    {
+        var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
+        var next = run?.NextWork();
+        if (run is null || next is null)
+            return null;
+
+        var item = next switch
+        {
+            WorkflowTaskWork task => WorkItem.Task(
+                task.Stage,
+                task.Id,
+                task.Title,
+                task.Uses,
+                task.With,
+                task.Artifacts,
+                task.SetVars,
+                task.Recovery,
+                task.RecoveryRemaining),
+            WorkflowChecksWork checks => WorkItem.Checks(
+                checks.Stage,
+                WorkflowRunExtensions.ChecksWorkIdFor(checks.Stage),
+                checks.Items),
+            _ => null,
+        };
+        return item is null ? null : await _translator.ResolveRequiredRuntimesAsync(item, run);
+    }
+
+    private static IReadOnlyList<string>? RuntimeRequirementsFromDispatch(WorkDispatch? dispatch)
+    {
+        if (dispatch is null)
+            return null;
+        if (dispatch.AgentDefinition?.Runtime is { } runtime && !string.IsNullOrWhiteSpace(runtime))
+            return [runtime.Trim()];
+
+        return dispatch.Uses switch
+        {
+            "mohist/pi" => ["pi"],
+            "mohist/opencode" => ["opencode"],
+            _ => [],
+        };
     }
 
     private async Task<WorkDispatch?> StoreDispatchAsync(

@@ -5,6 +5,12 @@ export type JsonObject = { [key: string]: JsonValue }
 
 export type WorkType = "task" | "checks"
 
+export interface RuntimeReadinessWitness {
+  runtime: string
+  ready: boolean
+  generation: number | null
+}
+
 export interface CheckItem {
   name: string
   title: string

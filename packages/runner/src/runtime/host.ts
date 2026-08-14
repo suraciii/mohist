@@ -1,4 +1,4 @@
-import type { RunnerOptions, RunnerRegistration } from '../core/types.js'
+import type { RunnerOptions, RunnerRegistration, RuntimeReadinessWitness } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { RunnerSignalRClient } from '../server/runner-signalr.js'
 import { reportAndRequireDurableAck } from './work-report.js'
@@ -132,6 +132,7 @@ export class RunnerHost {
    */
   private openCodeRuntime: OpenCodeRuntime | null = null
   private piRuntime: PiRuntime | null = null
+  private piRuntimeGeneration = 0
   private providerPolicyDiagnostic: string | null = null
   /**
    * Per-runner journal for SessionCommand dedup/recovery.
@@ -417,6 +418,7 @@ export class RunnerHost {
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const piStart = await this.piRuntime.start()
+    if (this.piRuntime.ready()) this.piRuntimeGeneration += 1
     if (!piStart.ok) {
       log.error('pi runtime not ready at startup; claiming gated until it recovers', { reason: piStart.error.message })
     }
@@ -510,34 +512,17 @@ export class RunnerHost {
     // declared on the host instance, so it survives poll exceptions. Polling
     // and report retries share this one process-critical reconciliation loop;
     // no sibling lifetime task can prevent a failed poll from being retried.
-    let lastReadinessDiagnostic: string | null = null
-    let lastReadinessLoggedAt = 0
     while (!signal.aborted) {
       void retryPendingTerminalTaskLogs(this.taskLogDeps(), this.terminalTaskLogDeliveryInFlight, signal)
       await this.retryDueReports()
 
-      // OpenCode readiness gate. While the runtime is not ready, the
-      // runner skips claiming new work and emits the actionable
-      // readiness diagnostic — but it still drains `awaitingAck`
-      // reports (the line above) and respects the existing poll
-      // cadence so a recovered runtime resumes claiming on the next
-      // tick.
+      // Runtime readiness is sent as a claim-time witness. Polling must stay
+      // alive while a runtime is unhealthy so held work can be reconciled and
+      // terminal receipts can be redelivered after a restart.
       this.syncOpenCodeWorkOwners()
-      if (!this.isReadyForClaim()) {
-        if (this.piRuntime && !this.piRuntime.ready()) await this.piRuntime.start().catch(() => {})
-        const diagnostic = this.readinessDiagnostic()
-        const now = Date.now()
-        const diagnosticChanged = diagnostic !== lastReadinessDiagnostic
-        const reLogDue = now - lastReadinessLoggedAt > READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS
-        if (diagnosticChanged || reLogDue) {
-          log.warn('runner not ready; skipping poll', { reason: diagnostic ?? 'opencode runtime not ready' })
-          lastReadinessDiagnostic = diagnostic
-          lastReadinessLoggedAt = now
-        }
-        await raceInterval(this.nextReconciliationInterval(), signal, [
-          ...[...this.inFlight.values()].map((e) => e.done),
-        ])
-        continue
+      if (this.piRuntime && !this.piRuntime.ready()) {
+        const piStart = await this.piRuntime.start().catch(() => null)
+        if (piStart?.ok && this.piRuntime.ready()) this.piRuntimeGeneration += 1
       }
 
       let works: DispatchWorkItem[]
@@ -602,24 +587,6 @@ export class RunnerHost {
     await Promise.allSettled([...this.inFlight.values()].map((e) => e.done))
   }
 
-  private isOpenCodeReadyForClaim(): boolean {
-    const runtime = this.openCodeRuntime
-    return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
-  }
-
-  private isReadyForClaim(): boolean {
-    const runtime = this.openCodeRuntime
-    return (
-      this.providerPolicyDiagnostic === null &&
-      this.terminalTaskLogDelivery.ready() &&
-      this.agentSessionRuntimeEventOutbox.ready() &&
-      this.workResultJournal.ready() &&
-      this.piRuntime !== null &&
-      this.piRuntime.ready() &&
-      (runtime?.ready() === true || runtime?.canPollWhileCold() === true)
-    )
-  }
-
   private syncOpenCodeWorkOwners(): void {
     const runtime = this.openCodeRuntime
     if (!runtime) return
@@ -648,32 +615,6 @@ export class RunnerHost {
     ]
   }
 
-  /**
-   * Produce the user-visible, actionable readiness diagnostic emitted
-   * when the runner pauses claiming. The OpenCode runtime's own
-   * `diagnostic()` (set on each rebuild and on every startup failure)
-   * is the authoritative message — it carries the failure stage
-   * (`server-spawn-failed` / `health-failed` / `server-exit`) plus the recovery suggestion. When the runtime
-   * has not been constructed yet (very early in startup), fall back
-   * to a generic message so the log line is still informative.
-   */
-  private openCodeReadinessDiagnostic(): string | null {
-    const runtime = this.openCodeRuntime
-    if (runtime === null) return null
-    const diagnostic = runtime.diagnostic()
-    if (diagnostic === null) return null
-    return `opencode runtime not ready (${diagnostic.code}): ${diagnostic.message}`
-  }
-
-  private readinessDiagnostic(): string | null {
-    if (this.providerPolicyDiagnostic !== null) return this.providerPolicyDiagnostic
-    if (!this.isOpenCodeReadyForClaim()) return this.openCodeReadinessDiagnostic()
-    const diagnostic = this.piRuntime?.diagnostic()
-    return diagnostic
-      ? `pi runtime not ready (${diagnostic.code}): ${diagnostic.message}`
-      : 'pi runtime not ready; skipping poll'
-  }
-
   private async pollOnce(signal: AbortSignal): Promise<DispatchWorkItem[]> {
     const bounded = boundedSignal(signal, POLL_TIMEOUT_MS)
     try {
@@ -689,11 +630,39 @@ export class RunnerHost {
    * value of sending it now is that the reported set is correct the moment
    * the server starts consuming it, with no second runner-side change.
    */
-  private pollReport(): { inFlight: string[]; awaitingAck: string[] } {
+  private pollReport(): {
+    inFlight: string[]
+    awaitingAck: string[]
+    runtimeReadiness: RuntimeReadinessWitness[]
+    connectionId: string | null
+    admissionReady: boolean
+  } {
     return {
       inFlight: [...this.inFlight.keys()],
       awaitingAck: [...this.awaitingAck.keys()],
+      runtimeReadiness: this.runtimeReadiness(),
+      connectionId: this.signalR.getConnectionId(),
+      admissionReady:
+        this.providerPolicyDiagnostic === null &&
+        this.terminalTaskLogDelivery.ready() &&
+        this.agentSessionRuntimeEventOutbox.ready() &&
+        this.workResultJournal.ready(),
     }
+  }
+
+  private runtimeReadiness(): RuntimeReadinessWitness[] {
+    return [
+      {
+        runtime: 'opencode',
+        ready: this.openCodeRuntime?.ready() === true,
+        generation: this.openCodeRuntime?.ownership().generation ?? null,
+      },
+      {
+        runtime: 'pi',
+        ready: this.piRuntime?.ready() === true,
+        generation: this.piRuntime?.ready() === true ? this.piRuntimeGeneration : null,
+      },
+    ]
   }
 
   /**
@@ -885,16 +854,6 @@ export class RunnerHost {
     }
   }
 }
-
-/**
- * Minimum interval between repeated "opencode runtime not ready"
- * warnings while the runner pauses claiming. The gate fires on every
- * loop tick when the runtime is unhealthy; without this throttle a
- * not-ready window would spam the log every poll. The first emission
- * always logs; the same diagnostic message is then re-logged at most
- * once per interval (or as soon as the message changes).
- */
-const READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS = 30_000
 
 /** Maximum time a single poll request may wait before the loop retries. */
 const POLL_TIMEOUT_MS = 10_000

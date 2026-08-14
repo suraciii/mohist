@@ -4,7 +4,6 @@ import { RunnerHost } from "../src/runtime/host.js"
 import type { PiRuntime } from "../src/runtime/pi/index.js"
 import type { ActionDefinition } from "../src/actions/manifest.js"
 import { deferred } from "./support/deferred.js"
-import { capturedLogs } from "./support/logger-test.js"
 import type { GitRunner } from "../src/runtime/git-probe.js"
 import { UnexpectedConsoleRecorder } from "./support/unexpected-console.js"
 import { FakeTerminalTaskLogDeliveryStore } from "./support/terminal-task-log-delivery.js"
@@ -369,10 +368,10 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("not-ready-skip: when the runtime flips to not-ready mid-flight, pollOnce stops and the existing report still drains", async (resources) => {
+  it("runtime-not-ready: polling continues with a readiness witness while the existing report drains", async (resources) => {
     // Start with a ready runtime; let the first poll dispatch and
     // capture the work item's report; then simulate a server exit
-    // and confirm no further polls run until the runtime recovers.
+    // and confirm polls continue with a negative readiness witness.
     const installed = installFakeOpenCodeRuntimeFactory(resources, { rebuildDelayMs: 50 })
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()
@@ -396,28 +395,25 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }]).mockResolvedValue([])
     const controller = new AbortController()
     const host = hostWithFakeTerminalDelivery()
-    // Capture the readiness-diagnostic warn so it doesn't trip the
-    // unexpected-console recorder — the diagnostic IS the expected
-    // signal the test verifies.
     const run = host.run(controller.signal)
     try {
       await reportStarted.promise
       // Flip the runtime to not-ready by simulating a server exit.
       installed.subscription.emit({ type: "server.disconnected", payload: {} })
       expect(installed.lastRuntime?.ready()).toBe(false)
-      // Capture the post-flip poll count; advance time and verify it
-      // stays flat (gate is closed).
+      // Capture the post-flip poll count; advance time and verify the
+      // control-plane poll continues while the runtime is unavailable.
       const callsBefore = poll.mock.calls.length
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 4)
-      expect(poll.mock.calls.length).toBe(callsBefore)
-      // The actionable readiness diagnostic is emitted while the gate
-      // is closed.
-      expect(capturedLogs()).toEqual(expect.arrayContaining([
-        expect.objectContaining({ level: "WARN", message: "runner not ready; skipping poll", fields: expect.objectContaining({ reason: expect.stringContaining("opencode runtime not ready (server-exit)") }) }),
-      ]))
+      expect(poll.mock.calls.length).toBeGreaterThan(callsBefore)
+      expect(poll.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({
+        runtimeReadiness: expect.arrayContaining([
+          expect.objectContaining({ runtime: "opencode", ready: false }),
+        ]),
+      }))
       // awaitingAck drains while not-ready: the in-flight report
       // resolves and the entry leaves awaitingAck on the next loop
-      // tick. The run continues without a fresh poll.
+      // tick. The run continues without replaying the work.
       reportRelease.resolve()
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
       // After rebuildDelayMs the runtime re-passes and the gate
@@ -468,10 +464,16 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       // turn reports its result exactly once.
       installed.subscription.emit({ type: "server.disconnected", payload: {} })
       expect(installed.lastRuntime?.ready()).toBe(false)
-      // Confirm the runner does not poll while not-ready.
+      // Confirm the runner keeps polling while not-ready, carrying the
+      // negative witness instead of claiming new runtime work locally.
       const callsBefore = poll.mock.calls.length
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
-      expect(poll.mock.calls.length).toBe(callsBefore)
+      expect(poll.mock.calls.length).toBeGreaterThan(callsBefore)
+      expect(poll.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({
+        runtimeReadiness: expect.arrayContaining([
+          expect.objectContaining({ runtime: "opencode", ready: false }),
+        ]),
+      }))
       // Let the in-flight turn settle and report once (no replay).
       actionRelease.resolve()
       await vi.advanceTimersByTimeAsync(0)
@@ -596,11 +598,9 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     expect(registryInvoked).toBe(false)
   })
 
-  it("the readiness gate pauses AgentJob claim while runtime is not ready", async (resources) => {
-    // Use a long rebuild delay so the gate stays closed throughout
-    // the post-flip observation window — we want to verify pollOnce
-    // is skipped during the not-ready window, not that rebuild races
-    // the assertion. The poll mock returns the AgentJob dispatch
+  it("runtime-not-ready: AgentJob polls continue while the server admission fence rejects the claim", async (resources) => {
+    // Use a long rebuild delay so the negative witness stays present
+    // throughout the post-flip observation window. The poll mock returns the AgentJob dispatch
     // exactly once followed by empty arrays so the dispatch loop
     // can't tight-loop on the same work key (#410 T-001: the
     // AgentJobExecutor closes the work within a few microtasks, so
@@ -628,19 +628,22 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       }
       const callsBeforeFlip = poll.mock.calls.length
       expect(callsBeforeFlip).toBeGreaterThan(0)
-      // Flip the runtime to not-ready. The gate closes for both
-      // Workflow AND AgentJob claims under the one-gate rule (design
-      // D3, #410 T-001 D4). The subscription lives on the fake
+      // Flip the runtime to not-ready. The server-side admission fence
+      // rejects runtime-specific claims while polling stays alive. The subscription lives on the fake
       // handles returned by `installFakeOpenCodeRuntimeFactory` — not
       // on the runtime instance itself, which only stores it as
       // private state.
       installedHandles.subscription.emit({ type: "server.disconnected", payload: {} })
       expect(installedHandles.lastRuntime?.ready()).toBe(false)
-      // Drive timers for a few intervals; with the gate closed the
-      // poll mock would not be called even though it would return
-      // work — proving the gate blocks AgentJob claim too.
+      // Drive timers for a few intervals; the poll mock continues to
+      // receive the negative readiness witness.
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 4)
-      expect(poll.mock.calls.length).toBe(callsBeforeFlip)
+      expect(poll.mock.calls.length).toBeGreaterThan(callsBeforeFlip)
+      expect(poll.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({
+        runtimeReadiness: expect.arrayContaining([
+          expect.objectContaining({ runtime: "opencode", ready: false }),
+        ]),
+      }))
     } finally {
       controller.abort()
       await run.catch(() => undefined)
