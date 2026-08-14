@@ -134,6 +134,7 @@ export class RunnerHost {
   private piRuntime: PiRuntime | null = null
   private piRuntimeGeneration = 0
   private providerPolicyDiagnostic: string | null = null
+  private lastProviderPolicyDiagnosticLogged: string | null = null
   /**
    * Per-runner journal for SessionCommand dedup/recovery.
    * Shared with `RunnerSignalRClient`
@@ -519,6 +520,15 @@ export class RunnerHost {
       // Runtime readiness is sent as a claim-time witness. Polling must stay
       // alive while a runtime is unhealthy so held work can be reconciled and
       // terminal receipts can be redelivered after a restart.
+      if (this.providerPolicyDiagnostic !== null) {
+        if (this.providerPolicyDiagnostic !== this.lastProviderPolicyDiagnosticLogged) {
+          log.warn('runner not ready; skipping poll', { reason: this.providerPolicyDiagnostic })
+          this.lastProviderPolicyDiagnosticLogged = this.providerPolicyDiagnostic
+        }
+        await raceInterval(this.nextReconciliationInterval(), signal, [])
+        continue
+      }
+      this.lastProviderPolicyDiagnosticLogged = null
       this.syncOpenCodeWorkOwners()
       if (this.piRuntime && !this.piRuntime.ready()) {
         const piStart = await this.piRuntime.start().catch(() => null)
@@ -663,6 +673,11 @@ export class RunnerHost {
         generation: this.piRuntime?.ready() === true ? this.piRuntimeGeneration : null,
       },
     ]
+  }
+
+  private isOpenCodeReadyForClaim(): boolean {
+    const runtime = this.openCodeRuntime
+    return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
   }
 
   /**
