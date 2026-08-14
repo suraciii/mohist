@@ -528,7 +528,7 @@ test('planTracks gives every Server Spec partition its own report, temp, and por
   )
 })
 
-test('planTracks isolates duration measurements and gates only Node fan-out', () => {
+test('planTracks isolates duration measurements and gates non-Spec fan-out after the Spec phase', () => {
   const cli: TrackConfig = {
     id: 'cli',
     kind: 'dotnet-apphost',
@@ -580,11 +580,11 @@ test('planTracks isolates duration measurements and gates only Node fan-out', ()
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
   assert.ok(byId.get('cli')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['cli'])
+  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['cli', 'server-spec-coverage'])
   assert.ok(!byId.get('server-unit')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('runner')?.dependsOn, ['cli'])
+  assert.deepEqual(byId.get('runner')?.dependsOn, ['cli', 'server-spec-coverage'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
+  assert.deepEqual(byId.get('web')?.dependsOn, ['runner', 'server-spec-coverage'])
   assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['cli'])
   assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'cli'])
 

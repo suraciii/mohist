@@ -21,19 +21,19 @@
   "suiteDeadlineMs": 300000,
   "killGraceMs": 5000,
   // The local canonical gate does not open every test process at once. The
-  // four-lane host cap matches the active Spec runner bound; resource caps
-  // reserve capacity for a Node lane while bounded .NET work is active.
+  // four-lane host cap matches the active Spec runner bound. The Spec phase
+  // owns all four bounded .NET lanes before the remaining fan-out starts.
   "canonical": {
     "maxConcurrentLanes": 4,
     "resourceLimits": {
       "host": 4,
-      "dotnet": 3,
+      "dotnet": 4,
       "node": 2,
-      "server-spec": 3,
+      "server-spec": 4,
       "duration-measurement": 1
     },
-    // The CLI sample is a short ordered prefix. Runner then gates only the
-    // remaining Node lanes while all .NET fan-out stays bounded and concurrent.
+    // The CLI sample is a short ordered prefix. Spec coverage then gates the
+    // remaining Node and .NET fan-out.
     "durationMeasurementTracks": ["cli"],
     "durationIsolationTrack": "runner"
   },
