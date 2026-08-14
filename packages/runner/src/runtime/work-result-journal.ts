@@ -125,7 +125,8 @@ export class WorkResultJournal {
       const existing = this.entries.get(key)
       if (!existing) return
       if (!sameWork(existing.work, work)) throw new Error(`Work result journal identity conflict for ${key}`)
-      if (existing.state !== 'completed') throw new Error(`Work result journal cannot acknowledge unfinished work ${key}`)
+      if (existing.state !== 'completed')
+        throw new Error(`Work result journal cannot acknowledge unfinished work ${key}`)
       this.entries.delete(key)
       try {
         await this.persist()
@@ -140,7 +141,10 @@ export class WorkResultJournal {
   private async mutate<T>(work: () => Promise<T>): Promise<T> {
     this.ensureAvailable()
     const run = this.writeChain.then(work, work)
-    this.writeChain = run.then(() => undefined, () => undefined)
+    this.writeChain = run.then(
+      () => undefined,
+      () => undefined,
+    )
     return await run
   }
 
@@ -170,9 +174,7 @@ export function workKey(work: DispatchWorkItem): string {
 function parseJournal(raw: string): WorkResultJournalFile | null {
   try {
     const value = JSON.parse(raw) as Partial<WorkResultJournalFile> | null
-    return isRecord(value) && value.version === 1 && isRecord(value.entries)
-      ? value as WorkResultJournalFile
-      : null
+    return isRecord(value) && value.version === 1 && isRecord(value.entries) ? (value as WorkResultJournalFile) : null
   } catch {
     return null
   }
@@ -185,10 +187,12 @@ function isEntry(value: unknown): value is WorkResultJournalEntry {
 }
 
 function isWork(value: unknown): value is DispatchWorkItem {
-  return isRecord(value)
-    && typeof value.workflowRunId === 'string'
-    && typeof value.workId === 'string'
-    && typeof value.workType === 'string'
+  return (
+    isRecord(value) &&
+    typeof value.workflowRunId === 'string' &&
+    typeof value.workId === 'string' &&
+    typeof value.workType === 'string'
+  )
 }
 
 function isResult(value: unknown): value is WorkItemResult {

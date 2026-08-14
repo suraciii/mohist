@@ -83,15 +83,18 @@ describe('WorkResultJournal', () => {
 
   it('FailsClosedWhenSettledResultCannotBePersisted', async () => {
     const fileSystem = new FailingWriteFileSystem()
-    await withTestRunnerResources(async () => {
-      const journal = new WorkResultJournal('/runner')
-      await journal.load()
-      await journal.begin(work)
-      fileSystem.failWrites = true
+    await withTestRunnerResources(
+      async () => {
+        const journal = new WorkResultJournal('/runner')
+        await journal.load()
+        await journal.begin(work)
+        fileSystem.failWrites = true
 
-      await expect(journal.complete(work, result)).rejects.toThrow('disk full')
-      expect(journal.ready()).toBe(false)
-      await expect(journal.acknowledge(work)).rejects.toThrow('unavailable')
-    }, { fileSystem })
+        await expect(journal.complete(work, result)).rejects.toThrow('disk full')
+        expect(journal.ready()).toBe(false)
+        await expect(journal.acknowledge(work)).rejects.toThrow('unavailable')
+      },
+      { fileSystem },
+    )
   })
 })

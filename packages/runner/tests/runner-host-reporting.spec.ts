@@ -221,11 +221,13 @@ describe('RunnerHost', () => {
 
     const run = host.run(controller.signal)
     try {
-      await vi.waitFor(() => expect(report).toHaveBeenCalledWith(
-        expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
-        expect.any(AbortSignal),
-      ))
+      await vi.waitFor(() =>
+        expect(report).toHaveBeenCalledWith(
+          expect.objectContaining({ workId: work.workId }),
+          expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
+          expect.any(AbortSignal),
+        ),
+      )
       expect(blockingAction).not.toHaveBeenCalled()
       const restartedJournal = new WorkResultJournal('/virtual/mohist-runner-test')
       await restartedJournal.load()
