@@ -239,20 +239,25 @@ a gate recovery mechanism.
 The scheduler has explicit lane ownership rather than opening every command at
 once. `test-duration.config.jsonc` declares the reproducible host limits. The
 default is four host lanes, with at most three .NET lanes and two Node lanes;
-this preserves the repository's active four-thread Spec bound while allowing a
-Node lane to overlap a compatible .NET lane. A lane starts only when its
+this keeps the outer lane budget separate from each test runner's inner
+parallelism while allowing a Node lane to overlap a compatible .NET lane. A lane starts only when its
 dependencies and all claimed resources are available, and an already-aborted
 schedule admits none. Node duration commands place reporter arguments on their
 terminal `vitest run` invocation, and execute TypeScript boundary checks through
 `node --import tsx` rather than the `tsx` CLI IPC server. Each lane owns its
-`TMPDIR`, `TEMP`, `TMP`, HOME, and runtime IPC directory. The four concurrent
-Server Spec lanes additionally own their main SQLite path, OTel SQLite path, and
+`TMPDIR`, `TEMP`, `TMP`, HOME, and runtime IPC directory. The four Server Spec
+partition lanes additionally own their main SQLite path, OTel SQLite path, and
 OTLP endpoint/port scope; unit lanes retain their product-default configuration
 so their default-value assertions remain meaningful. The Spec lanes use a
 Node-hosted deterministic partition executor on every platform. Each owns a
 distinct report path, temporary directory, and manifest directory; the fixtures
 allocate their physical silo/gateway ports through `TestClusterPortAllocator`,
-never from a fixed shared port. xUnit v3 lanes use their compiled apphost
+never from a fixed shared port. Each partition declares `partitionMaxThreads`;
+the executor passes that value as xUnit `-maxThreads`, and the scheduler claims
+the same number of weighted `server-spec` resource units. Configuration rejects
+partitioned tracks without this declaration or without matching resource
+capacity, so outer lanes cannot silently multiply an inherited inner default.
+xUnit v3 lanes use their compiled apphost
 reporter; the legacy xUnit v2 workflow-definition lane reuses its build through
 `dotnet test --no-build --no-restore` and its VSTest TRX reporter.
 

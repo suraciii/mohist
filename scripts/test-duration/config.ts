@@ -106,6 +106,15 @@ function validateTrack(track: TrackConfig): string[] {
   if (track.partitions !== undefined && !track.report.includes('{partition}')) {
     errors.push(`${prefix}: partitioned reports must include {partition}`)
   }
+  if (track.partitionMaxThreads !== undefined && (!Number.isInteger(track.partitionMaxThreads) || track.partitionMaxThreads <= 0)) {
+    errors.push(`${prefix}: partitionMaxThreads must be a positive integer`)
+  }
+  if (track.partitionMaxThreads !== undefined && track.partitions === undefined) {
+    errors.push(`${prefix}: partitionMaxThreads requires partitions`)
+  }
+  if (track.partitions !== undefined && track.partitionMaxThreads === undefined) {
+    errors.push(`${prefix}: partitioned tracks must declare partitionMaxThreads`)
+  }
   if (track.kind !== 'report-only' && !track.run && !track.csproj && !track.apphost) {
     errors.push(`${prefix}: needs a run command, csproj, or apphost`)
   }
@@ -153,6 +162,15 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
   for (const [resource, limit] of Object.entries(config.resourceLimits)) {
     if (!Number.isInteger(limit) || limit <= 0) {
       errors.push(`canonical.resourceLimits.${resource} must be a positive integer`)
+    }
+  }
+  for (const track of tracks) {
+    if (track.partitionMaxThreads === undefined) continue
+    const limit = config.resourceLimits['server-spec']
+    if (limit === undefined) {
+      errors.push(`track "${track.id}": partitionMaxThreads requires canonical.resourceLimits.server-spec`)
+    } else if (track.partitionMaxThreads > limit) {
+      errors.push(`track "${track.id}": partitionMaxThreads exceeds canonical.resourceLimits.server-spec`)
     }
   }
   if (config.durationMeasurementTracks !== undefined) {

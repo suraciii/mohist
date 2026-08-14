@@ -173,8 +173,10 @@ async function runPartition(
   partitionCount: number,
   manifestDirectory: string,
   reportPath: string,
+  maxThreads = 1,
 ): Promise<void> {
   if (!existsSync(apphost)) throw new Error(`apphost does not exist: ${apphost}`)
+  if (!Number.isInteger(maxThreads) || maxThreads <= 0) throw new Error('max-threads must be a positive integer')
   const discovery = await runCommand(apphost, ['-list', 'classes', '-noColor', '-noLogo', '-noAutoReporters'])
   if (discovery.exitCode !== 0) throw new Error('xUnit class discovery failed')
   const plan = planPartitionClasses(discovery.output, partitionIndex, partitionCount)
@@ -183,7 +185,9 @@ async function runPartition(
   mkdirSync(dirname(reportPath), { recursive: true })
   const classArgs = plan.selectedClasses.flatMap((className) => ['-class', className])
   const execution = await runCommand(apphost, [
-    '-noColor', '-noLogo', '-noAutoReporters', '-trx', reportPath, ...classArgs,
+    '-noColor', '-noLogo', '-noAutoReporters', '-parallel', 'collections',
+    '-parallelAlgorithm', 'conservative', '-maxThreads', String(maxThreads),
+    '-trx', reportPath, ...classArgs,
   ])
   writeFileSync(resolve(manifestDirectory, 'spec.log'), execution.output)
   if (execution.exitCode !== 0) throw new Error(`xUnit partition exited ${execution.exitCode ?? 'without an exit code'}`)
@@ -197,14 +201,14 @@ async function runPartition(
 
 function usage(): never {
   throw new Error(
-    'usage: spec-partition <run apphost index count manifest-dir report | verify manifest-root>',
+    'usage: spec-partition <run apphost index count manifest-dir report [max-threads] | verify manifest-root>',
   )
 }
 
 async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   try {
-    if (argv[0] === 'run' && argv.length === 6) {
-      await runPartition(argv[1], Number(argv[2]), Number(argv[3]), argv[4], argv[5])
+    if (argv[0] === 'run' && (argv.length === 6 || argv.length === 7)) {
+      await runPartition(argv[1], Number(argv[2]), Number(argv[3]), argv[4], argv[5], argv[6] === undefined ? 1 : Number(argv[6]))
       return 0
     }
     if (argv[0] === 'verify' && argv.length === 2) {
