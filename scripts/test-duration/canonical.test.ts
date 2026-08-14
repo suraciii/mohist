@@ -161,7 +161,7 @@ test('canonical gate retains an external diagnostic root for success, failure, a
   }
 })
 
-test('canonical gate passes its fake clock and absolute deadline into the guard boundary', async () => {
+test('canonical gate starts the measured deadline after setup completes', async () => {
   const { runtime, probe } = fakeRuntime(
     [
       { exitCode: 0, timedOut: false },
@@ -169,6 +169,7 @@ test('canonical gate passes its fake clock and absolute deadline into the guard 
       { exitCode: 0, timedOut: false },
     ],
     0,
+    [120_000, 60_000, 10_000],
   )
 
   const code = await main(runtime)
@@ -176,8 +177,8 @@ test('canonical gate passes its fake clock and absolute deadline into the guard 
   assert.equal(code, 0)
   assert.equal(probe.durationClock.length, 1)
   assert.equal(probe.durationClock[0], runtime.now)
-  assert.equal(probe.durationClock[0](), 1000)
-  assert.equal(probe.durationArgs[0].at(-1), '301000')
+  assert.equal(probe.durationClock[0](), 191_000)
+  assert.equal(probe.durationArgs[0].at(-1), '491000')
 })
 
 test('canonical gate uses the injected clock to stop before a new phase at the absolute execution cutoff', async () => {
