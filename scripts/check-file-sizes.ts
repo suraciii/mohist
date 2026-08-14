@@ -20,10 +20,10 @@ export function allowedLineCount(baseLines: number | null): number {
   return baseLines == null || baseLines <= maxLines ? maxLines : baseLines
 }
 
-export function evaluateFileSize({ baseLines, candidateLines }: {
-  baseLines: number | null
-  candidateLines: number
-}): { limit: number, violates: boolean } {
+export function evaluateFileSize({ baseLines, candidateLines }: { baseLines: number | null; candidateLines: number }): {
+  limit: number
+  violates: boolean
+} {
   const limit = allowedLineCount(baseLines)
   return { limit, violates: candidateLines > limit }
 }
@@ -34,11 +34,11 @@ export function isGovernedPath(filePath: string): boolean {
   return governedExtensions.has(extname(filePath))
 }
 
-export function parseChangedFiles(output: string): Array<{ status: string, path: string, oldPath?: string }> {
+export function parseChangedFiles(output: string): Array<{ status: string; path: string; oldPath?: string }> {
   const fields = output.split('\0')
   const changes = []
 
-  for (let index = 0; index < fields.length - 1;) {
+  for (let index = 0; index < fields.length - 1; ) {
     const status = fields[index]
     index += 1
     if (status.startsWith('R')) {
@@ -53,55 +53,57 @@ export function parseChangedFiles(output: string): Array<{ status: string, path:
   return changes
 }
 
-function git(args: string[]): string {
+export function gitText(args: string[], env: NodeJS.ProcessEnv = process.env): string {
   return execFileSync('git', args, {
     cwd: repositoryRoot,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env,
   })
 }
 
-function resolveBaseRef(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveBaseRef(env: NodeJS.ProcessEnv = process.env): string {
   if (env.FILE_SIZE_BASE_REF) return env.FILE_SIZE_BASE_REF
 
   try {
-    const mergeBase = git(['merge-base', 'origin/master', 'HEAD']).trim()
-    const head = git(['rev-parse', 'HEAD']).trim()
+    const mergeBase = gitText(['merge-base', 'origin/master', 'HEAD'], env).trim()
+    const head = gitText(['rev-parse', 'HEAD'], env).trim()
     return mergeBase === head ? head : mergeBase
   } catch (error) {
     throw new Error(
-      `Could not resolve the file-size base from origin/master: ${error instanceof Error ? error.message : String(error)}. `
-      + 'Fetch origin/master or set FILE_SIZE_BASE_REF to an explicit commit.',
+      `Could not resolve the file-size base from origin/master: ${error instanceof Error ? error.message : String(error)}. ` +
+        'Fetch origin/master or set FILE_SIZE_BASE_REF to an explicit commit.',
     )
   }
 }
 
-function readBaseFile(baseRef: string, filePath: string): string | null {
+export function changedFilesUnder(
+  baseRef: string,
+  root: string,
+): Array<{ status: string; path: string; oldPath?: string }> {
+  const diff = gitText(['diff', '--name-status', '-z', '--find-renames=90%', baseRef, '--', root])
+  const untracked = gitText(['ls-files', '--others', '--exclude-standard', '-z', '--', root])
+    .split('\0')
+    .filter((filePath) => filePath.length > 0)
+
+  return [...parseChangedFiles(diff), ...untracked.map((path) => ({ status: 'A', path }))]
+}
+
+function readBaseFile(baseRef: string, filePath: string): string {
   try {
-    return git(['show', `${baseRef}:${filePath}`])
+    return gitText(['show', `${baseRef}:${filePath}`])
   } catch {
     throw new Error(`Could not read ${filePath} from base ${baseRef}; fetch the base or set FILE_SIZE_BASE_REF`)
   }
 }
 
-function changedGovernedFiles(baseRef: string): Array<{ path: string, oldPath?: string, baseLines: number | null }> {
-  const diff = git(['diff', '--name-status', '-z', '--find-renames=90%', baseRef, '--', governedRoot])
-  const untracked = git(['ls-files', '--others', '--exclude-standard', '-z', '--', governedRoot])
-    .split('\0')
-    .filter((filePath) => filePath.length > 0)
-
-  const changes: Array<{ status: string, path: string, oldPath?: string }> = [
-    ...parseChangedFiles(diff),
-    ...untracked.map((path) => ({ status: 'A', path })),
-  ]
-
-  return changes
+function changedGovernedFiles(baseRef: string): Array<{ path: string; baseLines: number | null }> {
+  return changedFilesUnder(baseRef, governedRoot)
     .filter((change) => change.status !== 'D')
     .filter((change) => isGovernedPath(change.path))
     .map((change) => ({
       path: change.path,
-      oldPath: change.oldPath,
       baseLines: change.status === 'A' ? null : countLines(readBaseFile(baseRef, change.oldPath ?? change.path)),
     }))
 }
@@ -109,7 +111,7 @@ function changedGovernedFiles(baseRef: string): Array<{ path: string, oldPath?: 
 function run(): number {
   const baseRef = resolveBaseRef()
   // Fail loudly instead of silently turning a missing or shallow base into a pass.
-  git(['cat-file', '-e', `${baseRef}^{commit}`])
+  gitText(['cat-file', '-e', `${baseRef}^{commit}`])
 
   const violations = []
   for (const change of changedGovernedFiles(baseRef)) {
@@ -119,8 +121,8 @@ function run(): number {
 
     const before = change.baseLines == null ? 'new file' : `${change.baseLines} lines`
     violations.push(
-      `${change.path}: ${before} -> ${candidateLines} lines (allowed ${result.limit}). `
-      + 'Split the file; a file already over the limit may not grow.',
+      `${change.path}: ${before} -> ${candidateLines} lines (allowed ${result.limit}). ` +
+        'Split the file; a file already over the limit may not grow.',
     )
   }
 

@@ -177,6 +177,7 @@ Existing:
 - vitest: `isolate: false`; restoreMocks, unstubGlobals, unstubEnvs auto; projects by suffix.
 - web boundary guards: `vi.mock` ban locked at zero; MSW unhandled requests fail; weekly shuffled suite records a reproducible seed.
 - file-size ratchet (`scripts/check-file-sizes.ts`, `npm run check:filesizes`): new files over 1000 lines and any growth of an already-over-limit file fail against the merge-base with `origin/master`.
+- formatter ratchet (`scripts/check-format.ts`, `npm run format:check`): every `.js`/`.mjs`/`.ts`/`.tsx`/`.css` file changed against the merge-base must be biome-clean (`biome.json`, formatter only). Legacy files stay as-is until touched, so the repo converges file by file instead of through a one-shot reformat.
 
 Planned:
 - UnitTests csproj backstop: ban heavy fixtures (WebApplicationFactory, Orleans.TestingHost).

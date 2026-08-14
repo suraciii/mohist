@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Format staged JS/TS/CSS files with biome and re-stage them. Runs from the
+# repository root so biome.json and the git ignore file resolve identically to
+# a manual `npm run format`.
+set -euo pipefail
+
+cd "$(git rev-parse --path-format=absolute --git-common-dir)/.."
+
+staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.js' '*.mjs' '*.ts' '*.tsx' '*.css')
+if [[ -z "$staged" ]]; then
+  exit 0
+fi
+
+npm exec -- biome format --write $staged
+git add $staged
