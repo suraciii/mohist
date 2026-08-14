@@ -48,6 +48,61 @@ A Profile can reference external values through `${{ vars.* }}` and `${{ prompts
 declare or store those values. An Action Input that is fixed and belongs only to one task must be written
 directly in `definition`.
 
+## Agent Runtime Projection
+
+`agentRuntime` is a read-only projection used by Project, Issue, and create-Issue
+model selectors. It is not stored in `WorkflowProfile`, is not accepted in
+Workflow YAML, and does not participate in execution. `uses` remains the only
+Runtime selector for an inline Agent task.
+
+The Server derives the projection from the validated Definition with this
+built-in mapping:
+
+| Inline Agent Action | Runtime |
+|---|---|
+| `mohist/opencode` | `opencode` |
+| `mohist/pi` | `pi` |
+
+The scan includes Stage tasks and checks, Approval feedback tasks, recovery
+tasks, and the static `task.uses` default of `mohist/openspec-tasks`. It follows
+nested recovery tasks recursively. Runtime-created task overrides are execution
+data and do not change the Profile projection.
+
+The result is deliberately small:
+
+```text literal
+agentRuntime = exactly one discovered Runtime ? that Runtime : null
+```
+
+- A Profile with no inline Agent Action has `agentRuntime: null`.
+- A Profile that statically selects more than one Runtime has
+  `agentRuntime: null`.
+- `mohist/agent` does not contribute a Runtime because its named Agent
+  definition owns Runtime, model, and variant selection.
+- A null projection does not make the Profile invalid. It means Mohist cannot
+  offer one shared Workflow model selector for that Profile.
+
+The Project WorkflowProfile list and detail read models expose `agentRuntime`.
+The browser consumes that field and never parses Profile YAML or infers a
+Runtime from a model ID. A newly supported built-in Runtime adds one row to the
+mapping; it does not add a Profile field, Action input, or Runtime descriptor.
+
+The model selector resolves the Profile through the same selection rule as a
+future WorkflowRun:
+
+- Project settings use the Project's effective default Profile.
+- Issue settings use the Issue's explicit Profile, or the Project's effective
+  default when the Issue inherits it.
+- Create Issue uses the Profile currently selected in the form.
+- Stage-specific selectors use the same Profile Runtime while writing the
+  existing Stage-specific `vars.agent` override.
+
+After resolving the Profile, the selector requests that Runtime's existing
+model catalog. It never falls back to another Runtime. Changing a Profile does
+not rewrite or clear Project or Issue Variables. A configured model that is no
+longer present in discovery remains visible and can be changed or cleared
+explicitly.
+
 ## Selection
 
 An Issue makes one selection when it starts a WorkflowRun:
@@ -128,3 +183,6 @@ Project-managed Profiles; the Project default and explicit Issue selection, incl
 `--inherit-workflow-profile`; reference protection on deletion; the ability to change an Issue selection
 during an active Run with an effect only on the next Run; a fixed Profile ID for a Run with live Definition
 reads at Stage initialization and no Definition snapshot; and separate Variables and Prompts resources.
+
+Not yet implemented: the `agentRuntime` list/detail projection and its use by
+Project, Issue, and create-Issue model selectors.

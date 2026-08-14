@@ -78,6 +78,26 @@ archive a change.
 Pi is an independent peer Action, not an input extension of
 `mohist/opencode`.
 
+### Workflow Model Selection
+
+For an Inline Agent, `uses` selects the execution backend:
+
+| Action | Runtime |
+|---|---|
+| `mohist/opencode` | OpenCode |
+| `mohist/pi` | Pi |
+
+Project and Issue model selectors use the effective Workflow Profile to show
+models reported by that backend. They do not add `runtime` to `vars.agent` and
+do not change the selected Action. `vars.agent` continues to contain only
+Action options such as `model` and `variant`.
+
+When a Profile has no single Inline Agent Runtime, Mohist does not show a shared
+Workflow model selector. A task using `mohist/agent` is configured through its
+named Agent instead. If a configured model is not currently discovered, Mohist
+keeps the value visible until the user changes or clears it; it never substitutes
+a model from another backend.
+
 ## Shared Semantics for Agent Execution Actions
 
 `mohist/opencode` and `mohist/pi` share the following semantics. Their own
