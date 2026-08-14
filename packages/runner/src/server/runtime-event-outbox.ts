@@ -141,6 +141,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private snapshotInFlight: Promise<void> | null = null
   private recoveryInFlight: Promise<void> | null = null
   private readonly deliveryStop = new AbortController()
+  private nextDeliveryGroupLabel: string | null = null
   private recoveryRequiresLoad = false
   private loadAttempts = 0
 
@@ -357,8 +358,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     while (!signal.aborted && this.healthy && !this.stopped) {
       const groups = collectGroups([...this.records.values()])
       if (groups.length === 0) break
+      const selectedGroups = selectDeliveryGroups(groups, this.boundedConcurrency, this.nextDeliveryGroupLabel)
+      this.nextDeliveryGroupLabel = selectedGroups.nextLabel
       const tick: Promise<boolean>[] = []
-      for (const group of groups.slice(0, this.boundedConcurrency)) {
+      for (const group of selectedGroups.groups) {
         tick.push(this.drainGroup(group.label, signal))
       }
       if (tick.length === 0) break
@@ -602,6 +605,28 @@ function collectGroups(records: InternalRecord[]): GroupSnapshot[] {
     label,
     records: list.sort(sortBySequence),
   }))
+}
+
+function selectDeliveryGroups(
+  groups: GroupSnapshot[],
+  limit: number,
+  nextLabel: string | null,
+): { groups: GroupSnapshot[]; nextLabel: string | null } {
+  if (groups.length === 0) return { groups: [], nextLabel: null }
+
+  const start =
+    nextLabel === null
+      ? 0
+      : Math.max(
+          0,
+          groups.findIndex((group) => group.label === nextLabel),
+        )
+  const count = Math.min(limit, groups.length)
+  const selected = Array.from({ length: count }, (_, offset) => groups[(start + offset) % groups.length])
+  return {
+    groups: selected,
+    nextLabel: groups[(start + count) % groups.length]?.label ?? null,
+  }
 }
 
 function sequenceKey(record: RuntimeEventRecord): SequenceKey {
