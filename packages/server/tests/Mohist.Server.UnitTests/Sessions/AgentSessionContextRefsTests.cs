@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
@@ -7,8 +9,7 @@ using Xunit;
 namespace Mohist.Server.UnitTests.Sessions;
 
 /// <summary>
-/// Issue-327 T-002 / design D4: locks in the consolidated
-/// <see cref="AgentSessionContextRefs.TryBuild"/> parser — the single
+/// Locks in the consolidated <see cref="AgentSessionContextRefs.TryBuild"/> parser — the single
 /// construction site for the four-label context-reference envelope
 /// (issue-number / epic-number / repository / workspace-name) with the
 /// null-when-all-empty invariant previously duplicated in
@@ -18,7 +19,7 @@ namespace Mohist.Server.UnitTests.Sessions;
 /// Round-trips both wrapper call sites to prove the wire-format DTOs
 /// (<see cref="AgentSessionListContextRefsDto"/>,
 /// <see cref="GenericAgentSessionSummaryContextRefsDto"/>) are
-/// byte-identical to the pre-consolidation values.
+/// consistent across the public Session read models.
 /// </summary>
 public sealed class AgentSessionContextRefsTests
 {
@@ -131,7 +132,7 @@ public sealed class AgentSessionContextRefsTests
         var refs = AgentSessionContextRefs.TryBuild(record);
         var dto = refs is null
             ? null
-            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName);
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
@@ -148,7 +149,7 @@ public sealed class AgentSessionContextRefsTests
         var refs = AgentSessionContextRefs.TryBuild(record);
         var dto = refs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName);
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
@@ -165,28 +166,59 @@ public sealed class AgentSessionContextRefsTests
         var listRefs = AgentSessionContextRefs.TryBuild(record);
         var listDto = listRefs is null
             ? null
-            : new AgentSessionListContextRefsDto(listRefs.Value.IssueNumber, listRefs.Value.EpicNumber, listRefs.Value.Repository, listRefs.Value.WorkspaceName, listRefs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(listRefs.Value.IssueNumber, listRefs.Value.EpicNumber, listRefs.Value.Repository, listRefs.Value.WorkspaceName);
 
         var summaryRefs = AgentSessionContextRefs.TryBuild(record);
         var summaryDto = summaryRefs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(summaryRefs.Value.IssueNumber, summaryRefs.Value.EpicNumber, summaryRefs.Value.Repository, summaryRefs.Value.WorkspaceName, summaryRefs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(summaryRefs.Value.IssueNumber, summaryRefs.Value.EpicNumber, summaryRefs.Value.Repository, summaryRefs.Value.WorkspaceName);
 
         Assert.Null(listDto);
         Assert.Null(summaryDto);
+    }
+
+    [Fact]
+    public void TryBuild_WorkspacePathOnly_RemainsInternal()
+    {
+        var record = BuildRecord(workspacePath: "/srv/private/worktree");
+
+        var result = AgentSessionContextRefs.TryBuild(record);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void PublicContextDtos_OmitWorkspacePath()
+    {
+        var list = new AgentSessionListContextRefsDto(42, 7, "owner/repo", "issue-42");
+        var summary = new GenericAgentSessionSummaryContextRefsDto(42, 7, "owner/repo", "issue-42");
+        var unified = new UnifiedSessionContextRefsDto(42, 7, "owner/repo", "issue-42");
+
+        AssertNoWorkspacePath(list);
+        AssertNoWorkspacePath(summary);
+        AssertNoWorkspacePath(unified);
+    }
+
+    private static void AssertNoWorkspacePath(object value)
+    {
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(value, JSON.Options));
+        Assert.False(document.RootElement.TryGetProperty("workspacePath", out _));
+        Assert.Equal("issue-42", document.RootElement.GetProperty("workspaceName").GetString());
     }
 
     private static AgentSessionRecord BuildRecord(
         string? issueNumber = null,
         string? epic = null,
         string? repo = null,
-        string? workspace = null)
+        string? workspace = null,
+        string? workspacePath = null)
     {
         var labels = new Dictionary<string, string>(StringComparer.Ordinal);
         if (issueNumber is not null) labels[GenericAgentSessionMetadata.IssueNumber] = issueNumber;
         if (epic is not null) labels[GenericAgentSessionMetadata.EpicNumber] = epic;
         if (repo is not null) labels[GenericAgentSessionMetadata.Repository] = repo;
         if (workspace is not null) labels[GenericAgentSessionMetadata.WorkspaceName] = workspace;
+        if (workspacePath is not null) labels[GenericAgentSessionMetadata.WorkspacePath] = workspacePath;
         return new AgentSessionRecord(
             new AgentSessionRow(),
             new AgentSession { Id = "s_test", Runtime = new AgentSessionRuntime("r", null) },

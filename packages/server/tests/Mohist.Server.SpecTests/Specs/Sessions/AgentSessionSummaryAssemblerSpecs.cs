@@ -130,6 +130,31 @@ public class AgentSessionSummaryAssemblerSpecs
     }
 
     [Fact]
+    public async Task PublicSessionContext_OmitsWorkspacePathAcrossReadModels()
+    {
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(
+            projectId,
+            sessionId,
+            hasTranscript: false,
+            withContextRefs: true,
+            workspacePath: "/srv/private/worktree");
+        var querier = CreateQuerier();
+
+        var generic = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
+        var list = await querier.ListAgentSessionsAsync(projectId, AgentId);
+        var unified = await querier.GetUnifiedSessionSummaryAsync(projectId, sessionId);
+
+        Assert.NotNull(generic);
+        Assert.NotNull(unified);
+        var listItem = Assert.Single(list, item => item.SessionId == sessionId);
+        AssertPublicContext(generic!.ContextRefs);
+        AssertPublicContext(listItem.ContextRefs);
+        AssertPublicContext(unified!.ContextRefs);
+    }
+
+    [Fact]
     public async Task Summary_ContextRefsIsNull_WhenNoContextReferences()
     {
         var projectId = NewProjectId();
@@ -332,7 +357,8 @@ public class AgentSessionSummaryAssemblerSpecs
         bool withContextRefs = false,
         string? terminalStatus = null,
         bool active = false,
-        string? failureReason = null)
+        string? failureReason = null,
+        string? workspacePath = null)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
 
@@ -350,6 +376,8 @@ public class AgentSessionSummaryAssemblerSpecs
             labels[GenericAgentSessionMetadata.EpicNumber] = AgentEpicNumber;
             labels[GenericAgentSessionMetadata.Repository] = AgentRepository;
             labels[GenericAgentSessionMetadata.WorkspaceName] = AgentWorkspaceName;
+            if (workspacePath is not null)
+                labels[GenericAgentSessionMetadata.WorkspacePath] = workspacePath;
         }
 
         var stateJson = JsonSerializer.Serialize(new
@@ -439,6 +467,15 @@ public class AgentSessionSummaryAssemblerSpecs
         }
 
         await db.SaveChangesAsync();
+    }
+
+    private static void AssertPublicContext(object? contextRefs)
+    {
+        Assert.NotNull(contextRefs);
+        var json = JsonSerializer.Serialize(contextRefs, JSON.Options);
+        using var document = JsonDocument.Parse(json);
+        Assert.False(document.RootElement.TryGetProperty("workspacePath", out _));
+        Assert.Equal(AgentWorkspaceName, document.RootElement.GetProperty("workspaceName").GetString());
     }
 
     private async Task SeedMultiTurnClosedFactsAsync(string projectId, string sessionId)

@@ -21,8 +21,7 @@ internal static class AgentSessionContextRefs
         int? IssueNumber,
         int? EpicNumber,
         string? Repository,
-        string? WorkspaceName,
-        string? WorkspacePath);
+        string? WorkspaceName);
 
     /// <summary>
     /// Reads the four launch labels from <paramref name="record"/> and
@@ -41,17 +40,15 @@ internal static class AgentSessionContextRefs
         var epicNumber = TryReadPositiveNumber(record.Label(GenericAgentSessionMetadata.EpicNumber));
         var repository = record.Label(GenericAgentSessionMetadata.Repository);
         var workspaceName = record.Label(GenericAgentSessionMetadata.WorkspaceName);
-        var workspacePath = record.Label(GenericAgentSessionMetadata.WorkspacePath);
 
         if (issueNumber is null && epicNumber is null
             && string.IsNullOrWhiteSpace(repository)
-            && string.IsNullOrWhiteSpace(workspaceName)
-            && string.IsNullOrWhiteSpace(workspacePath))
+            && string.IsNullOrWhiteSpace(workspaceName))
         {
             return null;
         }
 
-        return new ContextRefs(issueNumber, epicNumber, repository, workspaceName, workspacePath);
+        return new ContextRefs(issueNumber, epicNumber, repository, workspaceName);
     }
 
     private static int? TryReadPositiveNumber(string? value) =>

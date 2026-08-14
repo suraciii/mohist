@@ -520,6 +520,17 @@ original identities and a risk warning.
 Server is the sole arbiter for Binding, Activity, admission, and operation results. Runner cannot
 independently replace a Binding or close an AgentSession because a process exited.
 
+## Public Execution Context
+
+The durable launch metadata may retain a filesystem `workspacePath` for internal
+dispatch, recovery, and storage lookup. It is not a public execution-context
+fact. Agent-scoped Session lists, generic Session summaries, and unified Session
+summaries expose only the Issue, Epic, repository, and named Workspace. CLI
+tables and Web types consume those same read models, so they cannot reconstruct
+or display the materialization path. Transcript raw diagnostics remain a
+separate, controlled presentation and do not turn this internal label into a
+public field.
+
 ## Verification Boundaries
 
 Tests must prove the contracts at deterministic seams without real Runtime, network, process,
