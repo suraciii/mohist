@@ -140,8 +140,7 @@ public static class RunnerRoutes
             HttpRequest request,
             IGrainFactory grains,
             Mohist.Server.Runner.Services.DispatchService dispatch,
-            IssueQuerier issues,
-            RunnerConnectionTracker connections,
+            IssueQuerier issues, RunnerConnectionTracker connections,
             CancellationToken ct) =>
         {
             RunnerPollRequest req = new([], []);
@@ -158,19 +157,7 @@ public static class RunnerRoutes
                     req = new RunnerPollRequest([], []);
                 }
             }
-
-            var currentConnectionId = connections.GetConnectionId(runnerId);
-            var connectionGeneration = currentConnectionId is not null
-                && string.Equals(req.ConnectionId, currentConnectionId, StringComparison.Ordinal)
-                ? connections.GetConnectionGeneration(runnerId)
-                : null;
-            req = req with
-            {
-                ConnectionGeneration = connectionGeneration,
-                AdmissionReady = req.AdmissionReady ?? false,
-            };
-
-            var response = await dispatch.PollAsync(runnerId, req, ct);
+            var response = await dispatch.PollAsync(runnerId, connections.ApplyPollAdmission(runnerId, req), ct);
             if (response.Dispatches.Count == 0) return Results.NoContent();
 
             var dispatches = await Task.WhenAll(response.Dispatches.Select(work =>

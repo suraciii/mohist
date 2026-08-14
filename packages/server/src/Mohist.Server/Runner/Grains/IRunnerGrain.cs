@@ -278,6 +278,9 @@ public sealed record RunnerRuntimeReadinessSnapshot(
         if (requiredRuntimes.Count == 0)
             return true;
 
+        if (Witnesses.Count == 0)
+            return ConnectionGeneration is null;
+
         return requiredRuntimes.All(runtime => Witnesses.Any(witness =>
             witness.Ready
             && witness.Generation is > 0

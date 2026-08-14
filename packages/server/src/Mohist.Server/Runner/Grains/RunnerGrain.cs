@@ -289,7 +289,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             var normalizedConnectionGeneration = connectionGeneration.Trim();
             if (_info.ConnectionGeneration is { } registered
                 && !string.Equals(registered, normalizedConnectionGeneration, StringComparison.Ordinal))
-                return RunnerRuntimeReadinessSnapshot.Empty;
+                return new RunnerRuntimeReadinessSnapshot(normalizedConnectionGeneration, []);
 
             if (!string.Equals(_readinessConnectionGeneration, normalizedConnectionGeneration, StringComparison.Ordinal))
             {
