@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Active development — do not design for version compatibility.
+Active development.
 
 - server: ASP.NET Core + Orleans, .NET 11 (`packages/server/`)
 - runner: TypeScript, Node (`packages/runner/`)
@@ -12,13 +12,14 @@ Active development — do not design for version compatibility.
 
 ## Engineering Principles
 
+- Follow KISS and YAGNI. Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
 - Study established products before designing a solution. Reuse proven patterns and conventions when they fit the current requirements.
-- Choose the simplest design that fully meets the current requirements.
-- Grow the system in working layers. Do not trade a working product for unfinished complexity.
-- Keep modules small and keep different concerns separate.
-- Check existing dependencies before adding code or a package. Prefer a maintained library when it reduces complexity or improves reliability.
-- Make architecture decisions for the long term. Do not create a stopgap that is meant to be replaced later.
-- Remove obsolete paths. Add compatibility code only when the product contract requires it.
+- Grow the system in working layers. Start with the smallest version that works end to end, then add each capability on top of a product that already works. Never trade a working product for unfinished complexity.
+- Keep components modular and concerns clearly separated.
+- Lean on the dependencies already in the project before writing your own implementation or adding packages. Check their documentation and types before assuming they lack a capability.
+- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 - Keep models small. Add only the properties that the current contract needs.
 
 ## Architecture Constraints
