@@ -595,7 +595,7 @@ internal sealed class MohistCliApi
         }
     }
 
-    public async Task<int> PrintOpencodeModelsAsync(string projectId, string mode)
+    public async Task<int> PrintOpencodeModelsAsync(string projectId, string? runtime, string mode)
     {
         var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.Models));
         if (localExit is not null)
@@ -609,7 +609,10 @@ internal sealed class MohistCliApi
         JsonNode? data;
         try
         {
-            data = await GetDataAsync($"/api/projects/{Uri.EscapeDataString(projectId)}/opencode/models");
+            var runtimeQuery = string.IsNullOrWhiteSpace(runtime)
+                ? string.Empty
+                : $"?runtime={Uri.EscapeDataString(runtime.Trim())}";
+            data = await GetDataAsync($"/api/projects/{Uri.EscapeDataString(projectId)}/opencode/models{runtimeQuery}");
         }
         catch (HttpRequestException)
         {
@@ -1230,6 +1233,7 @@ internal sealed class MohistCliApi
         IssueTemplateList,
         IssueTemplateShow,
         WorkflowProfileList,
+        WorkflowProfileDetail,
         RunnerList,
         RunnerShow,
         Models,

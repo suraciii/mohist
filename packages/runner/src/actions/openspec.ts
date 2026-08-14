@@ -77,7 +77,19 @@ export async function openspecTasksAction(inputs: JsonObject, host: ActionHost):
   if (!Array.isArray(root.tasks)) return fail("invalid-input", "tasks.json must contain a tasks array")
 
   const taskDefaults = objectInput(inputs, "task")
-  const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/opencode"
+  const templateUses = taskDefaults?.["uses"]
+  if (typeof templateUses !== "string" || !templateUses.trim()) {
+    return fail("invalid-input", "OpenSpec task loader requires non-empty 'task.uses'")
+  }
+  const sourceUses = sourceTasks.find((task) => Object.prototype.hasOwnProperty.call(task, "uses"))
+  if (sourceUses) {
+    const sourceTaskId = stringInput(sourceUses, "id") ?? stringInput(sourceUses, "taskId") ?? "unknown"
+    return fail(
+      "invalid-input",
+      `tasks.json task '${sourceTaskId}' must not declare 'uses'; configure 'task.uses' on mohist/openspec-tasks`,
+    )
+  }
+  const taskUses = templateUses.trim()
   const defaultWith = objectInput(taskDefaults, "with")
   const itemsPath = stringInput(inputs, "items") ?? DEFAULT_OPENSPEC_ITEMS_PATH
   const buildPrompt = stringInput(inputs, "buildPrompt")
@@ -85,10 +97,9 @@ export async function openspecTasksAction(inputs: JsonObject, host: ActionHost):
     const id = stringInput(task, "id") ?? stringInput(task, "taskId")
     if (!id?.trim()) return []
     const title = stringInput(task, "title") ?? id
-    const uses = stringInput(task, "uses") ?? defaultUses
     const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath }, buildPrompt)
     const expect = mergeTaskExpect(task)
-    return [{ id, title, uses, with: mergedWith ?? null, expect }]
+    return [{ id, title, uses: taskUses, with: mergedWith ?? null, expect }]
   })
 
   if (tasks.length === 0) {

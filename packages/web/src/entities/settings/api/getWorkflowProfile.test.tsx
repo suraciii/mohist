@@ -30,6 +30,7 @@ const PROFILE_DETAIL = {
   sourceProvenance: 'BuiltIn',
   isBuiltIn: true,
   definitionSource: 'stages:\n  - stage: build\n',
+  agentAction: 'mohist/opencode',
   agentRuntime: 'opencode',
   stages: [{ stage: 'build', requiresApproval: false, tasks: ['run'], checks: [] }],
 }
@@ -106,6 +107,7 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
       displayName: 'Mohist Local',
       description: PROFILE_DETAIL.description,
       isDefault: true,
+      agentAction: 'mohist/opencode',
       agentRuntime: 'opencode',
       definitionSource: PROFILE_DETAIL.definitionSource,
     }))

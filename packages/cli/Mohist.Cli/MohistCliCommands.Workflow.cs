@@ -5,9 +5,8 @@ namespace Mohist.Cli;
 
 internal static class WorkflowCommands
 {
-    private static readonly ResourceDescriptor WorkflowProfileDescriptor = new(
-        ResourceCardinality.Single,
-        ["profileId", "name", "description", "definitionSource", "sourceProvenance", "isBuiltIn"]);
+    private static readonly ResourceDescriptor WorkflowProfileDescriptor =
+        ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WorkflowProfileDetail));
 
     private static string Path(string projectId, string? profileId = null) =>
         $"/api/projects/{MohistCliCommands.Escape(projectId)}/workflow-profiles" +
@@ -79,8 +78,8 @@ internal static class WorkflowCommands
                 return 0;
             }
             return ctx.GetResult(json) is null
-                ? await api.RenderTableAsync(data.Data, MohistCliApi.TableShape.WorkflowProfile)
-                : await api.WriteSelectedDataAsync(data.Data, "json:" + ctx.GetValue(json), nameof(MohistCliApi.TableShape.WorkflowProfile));
+                ? await api.RenderTableAsync(data.Data, MohistCliApi.TableShape.WorkflowProfileDetail)
+                : await api.WriteSelectedDataAsync(data.Data, "json:" + ctx.GetValue(json), nameof(MohistCliApi.TableShape.WorkflowProfileDetail));
         });
         return cmd;
     }
@@ -119,7 +118,7 @@ internal static class WorkflowCommands
             var (mode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
             if (outputExit != 0) return outputExit;
             var body = new { profileId, name = ctx.GetValue(nameOpt), description = ctx.GetValue(descriptionOpt), definitionSource = ((BodyInputResolver.Result.Success)source).Body };
-            return await api.PrintMutationResourceAsync(method, Path(resolved, method == HttpMethod.Post ? null : profileId), body, WorkflowProfileDescriptor, new JsonSelection(JsonSelectionKind.None, [], null), data => mode.StartsWith("json:", StringComparison.Ordinal) ? api.WriteSelectedDataAsync(data, mode, nameof(MohistCliApi.TableShape.WorkflowProfile)) : api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowProfile));
+            return await api.PrintMutationResourceAsync(method, Path(resolved, method == HttpMethod.Post ? null : profileId), body, WorkflowProfileDescriptor, new JsonSelection(JsonSelectionKind.None, [], null), data => mode.StartsWith("json:", StringComparison.Ordinal) ? api.WriteSelectedDataAsync(data, mode, nameof(MohistCliApi.TableShape.WorkflowProfileDetail)) : api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowProfileDetail));
         });
         return cmd;
     }
@@ -137,15 +136,15 @@ internal static class WorkflowCommands
             if (resolveExit != 0) return resolveExit;
             var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(output));
             if (exit != 0) return exit;
-            return await api.PrintDeleteWithOutputAsync(Path(resolved, ctx.GetValue(profile)), mode, nameof(MohistCliApi.TableShape.WorkflowProfile));
+            return await api.PrintDeleteWithOutputAsync(Path(resolved, ctx.GetValue(profile)), mode, nameof(MohistCliApi.TableShape.WorkflowProfileDetail));
         });
         return cmd;
     }
 
     private static Command BuildValidate(MohistCliApi api)
     {
-        var cmd = new Command("validate", "Validate a local Workflow Definition without contacting a server");
-        var file = new Option<string>("--file") { Arity = ArgumentArity.ExactlyOne, Description = "Definition file path, or - for stdin" };
+        var cmd = new Command("validate", "Validate a local Workflow Profile without contacting a server");
+        var file = new Option<string>("--file") { Arity = ArgumentArity.ExactlyOne, Description = "Profile file path, or - for stdin" };
         cmd.Options.Add(file);
         cmd.SetAction(ctx => ValidateLocalAsync(api, ctx.GetValue(file)));
         return cmd;
@@ -156,10 +155,10 @@ internal static class WorkflowCommands
         if (string.IsNullOrWhiteSpace(file)) { api.Error.WriteLine("--file is required and must not be empty"); return 1; }
         string source;
         try { source = file == "-" ? await api.StandardInput.ReadToEndAsync() : await api.FileSystem.ReadAllTextAsync(file); }
-        catch (Exception ex) { api.Error.WriteLine($"could not read Workflow Definition file: {file} ({ex.Message})"); return 1; }
-        var result = Mohist.Workflow.Definition.WorkflowDefinitionParser.Parse(source);
+        catch (Exception ex) { api.Error.WriteLine($"could not read Workflow Profile file: {file} ({ex.Message})"); return 1; }
+        var result = Mohist.Workflow.Definition.WorkflowProfileParser.Parse(source, "local");
         if (!result.IsValid) { foreach (var error in result.Errors) api.Error.WriteLine($"{error.Path}: {error.Message}"); return 1; }
-        api.Output.WriteLine("Workflow Definition is valid.");
+        api.Output.WriteLine("Workflow Profile is valid.");
         return 0;
     }
 }

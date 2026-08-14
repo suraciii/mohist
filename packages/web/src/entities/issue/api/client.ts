@@ -1,5 +1,6 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
 import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, IssueListItem, IssueParentCandidate, StoredCloudEventDto, TaskLogPage, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { WorkflowRunDetail } from '../model/workflow-run'
 import type { IssueListParams } from './query-keys'
 
 export interface IssueWorkflowVariables {
@@ -21,6 +22,10 @@ export function getIssues(params?: IssueListParams, signal?: AbortSignal) {
 
 export function getIssue(number: number, projectId?: string | null, signal?: AbortSignal) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`), { signal })
+}
+
+export function getWorkflowRunDetail(workflowRunId: string, signal?: AbortSignal) {
+  return request<WorkflowRunDetail>(`/workflow-runs/${encodeURIComponent(workflowRunId)}`, { signal })
 }
 
 export function getParentIssueCandidates(projectId?: string | null, signal?: AbortSignal) {

@@ -6,7 +6,9 @@ namespace Mohist.Server.Workflow.Services;
 
 internal static class ActionContractValidator
 {
+    public const string AgentTurnCapability = "agent-turn";
     private const string EngineReservedKey = "working-directory";
+    private const string OpenSpecTasksUses = "mohist/openspec-tasks";
 
     private static readonly string[] CanonicalKindOrder = ["string", "number", "boolean", "object", "array"];
 
@@ -68,10 +70,103 @@ internal static class ActionContractValidator
             }
         }
 
+        if (definition.Recoveries is not null)
+        {
+            foreach (var (name, recovery) in definition.Recoveries)
+            {
+                ValidateRecoveryTasks(errors, recovery, $"recoveries.{name}", actionsByName, tombstonesByName);
+            }
+        }
+
         return errors
             .OrderBy(error => error.Path, StringComparer.Ordinal)
             .ThenBy(error => error.Message, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    public static IReadOnlyList<ValidationError> ValidateAgentAction(
+        WorkflowDefinition? definition,
+        string agentAction,
+        ActionCatalog catalog)
+    {
+        var errors = new List<ValidationError>();
+        var selected = catalog.Actions.FirstOrDefault(action =>
+            string.Equals(action.Name, agentAction, StringComparison.Ordinal));
+        var tombstone = catalog.Tombstones.FirstOrDefault(action =>
+            string.Equals(action.Name, agentAction, StringComparison.Ordinal));
+
+        if (tombstone is not null)
+            errors.Add(new ValidationError("agentAction", $"Agent Action '{agentAction}' was removed: {tombstone.Guidance}", ValidationSource.Action));
+        else if (selected is null)
+            errors.Add(new ValidationError("agentAction", $"Agent Action '{agentAction}' is not available in the current Runner catalog", ValidationSource.Action));
+        else if (selected.Capabilities?.Contains(AgentTurnCapability, StringComparer.Ordinal) != true)
+            errors.Add(new ValidationError("agentAction", $"Action '{agentAction}' does not declare the '{AgentTurnCapability}' capability", ValidationSource.Action));
+
+        if (definition is not null)
+        {
+            foreach (var (path, uses) in EnumerateUses(definition))
+            {
+                var action = catalog.Actions.FirstOrDefault(entry => string.Equals(entry.Name, uses, StringComparison.Ordinal));
+                if (action?.Capabilities?.Contains(AgentTurnCapability, StringComparer.Ordinal) == true
+                    && !string.Equals(uses, agentAction, StringComparison.Ordinal))
+                {
+                    errors.Add(new ValidationError(
+                        $"{path}.uses",
+                        $"Agent Action binding '{agentAction}' cannot be mixed with literal Agent Action '{uses}'",
+                        ValidationSource.Action));
+                }
+            }
+        }
+
+        return errors
+            .OrderBy(error => error.Path, StringComparer.Ordinal)
+            .ThenBy(error => error.Message, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IEnumerable<(string Path, string Uses)> EnumerateUses(WorkflowDefinition definition)
+    {
+        static IEnumerable<(string Path, string Uses)> TaskUses(TaskDefinition task, string path)
+        {
+            yield return (path, task.Uses);
+            if (TryReadOpenSpecGeneratedTask(task, out var generatedTask))
+                yield return ($"{path}.with.task", generatedTask.Uses);
+            if (task.Recovery?.Handlers is not { Count: > 0 } handlers) yield break;
+            for (var handlerIndex = 0; handlerIndex < handlers.Count; handlerIndex++)
+            {
+                var tasks = handlers[handlerIndex].Tasks ?? [];
+                for (var taskIndex = 0; taskIndex < tasks.Count; taskIndex++)
+                    foreach (var item in TaskUses(tasks[taskIndex], $"{path}.recovery.handlers[{handlerIndex}].tasks[{taskIndex}]"))
+                        yield return item;
+            }
+        }
+
+        for (var stageIndex = 0; stageIndex < definition.Stages.Count; stageIndex++)
+        {
+            var stage = definition.Stages[stageIndex];
+            for (var taskIndex = 0; taskIndex < stage.Tasks.Count; taskIndex++)
+                foreach (var item in TaskUses(stage.Tasks[taskIndex], $"stages[{stageIndex}].tasks[{taskIndex}]"))
+                    yield return item;
+            for (var checkIndex = 0; checkIndex < stage.Checks.Count; checkIndex++)
+                yield return ($"stages[{stageIndex}].checks[{checkIndex}]", stage.Checks[checkIndex].Uses);
+        }
+
+        var feedbackTasks = definition.Approval?.Feedback?.Tasks ?? [];
+        for (var taskIndex = 0; taskIndex < feedbackTasks.Count; taskIndex++)
+            foreach (var item in TaskUses(feedbackTasks[taskIndex], $"approval.feedback.tasks[{taskIndex}]"))
+                yield return item;
+
+        if (definition.Recoveries is null) yield break;
+        foreach (var (name, recovery) in definition.Recoveries)
+        {
+            for (var handlerIndex = 0; handlerIndex < recovery.Handlers.Count; handlerIndex++)
+            {
+                var tasks = recovery.Handlers[handlerIndex].Tasks ?? [];
+                for (var taskIndex = 0; taskIndex < tasks.Count; taskIndex++)
+                    foreach (var item in TaskUses(tasks[taskIndex], $"recoveries.{name}.handlers[{handlerIndex}].tasks[{taskIndex}]"))
+                        yield return item;
+            }
+        }
     }
 
     private static void ValidateTask(
@@ -87,22 +182,93 @@ internal static class ActionContractValidator
             && actionsByName.TryGetValue(task.Uses, out var action))
         {
             ValidateWith(errors, task.Id, "Task", taskPath, task.With, action);
-        }
 
-        if (task.Recovery?.Handlers is { Count: > 0 } handlers)
-        {
-            for (var handlerIndex = 0; handlerIndex < handlers.Count; handlerIndex++)
+            if (string.Equals(task.Uses, OpenSpecTasksUses, StringComparison.Ordinal))
             {
-                var handler = handlers[handlerIndex];
-                if (handler.Tasks is null) continue;
-                for (var innerTaskIndex = 0; innerTaskIndex < handler.Tasks.Count; innerTaskIndex++)
-                {
-                    ValidateTask(errors, handler.Tasks[innerTaskIndex],
-                        $"{taskPath}.recovery.handlers[{handlerIndex}].tasks[{innerTaskIndex}]",
-                        actionsByName, tombstonesByName);
-                }
+                ValidateOpenSpecGeneratedTask(errors, task, taskPath, actionsByName, tombstonesByName);
             }
         }
+
+        ValidateRecoveryTasks(errors, task.Recovery, $"{taskPath}.recovery", actionsByName, tombstonesByName);
+    }
+
+    private static void ValidateRecoveryTasks(
+        List<ValidationError> errors,
+        RecoveryDefinition? recovery,
+        string recoveryPath,
+        IReadOnlyDictionary<string, ActionCatalogEntry> actionsByName,
+        IReadOnlyDictionary<string, ActionCatalogTombstone> tombstonesByName)
+    {
+        if (recovery?.Handlers is not { Count: > 0 } handlers) return;
+
+        for (var handlerIndex = 0; handlerIndex < handlers.Count; handlerIndex++)
+        {
+            var handler = handlers[handlerIndex];
+            if (handler.Tasks is null) continue;
+            for (var taskIndex = 0; taskIndex < handler.Tasks.Count; taskIndex++)
+            {
+                ValidateTask(errors, handler.Tasks[taskIndex],
+                    $"{recoveryPath}.handlers[{handlerIndex}].tasks[{taskIndex}]",
+                    actionsByName, tombstonesByName);
+            }
+        }
+    }
+
+    private static void ValidateOpenSpecGeneratedTask(
+        List<ValidationError> errors,
+        TaskDefinition loaderTask,
+        string loaderTaskPath,
+        IReadOnlyDictionary<string, ActionCatalogEntry> actionsByName,
+        IReadOnlyDictionary<string, ActionCatalogTombstone> tombstonesByName)
+    {
+        if (!TryReadOpenSpecGeneratedTask(loaderTask, out var generatedTask)) return;
+        if (string.IsNullOrWhiteSpace(generatedTask.Uses))
+        {
+            errors.Add(new ValidationError(
+                $"{loaderTaskPath}.with.task.uses",
+                "OpenSpec generated task requires a non-empty Action 'uses' value",
+                ValidationSource.Action));
+            return;
+        }
+
+        ValidateTask(
+            errors,
+            generatedTask,
+            $"{loaderTaskPath}.with.task",
+            actionsByName,
+            tombstonesByName);
+    }
+
+    private static bool TryReadOpenSpecGeneratedTask(
+        TaskDefinition loaderTask,
+        out TaskDefinition generatedTask)
+    {
+        generatedTask = null!;
+        if (!string.Equals(loaderTask.Uses, OpenSpecTasksUses, StringComparison.Ordinal)
+            || loaderTask.With is null
+            || !loaderTask.With.TryGetValue("task", out var taskTemplate)
+            || !taskTemplate.HasValue
+            || taskTemplate.Value.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var template = taskTemplate.Value;
+        var uses = template.TryGetProperty("uses", out var usesElement)
+            && usesElement.ValueKind == JsonValueKind.String
+                ? usesElement.GetString() ?? string.Empty
+                : string.Empty;
+        Dictionary<string, JsonElement?>? with = null;
+        if (template.TryGetProperty("with", out var withElement)
+            && withElement.ValueKind == JsonValueKind.Object)
+        {
+            with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+            foreach (var property in withElement.EnumerateObject())
+                with[property.Name] = property.Value.Clone();
+        }
+
+        generatedTask = new TaskDefinition(loaderTask.Id, Uses: uses, With: with);
+        return true;
     }
 
     private static void ValidateCheck(

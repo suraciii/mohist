@@ -3,9 +3,11 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Grains.Coordinator;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Orleans;
 using Orleans.Runtime;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -64,7 +66,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             _log.LogInformation(
                 "WorkflowProfileReferenceCoordinator {ProjectId} replaying pending command {CommandId} kind={Kind} on activation",
                 ProjectId, pending.CommandId, pending.Kind);
-            await ReplayPendingAsync(pending);
+            _ = await ReplayPendingAsync(pending);
         }
     }
 
@@ -114,32 +116,163 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("commandId is required", nameof(commandId));
 
-        if (!await _provider.ContainsAsync(payload.ProjectId, payload.ProfileId))
+        if (_state.State.Pending is { } existingFence)
         {
-            return new WorkflowProfileReferenceResult(
-                WorkflowProfileReferenceResultCode.ProfileUnknown,
-                payload.ProfileId,
-                expectedRevision ?? 0L,
-                $"Profile '{payload.ProfileId}' is not in the project collection");
+            if (string.Equals(existingFence.CommandId, commandId, StringComparison.Ordinal))
+            {
+                if (existingFence.Kind != WorkflowProfileCommandPayloadKinds.BindWorkflowRun)
+                {
+                    return new WorkflowProfileReferenceResult(
+                        WorkflowProfileReferenceResultCode.ConflictingRequest,
+                        existingFence.ProfileId,
+                        existingFence.ExpectedRevision,
+                        $"Command '{commandId}' was reused with a different canonical payload");
+                }
+                var pendingPayload = (WorkflowProfileCommandPayload.BindWorkflowRun)
+                    WorkflowProfileCommandPayloadCodec.Deserialize(existingFence.Kind, existingFence.PayloadJson);
+                if (!SameStartRequest(payload, pendingPayload))
+                {
+                    return new WorkflowProfileReferenceResult(
+                        WorkflowProfileReferenceResultCode.ConflictingRequest,
+                        pendingPayload.ProfileId,
+                        existingFence.ExpectedRevision,
+                        $"Command '{commandId}' was reused with different startup facts");
+                }
+            }
+            _ = await ReplayPendingAsync(existingFence);
         }
 
+        var participant = _grains.GetGrain<IWorkflowRunBindingParticipant>(payload.WorkflowRunId);
+        var receipt = await participant.GetBindingAsync(payload);
+        if (receipt.Outcome == WorkflowRunBindingOutcome.Conflict)
+            return new WorkflowProfileReferenceResult(
+                WorkflowProfileReferenceResultCode.ConflictingRequest,
+                receipt.Binding?.ProfileId ?? payload.ExplicitProfileId ?? string.Empty,
+                expectedRevision ?? 0L,
+                receipt.Message,
+                Binding: receipt.Binding);
+        if (receipt.Binding is not null)
+            return new WorkflowProfileReferenceResult(
+                WorkflowProfileReferenceResultCode.AlreadyApplied,
+                receipt.Binding.ProfileId,
+                expectedRevision ?? 0L,
+                Binding: receipt.Binding);
+
+        var bound = await ResolveWorkflowStartAsync(payload);
+        if (bound is null)
+            return new WorkflowProfileReferenceResult(
+                WorkflowProfileReferenceResultCode.ProfileUnknown,
+                payload.ExplicitProfileId ?? string.Empty,
+                expectedRevision ?? 0L,
+                "No enabled Workflow Profile is available for this Project");
+
+        var boundPayload = payload with { Bound = bound };
         var pending = await AcquireFenceAsync(
             WorkflowProfileCommandPayloadKinds.BindWorkflowRun,
-            payload.ProfileId,
+            bound.ProfileId,
             commandId,
             expectedRevision,
-            payload);
+            boundPayload);
 
         if (pending.Replay is not null)
             return pending.Replay;
 
-        var participant = _grains.GetGrain<IWorkflowRunBindingParticipant>(payload.WorkflowRunId);
-        var outcome = await participant.BindAsync(payload, commandId, pending.CapturedRevision);
+        var outcome = await participant.BindAsync(bound, commandId, pending.CapturedRevision);
         await ClearFenceAsync(commandId);
         return new WorkflowProfileReferenceResult(
-            Code: MapRunOutcome(outcome),
-            ProfileId: payload.ProfileId,
-            AppliedRevision: pending.CapturedRevision);
+            Code: MapRunOutcome(outcome.Outcome),
+            ProfileId: bound.ProfileId,
+            AppliedRevision: pending.CapturedRevision,
+            Message: outcome.Message,
+            Binding: outcome.Binding);
+    }
+
+    public async Task<WorkflowProfileReferenceResult> SetAgentActionOverrideAsync(
+        WorkflowProfileCommandPayload.SetAgentActionOverride payload,
+        string commandId,
+        long? expectedRevision)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (_state.State.Pending is { } existing)
+        {
+            var payloadJson = WorkflowProfileCommandPayloadCodec.Serialize(payload);
+            if (string.Equals(existing.CommandId, commandId, StringComparison.Ordinal))
+            {
+                if (existing.Kind != payload.Kind
+                    || !string.Equals(existing.PayloadJson, payloadJson, StringComparison.Ordinal))
+                    throw new InvalidOperationException($"Command '{commandId}' was reused with a different canonical payload");
+                return await ReplayPendingAsync(existing)
+                    ?? throw new InvalidOperationException(
+                        $"Pending command '{commandId}' did not produce an Agent Action override result");
+            }
+            _ = await ReplayPendingAsync(existing);
+        }
+        await _provider.ValidateAgentActionOverrideAsync(
+            payload.ProjectId,
+            payload.ProfileId,
+            payload.AgentAction);
+
+        var pending = await AcquireFenceAsync(
+            WorkflowProfileCommandPayloadKinds.SetAgentActionOverride,
+            payload.ProfileId,
+            commandId,
+            expectedRevision,
+            payload);
+        var participant = _grains.GetGrain<IProjectWorkflowProfileBindingParticipant>(payload.ProjectId);
+        var outcome = await participant.SetAgentActionOverrideAsync(payload, commandId, pending.CapturedRevision);
+        await ClearFenceAsync(commandId);
+        return new WorkflowProfileReferenceResult(
+            MapProjectOutcome(outcome),
+            payload.ProfileId,
+            pending.CapturedRevision);
+    }
+
+    public async Task<WorkflowProfileSaveResult> UpdateProfileAsync(
+        WorkflowProfileCommandPayload.UpdateProfile payload,
+        string commandId,
+        long? expectedRevision)
+    {
+        var pending = await AcquireFenceAsync(
+            WorkflowProfileCommandPayloadKinds.UpdateProfile,
+            payload.ProfileId,
+            commandId,
+            expectedRevision,
+            payload);
+        try
+        {
+            var result = await _provider.UpdateAsync(
+                payload.ProjectId,
+                new WorkflowProfileCollectionEntry(
+                    payload.ProjectId,
+                    payload.ProfileId,
+                    payload.Name,
+                    payload.Description,
+                    WorkflowProfileSourceProvenance.Verbatim,
+                    IsBuiltIn: false,
+                    payload.DefinitionSource));
+            await ClearFenceAsync(commandId);
+            return result;
+        }
+        catch (WorkflowDefinitionValidationException)
+        {
+            await ClearFenceAsync(commandId);
+            throw;
+        }
+        catch (WorkflowProfileNotFoundException)
+        {
+            await ClearFenceAsync(commandId);
+            throw;
+        }
+        catch (WorkflowProfileReadOnlyException)
+        {
+            await ClearFenceAsync(commandId);
+            throw;
+        }
+        catch (ArgumentException)
+        {
+            await ClearFenceAsync(commandId);
+            throw;
+        }
     }
 
     public async Task<WorkflowProfileReferenceResult> DeleteProfileAsync(
@@ -237,14 +370,20 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         var existing = _state.State.Pending;
         if (existing is not null)
         {
-            if (string.Equals(existing.CommandId, commandId, StringComparison.Ordinal)
-                && existing.Kind == kind
-                && string.Equals(existing.ProfileId, profileId, StringComparison.Ordinal))
+            var payloadJson = WorkflowProfileCommandPayloadCodec.Serialize(payload);
+            if (string.Equals(existing.CommandId, commandId, StringComparison.Ordinal))
             {
-                return new FenceDecision(existing.ExpectedRevision, null);
+                if (existing.Kind == kind
+                    && string.Equals(existing.ProfileId, profileId, StringComparison.Ordinal)
+                    && string.Equals(existing.PayloadJson, payloadJson, StringComparison.Ordinal))
+                {
+                    return new FenceDecision(existing.ExpectedRevision, null);
+                }
+                throw new InvalidOperationException(
+                    $"Command '{commandId}' was reused with a different canonical payload");
             }
 
-            await ReplayPendingAsync(existing);
+            _ = await ReplayPendingAsync(existing);
         }
 
         var capturedRevision = expectedRevision ?? 1L;
@@ -261,9 +400,10 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         return new FenceDecision(capturedRevision, null);
     }
 
-    private async Task ReplayPendingAsync(PendingWorkflowProfileCommand pending)
+    private async Task<WorkflowProfileReferenceResult?> ReplayPendingAsync(PendingWorkflowProfileCommand pending)
     {
         var payload = WorkflowProfileCommandPayloadCodec.Deserialize(pending.Kind, pending.PayloadJson);
+        WorkflowProfileReferenceResult? result = null;
         try
         {
             switch (pending.Kind)
@@ -272,20 +412,60 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
                 {
                     var p = (WorkflowProfileCommandPayload.SetProjectDefault)payload;
                     var participant = _grains.GetGrain<IProjectWorkflowProfileBindingParticipant>(p.ProjectId);
-                    await participant.SetDefaultAsync(p, pending.CommandId, pending.ExpectedRevision);
+                    var outcome = await participant.SetDefaultAsync(p, pending.CommandId, pending.ExpectedRevision);
+                    result = new WorkflowProfileReferenceResult(
+                        MapProjectOutcome(outcome), p.ProfileId, pending.ExpectedRevision);
                     break;
                 }
                 case WorkflowProfileCommandPayloadKinds.BindWorkflowRun:
                 {
                     var p = (WorkflowProfileCommandPayload.BindWorkflowRun)payload;
+                    if (p.Bound is null)
+                        throw new InvalidOperationException("Pending WorkflowRun binding has no resolved startup payload");
                     var participant = _grains.GetGrain<IWorkflowRunBindingParticipant>(p.WorkflowRunId);
-                    await participant.BindAsync(p, pending.CommandId, pending.ExpectedRevision);
+                    var outcome = await participant.BindAsync(p.Bound, pending.CommandId, pending.ExpectedRevision);
+                    result = new WorkflowProfileReferenceResult(
+                        MapRunOutcome(outcome.Outcome),
+                        outcome.Binding?.ProfileId ?? p.Bound.ProfileId,
+                        pending.ExpectedRevision,
+                        outcome.Message,
+                        Binding: outcome.Binding);
+                    break;
+                }
+                case WorkflowProfileCommandPayloadKinds.SetAgentActionOverride:
+                {
+                    var p = (WorkflowProfileCommandPayload.SetAgentActionOverride)payload;
+                    var participant = _grains.GetGrain<IProjectWorkflowProfileBindingParticipant>(p.ProjectId);
+                    var outcome = await participant.SetAgentActionOverrideAsync(p, pending.CommandId, pending.ExpectedRevision);
+                    result = new WorkflowProfileReferenceResult(
+                        MapProjectOutcome(outcome), p.ProfileId, pending.ExpectedRevision);
+                    break;
+                }
+                case WorkflowProfileCommandPayloadKinds.UpdateProfile:
+                {
+                    var p = (WorkflowProfileCommandPayload.UpdateProfile)payload;
+                    await _provider.UpdateAsync(
+                        p.ProjectId,
+                        new WorkflowProfileCollectionEntry(
+                            p.ProjectId,
+                            p.ProfileId,
+                            p.Name,
+                            p.Description,
+                            WorkflowProfileSourceProvenance.Verbatim,
+                            IsBuiltIn: false,
+                            p.DefinitionSource));
                     break;
                 }
                 case WorkflowProfileCommandPayloadKinds.DeleteProfile:
                 {
                     var p = (WorkflowProfileCommandPayload.DeleteProfile)payload;
-                    await _provider.DeleteAsync(p.ProjectId, p.ProfileId);
+                    var deleted = await _provider.DeleteAsync(p.ProjectId, p.ProfileId);
+                    result = new WorkflowProfileReferenceResult(
+                        deleted
+                            ? WorkflowProfileReferenceResultCode.Applied
+                            : WorkflowProfileReferenceResultCode.ProfileUnknown,
+                        p.ProfileId,
+                        pending.ExpectedRevision);
                     break;
                 }
             }
@@ -309,6 +489,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
 
         _state.State = _state.State with { Pending = null };
         await _state.WriteStateAsync();
+        return result;
     }
 
     private async Task ClearFenceAsync(string commandId)
@@ -343,8 +524,127 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             WorkflowRunBindingOutcome.AlreadyApplied => WorkflowProfileReferenceResultCode.AlreadyApplied,
             WorkflowRunBindingOutcome.RunNotFound => WorkflowProfileReferenceResultCode.ProjectNotFound,
             WorkflowRunBindingOutcome.ProfileUnknown => WorkflowProfileReferenceResultCode.ProfileUnknown,
+            WorkflowRunBindingOutcome.Conflict => WorkflowProfileReferenceResultCode.ConflictingRequest,
             _ => WorkflowProfileReferenceResultCode.Applied,
         };
+
+    private async Task<BoundWorkflowStart?> ResolveWorkflowStartAsync(
+        WorkflowProfileCommandPayload.BindWorkflowRun request)
+    {
+        var disabled = await _provider.GetDisabledProfileIdsAsync(request.ProjectId);
+        var projectDefault = await _provider.GetDefaultProfileIdAsync(request.ProjectId);
+        var selected = await ResolveEffectiveProfileIdAsync(
+            request.ProjectId,
+            request.ExplicitProfileId,
+            projectDefault,
+            disabled);
+        if (selected is null)
+            return null;
+
+        var entry = await _provider.GetAsync(request.ProjectId, selected);
+        if (entry is null) return null;
+        var definition = await _provider.GetDefinitionAsync(
+            request.ProjectId,
+            selected,
+            entry.AgentAction);
+        if (definition is null || definition.Stages.Count == 0)
+            return null;
+        var metadata = request.Metadata with
+        {
+            ProjectId = request.ProjectId,
+            IssueNumber = request.IssueNumber,
+            EpicNumber = request.EpicNumber,
+        };
+        return new BoundWorkflowStart(
+            request.WorkflowRunId,
+            request.ProjectId,
+            request.IssueNumber,
+            request.EpicNumber,
+            request.ExplicitProfileId,
+            selected,
+            entry.AgentAction,
+            definition.Stages.Select(stage => new BoundStageStructure(stage.Stage, stage.RequiresApproval)).ToList(),
+            metadata,
+            request.Workspace);
+    }
+
+    private async Task<string?> ResolveEffectiveProfileIdAsync(
+        string projectId,
+        string? issueSelection,
+        string? projectDefault,
+        IReadOnlySet<string> disabledIds)
+    {
+        foreach (var profileId in CandidateProfileIds(issueSelection, projectDefault, disabledIds))
+        {
+            if (await _provider.ContainsAsync(projectId, profileId))
+                return profileId;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> CandidateProfileIds(
+        string? issueSelection,
+        string? projectDefault,
+        IReadOnlySet<string> disabledIds)
+    {
+        if (!string.IsNullOrWhiteSpace(issueSelection)
+            && !IsDisabledSystemProfile(issueSelection, disabledIds))
+        {
+            yield return issueSelection;
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectDefault)
+            && !string.Equals(projectDefault, issueSelection, StringComparison.Ordinal)
+            && !IsDisabledSystemProfile(projectDefault, disabledIds))
+        {
+            yield return projectDefault;
+        }
+
+        foreach (var systemProfileId in WorkflowProfileCatalog.SystemProfileIds)
+        {
+            if (string.Equals(systemProfileId, issueSelection, StringComparison.Ordinal)
+                || string.Equals(systemProfileId, projectDefault, StringComparison.Ordinal)
+                || IsDisabledSystemProfile(systemProfileId, disabledIds))
+            {
+                continue;
+            }
+
+            yield return systemProfileId;
+        }
+    }
+
+    private static bool IsDisabledSystemProfile(string profileId, IReadOnlySet<string> disabledIds) =>
+        WorkflowProfileCatalog.IsSystemProfile(profileId) && disabledIds.Contains(profileId);
+
+    internal static bool SameStartRequest(
+        WorkflowProfileCommandPayload.BindWorkflowRun left,
+        WorkflowProfileCommandPayload.BindWorkflowRun right) =>
+        string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
+        && string.Equals(left.WorkflowRunId, right.WorkflowRunId, StringComparison.Ordinal)
+        && left.IssueNumber == right.IssueNumber
+        && left.EpicNumber == right.EpicNumber
+        && string.Equals(left.ExplicitProfileId, right.ExplicitProfileId, StringComparison.Ordinal)
+        && SameMetadataIdentity(left.Metadata, right.Metadata)
+        && Equals(left.Workspace, right.Workspace);
+
+    private static bool SameMetadataIdentity(WorkflowRunMetadata left, WorkflowRunMetadata right) =>
+        string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+        && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
+        && left.IssueNumber == right.IssueNumber
+        && left.EpicNumber == right.EpicNumber
+        && SameDictionary(left.Labels, right.Labels)
+        && SameDictionary(left.Annotations, right.Annotations);
+
+    private static bool SameDictionary(
+        IReadOnlyDictionary<string, string>? left,
+        IReadOnlyDictionary<string, string>? right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left is null || right is null || left.Count != right.Count) return false;
+        return left.All(pair => right.TryGetValue(pair.Key, out var value)
+            && string.Equals(pair.Value, value, StringComparison.Ordinal));
+    }
 
     private static WorkflowProfileDeletionBlockersDto ToDto(WorkflowProfileDeletionBlockers blockers) =>
         new(

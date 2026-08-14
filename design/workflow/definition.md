@@ -83,7 +83,7 @@ stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 | Location | Rule |
 |---|---|
 | top level | Only `approval`, `stages`, and `recoveries` are allowed; `stages` must not be empty |
-| approval.feedback | Required when any Stage has `requiresApproval: true`; `tasks` must not be empty and every item follows the task rules |
+| approval.feedback | Optional; when present, `tasks` must not be empty and every item follows the task rules |
 | stage | `stage` name must not be empty and must be unique within the Definition; `tasks` must not be empty |
 | stage | `lockBehavior` only accepts `sequential` and must appear with non-empty `resources`; `resources` cannot appear alone |
 | task | `id` must not be empty and must be unique within its task list; `uses` is required; `title` is optional |

@@ -11,6 +11,8 @@ import { callAction } from "./support/call-action.js"
 import { currentRunnerFileSystem } from "../src/system/filesystem.js"
 import { withTestRunnerResources } from "./support/test-resources.js"
 
+const OPENCODE_TASK_TEMPLATE = { uses: "mohist/opencode" } as const
+
 const it = Object.assign(
   (name: string, body: () => unknown) => vitestIt(name, () => withTestRunnerResources(async () => await body())),
   { each: vitestIt.each.bind(vitestIt) },
@@ -32,7 +34,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const output = result.output as Record<string, unknown>
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
@@ -65,6 +70,7 @@ describe("mohist/openspec-tasks", () => {
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: {
+        ...OPENCODE_TASK_TEMPLATE,
         with: {
           prompt: {
             uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
@@ -102,7 +108,7 @@ describe("mohist/openspec-tasks", () => {
 
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
-      task: { with: { options: "${{ vars.agent }}" } },
+      task: { ...OPENCODE_TASK_TEMPLATE, with: { options: "${{ vars.agent }}" } },
     }, {
       vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
     }))
@@ -129,7 +135,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }, {
       vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
     }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
@@ -168,7 +177,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
@@ -209,7 +221,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
@@ -234,7 +249,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
@@ -262,7 +280,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
@@ -287,7 +308,7 @@ describe("mohist/openspec-tasks", () => {
 
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
-      task: { with: { prompt: "default-with caller prompt" } },
+      task: { ...OPENCODE_TASK_TEMPLATE, with: { prompt: "default-with caller prompt" } },
     }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
@@ -310,6 +331,7 @@ describe("mohist/openspec-tasks", () => {
 
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
       buildPrompt: "<build>build prompt</build>",
     }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
@@ -333,7 +355,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
@@ -361,6 +386,7 @@ describe("mohist/openspec-tasks", () => {
 
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
       items: "items.nested",
     }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
@@ -384,7 +410,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
@@ -414,7 +443,7 @@ describe("mohist/openspec-tasks", () => {
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: {
-        uses: "mohist/opencode",
+        ...OPENCODE_TASK_TEMPLATE,
         with: {
           options: "${{ vars.agent }}",
           prompt: {
@@ -462,7 +491,7 @@ describe("mohist/openspec-tasks", () => {
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: {
-        uses: "mohist/opencode",
+        ...OPENCODE_TASK_TEMPLATE,
         with: {
           options: "${{ vars.agent }}",
           prompt: {
@@ -485,47 +514,65 @@ describe("mohist/openspec-tasks", () => {
     expect(loadedWithList[1].prompt.with.base).toBe("${{ prompts.build }}")
   })
 
-  it("OpenSpecTaskWithoutProfileUses_DefaultsToMohistOpencode", async () => {
-    // T-004 acceptance: when the profile (and the task itself) does
-    // not declare a `uses`, the loader MUST default to `mohist/opencode`
-    // (the canonical Action for the new contract). The previous
-    // default was `mohist/opencode`.
+  it("OpenSpecTaskWithMaterializedTemplateUses_AppliesTemplateToEveryTask", async () => {
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await currentRunnerFileSystem().writeText(tasksPath, JSON.stringify({
       tasks: [
-        { id: "T-001", title: "Default uses is opencode" },
-        { id: "T-002", title: "Second task also gets opencode" },
+        { id: "T-001", title: "First task" },
+        { id: "T-002", title: "Second task" },
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: { uses: "mohist/pi" },
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
 
     expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(2)
-    expect(loadedTasks[0].uses).toBe("mohist/opencode")
-    expect(loadedTasks[1].uses).toBe("mohist/opencode")
+    expect(loadedTasks[0].uses).toBe("mohist/pi")
+    expect(loadedTasks[1].uses).toBe("mohist/pi")
   })
 
-  it("OpenSpecTaskWithExplicitUses_PreservesCallerChoice", async () => {
-    // The default kicks in only when both the profile and the task omit
-    // `uses`. A caller may still pin a specific Action (e.g. for a
-    // custom recovery task); that choice is preserved.
+  it("OpenSpecTaskWithoutTemplateUses_ReturnsInvalidInput", async () => {
+    const workDir = await createTestTempDir("mohist-openspec-")
+    const tasksPath = join(workDir, "tasks.json")
+    await currentRunnerFileSystem().writeText(tasksPath, JSON.stringify({
+      tasks: [{ id: "T-001", title: "First task" }],
+    }))
+
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: { uses: "  " },
+    }))
+
+    expect(result).toMatchObject({
+      error: { code: "invalid-input", message: expect.stringContaining("task.uses") },
+    })
+    expect((result as any).effects?.addTasks).toBeUndefined()
+  })
+
+  it("OpenSpecTaskWithSourceUses_ReturnsInvalidInput", async () => {
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await currentRunnerFileSystem().writeText(tasksPath, JSON.stringify({
       tasks: [
-        { id: "T-001", title: "Custom Action override", uses: "mohist/custom-action" },
-        { id: "T-002", title: "Default uses is opencode" },
+        { id: "T-001", title: "Source override", uses: "mohist/custom-action" },
+        { id: "T-002", title: "Second task" },
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
-    const loadedTasks = (result as any).effects?.addTasks ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: { uses: "mohist/pi" },
+    }))
 
-    expect(loadedTasks[0].uses).toBe("mohist/custom-action")
-    expect(loadedTasks[1].uses).toBe("mohist/opencode")
+    expect(result).toMatchObject({
+      error: { code: "invalid-input", message: expect.stringContaining("must not declare 'uses'") },
+    })
+    expect((result as any).effects?.addTasks).toBeUndefined()
   })
 
   it("OpenSpecTaskWithTaskLevelExpect_PropagatesExpectIntoAddTaskInput", async () => {
@@ -553,7 +600,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
 
     expect(loadedTasks[0].expect).toEqual({
@@ -589,7 +639,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      task: OPENCODE_TASK_TEMPLATE,
+    }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
 
     expect(loadedTasks[0].expect).toEqual({
@@ -617,7 +670,7 @@ describe("mohist/openspec-tasks", () => {
 
     const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
-      task: { with: { options: resolvedAgent } },
+      task: { ...OPENCODE_TASK_TEMPLATE, with: { options: resolvedAgent } },
     }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
@@ -628,7 +681,11 @@ describe("mohist/openspec-tasks", () => {
 })
 
 
-function context(workDir: string, withInput: Record<string, unknown>, _serverConnectionDeps?: Record<string, unknown>): ActionContext {
+function context(
+  workDir: string,
+  withInput: Record<string, unknown> & { task: Record<string, unknown> },
+  _serverConnectionDeps?: Record<string, unknown>,
+): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "load-build",

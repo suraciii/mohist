@@ -21,9 +21,10 @@ public sealed class GoldenCaseTests
 
         foreach (var resource in resources)
         {
-            var result = WorkflowDefinitionParser.Parse(ReadResource(resource));
+            var result = WorkflowProfileParser.Parse(ReadResource(resource), resource);
 
             Assert.True(result.IsValid, FormatErrors(resource, result.Errors));
+            Assert.NotEmpty(result.Profile!.Definition.Stages);
         }
     }
 

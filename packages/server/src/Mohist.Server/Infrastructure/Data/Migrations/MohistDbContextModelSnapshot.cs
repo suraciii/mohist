@@ -3486,6 +3486,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile", b =>
                 {
+                    b.Property<string>("AgentActionOverrides")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("{}");
+
                     b.Property<string>("ProjectId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");

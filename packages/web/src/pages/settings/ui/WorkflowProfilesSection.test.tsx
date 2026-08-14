@@ -5,11 +5,14 @@ import {
   it,
 } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import userEvent from '@testing-library/user-event'
 import { setScopedProperty } from '../../../../tests/support/scoped-property'
 import {
   WorkflowProfilesSection as DefaultWorkflowProfilesSection,
   WORKFLOW_DESCRIPTORS,
+  type WorkflowActionCatalogHook,
   type WorkflowProfileHook,
+  type WorkflowProfileAgentActionMutationHook,
   type WorkflowProfilesSectionComponents,
   type WorkflowProfilesSectionDataHook,
 } from './WorkflowProfilesSection'
@@ -50,6 +53,8 @@ const DEFAULT_DETAIL = {
   name: 'Mohist Local',
   description: SYSTEM_TEMPLATES[0].description,
   isDefault: true,
+  agentAction: 'mohist/opencode',
+  agentRuntime: 'opencode' as const,
   yaml: 'description: |\n  Full Mohist pipeline for shipping user-visible changes end-to-end.\nstages:\n  - stage: plan\n    tasks: []\n    checks: []\n',
   stages: [
     { stage: 'plan', requiresApproval: true, tasks: ['proposal'], checks: [] },
@@ -83,6 +88,7 @@ const DETAILS = {
 }
 
 const disableRequests: string[] = []
+const agentActionRequests: Array<{ profileId: string; agentAction: string | null }> = []
 
 const dataHook: WorkflowProfilesSectionDataHook = () => ({
   allProfiles: [
@@ -114,6 +120,24 @@ const profileHook: WorkflowProfileHook = (profileId) => ({
   isError: false,
 })
 
+const actionCatalogHook: WorkflowActionCatalogHook = () => ({
+  data: {
+    actions: [
+      { name: 'mohist/opencode', capabilities: ['agent-turn'] },
+      { name: 'mohist/pi', capabilities: ['agent-turn'] },
+      { name: 'mohist/git-push', capabilities: [] },
+    ],
+  },
+  isLoading: false,
+  isError: false,
+})
+
+const agentActionMutationHook: WorkflowProfileAgentActionMutationHook = () => ({
+  mutate: (variables) => agentActionRequests.push(variables),
+  isPending: false,
+  error: null,
+})
+
 const components: WorkflowProfilesSectionComponents = {
   ProjectDefaultWorkflowControl: () => <div data-testid="project-default-workflow-control" />,
 }
@@ -123,6 +147,8 @@ function WorkflowProfilesSection() {
     <DefaultWorkflowProfilesSection
       dataHook={dataHook}
       profileHook={profileHook}
+      actionCatalogHook={actionCatalogHook}
+      agentActionMutationHook={agentActionMutationHook}
       components={components}
     />
   )
@@ -131,6 +157,7 @@ function WorkflowProfilesSection() {
 beforeEach(() => {
   overflowByTestId.clear()
   disableRequests.length = 0
+  agentActionRequests.length = 0
   setScopedProperty(HTMLElement.prototype, 'clientHeight', {
     configurable: true,
     get() {
@@ -275,6 +302,32 @@ describe('WorkflowProfilesSection', () => {
   })
 
   describe('Profile detail', () => {
+    it('selects Agent Actions exclusively from agent-turn catalog capabilities', async () => {
+      const user = userEvent.setup()
+      render(<WorkflowProfilesSection />)
+
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument())
+      await user.click(within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', { name: 'View details' }))
+      await user.click(await screen.findByTestId('workflow-profile-agent-action-selector'))
+
+      expect(await screen.findByRole('option', { name: 'mohist/opencode' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'mohist/pi' })).toBeInTheDocument()
+      expect(screen.queryByRole('option', { name: 'mohist/git-push' })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('option', { name: 'mohist/pi' }))
+      expect(agentActionRequests).toEqual([{ profileId: 'mohist/local', agentAction: 'mohist/pi' }])
+    })
+
+    it('does not show an Agent Action selector when the Profile has no binding', async () => {
+      const user = userEvent.setup()
+      render(<WorkflowProfilesSection />)
+
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/quick-fix')).toBeInTheDocument())
+      await user.click(within(screen.getByTestId('workflow-profile-mohist/quick-fix')).getByRole('button', { name: 'View details' }))
+
+      expect(screen.queryByTestId('workflow-profile-agent-action-selector')).not.toBeInTheDocument()
+    })
+
     it('shows the full multi-line description at the top with readable formatting and whitespace-pre-line', async () => {
       render(<WorkflowProfilesSection />)
 

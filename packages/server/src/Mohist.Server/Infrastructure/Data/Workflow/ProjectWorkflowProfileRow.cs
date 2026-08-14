@@ -28,6 +28,8 @@ public class ProjectWorkflowProfile
 
     public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal);
 
+    public Dictionary<string, string> AgentActionOverrides { get; set; } = new(StringComparer.Ordinal);
+
     /// <summary>
     /// 是否禁用了内置 issue 模板。
     /// </summary>

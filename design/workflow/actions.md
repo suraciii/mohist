@@ -380,6 +380,6 @@ when Runner registers with Server; catalog validation during Profile save with a
 special-case lists, `PROMISE_PROJECTED` and `REMOVED`, have been removed. Privileged access such as
 `openspec-tasks` has been reduced to declarative effects.
 
-Planned in the Profile Agent Action binding change: capability projection in the Server catalog,
+Implemented in the Profile Agent Action binding change: capability projection in the Server catalog,
 capability validation for `agentAction`, and the required non-overridable `task.uses` contract for
 `mohist/openspec-tasks`.

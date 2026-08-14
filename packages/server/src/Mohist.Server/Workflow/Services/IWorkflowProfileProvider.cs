@@ -38,6 +38,12 @@ public interface IWorkflowProfileProvider
     /// </summary>
     Task<WorkflowDefinition?> GetDefinitionAsync(string projectId, string profileId, CancellationToken ct = default);
 
+    Task<WorkflowDefinition?> GetDefinitionAsync(
+        string projectId,
+        string profileId,
+        string? boundAgentAction,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Returns the YAML source for a Profile. Custom Profiles return their
     /// persisted source; built-ins return their authoritative canonical source.
@@ -102,6 +108,14 @@ public interface IWorkflowProfileProvider
     /// </summary>
     Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(string projectId, CancellationToken ct = default);
 
+    Task<string?> GetAgentActionOverrideAsync(string projectId, string profileId, CancellationToken ct = default);
+
+    Task ValidateAgentActionOverrideAsync(
+        string projectId,
+        string profileId,
+        string? agentAction,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Toggles a built-in Profile's enabled state for the Project. The
     /// write rejects disabling the last enabled built-in Profile so the
@@ -117,33 +131,44 @@ public interface IWorkflowProfileProvider
     /// <c>BuiltIn</c>; custom entries carry <c>Verbatim</c> or
     /// <c>CanonicalLegacy</c> provenance.
 /// </summary>
+[GenerateSerializer]
 public sealed record WorkflowProfileCollectionEntry(
-    string ProjectId,
-    string ProfileId,
-    string Name,
-    string Description,
-    WorkflowProfileSourceProvenance SourceProvenance,
-    bool IsBuiltIn,
-    string? DefinitionSource)
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] string ProfileId,
+    [property: Id(2)] string Name,
+    [property: Id(3)] string Description,
+    [property: Id(4)] WorkflowProfileSourceProvenance SourceProvenance,
+    [property: Id(5)] bool IsBuiltIn,
+    [property: Id(6)] string? DefinitionSource)
 {
+    [Id(7)]
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? AgentRuntime { get; init; }
 
-    public static WorkflowProfileCollectionEntry BuiltIn(string profileId)
+    [Id(8)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? AgentAction { get; init; }
+
+    public static WorkflowProfileCollectionEntry BuiltIn(
+        string profileId,
+        string projectId = "",
+        string? agentActionOverride = null)
     {
         var profile = WorkflowProfileCatalog.GetProfile(profileId)
             ?? throw new InvalidOperationException($"Unknown built-in Profile '{profileId}'");
 
         return new(
-            ProjectId: string.Empty,
-            ProfileId: profileId,
+            ProjectId: projectId,
+            ProfileId: profile.Id,
             Name: profile.Name,
             Description: profile.Description,
             SourceProvenance: WorkflowProfileSourceProvenance.BuiltIn,
             IsBuiltIn: true,
-            DefinitionSource: WorkflowProfileCanonicalYamlRenderer.Render(profile))
+            DefinitionSource: WorkflowProfileCatalog.GetDefinitionSource(profile.Id))
         {
-            AgentRuntime = WorkflowProfileAgentRuntimeProjection.Project(profile.Definition),
+            AgentAction = agentActionOverride ?? profile.AgentAction,
+            AgentRuntime = WorkflowProfileAgentRuntimeProjection.Project(agentActionOverride ?? profile.AgentAction)
+                ?? WorkflowProfileAgentRuntimeProjection.Project(profile.Definition),
         };
     }
 }
@@ -155,16 +180,28 @@ public enum WorkflowProfileSourceProvenance
     CanonicalLegacy,
 }
 
+[GenerateSerializer]
 public sealed record WorkflowProfileSaveResult(
-    WorkflowProfileCollectionEntry Profile,
-    WorkflowDefinitionValidationResult ValidationResult);
+    [property: Id(0)] WorkflowProfileCollectionEntry Profile,
+    [property: Id(1)] WorkflowDefinitionValidationResult ValidationResult);
 
+[GenerateSerializer]
 public sealed record WorkflowDefinitionValidationResult(
-    IReadOnlyList<ValidationError> DefinitionErrors,
-    IReadOnlyList<ValidationError> ActionErrors,
-    ActionValidationStatus ActionValidationStatus)
+    [property: Id(0)] IReadOnlyList<WorkflowProfileValidationError> DefinitionErrors,
+    [property: Id(1)] IReadOnlyList<WorkflowProfileValidationError> ActionErrors,
+    [property: Id(2)] ActionValidationStatus ActionValidationStatus)
 {
     public bool HasDefinitionErrors => DefinitionErrors.Count > 0;
     public bool HasActionErrors => ActionErrors.Count > 0;
     public bool IsValid => DefinitionErrors.Count == 0 && ActionErrors.Count == 0;
+}
+
+[GenerateSerializer]
+public sealed record WorkflowProfileValidationError(
+    [property: Id(0)] string Path,
+    [property: Id(1)] string Message,
+    [property: Id(2)] ValidationSource Source)
+{
+    public static WorkflowProfileValidationError From(ValidationError error) =>
+        new(error.Path, error.Message, error.Source);
 }

@@ -1602,6 +1602,14 @@ public class MohistDbContext : DbContext
                 .HasDefaultValue(new Dictionary<string, string>());
             entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
 
+            entity.Property(e => e.AgentActionOverrides)
+                .HasConversion(
+                    v => JSON.Serialize(v),
+                    v => JSON.DeserializeDictionary(v))
+                .IsRequired()
+                .HasDefaultValue(new Dictionary<string, string>());
+            entity.Property(e => e.AgentActionOverrides).Metadata.SetValueComparer(DictionaryStringComparer);
+
             entity.Property(e => e.DisabledWorkflowProfileIds)
                 .HasConversion(
                     v => JSON.Serialize(v),

@@ -233,8 +233,9 @@ repository.
 
 ### Require Approval after Build
 
-Set Build's `requiresApproval` value to `true`. The Profile must also declare
-non-empty `approval.feedback.tasks`; built-in Profiles already do.
+Set Build's `requiresApproval` value to `true`. Add
+`approval.feedback.tasks` when rejected approvals should create follow-up work;
+built-in Profiles include this loop.
 
 ### Remove Check
 
@@ -245,8 +246,8 @@ review before Integrate.
 
 Add a Stage after Integrate:
 
-The Profile must declare non-empty top-level `approval.feedback.tasks` because
-Deploy waits for approval.
+To send rejected Deploy approvals back to an agent, declare non-empty top-level
+`approval.feedback.tasks`.
 
 ```yaml
 - stage: deploy

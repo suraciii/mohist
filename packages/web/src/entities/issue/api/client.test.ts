@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { addComment, approveIssue, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getIssues, getLabels, getParentIssueCandidates, requestChangesIssue, updateIssue } from './client'
+import { addComment, approveIssue, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getIssues, getLabels, getParentIssueCandidates, getWorkflowRunDetail, requestChangesIssue, updateIssue } from './client'
 
 useMswServer()
 
@@ -78,6 +78,32 @@ describe('getIssueEvents', () => {
     const events = await getIssueEvents(42, 'proj-1')
 
     expect(events).toEqual([])
+  })
+})
+
+describe('getWorkflowRunDetail', () => {
+  it('reads the Run-bound Agent projection from the global workflow-run detail resource', async () => {
+    const requests: Request[] = []
+    server.use(
+      http.get('*/api/workflow-runs/:workflowRunId', ({ request }) => {
+        requests.push(request)
+        return successResponse({
+          status: { workflowRunId: 'run-42', status: 'running' },
+          issueRef: { projectId: 'proj-1', number: 42, title: 'Issue' },
+          workflowProfileId: 'mohist/github-pr',
+          agentAction: 'mohist/pi',
+          agentRuntime: 'pi',
+        })
+      }),
+    )
+
+    await expect(getWorkflowRunDetail('run-42')).resolves.toEqual(expect.objectContaining({
+      workflowProfileId: 'mohist/github-pr',
+      agentAction: 'mohist/pi',
+      agentRuntime: 'pi',
+    }))
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/workflow-runs/run-42')
   })
 })
 

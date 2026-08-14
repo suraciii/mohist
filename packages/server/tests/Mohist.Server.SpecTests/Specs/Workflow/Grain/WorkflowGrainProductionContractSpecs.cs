@@ -76,6 +76,17 @@ public sealed class WorkflowGrainProductionContractSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
 
+        var created = WorkflowRun.Create(
+            workflowRunId,
+            new WorkflowStructure(WorkflowProfileCatalog.LocalId, [new StageStructure("plan", false)]),
+            TimeProvider.GetUtcNow(),
+            new WorkflowRunMetadata(
+                null,
+                TimeProvider.GetUtcNow(),
+                ProjectId: projectId,
+                IssueNumber: 1));
+        await store.SaveAsync(created);
+
         var definitionResolver = BuildThrowingDefinitionResolver(scope.ServiceProvider, exceptionMessage);
         var variableResolver = scope.ServiceProvider.GetRequiredService<WorkflowVariableResolver>();
         var identity = GrainTestContext.Create(workflowRunId, new StubProfileCoordinatorGrainFactory());
@@ -166,7 +177,6 @@ public sealed class WorkflowGrainProductionContractSpecs
     private sealed class StubFailingOnStageLoadProfileProvider : IWorkflowProfileProvider
     {
         private readonly string _exceptionMessage;
-        private int _calls;
 
         public StubFailingOnStageLoadProfileProvider(string exceptionMessage)
         {
@@ -175,18 +185,25 @@ public sealed class WorkflowGrainProductionContractSpecs
 
         public Task<WorkflowDefinition?> GetDefinitionAsync(string projectId, string profileId, CancellationToken ct = default)
         {
-            if (Interlocked.Increment(ref _calls) == 1)
-            {
-                return Task.FromResult<WorkflowDefinition?>(new WorkflowDefinition(
-                    [
-                        new StageDefinition("plan", [new("draft", "Draft", "spec/task")], []),
-                    ]));
-            }
-
             throw new WorkflowDefinitionResolutionException(
                 WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
                 _exceptionMessage);
         }
+
+        public Task<WorkflowDefinition?> GetDefinitionAsync(
+            string projectId,
+            string profileId,
+            string? boundAgentAction,
+            CancellationToken ct = default) => GetDefinitionAsync(projectId, profileId, ct);
+
+        public Task<string?> GetAgentActionOverrideAsync(string projectId, string profileId, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
+
+        public Task ValidateAgentActionOverrideAsync(
+            string projectId,
+            string profileId,
+            string? agentAction,
+            CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<bool> ContainsAsync(string projectId, string profileId, CancellationToken ct = default) =>
             Task.FromResult(true);
@@ -308,5 +325,15 @@ public sealed class WorkflowGrainProductionContractSpecs
             string commandId,
             long? expectedRevision) =>
             throw new NotSupportedException();
+
+        public Task<WorkflowProfileReferenceResult> SetAgentActionOverrideAsync(
+            WorkflowProfileCommandPayload.SetAgentActionOverride payload,
+            string commandId,
+            long? expectedRevision) => throw new NotSupportedException();
+
+        public Task<WorkflowProfileSaveResult> UpdateProfileAsync(
+            WorkflowProfileCommandPayload.UpdateProfile payload,
+            string commandId,
+            long? expectedRevision) => throw new NotSupportedException();
     }
 }

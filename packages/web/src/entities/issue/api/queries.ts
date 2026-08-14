@@ -4,9 +4,9 @@ import { ApiError } from '../../../shared/api/client'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import type { ApprovalFeedback, Issue, IssueListItem, IssueWorkflowProfileYamlResponse, TaskLogPage } from '../model/types'
-import { issueArtifactKeys, issueCandidateKeys, issueDetailKeys, issueListKeys, issueWorkflowKeys, type IssueListParams } from './query-keys'
+import { issueArtifactKeys, issueCandidateKeys, issueDetailKeys, issueListKeys, issueWorkflowKeys, workflowRunKeys, type IssueListParams } from './query-keys'
 import type { CreateFeedbackRequest, IssueWorkflowArtifactContentOptions, IssueWorkflowArtifactListParams, IssueWorkflowTaskLogParams } from './client'
-import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getIssueWorkflowTaskLog, getLabels, getParentIssueCandidates, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
+import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getIssueWorkflowTaskLog, getLabels, getParentIssueCandidates, getWorkflowRunDetail, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
 import { invalidateApprovalWait } from './approval-wait'
 
 const EMPTY_TASK_LOG_PAGE: TaskLogPage = { lines: [], nextCursor: null, truncated: false }
@@ -100,6 +100,14 @@ export function useIssue(number: number) {
     queryKey: issueDetailKeys.detail(projectId, number),
     queryFn: ({ signal }: QueryFunctionContext) => getIssue(number, projectId, signal),
     enabled: number > 0 && !!projectId,
+  })
+}
+
+export function useWorkflowRunDetail(workflowRunId: string | null | undefined) {
+  return useQuery({
+    queryKey: workflowRunKeys.detail(workflowRunId),
+    queryFn: ({ signal }: QueryFunctionContext) => getWorkflowRunDetail(workflowRunId!, signal),
+    enabled: !!workflowRunId,
   })
 }
 

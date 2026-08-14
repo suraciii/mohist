@@ -77,8 +77,8 @@ remains isolated on the Issue branch until Integrate.
 
 By default, the Workflow enters Check automatically. To require approval after
 Build, set Build's `requiresApproval` field to `true` in the Workflow Profile.
-The Profile must also declare non-empty `approval.feedback.tasks`; built-in
-Profiles already do.
+Declare `approval.feedback.tasks` when rejected approvals should create
+follow-up work; built-in Profiles include this loop.
 
 ## Check
 

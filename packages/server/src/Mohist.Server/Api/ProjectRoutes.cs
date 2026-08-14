@@ -4,6 +4,8 @@ using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Domain;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
@@ -101,6 +103,12 @@ public static class ProjectRoutes
             return ApiResults.Ok(project);
         });
 
+        byRef.MapGet("/actions", async (IActionCatalogSource catalogSource) =>
+        {
+            var catalog = await catalogSource.GetCatalogAsync();
+            return ApiResults.Ok(catalog ?? new ActionCatalog([], []));
+        });
+
         byRef.MapGet("/workflow-profiles", async (HttpContext context, IWorkflowProfileProvider provider) =>
         {
             var project = context.GetResolvedProject();
@@ -153,6 +161,7 @@ public static class ProjectRoutes
                 profile.SourceProvenance,
                 profile.IsBuiltIn,
                 profile.DefinitionSource,
+                profile.AgentAction,
                 profile.AgentRuntime,
                 definition.Stages
                     .Select(stage => new WorkflowProfileStageSummary(
@@ -163,19 +172,67 @@ public static class ProjectRoutes
                     .ToArray()));
         });
 
-        byRef.MapPut("/workflow-profiles/{*profileId}", async (
+        byRef.MapPatch("/workflow-profiles/{*profileId}", async (
             HttpContext context,
             string profileId,
-            WorkflowProfileSaveRequest request,
+            WorkflowProfileAgentActionRequest request,
+            IGrainFactory grains,
             IWorkflowProfileProvider provider) =>
         {
             var project = context.GetResolvedProject();
             var id = Uri.UnescapeDataString(profileId);
             try
             {
-                var result = await provider.UpdateAsync(project.Id, request.ToEntry(project.Id, id));
+                var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
+                    .SetAgentActionOverrideAsync(
+                        new WorkflowProfileCommandPayload.SetAgentActionOverride(
+                            project.Id,
+                            id,
+                            string.IsNullOrWhiteSpace(request.AgentAction) ? null : request.AgentAction.Trim()),
+                        $"api-agent-action:{Guid.NewGuid():N}",
+                        expectedRevision: null);
+                if (!result.IsApplied)
+                    return result.Code == WorkflowProfileReferenceResultCode.ProfileUnknown
+                        ? ApiResults.NotFound(result.Message ?? $"WorkflowProfile '{id}' was not found")
+                        : ApiResults.Conflict(result.Message ?? "Unable to update Agent Action", "workflow_profile_agent_action_conflict");
+
+                var profile = await provider.GetAsync(project.Id, id);
+                return profile is null
+                    ? ApiResults.NotFound($"WorkflowProfile '{id}' was not found")
+                    : ApiResults.Ok(profile);
+            }
+            catch (WorkflowProfileNotFoundException ex)
+            {
+                return ApiResults.NotFound(ex.Message);
+            }
+            catch (WorkflowDefinitionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "workflow_profile_agent_action_validation", ex.Errors);
+            }
+        });
+
+        byRef.MapPut("/workflow-profiles/{*profileId}", async (
+            HttpContext context,
+            string profileId,
+            WorkflowProfileSaveRequest request,
+            IGrainFactory grains) =>
+        {
+            var project = context.GetResolvedProject();
+            var id = Uri.UnescapeDataString(profileId);
+            try
+            {
+                var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
+                    .UpdateProfileAsync(
+                        new WorkflowProfileCommandPayload.UpdateProfile(
+                            project.Id,
+                            id,
+                            request.Name ?? id,
+                            request.Description ?? string.Empty,
+                            request.DefinitionSource),
+                        $"api-profile-update:{Guid.NewGuid():N}",
+                        expectedRevision: null);
                 return result.ValidationResult.IsValid
-                    ? ApiResults.Ok(new { success = true, data = result.Profile, validation = result.ValidationResult })
+                    ? Results.Json(new { success = true, data = result.Profile, validation = result.ValidationResult })
                     : ApiResults.BadRequest("WorkflowProfile validation failed", "workflow_profile_validation", result.ValidationResult);
             }
             catch (WorkflowProfileReadOnlyException ex)
@@ -670,6 +727,7 @@ public sealed record WorkflowProfileDetailResponse(
     WorkflowProfileSourceProvenance SourceProvenance,
     bool IsBuiltIn,
     string? DefinitionSource,
+    string? AgentAction,
     string? AgentRuntime,
     IReadOnlyList<WorkflowProfileStageSummary> Stages);
 
@@ -721,6 +779,7 @@ public record UpdateRepositoryRequest(
     JsonElement ResolvedPath = default);
 public sealed record SetDefaultWorkflowProfileRequest(string ProfileId);
 public sealed record ToggleWorkflowProfileRequest(string ProfileId);
+public sealed record WorkflowProfileAgentActionRequest(string? AgentAction);
 
 public sealed record WorkflowProfileSaveRequest(
     string ProfileId,

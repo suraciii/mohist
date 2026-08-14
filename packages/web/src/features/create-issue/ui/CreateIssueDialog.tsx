@@ -288,7 +288,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
   const profileOptions: WorkflowProfileInfo[] = workflowProfiles ?? []
   return (
     <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
         <DialogHeader>
           <DialogTitle>Create Issue</DialogTitle>
         </DialogHeader>

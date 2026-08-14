@@ -173,7 +173,8 @@ public sealed partial class Issue
             repository,
             workspace,
             context,
-            workspaceName));
+            workspaceName,
+            WorkflowProfileId));
     }
 
     public IssueStartBlocker? StartBlocker(
@@ -234,7 +235,8 @@ public sealed partial class Issue
             repository,
             workspace,
             context,
-            workspaceName));
+            workspaceName,
+            WorkflowProfileId));
     }
 
     public void ClearStoppedWorkflow(string workflowRunId, DateTime? now = null)

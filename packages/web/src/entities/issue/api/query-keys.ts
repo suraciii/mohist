@@ -19,6 +19,10 @@ export const issueDetailKeys = {
   detail: (projectId?: string | null, issueNumber?: number) => ['issue-detail', projectId ?? null, issueNumber ?? null] as const,
 }
 
+export const workflowRunKeys = {
+  detail: (workflowRunId?: string | null) => ['workflow-run', workflowRunId ?? null] as const,
+}
+
 export const issueWorkflowKeys = {
   root: (projectId?: string | null, issueNumber?: number) => ['issue-workflow', projectId ?? null, issueNumber ?? null] as const,
   taskLog: (projectId: string | null | undefined, issueNumber: number, taskId: string | null, workflowRunId?: string | null, params?: unknown) => ['issue-workflow', projectId ?? null, issueNumber, 'task-log', taskId, workflowRunId ?? null, params ?? null] as const,

@@ -19,9 +19,9 @@ before Mohist parses the Definition described here.
 A Definition has only three top-level sections:
 
 ```yaml
-approval:      # Required when any Stage has requiresApproval: true.
+approval:      # Optional. Configures work created from rejected approvals.
   feedback:
-    tasks:     # Required, non-empty ordered repair Task list.
+    tasks:     # Required when feedback is configured; non-empty and ordered.
       - <Task>
 
 stages:        # Required. An ordered Stage list.
@@ -31,12 +31,13 @@ recoveries:    # Optional. Named recovery declarations reused by Tasks.
   <name>: <Recovery>
 ```
 
-After an approval rejection, Mohist runs `approval.feedback.tasks` in order to
-apply the feedback. The first Task usually continues the rejected Stage's
-session. Later Tasks can publish the repaired work. When all feedback Tasks
-finish, Mohist runs the Stage Checks again. The approver then sees the current,
-published work. Mohist does not create a default feedback Task. A Definition
-with an Approval Stage and no explicit feedback Tasks is invalid.
+When a rejected approval includes feedback, Mohist runs
+`approval.feedback.tasks` in order to apply it. The first Task usually
+continues the rejected Stage's session. Later Tasks can publish the repaired
+work. When all feedback Tasks finish, Mohist runs the Stage Checks again. The
+approver then sees the current, published work. Mohist does not create a default
+feedback Task, so a feedback request is rejected when the Profile does not
+declare one.
 
 ## Stage
 

@@ -1,5 +1,5 @@
 import { ApiError, projectApiPath, request } from '../../../shared/api/client'
-import type { AgentRuntime, AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
+import type { ActionCatalog, AgentRuntime, AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
 
 export const AGENT_RUNTIME_OPENCODE = 'opencode'
 export const AGENT_RUNTIME_PI = 'pi'
@@ -237,6 +237,7 @@ interface WorkflowProfileCollectionEntryResponse {
   sourceProvenance: string
   isBuiltIn: boolean
   definitionSource: string | null
+  agentAction?: string | null
   agentRuntime?: AgentRuntime | null
 }
 
@@ -256,6 +257,7 @@ function mapWorkflowProfileInfo(profile: WorkflowProfileCollectionEntryResponse)
     description: profile.description,
     isDefault: profile.profileId === 'mohist/local',
     isBuiltIn: profile.isBuiltIn,
+    agentAction: profile.agentAction ?? null,
     agentRuntime: profile.agentRuntime ?? null,
   }
 }
@@ -275,6 +277,24 @@ function mapWorkflowProfileDetail(profile: WorkflowProfileDetailResponse): Workf
 export function getWorkflowProfile(projectId: string, id: string, requester: typeof request = request) {
   return requester<WorkflowProfileDetailResponse>(projectApiPath(projectId, `/workflow-profiles/${id}`))
     .then(mapWorkflowProfileDetail)
+}
+
+export function getActionCatalog(projectId: string) {
+  return request<ActionCatalog>(projectApiPath(projectId, '/actions'))
+}
+
+export function patchWorkflowProfileAgentAction(
+  projectId: string,
+  profileId: string,
+  agentAction: string | null,
+) {
+  return request<WorkflowProfileCollectionEntryResponse>(
+    projectApiPath(projectId, `/workflow-profiles/${profileId}`),
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ agentAction }),
+    },
+  ).then(mapWorkflowProfileInfo)
 }
 
 export interface ProjectDefaultWorkflowProfile {

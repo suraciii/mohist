@@ -643,7 +643,7 @@ export function IssueDetailPage({
                 summary={issue.model ?? 'default model'}
               >
                 <IssueConfigurationCard
-                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prereq, canStart: issue.canStart, blocker: issue.blocker, isBacklog: !!isBacklog }}
+                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, workflowRunId: issue.workflowRunId, workflowProfileId: issue.workflowProfileId, prerequisites: issue.prereq, canStart: issue.canStart, blocker: issue.blocker, isBacklog: !!isBacklog }}
                   projectId={issueProjectId}
                   mutations={{ addPrerequisiteMutation: mutations.addPrerequisiteMutation, removePrerequisiteMutation: mutations.removePrerequisiteMutation }}
                   unframed

@@ -24,6 +24,7 @@ describe("local Git Action manifests", () => {
       target: { required: true },
       remote: { required: true },
     })
+    expect(inputs("mohist/openspec-tasks")).toMatchObject({ task: { required: true } })
     expect(inputs("mohist/push")).not.toHaveProperty("baseBranch")
   })
 
@@ -33,6 +34,7 @@ describe("local Git Action manifests", () => {
     ["mohist/rebase-status", "baseBranch", { remote: "origin" }],
     ["mohist/merge-ready", "baseBranch", { source: "feature", remote: "origin" }],
     ["mohist/push", "source", { target: "master", remote: "origin" }],
+    ["mohist/openspec-tasks", "task", { path: "tasks.json" }],
   ])("rejects missing %s input before execution", (name, field, withInput) => {
     const resolved = createDefaultRegistry().resolve(name)
     if (resolved.kind !== "definition") throw new Error(`Missing action ${name}`)

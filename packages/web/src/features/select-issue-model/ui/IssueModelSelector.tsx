@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
 import { Command as CommandRoot } from 'cmdk'
-import { getWorkflowProfileAgentRuntime, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useModelVariants, useOpencodeModel, useWorkflowProfiles } from '../../../entities/settings'
+import { getWorkflowProfileAgentRuntime, isAgentRuntime, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useModelVariants, useOpencodeModel, useWorkflowProfiles } from '../../../entities/settings'
 import type { AgentRuntime } from '../../../entities/settings'
-import { getIssueWorkflowVariables, issueDetailKeys, issueListKeys, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
+import { getIssueWorkflowVariables, isTerminalWorkflowRunStatus, issueDetailKeys, issueListKeys, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar, useWorkflowRunDetail } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
 import { variantListFor } from '../../../shared/ui/model-variants'
@@ -21,6 +21,7 @@ interface Props {
   issueNumber: number
   currentModel?: string | null
   currentStageModels?: Record<string, string> | null
+  workflowRunId?: string | null
   workflowProfileId?: string | null
   dependencies?: IssueModelSelectorDependencies
 }
@@ -31,6 +32,7 @@ export interface IssueModelSelectorDependencies {
   useOpencodeModel: typeof useOpencodeModel
   useWorkflowProfiles: typeof useWorkflowProfiles
   useEffectiveDefaultWorkflowProfile: typeof useEffectiveDefaultWorkflowProfile
+  useWorkflowRunDetail: typeof useWorkflowRunDetail
   getIssueWorkflowVariables: typeof getIssueWorkflowVariables
   patchIssueWorkflowDefinitionVar: typeof patchIssueWorkflowDefinitionVar
   patchIssueWorkflowStageDefinitionVar: typeof patchIssueWorkflowStageDefinitionVar
@@ -42,6 +44,7 @@ const defaultDependencies: IssueModelSelectorDependencies = {
   useOpencodeModel,
   useWorkflowProfiles,
   useEffectiveDefaultWorkflowProfile,
+  useWorkflowRunDetail,
   getIssueWorkflowVariables,
   patchIssueWorkflowDefinitionVar,
   patchIssueWorkflowStageDefinitionVar,
@@ -131,12 +134,13 @@ function modelDisplayName(modelId: string): string {
   return describeModel(modelId).name
 }
 
-export function IssueModelSelector({ issueNumber, currentModel, currentStageModels, workflowProfileId, dependencies = defaultDependencies }: Props) {
+export function IssueModelSelector({ issueNumber, currentModel, currentStageModels, workflowRunId, workflowProfileId, dependencies = defaultDependencies }: Props) {
   const {
     useAvailableModelIds,
     useOpencodeModel,
     useWorkflowProfiles,
     useEffectiveDefaultWorkflowProfile,
+    useWorkflowRunDetail,
     getIssueWorkflowVariables,
     patchIssueWorkflowDefinitionVar,
     patchIssueWorkflowStageDefinitionVar,
@@ -146,7 +150,19 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const { data: workflowProfiles } = useWorkflowProfiles()
   const { effectiveTemplateId } = useEffectiveDefaultWorkflowProfile()
   const selectedProfileId = workflowProfileId ?? effectiveTemplateId
-  const selectedRuntime: AgentRuntime | null = getWorkflowProfileAgentRuntime(workflowProfiles, selectedProfileId)
+  const profileRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, selectedProfileId)
+  const { data: workflowRun, isLoading: isWorkflowRunLoading, error: workflowRunError } = useWorkflowRunDetail(workflowRunId)
+  const hasActiveRun = !!workflowRun && !isTerminalWorkflowRunStatus(workflowRun.status.status)
+  const runProfileRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, workflowRun?.workflowProfileId)
+  const selectedRuntime: AgentRuntime | null = !workflowRunId
+    ? profileRuntime
+    : isWorkflowRunLoading || workflowRunError || !workflowRun
+      ? null
+      : !hasActiveRun
+        ? profileRuntime
+        : workflowRun.agentAction != null
+          ? (isAgentRuntime(workflowRun.agentRuntime) ? workflowRun.agentRuntime : null)
+          : runProfileRuntime
   const catalog = useAvailableModelIds(selectedRuntime)
   const { data: availableModels, isLoading, error } = catalog
   const { data: opencodeModelData } = useOpencodeModel()

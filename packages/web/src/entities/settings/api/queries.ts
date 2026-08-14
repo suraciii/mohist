@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
+import type { ActionCatalog, ActionCatalogEntry, AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
 import { includesWorkflowProfileId, workflowProfileIdEquals } from '../model/workflowProfileIds'
 import { useProject } from '../../project/@x/project-context'
 import type { OpencodeModelVariants, ProjectDefaultWorkflowProfile } from './client'
 import { DEFAULT_AGENT_RUNTIME, isAgentRuntime, type AgentRuntime } from './client'
-import { disableWorkflowProfile, enableWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, getModels, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import { disableWorkflowProfile, enableWorkflowProfile, getActionCatalog, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, getModels, patchWorkflowProfileAgentAction, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
@@ -315,6 +315,46 @@ export function useWorkflowProfile(
     queryFn: () => fetcher(projectId!, id!),
     enabled: !!projectId && !!id,
   })
+}
+
+export function selectAgentTurnActions(catalog: ActionCatalog | undefined): ActionCatalogEntry[] {
+  return catalog?.actions.filter((action) => action.capabilities?.includes('agent-turn')) ?? []
+}
+
+export function useActionCatalog() {
+  const { projectId } = useProject()
+  return useQuery<ActionCatalog>({
+    queryKey: ['action-catalog', projectId],
+    queryFn: () => getActionCatalog(projectId!),
+    enabled: !!projectId,
+  })
+}
+
+export function setWorkflowProfileAgentActionMutationOptions(
+  projectId: string | null | undefined,
+  queryClient: InvalidationClient,
+) {
+  return {
+    mutationFn: ({ profileId, agentAction }: { profileId: string; agentAction: string | null }) =>
+      patchWorkflowProfileAgentAction(projectId!, profileId, agentAction),
+    onSuccess: (_profile: WorkflowProfileInfo, { profileId }: { profileId: string; agentAction: string | null }) => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-profiles', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['workflow-profile', projectId, profileId] })
+      queryClient.invalidateQueries({ queryKey: ['opencode-model-ids'] })
+      toast.success('Agent Action updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to update Agent Action')
+    },
+  }
+}
+
+export function useSetWorkflowProfileAgentAction() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<WorkflowProfileInfo, Error, { profileId: string; agentAction: string | null }>(
+    setWorkflowProfileAgentActionMutationOptions(projectId, queryClient),
+  )
 }
 
 export function projectDefaultWorkflowProfileQueryOptions(projectId: string | null | undefined) {

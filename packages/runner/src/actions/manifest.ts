@@ -109,6 +109,7 @@ export interface ActionCatalogEntry {
   readonly inputs: ReadonlyArray<ActionCatalogInput>
   readonly outputs: ReadonlyArray<ActionCatalogOutput>
   readonly errors: ReadonlyArray<ActionCatalogError>
+  readonly capabilities?: ReadonlyArray<ActionCapability>
 }
 
 export interface ActionCatalogTombstone {

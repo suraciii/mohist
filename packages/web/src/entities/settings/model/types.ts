@@ -119,6 +119,7 @@ export interface WorkflowProfileInfo {
   description: string
   isDefault: boolean
   isBuiltIn?: boolean
+  agentAction?: string | null
   agentRuntime?: AgentRuntime | null
 }
 
@@ -140,7 +141,18 @@ export interface WorkflowProfileDetail {
   definitionSource?: string | null
   yaml: string
   stages: WorkflowProfileStageSummary[]
+  agentAction?: string | null
   agentRuntime?: AgentRuntime | null
+}
+
+export interface ActionCatalogEntry {
+  name: string
+  description?: string | null
+  capabilities?: string[] | null
+}
+
+export interface ActionCatalog {
+  actions: ActionCatalogEntry[]
 }
 
 export type ModelBadge = 'free' | 'latest'

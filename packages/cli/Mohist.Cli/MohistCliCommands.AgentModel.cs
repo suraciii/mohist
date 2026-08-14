@@ -46,7 +46,7 @@ internal static class AgentModelCommands
 
                 if (exit != 0) return exit;
 
-                return await api.PrintOpencodeModelsAsync(resolvedProjectId, mode);
+                return await api.PrintOpencodeModelsAsync(resolvedProjectId, runtime, mode);
             }
         });
 

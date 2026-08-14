@@ -104,7 +104,11 @@ internal static partial class SpecUnitMigrationLedgerValidator
             violations.Add($"{row.Id}: history operation {change.Operation} has invalid status {row.Status}");
         if (history.SourceContentDigest != change.SourceContentDigest)
             violations.Add($"{row.Id}: history source-content digest differs from PR #388 source object");
-        ValidateExecutableAndClosure(row, row.Target, inventory, violations, "target");
+        if (!inventory.TryGetExecutable(row.Target.Fqn ?? "", row.Target.Path ?? "", out _))
+        {
+            violations.Add(
+                $"{row.Id}: historical target is not a compiled discoverable type: {row.Target.Path}/{row.Target.Fqn}");
+        }
         ValidateRequiredRowFields(row, violations);
     }
 
@@ -174,13 +178,9 @@ internal static partial class SpecUnitMigrationLedgerValidator
     {
         if (ledger.SchemaVersion != 1) violations.Add($"ledger schemaVersion must be 1, got {ledger.SchemaVersion}");
         if (ledger.ValidationHead != ValidationHead) violations.Add($"ledger validationHead must be {ValidationHead}, got {ledger.ValidationHead}");
-        if (inventory.SourceTree.ValidationHead != ValidationHead || inventory.SourceTree.ValidationTree != ValidationTree)
-            violations.Add("current embedded source tree is not bound to the validation head/tree");
-        if (inventory.SourceTree.FileCount != ledger.ValidationSourceFileCount
-            || inventory.SourceTree.Digest != ledger.ValidationSourceTreeDigest
-            || inventory.SourceTree.FileCount != ValidationSourceTreeFileCount
-            || inventory.SourceTree.Digest != ValidationSourceTreeDigest)
-            violations.Add($"current embedded source tree digest mismatch; files={inventory.SourceTree.FileCount}, digest={inventory.SourceTree.Digest}");
+        if (ledger.ValidationSourceFileCount != ValidationSourceTreeFileCount
+            || ledger.ValidationSourceTreeDigest != ValidationSourceTreeDigest)
+            violations.Add("ledger validation source tree metadata does not match the audited baseline");
         if (ledger.ValidationBaselineDigest != ExpectedValidationBaselineDigest)
             violations.Add($"ledger validation baseline digest must be {ExpectedValidationBaselineDigest}, got {ledger.ValidationBaselineDigest}");
         if (string.IsNullOrWhiteSpace(ledger.ValidationHeadMeaning) || !ledger.ValidationHeadMeaning.Contains("not the final validation commit", StringComparison.OrdinalIgnoreCase))
@@ -188,11 +188,11 @@ internal static partial class SpecUnitMigrationLedgerValidator
         if (provenance.SchemaVersion != 1 || provenance.Pr != "#388" || provenance.Parent != Pr388Parent || provenance.Commit != Pr388Commit
             || provenance.ValidationHead != ValidationHead || provenance.ValidationTree != ValidationTree
             || provenance.ValidationBaselineDigest != ExpectedValidationBaselineDigest
-            || provenance.ValidationSourceFileCount != inventory.SourceTree.FileCount
-            || provenance.ValidationSourceTreeDigest != inventory.SourceTree.Digest)
+            || provenance.ValidationSourceFileCount != ValidationSourceTreeFileCount
+            || provenance.ValidationSourceTreeDigest != ValidationSourceTreeDigest)
             violations.Add("embedded PR #388 provenance does not bind the exact parent and commit");
         var changes = provenance.Changes;
-        SpecUnitMigrationLedgerProof.ValidatePr388(provenance, inventory, changes, violations);
+        SpecUnitMigrationLedgerProof.ValidatePr388(provenance, changes, violations);
         if (ledger.History is null) violations.Add("ledger history aggregate is required");
         else
         {

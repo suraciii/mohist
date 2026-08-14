@@ -171,6 +171,7 @@ function projectEntry(manifest: ActionManifest): ActionCatalogEntry {
     inputs,
     outputs,
     errors,
+    ...(manifest.capabilities !== undefined ? { capabilities: [...manifest.capabilities] } : {}),
   }
   if (manifest.description !== undefined) {
     return { ...entry, description: manifest.description }
