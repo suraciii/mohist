@@ -137,10 +137,10 @@ has no Pi-specific business error codes.
 Both Workflow and AgentJob paths are implemented. A Workflow can use
 `mohist/pi`, and a Mohist Agent configured for Pi can execute input. Both reuse
 AgentSession and show transcripts, tools, state, compaction, model, usage, and
-cost on the existing Session page. Execution-backend selection for Agent and
-Issue, Runtime-specific model catalogs, and Web model selectors are also
-implemented. Pi Compact and Reset are available through the shared Session
-operations.
+cost on the existing Session page. Pi Compact and Reset are available through
+the shared Session operations. Runtime-specific model catalog transport exists,
+but Workflow model selectors do not yet consistently select the catalog from
+the effective Profile and may still request OpenCode models.
 
 Before a new Workflow input is submitted, Mohist automatically creates empty Pi
 context and replaces a binding that the owning Runner confirms is missing while

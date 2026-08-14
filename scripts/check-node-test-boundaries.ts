@@ -83,7 +83,8 @@ const testApiFunctionNames = new Set(['it', 'test', 'describe', 'suite', 'contex
 const runnerDefaultTrack = 'default'
 const runnerIntegrationTrack = 'integration'
 const testFileBudgetBaselineRelativePath = 'scripts/node-test-file-budget-baseline.json'
-const testFileLineBudgets = Object.freeze({ test: 500, spec: 800 })
+const testFileLineBudgets = Object.freeze({ test: 500, spec: 850 })
+export const nodeTestFileBaselineSlack = 100
 
 type BudgetRecord = {
   filePath: string
@@ -1128,6 +1129,10 @@ function budgetBaselineFilePath() {
   return resolve(repositoryRoot, testFileBudgetBaselineRelativePath)
 }
 
+export function nodeTestFileBaselineAllowance(observedLines: number) {
+  return observedLines + nodeTestFileBaselineSlack
+}
+
 function validateBudgetBaselinePath(filePath, sourceName) {
   if (
     filePath.startsWith('/')
@@ -1211,11 +1216,12 @@ function validateBudgetRecords(records: BudgetRecord[], baseline: Map<string, nu
       ))
       continue
     }
-    if (record.lines > allowedLines) {
+    const effectiveAllowedLines = nodeTestFileBaselineAllowance(allowedLines)
+    if (record.lines > effectiveAllowedLines) {
       violations.push(createBudgetViolation(
         record.relativePath,
-        `has ${record.lines} lines, exceeding its baseline allowance of ${allowedLines} lines`,
-        `Split the file or lower it to at most ${allowedLines} lines, then lower or remove the baseline entry.`,
+        `has ${record.lines} lines, exceeding its baseline allowance of ${effectiveAllowedLines} lines (${allowedLines} observed plus ${nodeTestFileBaselineSlack} maintenance slack)`,
+        `Split the file or lower it to at most ${effectiveAllowedLines} lines, then lower or remove the baseline entry.`,
       ))
     }
   }

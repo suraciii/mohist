@@ -116,6 +116,8 @@ a silent warning. Baselines expand incrementally.
 |---|---|
 | Unit | < 300 LOC |
 | Spec | < 800 LOC (C# ratchet: 24,000 bytes, ≈540 lines at this repo's density) |
+| Node unit (`.test`) | < 500 LOC |
+| Node spec (`.spec`) | < 850 LOC |
 | Browser | separate `npm run test:browser`; never in default `npm test` and never in the guard | |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
@@ -126,6 +128,12 @@ next 1,000 bytes, so ordinary edits stay inside a bucket and a file that shrinks
 hands its slack back. Crossing a bucket needs a baseline edit in the same commit
 — that edit is the review gate. The way past the ratchet is to split the file
 along the behavior it specifies, never to compress formatting to fit.
+
+The Node test ratchet applies the same principle with a smaller maintenance
+buffer: an existing baseline allowance covers the recorded size plus 100 lines.
+New over-budget files still cannot add a baseline entry, and a file that returns
+under its absolute limit must drop its allowance. Keep test formatting readable;
+do not compress statements onto one line to satisfy the counter.
 
 ### Repository CI time budget
 

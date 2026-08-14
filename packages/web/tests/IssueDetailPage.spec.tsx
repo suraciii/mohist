@@ -16,7 +16,9 @@ let _issueData: any = null
 let _workflowProfileData: any = null
 let _workflowProfileLoading = false
 let _workflowProfileError: string | null = null
-let _workflowProfilesListData: any = null
+let _workflowProfilesListData: any = [
+  { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
+]
 let _retryError: string | null = null
 let _uploads: Array<{ id: string; fileName: string; contentType: string; size: number }> = []
 let _addCommentHandler = vi.fn()
@@ -53,13 +55,23 @@ useMswServer(
   http.patch('*/api/projects/:projectId/issues/:number', () =>
     HttpResponse.json({ success: true, data: _issueData }),
   ),
-  http.get('*/api/projects/:projectId/workflow-profile', () =>
-    HttpResponse.json({ success: true, data: { projectId: 'test-project', defaultTemplateId: null, disabledWorkflowProfileIds: [] } }),
+  http.get('*/api/projects/:projectId/workflow-profile/default', () =>
+    HttpResponse.json({ success: true, data: { projectId: 'test-project', defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] } }),
   ),
-  http.get('*/api/workflow-templates/system', () =>
-    HttpResponse.json({ success: true, data: _workflowProfilesListData?.map
-      ? _workflowProfilesListData.map((p: any) => ({ id: p.id, name: p.displayName, description: p.description, isDefault: p.isDefault }))
-      : null }),
+  http.get('*/api/projects/:projectId/workflow-profiles', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: (_workflowProfilesListData ?? []).map((p: any) => ({
+        projectId: params.projectId,
+        profileId: p.id,
+        name: p.displayName,
+        description: p.description,
+        sourceProvenance: 'BuiltIn',
+        isBuiltIn: true,
+        definitionSource: null,
+        agentRuntime: p.agentRuntime ?? 'opencode',
+      })),
+    }),
   ),
   http.get('*/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
@@ -185,7 +197,9 @@ beforeEach(() => {
   _workflowProfileData = null
   _workflowProfileLoading = false
   _workflowProfileError = null
-  _workflowProfilesListData = null
+  _workflowProfilesListData = [
+    { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
+  ]
   _retryError = null
   _uploads = []
   _addCommentHandler = vi.fn()

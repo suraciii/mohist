@@ -5,8 +5,8 @@ const ISSUES = '*/api/projects/:projectId/issues/:number'
 const AGENT_STATUS = '*/api/projects/:projectId/agent/status'
 const OPENCODE_MODELS = '*/api/projects/:projectId/opencode/models'
 const WORKFLOW_VARIABLES = '*/api/projects/:projectId/variables'
-const PROJECT_DEFAULT = '*/api/projects/:projectId/workflow-profile'
-const SYSTEM_PROFILES = '*/api/workflow-templates/system*'
+const PROJECT_DEFAULT = '*/api/projects/:projectId/workflow-profile/default'
+const SYSTEM_PROFILES = '*/api/projects/:projectId/workflow-profiles'
 const RUN_YAML = '*/api/workflow-runs/:runId/yaml'
 
 let currentIssue: Record<string, unknown> | null = null
@@ -83,7 +83,7 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
         success: true,
         data: {
           projectId: 'proj-1',
-          defaultTemplateId: null,
+          defaultWorkflowProfileId: 'mohist/local',
           disabledWorkflowProfileIds: [],
         },
       }),

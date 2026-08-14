@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
-import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings'
+import { getWorkflowProfileAgentRuntime, resolveEffectiveDefaultWorkflowProfile, useAvailableModelIds, useOpencodeModel, useProjectDefaultWorkflowProfile, useSetStageModels, useStageModels, useUpdateOpencodeModel, useWorkflowProfiles } from '../../../entities/settings'
 import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { resolveVariantAgainstModel } from '../../../shared/ui/model-variants'
@@ -37,8 +37,13 @@ export const AI_SETTINGS_DESCRIPTORS: SettingsSearchEntry[] = [
 ]
 
 export function AiSettingsSection() {
-  const { isLoading: runtimeLoading, error: runtimeError } = useOpencodeRuntime()
-  const { data: availableModelIds, isLoading: modelsLoading, error: modelsError } = useAvailableModelIds()
+  const { data: workflowProfiles, isLoading: profilesLoading, error: profilesError } = useWorkflowProfiles()
+  const { data: projectWorkflowProfile, isLoading: defaultProfileLoading, error: defaultProfileError } = useProjectDefaultWorkflowProfile()
+  const { effectiveTemplateId } = resolveEffectiveDefaultWorkflowProfile(projectWorkflowProfile, workflowProfiles)
+  const selectedRuntime = profilesLoading || defaultProfileLoading
+    ? null
+    : getWorkflowProfileAgentRuntime(workflowProfiles, effectiveTemplateId)
+  const { data: availableModelIds, isLoading: modelsLoading, error: modelsError } = useAvailableModelIds(selectedRuntime)
   const { data: opencodeModelData } = useOpencodeModel()
   const setOpencodeModel = useUpdateOpencodeModel()
   const { data: stageModelsData } = useStageModels()
@@ -73,7 +78,21 @@ export function AiSettingsSection() {
 
   const storedDefaultModel = opencodeModelData?.model ?? null
   const storedDefaultVariant = opencodeModelData?.variant ?? null
-  const resolvedDefaultVariant = resolveVariantAgainstModel(storedDefaultModel, storedDefaultVariant, modelVariantsMap)
+  const hasSelectedRuntime = selectedRuntime !== null
+  const configuredStageEntries = STAGES.filter((stage) => !!localStageModels[stage])
+  const displayModelVariants = useMemo(() => {
+    if (hasSelectedRuntime) return modelVariantsMap
+
+    const variants: Record<string, string[]> = {}
+    if (storedDefaultModel && storedDefaultVariant) variants[storedDefaultModel] = [storedDefaultVariant]
+    for (const stage of configuredStageEntries) {
+      const model = localStageModels[stage]
+      const variant = localStageModelVariants[stage]
+      if (model && variant) variants[model] = [...(variants[model] ?? []), variant]
+    }
+    return variants
+  }, [configuredStageEntries, hasSelectedRuntime, localStageModelVariants, localStageModels, modelVariantsMap, storedDefaultModel, storedDefaultVariant])
+  const resolvedDefaultVariant = resolveVariantAgainstModel(storedDefaultModel, storedDefaultVariant, displayModelVariants)
 
   const handleSetOpencodeModel = (modelId: string) => {
     setOpencodeModel.mutate({ model: modelId, variant: null })
@@ -122,93 +141,103 @@ export function AiSettingsSection() {
     setStageModels.mutate({ stage, model: stageModel, variant })
   }
 
-  if (runtimeLoading || modelsLoading) {
+  if (profilesLoading || defaultProfileLoading || modelsLoading) {
     return <SectionState variant="loading" title={sectionLabel} skeletonRows={2} />
   }
 
-  const error = runtimeError ?? modelsError
+  const error = profilesError ?? defaultProfileError ?? modelsError
   if (error) {
     return (
       <SectionState
         variant="error"
         title={sectionLabel}
-        message={`Failed to load opencode runtime: ${(error as Error).message}`}
+        message={`Failed to load workflow profile models: ${(error as Error).message}`}
       />
     )
   }
 
   return (
     <div className="space-y-8">
-      <SettingsSection title={sectionLabel}>
-        <CardSection>
-          <div className="space-y-1.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <label id={DEFAULT_MODEL_LABEL_ID} className="block text-xs font-medium text-muted-foreground">Default Coder Agent Model</label>
-              <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
+      {(hasSelectedRuntime || storedDefaultModel) && (
+        <SettingsSection title={sectionLabel}>
+          <CardSection>
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <label id={DEFAULT_MODEL_LABEL_ID} className="block text-xs font-medium text-muted-foreground">Default Coder Agent Model</label>
+                {hasSelectedRuntime && (
+                  <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Passed to the selected workflow profile runtime when tasks run.</p>
+              <ModelSelect
+                id="settings-default-model"
+                value={storedDefaultModel}
+                placeholder="Runtime default"
+                models={hasSelectedRuntime ? coderModels : []}
+                onChange={handleSetOpencodeModel}
+                onClear={hasSelectedRuntime && storedDefaultModel ? handleClearOpencodeModel : undefined}
+                allowClear={hasSelectedRuntime && !!storedDefaultModel}
+                aria-labelledby={DEFAULT_MODEL_LABEL_ID}
+                modelVariants={displayModelVariants}
+                valueVariant={resolvedDefaultVariant}
+                onChangeModelVariant={handleSetDefaultVariant}
+                disabled={!hasSelectedRuntime}
+              />
             </div>
-            <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
-            <ModelSelect
-              id="settings-default-model"
-              value={storedDefaultModel}
-              placeholder="Opencode default"
-              models={coderModels}
-              onChange={handleSetOpencodeModel}
-              onClear={storedDefaultModel ? handleClearOpencodeModel : undefined}
-              allowClear={!!storedDefaultModel}
-              aria-labelledby={DEFAULT_MODEL_LABEL_ID}
-              modelVariants={modelVariantsMap}
-              valueVariant={resolvedDefaultVariant}
-              onChangeModelVariant={handleSetDefaultVariant}
-            />
+          </CardSection>
+        </SettingsSection>
+      )}
+
+      {((hasSelectedRuntime || configuredStageEntries.length > 0) && (
+        <>
+          {storedDefaultModel || hasSelectedRuntime ? <hr className="border" /> : null}
+
+          <div>
+            <Button
+              variant="ghost"
+              onClick={() => setStageOverridesOpen(!stageOverridesOpen)}
+              aria-expanded={stageOverridesOpen}
+              aria-controls={STAGE_OVERRIDES_ID}
+              className="flex items-center gap-2 w-full text-left justify-start h-auto px-0 py-0 font-normal hover:bg-transparent"
+            >
+              <ChevronRightIcon
+                className={`h-4 w-4 text-muted-foreground transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`}
+              />
+              <span className="text-sm font-medium text-foreground">Stage Model Overrides</span>
+              <span className="text-xs text-muted-foreground ml-1">Advanced</span>
+            </Button>
+
+            {stageOverridesOpen && (
+              <div id={STAGE_OVERRIDES_ID} className="mt-4 space-y-3 pl-6">
+                {(hasSelectedRuntime ? STAGES : configuredStageEntries).map((stage) => {
+                  const stageModel = localStageModels[stage] ?? null
+                  const stageVariant = resolveVariantAgainstModel(stageModel, localStageModelVariants[stage], displayModelVariants)
+                  return (
+                    <div key={stage} className="space-y-1">
+                      <label id={`settings-stage-model-${stage}-label`} className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
+                      <ModelSelect
+                        id={`settings-stage-model-${stage}`}
+                        value={stageModel}
+                        placeholder="Default"
+                        models={hasSelectedRuntime ? coderModels : []}
+                        onChange={(modelId) => handleSetStageModel(stage, modelId)}
+                        onClear={hasSelectedRuntime ? () => handleClearStageModel(stage) : undefined}
+                        allowClear={hasSelectedRuntime && !!stageModel}
+                        aria-labelledby={`settings-stage-model-${stage}-label`}
+                        size="compact"
+                        modelVariants={displayModelVariants}
+                        valueVariant={stageVariant}
+                        onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, variant, modelId)}
+                        disabled={!hasSelectedRuntime}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        </CardSection>
-      </SettingsSection>
-
-      <hr className="border" />
-
-      <div>
-        <Button
-          variant="ghost"
-          onClick={() => setStageOverridesOpen(!stageOverridesOpen)}
-          aria-expanded={stageOverridesOpen}
-          aria-controls={STAGE_OVERRIDES_ID}
-          className="flex items-center gap-2 w-full text-left justify-start h-auto px-0 py-0 font-normal hover:bg-transparent"
-        >
-          <ChevronRightIcon
-            className={`h-4 w-4 text-muted-foreground transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`}
-          />
-          <span className="text-sm font-medium text-foreground">Stage Model Overrides</span>
-          <span className="text-xs text-muted-foreground ml-1">Advanced</span>
-        </Button>
-
-        {stageOverridesOpen && (
-          <div id={STAGE_OVERRIDES_ID} className="mt-4 space-y-3 pl-6">
-            {STAGES.map((stage) => {
-              const stageModel = localStageModels[stage] ?? null
-              const stageVariant = resolveVariantAgainstModel(stageModel, localStageModelVariants[stage], modelVariantsMap)
-              return (
-                <div key={stage} className="space-y-1">
-                  <label id={`settings-stage-model-${stage}-label`} className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
-                  <ModelSelect
-                    id={`settings-stage-model-${stage}`}
-                    value={stageModel}
-                    placeholder="Default"
-                    models={coderModels}
-                    onChange={(modelId) => handleSetStageModel(stage, modelId)}
-                    onClear={() => handleClearStageModel(stage)}
-                    allowClear={!!stageModel}
-                    aria-labelledby={`settings-stage-model-${stage}-label`}
-                    size="compact"
-                    modelVariants={modelVariantsMap}
-                    valueVariant={stageVariant}
-                    onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, variant, modelId)}
-                  />
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+        </>
+      ))}
     </div>
   )
 }

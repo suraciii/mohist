@@ -4,6 +4,7 @@ using System.Text.Json;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow;
@@ -38,6 +39,29 @@ public class WorkflowProfileApiSpecs
 
         var profiles = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
         Assert.DoesNotContain(profiles.EnumerateArray(), profile => profile.GetProperty("profileId").GetString() == "broken");
+    }
+
+    [Fact]
+    public async Task ListAndGet_ExposeAgentRuntime()
+    {
+        var project = await CreateProjectAsync();
+
+        var profiles = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
+        var builtin = profiles.EnumerateArray()
+            .Single(profile => profile.GetProperty("profileId").GetString() == "mohist/local");
+        var detail = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/workflow-profiles/mohist%2Flocal");
+
+        Assert.Equal(WorkflowProfileCatalog.Profile.Name, builtin.GetProperty("name").GetString());
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, builtin.GetProperty("description").GetString());
+        Assert.Equal("opencode", builtin.GetProperty("agentRuntime").GetString());
+        Assert.Equal("opencode", detail.GetProperty("agentRuntime").GetString());
+        Assert.Equal("mohist/local", detail.GetProperty("profileId").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(detail.GetProperty("definitionSource").GetString()));
+        var stage = detail.GetProperty("stages").EnumerateArray()
+            .Single(candidate => candidate.GetProperty("stage").GetString() == "plan");
+        Assert.Equal("plan", stage.GetProperty("stage").GetString());
+        Assert.NotEmpty(stage.GetProperty("tasks").EnumerateArray());
     }
 
     [Fact]

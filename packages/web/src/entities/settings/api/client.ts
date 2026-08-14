@@ -1,12 +1,12 @@
 import { ApiError, projectApiPath, request } from '../../../shared/api/client'
-import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
+import type { AgentRuntime, AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
 
 export const AGENT_RUNTIME_OPENCODE = 'opencode'
 export const AGENT_RUNTIME_PI = 'pi'
 
 export const AGENT_RUNTIMES = [AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI] as const
 
-export type AgentRuntime = typeof AGENT_RUNTIMES[number]
+export type { AgentRuntime } from '../model/types'
 
 export function isAgentRuntime(value: string | null | undefined): value is AgentRuntime {
   return value === AGENT_RUNTIME_OPENCODE || value === AGENT_RUNTIME_PI
@@ -224,21 +224,57 @@ export function setStageModel(projectId: string | null | undefined, stage: strin
     }))
 }
 
-export function getWorkflowProfiles(projectId?: string | null) {
-  const path = projectId
-    ? `/workflow-templates/system?project=${encodeURIComponent(projectId)}`
-    : '/workflow-templates/system'
-  return request<Array<{ id: string; name: string; description: string; isDefault: boolean }>>(path)
-    .then((templates) => templates.map((template) => ({
-      id: template.id,
-      displayName: template.name,
-      description: template.description,
-      isDefault: template.isDefault,
-    })))
+export function getWorkflowProfiles(projectId: string) {
+  return request<WorkflowProfileCollectionEntryResponse[]>(projectApiPath(projectId, '/workflow-profiles'))
+    .then((profiles) => profiles.map(mapWorkflowProfileInfo))
 }
 
-export function getWorkflowProfile(id: string, requester: typeof request = request) {
-  return requester<WorkflowProfileDetail>(`/workflow-templates/system/${id}`)
+interface WorkflowProfileCollectionEntryResponse {
+  projectId: string
+  profileId: string
+  name: string
+  description: string
+  sourceProvenance: string
+  isBuiltIn: boolean
+  definitionSource: string | null
+  agentRuntime?: AgentRuntime | null
+}
+
+interface WorkflowProfileDetailResponse extends WorkflowProfileCollectionEntryResponse {
+  stages: Array<{
+    stage: string
+    requiresApproval: boolean
+    tasks: string[]
+    checks: string[]
+  }>
+}
+
+function mapWorkflowProfileInfo(profile: WorkflowProfileCollectionEntryResponse) {
+  return {
+    id: profile.profileId,
+    displayName: profile.name,
+    description: profile.description,
+    isDefault: profile.profileId === 'mohist/local',
+    isBuiltIn: profile.isBuiltIn,
+    agentRuntime: profile.agentRuntime ?? null,
+  }
+}
+
+function mapWorkflowProfileDetail(profile: WorkflowProfileDetailResponse): WorkflowProfileDetail {
+  return {
+    ...mapWorkflowProfileInfo(profile),
+    projectId: profile.projectId,
+    sourceProvenance: profile.sourceProvenance,
+    isBuiltIn: profile.isBuiltIn,
+    definitionSource: profile.definitionSource,
+    yaml: profile.definitionSource ?? '',
+    stages: profile.stages,
+  }
+}
+
+export function getWorkflowProfile(projectId: string, id: string, requester: typeof request = request) {
+  return requester<WorkflowProfileDetailResponse>(projectApiPath(projectId, `/workflow-profiles/${id}`))
+    .then(mapWorkflowProfileDetail)
 }
 
 export interface ProjectDefaultWorkflowProfile {
@@ -248,30 +284,21 @@ export interface ProjectDefaultWorkflowProfile {
 }
 
 export function getProjectDefaultWorkflowProfile(projectId?: string | null) {
-  return request<{ projectId: string; defaultTemplateId: string | null; variables?: unknown; disabledWorkflowProfileIds?: string[] }>(
-    projectApiPath(projectId, '/workflow-profile'),
+  return request<{ projectId: string; defaultWorkflowProfileId: string | null; disabledWorkflowProfileIds?: string[] }>(
+    projectApiPath(projectId, '/workflow-profile/default'),
   ).then((response) => ({
     projectId: response.projectId,
-    defaultTemplateId: response.defaultTemplateId ?? null,
+    defaultTemplateId: response.defaultWorkflowProfileId ?? null,
     disabledWorkflowProfileIds: response.disabledWorkflowProfileIds ?? [],
   }))
 }
 
 export function setProjectDefaultWorkflowProfile(projectId: string | null | undefined, templateId: string) {
-  return request<{ projectId: string; defaultTemplateId: string }>(
-    projectApiPath(projectId, '/workflow-profile/default-template'),
+  return request<{ projectId: string; profileId: string }>(
+    projectApiPath(projectId, '/workflow-profile/default'),
     {
       method: 'PUT',
-      body: JSON.stringify({ templateId }),
-    },
-  )
-}
-
-export function clearProjectDefaultWorkflowProfile(projectId: string | null | undefined) {
-  return request<{ projectId: string; defaultTemplateId: null }>(
-    projectApiPath(projectId, '/workflow-profile/default-template'),
-    {
-      method: 'DELETE',
+      body: JSON.stringify({ profileId: templateId }),
     },
   )
 }

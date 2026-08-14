@@ -228,12 +228,14 @@ function ProfileCard({
             <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{profile.id}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Switch
-              aria-label={`${isDisabled ? 'Enable' : 'Disable'} workflow profile ${profile.displayName}`}
-              checked={!isDisabled}
-              onCheckedChange={handleToggle}
-              disabled={toggleDisabled}
-            />
+            {profile.isBuiltIn === true && (
+              <Switch
+                aria-label={`${isDisabled ? 'Enable' : 'Disable'} workflow profile ${profile.displayName}`}
+                checked={!isDisabled}
+                onCheckedChange={handleToggle}
+                disabled={toggleDisabled}
+              />
+            )}
             <button
               type="button"
               onClick={onClick}
@@ -320,7 +322,8 @@ export function WorkflowProfilesSection({
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('workflows')
 
   const disabledIds = projectProfile?.disabledWorkflowProfileIds ?? []
-  const enabledCount = allProfiles?.filter((p) => !includesWorkflowProfileId(disabledIds, p.id)).length ?? 0
+  const builtInProfiles = allProfiles?.filter((p) => p.isBuiltIn === true) ?? []
+  const enabledCount = builtInProfiles.filter((p) => !includesWorkflowProfileId(disabledIds, p.id)).length
 
   const handleToggleDisabled = useCallback((profileId: string, currentlyDisabled: boolean) => {
     if (currentlyDisabled) {
@@ -368,7 +371,7 @@ export function WorkflowProfilesSection({
               profile={p}
               onClick={() => setSelectedId(p.id)}
               isDisabled={includesWorkflowProfileId(disabledIds, p.id)}
-              isLastEnabled={enabledCount <= 1 && !includesWorkflowProfileId(disabledIds, p.id)}
+              isLastEnabled={p.isBuiltIn === true && enabledCount <= 1 && !includesWorkflowProfileId(disabledIds, p.id)}
               toggleDisabled={disableMutation.isPending || enableMutation.isPending}
               onToggleDisabled={handleToggleDisabled}
               profileHook={profileHook}

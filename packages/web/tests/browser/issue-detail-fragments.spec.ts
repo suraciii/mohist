@@ -120,13 +120,13 @@ async function mockApi(page: Page) {
     if (method === 'GET' && path === `/projects/${project.id}/variables`) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/workflow-profile`) {
-      return route.fulfill({ json: response({ projectId: project.id, defaultTemplateId: null, disabledWorkflowProfileIds: [] }) })
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/default`) {
+      return route.fulfill({ json: response({ projectId: project.id, defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }) })
     }
     if (method === 'GET' && path.endsWith('/opencode/models')) {
       return route.fulfill({ json: response({ models: [], modelVariants: {} }) })
     }
-    if (method === 'GET' && path === '/workflow-templates/system') return route.fulfill({ json: response([]) })
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`) return route.fulfill({ json: response([]) })
     if (method === 'GET' && path === '/workflow-runs/wr-fragment-approval/sessions') return route.fulfill({ json: response([]) })
     if (method === 'GET' && path === '/workflow-runs/wr-fragment-approval/yaml') {
       return route.fulfill({ json: response({ workflowRunId: 'wr-fragment-approval', yaml: '' }) })

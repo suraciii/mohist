@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { request } from '../../../shared/api/client'
+import { ProjectProvider } from '../../project'
 import { getWorkflowProfile } from './client'
 import { useWorkflowProfile, type WorkflowProfileFetcher } from './queries'
 
@@ -22,12 +23,15 @@ interface CapturedRequest {
 }
 
 const PROFILE_DETAIL = {
-  id: 'mohist/local',
-  displayName: 'Mohist Local',
+  projectId: 'proj-1',
+  profileId: 'mohist/local',
+  name: 'Mohist Local',
   description: 'Default workflow profile',
-  isDefault: true,
-  yaml: 'stages: []\n',
-  stages: [],
+  sourceProvenance: 'BuiltIn',
+  isBuiltIn: true,
+  definitionSource: 'stages:\n  - stage: build\n',
+  agentRuntime: 'opencode',
+  stages: [{ stage: 'build', requiresApproval: false, tasks: ['run'], checks: [] }],
 }
 
 const queryClients: QueryClient[] = []
@@ -47,7 +51,14 @@ function renderUseWorkflowProfile(id: string | null) {
   const queryClient = createQueryClient()
   return renderHook(() => useWorkflowProfile(id, workflowProfileFetcher), {
     wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider
+          initialProjectId="proj-1"
+          initialProjects={[{ id: 'proj-1', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}
+        >
+          {children}
+        </ProjectProvider>
+      </QueryClientProvider>
     ),
   })
 }
@@ -59,7 +70,7 @@ const requester: typeof request = async <T,>(path: string, init?: RequestInit) =
   return PROFILE_DETAIL as T
 }
 
-const workflowProfileFetcher: WorkflowProfileFetcher = (id) => getWorkflowProfile(id, requester)
+const workflowProfileFetcher: WorkflowProfileFetcher = (projectId, id) => getWorkflowProfile(projectId, id, requester)
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -81,7 +92,7 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
 
     expect(requests).toHaveLength(1)
     expect(requests[0].init).toBeUndefined()
-    expect(requests[0].path).toBe('/workflow-templates/system/mohist/local')
+    expect(requests[0].path).toBe('/projects/proj-1/workflow-profiles/mohist/local')
     expect(requests[0].path).not.toContain('%2F')
     expect(requests[0].path).not.toContain('mohist%2Fdefault')
   })
@@ -90,11 +101,18 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
     const { result } = renderUseWorkflowProfile('mohist/local')
 
     await flush()
-    expect(result.current.data).toEqual(PROFILE_DETAIL)
+    expect(result.current.data).toEqual(expect.objectContaining({
+      id: 'mohist/local',
+      displayName: 'Mohist Local',
+      description: PROFILE_DETAIL.description,
+      isDefault: true,
+      agentRuntime: 'opencode',
+      definitionSource: PROFILE_DETAIL.definitionSource,
+    }))
 
     expect(result.current.data?.id).toBe('mohist/local')
-    expect(result.current.data?.yaml).toBe(PROFILE_DETAIL.yaml)
-    expect(result.current.data?.stages).toEqual([])
+    expect(result.current.data?.yaml).toBe(PROFILE_DETAIL.definitionSource)
+    expect(result.current.data?.stages).toEqual(PROFILE_DETAIL.stages)
   })
 
   it('does not fetch when id is null', () => {
