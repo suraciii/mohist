@@ -512,6 +512,23 @@ function applyDurationMeasurementPhase(
   })
 }
 
+function applyServerSpecPhase(planned: readonly PlannedLane[]): PlannedLane[] {
+  const specPartitions = planned.filter(
+    (plan) => plan.partition !== undefined && plan.policyTrack?.id === 'server-spec',
+  )
+  if (specPartitions.length === 0) return [...planned]
+
+  const coverage = planned.find((plan) => plan.lane.id === 'server-spec-coverage')
+  if (coverage === undefined) return [...planned]
+
+  return planned.map((plan) => {
+    if (plan.policyTrack?.id === 'cli') return plan
+    if (plan.partition !== undefined && plan.policyTrack?.id === 'server-spec') return plan
+    if (plan.lane.id === coverage.lane.id) return plan
+    return withLaneConstraints(plan, [coverage.lane.id])
+  })
+}
+
 export function planTracks(
   selected: readonly TrackConfig[],
   artifactRoot: string,
@@ -563,7 +580,7 @@ export function planTracks(
       deadlineMs: track.deadlineMs,
     })
   }
-  return applyDurationMeasurementPhase(planned, durationMeasurementTracks, durationIsolationTrack)
+  return applyServerSpecPhase(applyDurationMeasurementPhase(planned, durationMeasurementTracks, durationIsolationTrack))
 }
 
 function evidenceFor(artifactRoot: string, laneId: string): RawEvidence {
