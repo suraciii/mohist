@@ -278,7 +278,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("ready-claim: starts the runtime without probing or registering a model catalog", async (resources) => {
+  it("ready-claim: registers the Pi model catalog snapshot", async (resources) => {
     installFakeOpenCodeRuntimeFactory(resources)
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
@@ -288,9 +288,11 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     try {
       await connected.promise
       const connectArg = connect.mock.calls[0]?.[0] as Record<string, unknown>
-      expect(connectArg).not.toHaveProperty("coderModels")
-      expect(connectArg).not.toHaveProperty("coderModelVariants")
-      expect(connectArg).not.toHaveProperty("runtimeCatalogs")
+      expect(connectArg).toMatchObject({
+        runtimeCatalogs: {
+          pi: { models: [], variants: {} },
+        },
+      })
       expect(connectArg?.actionCatalog).toEqual(expectedActionCatalog())
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("run")
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("private")
@@ -300,7 +302,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("RunnerRegistration does not read runtime model catalogs", async (resources) => {
+  it("RunnerRegistration registers the Pi model catalog", async (resources) => {
     installFakeOpenCodeRuntimeFactory(resources)
     const piCatalog = {
       models: [
@@ -325,17 +327,25 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     try {
       await connected.promise
       const registration = connect.mock.calls[0]?.[0] as Record<string, unknown>
-      expect(registration).not.toHaveProperty("coderModels")
-      expect(registration).not.toHaveProperty("coderModelVariants")
-      expect(registration).not.toHaveProperty("runtimeCatalogs")
-      expect(catalog).not.toHaveBeenCalled()
+      expect(registration).toMatchObject({
+        runtimeCatalogs: {
+          pi: {
+            models: ["anthropic/claude-sonnet-4", "openai/gpt-5.5"],
+            variants: {
+              "anthropic/claude-sonnet-4": ["off"],
+              "openai/gpt-5.5": ["low", "high"],
+            },
+          },
+        },
+      })
+      expect(catalog).toHaveBeenCalledTimes(1)
     } finally {
       controller.abort()
       await run.catch(() => undefined)
     }
   })
 
-  it("RunnerRegistration omits model catalogs on every heartbeat", async (resources) => {
+  it("RunnerRegistration carries the Pi model catalog on every heartbeat", async (resources) => {
     installFakeOpenCodeRuntimeFactory(resources)
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
@@ -350,9 +360,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       const heartbeatBodies = heartbeat.mock.calls.map((call) => call[0] as Record<string, unknown>)
       expect(heartbeatBodies.length).toBeGreaterThan(0)
       for (const body of heartbeatBodies) {
-        expect(body).not.toHaveProperty("coderModels")
-        expect(body).not.toHaveProperty("coderModelVariants")
-        expect(body).not.toHaveProperty("runtimeCatalogs")
+        expect(body).toMatchObject({ runtimeCatalogs: { pi: { models: [], variants: {} } } })
         expect(body.actionCatalog).toEqual(expectedActionCatalog())
       }
     } finally {

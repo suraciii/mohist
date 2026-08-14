@@ -1074,11 +1074,22 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
+    const piCatalog = this.piRuntime?.catalog()
     return {
       capabilities: [],
       actionCatalog: this.actions.catalog(),
       projectId: this.options.projectId,
       connectionId: this.signalR.getConnectionId(),
+      ...(piCatalog ? {
+        runtimeCatalogs: {
+          pi: {
+            models: piCatalog.models.map((model) => `${model.provider}/${model.id}`),
+            variants: Object.fromEntries(
+              piCatalog.models.map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]),
+            ),
+          },
+        },
+      } : {}),
     }
   }
 
