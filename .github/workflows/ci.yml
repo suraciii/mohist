@@ -143,17 +143,16 @@ jobs:
         run: timeout --signal=TERM --kill-after=30s 60s npm run format:check
 
       - name: Run canonical gate
-        # TERM starts at 390s and KILL follows after ten seconds. The remaining
-        # job wall belongs to checkout, setup, install, and diagnostic upload;
-        # the job timeout above is only an outer setup/cleanup margin.
+        # The canonical executor owns separate setup and measured-duration
+        # deadlines. Do not wrap it in a shorter shell timeout: cold setup can
+        # consume that margin before the measured five-minute gate starts.
         # npm run verify first executes the master file-size ratchet, then the
         # canonical scheduler.
-        timeout-minutes: 7
         env:
           TMPDIR: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: timeout -k 10s 390s npm run verify
+        run: npm run verify
 
       - name: Upload canonical diagnostics
         if: always()
