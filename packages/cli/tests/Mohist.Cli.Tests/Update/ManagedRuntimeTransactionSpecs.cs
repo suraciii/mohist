@@ -304,6 +304,52 @@ public sealed class ManagedRuntimeTransactionSpecs
         Assert.DoesNotContain(fixture.Commands.ExecutedCommands, command =>
             command.FileName == "systemctl"
             && command.Args.SequenceEqual(["--user", "restart", "mohist-runner.service"]));
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path =>
+            path.Contains("/releases/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PrepareManagedRunner_WhenInterruptPreconditionFails_RemovesUnactivatedRelease()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        SeedSourceRunner(fixture, "runner-pluto");
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-interrupt-rejected",
+            null,
+            _ => Task.FromResult<string?>("runner update interrupt was not confirmed"));
+
+        Assert.Null(prepared.Session);
+        Assert.Contains("interrupt was not confirmed", prepared.Error, StringComparison.Ordinal);
+        Assert.Equal(0, fixture.Activator.ApplyCalls);
+        Assert.Equal(0, fixture.Activator.RestoreCalls);
+        Assert.False(fixture.Files.HasFile(fixture.ActivePath));
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path =>
+            path.Contains("/releases/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PrepareManagedRunner_WhenInterruptPreconditionThrows_RestoresSourceAndCleansRelease()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        SeedSourceRunner(fixture, "runner-pluto");
+
+        var prepared = await fixture.Transaction.PrepareAsync(
+            "/repo",
+            "runner",
+            "tx-runner-interrupt-exception",
+            null,
+            _ => Task.FromException<string?>(new InvalidOperationException("interrupt transport lost")));
+
+        Assert.Null(prepared.Session);
+        Assert.Contains("staging failed", prepared.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, fixture.Activator.ApplyCalls);
+        Assert.Equal(1, fixture.Activator.RestoreCalls);
+        Assert.Equal("none", Parse(fixture.Files.Read(fixture.ActivePath)).Status);
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path =>
+            path.Contains("/releases/", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -883,6 +929,7 @@ public sealed class ManagedRuntimeTransactionSpecs
                 && path == "/api/runner/runner-pluto/update-interrupt")
             {
                 Assert.Equal(1, identityReads);
+                Assert.False(fixture.Files.HasFile(fixture.ActivePath));
                 Assert.Equal(sourceUnit, fixture.Files.Read(
                     Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")));
                 return Task.FromResult(interruptConfirmed

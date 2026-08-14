@@ -81,6 +81,7 @@ internal sealed class ManagedRuntimeTransaction
         RuntimeTargetSet? activatedTargets = null;
         ManagedRuntimeSnapshot? sourceSnapshot = null;
         ManagedCliLauncherState? cliLauncher = null;
+        string? stagedReleaseRoot = null;
         var activePointerWritten = false;
         var activationPreconditionInvoked = false;
 
@@ -152,6 +153,7 @@ internal sealed class ManagedRuntimeTransaction
                 return (null, "managed release parent is unavailable");
             _files.CreateDirectory(releaseParent);
             _files.Move(context.CandidateRoot, releaseRoot);
+            stagedReleaseRoot = releaseRoot;
 
             var targets = BuildTargetSet(context, releaseRoot, generation, previous, built);
             if (!targets.IsCompleteFor(scope))
@@ -278,6 +280,11 @@ internal sealed class ManagedRuntimeTransaction
                     CancellationToken.None);
             _err.WriteLine($"Managed update staging failed: {ex.Message}");
             return (null, "managed update staging failed");
+        }
+        finally
+        {
+            if (!activePointerWritten && stagedReleaseRoot is not null)
+                DiscardStagedRelease(stagedReleaseRoot);
         }
     }
 
@@ -721,6 +728,18 @@ internal sealed class ManagedRuntimeTransaction
             _err.WriteLine($"Recovery after activation exit {activationCode} failed: {ex.Message}; no success was emitted.");
         }
         _err.WriteLine($"Managed runtime activation was rejected: {reason}.");
+    }
+
+    private void DiscardStagedRelease(string releaseRoot)
+    {
+        try
+        {
+            _files.DeleteDirectory(releaseRoot);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Managed staged release cleanup failed for {releaseRoot}: {ex.Message}");
+        }
     }
 
     private RuntimeTargetSet NoneTargets(ManagedUpdateSession session) =>
