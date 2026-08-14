@@ -89,15 +89,11 @@ const issuesHandler = vi.fn((info: { request: Request }) => {
 const parentCandidatesHandler = vi.fn(() => {
   return HttpResponse.json({
     success: true,
-    data: _issuesData
-      .filter((issue) => issue.canBeParent)
-      .map(({ number, title }) => ({ number, title })),
+    data: _issuesData.filter((issue) => issue.canBeParent).map(({ number, title }) => ({ number, title })),
   })
 })
 
-const repositoriesHandler = vi.fn(() =>
-  HttpResponse.json({ success: true, data: _repositoriesData }),
-)
+const repositoriesHandler = vi.fn(() => HttpResponse.json({ success: true, data: _repositoriesData }))
 
 const modelsHandler = vi.fn((info: { request: Request }) => {
   void info.request.url
@@ -109,7 +105,15 @@ const workflowProfilesHandler = vi.fn(() =>
     success: true,
     data: (_workflowProfilesData.length > 0
       ? _workflowProfilesData
-      : [{ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' as const }]
+      : [
+          {
+            id: 'mohist/local',
+            displayName: 'Default',
+            description: '',
+            isDefault: true,
+            agentRuntime: 'opencode' as const,
+          },
+        ]
     ).map((profile) => ({
       projectId: 'proj_create',
       profileId: profile.id,
@@ -155,7 +159,10 @@ useMswServer(
   http.get('*/api/issue-templates*', issueTemplatesHandler),
 )
 
-function setupTemplates(defaultTemplate: typeof TEMPLATE_FIXTURES.default = TEMPLATE_FIXTURES.default, customTemplate: typeof TEMPLATE_FIXTURES.custom | null = TEMPLATE_FIXTURES.custom) {
+function setupTemplates(
+  defaultTemplate: typeof TEMPLATE_FIXTURES.default = TEMPLATE_FIXTURES.default,
+  customTemplate: typeof TEMPLATE_FIXTURES.custom | null = TEMPLATE_FIXTURES.custom,
+) {
   _issueTemplatesData.length = 0
   _issueTemplatesData.push(defaultTemplate)
   if (customTemplate) _issueTemplatesData.push(customTemplate)
@@ -165,7 +172,18 @@ function renderDialog(open = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+      <ProjectProvider
+        initialProjectId="proj_create"
+        initialProjects={[
+          {
+            id: 'proj_create',
+            name: 'Project',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            repositories: [],
+          },
+        ]}
+      >
         <CreateIssueDialog open={open} onClose={vi.fn()} />
       </ProjectProvider>
     </QueryClientProvider>,
@@ -189,13 +207,25 @@ describe('CreateIssueDialog', () => {
 
   it('serializes the configured default workflow as the current create selection', async () => {
     _projectWorkflowProfile.defaultTemplateId = 'mohist/local'
-    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false, agentRuntime: 'opencode' })
-    _workflowProfilesData.push({ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' })
+    _workflowProfilesData.push({
+      id: 'mohist/github-pr',
+      displayName: 'GitHub PR',
+      description: '',
+      isDefault: false,
+      agentRuntime: 'opencode',
+    })
+    _workflowProfilesData.push({
+      id: 'mohist/local',
+      displayName: 'Default',
+      description: '',
+      isDefault: true,
+      agentRuntime: 'opencode',
+    })
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Disabled default fallback' } })
-    const workflowSelect = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const workflowSelect = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await waitFor(() => expect(workflowSelect.value).toBe('mohist/local'))
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
@@ -332,7 +362,7 @@ describe('CreateIssueDialog template selector', () => {
     })
     fireEvent.change(selector, { target: { value: 'feature' } })
 
-    const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
+    const description = (await screen.findByPlaceholderText('Optional description')) as HTMLTextAreaElement
 
     await waitFor(() => {
       expect(description.value).toBe(TEMPLATE_FIXTURES.default.body)
@@ -362,7 +392,7 @@ describe('CreateIssueDialog template selector', () => {
     })
     fireEvent.change(selector, { target: { value: 'team/bug-report' } })
 
-    const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
+    const description = (await screen.findByPlaceholderText('Optional description')) as HTMLTextAreaElement
 
     await waitFor(() => {
       expect(description.value).toBe(TEMPLATE_FIXTURES.custom.body)
@@ -381,7 +411,11 @@ describe('CreateIssueDialog template selector', () => {
     fireEvent.change(selector, { target: { value: 'feature' } })
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated issue' } })
 
-    await waitFor(() => expect((screen.getByPlaceholderText('Optional description') as HTMLTextAreaElement).value).toContain('## User Voice'))
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText('Optional description') as HTMLTextAreaElement).value).toContain(
+        '## User Voice',
+      ),
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
@@ -390,224 +424,6 @@ describe('CreateIssueDialog template selector', () => {
     expect(callBody).not.toHaveProperty('risk')
     expect(callBody.workflowProfileId).toBe('mohist/local')
     expect(callBody).not.toHaveProperty('labels')
-  })
-})
-
-describe('CreateIssueDialog model + variant chips', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-    _issuesData = []
-    _createIssueResponse = { number: 1 }
-    _modelsData.models = []
-    _modelsData.modelVariants = {}
-    _workflowProfilesData.length = 0
-    _projectWorkflowProfile.defaultTemplateId = null
-    _projectWorkflowProfile.disabledWorkflowProfileIds = []
-    _issueTemplatesData.length = 0
-  })
-
-  async function modelTrigger() {
-    return waitFor(() => {
-      const trigger = document.getElementById('create-issue-model-trigger')
-      if (!trigger) throw new Error('model trigger not found')
-      return trigger
-    })
-  }
-
-  it('does not render a standalone variant picker anywhere', () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    renderDialog()
-    expect(screen.queryByTestId('create-issue-model-variant-variant-trigger')).not.toBeInTheDocument()
-  })
-
-  it('renders inline variant chips on a variant-capable model row', async () => {
-    _modelsData.models = ['anthropic/claude', 'openai/gpt-4']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-    await user.click(await modelTrigger())
-
-    for (const variant of ['low', 'medium', 'high']) {
-      const chip = document.querySelector(
-        `[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-${variant}"]`,
-      )
-      expect(chip).toBeInTheDocument()
-    }
-    expect(
-      document.querySelector(`[data-testid="create-issue-model-trigger-row-openai/gpt-4-variant-low"]`),
-    ).toBeNull()
-  })
-
-  it('sends modelVariant alongside model on create when a chip is clicked', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
-
-    await user.click(await modelTrigger())
-
-    const highChip = await screen.findByTestId(
-      'create-issue-model-trigger-row-anthropic/claude-variant-high',
-    )
-    await user.click(highChip)
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      model: 'anthropic/claude',
-      modelVariant: 'high',
-    }))
-  })
-
-  it('does not expose or submit an Issue Runtime override', async () => {
-    _modelsData.models = ['openai/gpt-4']
-    renderDialog()
-    expect(screen.queryByTestId('create-issue-runtime')).not.toBeInTheDocument()
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Issue' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const body = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(body.agentConfig).not.toHaveProperty('runtime')
-  })
-
-  it('does not transiently clear the variant when a chip is clicked', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
-    await user.click(await modelTrigger())
-    await user.click(await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high'))
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toMatchObject({
-      model: 'anthropic/claude',
-      modelVariant: 'high',
-    })
-  })
-
-  it('uses the selected profile runtime without clearing the chosen model', async () => {
-    _workflowProfilesData.push(
-      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
-      { id: 'team/pi', displayName: 'Pi', description: '', isDefault: false, agentRuntime: 'pi' },
-    )
-    _modelsData.models = ['anthropic/claude']
-    const user = userEvent.setup()
-    renderDialog()
-
-    const workflow = await screen.findByLabelText('Workflow') as HTMLSelectElement
-    await user.click(await modelTrigger())
-    await user.click(await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement))
-    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
-
-    fireEvent.change(workflow, { target: { value: 'team/pi' } })
-
-    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
-    const runtimes = modelsHandler.mock.calls.map(([call]) => new URL(call.request.url).searchParams.get('runtime'))
-    expect(runtimes).toEqual(expect.arrayContaining(['opencode', 'pi']))
-  })
-
-  it('does not render a model selector when the selected profile has no runtime', async () => {
-    _workflowProfilesData.push({
-      id: 'team/unknown',
-      displayName: 'Unknown',
-      description: '',
-      isDefault: true,
-      agentRuntime: null,
-    })
-    _projectWorkflowProfile.defaultTemplateId = 'team/unknown'
-    _modelsData.models = ['vendor/custom-model']
-    renderDialog()
-
-    const workflow = await screen.findByLabelText('Workflow') as HTMLSelectElement
-    await waitFor(() => expect(workflow.value).toBe('team/unknown'))
-    expect(screen.queryByRole('button', { name: 'Coder Model' })).not.toBeInTheDocument()
-  })
-
-  it('does not include modelVariant when a model body click selects the default variant', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
-
-    await user.click(await modelTrigger())
-
-    const modelRow = await screen.findByText('claude', { selector: 'span' })
-    const rowEl = modelRow.closest('[data-model-id]') as HTMLElement
-    expect(rowEl.getAttribute('data-model-id')).toBe('anthropic/claude')
-    await user.click(rowEl)
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      model: 'anthropic/claude',
-    }))
-    expect(callBody).not.toHaveProperty('modelVariant')
-  })
-
-  it('highlights the active variant chip on the selected row', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    await user.click(await modelTrigger())
-
-    const mediumChip = await screen.findByTestId(
-      'create-issue-model-trigger-row-anthropic/claude-variant-medium',
-    )
-    await user.click(mediumChip)
-
-    await user.click(await modelTrigger())
-
-    const active = document.querySelector(
-      '[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-medium"][data-variant-active="true"]',
-    )
-    expect(active).toBeInTheDocument()
-    expect(
-      document.querySelector(
-        '[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-low"][data-variant-active="true"]',
-      ),
-    ).toBeNull()
-  })
-
-  it('uses shared keyboard navigation to select a variant chip', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Keyboard' } })
-    await user.click(await modelTrigger())
-
-    const search = await screen.findByPlaceholderText('Search models...')
-    fireEvent.keyDown(search, { key: 'ArrowRight' })
-    const lowChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-low')
-    await waitFor(() => expect(lowChip).toHaveFocus())
-    fireEvent.keyDown(lowChip, { key: 'ArrowRight' })
-    const highChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high')
-    await waitFor(() => expect(highChip).toHaveFocus())
-    fireEvent.keyDown(highChip, { key: 'Enter' })
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      model: 'anthropic/claude',
-      modelVariant: 'high',
-    }))
   })
 })
 
@@ -640,7 +456,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Project default issue' } })
-    const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const select = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
@@ -655,12 +471,18 @@ describe('CreateIssueDialog workflow profile default', () => {
 
     renderDialog()
 
-    const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const select = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await waitFor(() => expect(select.value).toBe('mohist/local'))
   })
 
   it('does not prefill or submit a frontmatter recommendation that is not enabled', async () => {
-    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false, agentRuntime: 'opencode' })
+    _workflowProfilesData.push({
+      id: 'mohist/github-pr',
+      displayName: 'PR',
+      description: '',
+      isDefault: false,
+      agentRuntime: 'opencode',
+    })
     _projectWorkflowProfile.defaultTemplateId = null
 
     renderDialog()
@@ -668,14 +490,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Stale recommendation' } })
     fireEvent.change(screen.getByPlaceholderText('Optional description'), {
       target: {
-        value: [
-          '---',
-          'recommended_workflow: mohist/local',
-          'risk: medium',
-          '---',
-          '',
-          'Body',
-        ].join('\n'),
+        value: ['---', 'recommended_workflow: mohist/local', 'risk: medium', '---', '', 'Body'].join('\n'),
       },
     })
 
@@ -784,10 +599,12 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      title: 'Plan with deps',
-      prerequisiteNumbers: [5, 7],
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        title: 'Plan with deps',
+        prerequisiteNumbers: [5, 7],
+      }),
+    )
   })
 
   it('removes a buffered chip from the local selection without sending the removed number', async () => {
@@ -819,9 +636,11 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      prerequisiteNumbers: [7],
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        prerequisiteNumbers: [7],
+      }),
+    )
 
     // after submit, the picker re-opened from scratch (dialog was reset); confirm chip state was cleared.
     cleanup()
@@ -858,7 +677,18 @@ describe('CreateIssueDialog prerequisites', () => {
 
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <ProjectProvider
+          initialProjectId="proj_create"
+          initialProjects={[
+            {
+              id: 'proj_create',
+              name: 'Project',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <CreateIssueDialog open onClose={onClose} />
         </ProjectProvider>
       </QueryClientProvider>,
@@ -877,21 +707,45 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      prerequisiteNumbers: [5],
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        prerequisiteNumbers: [5],
+      }),
+    )
     expect(onClose).toHaveBeenCalledTimes(1)
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <ProjectProvider
+          initialProjectId="proj_create"
+          initialProjects={[
+            {
+              id: 'proj_create',
+              name: 'Project',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <CreateIssueDialog open={false} onClose={onClose} />
         </ProjectProvider>
       </QueryClientProvider>,
     )
     rerender(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <ProjectProvider
+          initialProjectId="proj_create"
+          initialProjects={[
+            {
+              id: 'proj_create',
+              name: 'Project',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <CreateIssueDialog open onClose={onClose} />
         </ProjectProvider>
       </QueryClientProvider>,
