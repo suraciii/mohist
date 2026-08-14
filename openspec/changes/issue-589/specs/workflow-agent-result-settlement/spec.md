@@ -2,9 +2,9 @@
 
 For a Workflow-owned Agent task, the WorkflowRun SHALL be the sole authority that records the task as completed or failed. An authoritative Agent result is a result report bound to the recorded Workflow execution identity that explicitly establishes success or failure. Runner connectivity, result-report transport errors, AgentSession activity, AgentTurn activity, and physical stop delivery or confirmation states MUST remain execution observations and MUST NOT by themselves produce `TaskCompleted`, `TaskFailed`, or an equivalent terminal task outcome.
 
-#### Scenario: Stop confirmation fails while the target may still be active
+#### Scenario: Stop confirmation fails while the target might still be active
 
-- **WHEN** a physical stop request for a Workflow Agent execution cannot be confirmed and the recorded target may still be active
+- **WHEN** a physical stop request for a Workflow Agent execution cannot be confirmed and the recorded target might still be active
 - **THEN** the Workflow SHALL retain an explicit unknown, nonterminal settlement for the original execution
 - **AND** the task and WorkflowRun MUST NOT be recorded as completed or failed
 
@@ -24,7 +24,7 @@ For a Workflow-owned Agent task, the WorkflowRun SHALL be the sole authority tha
 
 An unknown settlement SHALL durably retain the original WorkflowRun, task attempt and work identity, bound AgentSession and AgentTurn identity, applicable physical target, stop-operation identity, unresolved reason, and settlement deadline. The turn-opening input SHALL have a stable delivery identity, and the Agent runtime MUST NOT start until the Server acknowledges that both the AgentSession turn binding and Workflow execution binding are durable. Every later runtime event SHALL retain that immutable execution identity; events from different executions MUST NOT be delivered as one identity. Repeated inputs or observations for the same identity MUST resolve to the same turn and settlement and MUST NOT create replacement work, a replacement Agent turn, a replacement deadline, or a second task outcome.
 
-Task definition identifiers remain scoped to their stage and MAY repeat in different stages. The resulting `TaskRunId` and `WorkId` MUST nevertheless be unique within a WorkflowRun, including the first attempt of two different stages with the same definition identifier. Identity allocation MUST retain the established identifier for a non-colliding attempt and deterministically disambiguate only a colliding later attempt.
+The system MUST support task definition identifiers that repeat in different stages because each definition identifier is scoped to its stage. The resulting `TaskRunId` and `WorkId` MUST nevertheless be unique within a WorkflowRun, including the first attempt of two different stages with the same definition identifier. Identity allocation MUST retain the established identifier for a non-colliding attempt and deterministically disambiguate only a colliding later attempt.
 
 #### Scenario: Different stages repeat a task definition identifier
 
@@ -43,7 +43,7 @@ Task definition identifiers remain scoped to their stage and MAY repeat in diffe
 
 - **WHEN** the Server durably binds a turn-opening input but its acknowledgement is lost before the Runner receives it
 - **THEN** replay of the same input delivery identity SHALL reuse the existing Agent input, AgentTurn, and Workflow settlement
-- **AND** the runtime MAY start only after the replay receives the matching acknowledgement
+- **AND** the runtime MUST NOT start before the replay receives the matching acknowledgement
 
 #### Scenario: A runtime-event batch contains different execution identities
 
@@ -56,7 +56,7 @@ Task definition identifiers remain scoped to their stage and MAY repeat in diffe
 - **WHEN** the same stop operation is delivered again for an execution that already has an unknown settlement
 - **THEN** the system SHALL return or continue the existing settlement for that execution identity
 - **AND** it MUST NOT create a new stop-operation identity or another Workflow task outcome
-- **AND** it MAY redeliver the recorded stop operation only after positive reconciliation proves that the exact recorded target is still active
+- **AND** it MUST NOT redeliver the recorded stop operation unless positive reconciliation proves that the exact recorded target is still active
 
 #### Scenario: Duplicate unknown observations arrive
 
