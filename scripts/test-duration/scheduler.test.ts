@@ -73,6 +73,32 @@ test('scheduler admits only resource-compatible lanes and releases a completed c
   assert.deepEqual(result.lanes.map((lane) => lane.state), ['passed', 'passed', 'passed'])
 })
 
+test('scheduler treats a weighted inner test-runner claim as one resource budget', async () => {
+  const starts = startSignals('wide', 'queued')
+  const wide = deferred<boolean>()
+  const queued = deferred<boolean>()
+  const pending = scheduleLanes(
+    [
+      { id: 'wide', resources: ['host', 'server-spec'], resourceWeights: { 'server-spec': 2 } },
+      { id: 'queued', resources: ['host', 'server-spec'], resourceWeights: { 'server-spec': 2 } },
+    ],
+    (lane): RunningLane<boolean> => {
+      starts.record(lane.id)
+      return { result: lane.id === 'wide' ? wide.promise : queued.promise, cancel: () => {} }
+    },
+    (result) => result,
+    { resourceLimits: { host: 2, 'server-spec': 2 } },
+  )
+
+  await starts.waitFor('wide')
+  assert.deepEqual(starts.started, ['wide'])
+  wide.resolve(true)
+  await starts.waitFor('queued')
+  queued.resolve(true)
+  const result = await pending
+  assert.deepEqual(result.lanes.map((lane) => lane.state), ['passed', 'passed'])
+})
+
 test('scheduler cancels active lanes and does not admit queued lanes after the first failure', async () => {
   const starts = startSignals('first', 'second', 'queued')
   const cancelled: string[] = []

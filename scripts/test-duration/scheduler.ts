@@ -2,6 +2,7 @@ export interface LaneSpec {
   readonly id: string
   readonly dependsOn?: readonly string[]
   readonly resources?: readonly string[]
+  readonly resourceWeights?: Readonly<Record<string, number>>
 }
 
 export interface RunningLane<T> {
@@ -53,6 +54,14 @@ function assertPlan(lanes: readonly LaneSpec[], resourceLimits: Readonly<Record<
     if (new Set(resources).size !== resources.length) {
       throw new Error(`scheduler lane ${lane.id} claims a resource more than once`)
     }
+    for (const [resource, weight] of Object.entries(lane.resourceWeights ?? {})) {
+      if (!resources.includes(resource)) {
+        throw new Error(`scheduler lane ${lane.id} weights an unclaimed resource ${resource}`)
+      }
+      if (!Number.isInteger(weight) || weight <= 0) {
+        throw new Error(`scheduler lane ${lane.id} resource ${resource} must have a positive integer weight`)
+      }
+    }
   }
   for (const lane of lanes) {
     for (const dependency of lane.dependsOn ?? []) {
@@ -72,18 +81,21 @@ function resourcesAvailable(
   used: ReadonlyMap<string, number>,
   limits: Readonly<Record<string, number>>,
 ): boolean {
-  return (lane.resources ?? []).every((resource) => (used.get(resource) ?? 0) < (limits[resource] ?? 1))
+  return (lane.resources ?? []).every((resource) => {
+    const weight = lane.resourceWeights?.[resource] ?? 1
+    return (used.get(resource) ?? 0) + weight <= (limits[resource] ?? 1)
+  })
 }
 
 function claim(lane: LaneSpec, used: Map<string, number>): void {
   for (const resource of lane.resources ?? []) {
-    used.set(resource, (used.get(resource) ?? 0) + 1)
+    used.set(resource, (used.get(resource) ?? 0) + (lane.resourceWeights?.[resource] ?? 1))
   }
 }
 
 function release(lane: LaneSpec, used: Map<string, number>): void {
   for (const resource of lane.resources ?? []) {
-    const next = (used.get(resource) ?? 1) - 1
+    const next = (used.get(resource) ?? 1) - (lane.resourceWeights?.[resource] ?? 1)
     if (next <= 0) used.delete(resource)
     else used.set(resource, next)
   }
