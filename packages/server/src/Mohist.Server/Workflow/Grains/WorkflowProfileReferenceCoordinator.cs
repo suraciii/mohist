@@ -1,6 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -37,6 +41,16 @@ public interface IWorkflowProfileReferenceCoordinatorGrain : IGrainWithStringKey
         string commandId,
         long? expectedRevision);
 
+    Task<WorkflowProfileReferenceResult> SetAgentActionOverrideAsync(
+        WorkflowProfileCommandPayload.SetAgentActionOverride payload,
+        string commandId,
+        long? expectedRevision);
+
+    Task<WorkflowProfileSaveResult> UpdateProfileAsync(
+        WorkflowProfileCommandPayload.UpdateProfile payload,
+        string commandId,
+        long? expectedRevision);
+
     /// <summary>
     /// Delete a custom Profile after re-validating that no Project
     /// default, Issue selection (including terminal), or active
@@ -59,6 +73,8 @@ public enum WorkflowProfileReferenceResultCode
     ProfileReadOnly = 4,
     BlockedByReferences = 5,
     StaleRevision = 6,
+    ConflictingRequest = 7,
+    ValidationFailed = 8,
 }
 
 [GenerateSerializer]
@@ -67,7 +83,8 @@ public sealed record WorkflowProfileReferenceResult(
     [property: Id(1)] string ProfileId,
     [property: Id(2)] long AppliedRevision,
     [property: Id(3)] string? Message = null,
-    [property: Id(4)] WorkflowProfileDeletionBlockersDto? Blockers = null)
+    [property: Id(4)] WorkflowProfileDeletionBlockersDto? Blockers = null,
+    [property: Id(5)] BoundWorkflowStart? Binding = null)
 {
     public bool IsApplied =>
         Code is WorkflowProfileReferenceResultCode.Applied
@@ -110,6 +127,8 @@ public static class WorkflowProfileCommandPayloadKinds
 {
     public const string SetProjectDefault = "setProjectDefault";
     public const string BindWorkflowRun = "bindWorkflowRun";
+    public const string SetAgentActionOverride = "setAgentActionOverride";
+    public const string UpdateProfile = "updateProfile";
     public const string DeleteProfile = "deleteProfile";
 }
 
@@ -130,9 +149,35 @@ public abstract record WorkflowProfileCommandPayload
     public sealed record BindWorkflowRun(
         string ProjectId,
         string WorkflowRunId,
-        string ProfileId) : WorkflowProfileCommandPayload
+        int? IssueNumber,
+        int? EpicNumber,
+        string? ExplicitProfileId,
+        WorkflowRunMetadata Metadata,
+        WorkspaceIdentity? Workspace = null,
+        BoundWorkflowStart? Bound = null) : WorkflowProfileCommandPayload
     {
         public override string Kind => WorkflowProfileCommandPayloadKinds.BindWorkflowRun;
+        public string ProfileId => Bound?.ProfileId ?? ExplicitProfileId ?? string.Empty;
+    }
+
+    [GenerateSerializer]
+    public sealed record SetAgentActionOverride(
+        string ProjectId,
+        string ProfileId,
+        string? AgentAction) : WorkflowProfileCommandPayload
+    {
+        public override string Kind => WorkflowProfileCommandPayloadKinds.SetAgentActionOverride;
+    }
+
+    [GenerateSerializer]
+    public sealed record UpdateProfile(
+        string ProjectId,
+        string ProfileId,
+        string Name,
+        string Description,
+        string DefinitionSource) : WorkflowProfileCommandPayload
+    {
+        public override string Kind => WorkflowProfileCommandPayloadKinds.UpdateProfile;
     }
 
     [GenerateSerializer]
@@ -143,6 +188,24 @@ public abstract record WorkflowProfileCommandPayload
         public override string Kind => WorkflowProfileCommandPayloadKinds.DeleteProfile;
     }
 }
+
+[GenerateSerializer]
+public sealed record BoundWorkflowStart(
+    [property: Id(0)] string WorkflowRunId,
+    [property: Id(1)] string ProjectId,
+    [property: Id(2)] int? IssueNumber,
+    [property: Id(3)] int? EpicNumber,
+    [property: Id(4)] string? ExplicitProfileId,
+    [property: Id(5)] string ProfileId,
+    [property: Id(6)] string? AgentAction,
+    [property: Id(7)] List<BoundStageStructure> Stages,
+    [property: Id(8)] WorkflowRunMetadata Metadata,
+    [property: Id(9)] WorkspaceIdentity? Workspace);
+
+[GenerateSerializer]
+public sealed record BoundStageStructure(
+    [property: Id(0)] string Stage,
+    [property: Id(1)] bool RequiresApproval);
 
 internal static class WorkflowProfileCommandPayloadCodec
 {
@@ -172,6 +235,12 @@ internal static class WorkflowProfileCommandPayloadCodec
                     dataElement.GetRawText(), JSON.Options)!,
             WorkflowProfileCommandPayloadKinds.BindWorkflowRun =>
                 JsonSerializer.Deserialize<WorkflowProfileCommandPayload.BindWorkflowRun>(
+                    dataElement.GetRawText(), JSON.Options)!,
+            WorkflowProfileCommandPayloadKinds.SetAgentActionOverride =>
+                JsonSerializer.Deserialize<WorkflowProfileCommandPayload.SetAgentActionOverride>(
+                    dataElement.GetRawText(), JSON.Options)!,
+            WorkflowProfileCommandPayloadKinds.UpdateProfile =>
+                JsonSerializer.Deserialize<WorkflowProfileCommandPayload.UpdateProfile>(
                     dataElement.GetRawText(), JSON.Options)!,
             WorkflowProfileCommandPayloadKinds.DeleteProfile =>
                 JsonSerializer.Deserialize<WorkflowProfileCommandPayload.DeleteProfile>(

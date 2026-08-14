@@ -326,13 +326,16 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         IWorkflowRunStore store,
         string workflowRunId)
     {
-        var identity = GrainTestContext.Create(workflowRunId, new WorkflowGrainTestProfileCoordinatorFactory());
+        var resolver = services.GetRequiredService<WorkflowDefinitionResolver>();
+        var identity = GrainTestContext.Create(
+            workflowRunId,
+            new WorkflowGrainTestProfileCoordinatorFactory(store, resolver));
         return new WorkflowGrain(
             identity.Context,
             identity.Runtime,
             store,
             services.GetRequiredService<IDispatchSnapshotStore>(),
-            services.GetRequiredService<WorkflowDefinitionResolver>(),
+            resolver,
             services.GetRequiredService<WorkflowVariableResolver>(),
             services.GetRequiredService<IWorkflowArtifactBindService>(),
             Options.Create(new WorkflowOptions()),
@@ -346,13 +349,16 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         string workflowRunId,
         ReminderCalls calls)
     {
-        var identity = GrainTestContext.Create(workflowRunId, new WorkflowGrainTestProfileCoordinatorFactory());
+        var resolver = services.GetRequiredService<WorkflowDefinitionResolver>();
+        var identity = GrainTestContext.Create(
+            workflowRunId,
+            new WorkflowGrainTestProfileCoordinatorFactory(store, resolver));
         return new ReminderWorkflowGrain(
             identity.Context,
             identity.Runtime,
             store,
             services.GetRequiredService<IDispatchSnapshotStore>(),
-            services.GetRequiredService<WorkflowDefinitionResolver>(),
+            resolver,
             services.GetRequiredService<WorkflowVariableResolver>(),
             services.GetRequiredService<IWorkflowArtifactBindService>(),
             Options.Create(new WorkflowOptions()),

@@ -55,7 +55,8 @@ public sealed record WorkflowProfile(
     string Id,
     string Name,
     string Description,
-    WorkflowDefinition Definition);
+    WorkflowDefinition Definition,
+    string? AgentAction = null);
 
 public sealed record WorkflowStructure(
     string Id,

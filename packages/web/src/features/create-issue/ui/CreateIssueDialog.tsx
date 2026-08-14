@@ -1,12 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/shared/ui/components/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
@@ -22,15 +17,17 @@ import {
   useParentIssueCandidates,
 } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
-import { getWorkflowProfileAgentRuntime, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
+import {
+  getWorkflowProfileAgentRuntime,
+  useAvailableModelIds,
+  useEffectiveDefaultWorkflowProfile,
+  useWorkflowProfiles,
+} from '../../../entities/settings'
 import type { AgentRuntime, WorkflowProfileInfo } from '../../../entities/settings'
 import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
-import {
-  mapCreateIssueError,
-  pickInitialRepositoryName,
-} from '../lib/assignment'
+import { mapCreateIssueError, pickInitialRepositoryName } from '../lib/assignment'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
@@ -59,7 +56,7 @@ function ModelPresetSelect({
   const { data: availableModels } = useAvailableModelIds(runtime)
   const allModels: string[] = availableModels?.models ?? []
   const modelVariantsMap = availableModels?.modelVariants ?? {}
-  const availableVariants = value ? modelVariantsMap[value] ?? [] : []
+  const availableVariants = value ? (modelVariantsMap[value] ?? []) : []
   const resolvedVariant = variant && availableVariants.includes(variant) ? variant : null
   const readOnly = runtime === null
 
@@ -105,9 +102,8 @@ function TemplateSelector({
   const options = useMemo(() => {
     const list = templates
     const known = new Set(list.map((t) => t.id))
-    const extras = value && !known.has(value)
-      ? [{ id: value, name: value, description: '', source: 'custom' as const }]
-      : []
+    const extras =
+      value && !known.has(value) ? [{ id: value, name: value, description: '', source: 'custom' as const }] : []
     return [...list, ...extras]
   }, [templates, value])
 
@@ -173,7 +169,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
     }
     return null
   }, [frontmatter])
-  const frontmatterRisk = frontmatter.kind === 'closed' ? frontmatter.risk ?? null : null
+  const frontmatterRisk = frontmatter.kind === 'closed' ? (frontmatter.risk ?? null) : null
 
   const lastInitializedProjectIdRef = useRef<string | null>(null)
   useEffect(() => {
@@ -203,17 +199,14 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
     () => new Set((workflowProfiles ?? []).map((profile) => profile.id)),
     [workflowProfiles],
   )
-  const recommendationIsEnabled = recommendation
-    ? enabledWorkflowIds.has(recommendation.workflow)
-    : false
+  const recommendationIsEnabled = recommendation ? enabledWorkflowIds.has(recommendation.workflow) : false
   const recommendationUnavailable = recommendation && !recommendationIsEnabled
-  const recommendedWorkflowProfileId = recommendation && recommendationIsEnabled && !workflowTouched
-    ? recommendation.workflow
-    : null
+  const recommendedWorkflowProfileId =
+    recommendation && recommendationIsEnabled && !workflowTouched ? recommendation.workflow : null
   const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
   const submittedWorkflowProfileId = workflowTouched
     ? workflowProfileId
-    : recommendedWorkflowProfileId ?? defaultProfileId ?? null
+    : (recommendedWorkflowProfileId ?? defaultProfileId ?? null)
   const effectiveRisk = riskTouched ? risk : frontmatterRisk
 
   useEffect(() => {
@@ -223,8 +216,8 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
   }, [selectedTemplate])
 
   const workflowSelectValue = workflowTouched
-    ? workflowProfileId ?? ''
-    : recommendedWorkflowProfileId ?? defaultProfileId ?? ''
+    ? (workflowProfileId ?? '')
+    : (recommendedWorkflowProfileId ?? defaultProfileId ?? '')
   const selectedWorkflowRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, workflowSelectValue || null)
 
   const mutation = useMutation({
@@ -288,7 +281,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
   const profileOptions: WorkflowProfileInfo[] = workflowProfiles ?? []
   return (
     <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
         <DialogHeader>
           <DialogTitle>Create Issue</DialogTitle>
         </DialogHeader>
@@ -335,21 +328,17 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
                 </span>
               </div>
               {recommendation.reason && (
-                <p
-                  className="text-xs text-blue-700 mt-1 whitespace-pre-wrap"
-                  data-testid="recommended-workflow-reason"
-                >
+                <p className="text-xs text-blue-700 mt-1 whitespace-pre-wrap" data-testid="recommended-workflow-reason">
                   {recommendation.reason}
                 </p>
               )}
               {recommendationUnavailable ? (
                 <p className="text-[11px] text-amber-700 mt-1" data-testid="workflow-recommendation-unavailable">
-                  This workflow is not enabled for the current project. Choose an enabled workflow or use the project default.
+                  This workflow is not enabled for the current project. Choose an enabled workflow or use the project
+                  default.
                 </p>
               ) : (
-                <p className="text-[11px] text-blue-600/80 mt-1">
-                  Pre-filled below. Change the selector to override.
-                </p>
+                <p className="text-[11px] text-blue-600/80 mt-1">Pre-filled below. Change the selector to override.</p>
               )}
             </div>
           )}
@@ -519,11 +508,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
                     variant="ghost"
                     size="xs"
                     onClick={() => setPriority(p)}
-                    className={`rounded-full ${
-                      priority === p
-                        ? 'ring-1 ring-offset-1'
-                        : 'hover:opacity-80'
-                    }`}
+                    className={`rounded-full ${priority === p ? 'ring-1 ring-offset-1' : 'hover:opacity-80'}`}
                     style={{
                       backgroundColor: style.bg,
                       color: style.text,
@@ -548,16 +533,11 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
           )}
 
           {mutation.error && !assignmentErrorMessage && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              {mutation.error.message}
-            </div>
+            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">{mutation.error.message}</div>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button
-              variant="outline"
-              onClick={resetAndClose}
-            >
+            <Button variant="outline" onClick={resetAndClose}>
               Cancel
             </Button>
             <Button

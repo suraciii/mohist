@@ -747,7 +747,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     input.Description)).ToArray(),
                 action.Outputs.Select(output => new ActionCatalogOutput(output.Name, output.Description)).ToArray(),
                 action.Errors.Select(error => new ActionCatalogError(error.Code, error.Description)).ToArray(),
-                action.Description)).ToArray(),
+                action.Description,
+                action.Capabilities is null ? null : [.. action.Capabilities])).ToArray(),
             catalog.Tombstones.Select(tombstone => new ActionCatalogTombstone(tombstone.Name, tombstone.Guidance)).ToArray());
     }
 

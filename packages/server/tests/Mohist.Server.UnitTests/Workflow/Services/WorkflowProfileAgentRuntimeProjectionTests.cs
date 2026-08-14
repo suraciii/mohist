@@ -58,11 +58,11 @@ public sealed class WorkflowProfileAgentRuntimeProjectionTests
     }
 
     [Fact]
-    public void Project_DefaultsOpenCodeForOpenSpecTaskWithoutNestedUses()
+    public void Project_DoesNotInferRuntimeForOpenSpecTaskWithoutNestedUses()
     {
         var definition = DefinitionWithTask(new TaskDefinition("load", Uses: "mohist/openspec-tasks"));
 
-        Assert.Equal("opencode", WorkflowProfileAgentRuntimeProjection.Project(definition));
+        Assert.Null(WorkflowProfileAgentRuntimeProjection.Project(definition));
     }
 
     [Fact]

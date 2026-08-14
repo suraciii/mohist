@@ -9,7 +9,7 @@ Loads `tasks.json` and adds its tasks to the current Workflow execution.
 | Field | Required | Default | Meaning |
 |---|---:|---|---|
 | `path` | Yes | - | Path to `tasks.json`. The value is text. |
-| `task` | No | - | Default task-level fields applied to each task entry. The value is an object and is resolved when the task expands. |
+| `task` | Yes | - | Default task fields applied to every task entry. `task.uses` is required and is resolved by the Profile before the Action runs. |
 | `items` | No | `tasks` | Top-level path to the task list in the JSON document. The value is text. |
 | `buildPrompt` | No | - | Text used to build each task prompt. |
 
@@ -33,12 +33,17 @@ Loads `tasks.json` and adds its tasks to the current Workflow execution.
   uses: mohist/openspec-tasks
   with:
     path: openspec/changes/issue-448/tasks.json
-    task: ${{ vars.defaultTask }}
+    task:
+      uses: ${{ profile.agentAction }}
+      with:
+        options: ${{ vars.agent }}
     items: tasks
 ```
 
-This example references a Variable named `defaultTask`. Omit `task` when no
-default task-level fields are needed.
+Every generated task inherits the materialized `task.uses`. Entries in
+`tasks.json` must not contain `uses`; the Action rejects an override with
+`invalid-input` instead of changing the Profile-selected Action. There is no
+implicit `mohist/opencode` fallback.
 
 ## `mohist/openspec-artifacts`
 

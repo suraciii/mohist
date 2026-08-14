@@ -40,7 +40,13 @@ public static partial class WorkflowRoutes
             if (status is null) return ApiResults.NotFound($"Workflow run '{workflowRunId}' not found");
 
             var issueRef = await issueQuerier.GetIssueRefForWorkflowRunAsync(workflowRunId);
-            var detail = new WorkflowRunDetailDto(status, issueRef);
+            var binding = await workflowReader.GetBindingAsync(workflowRunId);
+            var detail = new WorkflowRunDetailDto(
+                status,
+                issueRef,
+                binding?.WorkflowProfileId,
+                binding?.AgentAction,
+                binding?.AgentRuntime);
 
             return ApiResults.Ok(detail);
         });

@@ -1,9 +1,11 @@
+agentAction: mohist/opencode
+
 approval:
   feedback:
     tasks:
       - id: apply-feedback
         title: Apply approval feedback
-        uses: mohist/opencode
+        uses: ${{ profile.agentAction }}
         with:
           session: ${{ stage.name }}
           prompt: ${{ prompts.apply-feedback }}
@@ -25,7 +27,7 @@ recoveries:
         tasks:
           - id: recover:resolve-rebase-conflicts
             title: Resolve rebase conflicts
-            uses: mohist/opencode
+            uses: ${{ profile.agentAction }}
             with:
               session: check
               prompt: ${{ prompts.resolve-rebase-conflicts }}
@@ -43,7 +45,7 @@ stages:
           expectedBranch: ${{ workspace.branch }}
       - id: proposal
         title: Generate proposal
-        uses: mohist/opencode
+        uses: ${{ profile.agentAction }}
         with:
           session: plan
           prompt: ${{ prompts.proposal }}
@@ -57,7 +59,7 @@ stages:
 
       - id: specs
         title: Write specs
-        uses: mohist/opencode
+        uses: ${{ profile.agentAction }}
         with:
           session: plan
           prompt: ${{ prompts.specs }}
@@ -68,7 +70,7 @@ stages:
 
       - id: design
         title: Create design
-        uses: mohist/opencode
+        uses: ${{ profile.agentAction }}
         with:
           session: plan
           prompt: ${{ prompts.design }}
@@ -82,7 +84,7 @@ stages:
 
       - id: tasks
         title: Generate tasks
-        uses: mohist/opencode
+        uses: ${{ profile.agentAction }}
         with:
           session: plan
           prompt: ${{ prompts.tasks }}
@@ -96,7 +98,7 @@ stages:
 
       - id: self-review
         title: Self review
-        uses: mohist/opencode
+        uses: ${{ profile.agentAction }}
         with:
           session: plan
           prompt: ${{ prompts.self-review }}
@@ -115,7 +117,7 @@ stages:
               tasks:
                 - id: recover:fix-plan-review
                   title: Fix plan review findings
-                  uses: mohist/opencode
+                  uses: ${{ profile.agentAction }}
                   with:
                     session: plan
                     prompt: ${{ prompts.fix-plan-review }}
@@ -168,7 +170,7 @@ stages:
         with:
           path: openspec/changes/issue-${{ issue.number }}/tasks.json
           task:
-            uses: mohist/opencode
+            uses: ${{ profile.agentAction }}
             with:
               options: ${{ vars.agent }}
               prompt:
@@ -189,7 +191,7 @@ stages:
             - tasks:
                 - id: recover:fix-ci
                   title: Fix CI verification
-                  uses: mohist/opencode
+                  uses: ${{ profile.agentAction }}
                   with:
                     session: build
                     prompt: ${{ prompts.fix-ci }}
@@ -215,7 +217,7 @@ stages:
           expectedBranch: ${{ workspace.branch }}
       - id: ai-review
         title: AI review
-        uses: mohist/opencode
+        uses: ${{ profile.agentAction }}
         with:
           session: check
           prompt: ${{ prompts.review }}
@@ -234,7 +236,7 @@ stages:
               tasks:
                 - id: recover:fix-review-findings
                   title: Fix review findings
-                  uses: mohist/opencode
+                  uses: ${{ profile.agentAction }}
                   with:
                     session: check
                     prompt: ${{ prompts.auto-fix }}
@@ -258,7 +260,7 @@ stages:
               tasks:
                 - id: recover:resolve-rebase-conflicts
                   title: Resolve rebase conflicts
-                  uses: mohist/opencode
+                  uses: ${{ profile.agentAction }}
                   with:
                     session: check
                     prompt: ${{ prompts.resolve-rebase-conflicts }}
@@ -293,7 +295,7 @@ stages:
               tasks:
                 - id: recover:fix-pr-checks
                   title: Fix failing GitHub PR checks
-                  uses: mohist/opencode
+                  uses: ${{ profile.agentAction }}
                   with:
                     session: check
                     prompt: ${{ prompts.fix-pr-checks }}
@@ -372,7 +374,7 @@ stages:
                         tasks:
                           - id: recover:resolve-rebase-conflicts
                             title: Resolve rebase conflicts
-                            uses: mohist/opencode
+                            uses: ${{ profile.agentAction }}
                             with:
                               session: integrate
                               prompt: ${{ prompts.resolve-rebase-conflicts }}
@@ -390,7 +392,7 @@ stages:
               tasks:
                 - id: recover:fix-pr-checks
                   title: Fix failing GitHub PR checks
-                  uses: mohist/opencode
+                  uses: ${{ profile.agentAction }}
                   with:
                     session: integrate
                     prompt: ${{ prompts.fix-pr-checks }}

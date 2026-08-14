@@ -37,6 +37,8 @@ internal static class WorkflowProfileCanonicalYamlRenderer
         };
         if (!string.IsNullOrEmpty(profile.Description))
             document["description"] = profile.Description;
+        if (!string.IsNullOrEmpty(profile.AgentAction))
+            document["agentAction"] = profile.AgentAction;
         if (profile.Definition is not null)
         {
             foreach (var entry in BuildDefinition(profile.Definition))

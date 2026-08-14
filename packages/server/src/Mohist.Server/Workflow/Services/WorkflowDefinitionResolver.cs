@@ -56,7 +56,8 @@ public class WorkflowDefinitionResolver : IScopedService
         if (!string.IsNullOrWhiteSpace(boundProfileId)
             && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
-            var boundProfile = await LoadProfileAsync(context.ProjectId!, boundProfileId!);
+            var boundAgentAction = await LoadBoundAgentActionAsync(db, runId);
+            var boundProfile = await LoadProfileAsync(context.ProjectId!, boundProfileId!, boundAgentAction);
             if (boundProfile is null)
                 throw new WorkflowDefinitionResolutionException(
                     WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
@@ -242,7 +243,9 @@ public class WorkflowDefinitionResolver : IScopedService
     {
         if (string.IsNullOrWhiteSpace(projectId))
             return await LoadTemplateAsync(runId, projectId);
-        var profile = await LoadProfileAsync(projectId!, profileId);
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var boundAgentAction = await LoadBoundAgentActionAsync(db, runId);
+        var profile = await LoadProfileAsync(projectId!, profileId, boundAgentAction);
         if (profile is null)
             throw new WorkflowDefinitionResolutionException(
                 WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
@@ -257,6 +260,27 @@ public class WorkflowDefinitionResolver : IScopedService
         {
             using var doc = JsonDocument.Parse(stateJson);
             return doc.RootElement.TryGetProperty("workflowProfileId", out var value)
+                && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<string?> LoadBoundAgentActionAsync(MohistDbContext db, string runId)
+    {
+        var state = await db.WorkflowRuns.AsNoTracking()
+            .Where(x => x.WorkflowRunId == runId)
+            .Select(x => x.State)
+            .FirstOrDefaultAsync();
+        if (string.IsNullOrWhiteSpace(state)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(state);
+            return doc.RootElement.TryGetProperty("agentAction", out var value)
                 && value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
@@ -309,20 +333,27 @@ public class WorkflowDefinitionResolver : IScopedService
         }
     }
 
-    private async Task<ResolvedTemplate?> LoadProfileAsync(string projectId, string profileId)
+    private async Task<ResolvedTemplate?> LoadProfileAsync(
+        string projectId,
+        string profileId,
+        string? boundAgentAction = null)
     {
         var entry = await _profileProvider.GetAsync(projectId, profileId);
         if (entry is null)
             return null;
 
-        var definition = await _profileProvider.GetDefinitionAsync(projectId, profileId);
+        var definition = await _profileProvider.GetDefinitionAsync(
+            projectId,
+            profileId,
+            boundAgentAction ?? entry.AgentAction);
         return definition is null
             ? null
             : ResolvedTemplate.FromProfile(new WorkflowProfile(
                 entry.ProfileId,
                 entry.Name,
                 entry.Description,
-                definition));
+                definition,
+                boundAgentAction ?? entry.AgentAction));
     }
 
 

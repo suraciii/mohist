@@ -51,15 +51,25 @@ public static class WorkflowProfileCatalog
         return GetProfile(profileId)?.Definition;
     }
 
+    public static string? GetDefinitionSource(string profileId) =>
+        IdComparer.Equals(profileId, LocalId) ? ReadDefinitionSource(LocalDefinitionFileName) :
+        IdComparer.Equals(profileId, GithubPrId) ? ReadDefinitionSource(GithubPrDefinitionFileName) : null;
+
     public static WorkflowProfile? GetProfile(string profileId) =>
         IdComparer.Equals(profileId, LocalId) ? Profile :
         IdComparer.Equals(profileId, GithubPrId) ? GithubPrProfileAsset : null;
 
     private static WorkflowProfile LoadProfile(string fileName, string id, string name, string description)
     {
+        var parsed = WorkflowProfileYamlParser.Parse(ReadDefinitionSource(fileName), id);
+        return parsed with { Id = id, Name = name, Description = description };
+    }
+
+    private static string ReadDefinitionSource(string fileName)
+    {
         var path = ResolveDefinitionPath(fileName)
             ?? throw new FileNotFoundException($"Workflow definition not found: {fileName}");
-        return new WorkflowProfile(id, name, description, WorkflowYamlSerializer.FromYaml(File.ReadAllText(path)));
+        return File.ReadAllText(path);
     }
 
     private static string? ResolveDefinitionPath(string fileName)

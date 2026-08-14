@@ -1,30 +1,30 @@
-import type { ActionError, ActionResult, JsonObject, JsonValue } from "../core/types.js"
-import type { ValidatedWith } from "./context.js"
-import type { ActionHostFor } from "./host.js"
+import type { ActionError, ActionResult, JsonObject, JsonValue } from '../core/types.js'
+import type { ValidatedWith } from './context.js'
+import type { ActionHostFor } from './host.js'
 
-export type ActionInputKind = "string" | "number" | "boolean" | "object" | "array"
+export type ActionInputKind = 'string' | 'number' | 'boolean' | 'object' | 'array'
 
-const CANONICAL_KIND_ORDER: ReadonlyArray<ActionInputKind> = ["string", "number", "boolean", "object", "array"]
+const CANONICAL_KIND_ORDER: ReadonlyArray<ActionInputKind> = ['string', 'number', 'boolean', 'object', 'array']
 
 export function canonicalKindOrder(): ReadonlyArray<ActionInputKind> {
   return CANONICAL_KIND_ORDER
 }
 
-export type ActionCapability = "agent-turn" | "issue-fields" | "workflow-checkpoint" | "add-tasks" | "write-vars"
+export type ActionCapability = 'agent-turn' | 'issue-fields' | 'workflow-checkpoint' | 'add-tasks' | 'write-vars'
 
 const VALID_CAPABILITIES: ReadonlyArray<ActionCapability> = [
-  "agent-turn",
-  "issue-fields",
-  "workflow-checkpoint",
-  "add-tasks",
-  "write-vars",
+  'agent-turn',
+  'issue-fields',
+  'workflow-checkpoint',
+  'add-tasks',
+  'write-vars',
 ]
 
 export function validCapabilities(): ReadonlyArray<ActionCapability> {
   return VALID_CAPABILITIES
 }
 
-export type InputRenderTiming = "immediate" | "deferred"
+export type InputRenderTiming = 'immediate' | 'deferred'
 
 export interface ActionInputDeclaration {
   readonly types: ReadonlyArray<ActionInputKind>
@@ -32,7 +32,7 @@ export interface ActionInputDeclaration {
   readonly default?: JsonValue
   readonly description?: string
   readonly render?: InputRenderTiming
-  readonly engineSource?: "prompts.build"
+  readonly engineSource?: 'prompts.build'
 }
 
 export interface ActionOutputDeclaration {
@@ -67,19 +67,19 @@ export interface ActionTombstone {
 }
 
 export interface ResolvedDefinition<M extends ActionManifest = ActionManifest> {
-  readonly kind: "definition"
+  readonly kind: 'definition'
   readonly definition: ActionDefinition<M>
   readonly canonicalName: string
 }
 
 export interface ResolvedTombstone {
-  readonly kind: "tombstone"
+  readonly kind: 'tombstone'
   readonly tombstone: ActionTombstone
   readonly canonicalName: string
 }
 
 export interface ResolvedUnknown {
-  readonly kind: "unknown"
+  readonly kind: 'unknown'
   readonly canonicalName: string
 }
 
@@ -109,6 +109,7 @@ export interface ActionCatalogEntry {
   readonly inputs: ReadonlyArray<ActionCatalogInput>
   readonly outputs: ReadonlyArray<ActionCatalogOutput>
   readonly errors: ReadonlyArray<ActionCatalogError>
+  readonly capabilities?: ReadonlyArray<ActionCapability>
 }
 
 export interface ActionCatalogTombstone {
@@ -122,29 +123,34 @@ export interface ActionCatalog {
 }
 
 export const RESERVED_PLATFORM_ERROR_CODES: ReadonlySet<string> = new Set([
-  "invalid-input",
-  "unexpected-error",
-  "timeout",
+  'invalid-input',
+  'unexpected-error',
+  'timeout',
 ])
 
 export interface ValidatedInputSuccess {
-  readonly kind: "ok"
+  readonly kind: 'ok'
   readonly input: JsonObject
 }
 
 export interface ValidatedInputFailure {
-  readonly kind: "failure"
+  readonly kind: 'failure'
   readonly error: ActionError
 }
 
 export type ValidatedInput = ValidatedInputSuccess | ValidatedInputFailure
 
 export function isActionError(value: unknown): value is ActionError {
-  return !!value && typeof value === "object" && typeof (value as ActionError).code === "string" && typeof (value as ActionError).message === "string"
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as ActionError).code === 'string' &&
+    typeof (value as ActionError).message === 'string'
+  )
 }
 
 export function isPlainJsonObject(value: unknown): value is JsonObject {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const proto = Object.getPrototypeOf(value)
   return proto === Object.prototype || proto === null
 }

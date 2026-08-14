@@ -13,6 +13,11 @@ public partial class ActionContractValidatorTests
         params ActionCatalogInput[] inputs) =>
         new(name, inputs, [], []);
 
+    private static ActionCatalogEntry CreateAgentAction(
+        string name,
+        params ActionCatalogInput[] inputs) =>
+        new(name, inputs, [], [], Capabilities: [ActionContractValidator.AgentTurnCapability]);
+
     private static ActionCatalogInput StringInput(string name, bool required = false) =>
         new(name, ["string"], required);
 

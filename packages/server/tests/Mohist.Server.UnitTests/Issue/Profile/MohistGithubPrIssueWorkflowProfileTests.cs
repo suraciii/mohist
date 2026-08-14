@@ -550,11 +550,11 @@ public class MohistGithubPrIssueWorkflowProfileTests
     }
 
     [Fact]
-    public void GithubPrWorkflowYaml_ParsesViaWorkflowYamlSerializer()
+    public void GithubPrWorkflowYaml_ParsesViaWorkflowProfileParser()
     {
         var yaml = ReadResourceYaml("mohist-github-pr.workflow.yaml");
 
-        var definition = WorkflowYamlSerializer.FromYaml(yaml);
+        var definition = WorkflowProfileYamlParser.Parse(yaml, WorkflowProfileCatalog.GithubPrId).Definition;
 
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
 
@@ -596,11 +596,11 @@ public class MohistGithubPrIssueWorkflowProfileTests
     }
 
     [Fact]
-    public void GithubPrWorkflowYaml_RoundTripsViaWorkflowYamlSerializer()
+    public void GithubPrWorkflowYaml_MaterializedDefinitionRoundTripsViaWorkflowYamlSerializer()
     {
         var yaml = ReadResourceYaml("mohist-github-pr.workflow.yaml");
 
-        var definition = WorkflowYamlSerializer.FromYaml(yaml);
+        var definition = WorkflowProfileYamlParser.Parse(yaml, WorkflowProfileCatalog.GithubPrId).Definition;
         var emitted = WorkflowYamlSerializer.ToYaml(definition);
 
         Assert.Contains("mohist/create-github-pr", emitted);

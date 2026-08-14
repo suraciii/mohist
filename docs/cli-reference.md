@@ -102,10 +102,11 @@ need all three commands for symmetry. User shell aliases are not part of the
   the full automatic recovery budget.
 - `rerun` executes the complete Run again from the start.
   `--from-stage <stage>` invalidates and executes only that Stage and all later
-  results.
+  results. Both forms apply only to a non-terminal Run.
 - `pause` interrupts current advancement but preserves a recovery path.
   `resume` continues the same Run.
-- `stop` ends the Run permanently. The Run must not resume.
+- `stop` ends the Run permanently. Completed and stopped Runs cannot retry,
+  rerun, or resume. Starting Issue work again creates a new WorkflowRun.
 
 ### Flag Conventions
 
@@ -255,8 +256,10 @@ WorkflowProfile and WorkflowRun semantics.
 
 `mo workflow create` and `mo workflow edit` accept a Workflow Definition through
 `--file <path>`. `--file -` reads from stdin.
-`mo workflow validate --file <path>` validates a Workflow Definition locally.
-It does not resolve a Project or connect to the Server.
+`mo workflow validate --file <path>` validates optional Profile metadata and the
+Workflow Definition locally. It checks the restricted Agent Action binding
+syntax but does not resolve a Project override, inspect Action availability, or
+connect to the Server.
 
 ## WorkflowRun
 
@@ -276,10 +279,13 @@ bound to that Issue. Callers must provide exactly one. An Issue number is unique
 within a Project and can be used with `--project`.
 
 `mo run view --yaml` reads the current Definition of the Profile ID bound to the
-Run. It is not a historical snapshot: editing that Profile can change later
-Stages, so this view can also change during the Run. Like
-`workflow view --yaml`, it is a resource source view and is mutually exclusive
-with `--json`.
+Run and materializes Agent references with that Run's bound concrete Action. It
+is not a historical Definition snapshot: editing other Profile structure can
+change later Stages, so this view can also change during the Run. Changing the
+Project's Profile Agent Action override does not change this view for an active
+Run. The option is mutually exclusive with `--json`. The JSON view exposes the
+nullable concrete `agentAction` bound to the Run and its derived `agentRuntime`
+so clients can select the matching model catalog without rereading Profile YAML.
 
 Project, Issue, and WorkflowRun each own one set of Variables. All three scopes
 use the same `variable list/get/set/unset` key-value language.

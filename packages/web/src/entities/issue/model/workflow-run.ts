@@ -19,6 +19,25 @@ export type WorkflowRunStatus =
   | 'failed'
   | 'blocked'
 
+export interface WorkflowRunDetail {
+  status: {
+    workflowRunId: string
+    status: WorkflowRunStatus
+  }
+  issueRef: {
+    projectId: string
+    number: number
+    title: string
+  } | null
+  workflowProfileId: string | null
+  agentAction: string | null
+  agentRuntime: string | null
+}
+
+export function isTerminalWorkflowRunStatus(status: WorkflowRunStatus | string | null | undefined): boolean {
+  return status === 'stopped' || status === 'completed'
+}
+
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'blocked'
 export type WorkflowCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
 

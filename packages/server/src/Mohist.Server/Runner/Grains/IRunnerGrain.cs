@@ -96,7 +96,8 @@ public sealed record ActionCatalogEntry(
     [property: Id(1)] ActionCatalogInput[] Inputs,
     [property: Id(2)] ActionCatalogOutput[] Outputs,
     [property: Id(3)] ActionCatalogError[] Errors,
-    [property: Id(4)] string? Description = null);
+    [property: Id(4)] string? Description = null,
+    [property: Id(5)] string[]? Capabilities = null);
 
 [GenerateSerializer]
 public sealed record ActionCatalogInput(

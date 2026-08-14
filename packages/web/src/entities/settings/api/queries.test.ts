@@ -7,7 +7,9 @@ import {
   getWorkflowProfileAgentRuntime,
   projectDefaultWorkflowProfileQueryOptions,
   resolveEffectiveDefaultWorkflowProfile,
+  selectAgentTurnActions,
   selectModelVariants,
+  setWorkflowProfileAgentActionMutationOptions,
   setProjectDefaultWorkflowProfileMutationOptions,
 } from './queries'
 
@@ -62,19 +64,61 @@ describe('getWorkflowProfileAgentRuntime', () => {
   it('matches profile ids without regard to casing', () => {
     expect(
       getWorkflowProfileAgentRuntime(
-        [{ id: 'mohist/local', displayName: 'Mohist Local', description: '', isDefault: true, agentRuntime: 'opencode' }],
+        [
+          {
+            id: 'mohist/local',
+            displayName: 'Mohist Local',
+            description: '',
+            isDefault: true,
+            agentRuntime: 'opencode',
+          },
+        ],
         'MOHIST/LOCAL',
       ),
     ).toBe('opencode')
   })
 })
 
+describe('selectAgentTurnActions', () => {
+  it('uses the declared capability and never infers Agent Actions from names', () => {
+    expect(
+      selectAgentTurnActions({
+        actions: [
+          { name: 'mohist/pi', capabilities: ['agent-turn'] },
+          { name: 'team/looks-like-an-agent', capabilities: [] },
+          { name: 'team/capable', capabilities: ['write-vars', 'agent-turn'] },
+        ],
+      }).map((action) => action.name),
+    ).toEqual(['mohist/pi', 'team/capable'])
+  })
+})
+
+describe('setWorkflowProfileAgentActionMutationOptions', () => {
+  it('refreshes Profile collection, detail, and model catalogs after PATCH succeeds', () => {
+    const qc = createInvalidationClient()
+    const options = setWorkflowProfileAgentActionMutationOptions('proj-1', qc)
+
+    options.onSuccess(
+      {
+        id: 'mohist/github-pr',
+        displayName: 'GitHub PR',
+        description: '',
+        isDefault: false,
+        agentAction: 'mohist/pi',
+        agentRuntime: 'pi',
+      },
+      { profileId: 'mohist/github-pr', agentAction: 'mohist/pi' },
+    )
+
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['workflow-profiles', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['workflow-profile', 'proj-1', 'mohist/github-pr'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-model-ids'] })
+  })
+})
+
 describe('projectDefaultWorkflowProfileQueryOptions', () => {
   it('uses a project-scoped query key', () => {
-    expect(projectDefaultWorkflowProfileQueryOptions('proj-1').queryKey).toEqual([
-      'project-workflow-profile',
-      'proj-1',
-    ])
+    expect(projectDefaultWorkflowProfileQueryOptions('proj-1').queryKey).toEqual(['project-workflow-profile', 'proj-1'])
   })
 
   it('is disabled when projectId is missing', () => {

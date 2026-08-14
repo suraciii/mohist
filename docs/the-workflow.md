@@ -77,6 +77,8 @@ remains isolated on the Issue branch until Integrate.
 
 By default, the Workflow enters Check automatically. To require approval after
 Build, set Build's `requiresApproval` field to `true` in the Workflow Profile.
+Declare `approval.feedback.tasks` when rejected approvals should create
+follow-up work; built-in Profiles include this loop.
 
 ## Check
 
@@ -183,7 +185,8 @@ only consumes the approval action and its result.
 Change the default Workflow when it does not fit the project:
 
 - To require approval after Build, change the Profile's `requiresApproval`
-  value.
+  value. A Profile with any Approval Stage must declare non-empty
+  `approval.feedback.tasks`.
 - To skip Check, remove that Stage from a custom Profile.
 - To add a Stage such as Deploy, extend the Profile YAML.
 

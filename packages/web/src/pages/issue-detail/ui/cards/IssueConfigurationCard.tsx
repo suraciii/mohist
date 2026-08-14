@@ -6,7 +6,7 @@ import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
 
 export type IssueConfigurationCardIssue = Pick<
   Issue,
-  'number' | 'model' | 'stageModels' | 'workflowProfileId' | 'canStart' | 'blocker'
+  'number' | 'model' | 'stageModels' | 'workflowRunId' | 'workflowProfileId' | 'canStart' | 'blocker'
 > & {
   prerequisites?: IssuePrerequisiteSummary[]
   isBacklog: boolean
@@ -15,10 +15,7 @@ export type IssueConfigurationCardIssue = Pick<
 export interface IssueConfigurationCardProps {
   issue: IssueConfigurationCardIssue
   projectId: string
-  mutations: Pick<
-    IssueDetailMutations,
-    'addPrerequisiteMutation' | 'removePrerequisiteMutation'
-  >
+  mutations: Pick<IssueDetailMutations, 'addPrerequisiteMutation' | 'removePrerequisiteMutation'>
   unframed?: boolean
   prerequisitePickerIssuesHook?: IssuePrerequisitePickerProps['issuesHook']
 }
@@ -31,13 +28,14 @@ export function IssueConfigurationCard({
   prerequisitePickerIssuesHook,
 }: IssueConfigurationCardProps) {
   const { addPrerequisiteMutation, removePrerequisiteMutation } = mutations
-  const prerequisiteNumbers = issue.prerequisites?.map(p => p.number) ?? []
+  const prerequisiteNumbers = issue.prerequisites?.map((p) => p.number) ?? []
   const blocker: IssueStartBlocker | null = issue.blocker ?? null
 
   const content = (
     <div className="space-y-4">
       <IssueModelSelector
         issueNumber={issue.number}
+        workflowRunId={issue.workflowRunId}
         workflowProfileId={issue.workflowProfileId}
         currentModel={issue.model}
         currentStageModels={issue.stageModels}

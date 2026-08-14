@@ -1,10 +1,25 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { ArrowLeftIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
-import { useDisableWorkflowProfile, useEnableWorkflowProfile, useProjectDefaultWorkflowProfile, useWorkflowProfile, useAllWorkflowProfiles } from '../../../entities/settings'
-import type { ProjectDefaultWorkflowProfile, WorkflowProfileDetail, WorkflowProfileInfo } from '../../../entities/settings'
+import {
+  selectAgentTurnActions,
+  useActionCatalog,
+  useDisableWorkflowProfile,
+  useEnableWorkflowProfile,
+  useProjectDefaultWorkflowProfile,
+  useSetWorkflowProfileAgentAction,
+  useWorkflowProfile,
+  useAllWorkflowProfiles,
+} from '../../../entities/settings'
+import type {
+  ActionCatalog,
+  ProjectDefaultWorkflowProfile,
+  WorkflowProfileDetail,
+  WorkflowProfileInfo,
+} from '../../../entities/settings'
 import { includesWorkflowProfileId } from '../../../entities/settings'
 import { CardSection } from '../../../shared/ui/components/card-section'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../shared/ui/components/select'
 import { Switch } from '../../../shared/ui/components/switch'
 import type { SettingsSearchEntry } from '../model/settings-search'
 import { getSectionMeta } from '../lib/sections'
@@ -36,7 +51,11 @@ function YamlViewer({ yaml }: { yaml: string }) {
   )
 }
 
-function StageSummary({ stage }: { stage: { stage: string; requiresApproval: boolean; tasks: string[]; checks: string[] } }) {
+function StageSummary({
+  stage,
+}: {
+  stage: { stage: string; requiresApproval: boolean; tasks: string[]; checks: string[] }
+}) {
   return (
     <div className="flex items-start gap-3 py-2 border-b last:border-b-0">
       <div className="flex-1 min-w-0">
@@ -65,9 +84,23 @@ function StageSummary({ stage }: { stage: { stage: string; requiresApproval: boo
   )
 }
 
-export type WorkflowProfileHook = (
-  profileId: string | null,
-) => { data: WorkflowProfileDetail | undefined; isLoading: boolean; isError: boolean }
+export type WorkflowProfileHook = (profileId: string | null) => {
+  data: WorkflowProfileDetail | undefined
+  isLoading: boolean
+  isError: boolean
+}
+
+export type WorkflowActionCatalogHook = () => {
+  data: ActionCatalog | undefined
+  isLoading: boolean
+  isError: boolean
+}
+
+export type WorkflowProfileAgentActionMutationHook = () => {
+  mutate: (variables: { profileId: string; agentAction: string | null }) => void
+  isPending: boolean
+  error: Error | null
+}
 
 interface WorkflowProfileMutation {
   mutate: (profileId: string) => void
@@ -93,7 +126,11 @@ export interface WorkflowProfilesSectionComponents {
 
 const useDefaultData: WorkflowProfilesSectionDataHook = () => {
   const { data: allProfiles, isLoading: profilesLoading, isError: profilesError } = useAllWorkflowProfiles()
-  const { data: projectProfile, isLoading: projectProfileLoading, isError: projectProfileError } = useProjectDefaultWorkflowProfile()
+  const {
+    data: projectProfile,
+    isLoading: projectProfileLoading,
+    isError: projectProfileError,
+  } = useProjectDefaultWorkflowProfile()
   return {
     allProfiles,
     profilesLoading,
@@ -106,7 +143,79 @@ const useDefaultData: WorkflowProfilesSectionDataHook = () => {
   }
 }
 
-function ProfileDetail({ profileId, onBack, profileHook }: { profileId: string; onBack: () => void; profileHook: WorkflowProfileHook }) {
+const PROFILE_DEFAULT_ACTION = '__profile_default__'
+
+function AgentActionSelector({
+  profileId,
+  agentAction,
+  actionCatalogHook,
+  agentActionMutationHook,
+}: {
+  profileId: string
+  agentAction: string
+  actionCatalogHook: WorkflowActionCatalogHook
+  agentActionMutationHook: WorkflowProfileAgentActionMutationHook
+}) {
+  const actionCatalog = actionCatalogHook()
+  const agentActionMutation = agentActionMutationHook()
+  const agentActions = selectAgentTurnActions(actionCatalog.data)
+
+  return (
+    <div className="space-y-2 border-t border-border/60 pt-4">
+      <label id="workflow-profile-agent-action-label" className="text-sm font-medium text-foreground">
+        Agent Action
+      </label>
+      <Select
+        value={agentAction}
+        onValueChange={(value) => {
+          if (!value) return
+          agentActionMutation.mutate({
+            profileId,
+            agentAction: value === PROFILE_DEFAULT_ACTION ? null : value,
+          })
+        }}
+        disabled={
+          actionCatalog.isLoading || actionCatalog.isError || agentActions.length === 0 || agentActionMutation.isPending
+        }
+      >
+        <SelectTrigger
+          aria-labelledby="workflow-profile-agent-action-label"
+          className="w-full max-w-sm"
+          data-testid="workflow-profile-agent-action-selector"
+        >
+          <SelectValue placeholder="Select Agent Action" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={PROFILE_DEFAULT_ACTION}>Profile default</SelectItem>
+          {agentActions.map((action) => (
+            <SelectItem key={action.name} value={action.name}>
+              {action.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {actionCatalog.isError && <p className="text-xs text-destructive">Failed to load Agent Actions.</p>}
+      {!actionCatalog.isLoading && !actionCatalog.isError && agentActions.length === 0 && (
+        <p className="text-xs text-muted-foreground">No Agent Actions are available.</p>
+      )}
+      {agentActionMutation.error && <p className="text-xs text-destructive">{agentActionMutation.error.message}</p>}
+    </div>
+  )
+}
+
+function ProfileDetail({
+  profileId,
+  onBack,
+  profileHook,
+  actionCatalogHook,
+  agentActionMutationHook,
+}: {
+  profileId: string
+  onBack: () => void
+  profileHook: WorkflowProfileHook
+  actionCatalogHook: WorkflowActionCatalogHook
+  agentActionMutationHook: WorkflowProfileAgentActionMutationHook
+}) {
   const { data: profile, isLoading, isError } = profileHook(profileId)
   const { label: sectionLabel } = getSectionMeta('workflows')
 
@@ -120,9 +229,7 @@ function ProfileDetail({ profileId, onBack, profileHook }: { profileId: string; 
   }
 
   if (isError || !profile) {
-    return (
-      <div className="text-sm text-red-700">Failed to load profile.</div>
-    )
+    return <div className="text-sm text-red-700">Failed to load profile.</div>
   }
 
   return (
@@ -152,6 +259,15 @@ function ProfileDetail({ profileId, onBack, profileHook }: { profileId: string; 
           {profile.description}
         </p>
       </div>
+
+      {profile.agentAction != null && (
+        <AgentActionSelector
+          profileId={profile.id}
+          agentAction={profile.agentAction}
+          actionCatalogHook={actionCatalogHook}
+          agentActionMutationHook={agentActionMutationHook}
+        />
+      )}
 
       <CardSection title="Stages" titleAs="h3" className="py-1">
         <div>
@@ -300,10 +416,14 @@ function ProfileCard({
 export function WorkflowProfilesSection({
   dataHook = useDefaultData,
   profileHook = useWorkflowProfile,
+  actionCatalogHook = useActionCatalog,
+  agentActionMutationHook = useSetWorkflowProfileAgentAction,
   components,
 }: {
   dataHook?: WorkflowProfilesSectionDataHook
   profileHook?: WorkflowProfileHook
+  actionCatalogHook?: WorkflowActionCatalogHook
+  agentActionMutationHook?: WorkflowProfileAgentActionMutationHook
   components?: Partial<WorkflowProfilesSectionComponents>
 } = {}) {
   const { currentProject } = useProject()
@@ -325,20 +445,31 @@ export function WorkflowProfilesSection({
   const builtInProfiles = allProfiles?.filter((p) => p.isBuiltIn === true) ?? []
   const enabledCount = builtInProfiles.filter((p) => !includesWorkflowProfileId(disabledIds, p.id)).length
 
-  const handleToggleDisabled = useCallback((profileId: string, currentlyDisabled: boolean) => {
-    if (currentlyDisabled) {
-      enableMutation.mutate(profileId)
-    } else {
-      disableMutation.mutate(profileId)
-    }
-  }, [enableMutation, disableMutation])
+  const handleToggleDisabled = useCallback(
+    (profileId: string, currentlyDisabled: boolean) => {
+      if (currentlyDisabled) {
+        enableMutation.mutate(profileId)
+      } else {
+        disableMutation.mutate(profileId)
+      }
+    },
+    [enableMutation, disableMutation],
+  )
 
   if (!currentProject) {
     return <NoProjectCard title={sectionLabel} />
   }
 
   if (selectedId) {
-    return <ProfileDetail profileId={selectedId} onBack={() => setSelectedId(null)} profileHook={profileHook} />
+    return (
+      <ProfileDetail
+        profileId={selectedId}
+        onBack={() => setSelectedId(null)}
+        profileHook={profileHook}
+        actionCatalogHook={actionCatalogHook}
+        agentActionMutationHook={agentActionMutationHook}
+      />
+    )
   }
 
   if (profilesLoading || projectProfileLoading) {
@@ -346,21 +477,12 @@ export function WorkflowProfilesSection({
   }
 
   if (profilesError || projectProfileError || !allProfiles || !projectProfile) {
-    return (
-      <SectionState
-        variant="error"
-        title={sectionLabel}
-        message="Failed to load workflow profile settings."
-      />
-    )
+    return <SectionState variant="error" title={sectionLabel} message="Failed to load workflow profile settings." />
   }
 
   return (
     <div id="workflow-profiles-section" tabIndex={-1}>
-      <SettingsSection
-        title={sectionLabel}
-        description={sectionDescription}
-      >
+      <SettingsSection title={sectionLabel} description={sectionDescription}>
         <div className="space-y-4">
           <div id="project-default-workflow" tabIndex={-1}>
             <DefaultWorkflowControl />

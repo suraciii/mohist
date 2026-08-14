@@ -36,7 +36,8 @@ public class RunnerActionCatalogApiSpecs
                     ],
                     [new ActionCatalogOutput("public", "Public result")],
                     [new ActionCatalogError("action-failed", "Action failed")],
-                    "Catalog test Action"),
+                    "Catalog test Action",
+                    ["agent-turn"]),
                 new ActionCatalogEntry("zeta/catalog", [], [], []),
             ],
             [new ActionCatalogTombstone(
@@ -64,6 +65,8 @@ public class RunnerActionCatalogApiSpecs
             Assert.Equal(30, receivedCatalog.Actions[0].Inputs[1].Default?.GetInt32());
             Assert.Equal("public", receivedCatalog.Actions[0].Outputs[0].Name);
             Assert.Equal("action-failed", receivedCatalog.Actions[0].Errors[0].Code);
+            Assert.NotNull(receivedCatalog.Actions[0].Capabilities);
+            Assert.Equal(["agent-turn"], receivedCatalog.Actions[0].Capabilities!);
             Assert.Equal("Use mohist/opencode and rerun the affected stage.", receivedCatalog.Tombstones[0].Guidance);
         }
         finally

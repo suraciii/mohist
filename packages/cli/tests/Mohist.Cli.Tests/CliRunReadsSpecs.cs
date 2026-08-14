@@ -27,7 +27,12 @@ public class CliRunReadsSpecs
     private const string WrId = "wr_read01";
     private static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(2);
 
-    private static object SampleRunDetail(string id = WrId, string status = "running", string? currentStage = "build") => new
+    private static object SampleRunDetail(
+        string id = WrId,
+        string status = "running",
+        string? currentStage = "build",
+        string? agentAction = "mohist/pi",
+        string? agentRuntime = "pi") => new
     {
         status = new
         {
@@ -64,6 +69,9 @@ public class CliRunReadsSpecs
             metadata = new { name = "Mohist", labels = new Dictionary<string, string>(), createdAt = "2026-07-05T00:00:00Z" },
         },
         issueRef = new { projectId = "proj_abc", number = 42, title = "Close the agent subscriptions gap" },
+        workflowProfileId = "mohist/github-pr",
+        agentAction,
+        agentRuntime,
     };
 
     private static object SampleIssue(int number, string workflowRunId, string workflowStatus, string workflowStage) => new
@@ -338,6 +346,8 @@ public class CliRunReadsSpecs
         Assert.Contains("run id:", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("status:", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("current stage:", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("agent action:  mohist/pi", stdout, StringComparison.Ordinal);
+        Assert.Contains("agent runtime: pi", stdout, StringComparison.Ordinal);
         Assert.Contains("issue:", stdout, StringComparison.OrdinalIgnoreCase);
         // Stages are rendered as a sub-table; the renderer emits a "stage"
         // header inside the run detail view (RenderWorkflowRunStages).
@@ -380,17 +390,45 @@ public class CliRunReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "view", WrId, "--json", "id,status,currentStage"], output, error, fs, executor);
+            http,
+            ["run", "view", WrId, "--json", "id,status,currentStage,agentAction,agentRuntime"],
+            output,
+            error,
+            fs,
+            executor);
 
         Assert.Equal(0, exitCode);
         Assert.Single(handler.Requests);
         var selected = Assert.IsType<JsonObject>(JsonNode.Parse(output.ToString()));
         Assert.Equal(
-            new HashSet<string> { "id", "status", "currentStage" },
+            new HashSet<string> { "id", "status", "currentStage", "agentAction", "agentRuntime" },
             selected.Select(property => property.Key).ToHashSet());
         Assert.Equal(WrId, selected["id"]?.GetValue<string>());
         Assert.Equal("running", selected["status"]?.GetValue<string>());
         Assert.Equal("build", selected["currentStage"]?.GetValue<string>());
+        Assert.Equal("mohist/pi", selected["agentAction"]?.GetValue<string>());
+        Assert.Equal("pi", selected["agentRuntime"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task View_NullAgentBinding_RemainsVisibleInTable()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}"
+                ? RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = SampleRunDetail(agentAction: null, agentRuntime: null),
+                })
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["run", "view", WrId], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("profile:       mohist/github-pr", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("agent action:  (none)", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("agent runtime: (none)", output.ToString(), StringComparison.Ordinal);
     }
 
     // ────────────────────────────────────────────────────────────────────

@@ -1,5 +1,22 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
-import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, IssueListItem, IssueParentCandidate, StoredCloudEventDto, TaskLogPage, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type {
+  ApprovalFeedback,
+  CommitDiffResponse,
+  Comment,
+  Issue,
+  IssueCommitsResponse,
+  IssueDiffResponse,
+  IssueListItem,
+  IssueParentCandidate,
+  StoredCloudEventDto,
+  TaskLogPage,
+  WorkflowArtifact,
+  WorkflowArtifactDirectory,
+  WorkflowArtifactDirectoryEntry,
+  WorkflowTimeline,
+  IssueWorkflowProfileYamlResponse,
+} from '../model/types'
+import type { WorkflowRunDetail } from '../model/workflow-run'
 import type { IssueListParams } from './query-keys'
 
 export interface IssueWorkflowVariables {
@@ -21,6 +38,10 @@ export function getIssues(params?: IssueListParams, signal?: AbortSignal) {
 
 export function getIssue(number: number, projectId?: string | null, signal?: AbortSignal) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`), { signal })
+}
+
+export function getWorkflowRunDetail(workflowRunId: string, signal?: AbortSignal) {
+  return request<WorkflowRunDetail>(`/workflow-runs/${encodeURIComponent(workflowRunId)}`, { signal })
 }
 
 export function getParentIssueCandidates(projectId?: string | null, signal?: AbortSignal) {
@@ -75,11 +96,15 @@ export function updateIssue(number: number, data: UpdateIssueOptions, projectId?
 }
 
 export function startIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/start`), { method: 'POST' })
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/start`), {
+    method: 'POST',
+  })
 }
 
 export function closeIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/close`), { method: 'POST' })
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/close`), {
+    method: 'POST',
+  })
 }
 
 export function markIssueDone(number: number, projectId?: string | null) {
@@ -87,15 +112,21 @@ export function markIssueDone(number: number, projectId?: string | null) {
 }
 
 export function reopenIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/reopen`), { method: 'POST' })
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/reopen`), {
+    method: 'POST',
+  })
 }
 
 export function resumeIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/resume`), { method: 'POST' })
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/resume`), {
+    method: 'POST',
+  })
 }
 
 export function retryIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/retry`), { method: 'POST' })
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/retry`), {
+    method: 'POST',
+  })
 }
 
 export interface ApproveIssueInput {
@@ -103,10 +134,13 @@ export interface ApproveIssueInput {
 }
 
 export function approveIssue(number: number, data: ApproveIssueInput, projectId?: string | null) {
-  return request<{ issue: Issue; context: string | null; message: string }>(projectApiPath(projectId, `/issues/${number}/approve`), {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
+  return request<{ issue: Issue; context: string | null; message: string }>(
+    projectApiPath(projectId, `/issues/${number}/approve`),
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    },
+  )
 }
 
 export interface RejectIssueInput {
@@ -142,7 +176,9 @@ export function listIssueFeedback(number: number, params: { stage?: string } = {
 }
 
 export function getIssueFeedback(number: number, feedbackId: string, projectId?: string | null) {
-  return request<ApprovalFeedback>(projectApiPath(projectId, `/issues/${number}/feedback/${encodeURIComponent(feedbackId)}`))
+  return request<ApprovalFeedback>(
+    projectApiPath(projectId, `/issues/${number}/feedback/${encodeURIComponent(feedbackId)}`),
+  )
 }
 
 export function getIssueDiff(number: number, projectId?: string | null, signal?: AbortSignal) {
@@ -162,10 +198,18 @@ export function getCommitDiff(number: number, hash: string, projectId?: string |
 }
 
 export function getFileContent(number: number, filePath: string, projectId?: string | null) {
-  return request<{ base: string; head: string }>(projectApiPath(projectId, `/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`))
+  return request<{ base: string; head: string }>(
+    projectApiPath(projectId, `/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`),
+  )
 }
 
-export function addComment(issueNumber: number, displayName: string, body: string, projectId?: string | null, attachmentIds?: string[]) {
+export function addComment(
+  issueNumber: number,
+  displayName: string,
+  body: string,
+  projectId?: string | null,
+  attachmentIds?: string[],
+) {
   return request<Comment>(projectApiPath(projectId, `/issues/${issueNumber}/comments`), {
     method: 'POST',
     body: JSON.stringify({ displayName, body, ...(attachmentIds?.length ? { attachmentIds } : {}) }),
@@ -176,8 +220,16 @@ export function issueAttachmentContentPath(issueNumber: number, attachmentId: st
   return projectApiPath(projectId, `/issues/${issueNumber}/attachments/${encodeURIComponent(attachmentId)}/content`)
 }
 
-export function commentAttachmentContentPath(issueNumber: number, commentId: string, attachmentId: string, projectId?: string | null) {
-  return projectApiPath(projectId, `/issues/${issueNumber}/comments/${encodeURIComponent(commentId)}/attachments/${encodeURIComponent(attachmentId)}/content`)
+export function commentAttachmentContentPath(
+  issueNumber: number,
+  commentId: string,
+  attachmentId: string,
+  projectId?: string | null,
+) {
+  return projectApiPath(
+    projectId,
+    `/issues/${issueNumber}/comments/${encodeURIComponent(commentId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
+  )
 }
 
 export function extractAttachmentIds(markdown: string) {
@@ -195,11 +247,15 @@ export function getLabels(projectId?: string | null, signal?: AbortSignal) {
 }
 
 export function getWorkflowYaml(workflowRunId: string, signal?: AbortSignal) {
-  return request<{ workflowRunId: string; yaml: string }>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/yaml`, { signal })
+  return request<{ workflowRunId: string; yaml: string }>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/yaml`, {
+    signal,
+  })
 }
 
 export function getIssueWorkflowProfileYaml(number: number, projectId: string, signal?: AbortSignal) {
-  return request<IssueWorkflowProfileYamlResponse>(projectApiPath(projectId, `/issues/${number}/workflow-profile`), { signal })
+  return request<IssueWorkflowProfileYamlResponse>(projectApiPath(projectId, `/issues/${number}/workflow-profile`), {
+    signal,
+  })
 }
 
 export interface IssueWorkflowArtifactListParams {
@@ -208,13 +264,21 @@ export interface IssueWorkflowArtifactListParams {
   taskRunId?: string
 }
 
-export function getIssueWorkflowArtifacts(number: number, params: IssueWorkflowArtifactListParams = {}, projectId?: string | null, signal?: AbortSignal) {
+export function getIssueWorkflowArtifacts(
+  number: number,
+  params: IssueWorkflowArtifactListParams = {},
+  projectId?: string | null,
+  signal?: AbortSignal,
+) {
   const search = new URLSearchParams()
   if (params.path) search.set('path', params.path)
   if (params.history) search.set('history', 'true')
   if (params.taskRunId) search.set('taskRunId', params.taskRunId)
   const qs = search.toString()
-  return request<(WorkflowArtifact | WorkflowArtifactDirectory)[]>(projectApiPath(projectId, `/issues/${number}/workflow/artifacts${qs ? `?${qs}` : ''}`), { signal })
+  return request<(WorkflowArtifact | WorkflowArtifactDirectory)[]>(
+    projectApiPath(projectId, `/issues/${number}/workflow/artifacts${qs ? `?${qs}` : ''}`),
+    { signal },
+  )
 }
 
 export function issueWorkflowArtifactContentPath(number: number, artifactId: string, projectId?: string | null) {
@@ -258,21 +322,29 @@ export async function getIssueWorkflowArtifactContent(
 }
 
 export function updateIssueWorkflowProfileYaml(number: number, yaml: string, projectId: string) {
-  return request<IssueWorkflowProfileYamlResponse>(projectApiPath(projectId, `/issues/${number}/workflow-profile/template`), {
-    method: 'PUT',
-    body: JSON.stringify({ yaml }),
-  })
+  return request<IssueWorkflowProfileYamlResponse>(
+    projectApiPath(projectId, `/issues/${number}/workflow-profile/template`),
+    {
+      method: 'PUT',
+      body: JSON.stringify({ yaml }),
+    },
+  )
 }
 
 export function deleteIssueWorkflowProfileTemplate(number: number, projectId: string) {
-  return request<IssueWorkflowProfileYamlResponse>(projectApiPath(projectId, `/issues/${number}/workflow-profile/template`), {
-    method: 'DELETE',
-  })
+  return request<IssueWorkflowProfileYamlResponse>(
+    projectApiPath(projectId, `/issues/${number}/workflow-profile/template`),
+    {
+      method: 'DELETE',
+    },
+  )
 }
 
 export function getWorkflowTimeline(number: number, projectId?: string | null, signal?: AbortSignal) {
-  return request<{ workflow: WorkflowTimeline | null }>(projectApiPath(projectId, `/issues/${number}/workflow/status`), { signal })
-    .then(response => response.workflow)
+  return request<{ workflow: WorkflowTimeline | null }>(
+    projectApiPath(projectId, `/issues/${number}/workflow/status`),
+    { signal },
+  ).then((response) => response.workflow)
 }
 
 export function getIssueWorkflowVariables(number: number, projectId: string) {
@@ -290,7 +362,13 @@ export function patchIssueWorkflowDefinitionVar(number: number, name: string, va
   })
 }
 
-export function patchIssueWorkflowStageDefinitionVar(number: number, stage: string, name: string, value: unknown, projectId: string) {
+export function patchIssueWorkflowStageDefinitionVar(
+  number: number,
+  stage: string,
+  name: string,
+  value: unknown,
+  projectId: string,
+) {
   return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/variables`), {
     method: 'PATCH',
     body: JSON.stringify({ stages: { [stage]: { vars: { [name]: value } } } }),
@@ -299,25 +377,53 @@ export function patchIssueWorkflowStageDefinitionVar(number: number, stage: stri
 
 export async function rebaseIssue(number: number, projectId?: string | null) {
   try {
-    return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'queued'; workflowRunId?: string; taskId?: string; stage?: string; baseBranch?: string }>(projectApiPath(projectId, `/issues/${number}/rebase`), { method: 'POST' })
+    return await request<{
+      rebased: boolean
+      rePlan?: boolean
+      conflicts?: string[]
+      buildPassed?: boolean
+      message: string
+      status?: 'queued'
+      workflowRunId?: string
+      taskId?: string
+      stage?: string
+      baseBranch?: string
+    }>(projectApiPath(projectId, `/issues/${number}/rebase`), { method: 'POST' })
   } catch (err) {
     if (err instanceof ApiError && err.data && typeof err.data === 'object') {
-      return err.data as { rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'queued'; workflowRunId?: string; taskId?: string; stage?: string; baseBranch?: string }
+      return err.data as {
+        rebased: boolean
+        rePlan?: boolean
+        conflicts?: string[]
+        buildPassed?: boolean
+        message: string
+        status?: 'queued'
+        workflowRunId?: string
+        taskId?: string
+        stage?: string
+        baseBranch?: string
+      }
     }
     throw err
   }
 }
 
 export function rerunIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/rerun`), { method: 'POST' })
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/rerun`), {
+    method: 'POST',
+  })
 }
 
 export function forceStopIssue(number: number, projectId?: string | null) {
-  return request<{ ok: boolean; issueNumber: number }>(projectApiPath(projectId, `/issues/${number}/force-stop`), { method: 'POST' })
+  return request<{ ok: boolean; issueNumber: number }>(projectApiPath(projectId, `/issues/${number}/force-stop`), {
+    method: 'POST',
+  })
 }
 
 export function stopIssue(number: number, projectId?: string | null) {
-  return request<{ ok: boolean; issueNumber: number }>(projectApiPath(projectId, `/issues/${number}/stop`), { method: 'POST' })
+  return request<{ ok: boolean; issueNumber: number }>(projectApiPath(projectId, `/issues/${number}/stop`), {
+    method: 'POST',
+  })
 }
 
 export function getWorkspaceStatus(number: number, projectId?: string | null, signal?: AbortSignal) {
@@ -342,15 +448,23 @@ export function cleanupIssueWorkspace(number: number, projectId?: string | null)
 }
 
 export function archiveIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string; warning?: string }>(projectApiPath(projectId, `/issues/${number}/archive`), { method: 'POST' })
+  return request<{ issue: Issue; message: string; warning?: string }>(
+    projectApiPath(projectId, `/issues/${number}/archive`),
+    { method: 'POST' },
+  )
 }
 
 export function unarchiveIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/unarchive`), { method: 'POST' })
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/unarchive`), {
+    method: 'POST',
+  })
 }
 
 export function archiveAllCompleted(projectId?: string | null) {
-  return request<{ archived: number; skipped: number; skippedNumbers: number[]; message: string }>(projectApiPath(projectId, '/issues/archive-completed'), { method: 'POST' })
+  return request<{ archived: number; skipped: number; skippedNumbers: number[]; message: string }>(
+    projectApiPath(projectId, '/issues/archive-completed'),
+    { method: 'POST' },
+  )
 }
 
 export function addPrerequisite(number: number, prerequisiteNumber: number, projectId?: string | null) {
@@ -361,9 +475,12 @@ export function addPrerequisite(number: number, prerequisiteNumber: number, proj
 }
 
 export function removePrerequisite(number: number, prerequisiteNumber: number, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/prerequisites/${prerequisiteNumber}`), {
-    method: 'DELETE',
-  })
+  return request<{ issue: Issue; message: string }>(
+    projectApiPath(projectId, `/issues/${number}/prerequisites/${prerequisiteNumber}`),
+    {
+      method: 'DELETE',
+    },
+  )
 }
 
 export interface IssueWorkflowTaskLogParams {
@@ -371,10 +488,22 @@ export interface IssueWorkflowTaskLogParams {
   limit?: number | null
 }
 
-export function getIssueWorkflowTaskLog(number: number, taskId: string, params: IssueWorkflowTaskLogParams = {}, projectId?: string | null, signal?: AbortSignal) {
+export function getIssueWorkflowTaskLog(
+  number: number,
+  taskId: string,
+  params: IssueWorkflowTaskLogParams = {},
+  projectId?: string | null,
+  signal?: AbortSignal,
+) {
   const search = new URLSearchParams()
   if (params.cursor != null) search.set('cursor', String(params.cursor))
   if (params.limit != null) search.set('limit', String(params.limit))
   const qs = search.toString()
-  return request<TaskLogPage>(projectApiPath(projectId, `/issues/${number}/workflow/tasks/${encodeURIComponent(taskId)}/logs${qs ? `?${qs}` : ''}`), { signal })
+  return request<TaskLogPage>(
+    projectApiPath(
+      projectId,
+      `/issues/${number}/workflow/tasks/${encodeURIComponent(taskId)}/logs${qs ? `?${qs}` : ''}`,
+    ),
+    { signal },
+  )
 }

@@ -283,7 +283,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task EventAwareSaveFailure_DeactivationDoesNotFlushMutatedRunStateOnly()
+    public async Task EventAwareSaveFailure_DeactivationKeepsCreatedBindingWithoutStartedState()
     {
         await ClearBacklogAsync();
         var workflowId = $"wf-start-fails-{Guid.NewGuid():N}";
@@ -297,7 +297,9 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
             await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.StartAsync(TestInput()));
             await DeactivateWorkflowAsync(workflowId);
 
-            Assert.Null(await TryLoadRunAsync(workflowId));
+            var persisted = await TryLoadRunAsync(workflowId);
+            Assert.NotNull(persisted);
+            Assert.Equal(WorkflowRunStatus.Created, persisted!.Status);
             Assert.DoesNotContain(_fixture.EventStore.Appended,
                 e => e.Envelope.Source.ToString() == WorkflowRunSource(workflowId)
                     && e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);

@@ -157,6 +157,26 @@ public class CliAgentModelListCommandSpecs
     }
 
     [Fact]
+    public async Task AgentModelList_Runtime_ForwardsRuntimeQuery()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = AgentModelPayload(),
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "model", "list", "--runtime", "pi"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(
+            $"/api/projects/{ActiveProjectId}/opencode/models?runtime=pi",
+            handler.Requests.Single().RequestUri?.PathAndQuery);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
     public async Task AgentModel_Help_ListsListSubcommand()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>

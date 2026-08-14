@@ -16,11 +16,22 @@ public sealed class CliWorkflowValidateSpecs
             checks: []
         """;
 
+    private const string ValidProfile = """
+        id: delivery/review
+        name: Delivery Review
+        agentAction: mohist/pi
+        stages:
+          - stage: implement
+            tasks:
+              - id: implement
+                uses: ${{ profile.agentAction }}
+        """;
+
     [Fact]
     public async Task Validate_FileInput_SucceedsWithoutHttpOrProjectResolution()
     {
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.CreateSync();
-        fileSystem.AddFile("/workflow.yaml", ValidDefinition);
+        fileSystem.AddFile("/workflow.yaml", ValidProfile);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -31,7 +42,7 @@ public sealed class CliWorkflowValidateSpecs
             executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Workflow Definition is valid", output.ToString());
+        Assert.Contains("Workflow Profile is valid", output.ToString());
         Assert.Empty(error.ToString());
         Assert.Empty(handler.Requests);
     }
@@ -51,7 +62,7 @@ public sealed class CliWorkflowValidateSpecs
             standardInput: new StringReader(ValidDefinition));
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Workflow Definition is valid", output.ToString());
+        Assert.Contains("Workflow Profile is valid", output.ToString());
         Assert.Empty(error.ToString());
         Assert.Empty(handler.Requests);
     }
@@ -101,8 +112,36 @@ public sealed class CliWorkflowValidateSpecs
             executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Workflow Definition is valid", output.ToString());
+        Assert.Contains("Workflow Profile is valid", output.ToString());
         Assert.DoesNotContain("action", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Validate_ProfileExpressionOutsideCompleteUsesValue_Fails()
+    {
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.CreateSync();
+        fileSystem.AddFile("/invalid-profile.yaml", """
+            agentAction: mohist/pi
+            stages:
+              - stage: implement
+                tasks:
+                  - id: implement
+                    uses: prefix-${{ profile.agentAction }}
+            """);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["workflow", "validate", "--file", "/invalid-profile.yaml"],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("stages[0].tasks[0].uses", error.ToString());
+        Assert.Contains("complete value of uses", error.ToString());
+        Assert.Empty(output.ToString());
         Assert.Empty(handler.Requests);
     }
 }

@@ -78,11 +78,11 @@ declared capabilities:
 
 | Capability | Injection | Purpose |
 |---|---|---|
-| `agent-execution` | `host.agent.execute({ prompt, session?, options? })` | Execute one Agent input. The capability layer owns Session open/attach and the Runtime lifecycle; the Action only expresses intent |
+| `agent-turn` | `host.agent.execute({ prompt, session?, options? })` | Execute one Agent input. The capability layer owns Session open/attach and the Runtime lifecycle; the Action only expresses intent |
 | `add-tasks` | allows a result to carry `addTasks` | Append later tasks. The engine reports them uniformly; the Action does not connect directly to Server |
 | `write-vars` | `host.writeVars(vars)` | Persist `vars.*` immediately during execution, unlike the post-completion `setVars` projection. Writes are not rolled back on failure and are visible to retries |
 
-Declaring `agent-execution` also means the Action produces a Runner-private execution fact: the
+Declaring `agent-turn` also means the Action produces a Runner-private execution fact: the
 final assistant text. The capability layer records it so the `_output` marker in `expect` can match
 it. The Action result itself does not carry this fact.
 
@@ -91,7 +91,8 @@ it. The Action result itself does not carry this fact.
 Built-in Runner Actions are registered in one list. The registry is built from manifests and
 matches `uses` against `name` case-insensitively. All manifests are collected into a pure-JSON
 catalog and reported to Server when Runner registers, together with tombstones for retired Actions.
-Each tombstone contains a name and guidance.
+The catalog preserves manifest capabilities so Server can validate a Profile's `agentAction`
+without inferring semantics from an Action name. Each tombstone contains a name and guidance.
 
 Loading external plugins, version segments in `uses` such as `@v1`, and composite Actions that
 orchestrate YAML steps are out of scope. The registry retains an extension point that accepts
@@ -168,7 +169,7 @@ output and the Runner-produced error. Task status, exit code, and Runner-private
 belong to the task execution protocol, not the public Action result.
 
 Generic result handling in the engine does not interpret any Action's business semantics. The only
-capability-based branch is for an Action that declares `agent-execution`: the task executor projects
+capability-based branch is for an Action that declares `agent-turn`: the task executor projects
 its output from `expect` as `null | { promise }`, as described below. Every other Action preserves
 its output unchanged. There is no special-case list based on `uses`.
 
@@ -178,7 +179,10 @@ its output unchanged. There is no special-case list based on `uses`.
   catalog. Unknown `uses`, unknown input keys, missing `required` inputs, and constant input type
   mismatches are actionable errors. Inputs containing template expressions are checked only for
   key names; type validation waits for the Runner execution entry point. If no catalog has been
-  reported, this layer is skipped and recorded without blocking the save.
+  reported, this layer is skipped and recorded without blocking a Profile that uses only literal
+  Actions. A Profile that declares `agentAction`, or a mutation of its Project override, is rejected
+  when no catalog is available because the capability and complete materialized contract cannot be
+  validated.
 - **Runner execution entry point, authoritative and fail-closed:** Runner renders the original
   `with` from the attempt snapshot, enforces its local manifest, and fails the task with
   `invalid-input` instead of invoking `run` with unvalidated input. Server no longer expands
@@ -186,11 +190,16 @@ its output unchanged. There is no special-case list based on `uses`.
 - **Retired Action:** a tombstone encountered during Runner rendering fails with its guidance; a
   tombstone encountered during Profile save rejects the save.
 
-Profile save first uses the Workflow Definition validator to produce a semantic model, then uses
-the catalog to evaluate `uses` and `with`. The Definition validator only recursively checks template
-expressions in `with` values. The catalog does not repeat Definition field or template namespace
-validation. Both diagnostic sources are combined into one validation exception, use the same YAML
-path convention, and carry source labels. A successful save response explicitly contains
+Profile save first materializes the Profile's optional Agent Action binding, then uses the Workflow
+Definition validator to produce a semantic model and the catalog to evaluate concrete `uses` and
+`with`. When `agentAction` is present, the catalog also requires that Action to declare `agent-turn`.
+For an update referenced by active bound Runs, Server repeats materialization and Action-contract validation
+once per distinct bound Action as well as for the future effective Action. The Project-scoped Profile
+reference coordinator serializes this validation and write with new Run bindings.
+The Definition validator only recursively checks runtime template expressions in `with` values. The
+catalog does not repeat Profile binding, Definition field, or template namespace validation. All
+diagnostic sources are combined into one validation exception, use the same YAML path convention,
+and carry source labels. A successful save response explicitly contains
 `actionValidation: { performed, reason? }`, telling the caller whether Action-contract validation
 ran. If the catalog is unavailable, the response explains the skipped validation. Built-in Profile
 loading, runtime loading, and `mo run validate` only perform Definition validation and do not depend
@@ -238,7 +247,7 @@ and rendered `expect` does not enter the Action input channel.
 
 A marker `path` may use the special value `_output`, which matches the final assistant text of this
 execution instead of file content. The task executor obtains that text from the execution fact
-recorded by the `agent-execution` capability. It does not enter Action output and requires no extra
+recorded by the `agent-turn` capability. It does not enter Action output and requires no extra
 Action declaration.
 
 `_output` recognizes only the promise-tag form `<promise>VALUE</promise>`. If multiple accepted
@@ -276,7 +285,7 @@ task or a check.
 
 ### `mohist/opencode`
 
-This Runtime-specific Action declares `agent-execution`. See
+This Runtime-specific Action declares `agent-turn`. See
 [`../agent-execution.md`](../agent-execution.md) for invariants about its ownership relationship
 with Agent and Session, including that direct use means an Inline Agent and does not resolve an
 Agent definition. Because `uses` already selects the Runtime, inputs need no `kind` or `type`
@@ -307,11 +316,27 @@ Output contract:
 type OpenCodeActionOutput = null | { promise: string }
 ```
 
-The task executor synthesizes this `{ promise }` output for an `agent-execution` Action based on
+The task executor synthesizes this `{ promise }` output for an `agent-turn` Action based on
 `expect`; neither the Action nor the capability layer produces it. Runtime Session identity, model,
 usage, transcript, diagnostics, and expectation details stay in the models that own them and are
 not copied into Action output. See [`../runtimes/opencode.md`](../runtimes/opencode.md) for the
 OpenCode implementation.
+
+`mohist/pi` is a peer concrete Action with the same Profile-facing input shape and `agent-turn`
+capability. A parameterized Profile still materializes one of these concrete names before Action
+validation and dispatch; there is no generic Agent-turn Action in the registry.
+
+### `mohist/openspec-tasks`
+
+`mohist/openspec-tasks` appends planned Build tasks through its `add-tasks` capability. Its
+`task.uses` input is a required default for every appended task. A Profile may set this value to
+`${{ profile.agentAction }}` because Profile materialization runs before deferred Action Input is
+captured.
+
+The source `tasks.json` may describe task identity, title, prompt context, and completion
+expectations, but it cannot provide `uses`. Allowing a source task to replace `task.uses` would
+bypass Profile validation and could mix Agent Runtimes inside a Run. The Action rejects such input
+with `invalid-input`; it does not fall back to `mohist/opencode`.
 
 ### Git and GitHub PR Actions
 
@@ -350,7 +375,11 @@ See [`builtin-workflows.md`](builtin-workflows.md) for the complete task graph.
 
 Implemented: manifests and `defineAction`; registry and catalog reporting, including tombstones,
 when Runner registers with Server; catalog validation during Profile save with an
-`actionValidation` response marker; declarative capability injection for `agent-execution`,
+`actionValidation` response marker; declarative capability injection for `agent-turn`,
 `add-tasks`, and `write-vars`; structured output end to end; and `setVars` projection. Named
 special-case lists, `PROMISE_PROJECTED` and `REMOVED`, have been removed. Privileged access such as
 `openspec-tasks` has been reduced to declarative effects.
+
+Implemented in the Profile Agent Action binding change: capability projection in the Server catalog,
+capability validation for `agentAction`, and the required non-overridable `task.uses` contract for
+`mohist/openspec-tasks`.

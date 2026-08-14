@@ -139,21 +139,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
         RejectIfRunReloadRequired();
-        var created = _run is null;
-        try
-        {
-            await EnsureCreatedRunAsync(input);
-            var events = _run!.Start(Now());
+        await EnsureCreatedRunAsync(input);
+        var events = _run!.Start(Now());
 
-            _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run!.CurrentStageId);
-            await CommitAsync(events);
-        }
-        catch
-        {
-            if (created)
-                await RemoveUncommittedRunAsync();
-            throw;
-        }
+        _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run!.CurrentStageId);
+        await CommitAsync(events);
     }
 
     public async Task EnsureStartedAsync(WorkflowIssueContext context)
@@ -163,20 +153,17 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run is not null)
         {
             await RefreshIssueContextAsync(context);
+            if (_run.Status == WorkflowRunStatus.Created)
+            {
+                var resumedEvents = _run.Start(Now());
+                await CommitAsync(resumedEvents);
+            }
             return;
         }
 
-        try
-        {
-            await EnsureCreatedRunAsync(context);
-            var events = _run!.Start(Now());
-            await CommitAsync(events);
-        }
-        catch
-        {
-            await RemoveUncommittedRunAsync();
-            throw;
-        }
+        await EnsureCreatedRunAsync(context);
+        var events = _run!.Start(Now());
+        await CommitAsync(events);
     }
 
     /// <summary>
@@ -197,31 +184,21 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             await EnsureStartedAsync(context);
             return;
         }
-        var created = _run is null;
-        try
-        {
-            if (created)
-                await EnsureCreatedRunAsync(context);
+        if (_run is null)
+            await EnsureCreatedRunAsync(context, snapshot.Workspace);
 
-            var metadata = _run!.Metadata;
-            var events = _run.EnsureStarted(snapshot.Repository, snapshot.Workspace, Now(), metadata);
-            if (events.Count > 0)
-            {
-                _log.LogInformation(
-                    "Workflow {Id} ensured-started with repository snapshot, stage={Stage}",
-                    GrainKey, _run.CurrentStageId);
-                await CommitAsync(events);
-            }
-            else
-            {
-                await SaveRunAsync();
-            }
-        }
-        catch
+        var metadata = _run!.Metadata;
+        var events = _run.EnsureStarted(snapshot.Repository, snapshot.Workspace, Now(), metadata);
+        if (events.Count > 0)
         {
-            if (created)
-                await RemoveUncommittedRunAsync();
-            throw;
+            _log.LogInformation(
+                "Workflow {Id} ensured-started with repository snapshot, stage={Stage}",
+                GrainKey, _run.CurrentStageId);
+            await CommitAsync(events);
+        }
+        else
+        {
+            await SaveRunAsync();
         }
     }
 
@@ -253,25 +230,31 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         RequireProjectOwnership(metadata);
         var projectId = metadata?.ProjectId;
         var issueNumber = metadata?.IssueNumber;
-        var structure = await _definitionResolver.LoadStartupStructureAsync(GrainKey, projectId, issueNumber);
-        _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
-        if (!string.IsNullOrWhiteSpace(structure.Id))
-            await PersistProfileBindingAsync(projectId!, structure.Id);
-        _run.Workspace = input?.Workspace;
+        await BindInitialRunAsync(
+            projectId!,
+            issueNumber,
+            metadata?.EpicNumber,
+            explicitProfileId: null,
+            metadata!,
+            input?.Workspace);
     }
 
-    private async Task EnsureCreatedRunAsync(WorkflowIssueContext context)
+    private async Task EnsureCreatedRunAsync(WorkflowIssueContext context, WorkspaceIdentity? workspace = null)
     {
+        if (_run is not null) return;
         var metadata = WorkflowRunLineage.ForIssue(
             context.ProjectId,
             context.IssueNumber,
             context.EpicNumber,
             new WorkflowRunMetadata(null, Now()));
-        var structure = await _definitionResolver.LoadStartupStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
-        _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
-        if (!string.IsNullOrWhiteSpace(structure.Id))
-            await PersistProfileBindingAsync(context.ProjectId, structure.Id);
-        _run.Workspace = await _variableResolver.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
+        workspace ??= await _variableResolver.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
+        await BindInitialRunAsync(
+            context.ProjectId,
+            context.IssueNumber,
+            context.EpicNumber,
+            context.WorkflowProfileId,
+            metadata,
+            workspace);
     }
 
     public async Task ResumeAsync()
@@ -692,22 +675,34 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     internal int? GetIssueNumber() =>
         _run?.Metadata?.IssueNumber is > 0 ? _run.Metadata.IssueNumber : null;
 
-    private async Task PersistProfileBindingAsync(string projectId, string profileId)
+    private async Task BindInitialRunAsync(
+        string projectId,
+        int? issueNumber,
+        int? epicNumber,
+        string? explicitProfileId,
+        WorkflowRunMetadata metadata,
+        WorkspaceIdentity? workspace)
     {
-        await _runStore.SaveAsync(_run!);
         var result = await GrainFactory
             .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
             .BindWorkflowRunAsync(
-                new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
-                $"workflow-run:{GrainKey}:profile:{profileId}",
+                new WorkflowProfileCommandPayload.BindWorkflowRun(
+                    projectId,
+                    GrainKey,
+                    issueNumber,
+                    epicNumber,
+                    explicitProfileId,
+                    metadata,
+                    workspace),
+                $"workflow-run:{GrainKey}:start",
                 expectedRevision: null);
         if (!result.IsApplied)
         {
-            await _runStore.DeleteAsync(GrainKey);
-            _run = null;
-            _runDirty = false;
-            throw new InvalidOperationException(result.Message ?? $"Unable to bind WorkflowRun '{GrainKey}' to Profile '{profileId}'");
+            throw new InvalidOperationException(result.Message ?? $"Unable to create WorkflowRun '{GrainKey}'");
         }
+        _run = await _runStore.LoadAsync(GrainKey)
+            ?? throw new InvalidOperationException($"WorkflowRun '{GrainKey}' binding committed without a persisted Run");
+        _runDirty = false;
     }
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)

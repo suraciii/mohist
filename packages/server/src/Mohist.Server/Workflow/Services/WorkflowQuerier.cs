@@ -63,6 +63,23 @@ public class WorkflowQuerier : IScopedService
         return view;
     }
 
+    public virtual async Task<WorkflowRunBindingView?> GetBindingAsync(string workflowRunId)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        var state = await db.WorkflowRuns.AsNoTracking()
+            .Where(row => row.WorkflowRunId == workflowRunId)
+            .Select(row => row.State)
+            .FirstOrDefaultAsync();
+        if (state is null) return null;
+        var run = _runDeserializer.Deserialize(state);
+        return run is null
+            ? null
+            : new WorkflowRunBindingView(
+                run.WorkflowProfileId,
+                run.AgentAction,
+                WorkflowProfileAgentRuntimeProjection.Project(run.AgentAction));
+    }
+
     private async Task<WorkflowRun?> LoadAndCacheAsync(
         MohistDbContext db,
         string workflowRunId,
@@ -213,3 +230,8 @@ public class WorkflowQuerier : IScopedService
     }
 
 }
+
+public sealed record WorkflowRunBindingView(
+    string? WorkflowProfileId,
+    string? AgentAction,
+    string? AgentRuntime);
