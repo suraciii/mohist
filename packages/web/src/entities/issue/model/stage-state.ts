@@ -11,7 +11,15 @@ export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 
  * blocked Agent settlement in the stage (nonterminal attention); it is not a
  * server enum value.
  */
-export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'completed' | 'passed' | 'failed' | 'skipped' | 'blocked'
+export type StageStateStatus =
+  | 'pending'
+  | 'running'
+  | 'awaiting-approval'
+  | 'completed'
+  | 'passed'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
 
 export interface StageTaskCause {
   type: 'check-failure' | 'health-check-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown'

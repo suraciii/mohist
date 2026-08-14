@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { classifyEvent } from './classify'
 import type { TimelineCategory } from './types'
 
-function expectCategory(type: string, payload: Record<string, unknown>, expected: TimelineCategory, attention: boolean) {
+function expectCategory(
+  type: string,
+  payload: Record<string, unknown>,
+  expected: TimelineCategory,
+  attention: boolean,
+) {
   const result = classifyEvent(type, payload)
   expect(result.category).toBe(expected)
   expect(result.attention).toBe(attention)

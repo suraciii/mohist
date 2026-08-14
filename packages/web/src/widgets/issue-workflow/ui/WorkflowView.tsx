@@ -22,10 +22,22 @@ export function AgentResultAttentionPanel({ attention }: { attention: WorkflowAg
           <div className="font-semibold">Agent result unconfirmed</div>
           <p>{attention.message ?? 'The Agent result was not confirmed before its deadline.'}</p>
           <dl className="grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
-            <dt>Deadline</dt><dd className="break-all">{attention.deadlineAt}</dd>
-            <dt>Work</dt><dd className="break-all">{attention.workId}</dd>
-            {attention.agentSessionId && <><dt>Session</dt><dd className="break-all">{attention.agentSessionId}</dd></>}
-            {attention.agentTurnId && <><dt>Turn</dt><dd className="break-all">{attention.agentTurnId}</dd></>}
+            <dt>Deadline</dt>
+            <dd className="break-all">{attention.deadlineAt}</dd>
+            <dt>Work</dt>
+            <dd className="break-all">{attention.workId}</dd>
+            {attention.agentSessionId && (
+              <>
+                <dt>Session</dt>
+                <dd className="break-all">{attention.agentSessionId}</dd>
+              </>
+            )}
+            {attention.agentTurnId && (
+              <>
+                <dt>Turn</dt>
+                <dd className="break-all">{attention.agentTurnId}</dd>
+              </>
+            )}
           </dl>
           {attention.nextAction && <p className="text-xs">{attention.nextAction}</p>}
         </div>
@@ -75,9 +87,7 @@ export function WorkflowView({
         onSelectStage={setSelectedStage}
       />
 
-      {timeline?.agentResultAttention && (
-        <AgentResultAttentionPanel attention={timeline.agentResultAttention} />
-      )}
+      {timeline?.agentResultAttention && <AgentResultAttentionPanel attention={timeline.agentResultAttention} />}
 
       {!readOnly && (isBacklog || issue.health === IssueHealth.Blocked) && (
         <SpecialStatePanel issue={issue} issueNumber={issue.number} />
@@ -97,7 +107,6 @@ export function WorkflowView({
       {!readOnly && issue.workflowStage === WorkflowStage.Integrate && issue.health === IssueHealth.Blocked && (
         <IntegrateFailurePanel issue={issue} />
       )}
-
     </div>
   )
 }

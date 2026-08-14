@@ -6,10 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { useReducer } from 'react'
 import { NOTIFICATION_KINDS, type InboxItem } from '../../../entities/inbox'
 import { ProjectProvider } from '../../../entities/project'
-import {
-  InboxPage as DefaultInboxPage,
-  type InboxPageDataHook,
-} from './InboxPage'
+import { InboxPage as DefaultInboxPage, type InboxPageDataHook } from './InboxPage'
 
 function makeItem(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -294,7 +291,15 @@ describe('InboxPage list rendering and link', () => {
     const links = screen.getAllByTestId('inbox-item-link')
     expect(links.length).toBeGreaterThan(0)
     const hrefs = links.map((l) => l.getAttribute('href'))
-    expect(hrefs).toEqual(expect.arrayContaining(['/demo/issues/42', '/demo/issues/13', '/demo/issues/5', '/demo/issues/9', '/demo/issues/7']))
+    expect(hrefs).toEqual(
+      expect.arrayContaining([
+        '/demo/issues/42',
+        '/demo/issues/13',
+        '/demo/issues/5',
+        '/demo/issues/9',
+        '/demo/issues/7',
+      ]),
+    )
   })
 
   it('distinguishes unread items with data-read="false" and read items with data-read="true"', async () => {

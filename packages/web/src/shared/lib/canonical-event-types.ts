@@ -48,8 +48,7 @@ export const REVERSE_DNS_EVENT_TYPES = {
   AgentSessionContextHealthUpdated: 'com.mohist.agent-session.context-health-updated',
 } as const
 
-export type ReverseDnsEventType =
-  (typeof REVERSE_DNS_EVENT_TYPES)[keyof typeof REVERSE_DNS_EVENT_TYPES]
+export type ReverseDnsEventType = (typeof REVERSE_DNS_EVENT_TYPES)[keyof typeof REVERSE_DNS_EVENT_TYPES]
 
 export const REVERSE_DNS_AGENT_SESSION_EVENT_TYPES = [
   REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,

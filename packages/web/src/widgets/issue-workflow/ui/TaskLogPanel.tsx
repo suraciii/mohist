@@ -44,9 +44,10 @@ export interface TaskLogDataResult {
 
 export type TaskLogDataHook = (input: TaskLogDataHookInput) => TaskLogDataResult
 
-export type WorkflowRunSessionsHook = (
-  workflowRunId: string | null | undefined,
-) => { sessions: WorkflowRunSession[]; isLoading: boolean }
+export type WorkflowRunSessionsHook = (workflowRunId: string | null | undefined) => {
+  sessions: WorkflowRunSession[]
+  isLoading: boolean
+}
 
 export interface TaskLogPanelProps {
   issueNumber: number
@@ -69,19 +70,10 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskSt
   'skipped',
 ])
 
-const LIVE_LOG_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskStatus>([
-  'running',
-  'blocked',
-])
+const LIVE_LOG_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskStatus>(['running', 'blocked'])
 
 export const useDefaultTaskLogData: TaskLogDataHook = ({ issueNumber, taskId, workflowRunId, enabled = true }) =>
-  useIssueWorkflowTaskLog(
-    issueNumber,
-    taskId,
-    { limit: TASK_LOG_RETAINED_LIMIT },
-    enabled,
-    workflowRunId,
-  )
+  useIssueWorkflowTaskLog(issueNumber, taskId, { limit: TASK_LOG_RETAINED_LIMIT }, enabled, workflowRunId)
 
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso)
@@ -114,10 +106,7 @@ function buildExportFilename(taskId: string): string {
   return `task-logs-${taskId}-${isoDate}.txt`
 }
 
-export function mergeTaskLogDelta(
-  page: TaskLogPage | undefined,
-  delta: TaskLogDeltaEnvelopeWire,
-): TaskLogPage {
+export function mergeTaskLogDelta(page: TaskLogPage | undefined, delta: TaskLogDeltaEnvelopeWire): TaskLogPage {
   const lines: TaskLogLine[] = page ? [...page.lines] : []
   const existingSeqs = new Set<number>(lines.map((line) => line.seq))
   const incoming: TaskLogLine[] = []
@@ -132,9 +121,8 @@ export function mergeTaskLogDelta(
     existingSeqs.add(entry.seq)
   }
   const sorted = lines.concat(incoming).sort((a, b) => a.seq - b.seq)
-  const retained = sorted.length > TASK_LOG_RETAINED_LIMIT
-    ? sorted.slice(sorted.length - TASK_LOG_RETAINED_LIMIT)
-    : sorted
+  const retained =
+    sorted.length > TASK_LOG_RETAINED_LIMIT ? sorted.slice(sorted.length - TASK_LOG_RETAINED_LIMIT) : sorted
   const truncated = !!(delta.truncated || page?.truncated || retained.length < sorted.length)
   return {
     lines: retained,
@@ -198,9 +186,15 @@ export function TaskLogPanel({
   const lines = data?.lines ?? []
   const truncated = data?.truncated ?? false
 
-  const isAgentTask = isInlineAgentTask({ origin: origin ?? null, sessionName: sessionName ?? null, classification: classification ?? null })
+  const isAgentTask = isInlineAgentTask({
+    origin: origin ?? null,
+    sessionName: sessionName ?? null,
+    classification: classification ?? null,
+  })
   const trimmedSessionName = typeof sessionName === 'string' ? sessionName.trim() : ''
-  const { sessions, isLoading: sessionsLoading } = workflowSessionsHook(isAgentTask && trimmedSessionName.length > 0 ? workflowRunId ?? null : null)
+  const { sessions, isLoading: sessionsLoading } = workflowSessionsHook(
+    isAgentTask && trimmedSessionName.length > 0 ? (workflowRunId ?? null) : null,
+  )
   const resolvedSession = useMemo(() => {
     if (!isAgentTask || trimmedSessionName.length === 0) return null
     const match = sessions.find((s) => s.sessionName === trimmedSessionName)
@@ -213,10 +207,7 @@ export function TaskLogPanel({
   )
   const isSessionSummaryLoading = isAgentTask && trimmedSessionName.length > 0 && sessionsLoading
 
-  const sources = useMemo(
-    () => Array.from(new Set(lines.map((line) => line.source))).sort(),
-    [lines],
-  )
+  const sources = useMemo(() => Array.from(new Set(lines.map((line) => line.source))).sort(), [lines])
 
   const filteredRows: TimelineRow[] = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -335,12 +326,23 @@ export function TaskLogPanel({
       subscribedRef.current &&
       subscribedConnectionRef.current === connection &&
       subscribedReconnectVersionRef.current === reconnectVersion
-    ) return
+    )
+      return
     subscribedRef.current = true
     subscribedConnectionRef.current = connection
     subscribedReconnectVersionRef.current = reconnectVersion
     void subscribeTaskLog(connection, { workflowRunId, taskId })
-  }, [connection, reconnectVersion, terminalNow, taskStatus, projectId, workflowRunId, issueNumber, taskId, queryClient])
+  }, [
+    connection,
+    reconnectVersion,
+    terminalNow,
+    taskStatus,
+    projectId,
+    workflowRunId,
+    issueNumber,
+    taskId,
+    queryClient,
+  ])
 
   useEffect(() => {
     return () => {

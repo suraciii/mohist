@@ -23,16 +23,15 @@ function TaskLifecycleTime({ task }: { task: StageTaskState }) {
 
   const completedAt = task.completedAt
   if (!completedAt) {
-    return (
-      <span className="text-xs text-muted-foreground/70 flex-shrink-0">{startClock}</span>
-    )
+    return <span className="text-xs text-muted-foreground/70 flex-shrink-0">{startClock}</span>
   }
 
   const endClock = formatClock(completedAt)
   const dur = task.duration > 0 ? ` · ${formatDuration(task.duration)}` : ''
   return (
     <span className="text-xs text-muted-foreground/70 flex-shrink-0" title={`Started ${startClock}, ended ${endClock}`}>
-      {startClock}→{endClock}{dur}
+      {startClock}→{endClock}
+      {dur}
     </span>
   )
 }
@@ -102,7 +101,9 @@ function RequiredFileEntry({
         <div className="mt-1 rounded bg-muted p-2 max-h-60 overflow-auto">
           {loading && <span className="text-muted-foreground">loading...</span>}
           {error && <span className="text-danger">File content unavailable</span>}
-          {content && <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{content}</pre>}
+          {content && (
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{content}</pre>
+          )}
         </div>
       )}
     </div>
@@ -111,9 +112,7 @@ function RequiredFileEntry({
 
 function TaskSessionChip({ sessionName, sessionId }: { sessionName: string; sessionId?: string }) {
   const toProjectPath = useProjectPath()
-  const transcriptPath = sessionId
-    ? toProjectPath(`/sessions/${encodeURIComponent(sessionId)}`)
-    : null
+  const transcriptPath = sessionId ? toProjectPath(`/sessions/${encodeURIComponent(sessionId)}`) : null
 
   if (!transcriptPath) return <span className="text-muted-foreground">{sessionName}</span>
   return (
@@ -129,13 +128,7 @@ function TaskSessionChip({ sessionName, sessionId }: { sessionName: string; sess
   )
 }
 
-function TaskArtifactSummaryChip({
-  summary,
-  onClick,
-}: {
-  summary: WorkflowArtifactSummary
-  onClick: () => void
-}) {
+function TaskArtifactSummaryChip({ summary, onClick }: { summary: WorkflowArtifactSummary; onClick: () => void }) {
   const isDirectory = summary.kind === 'directory'
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -165,13 +158,14 @@ function TaskArtifactSummaryChip({
 function isDeliveryFailureTask(task: StageTaskState): boolean {
   const uses = task.origin?.uses
   if (typeof uses !== 'string') {
-    return typeof task.taskId === 'string' && (
-      task.taskId.startsWith('integrate:prepare') ||
-      task.taskId.startsWith('integrate:publish') ||
-      task.taskId.startsWith('integrate:open-pr') ||
-      task.taskId.startsWith('integrate:merge-pr') ||
-      task.taskId.startsWith('recover:open-pr') ||
-      task.taskId.startsWith('recover:merge-pr')
+    return (
+      typeof task.taskId === 'string' &&
+      (task.taskId.startsWith('integrate:prepare') ||
+        task.taskId.startsWith('integrate:publish') ||
+        task.taskId.startsWith('integrate:open-pr') ||
+        task.taskId.startsWith('integrate:merge-pr') ||
+        task.taskId.startsWith('recover:open-pr') ||
+        task.taskId.startsWith('recover:merge-pr'))
     )
   }
   return (
@@ -214,13 +208,9 @@ export function TaskItem({
   const artifactSummaries = task.artifactSummaries ?? []
   const hasArtifacts = artifactSummaries.length > 0
   const isDeliveryTask = isDeliveryFailureTask(task)
-  const taskReason = task.error?.message
-    ?? (typeof task.reason === 'string' ? task.reason : null)
-    ?? settlement?.message
-    ?? null
-  const deliveryFailure = isFailed && isDeliveryTask
-    ? getDeliveryFailureGuidance(task.error?.code)
-    : null
+  const taskReason =
+    task.error?.message ?? (typeof task.reason === 'string' ? task.reason : null) ?? settlement?.message ?? null
+  const deliveryFailure = isFailed && isDeliveryTask ? getDeliveryFailureGuidance(task.error?.code) : null
   const resolvedTaskLogHook = taskLogHook ?? useDefaultTaskLogData
   const taskLogResult = resolvedTaskLogHook({
     issueNumber,
@@ -229,9 +219,9 @@ export function TaskItem({
     workflowRunId,
     enabled: task.taskId.trim().length > 0 && task.status !== 'pending',
   })
-  const hasLogs = task.taskId.trim().length > 0
-    && (isRunning || (taskLogResult.data?.lines.length ?? 0) > 0)
-  const canExpand = hasLogs || hasArtifacts || hasRequiredFiles || isFailed || isBlocked || hasOutput || deliveryFailure != null
+  const hasLogs = task.taskId.trim().length > 0 && (isRunning || (taskLogResult.data?.lines.length ?? 0) > 0)
+  const canExpand =
+    hasLogs || hasArtifacts || hasRequiredFiles || isFailed || isBlocked || hasOutput || deliveryFailure != null
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
@@ -290,22 +280,37 @@ export function TaskItem({
           {primaryContent}
         </button>
       ) : (
-        <div className="flex min-w-0 items-start gap-2 px-3 py-2">
-          {primaryContent}
-        </div>
+        <div className="flex min-w-0 items-start gap-2 px-3 py-2">{primaryContent}</div>
       )}
-      {(task.status === 'completed' && hasArtifacts) || hasReason || originLabel || sessionName || task.startedAt || task.attempts > 1 ? (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pl-9 text-xs text-muted-foreground" data-testid="workflow-task-metadata">
-          {task.status === 'completed' && artifactSummaries.map((summary) => (
-            <TaskArtifactSummaryChip
-              key={summary.artifactId}
-              summary={summary}
-              onClick={() => setSelectedArtifact(summary)}
-            />
-          ))}
-          {hasReason && <span className="text-warning" title={taskReason ?? undefined}>reason</span>}
-          {originLabel && <span className="break-all font-mono text-[11px]" title={originTitle}>{originLabel}</span>}
-           {sessionName && <TaskSessionChip sessionName={sessionName} sessionId={sessionId} />}
+      {(task.status === 'completed' && hasArtifacts) ||
+      hasReason ||
+      originLabel ||
+      sessionName ||
+      task.startedAt ||
+      task.attempts > 1 ? (
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pl-9 text-xs text-muted-foreground"
+          data-testid="workflow-task-metadata"
+        >
+          {task.status === 'completed' &&
+            artifactSummaries.map((summary) => (
+              <TaskArtifactSummaryChip
+                key={summary.artifactId}
+                summary={summary}
+                onClick={() => setSelectedArtifact(summary)}
+              />
+            ))}
+          {hasReason && (
+            <span className="text-warning" title={taskReason ?? undefined}>
+              reason
+            </span>
+          )}
+          {originLabel && (
+            <span className="break-all font-mono text-[11px]" title={originTitle}>
+              {originLabel}
+            </span>
+          )}
+          {sessionName && <TaskSessionChip sessionName={sessionName} sessionId={sessionId} />}
 
           {task.attempts > 1 && <span>{task.attempts} attempts</span>}
           <TaskLifecycleTime task={task} />
@@ -321,13 +326,12 @@ export function TaskItem({
                 nextAction={deliveryFailure.nextAction}
               />
             )}
-            {hasReason && (
-              <div className="text-xs text-warning bg-warning-subtle rounded px-2 py-1">
-                {taskReason}
-              </div>
-            )}
+            {hasReason && <div className="text-xs text-warning bg-warning-subtle rounded px-2 py-1">{taskReason}</div>}
             {isBlocked && settlement && (
-              <div className="space-y-1 rounded border border-warning-border bg-warning-subtle px-2 py-1.5 text-xs text-warning" data-testid="workflow-task-blocked-attention">
+              <div
+                className="space-y-1 rounded border border-warning-border bg-warning-subtle px-2 py-1.5 text-xs text-warning"
+                data-testid="workflow-task-blocked-attention"
+              >
                 <div className="font-semibold">Agent result unconfirmed</div>
                 {settlement.deadlineAt && <div>Deadline: {settlement.deadlineAt}</div>}
                 {settlement.workId && <div>Work: {settlement.workId}</div>}
@@ -351,12 +355,7 @@ export function TaskItem({
               </div>
             )}
             {task.requiredFiles?.map((rf) => (
-              <RequiredFileEntry
-                key={rf.path}
-                rf={rf}
-                issueNumber={issueNumber}
-                fileContentFn={fileContentFn}
-              />
+              <RequiredFileEntry key={rf.path} rf={rf} issueNumber={issueNumber} fileContentFn={fileContentFn} />
             ))}
             {hasOutput && (
               <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted rounded p-2 max-h-40 overflow-auto">

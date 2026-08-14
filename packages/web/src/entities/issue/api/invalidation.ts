@@ -111,15 +111,15 @@ export function invalidateIssueEvent(
   }
 
   if (eventName === REVERSE_DNS_EVENT_TYPES.IssueParentChanged) {
-    const relatedParents = new Set([
-      parsed.previousParentIssueNumber,
-      parsed.parentIssueNumber,
-    ])
+    const relatedParents = new Set([parsed.previousParentIssueNumber, parsed.parentIssueNumber])
     for (const relatedIssueNumber of relatedParents) {
-      if (typeof relatedIssueNumber !== 'number'
-        || !Number.isSafeInteger(relatedIssueNumber)
-        || relatedIssueNumber <= 0
-        || relatedIssueNumber === issueNumber) continue
+      if (
+        typeof relatedIssueNumber !== 'number' ||
+        !Number.isSafeInteger(relatedIssueNumber) ||
+        relatedIssueNumber <= 0 ||
+        relatedIssueNumber === issueNumber
+      )
+        continue
       queryClient.invalidateQueries({
         queryKey: issueDetailKeys.detail(currentProjectId, relatedIssueNumber),
         exact: true,

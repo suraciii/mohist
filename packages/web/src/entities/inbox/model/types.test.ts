@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  NOTIFICATION_KINDS,
-  NOTIFICATION_KIND_VALUES,
-  isNotificationKind,
-  parseNotificationKind,
-} from './types'
+import { NOTIFICATION_KINDS, NOTIFICATION_KIND_VALUES, isNotificationKind, parseNotificationKind } from './types'
 
 describe('NOTIFICATION_KINDS', () => {
   it('exposes the non-failure Agent-result attention kind exactly once', () => {

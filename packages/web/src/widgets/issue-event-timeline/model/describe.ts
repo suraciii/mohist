@@ -69,9 +69,7 @@ export function describeEvent(
   const error = getString(payload, 'error') ?? ''
   const taskId = getString(payload, 'taskId')
   const taskStage = getString(payload, 'stage')
-  const taskSubject = taskId
-    ? (taskStage ? resolveTaskTitle?.(taskStage, taskId) : null) ?? taskId
-    : null
+  const taskSubject = taskId ? ((taskStage ? resolveTaskTitle?.(taskStage, taskId) : null) ?? taskId) : null
   const artifactPath = getString(payload, 'path')
 
   switch (type) {
