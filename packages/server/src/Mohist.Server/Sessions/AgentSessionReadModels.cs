@@ -70,6 +70,52 @@ public sealed class AgentSessionTranscriptResponse
     public string Status { get; init; } = "unknown";
 }
 
+/// <summary>
+/// Public context references for one history row. Workspace paths are
+/// intentionally excluded; the public history contract carries names and
+/// stable targets, not runtime filesystem details.
+/// </summary>
+public sealed record AgentHistoryContextDto(
+    int? IssueNumber,
+    int? EpicNumber,
+    string? Repository,
+    string? WorkspaceName);
+
+/// <summary>
+/// Usage cost on a history row. Session usage is cumulative because the
+/// Session contract does not claim a per-turn cost allocation.
+/// </summary>
+public sealed record AgentHistoryCostDto(
+    double? Amount,
+    string? Currency,
+    string Scope);
+
+/// <summary>
+/// One public history row represents one canonical AgentTurn. JobId is the
+/// owning AgentJob when the turn was launched by a Job; SessionId, InputId,
+/// and TurnId remain the navigation identity for every row.
+/// </summary>
+public sealed record AgentHistoryItemDto(
+    string Id,
+    string SessionId,
+    string? InputId,
+    IReadOnlyList<string> InputIds,
+    string TurnId,
+    string? JobId,
+    string Task,
+    AgentHistoryContextDto? Context,
+    string Status,
+    string Outcome,
+    AgentTurnResultObservationDto? Result,
+    string StartedAt,
+    string? EndedAt,
+    long? DurationMs,
+    string? Model,
+    AgentHistoryCostDto Cost,
+    string? Workspace,
+    string? Target,
+    [property: JsonPropertyName("bucket")] string Bucket);
+
 public sealed class AgentSessionTranscriptTurnDto
 {
     public string Id { get; init; } = string.Empty;

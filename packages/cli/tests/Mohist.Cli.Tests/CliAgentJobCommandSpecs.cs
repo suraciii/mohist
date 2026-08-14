@@ -210,4 +210,72 @@ public class CliAgentJobCommandSpecs
         Assert.Contains("\"exitCode\": 0", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("\"message\"", stdout, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task History_SelectedJson_UsesCanonicalSessionAndTurnFields()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[] { new { id = "agent_123", name = "reviewer", status = "active" } },
+                }));
+            }
+
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new[]
+                {
+                    new
+                    {
+                        id = "turn-history",
+                        sessionId = "session-history",
+                        inputId = "input-history",
+                        inputIds = new[] { "input-history" },
+                        turnId = "turn-history",
+                        jobId = "job-history",
+                        task = "Review history",
+                        context = new { issueNumber = 385, repository = "suraciii/mohist" },
+                        status = "completed",
+                        outcome = "success",
+                        result = new { message = "complete", output = "result" },
+                        startedAt = "2026-08-09T10:00:00Z",
+                        endedAt = "2026-08-09T10:00:09Z",
+                        durationMs = 9000,
+                        model = "test-model",
+                        cost = new { amount = 1.5, currency = "USD", scope = "session" },
+                        workspace = "history",
+                        target = "target-history",
+                        bucket = "recent",
+                    },
+                },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["agent", "history", "reviewer", "--limit", "10", "--json", "sessionId,turnId,status,result"],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("/api/projects/proj_test/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal(
+            "/api/projects/proj_test/agents/agent_123/history?limit=10",
+            handler.Requests[1].RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("\"sessionId\": \"session-history\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"turnId\": \"turn-history\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"status\": \"completed\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"result\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"task\"", stdout, StringComparison.Ordinal);
+    }
 }

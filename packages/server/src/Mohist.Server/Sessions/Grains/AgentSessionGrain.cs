@@ -2094,14 +2094,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (runtimeEvents.Count == 0) return [];
 
         var supportedEvents = runtimeEvents
-            .Where(runtimeEvent => TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
+            .Where(runtimeEvent => TranscriptAccumulator.IsAcceptedEventType(runtimeEvent.Type))
             .ToList();
         foreach (var group in runtimeEvents
-            .Where(runtimeEvent => !TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
+            .Where(runtimeEvent => !TranscriptAccumulator.IsAcceptedEventType(runtimeEvent.Type))
             .GroupBy(runtimeEvent => runtimeEvent.Type, StringComparer.Ordinal))
         {
             _log.LogWarning(
-                "AgentSessionGrain discarded unsupported transcript events for {SessionId}; type {EventType}, count {DiscardedEventCount}",
+                "AgentSessionGrain discarded unsupported or retired transcript events for {SessionId}; type {EventType}, count {DiscardedEventCount}",
                 SessionId,
                 group.Key,
                 group.Count());
@@ -2450,7 +2450,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 
         foreach (var row in entries)
         {
-            if (!TranscriptAccumulator.EventTypes.Contains(row.Type))
+            if (!TranscriptAccumulator.IsAcceptedEventType(row.Type))
                 continue;
 
             JsonElement payload;

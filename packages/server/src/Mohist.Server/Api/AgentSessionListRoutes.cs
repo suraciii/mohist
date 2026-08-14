@@ -50,6 +50,30 @@ public static class AgentSessionListRoutes
             return ApiResults.Ok(items);
         });
 
+        group.MapGet("/history", async (
+            HttpContext context,
+            string projectRef,
+            string agentRef,
+            int? limit,
+            AgentQuerier agentQuerier,
+            AgentSessionQuerier sessions,
+            CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+
+            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
+            if (agent is null)
+                return ApiResults.NotFound($"Agent '{agentRef}' not found");
+
+            var items = await sessions.ListAgentHistoryAsync(
+                project.Id,
+                agent.Id,
+                limit ?? 50,
+                ct);
+
+            return ApiResults.Ok(items);
+        });
+
         return app;
     }
 }

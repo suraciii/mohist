@@ -2,12 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import type { ReactNode } from 'react'
 import { ProjectProvider } from '../../../entities/project'
 import { useUnifiedSessionDataSource, type UnifiedSessionDataSourceDependencies } from './useUnifiedSessionDataSource'
 import type { AgentSessionTranscriptResponse, SessionFollowupResult, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
 import type { TurnControlResult } from '../../../entities/agent'
 import { ApiError } from '../../../shared/api/client'
+import { server, useMswServer } from '../../../../tests/support/msw'
+
+useMswServer()
 
 const TEST_PROJECT = {
   id: 'proj-1',
@@ -406,5 +410,42 @@ describe('useUnifiedSessionDataSource — recovery command reconciliation', () =
     expect(keys.some((key) => key.includes('"unified-session","proj-1","session-1","transcript"'))).toBe(true)
     expect(keys.some((key) => key.includes('"agent-sessions"'))).toBe(true)
     expect(keys.some((key) => key.includes('"workflow-runs"'))).toBe(true)
+  })
+})
+
+describe('useUnifiedSessionDataSource — history navigation context', () => {
+  it('exposes canonical input, turn, and job context from the Session URL', () => {
+    server.use(
+      http.get('*/api/projects/:projectId/agent-jobs/:jobId/launch-observation', () =>
+        HttpResponse.json({ success: true, data: { turnStatus: 'completed' } })),
+    )
+
+    const { result } = renderWithSummary(
+      {},
+      '/sessions/session-1?inputId=input-7&turnId=turn-7&jobId=job-7',
+    )
+
+    expect(result.current.sessionKey).toBe('session-1')
+    expect(result.current.focusedInputId).toBe('input-7')
+    expect(result.current.focusedTurnId).toBe('turn-7')
+    expect(result.current.contextJobId).toBe('job-7')
+  })
+
+  it('keeps the selected transcript view in the Session URL alongside history context', () => {
+    server.use(
+      http.get('*/api/projects/:projectId/agent-jobs/:jobId/launch-observation', () =>
+        HttpResponse.json({ success: true, data: { turnStatus: 'completed' } })),
+    )
+
+    const { result } = renderWithSummary(
+      {},
+      '/sessions/session-1?inputId=input-7&turnId=turn-7&jobId=job-7&view=raw',
+    )
+
+    expect(result.current.transcriptView).toBe('raw')
+    act(() => {
+      result.current.setTranscriptView?.('public')
+    })
+    expect(result.current.transcriptView).toBe('public')
   })
 })

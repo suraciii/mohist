@@ -37,6 +37,47 @@ export interface AgentSessionListItemDto {
   targetId?: string | null
 }
 
+export interface AgentHistoryContextDto {
+  issueNumber?: number | null
+  epicNumber?: number | null
+  repository?: string | null
+  workspaceName?: string | null
+}
+
+export interface AgentHistoryCostDto {
+  amount: number | null
+  currency: string | null
+  scope: string
+}
+
+export interface AgentHistoryItemDto {
+  id: string
+  sessionId: string
+  inputId: string | null
+  inputIds: string[]
+  turnId: string
+  jobId: string | null
+  task: string
+  context: AgentHistoryContextDto | null
+  status: string
+  outcome: string
+  result: {
+    message?: string | null
+    output?: string | null
+    failureReason?: string | null
+    failureCategory?: string | null
+    exitCode?: number | null
+  } | null
+  startedAt: string
+  endedAt: string | null
+  durationMs: number | null
+  model: string | null
+  cost: AgentHistoryCostDto
+  workspace: string | null
+  target: string | null
+  bucket: 'running' | 'failed' | 'ended' | 'recent' | 'unknown'
+}
+
 export interface GenericAgentSessionSummaryDto {
   sessionId: string
   agentId: string
@@ -171,6 +212,15 @@ export function getAgentSessions(projectId: string, agentRef: string, params?: {
   const qs = search.toString()
   return request<AgentSessionListItemDto[]>(
     projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/sessions${qs ? `?${qs}` : ''}`),
+  )
+}
+
+export function getAgentHistory(projectId: string, agentRef: string, params?: { limit?: number }) {
+  const search = params?.limit != null
+    ? `?${new URLSearchParams({ limit: String(params.limit) }).toString()}`
+    : ''
+  return request<AgentHistoryItemDto[]>(
+    projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/history${search}`),
   )
 }
 

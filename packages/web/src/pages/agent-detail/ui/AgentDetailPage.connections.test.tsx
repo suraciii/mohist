@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
-import type { AgentInfo, AgentSessionListItemDto, AgentStatusDetailResponse } from '../../../entities/agent'
+import type { AgentInfo, AgentHistoryItemDto, AgentStatusDetailResponse } from '../../../entities/agent'
 import {
   AgentDetailPage,
   type AgentDetailPageComponents,
@@ -13,7 +13,7 @@ import {
 const state: {
   agent: AgentInfo | undefined
   agentState: 'loading' | 'ready' | 'error'
-  sessions: AgentSessionListItemDto[]
+  sessions: AgentHistoryItemDto[]
   detailStatus: AgentStatusDetailResponse | undefined
   detailStatusLoading: boolean
 } = {

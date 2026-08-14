@@ -1267,6 +1267,7 @@ internal sealed class MohistCliApi
         IssueWatchList,
         AgentJobList,
         AgentJobView,
+        AgentHistoryList,
         SessionList,
         SessionShow,
         SessionTree,

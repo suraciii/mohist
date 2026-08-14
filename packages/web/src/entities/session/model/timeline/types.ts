@@ -9,6 +9,7 @@ export type TimelineFactKind =
   | 'status'
   | 'boundary'
   | 'error'
+  | 'unknown'
   | 'suppressed'
 
 export type TimelineToolStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timeout'
@@ -26,6 +27,7 @@ export type TimelineRenderClass =
   | 'status'
   | 'boundary'
   | 'error'
+  | 'unknown'
   | 'suppressed'
 
 export type TimelineSalience = 'critical' | 'high' | 'normal' | 'medium' | 'low' | 'quiet'

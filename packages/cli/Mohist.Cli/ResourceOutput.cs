@@ -47,6 +47,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.RunList or
             MohistCliApi.TableShape.ActivityList or
             MohistCliApi.TableShape.AgentJobList or
+            MohistCliApi.TableShape.AgentHistoryList or
             MohistCliApi.TableShape.SessionList or
             MohistCliApi.TableShape.SessionScheduleList or
             MohistCliApi.TableShape.OtelTracesList or
@@ -84,6 +85,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.AgentSessionSpawn => ["jobId", "sessionId", "turnId", "parentSessionId", "edgeId"],
             MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt"],
             MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode", "executionDefinition"],
+            MohistCliApi.TableShape.AgentHistoryList => ["id", "sessionId", "inputId", "inputIds", "turnId", "jobId", "task", "context", "status", "outcome", "result", "startedAt", "endedAt", "durationMs", "model", "cost", "workspace", "target", "bucket"],
             MohistCliApi.TableShape.AgentSessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
             MohistCliApi.TableShape.AgentSessionStop => ["state", "interruptUnconfirmed"],
             MohistCliApi.TableShape.SessionList =>

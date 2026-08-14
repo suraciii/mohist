@@ -26,6 +26,7 @@ import {
   stringifyPayload,
   getCorrelationKey,
 } from './transcript-tool-utils'
+import { sanitizePublicAgentEvent } from './transcript-public'
 
 interface UseSessionTranscriptOptions {
   issueNumber: number
@@ -240,11 +241,12 @@ export function useSessionTranscript({
           : `live:${eventName}:${++liveDetailOrdinalRef.current}`
       if (liveSourceIdsRef.current.has(sourceId)) return
       liveSourceIdsRef.current.add(sourceId)
+      const visibleDetail = sanitizePublicAgentEvent(eventName, detail)
       setLiveDetails((previous) => [
         ...previous,
         {
-          ...detail,
-          type: typeof detail.type === 'string' ? detail.type : eventName,
+          ...visibleDetail,
+          type: eventName,
           sourceId,
         } as AgentTranscriptDetail,
       ])
@@ -256,35 +258,36 @@ export function useSessionTranscript({
     }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started'], eventName = 'tool_call.started') => {
       if (!acceptLiveDetail(eventName, detail)) return
+      const visibleDetail = sanitizePublicAgentEvent(eventName, detail as Record<string, unknown>) as typeof detail
 
       hasLiveTailRef.current = true
       const now = new Date().toISOString()
-      const toolCallId = detail.toolCallId
-      const normalizedName = getNormalizedName(detail)
+      const toolCallId = visibleDetail.toolCallId
+      const normalizedName = getNormalizedName(visibleDetail)
       const pendingCorrelation = pendingCorrelationRef.current.get(toolCallId)
-      const target = deriveToolTarget(detail.toolName, detail.rawInput, detail.title) ?? pendingCorrelation?.target
-      const correlationKey = getCorrelationKey(detail.toolName, detail.title, target)
-      const metadata = detail.metadata ?? detail.rawOutputMetadata
+      const target = deriveToolTarget(visibleDetail.toolName, visibleDetail.rawInput, visibleDetail.title) ?? pendingCorrelation?.target
+      const correlationKey = getCorrelationKey(visibleDetail.toolName, visibleDetail.title, target)
+      const metadata = visibleDetail.metadata ?? visibleDetail.rawOutputMetadata
       const detailsMetadata = asRecord(metadata)
-      const liveDetails = detail.details ?? buildLiveToolDetails(normalizedName, detail.rawInput, detail.rawOutput, detailsMetadata ?? undefined)
-      const { displayTitle, displaySubtitle } = getDisplayFields(detail)
+      const liveDetails = visibleDetail.details ?? buildLiveToolDetails(normalizedName, visibleDetail.rawInput, visibleDetail.rawOutput, detailsMetadata ?? undefined)
+      const { displayTitle, displaySubtitle } = getDisplayFields(visibleDetail)
 
-      if (detail.state === 'started') {
+      if (visibleDetail.state === 'started') {
         liveToolCallMapRef.current.set(toolCallId, {
           toolCallId,
-          toolName: detail.toolName,
+          toolName: visibleDetail.toolName,
           normalizedName,
           displayTitle,
           displaySubtitle,
-          category: detail.category,
+          category: visibleDetail.category,
           status: 'started',
-          title: detail.title,
+          title: visibleDetail.title,
           target,
-          input: stringifyPayload(detail.rawInput),
-          output: stringifyPayload(detail.rawOutput),
+          input: stringifyPayload(visibleDetail.rawInput),
+          output: stringifyPayload(visibleDetail.rawOutput),
           error: '',
-          rawInput: detail.rawInput,
-          rawOutput: detail.rawOutput,
+          rawInput: visibleDetail.rawInput,
+          rawOutput: visibleDetail.rawOutput,
           metadata: detailsMetadata ?? undefined,
           details: liveDetails,
           startedAt: now,
@@ -297,18 +300,18 @@ export function useSessionTranscript({
           const next = ensureLiveTurn(prev, now)
           const lastTurn = next[next.length - 1]
           next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-            toolName: detail.toolName,
+            toolName: visibleDetail.toolName,
             normalizedName,
             displayTitle,
             displaySubtitle,
-            category: detail.category,
+            category: visibleDetail.category,
             status: 'started',
-            title: detail.title,
+            title: visibleDetail.title,
             target,
-            input: stringifyPayload(detail.rawInput),
-            output: stringifyPayload(detail.rawOutput),
-            rawInput: detail.rawInput,
-            rawOutput: detail.rawOutput,
+            input: stringifyPayload(visibleDetail.rawInput),
+            output: stringifyPayload(visibleDetail.rawOutput),
+            rawInput: visibleDetail.rawInput,
+            rawOutput: visibleDetail.rawOutput,
             metadata: detailsMetadata ?? undefined,
             details: liveDetails,
             startedAt: now,
@@ -320,23 +323,23 @@ export function useSessionTranscript({
         return
       }
 
-      if (!isTerminalState(detail.state)) {
+      if (!isTerminalState(visibleDetail.state)) {
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, now)
           const lastTurn = next[next.length - 1]
           next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-            status: detail.state as LiveToolCall['status'],
-            toolName: detail.toolName,
+            status: visibleDetail.state as LiveToolCall['status'],
+            toolName: visibleDetail.toolName,
             normalizedName,
             displayTitle,
             displaySubtitle,
-            category: detail.category,
-            title: detail.title,
+            category: visibleDetail.category,
+            title: visibleDetail.title,
             target,
-            input: stringifyPayload(detail.rawInput),
-            output: stringifyPayload(detail.rawOutput),
-            rawInput: detail.rawInput,
-            rawOutput: detail.rawOutput,
+            input: stringifyPayload(visibleDetail.rawInput),
+            output: stringifyPayload(visibleDetail.rawOutput),
+            rawInput: visibleDetail.rawInput,
+            rawOutput: visibleDetail.rawOutput,
             metadata: detailsMetadata ?? undefined,
             details: liveDetails,
           }, correlationKey)
@@ -349,42 +352,42 @@ export function useSessionTranscript({
 
       const existing = liveToolCallMapRef.current.get(toolCallId)
       if (existing) {
-        existing.status = detail.state as LiveToolCall['status']
+        existing.status = visibleDetail.state as LiveToolCall['status']
         existing.normalizedName = normalizedName
         existing.displayTitle = displayTitle
         existing.displaySubtitle = displaySubtitle
-        existing.category = detail.category ?? existing.category
-        existing.input = stringifyPayload(detail.rawInput) ?? existing.input
-        existing.output = stringifyPayload(detail.rawOutput)
-        existing.rawInput = detail.rawInput ?? existing.rawInput
-        existing.rawOutput = detail.rawOutput
+        existing.category = visibleDetail.category ?? existing.category
+        existing.input = stringifyPayload(visibleDetail.rawInput) ?? existing.input
+        existing.output = stringifyPayload(visibleDetail.rawOutput)
+        existing.rawInput = visibleDetail.rawInput ?? existing.rawInput
+        existing.rawOutput = visibleDetail.rawOutput
         existing.metadata = detailsMetadata ?? existing.metadata
         existing.details = liveDetails ?? existing.details
         existing.completedAt = now
-        existing.error = detail.state === 'failed'
-          ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed'))
+        existing.error = visibleDetail.state === 'failed'
+          ? (typeof visibleDetail.rawOutput === 'string' ? visibleDetail.rawOutput : JSON.stringify(visibleDetail.rawOutput ?? 'Tool failed'))
           : existing.error
       }
 
       setTurns((prev) => {
         const next = ensureLiveTurn(prev, now)
         const lastTurn = next[next.length - 1]
-        const error = detail.state === 'failed'
-          ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed'))
+        const error = visibleDetail.state === 'failed'
+          ? (typeof visibleDetail.rawOutput === 'string' ? visibleDetail.rawOutput : JSON.stringify(visibleDetail.rawOutput ?? 'Tool failed'))
           : undefined
         next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-          status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
-          toolName: detail.toolName,
+          status: mapStatusToDisplay(visibleDetail.state) as LiveToolCall['status'],
+          toolName: visibleDetail.toolName,
           normalizedName,
           displayTitle,
           displaySubtitle,
-          category: detail.category,
-          title: detail.title,
+          category: visibleDetail.category,
+          title: visibleDetail.title,
           target,
-          input: stringifyPayload(detail.rawInput),
-          output: stringifyPayload(detail.rawOutput),
-          rawInput: detail.rawInput,
-          rawOutput: detail.rawOutput,
+          input: stringifyPayload(visibleDetail.rawInput),
+          output: stringifyPayload(visibleDetail.rawOutput),
+          rawInput: visibleDetail.rawInput,
+          rawOutput: visibleDetail.rawOutput,
           metadata: detailsMetadata ?? undefined,
           details: liveDetails,
           completedAt: now,

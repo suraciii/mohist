@@ -277,27 +277,32 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
                         title = "Read README",
                         rawOutput = new { content = "# Project" }
                     }
+                },
+                new
+                {
+                    type = "future.runtime.event",
+                    payload = new { internalPath = "/hidden/runtime/path", state = "preserved" }
                 }
             }
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, persistence);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 5, persistence);
 
         await using var db = await dbFactory.CreateDbContextAsync();
         var dbParts = await LoadTranscriptPartsAsync(db, session.Id);
-        Assert.Equal(4, dbParts.Length);
-        Assert.Equal(["text", "reasoning", "reasoning", "tool"], dbParts.Select(p => p.Type).ToArray());
+        Assert.Equal(5, dbParts.Length);
+        Assert.Equal(["text", "reasoning", "reasoning", "tool", "future.runtime.event"], dbParts.Select(p => p.Type).ToArray());
 
         var response = await _client.GetDataAsync<AgentSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
 
-        Assert.Equal(4, response.PartCount);
+        Assert.Equal(5, response.PartCount);
         var turn = Assert.Single(response.Turns);
         Assert.Equal("mohist", turn.User.Role);
         Assert.Equal("task", turn.User.Kind);
         Assert.Equal("plan the refactor", turn.User.Text);
 
-        Assert.Equal(4, turn.Assistant.Length);
+        Assert.Equal(5, turn.Assistant.Length);
         Assert.Equal("text", turn.Assistant[0].Type);
         Assert.Equal("first second", turn.Assistant[0].Text);
         Assert.Equal("reasoning", turn.Assistant[1].Type);
@@ -311,6 +316,10 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         Assert.Equal("read", toolPart.ToolName);
         Assert.Equal("completed", toolPart.Status);
         Assert.Equal("Read README", toolPart.Title);
+        var publicUnknown = turn.Assistant[4];
+        Assert.Equal("unknown", publicUnknown.Type);
+        Assert.Equal("unknown", publicUnknown.Kind);
+        Assert.Equal("Unknown runtime event", publicUnknown.Text);
 
         var publicJson = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
         using (var publicDocument = JsonDocument.Parse(publicJson))
@@ -318,6 +327,8 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
             var publicTurn = publicDocument.RootElement.GetProperty("data").GetProperty("turns")[0];
             Assert.Equal("plan the refactor", publicTurn.GetProperty("user").GetProperty("text").GetString());
             Assert.False(publicTurn.GetProperty("assistant")[3].GetProperty("tool").TryGetProperty("rawInput", out _));
+            Assert.Equal("unknown", publicTurn.GetProperty("assistant")[4].GetProperty("type").GetString());
+            Assert.False(publicTurn.GetProperty("assistant")[4].TryGetProperty("raw", out _));
         }
 
         var rawJson = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript?view=raw");
@@ -325,6 +336,8 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var rawTurn = rawDocument.RootElement.GetProperty("data").GetProperty("turns")[0];
         Assert.Contains("mohist-workspace-anchor", rawTurn.GetProperty("user").GetProperty("text").GetString(), StringComparison.Ordinal);
         Assert.Contains("README.md", rawTurn.GetProperty("assistant")[3].GetProperty("tool").GetProperty("rawInput").GetString(), StringComparison.Ordinal);
+        Assert.Equal("future.runtime.event", rawTurn.GetProperty("assistant")[4].GetProperty("raw").GetProperty("type").GetString());
+        Assert.Equal("/hidden/runtime/path", rawTurn.GetProperty("assistant")[4].GetProperty("raw").GetProperty("payload").GetProperty("internalPath").GetString());
     }
 
 }

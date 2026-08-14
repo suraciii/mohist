@@ -14,6 +14,7 @@ import type {
   TimelineFileChange,
   TimelineToolStatus,
 } from '../../../entities/session'
+import { sanitizePublicAgentEvent } from './transcript-public'
 
 export interface SessionTimelineSummaryInput {
   activity?: AgentSessionActivity | null
@@ -163,8 +164,9 @@ function liveTool(detail: Record<string, unknown>, sourceId: string): TimelineFa
 }
 
 function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number): TimelineFact {
-  const source = record(detail) ?? {}
-  const eventName = stringValue(source.type) ?? 'unknown'
+  const original = record(detail) ?? {}
+  const eventName = stringValue(original.type) ?? 'unknown'
+  const source = sanitizePublicAgentEvent(eventName, original)
   const sourceId = sourceIdForLive(source, eventName, index)
   const occurredAt = liveOccurredAt(source, fallback)
   const sequence = numberValue(source.sequence)
@@ -174,7 +176,7 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
   const inputId = stringValue(source.inputId)
 
   if (eventName === 'session.input') {
-    return fact(sourceId, 'live', 'input', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'input', occurredAt, order, source, {
       text,
       input: {
         text: text ?? '消息',
@@ -185,20 +187,20 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
     })
   }
   if (eventName === 'message.delta' || eventName === 'coder_text_chunk') {
-    return fact(sourceId, 'live', 'message', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'message', occurredAt, order, source, {
       text,
       correlationId: stringValue(source.messageId) ?? turnId ?? stringValue(source.executionId),
     })
   }
   if (eventName === 'reasoning.delta' || eventName === 'coder_thought_chunk') {
-    return fact(sourceId, 'live', 'reasoning', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'reasoning', occurredAt, order, source, {
       text,
       correlationId: stringValue(source.messageId) ?? turnId ?? stringValue(source.executionId),
     })
   }
   if (eventName === 'tool_call.started' || eventName === 'tool_call.updated' || eventName === 'tool_call.completed' || eventName === 'coder_tool_call') {
     const tool = liveTool(source, sourceId)
-    return fact(sourceId, 'live', 'tool', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'tool', occurredAt, order, source, {
       tool,
       correlationId: stringValue(source.executionId) ?? turnId,
       groupKey: stringValue(source.groupKey),
@@ -206,7 +208,7 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
   }
   if (eventName === 'compaction' || eventName === 'compaction_event' || eventName === 'com.mohist.agent-session.context-compacted' || eventName === 'session.context_compacted' || eventName === 'context_reset' || eventName === 'session.context_reset') {
     const kind = eventName.includes('reset') ? 'reset' : 'compaction'
-    return fact(sourceId, 'live', 'boundary', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'boundary', occurredAt, order, source, {
       boundary: {
         kind,
         reason: stringValue(source.reason),
@@ -217,7 +219,7 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
   if (eventName === 'coder_recovery_status') {
     const status = stringValue(source.status) ?? 'unknown'
     const label = stringValue(source.reason) ?? `恢复：${status}`
-    return fact(sourceId, 'live', 'status', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'status', occurredAt, order, source, {
       text: label,
       status: { label, state: status, turnId },
     })
@@ -225,7 +227,7 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
   if (eventName === 'session.activity') {
     const activity = stringValue(source.activity) ?? 'unknown'
     const label = activity === 'active' ? '执行中' : activity === 'idle' ? '空闲' : '状态未知'
-    return fact(sourceId, 'live', 'status', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'status', occurredAt, order, source, {
       text: label,
       status: { label, state: activity, turnId },
     })
@@ -236,12 +238,12 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
       ?? stringValue(source.resolvedModel)
       ?? stringValue(source.healthStatus)
       ?? eventName
-    return fact(sourceId, 'live', 'status', occurredAt, order, detail, {
+    return fact(sourceId, 'live', 'status', occurredAt, order, source, {
       text: label,
       status: { label, state: eventName, turnId },
     })
   }
-  return fact(sourceId, 'live', 'suppressed', occurredAt, order, detail, {
+  return fact(sourceId, 'live', 'suppressed', occurredAt, order, source, {
     text: eventName,
   })
 }
@@ -262,6 +264,12 @@ function partFact(part: SessionPart, turn: SessionTurn, turnSequence: number | u
     return fact(sourceId, 'transcript', 'reasoning', occurredAt, order, part, {
       text: stringValue(source.text),
       correlationId: `${turn.id}:reasoning`,
+    })
+  }
+  if (source.type === 'unknown') {
+    return fact(sourceId, 'transcript', 'unknown', occurredAt, order, part, {
+      text: stringValue(source.text) ?? '未知运行事件',
+      correlationId: stringValue(source.id),
     })
   }
   if (source.type === 'error') {
@@ -451,7 +459,12 @@ export function buildTimelineFacts(input: SessionTimelineFactInput): TimelineFac
   facts.push(...recoveryFacts(recoveryHistory, fallback))
   const activityFact = summaryActivityFact(input.activity ?? summary?.activity, fallback)
   if (activityFact) facts.push(activityFact)
-  for (const [index, detail] of (input.liveDetails ?? []).entries()) facts.push(liveFact(detail, fallback, index))
+  const knownInputIds = new Set(inputs.map((inputEntry) => inputEntry.id))
+  for (const [index, detail] of (input.liveDetails ?? []).entries()) {
+    const live = record(detail)
+    if (stringValue(live?.type) === 'session.input' && knownInputIds.has(stringValue(live?.inputId) ?? '')) continue
+    facts.push(liveFact(detail, fallback, index))
+  }
   return dedupeFacts(facts)
 }
 

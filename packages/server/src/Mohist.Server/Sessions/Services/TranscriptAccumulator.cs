@@ -31,6 +31,14 @@ internal sealed class TranscriptAccumulator
         RuntimeEventTypes.ProviderRetry,
     };
 
+    internal static bool IsRetiredEventType(string? type) => type is
+        "session.closed" or
+        "session.followup_completed" or
+        "session.followup_failed";
+
+    internal static bool IsAcceptedEventType(string? type) =>
+        !string.IsNullOrWhiteSpace(type) && !IsRetiredEventType(type);
+
     private PendingTextSegment? _pending;
     private readonly List<AgentSessionTranscriptPartDelta> _accumulatedParts = new();
 
@@ -57,7 +65,7 @@ internal sealed class TranscriptAccumulator
                 continue;
             }
 
-            if (!EventTypes.Contains(row.Type))
+            if (!IsAcceptedEventType(row.Type))
                 continue;
 
             FlushPendingIntoAccumulated(now, normalizedParts);

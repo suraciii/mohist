@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon, ListIcon, BracesIcon } from 'lucide-react'
+import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon, DownloadIcon, ListIcon, BracesIcon } from 'lucide-react'
 import {
   SessionTranscriptLayout as DefaultSessionTranscriptLayout,
 } from '../../../widgets/session-transcript'
@@ -14,6 +14,7 @@ import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import type { TimelineItem } from '../../../entities/session'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
+import { buildSessionExport, downloadSessionExport } from '../data/session-export'
 import { SessionUsageSummary } from './SessionUsageSummary'
 
 export interface SessionDetailShellComponents {
@@ -204,6 +205,10 @@ export function SessionDetailShell({
     supportsInputAttachments = false,
     transcriptView,
     setTranscriptView,
+    transcriptResponse,
+    focusedInputId,
+    focusedTurnId,
+    contextJobId,
   } = data
 
   // ── All hooks must be before any early return ──
@@ -258,6 +263,45 @@ export function SessionDetailShell({
     pendingTimelineAnchorRef.current = null
     locateTimelineSource(sourceId)
   }, [locateTimelineSource, timelineView])
+
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container || (!focusedInputId && !focusedTurnId)) return
+    const sourceIds = new Set<string>()
+    if (focusedInputId) sourceIds.add(`input:${focusedInputId}`)
+    if (focusedTurnId) {
+      sourceIds.add(`turn:${focusedTurnId}:input`)
+      sourceIds.add(`turn:${focusedTurnId}:state`)
+      sourceIds.add(`turn:${focusedTurnId}:result`)
+    }
+    const anchor = Array.from(container.querySelectorAll<HTMLElement>('[data-timeline-source-id]'))
+      .find((element) => sourceIds.has(element.dataset.timelineSourceId ?? ''))
+    const target = anchor?.classList.contains('sr-only') ? anchor.parentElement : anchor
+    if (!target) return
+    target.dataset.timelineFocused = 'true'
+    target.scrollIntoView?.({ block: 'center' })
+    return () => {
+      delete target.dataset.timelineFocused
+    }
+  }, [facts, focusedInputId, focusedTurnId, timelineView])
+
+  const handleExport = useCallback(() => {
+    const exportDocument = buildSessionExport({
+      exportedAt: new Date().toISOString(),
+      context: {
+        projectId,
+        sessionId: sessionKey,
+        inputId: focusedInputId,
+        turnId: focusedTurnId,
+        jobId: contextJobId,
+        view: transcriptView === 'raw' ? 'raw' : 'public',
+      },
+      metadata: meta,
+      transcript: transcriptResponse,
+      timeline: facts,
+    })
+    downloadSessionExport(exportDocument)
+  }, [contextJobId, facts, focusedInputId, focusedTurnId, meta, projectId, sessionKey, transcriptResponse, transcriptView])
 
   const recoveryBarContent = hasRecoveryActions ? (
     <div className="flex flex-col gap-2">
@@ -480,6 +524,7 @@ export function SessionDetailShell({
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-w-0 min-h-[120px] md:min-h-0"
           data-testid="session-transcript-scroll-container"
+          data-context-job-id={contextJobId ?? ''}
         >
           {header}
           <ScrollEngagedStickyTitle
@@ -505,7 +550,7 @@ export function SessionDetailShell({
                {recoveryBarContent}
              </div>
            )}
-          <TimelineViewToggle value={timelineView} onChange={changeTimelineView} />
+          <TimelineViewToggle value={timelineView} onChange={changeTimelineView} onExport={handleExport} />
           <SessionTranscriptLayout
             entries={entries}
             facts={facts}
@@ -540,9 +585,11 @@ export function SessionDetailShell({
 function TimelineViewToggle({
   value,
   onChange,
+  onExport,
 }: {
   value: 'summary' | 'raw'
   onChange: (value: 'summary' | 'raw') => void
+  onExport: () => void
 }) {
   return (
     <div
@@ -551,6 +598,17 @@ function TimelineViewToggle({
       role="group"
       aria-label="Timeline view"
     >
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        data-testid="session-export-trigger"
+        aria-label="Export session"
+        title="Export session"
+        onClick={onExport}
+      >
+        <DownloadIcon aria-hidden="true" />
+      </Button>
       <Button
         type="button"
         size="sm"

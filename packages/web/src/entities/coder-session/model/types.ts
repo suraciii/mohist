@@ -361,7 +361,7 @@ export interface UnknownPart {
   kind: 'unknown'
   startedAt: string
   completedAt: string | null
-  raw: {
+  raw?: {
     kind: 'unknown'
     type: string
     correlationKey: string

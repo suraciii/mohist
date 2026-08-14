@@ -6,6 +6,7 @@ import {
   agentQueryOptions,
   agentListAvailabilityQueryKey,
   agentListAvailabilityQueryOptions,
+  agentHistoryQueryOptions,
   agentSessionsQueryOptions,
   agentsQueryOptions,
   archiveAgentMutationOptions,
@@ -128,6 +129,23 @@ describe('agentSessionsQueryOptions', () => {
     await agentSessionsQueryOptions('proj-1', 'gamma').queryFn()
 
     expect(urls).toEqual(['/api/projects/proj-1/agents/gamma/sessions'])
+  })
+})
+
+describe('agentHistoryQueryOptions', () => {
+  it('uses a distinct project-scoped history key and endpoint', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/:agentRef/history', ({ request }) => {
+        urls.push(new URL(request.url).pathname)
+        return HttpResponse.json({ success: true, data: [] })
+      }),
+    )
+
+    const options = agentHistoryQueryOptions('proj-1', 'agent-gamma')
+    expect(options.queryKey).toEqual(['agents', 'proj-1', 'agent-gamma', 'history'])
+    await options.queryFn()
+    expect(urls).toEqual(['/api/projects/proj-1/agents/agent-gamma/history'])
   })
 })
 

@@ -8,6 +8,7 @@ import {
   genericFollowupMutationOptions,
   genericSessionSummaryQueryOptions,
   genericSessionTranscriptQueryOptions,
+  getAgentHistory,
   getAgentSessions,
   getGenericSessionSummary,
   getGenericSessionTranscript,
@@ -58,6 +59,22 @@ describe('getAgentSessions (client fn)', () => {
     await getAgentSessions('proj-1', 'agent-foo', { status: 'running', limit: 5 })
 
     expect(urls).toEqual(['/api/projects/proj-1/agents/agent-foo/sessions?status=running&limit=5'])
+  })
+})
+
+describe('getAgentHistory (client fn)', () => {
+  it('uses the canonical agent history endpoint and preserves the limit', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/:agentRef/history', ({ request }) => {
+        urls.push(new URL(request.url).pathname + new URL(request.url).search)
+        return HttpResponse.json({ success: true, data: [] })
+      }),
+    )
+
+    await getAgentHistory('proj-1', 'agent-foo', { limit: 25 })
+
+    expect(urls).toEqual(['/api/projects/proj-1/agents/agent-foo/history?limit=25'])
   })
 })
 

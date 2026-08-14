@@ -26,16 +26,17 @@ describe('deriveTimelineItems', () => {
       fact({ sourceId: 'status', order: 10, kind: 'status', status: { state: '执行中' } }),
       fact({ sourceId: 'boundary', order: 11, kind: 'boundary', boundary: { kind: 'reset' } }),
       fact({ sourceId: 'error', order: 12, kind: 'error', error: { message: '网络失败' } }),
-      fact({ sourceId: 'suppressed', order: 13, kind: 'suppressed' }),
+      fact({ sourceId: 'unknown', order: 13, kind: 'unknown', text: '未知事件' }),
+      fact({ sourceId: 'suppressed', order: 14, kind: 'suppressed' }),
     ])
 
     expect(items.map(item => item.renderClass)).toEqual([
       'input', 'message', 'reasoning', 'file-read', 'file-edit', 'shell', 'domain-action',
-      'plan', 'tool', 'status', 'boundary', 'error', 'suppressed',
+      'plan', 'tool', 'status', 'boundary', 'error', 'unknown', 'suppressed',
     ])
     expect(items.map(item => item.salience)).toEqual([
       'normal', 'normal', 'low', 'low', 'medium', 'medium', 'high',
-      'normal', 'low', 'quiet', 'normal', 'critical', 'quiet',
+      'normal', 'low', 'quiet', 'normal', 'critical', 'normal', 'quiet',
     ])
     expect(items[2]).toMatchObject({
       summary: '进行了思考',
