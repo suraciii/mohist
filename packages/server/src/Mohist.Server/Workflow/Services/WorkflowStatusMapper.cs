@@ -8,6 +8,11 @@ namespace Mohist.Server.Workflow.Services;
 
 public static class WorkflowStatusMapper
 {
+    public const string AgentResultUnconfirmedReason = "agent-result-unconfirmed";
+    public const string AgentResultSettlementNextAction =
+        "Restore the original Runner and allow the result to replay, inspect the bound AgentSession and AgentTurn, or explicitly stop the workflow after confirming the physical target is no longer active.";
+    public static readonly IReadOnlyList<string> AgentResultSettlementRecoveryActions = ["stop"];
+
     public static string WireStatus(WorkflowRunStatus status) => status switch
     {
         WorkflowRunStatus.Created => "created",
@@ -149,14 +154,51 @@ public static class WorkflowStatusMapper
         if (blocked is null) return null;
         var settlement = blocked.Task.AgentResultSettlement!;
         return new AgentResultAttentionView(
-            "agent-result-unconfirmed",
-            settlement.Message ?? "Agent result unconfirmed; stop the workflow to abandon this task.",
-            settlement.DeadlineAt,
+            "blocked",
+            AgentResultUnconfirmedReason,
+            settlement.Message ?? "Agent result was not confirmed before its deadline.",
+            settlement.DeadlineAt ?? throw new InvalidOperationException("Blocked Agent result settlement requires a deadline."),
             settlement.TaskRunId,
             settlement.WorkId,
             settlement.RunnerId,
             settlement.AgentSessionId,
-            settlement.AgentTurnId);
+            settlement.AgentTurnId,
+            AgentResultSettlementNextAction,
+            AgentResultSettlementRecoveryActions);
+    }
+
+    private static AgentResultSettlementView? MapAgentResultSettlement(TaskRun task)
+    {
+        var settlement = task.AgentResultSettlement;
+        if (settlement is null) return null;
+
+        var blocked = settlement.State == AgentResultSettlementState.Blocked;
+        return new AgentResultSettlementView(
+            State: settlement.State switch
+            {
+                AgentResultSettlementState.AwaitingResult => "awaiting-result",
+                AgentResultSettlementState.Unknown => "unknown",
+                AgentResultSettlementState.Blocked => "blocked",
+                _ => throw new SwitchExpressionException($"No settlement view mapping for {settlement.State}"),
+            },
+            Reason: blocked ? AgentResultUnconfirmedReason : settlement.ReasonCode,
+            Message: settlement.Message,
+            FirstUnknownAt: settlement.FirstUnknownAt,
+            DeadlineAt: settlement.DeadlineAt,
+            TaskRunId: settlement.TaskRunId,
+            WorkId: settlement.WorkId,
+            RunnerId: settlement.RunnerId,
+            AgentSessionId: settlement.AgentSessionId,
+            AgentTurnId: settlement.AgentTurnId,
+            Runtime: settlement.Runtime,
+            RuntimeSessionId: settlement.RuntimeSessionId,
+            StopOperationId: settlement.StopOperationId,
+            NextAction: settlement.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked
+                ? AgentResultSettlementNextAction
+                : null,
+            RecoveryActions: settlement.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked
+                ? AgentResultSettlementRecoveryActions
+                : null);
     }
 
     public static List<StageFeedbackView> MapFeedback(WorkflowRun run, string stageId)
@@ -201,7 +243,8 @@ public static class WorkflowStatusMapper
                         ? (long)(t.FinishedAt.Value - t.StartedAt.Value).TotalMilliseconds
                         : null,
                     Output: MapTaskOutput(t.Output),
-                    Error: t.Error))
+                    Error: t.Error,
+                    AgentResultSettlement: MapAgentResultSettlement(t)))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);

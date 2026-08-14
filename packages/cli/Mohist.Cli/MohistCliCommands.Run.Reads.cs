@@ -22,7 +22,7 @@ internal static partial class RunCommands
 
     internal static readonly ResourceDescriptor RunViewDescriptor = new(
         ResourceCardinality.Single,
-        ["id", "status", "currentStage", "stages", "issueRef"]);
+        ["id", "status", "currentStage", "stages", "agentResultAttention", "issueRef"]);
 
     public static void RegisterReads(Command runCommand, MohistCliApi api)
     {
@@ -190,6 +190,7 @@ internal static partial class RunCommands
             ["status"] = status?["status"]?.DeepClone(),
             ["currentStage"] = status?["currentStage"]?.DeepClone(),
             ["stages"] = status?["stages"]?.DeepClone(),
+            ["agentResultAttention"] = status?["agentResultAttention"]?.DeepClone(),
             ["issueRef"] = data?["issueRef"]?.DeepClone(),
         };
     }

@@ -10,8 +10,19 @@ function isNeedsAttentionDrift(type: string, payload: Record<string, unknown>): 
   return type === 'base_drift_detected' && payload.decision === 'needs-attention'
 }
 
+function isAgentResultAttention(type: string): boolean {
+  return type === REVERSE_DNS_EVENT_TYPES.AgentTaskResultUnconfirmed
+    || type === REVERSE_DNS_EVENT_TYPES.TaskBlocked
+    || type === REVERSE_DNS_EVENT_TYPES.StageBlocked
+    || type === REVERSE_DNS_EVENT_TYPES.WorkflowRunBlocked
+}
+
 export function classifyEvent(type: string, payload: Record<string, unknown> = {}): ClassificationResult {
   const lower = type.toLowerCase()
+
+  if (isAgentResultAttention(type)) {
+    return { category: 'attention', attention: true }
+  }
 
   if (
     lower.includes('failed')

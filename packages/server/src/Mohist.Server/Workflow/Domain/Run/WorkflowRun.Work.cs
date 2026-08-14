@@ -210,6 +210,11 @@ public static partial class WorkflowRunExtensions
                 .Any(task => task.Status == TaskRunStatus.Running
                     && task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
 
+        public bool HasBlockedAgentResult() =>
+            run.Stages.SelectMany(stage => stage.Tasks)
+                .Any(task => task.Status == TaskRunStatus.Running
+                    && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked);
+
         public WorkflowAgentResultSettlementTask? FindAgentResultSettlementTask(
             AgentExecutionBinding binding)
         {

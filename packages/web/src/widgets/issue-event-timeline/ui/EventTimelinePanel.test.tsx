@@ -100,6 +100,25 @@ describe('EventTimelinePanel', () => {
     expect(screen.getByTestId('timeline-inactive-badge')).toBeInTheDocument()
   })
 
+  it('renders blocked attention outside the failure category', () => {
+    timeline = {
+      entries: [makeEntry({
+        id: 'blocked',
+        category: 'attention',
+        attention: true,
+        description: 'Workflow blocked: Agent result unconfirmed',
+      })],
+      isLoading: false,
+    }
+
+    renderTimelineView({ workflowStatus: 'blocked' })
+
+    expect(screen.getByTestId('timeline-inactive-badge')).toHaveTextContent('Awaiting result')
+    expect(screen.getByTestId('category-filter-attention')).toBeInTheDocument()
+    expect(screen.getByText('Workflow blocked: Agent result unconfirmed')).toBeInTheDocument()
+    expect(screen.queryByTestId('category-filter-failure')).toBeInTheDocument()
+  })
+
   it('filters events by category', () => {
     timeline = {
       entries: [

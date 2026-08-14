@@ -56,6 +56,26 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
+    public async Task WorkflowRunBlocked_ProducesNonFailureAgentResultUnconfirmedItem()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database, "proj_a", 42, "Issue 42");
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.WorkflowRunBlocked,
+            workflowRunId: "wf_blocked",
+            eventId: "evt-blocked",
+            projectId: "proj_a",
+            issueNumber: 42);
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal(NotificationKinds.AgentResultUnconfirmed, item.NotificationKind);
+        Assert.NotEqual(NotificationKinds.WorkflowFailed, item.NotificationKind);
+    }
+
+    [Fact]
     public async Task AgentJobFailed_ProducesAgentResponseFailedItemInOwningProject()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
@@ -673,15 +693,16 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
-    public async Task Filter_AcceptsAllFiveTypes()
+    public async Task Filter_AcceptsAllSixTypes()
     {
         var handler = InboxProjectionTestSupport.CreateHandler(InboxProjectionTestSupport.CreateDatabase());
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "p", 1, "e1")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "p", 1, "e2")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "w", "e3")));
-        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e4")));
+        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunBlocked, "w", "e4")));
+        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e5")));
         Assert.True(handler.Filter(new CloudEvent(
-            id: "e5",
+            id: "e6",
             source: new Uri("/mohist/agent-job/job_1", UriKind.Relative),
             type: EventCatalog.ReverseDns.AgentJobFailed,
             time: TestTime.UtcNow,
@@ -701,13 +722,14 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
-    public async Task HasSubscriptionAttributeWithExpectedFiveTypes()
+    public async Task HasSubscriptionAttributeWithExpectedSixTypes()
     {
         var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
             typeof(InboxProjectionHandler), typeof(SubscriptionAttribute));
         Assert.NotNull(attr);
         Assert.Equal(
             EventCatalog.ReverseDns.WorkflowRunFailed + "|" +
+            EventCatalog.ReverseDns.WorkflowRunBlocked + "|" +
             EventCatalog.ReverseDns.StageApprovalRequested + "|" +
             EventCatalog.ReverseDns.IssueWorkStarted + "|" +
             EventCatalog.ReverseDns.IssueCompleted + "|" +

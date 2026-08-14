@@ -98,6 +98,17 @@ describe('describeEvent', () => {
     )).toBe('T-legacy completed')
   })
 
+  it('describes Agent-result attention without calling it a failure', () => {
+    expect(describeEvent('com.mohist.workflow.agent-result-unconfirmed', { stage: 'build', taskId: 'T-007' }))
+      .toBe('T-007 result unconfirmed')
+    expect(describeEvent('com.mohist.workflow.task.blocked', { stage: 'build', taskId: 'T-007' }))
+      .toBe('T-007 blocked: Agent result unconfirmed')
+    expect(describeEvent('com.mohist.workflow.stage.blocked', { stage: 'build' }))
+      .toBe('Stage Build blocked: Agent result unconfirmed')
+    expect(describeEvent('com.mohist.workflow.run.blocked'))
+      .toBe('Workflow blocked: Agent result unconfirmed')
+  })
+
   it('names the artifact path in the visible summary', () => {
     expect(describeEvent('com.mohist.workflow.artifact.recorded', { path: 'artifacts/report.md' }))
       .toBe('artifacts/report.md recorded')

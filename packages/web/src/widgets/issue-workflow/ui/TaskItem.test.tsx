@@ -92,6 +92,38 @@ describe('TaskItem', () => {
     expect(screen.getByTestId('task-log-panel')).toBeVisible()
   })
 
+  it('renders blocked Agent settlement details without a failed task treatment', async () => {
+    renderTask(makeTask({
+      status: 'blocked',
+      startedAt: '2026-08-14T10:56:58.000Z',
+      agentResultSettlement: {
+        state: 'blocked',
+        reason: 'agent-result-unconfirmed',
+        message: 'Runner disconnected before the Agent result was accepted.',
+        firstUnknownAt: '2026-08-14T10:56:58.000Z',
+        deadlineAt: '2026-08-14T11:01:58.000Z',
+        taskRunId: 'build.1',
+        workId: 'build.1',
+        runnerId: 'runner-pluto',
+        agentSessionId: 'session-1',
+        agentTurnId: 'turn-1',
+        nextAction: 'Restore the original Runner and allow the result to replay.',
+        recoveryActions: ['stop'],
+      },
+    }))
+
+    const disclosure = screen.getByRole('button', { name: /Canonical workflow task title/ })
+    expect(disclosure).toHaveTextContent('blocked')
+    fireEvent.click(disclosure)
+    await act(async () => { await Promise.resolve() })
+
+    const attention = screen.getByTestId('workflow-task-blocked-attention')
+    expect(attention).toHaveTextContent('Agent result unconfirmed')
+    expect(attention).toHaveTextContent('session-1')
+    expect(attention).toHaveTextContent('turn-1')
+    expect(screen.queryByText('failed')).not.toBeInTheDocument()
+  })
+
   it('keeps title primary, metadata actions separate, and expands all inspection details', async () => {
     const title = 'Complete the intentionally long workflow task title without allowing metadata to replace it'
     renderTask(makeTask({

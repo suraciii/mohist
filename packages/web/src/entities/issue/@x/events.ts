@@ -11,6 +11,11 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.TaskStarted]: { issueNumber: number; projectId: string; stage: string; taskId: string; workerId: string }
   [REVERSE_DNS_EVENT_TYPES.TaskCompleted]: { issueNumber: number; projectId: string; stage: string; taskId: string }
   [REVERSE_DNS_EVENT_TYPES.TaskFailed]: { issueNumber: number; projectId: string; stage: string; taskId: string; message?: string | null }
+  [REVERSE_DNS_EVENT_TYPES.TaskCancelled]: { issueNumber: number; projectId: string; stage: string; taskId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentTaskResultUnconfirmed]: { issueNumber: number; projectId: string; stage: string; taskId: string; workId: string; reason: string; deadlineAt: string }
+  [REVERSE_DNS_EVENT_TYPES.TaskBlocked]: { issueNumber: number; projectId: string; stage: string; taskId: string; reason: string; deadlineAt: string }
+  [REVERSE_DNS_EVENT_TYPES.StageBlocked]: { issueNumber: number; projectId: string; stage: string; taskId: string; reason: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunBlocked]: { issueNumber: number; projectId: string; stage: string; taskId: string; reason: string; deadlineAt: string }
   [REVERSE_DNS_EVENT_TYPES.ArtifactRecorded]: { issueNumber: number; projectId: string; workflowRunId: string; taskRunId: string; path: string; recordedAt: string }
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed]: { issueNumber: number; projectId: string }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
+import { CircleAlertIcon } from 'lucide-react'
 import { IssueStatus, IssueHealth, WorkflowStage, useWorkflowTimeline } from '../../../entities/issue'
-import type { Issue } from '../../../entities/issue'
+import type { Issue, WorkflowAgentResultAttention } from '../../../entities/issue'
 import { StageBar, workflowTimelineToStageStateMap, WORKFLOW_STAGES } from './StageBar'
 import { StepList, type StepListDependencies } from './InlineApproval'
 import { SpecialStatePanel, IntegrateFailurePanel } from './failure-panels'
@@ -8,6 +9,30 @@ import { SpecialStatePanel, IntegrateFailurePanel } from './failure-panels'
 export type WorkflowTimelineHook = (
   ...args: Parameters<typeof useWorkflowTimeline>
 ) => Pick<ReturnType<typeof useWorkflowTimeline>, 'data'>
+
+export function AgentResultAttentionPanel({ attention }: { attention: WorkflowAgentResultAttention }) {
+  return (
+    <section
+      className="rounded-md border border-warning-border bg-warning-subtle px-3 py-2.5 text-sm text-warning"
+      data-testid="workflow-agent-result-attention"
+    >
+      <div className="flex items-start gap-2">
+        <CircleAlertIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <div className="min-w-0 space-y-1">
+          <div className="font-semibold">Agent result unconfirmed</div>
+          <p>{attention.message ?? 'The Agent result was not confirmed before its deadline.'}</p>
+          <dl className="grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
+            <dt>Deadline</dt><dd className="break-all">{attention.deadlineAt}</dd>
+            <dt>Work</dt><dd className="break-all">{attention.workId}</dd>
+            {attention.agentSessionId && <><dt>Session</dt><dd className="break-all">{attention.agentSessionId}</dd></>}
+            {attention.agentTurnId && <><dt>Turn</dt><dd className="break-all">{attention.agentTurnId}</dd></>}
+          </dl>
+          {attention.nextAction && <p className="text-xs">{attention.nextAction}</p>}
+        </div>
+      </div>
+    </section>
+  )
+}
 
 export function WorkflowView({
   issue,
@@ -49,6 +74,10 @@ export function WorkflowView({
         selectedStage={selectedStage}
         onSelectStage={setSelectedStage}
       />
+
+      {timeline?.agentResultAttention && (
+        <AgentResultAttentionPanel attention={timeline.agentResultAttention} />
+      )}
 
       {!readOnly && (isBacklog || issue.health === IssueHealth.Blocked) && (
         <SpecialStatePanel issue={issue} issueNumber={issue.number} />

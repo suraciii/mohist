@@ -27,7 +27,11 @@ public class CliRunReadsSpecs
     private const string WrId = "wr_read01";
     private static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(2);
 
-    private static object SampleRunDetail(string id = WrId, string status = "running", string? currentStage = "build") => new
+    private static object SampleRunDetail(
+        string id = WrId,
+        string status = "running",
+        string? currentStage = "build",
+        object? agentResultAttention = null) => new
     {
         status = new
         {
@@ -61,6 +65,7 @@ public class CliRunReadsSpecs
             pendingWork = (object?)null,
             failure = (object?)null,
             availableActions = Array.Empty<object>(),
+            agentResultAttention,
             metadata = new { name = "Mohist", labels = new Dictionary<string, string>(), createdAt = "2026-07-05T00:00:00Z" },
         },
         issueRef = new { projectId = "proj_abc", number = 42, title = "Close the agent subscriptions gap" },
@@ -343,6 +348,42 @@ public class CliRunReadsSpecs
         // header inside the run detail view (RenderWorkflowRunStages).
         Assert.Contains("stage", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("approval", stdout, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task View_BlockedResultRendersAttentionWithoutFailure()
+    {
+        var attention = new
+        {
+            state = "blocked",
+            reason = "agent-result-unconfirmed",
+            message = "Runner disconnected before the Agent result was accepted.",
+            deadlineAt = "2026-08-14T11:01:58Z",
+            taskRunId = "build.1",
+            workId = "build.1",
+            runnerId = "runner-pluto",
+            agentSessionId = "session-1",
+            agentTurnId = "turn-1",
+            nextAction = "Restore the original Runner and allow the result to replay.",
+            recoveryActions = new[] { "stop" },
+        };
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
+                return RecordingHttpHandler.Json(new { success = true, data = SampleRunDetail(WrId, "blocked", "build", attention) });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["run", "view", WrId], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("status:        blocked", stdout);
+        Assert.Contains("agent result attention:", stdout);
+        Assert.Contains("agent-result-unconfirmed", stdout);
+        Assert.Contains("session-1", stdout);
+        Assert.Contains("turn-1", stdout);
+        Assert.DoesNotContain("failure:", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -699,6 +740,34 @@ public class CliRunReadsSpecs
         Assert.NotNull(third);
         Assert.Equal("completed", third!["status"]?.GetValue<string>());
         Assert.Equal("integrate", third["stage"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Watch_BlockedResultContinuesUntilLateAuthoritativeResult()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var pollCount = 0;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method != HttpMethod.Get || req.RequestUri?.PathAndQuery != $"/api/workflow-runs/{WrId}")
+                return null!;
+            pollCount++;
+            var status = pollCount == 1 ? "blocked" : "completed";
+            return RecordingHttpHandler.Json(new { success = true, data = SampleRunDetail(WrId, status, "build") });
+        });
+
+        var watchTask = MohistCliCommands.RunAsync(
+            http, ["run", "watch", WrId], output, error, fs, executor, timeProvider: time);
+        await handler.WaitForRequestCountAsync(1);
+        await Task.Run(static () => { });
+        time.Advance(DefaultInterval);
+
+        var exitCode = await watchTask;
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, pollCount);
+        Assert.Contains("\"status\":\"blocked\"", output.ToString());
+        Assert.Contains("\"status\":\"completed\"", output.ToString());
     }
 
     [Fact]

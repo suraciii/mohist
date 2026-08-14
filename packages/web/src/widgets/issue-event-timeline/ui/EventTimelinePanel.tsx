@@ -69,12 +69,13 @@ export function EventTimelinePanelView({
 }: EventTimelinePanelViewProps) {
   const [order, setOrder] = useState<'newest' | 'chronological'>('newest')
   const [selectedCategories, setSelectedCategories] = useState<Set<TimelineCategory>>(
-    new Set(['workflow', 'approval', 'integration', 'success', 'failure', 'metadata']),
+    new Set(['workflow', 'attention', 'approval', 'integration', 'success', 'failure', 'metadata']),
   )
 
   const counts = useMemo(() => {
     const result: Record<TimelineCategory, number> = {
       workflow: 0,
+      attention: 0,
       approval: 0,
       integration: 0,
       success: 0,
@@ -149,7 +150,7 @@ export function EventTimelinePanelView({
                 data-testid="timeline-inactive-badge"
                 className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
               >
-                Live
+                {workflowStatus === 'blocked' ? 'Awaiting result' : 'Live'}
               </span>
             )}
           </div>
@@ -181,10 +182,10 @@ export function EventTimelinePanelView({
           onToggle={toggleCategory}
           counts={counts}
         />
-        {selectedCategories.size < 6 && (
+        {selectedCategories.size < 7 && (
           <button
             type="button"
-            onClick={() => setSelectedCategories(new Set(['workflow', 'approval', 'integration', 'success', 'failure', 'metadata']))}
+            onClick={() => setSelectedCategories(new Set(['workflow', 'attention', 'approval', 'integration', 'success', 'failure', 'metadata']))}
             className="text-xs font-medium text-muted-foreground hover:text-foreground"
             data-testid="timeline-clear-filters"
           >

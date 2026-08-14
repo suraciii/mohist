@@ -28,6 +28,12 @@ const KIND_DESCRIPTORS: Record<NotificationKind, KindDescriptor> = {
     badge: 'Failed',
     badgeClass: 'bg-red-100 text-red-700',
   },
+  [NOTIFICATION_KINDS.AgentResultUnconfirmed]: {
+    Icon: AlertTriangleIcon,
+    label: (item) => `Issue #${item.issueNumber} agent result is unconfirmed`,
+    badge: 'Blocked',
+    badgeClass: 'bg-amber-100 text-amber-700',
+  },
   [NOTIFICATION_KINDS.ApprovalRequested]: {
     Icon: MailOpenIcon,
     label: (item) => `Issue #${item.issueNumber} needs approval`,

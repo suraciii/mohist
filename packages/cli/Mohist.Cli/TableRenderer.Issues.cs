@@ -190,6 +190,7 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"status:        {status}");
 
         RenderDeliveryFailure(failure);
+        RenderAgentResultAttention(workflow?["agentResultAttention"]);
 
         if (stages is null)
             return;
@@ -537,6 +538,7 @@ internal sealed partial class TableRenderer
 
         RenderWorkflowRunMetadata(status);
         RenderWorkflowRunFailure(status?["failure"]);
+        RenderAgentResultAttention(status?["agentResultAttention"]);
 
         var stages = status?["stages"] as JsonArray;
         if (stages is not null)
@@ -599,6 +601,38 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"  task id:   {taskId}");
         if (!string.IsNullOrEmpty(checkName))
             _out.WriteLine($"  check:     {checkName}");
+    }
+
+    private void RenderAgentResultAttention(JsonNode? attentionNode)
+    {
+        if (attentionNode is not JsonObject attention) return;
+
+        var reason = StringOf(attention, "reason");
+        var message = StringOf(attention, "message");
+        var deadline = StringOf(attention, "deadlineAt");
+        var workId = StringOf(attention, "workId");
+        var taskRunId = StringOf(attention, "taskRunId");
+        var runnerId = StringOf(attention, "runnerId");
+        var sessionId = StringOf(attention, "agentSessionId");
+        var turnId = StringOf(attention, "agentTurnId");
+        var nextAction = StringOf(attention, "nextAction");
+
+        if (string.IsNullOrEmpty(reason)
+            && string.IsNullOrEmpty(message)
+            && string.IsNullOrEmpty(deadline))
+            return;
+
+        _out.WriteLine("");
+        _out.WriteLine("agent result attention:");
+        if (!string.IsNullOrEmpty(reason)) _out.WriteLine($"  reason:      {reason}");
+        if (!string.IsNullOrEmpty(message)) _out.WriteLine($"  message:     {message}");
+        if (!string.IsNullOrEmpty(deadline)) _out.WriteLine($"  deadline:    {deadline}");
+        if (!string.IsNullOrEmpty(workId)) _out.WriteLine($"  work id:     {workId}");
+        if (!string.IsNullOrEmpty(taskRunId)) _out.WriteLine($"  task run id: {taskRunId}");
+        if (!string.IsNullOrEmpty(runnerId)) _out.WriteLine($"  runner:      {runnerId}");
+        if (!string.IsNullOrEmpty(sessionId)) _out.WriteLine($"  session:     {sessionId}");
+        if (!string.IsNullOrEmpty(turnId)) _out.WriteLine($"  turn:        {turnId}");
+        if (!string.IsNullOrEmpty(nextAction)) _out.WriteLine($"  next action: {nextAction}");
     }
 
     private void RenderWorkflowRunStages(JsonArray stages)

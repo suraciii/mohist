@@ -10,6 +10,7 @@ import type { InboxSubscription } from '../../../entities/inbox'
 
 const ALL_ENABLED: InboxSubscription = {
   workflow_failed: true,
+  agent_result_unconfirmed: true,
   approval_requested: true,
   issue_started: true,
   issue_completed: true,
@@ -33,16 +34,17 @@ function renderSection({
 }
 
 describe('InboxSubscriptionSection', () => {
-  it('renders exactly four toggles with product-facing labels', async () => {
+  it('renders exactly five toggles with product-facing labels', async () => {
     renderSection()
 
     expect(await screen.findByText('Workflow failed')).toBeInTheDocument()
+    expect(screen.getByText('Agent result unconfirmed')).toBeInTheDocument()
     expect(screen.getByText('Approval requested')).toBeInTheDocument()
     expect(screen.getByText('Issue started')).toBeInTheDocument()
     expect(screen.getByText('Issue completed')).toBeInTheDocument()
 
     const toggles = screen.getAllByRole('switch')
-    expect(toggles).toHaveLength(4)
+    expect(toggles).toHaveLength(5)
   })
 
   it('does not display raw event or CloudEvent type names', async () => {
@@ -52,6 +54,7 @@ describe('InboxSubscriptionSection', () => {
 
     for (const forbidden of [
       /workflow_failed/,
+      /agent_result_unconfirmed/,
       /approval_requested/,
       /issue_started/,
       /issue_completed/,
@@ -82,6 +85,7 @@ describe('InboxSubscriptionSection', () => {
     renderSection({
       subscription: {
         workflow_failed: false,
+        agent_result_unconfirmed: false,
         approval_requested: true,
         issue_started: false,
         issue_completed: true,
@@ -90,11 +94,11 @@ describe('InboxSubscriptionSection', () => {
 
     await screen.findByText('Workflow failed')
 
-    const toggles = screen.getAllByRole('switch')
-    expect(toggles[0]).not.toBeChecked()
-    expect(toggles[1]).toBeChecked()
-    expect(toggles[2]).not.toBeChecked()
-    expect(toggles[3]).toBeChecked()
+    expect(screen.getByTestId('inbox-toggle-workflow_failed')).not.toBeChecked()
+    expect(screen.getByTestId('inbox-toggle-agent_result_unconfirmed')).not.toBeChecked()
+    expect(screen.getByTestId('inbox-toggle-approval_requested')).toBeChecked()
+    expect(screen.getByTestId('inbox-toggle-issue_started')).not.toBeChecked()
+    expect(screen.getByTestId('inbox-toggle-issue_completed')).toBeChecked()
   })
 
   it('calls update mutation with the full subscription when a toggle is changed', async () => {
@@ -110,6 +114,7 @@ describe('InboxSubscriptionSection', () => {
     expect(updateCaptures).toHaveLength(1)
     expect(updateCaptures[0]).toEqual({
       workflow_failed: false,
+      agent_result_unconfirmed: true,
       approval_requested: true,
       issue_started: true,
       issue_completed: true,
@@ -123,13 +128,13 @@ describe('InboxSubscriptionSection', () => {
 
     await screen.findByText('Workflow failed')
 
-    const toggles = screen.getAllByRole('switch')
-    await user.click(toggles[0])
-    await user.click(toggles[1])
+    await user.click(screen.getByTestId('inbox-toggle-workflow_failed'))
+    await user.click(screen.getByTestId('inbox-toggle-approval_requested'))
 
     expect(updateCaptures).toHaveLength(2)
     expect(updateCaptures[1]).toEqual({
       workflow_failed: false,
+      agent_result_unconfirmed: true,
       approval_requested: false,
       issue_started: true,
       issue_completed: true,
@@ -149,10 +154,11 @@ describe('InboxSubscriptionSection', () => {
     await screen.findByText('Workflow failed')
 
     const toggles = screen.getAllByRole('switch')
-    expect(toggles).toHaveLength(4)
+    expect(toggles).toHaveLength(5)
 
     const labelTexts = toggles.map((t) => t.closest('label')?.textContent ?? '')
     expect(labelTexts).toContain('Workflow failed')
+    expect(labelTexts).toContain('Agent result unconfirmed')
     expect(labelTexts).toContain('Approval requested')
     expect(labelTexts).toContain('Issue started')
     expect(labelTexts).toContain('Issue completed')
