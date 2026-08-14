@@ -6,9 +6,14 @@ import type {
   ActionInputKind,
   ActionManifest,
   ActionOutputDeclaration,
-} from "./manifest.js"
-import { RESERVED_PLATFORM_ERROR_CODES, canonicalKindOrder, isEngineInputSource, validCapabilities } from "./manifest.js"
-import type { JsonValue } from "../core/types.js"
+} from './manifest.js'
+import {
+  RESERVED_PLATFORM_ERROR_CODES,
+  canonicalKindOrder,
+  isEngineInputSource,
+  validCapabilities,
+} from './manifest.js'
+import type { JsonValue } from '../core/types.js'
 
 const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/
 const CODE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
@@ -17,18 +22,18 @@ const OUTPUT_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_-]*$/
 export class ActionDefinitionError extends Error {
   constructor(message: string) {
     super(message)
-    this.name = "ActionDefinitionError"
+    this.name = 'ActionDefinitionError'
   }
 }
 
 interface DefineActionInput<M extends ActionManifest> {
   readonly manifest: M
-  readonly run: ActionDefinition<M>["run"]
+  readonly run: ActionDefinition<M>['run']
 }
 
 export function defineAction<M extends ActionManifest>(input: DefineActionInput<M>): ActionDefinition<M> {
   validateManifest(input.manifest)
-  if (typeof input.run !== "function") {
+  if (typeof input.run !== 'function') {
     throw new ActionDefinitionError(`Action '${input.manifest.name}' must provide an execution function`)
   }
   const frozenManifest = deepFreezeManifest(input.manifest) as M
@@ -41,18 +46,18 @@ export function defineAction<M extends ActionManifest>(input: DefineActionInput<
 }
 
 export function validateManifest(manifest: ActionManifest): void {
-  if (!manifest || typeof manifest !== "object") {
-    throw new ActionDefinitionError("Action manifest must be a non-null object")
+  if (!manifest || typeof manifest !== 'object') {
+    throw new ActionDefinitionError('Action manifest must be a non-null object')
   }
-  if (typeof manifest.name !== "string" || !NAME_PATTERN.test(manifest.name)) {
+  if (typeof manifest.name !== 'string' || !NAME_PATTERN.test(manifest.name)) {
     throw new ActionDefinitionError(
       `Action name '${String(manifest.name)}' must match lowercase <namespace>/<action> with kebab-case segments`,
     )
   }
-  if (manifest.description !== undefined && typeof manifest.description !== "string") {
+  if (manifest.description !== undefined && typeof manifest.description !== 'string') {
     throw new ActionDefinitionError(`Action '${manifest.name}' description must be a string when provided`)
   }
-  if (!manifest.inputs || typeof manifest.inputs !== "object" || Array.isArray(manifest.inputs)) {
+  if (!manifest.inputs || typeof manifest.inputs !== 'object' || Array.isArray(manifest.inputs)) {
     throw new ActionDefinitionError(`Action '${manifest.name}' must declare an inputs record`)
   }
   const canonical = canonicalKindOrder()
@@ -87,18 +92,22 @@ export function validateManifest(manifest: ActionManifest): void {
     for (const capability of manifest.capabilities) {
       if (!allValid.includes(capability as ActionCapability)) {
         throw new ActionDefinitionError(
-          `Action '${manifest.name}' declares unknown capability '${String(capability)}'; supported: ${allValid.join(", ")}`,
+          `Action '${manifest.name}' declares unknown capability '${String(capability)}'; supported: ${allValid.join(', ')}`,
         )
       }
       if (seen.has(capability as ActionCapability)) {
-        throw new ActionDefinitionError(`Action '${manifest.name}' declares duplicate capability '${String(capability)}'`)
+        throw new ActionDefinitionError(
+          `Action '${manifest.name}' declares duplicate capability '${String(capability)}'`,
+        )
       }
       seen.add(capability as ActionCapability)
     }
   }
   for (const [name, declaration] of Object.entries(manifest.inputs)) {
-    if (declaration.render !== undefined && declaration.render !== "immediate" && declaration.render !== "deferred") {
-      throw new ActionDefinitionError(`Action '${manifest.name}' input '${name}' render timing must be 'immediate' or 'deferred'`)
+    if (declaration.render !== undefined && declaration.render !== 'immediate' && declaration.render !== 'deferred') {
+      throw new ActionDefinitionError(
+        `Action '${manifest.name}' input '${name}' render timing must be 'immediate' or 'deferred'`,
+      )
     }
   }
 }
@@ -109,10 +118,10 @@ function validateInputDeclaration(
   declaration: ActionInputDeclaration,
   canonical: ReadonlyArray<ActionInputKind>,
 ): void {
-  if (inputName === "working-directory") {
+  if (inputName === 'working-directory') {
     throw new ActionDefinitionError(`Action '${actionName}' must not declare engine-reserved input 'working-directory'`)
   }
-  if (!declaration || typeof declaration !== "object" || Array.isArray(declaration)) {
+  if (!declaration || typeof declaration !== 'object' || Array.isArray(declaration)) {
     throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' declaration must be an object`)
   }
   const types = declaration.types
@@ -123,22 +132,28 @@ function validateInputDeclaration(
   for (const kind of types) {
     if (!canonical.includes(kind as ActionInputKind)) {
       throw new ActionDefinitionError(
-        `Action '${actionName}' input '${inputName}' declares unsupported kind '${String(kind)}'; supported kinds: ${canonical.join(", ")}`,
+        `Action '${actionName}' input '${inputName}' declares unsupported kind '${String(kind)}'; supported kinds: ${canonical.join(', ')}`,
       )
     }
     if (seen.has(kind as ActionInputKind)) {
-      throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' declares duplicate kind '${String(kind)}'`)
+      throw new ActionDefinitionError(
+        `Action '${actionName}' input '${inputName}' declares duplicate kind '${String(kind)}'`,
+      )
     }
     seen.add(kind as ActionInputKind)
   }
-  const orderedKinds = [...types].sort((a, b) => canonical.indexOf(a as ActionInputKind) - canonical.indexOf(b as ActionInputKind))
+  const orderedKinds = [...types].sort(
+    (a, b) => canonical.indexOf(a as ActionInputKind) - canonical.indexOf(b as ActionInputKind),
+  )
   if (orderedKinds.some((kind, index) => kind !== types[index])) {
     throw new ActionDefinitionError(
-      `Action '${actionName}' input '${inputName}' types must use canonical order ${canonical.join(", ")}`,
+      `Action '${actionName}' input '${inputName}' types must use canonical order ${canonical.join(', ')}`,
     )
   }
   if (declaration.required === true && declaration.default !== undefined) {
-    throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' must not be both required and defaulted`)
+    throw new ActionDefinitionError(
+      `Action '${actionName}' input '${inputName}' must not be both required and defaulted`,
+    )
   }
   if (declaration.default !== undefined) {
     if (declaration.default === null) {
@@ -147,15 +162,19 @@ function validateInputDeclaration(
     const defaultKind = jsonKindOf(declaration.default)
     if (defaultKind === null || !seen.has(defaultKind)) {
       throw new ActionDefinitionError(
-        `Action '${actionName}' input '${inputName}' default must be one of the declared kinds ${[...seen].join(", ")}, received ${defaultKind ?? typeof declaration.default}`,
+        `Action '${actionName}' input '${inputName}' default must be one of the declared kinds ${[...seen].join(', ')}, received ${defaultKind ?? typeof declaration.default}`,
       )
     }
   }
-  if (declaration.description !== undefined && typeof declaration.description !== "string") {
-    throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' description must be a string when provided`)
+  if (declaration.description !== undefined && typeof declaration.description !== 'string') {
+    throw new ActionDefinitionError(
+      `Action '${actionName}' input '${inputName}' description must be a string when provided`,
+    )
   }
   if (declaration.engineSource !== undefined && !isEngineInputSource(declaration.engineSource)) {
-    throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' engine source must be a dotted dispatch snapshot path, received '${String(declaration.engineSource)}'`)
+    throw new ActionDefinitionError(
+      `Action '${actionName}' input '${inputName}' engine source must be a dotted dispatch snapshot path, received '${String(declaration.engineSource)}'`,
+    )
   }
   if (declaration.engineSource !== undefined && declaration.required === true) {
     throw new ActionDefinitionError(`Action '${actionName}' engine-sourced input '${inputName}' must not be required`)
@@ -163,27 +182,31 @@ function validateInputDeclaration(
 }
 
 function validateOutputDeclaration(actionName: string, output: ActionOutputDeclaration, seen: Set<string>): void {
-  if (!output || typeof output !== "object" || Array.isArray(output)) {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
     throw new ActionDefinitionError(`Action '${actionName}' output declaration must be an object`)
   }
-  if (typeof output.name !== "string" || !OUTPUT_NAME_PATTERN.test(output.name)) {
+  if (typeof output.name !== 'string' || !OUTPUT_NAME_PATTERN.test(output.name)) {
     throw new ActionDefinitionError(`Action '${actionName}' output name '${String(output.name)}' is invalid`)
   }
   if (seen.has(output.name)) {
     throw new ActionDefinitionError(`Action '${actionName}' declares duplicate output '${output.name}'`)
   }
   seen.add(output.name)
-  if (output.description !== undefined && typeof output.description !== "string") {
-    throw new ActionDefinitionError(`Action '${actionName}' output '${output.name}' description must be a string when provided`)
+  if (output.description !== undefined && typeof output.description !== 'string') {
+    throw new ActionDefinitionError(
+      `Action '${actionName}' output '${output.name}' description must be a string when provided`,
+    )
   }
 }
 
 function validateErrorDeclaration(actionName: string, error: ActionErrorDeclaration, seen: Set<string>): void {
-  if (!error || typeof error !== "object" || Array.isArray(error)) {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
     throw new ActionDefinitionError(`Action '${actionName}' error declaration must be an object`)
   }
-  if (typeof error.code !== "string" || !CODE_PATTERN.test(error.code)) {
-    throw new ActionDefinitionError(`Action '${actionName}' error code '${String(error.code)}' must be lowercase kebab-case`)
+  if (typeof error.code !== 'string' || !CODE_PATTERN.test(error.code)) {
+    throw new ActionDefinitionError(
+      `Action '${actionName}' error code '${String(error.code)}' must be lowercase kebab-case`,
+    )
   }
   if (RESERVED_PLATFORM_ERROR_CODES.has(error.code)) {
     throw new ActionDefinitionError(
@@ -194,19 +217,21 @@ function validateErrorDeclaration(actionName: string, error: ActionErrorDeclarat
     throw new ActionDefinitionError(`Action '${actionName}' declares duplicate error code '${error.code}'`)
   }
   seen.add(error.code)
-  if (error.description !== undefined && typeof error.description !== "string") {
-    throw new ActionDefinitionError(`Action '${actionName}' error '${error.code}' description must be a string when provided`)
+  if (error.description !== undefined && typeof error.description !== 'string') {
+    throw new ActionDefinitionError(
+      `Action '${actionName}' error '${error.code}' description must be a string when provided`,
+    )
   }
 }
 
 function jsonKindOf(value: unknown): ActionInputKind | null {
-  if (typeof value === "string") return "string"
-  if (typeof value === "number") return "number"
-  if (typeof value === "boolean") return "boolean"
-  if (Array.isArray(value)) return "array"
-  if (value !== null && typeof value === "object") {
+  if (typeof value === 'string') return 'string'
+  if (typeof value === 'number') return 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  if (Array.isArray(value)) return 'array'
+  if (value !== null && typeof value === 'object') {
     const proto = Object.getPrototypeOf(value)
-    if (proto === Object.prototype || proto === null) return "object"
+    if (proto === Object.prototype || proto === null) return 'object'
   }
   return null
 }
@@ -225,13 +250,15 @@ function deepFreezeManifest(manifest: ActionManifest): ActionManifest {
       engineSource: declaration.engineSource,
     })
   }
-  const outputs = manifest.outputs.map((output) =>
-    Object.freeze({ name: output.name, description: output.description }) as ActionOutputDeclaration,
+  const outputs = manifest.outputs.map(
+    (output) => Object.freeze({ name: output.name, description: output.description }) as ActionOutputDeclaration,
   )
-  const errors = manifest.errors.map((error) =>
-    Object.freeze({ code: error.code, description: error.description }) as ActionErrorDeclaration,
+  const errors = manifest.errors.map(
+    (error) => Object.freeze({ code: error.code, description: error.description }) as ActionErrorDeclaration,
   )
-  const capabilities = manifest.capabilities ? Object.freeze([...manifest.capabilities] as ReadonlyArray<ActionCapability>) : undefined
+  const capabilities = manifest.capabilities
+    ? Object.freeze([...manifest.capabilities] as ReadonlyArray<ActionCapability>)
+    : undefined
   const frozen = Object.freeze({
     name: manifest.name,
     description: manifest.description,
@@ -244,7 +271,7 @@ function deepFreezeManifest(manifest: ActionManifest): ActionManifest {
 }
 
 function cloneJsonValue(value: JsonValue): JsonValue {
-  if (value === null || typeof value !== "object") return value
+  if (value === null || typeof value !== 'object') return value
   if (Array.isArray(value)) return Object.freeze(value.map((entry) => cloneJsonValue(entry))) as JsonValue
   const result: Record<string, JsonValue> = {}
   for (const [key, child] of Object.entries(value as Record<string, JsonValue>)) {
