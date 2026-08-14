@@ -23,7 +23,7 @@ public sealed class ExecutionLedgerReporter : IRunnerReporter
 
     public bool IsEnvironmentallyEnabled => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ExecutionLedgerEnvironment.Path));
 
-    public string? RunnerSwitch => null;
+    public string? RunnerSwitch => "mohist-ledger";
 
     public ValueTask<IRunnerReporterMessageHandler> CreateMessageHandler(IRunnerLogger logger, IMessageSink? diagnosticMessageSink) =>
         new(new ExecutionLedgerReporterMessageHandler());
