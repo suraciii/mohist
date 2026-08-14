@@ -107,13 +107,13 @@ Delete with their subjects: all tests listed in D1–D3, plus `entities/coder-se
 
 ### D8. Document the query dual-write convention in `packages/web/AGENTS.md`
 
-Add a short section to `packages/web/AGENTS.md` stating the convention the codebase already follows (reference implementation: the unified session clients in `entities/coder-session/api/client.ts`):
+Add a short section to `packages/web/AGENTS.md` stating the convention for entity query clients (reference implementation: the unified session clients in `entities/coder-session/api/client.ts`, which this change keeps intact):
 
 - Every entity server read is written twice: an exported `xxxQueryOptions(...)` factory that owns the query key and fetch (plus `enabled` / `refetchInterval` behavior), and a thin `useXxx()` hook that wraps `useQuery(xxxQueryOptions(...))` with the project context.
 - Callers above the entity layer never hand-build query keys or call raw fetch; invalidation and prefetch reuse the same options factory so keys stay single-sourced.
 - Mutations follow the same pairing: a client function, an `xxxMutationOptions(...)` factory owning invalidation, and a thin `useMutation` hook.
 
-Documentation only — no code is retrofit by this change; stragglers, if any, are follow-up cleanup.
+Documentation only — no code is retrofit by this change; older query modules that predate the convention are follow-up cleanup, not part of this change.
 
 ## Risks / Trade-offs
 

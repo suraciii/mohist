@@ -37,17 +37,17 @@ Web SHALL detect viewport breakpoints through exactly one hook: `useMediaQuery` 
 - **THEN** it SHALL call `useMediaQuery` with an explicit media query
 - **AND** no parallel viewport-detection hook SHALL exist in `shared`
 
-### Requirement: Entity query clients follow the dual-write convention
+### Requirement: The query dual-write convention is documented
 
-Every entity server read SHALL be written twice in the entity's api module: an exported query-options factory that owns the query key and fetch behavior, and a thin hook that wraps `useQuery` over that factory. Layers above entities SHALL NOT hand-build query keys for entity data or issue raw fetches; invalidation and prefetch SHALL reuse the same options factory. `packages/web/AGENTS.md` SHALL document this convention, with the unified session clients in `entities/coder-session/api/client.ts` as the reference implementation.
-
-#### Scenario: Adding or consuming a server query
-
-- **WHEN** an entity gains a server read or a higher layer needs that data
-- **THEN** the entity SHALL expose a `xxxQueryOptions` factory plus a thin `useXxx` hook
-- **AND** the consumer SHALL use the hook or pass the factory to `useQuery`/prefetch instead of building its own key
+`packages/web/AGENTS.md` SHALL document the dual-write convention for entity query clients: every server read is written twice — an exported query-options factory that owns the query key and fetch behavior, plus a thin hook wrapping `useQuery` over that factory — with invalidation and prefetch reusing the same factory so query keys stay single-sourced, and the same pairing (client function + mutation-options factory + thin hook) for mutations. The unified session clients in `entities/coder-session/api/client.ts` SHALL be cited as the reference implementation, and those clients SHALL keep exposing the factory + thin-hook pairing.
 
 #### Scenario: The convention is documented
 
 - **WHEN** `packages/web/AGENTS.md` is read after this change
-- **THEN** it SHALL contain the dual-write convention (options factory + thin hook, single-sourced query keys, same pairing for mutations)
+- **THEN** it SHALL contain the dual-write convention (options factory + thin hook, single-sourced query keys, invalidation/prefetch through the factory, same pairing for mutations)
+- **AND** it SHALL name the unified session clients as the reference implementation
+
+#### Scenario: The reference implementation keeps the pairing
+
+- **WHEN** the unified session clients in `entities/coder-session/api/client.ts` are inspected after this change
+- **THEN** `unifiedSessionSummaryQueryOptions` / `unifiedSessionTranscriptQueryOptions` and their `useUnifiedSessionSummary` / `useUnifiedSessionTranscript` hooks SHALL both be exported
