@@ -10,7 +10,9 @@ internal partial class SourceCodeUpdater
         CancellationToken cancellationToken,
         bool postOutcome)
     {
-        var resolvedCliPath = await ResolveCliPathAsync(cliPath);
+        var resolvedCliPath = IncludesManagedScope(scope, "cli") && string.IsNullOrWhiteSpace(cliPath)
+            ? _operations.ResolveManagedCliLauncherPath()
+            : await ResolveCliPathAsync(cliPath);
         var context = new UpdateContext(
             dryRun,
             repoRoot,
@@ -110,6 +112,19 @@ internal partial class SourceCodeUpdater
         string scope,
         CancellationToken cancellationToken)
     {
+        if (IncludesManagedScope(scope, "cli"))
+        {
+            var cli = session.Targets.Cli;
+            if (cli is null)
+                return "CLI target is missing from the candidate";
+            var cliIdentity = await _validator.VerifyCliRuntimeIdentityAsync(
+                session.Context.CliPath,
+                cli.Identity,
+                cancellationToken);
+            if (cliIdentity.Outcome == RuntimeCheckOutcome.Fail)
+                return cliIdentity.Message;
+        }
+
         if (IncludesManagedScope(scope, "server"))
         {
             var ready = await _readinessProbe.WaitForServerReadyWithProgressAsync(

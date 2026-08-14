@@ -498,6 +498,9 @@ internal sealed class UpdateOperations
         return null;
     }
 
+    public string ResolveManagedCliLauncherPath() =>
+        ResolveCliWrapperPath(_getUserHome?.Invoke());
+
     public static string ResolveManagedCliPath(string? home = null)
     {
         var root = !string.IsNullOrWhiteSpace(home)
@@ -525,58 +528,8 @@ internal sealed class UpdateOperations
     public async Task<int> EnsureCliWrapperAsync(string managedCliPath, string? home = null)
     {
         var wrapperPath = ResolveCliWrapperPath(home);
-        var wrapperDir = Path.GetDirectoryName(wrapperPath);
-        if (!string.IsNullOrWhiteSpace(wrapperDir))
-            _fileSystem.CreateDirectory(wrapperDir);
-
-        var wrapper = "#!/bin/sh" + Environment.NewLine
-            + $"exec \"{managedCliPath}\" \"$@\"" + Environment.NewLine;
-        var tempPath = $"{wrapperPath}.tmp";
-
-        try
-        {
-            await _fileSystem.WriteAllTextAsync(tempPath, wrapper);
-        }
-        catch (Exception ex)
-        {
-            _err.WriteLine($"Could not write wrapper script to {tempPath}: {ex.Message}");
-            return 1;
-        }
-
-        var (chmod, _, chmodErr) = await _commandExecutor.ExecuteAsync("chmod", ["+x", tempPath], null);
-        if (chmod != 0)
-        {
-            if (!string.IsNullOrWhiteSpace(chmodErr)) _err.WriteLine(chmodErr);
-            _err.WriteLine($"Could not make wrapper script at {tempPath} executable.");
-            CleanupTempFile(tempPath);
-            return chmod;
-        }
-
-        try
-        {
-            _fileSystem.MoveFile(tempPath, wrapperPath);
-        }
-        catch (Exception ex)
-        {
-            _err.WriteLine($"Could not install wrapper script at {wrapperPath}: {ex.Message}");
-            CleanupTempFile(tempPath);
-            return 1;
-        }
-
-        _out.WriteLine($"Installed CLI wrapper: {wrapperPath}");
-        return 0;
-    }
-
-    private void CleanupTempFile(string path)
-    {
-        try
-        {
-            if (_fileSystem.Exists(path))
-                _fileSystem.Delete(path);
-        }
-        catch
-        {
-        }
+        var launcher = new ManagedCliLauncher(_out, _err, _commandExecutor, _fileSystem);
+        return await launcher.InstallAsync(wrapperPath, managedCliPath);
     }
 
     public static string RuntimeIdentifier()

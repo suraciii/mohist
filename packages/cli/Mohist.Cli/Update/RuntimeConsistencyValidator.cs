@@ -84,6 +84,71 @@ internal sealed class RuntimeConsistencyValidator
         }
     }
 
+    internal async Task<RuntimeCheckResult> VerifyCliRuntimeIdentityAsync(
+        string? launcherPath,
+        RuntimeIdentity expected,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(launcherPath))
+        {
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Fail,
+                "Stable CLI launcher path was not resolved; cannot verify the candidate source revision");
+        }
+        if (!expected.IsComplete)
+        {
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Fail,
+                "Candidate CLI identity is incomplete");
+        }
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await _commandExecutor.ExecuteAsync(
+                launcherPath,
+                ["--version"],
+                null,
+                token);
+            if (exitCode != 0)
+            {
+                return new RuntimeCheckResult(
+                    "CLI identity",
+                    RuntimeCheckOutcome.Fail,
+                    $"Stable CLI launcher exited with code {exitCode}: {stderr.Trim()}");
+            }
+
+            var version = stdout.Trim();
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return new RuntimeCheckResult(
+                    "CLI identity",
+                    RuntimeCheckOutcome.Fail,
+                    "Stable CLI launcher reported an empty version; candidate source revision was not proven");
+            }
+            if (!version.Contains(expected.SourceRevision, StringComparison.Ordinal))
+            {
+                return new RuntimeCheckResult(
+                    "CLI identity",
+                    RuntimeCheckOutcome.Fail,
+                    $"Stable CLI launcher reported '{version}', expected source revision '{expected.SourceRevision}'");
+            }
+
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Pass,
+                $"Stable CLI launcher matches source revision '{expected.SourceRevision}'");
+        }
+        catch (Exception ex)
+        {
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Fail,
+                $"Stable CLI launcher identity check failed: {ex.Message}");
+        }
+    }
+
     internal async Task<RuntimeCheckResult> CheckServerIdentityAsync(UpdateContext context, CancellationToken token)
     {
         var info = await TryGetSystemInfoAsync(token);
