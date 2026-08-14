@@ -185,11 +185,13 @@ The following uses are in scope:
   clearing with `--inherit-workflow-profile`, is an Issue aggregate field. Issue creation commits that field
   in the same `IIssueBindingParticipant` transaction. Before it commits, the participant validates that the
   Profile exists in the same way that it validates that the Repository exists.
-- `WorkflowProfileReferenceCoordinator` serializes Profile deletion, writes to a Project's default Profile,
-  and WorkflowRun start-binding writes within a Project. These commands establish or break Profile
-  references. Each persisted custom Profile reference has a nullable custom-Profile backing key and a
-  restrictive foreign key to `(ProjectId, ProfileId)`. Builtin references keep a null backing key because
-  they cannot be deleted. This foreign key is the primary mechanism that makes concurrent deletion correct.
+- `WorkflowProfileReferenceCoordinator` serializes Profile deletion, custom Profile source updates, writes
+  to a Project's default Profile, Project Agent Action override changes, and WorkflowRun start binding within
+  a Project. Profile updates and override changes share this order with Run binding so a Run observes the
+  complete configuration before or after a mutation, never an intermediate version. Reference commands
+  establish or break Profile references. Each persisted custom Profile reference has a nullable backing key
+  and a restrictive foreign key to `(ProjectId, ProfileId)`. Builtin references keep a null backing key
+  because they cannot be deleted. This foreign key is the primary mechanism that makes concurrent deletion correct.
   `WorkflowProfileDeletionBlockerQuery` combines the Project default, **all** explicit Issue selections in
   that Project, including terminal Issues, and active Run bindings. It is the source of actionable deletion
   diagnostics and errors. `IssueRepositoryCoordinatorGrain` serializes Issue selection; selection does not
@@ -198,14 +200,19 @@ The following uses are in scope:
   `workflow-profile-not-found` conflict. It never leaves a dangling reference.
 
 Each coordinator serializes by Project key. They use narrow participant interfaces:
-`IIssueBindingParticipant`, `IProjectBindingParticipant`, and `IWorkflowRunBindingParticipant`. An
-`ArchTest` prevents production code from bypassing the coordinators. The coordinators **do not** call each
-other or share a transaction. Each synchronous coordinator call chain enters only one participant aggregate.
-Issue selection belongs to the Issue coordinator. Project default and Run binding belong to the Profile
-coordinator.
+`IIssueBindingParticipant`, `IProjectBindingParticipant`, `IProjectWorkflowProfileBindingParticipant`,
+`IWorkflowProfileMutationParticipant`, and `IWorkflowRunBindingParticipant`. The Workflow Profile Project
+participant owns default and Agent Action override writes; the Profile participant owns custom source writes;
+the Run participant owns the Profile ID and concrete Action captured at start. An `ArchTest` prevents
+production code from bypassing the coordinators. The coordinators **do not** call each other or share a
+transaction. Each synchronous coordinator call chain enters only one participant aggregate.
+Issue selection belongs to the Issue coordinator. Project default, Profile mutation, Agent Action override,
+and Run binding belong to the Profile coordinator.
 
-The coordinators do not handle invariant validation inside a participant, eventually consistent progress
-across aggregates, UI pushes, or Session and Runtime binding.
+The coordinators do not reimplement invariant validation. The Profile coordinator sequences the existing
+Profile compiler, Action-contract validator, active-Run binding query, and one participant commit under its
+fence. Coordinators do not handle eventually consistent progress across aggregates, UI pushes, or Session and
+Runtime binding.
 
 ## Persistence
 

@@ -282,7 +282,9 @@ Run and materializes Agent references with that Run's bound concrete Action. It
 is not a historical Definition snapshot: editing other Profile structure can
 change later Stages, so this view can also change during the Run. Changing the
 Project's Profile Agent Action override does not change this view for an active
-Run. The option is mutually exclusive with `--json`.
+Run. The option is mutually exclusive with `--json`. The JSON view exposes the
+nullable concrete `agentAction` bound to the Run and its derived `agentRuntime`
+so clients can select the matching model catalog without rereading Profile YAML.
 
 Project, Issue, and WorkflowRun each own one set of Variables. All three scopes
 use the same `variable list/get/set/unset` key-value language.

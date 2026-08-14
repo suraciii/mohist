@@ -193,6 +193,9 @@ its output unchanged. There is no special-case list based on `uses`.
 Profile save first materializes the Profile's optional Agent Action binding, then uses the Workflow
 Definition validator to produce a semantic model and the catalog to evaluate concrete `uses` and
 `with`. When `agentAction` is present, the catalog also requires that Action to declare `agent-turn`.
+For an update referenced by active bound Runs, Server repeats materialization and Action-contract validation
+once per distinct bound Action as well as for the future effective Action. The Project-scoped Profile
+reference coordinator serializes this validation and write with new Run bindings.
 The Definition validator only recursively checks runtime template expressions in `with` values. The
 catalog does not repeat Profile binding, Definition field, or template namespace validation. All
 diagnostic sources are combined into one validation exception, use the same YAML path convention,

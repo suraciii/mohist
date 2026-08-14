@@ -139,8 +139,8 @@ Both Workflow and AgentJob paths are implemented. A Workflow can use
 AgentSession and show transcripts, tools, state, compaction, model, usage, and
 cost on the existing Session page. Pi Compact and Reset are available through
 the shared Session operations. Workflow model selectors use the Runtime
-projected from the effective Profile Agent Action and do not fall back to an
-OpenCode catalog.
+projected from the active bound Run when present, otherwise from the effective
+Profile Agent Action. They do not fall back to an OpenCode catalog.
 
 Before a new Workflow input is submitted, Mohist automatically creates empty Pi
 context and replaces a binding that the owning Runner confirms is missing while

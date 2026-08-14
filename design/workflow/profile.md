@@ -80,15 +80,16 @@ This is a Profile binding, not a Run Variable. It has deliberately narrow syntax
 - Profiles that declare `agentAction` use the binding for every inline Agent task, including Approval
   feedback, recovery tasks, and the task default supplied to `mohist/openspec-tasks`. Literal non-Agent
   Actions remain unchanged. Mixing a bound Agent Action with a literal inline Agent Action is invalid.
-- Approval feedback that invokes an Agent must declare its task explicitly. Workflow does not synthesize
-  an implicit `mohist/opencode` feedback task when the Profile omits one.
+- A Profile with any Approval Stage must declare non-empty `approval.feedback.tasks`. Workflow does not
+  synthesize an implicit `mohist/opencode` feedback task when the Profile omits them.
 - The Profile layer replaces the binding before it creates the `WorkflowDefinition` semantic model and
   before Action-contract validation. `TaskDefinition.Uses`, `TaskRun.Uses`, dispatch, and Runner execution
   therefore always contain a concrete Action such as `mohist/pi`; dynamic `uses` is not part of the
   execution protocol.
 - Run creation stores the effective concrete Action beside `workflowProfileId`. Changing the Project
   override later affects only future WorkflowRuns. A later Stage may read updated Profile structure, but
-  its Agent references are materialized with the Action already bound to that Run.
+  its Agent references are materialized with the Action already bound to that Run. A Profile source update
+  must remain valid when materialized with every distinct Action bound to its active Runs.
 
 A Profile without `${{ profile.agentAction }}` continues to use literal `uses` declarations and does not
 need an `agentAction`. Mohist does not provide a general Profile parameter system, conditional Agent task
@@ -135,21 +136,22 @@ The browser consumes that field and never parses Profile YAML or infers a
 Runtime from a model ID. A newly supported built-in Runtime adds one row to the
 mapping; it does not add a Profile field, Action input, or Runtime descriptor.
 
-The model selector resolves the Profile through the same selection rule as a
-future WorkflowRun:
+The model selector uses one Runtime for its complete surface:
 
 - Project settings use the Project's effective default Profile.
-- Issue settings use the Issue's explicit Profile, or the Project's effective
-  default when the Issue inherits it.
+- Issue settings with an active bound Run use that Run's `agentRuntime` from the
+  WorkflowRun detail read model. Workflow-wide and Stage-specific controls do
+  not split across different catalogs.
+- Issue settings without an active bound Run use the Issue's explicit Profile,
+  or the Project's effective default when the Issue inherits it.
 - Create Issue uses the Profile currently selected in the form.
-- Stage-specific selectors for an active Run use that Run's bound Agent Action.
-  They do not switch catalogs after a Project override changes.
 
-After resolving the Profile, the selector requests that Runtime's existing
-model catalog. It never falls back to another Runtime. Changing a Profile does
-not rewrite or clear Project or Issue Variables. A configured model that is no
-longer present in discovery remains visible and can be changed or cleared
-explicitly.
+After resolving the Runtime, the selector requests that Runtime's existing
+model catalog. A bound Run with an unmapped Action reports `agentRuntime: null`;
+the browser does not fall back to the current Profile or another Runtime.
+Changing a Profile does not rewrite or clear Project or Issue Variables. A
+configured model that is no longer present in discovery remains visible and can
+be changed or cleared explicitly.
 
 ## Selection
 
@@ -169,6 +171,10 @@ selectedProfileId =
   does not switch an active Run to another Profile or Agent Action.
 - After the Definition for the same Profile ID changes, an active Run reads the new version when it
   initializes a later Stage.
+- If an active Run has a bound Agent Action, a custom Profile update must remain a bound Profile and must
+  validate when materialized with every distinct Action stored by its active Runs. The update is rejected
+  if it removes `agentAction`, replaces a bound Agent reference with a literal Agent Action, or introduces
+  Action Input that is incompatible with an active Run's Action.
 
 WorkflowRun does not store a complete Workflow Definition snapshot. Run creation materializes only the
 StageRun and Approval facts needed to advance the lifecycle. When each Stage initializes, it uses
@@ -207,6 +213,13 @@ Agent Action. At each Stage initialization it provides the current, validated `W
 Project, Profile ID, and the Run-bound Agent Action. WorkflowRun does not store the Definition body. The
 Provider does not read Variables or Prompts and does not select the Profile.
 
+The existing Project-scoped `WorkflowProfileReferenceCoordinator` serializes custom Profile updates,
+Project Agent Action override changes, and WorkflowRun binding. An update validates the future effective
+Action and the distinct bound Actions read from active Run state before it writes the Profile. A Run bind
+then reads one accepted Profile version, materializes it, and persists the selected Action with the Run.
+The coordinator order is the linearization point: a concurrent Run starts entirely before or after a
+Profile or override change, never between its validation and write.
+
 ## API
 
 The Profile collection is a child resource of Project:
@@ -223,8 +236,9 @@ DELETE /api/projects/{projectRef}/workflow-profiles/{*profileId}
 The Project's `defaultWorkflowProfileId` and the Issue's `workflowProfileId` reference this collection.
 They are modified through the Project and Issue resources, respectively. Profile deletion must protect a
 Profile that is still referenced by a default, an Issue, or an active WorkflowRun. Updating the Definition
-while keeping the same ID is allowed. An active WorkflowRun reads the new version at a later Stage
-initialization.
+while keeping the same ID is allowed. Before committing an update, Server validates the future effective
+Action and every distinct Action bound to an active Run. An active WorkflowRun reads the accepted version
+at a later Stage initialization.
 
 `profileId` is a terminal catch-all, so it can address an ID such as `mohist/local` without loss. Variables
 and Prompts use separate APIs. They are not children of `/workflow-profiles/{*profileId}`.
@@ -248,6 +262,12 @@ settings read the effective default and disabled Profile IDs through `/workflow-
 client resolves the effective Profile, reads its `agentRuntime`, and requests that Runtime's model catalog.
 The Project default mutation uses `PUT /workflow-profile/default` with `{ "profileId": "..." }`.
 
+`GET /api/workflow-runs/{workflowRunId}` exposes nullable `agentAction` and `agentRuntime` beside the Run
+status. `agentAction` is the concrete Action stored at Run creation. `agentRuntime` is derived from that
+stored Action with the same built-in mapping as the Profile projection. When `agentAction` is non-null, the
+Issue model selector treats this Run projection as authoritative and does not fall back to the current
+Profile. After the Run becomes terminal, Issue configuration resolves the Profile for a future Run again.
+
 Settings shows an Agent Action selector only for a Profile that declares the binding. Candidate Actions come
 from catalog entries with `agent-turn`; the browser does not infer candidates from names. A successful change
 refreshes the Profile read model and its model catalog. Issue and create-Issue screens consume that effective
@@ -261,12 +281,13 @@ Project-managed Profiles; the Project default and explicit Issue selection, incl
 during an active Run with an effect only on the next Run; a fixed Profile ID for a Run with live Definition
 reads at Stage initialization and no Definition snapshot; and separate Variables and Prompts resources.
 
-Implemented: the nullable `agentRuntime` list/detail projection and its use by Project, Issue, create-Issue,
-and stage model selectors. The projection is derived recursively from static `uses` declarations and the
-browser does not parse Workflow YAML. Runtime-specific model catalogs remain isolated; a missing catalog
-or a Profile with no single resolved Runtime does not fall back to another Runtime.
+Implemented: the nullable WorkflowProfile `agentRuntime` list/detail projection and its current use by
+Project, Issue, create-Issue, and stage model selectors. The projection is derived recursively from static
+`uses` declarations and the browser does not parse Workflow YAML. Runtime-specific model catalogs remain
+isolated; a missing catalog or a Profile with no single resolved Runtime does not fall back to another
+Runtime.
 
 Planned in the Profile Agent Action binding change: `agentAction` source defaults and Project overrides,
 the restricted `${{ profile.agentAction }}` compiler, Run-bound concrete Actions, capability-aware catalog
-validation, and `mohist/github-pr` adoption. These items must land together before this section becomes
-implemented behavior.
+validation, active-Run read projection, explicit Approval feedback validation, and `mohist/github-pr`
+adoption. These items must land together before this section becomes implemented behavior.

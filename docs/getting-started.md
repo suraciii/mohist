@@ -133,8 +133,9 @@ opencode --help
 ```
 
 Without an explicit model, the selected Action uses its Runtime default. The
-model selector requests the catalog for the effective Profile Action. To select
-a model explicitly, set it directly in the task `options`, or configure it in
+model selector requests the catalog for the effective Profile Action before a
+Run starts, and for the Run-bound Action while that Run is active. To select a
+model explicitly, set it directly in the task `options`, or configure it in
 Workflow Variables and pass it with `options: ${{ vars.agent }}`. See the
 [`mohist/opencode` Action](actions/opencode.md) and
 [`mohist/pi` Action](actions/pi.md) for Runtime-specific configuration.

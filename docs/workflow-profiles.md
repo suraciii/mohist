@@ -61,6 +61,16 @@ A Profile does not contain:
 The structure of `mohist/local` can be simplified as follows:
 
 ```yaml
+approval:
+  feedback:
+    tasks:
+      - id: apply-feedback
+        uses: mohist/opencode
+        with:
+          session: ${{ stage.name }}
+          prompt: ${{ prompts.apply-feedback }}
+          options: ${{ vars.agent }}
+
 stages:
   - stage: plan
     requiresApproval: true
@@ -154,10 +164,12 @@ WorkflowRun fixes the effective Action when it starts. Changing the Project
 binding later affects only new Runs; later Stages of the active Run continue to
 use the Action already bound to that Run.
 
-The model selector uses the Runtime projected from the effective Agent Action.
-Changing the binding does not rewrite or clear `vars.agent`; a configured model
-that is absent from the new Runtime remains visible until it is changed or
-cleared explicitly.
+While a bound Run is active, the Issue model selector uses that Run's Runtime
+for both Workflow-wide and Stage-specific model controls. After the Run becomes
+terminal, it uses the Runtime projected from the Profile selected for the next
+Run. Changing the binding does not rewrite or clear `vars.agent`; a configured
+model that is absent from the selected Runtime remains visible until it is
+changed or cleared explicitly.
 
 ### Variable References
 
@@ -217,7 +229,8 @@ repository.
 
 ### Require Approval after Build
 
-Set Build's `requiresApproval` value to `true`.
+Set Build's `requiresApproval` value to `true`. The Profile must also declare
+non-empty `approval.feedback.tasks`; built-in Profiles already do.
 
 ### Remove Check
 
@@ -227,6 +240,9 @@ review before Integrate.
 ### Add Deploy
 
 Add a Stage after Integrate:
+
+The Profile must declare non-empty top-level `approval.feedback.tasks` because
+Deploy waits for approval.
 
 ```yaml
 - stage: deploy
@@ -265,7 +281,9 @@ select the Project default. The Issue details page selects or changes a Profile.
 It does not edit the Profile Definition or its Project binding.
 
 Editing a Definition affects later Stages in active Workflows that use the
-Profile. Before saving, confirm that the change is also valid for those runs.
+Profile. Mohist validates the edit with every Agent Action bound to an active
+Run and rejects an edit that removes the binding or is incompatible with one of
+those Actions.
 
 Before saving, run `mo workflow validate --file <path>` to check the Definition
 structure, field types, and template expressions locally. Use `--file -` to

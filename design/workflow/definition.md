@@ -83,7 +83,7 @@ stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 | Location | Rule |
 |---|---|
 | top level | Only `approval`, `stages`, and `recoveries` are allowed; `stages` must not be empty |
-| approval.feedback | `tasks` must not be empty; every item follows the task rules |
+| approval.feedback | Required when any Stage has `requiresApproval: true`; `tasks` must not be empty and every item follows the task rules |
 | stage | `stage` name must not be empty and must be unique within the Definition; `tasks` must not be empty |
 | stage | `lockBehavior` only accepts `sequential` and must appear with non-empty `resources`; `resources` cannot appear alone |
 | task | `id` must not be empty and must be unique within its task list; `uses` is required; `title` is optional |
@@ -131,7 +131,8 @@ Definition snapshot. Run creation materializes the StageRun and approval facts r
 the lifecycle and stores the concrete Agent Action selected for the Profile. When each Stage
 initializes, it rereads the current Definition of the selected Profile and materializes Agent
 references with the Run-bound Action. Later edits do not retroactively rewrite an initialized Stage
-or switch the Run's Agent Action. During a run, recovery,
+or switch the Run's Agent Action. Profile save rejects an edit that cannot be materialized and
+Action-contract validated with every distinct Action bound to an active Run. During a run, recovery,
 retry, approval feedback, and control commands such as `mo issue rebase`, which inserts
 `uses: mohist/rebase`, may all create new `TaskRun` instances. They use the same dispatch, report,
 and Variables resolution semantics.
