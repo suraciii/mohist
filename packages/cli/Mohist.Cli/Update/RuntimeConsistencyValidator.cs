@@ -55,7 +55,7 @@ internal sealed class RuntimeConsistencyValidator
         if (string.IsNullOrWhiteSpace(context.CliPath))
         {
             return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Fail,
-                "CLI binary path was not resolved; cannot invoke mo --version. Reinstall with 'mo update' or pass --cli-path.");
+                "CLI binary path was not resolved; cannot invoke mo --version. Bootstrap from the source checkout with 'bash scripts/install-mo.sh' or pass --cli-path.");
         }
 
         try
@@ -81,6 +81,71 @@ internal sealed class RuntimeConsistencyValidator
         {
             return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Fail,
                 $"mo --version failed: {ex.Message}");
+        }
+    }
+
+    internal async Task<RuntimeCheckResult> VerifyCliRuntimeIdentityAsync(
+        string? launcherPath,
+        RuntimeIdentity expected,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(launcherPath))
+        {
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Fail,
+                "Stable CLI launcher path was not resolved; cannot verify the candidate source revision");
+        }
+        if (!expected.IsComplete)
+        {
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Fail,
+                "Candidate CLI identity is incomplete");
+        }
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await _commandExecutor.ExecuteAsync(
+                launcherPath,
+                ["--version"],
+                null,
+                token);
+            if (exitCode != 0)
+            {
+                return new RuntimeCheckResult(
+                    "CLI identity",
+                    RuntimeCheckOutcome.Fail,
+                    $"Stable CLI launcher exited with code {exitCode}: {stderr.Trim()}");
+            }
+
+            var version = stdout.Trim();
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return new RuntimeCheckResult(
+                    "CLI identity",
+                    RuntimeCheckOutcome.Fail,
+                    "Stable CLI launcher reported an empty version; candidate source revision was not proven");
+            }
+            if (!version.Contains(expected.SourceRevision, StringComparison.Ordinal))
+            {
+                return new RuntimeCheckResult(
+                    "CLI identity",
+                    RuntimeCheckOutcome.Fail,
+                    $"Stable CLI launcher reported '{version}', expected source revision '{expected.SourceRevision}'");
+            }
+
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Pass,
+                $"Stable CLI launcher matches source revision '{expected.SourceRevision}'");
+        }
+        catch (Exception ex)
+        {
+            return new RuntimeCheckResult(
+                "CLI identity",
+                RuntimeCheckOutcome.Fail,
+                $"Stable CLI launcher identity check failed: {ex.Message}");
         }
     }
 

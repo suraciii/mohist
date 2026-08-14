@@ -531,6 +531,9 @@ internal sealed class FakeFileSystem : IFileSystem
     private readonly object _gate = new();
     private string _currentDirectory = "/";
 
+    public Func<string, bool>? FailNextDelete { get; set; }
+    public Func<string, bool>? FailNextMoveTo { get; set; }
+
     public string Cwd
     {
         get
@@ -668,6 +671,11 @@ internal sealed class FakeFileSystem : IFileSystem
     public void Delete(string path)
     {
         var normalized = Normalize(path);
+        if (FailNextDelete?.Invoke(normalized) == true)
+        {
+            FailNextDelete = null;
+            throw new IOException($"configured delete failure for '{path}'");
+        }
         lock (_gate)
         {
             _files.Remove(normalized);
@@ -721,6 +729,11 @@ internal sealed class FakeFileSystem : IFileSystem
     {
         var sourceKey = Normalize(source);
         var destKey = Normalize(destination);
+        if (FailNextMoveTo?.Invoke(destKey) == true)
+        {
+            FailNextMoveTo = null;
+            throw new IOException($"configured move failure for '{destination}'");
+        }
         EnsureWritable(destKey);
         lock (_gate)
         {

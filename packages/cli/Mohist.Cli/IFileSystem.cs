@@ -12,6 +12,12 @@ internal interface IFileSystem
     void DeleteDirectory(string path);
     void Move(string source, string destination);
     void MoveFile(string source, string destination);
+    void CopyFile(string source, string destination)
+    {
+        using var input = OpenRead(source);
+        using var output = OpenWrite(destination);
+        input.CopyTo(output);
+    }
     string ReadAllText(string path);
     Task<string> ReadAllTextAsync(string path);
     void WriteAllText(string path, string contents);
@@ -53,6 +59,13 @@ internal sealed class RealFileSystem : IFileSystem
     public void Move(string source, string destination) => Directory.Move(source, destination);
 
     public void MoveFile(string source, string destination) => File.Move(source, destination, overwrite: true);
+
+    public void CopyFile(string source, string destination)
+    {
+        File.Copy(source, destination, overwrite: true);
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(destination, File.GetUnixFileMode(source));
+    }
 
     public string ReadAllText(string path) => File.ReadAllText(path);
 

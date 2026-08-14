@@ -879,7 +879,7 @@ public sealed class ManagedRuntimeTransactionSpecs
         JsonSerializer.Deserialize<RuntimeTargetSet>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))
         ?? throw new InvalidOperationException("runtime target set was not persisted");
 
-    private sealed class ManagedFixture
+    internal sealed class ManagedFixture
     {
         private const string Commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         private const string Tree = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -1042,7 +1042,7 @@ public sealed class ManagedRuntimeTransactionSpecs
         }
     }
 
-    private sealed class RecordingActivator(int applyCode, IManagedRuntimeActivator? inner = null) : IManagedRuntimeActivator
+    internal sealed class RecordingActivator(int applyCode, IManagedRuntimeActivator? inner = null) : IManagedRuntimeActivator
     {
         public int ApplyCalls { get; private set; }
         public int RestoreCalls { get; private set; }

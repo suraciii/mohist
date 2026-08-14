@@ -128,7 +128,9 @@ internal sealed class UpdateSourceResolver
             runtimeRoot,
             transactionId,
             scope,
-            cliPath);
+            string.IsNullOrWhiteSpace(cliPath)
+                ? UpdateOperations.ResolveCliWrapperPath(_getUserHome())
+                : cliPath);
         return (context, null);
     }
 
