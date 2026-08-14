@@ -913,15 +913,12 @@ public sealed class ManagedRuntimeTransactionSpecs
         public string ActivePath => Path.Combine(RuntimeRoot, "active.json").Replace('\\', '/');
         public string VerifiedPath => Path.Combine(RuntimeRoot, "verified.json").Replace('\\', '/');
 
-        public SourceCodeUpdater BuildManagedServerUpdater(
-            HttpMessageHandler handler,
-            TextWriter? output = null,
-            TextWriter? error = null)
+        public SourceCodeUpdater BuildManagedServerUpdater(HttpMessageHandler handler)
         {
             var systemd = Systemd ?? throw new InvalidOperationException("managed updater requires systemd");
             return SourceCodeUpdater.CreateWithDefaults(
-                output ?? TextWriter.Null,
-                error ?? TextWriter.Null,
+                TextWriter.Null,
+                TextWriter.Null,
                 systemd,
                 Commands,
                 Files,

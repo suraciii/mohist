@@ -58,9 +58,10 @@ public sealed class ManagedCliLauncherSpecs
         var fixture = CreateFixture();
         var error = new StringWriter();
 
-        var exitCode = await fixture.BuildManagedServerUpdater(
-                new SequenceHttpHandler(System.Net.HttpStatusCode.OK),
-                error: error)
+        var exitCode = await BuildManagedServerUpdater(
+            fixture,
+            new SequenceHttpHandler(System.Net.HttpStatusCode.OK),
+            error)
             .UpdateCliAsync("/repo", dryRun: false, cliPath: launcherPath);
 
         Assert.Equal(1, exitCode);
@@ -240,6 +241,26 @@ public sealed class ManagedCliLauncherSpecs
             0,
             $"0.0.0+{sourceRevision}{Environment.NewLine}",
             "");
+    }
+
+    private static SourceCodeUpdater BuildManagedServerUpdater(
+        ManagedRuntimeTransactionSpecs.ManagedFixture fixture,
+        HttpMessageHandler handler,
+        TextWriter error)
+    {
+        var systemd = fixture.Systemd ?? throw new InvalidOperationException("managed updater requires systemd");
+        return SourceCodeUpdater.CreateWithDefaults(
+            TextWriter.Null,
+            error,
+            systemd,
+            fixture.Commands,
+            fixture.Files,
+            fixture.Environment,
+            new HttpClient(handler) { BaseAddress = new Uri(UpdateTestFactory.ServerAddress) },
+            serverReadyTimeout: TimeSpan.FromSeconds(1),
+            getUserHome: () => "/home/test",
+            unitDir: UpdateTestFactory.UnitDir,
+            managedUpdatesEnabled: true);
     }
 
     private static string BackupPath(
