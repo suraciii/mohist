@@ -138,9 +138,9 @@ Both Workflow and AgentJob paths are implemented. A Workflow can use
 `mohist/pi`, and a Mohist Agent configured for Pi can execute input. Both reuse
 AgentSession and show transcripts, tools, state, compaction, model, usage, and
 cost on the existing Session page. Pi Compact and Reset are available through
-the shared Session operations. Runtime-specific model catalog transport exists,
-but Workflow model selectors do not yet consistently select the catalog from
-the effective Profile and may still request OpenCode models.
+the shared Session operations. Workflow model selectors use the Runtime
+projected from the effective Profile Agent Action and do not fall back to an
+OpenCode catalog.
 
 Before a new Workflow input is submitted, Mohist automatically creates empty Pi
 context and replaces a binding that the owning Runner confirms is missing while

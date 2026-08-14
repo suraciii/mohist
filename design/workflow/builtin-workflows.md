@@ -8,9 +8,10 @@ A `mohist/*` Profile appears in every Project, but the current Mohist version
 owns it. An upgrade changes future Stage initialization; it does not rewrite an
 initialized Stage or dispatched Task.
 
-A built-in Profile cannot be modified or deleted. Create a Project Profile for
-custom behavior. This document records rationale and invariants without
-duplicating YAML.
+A built-in Profile source cannot be modified or deleted. A Project may configure
+a binding explicitly declared by that source without copying it. Create a
+Project Profile for structural custom behavior. This document records rationale
+and invariants without duplicating YAML.
 
 - `mohist/local`: Rebase with squash locally, then push directly to the base
   branch. This is the default.
@@ -80,6 +81,12 @@ hook.
 This Profile opens a draft Pull Request after Plan, marks it ready after Check
 Approval, and squash-merges during Integrate. Runner host must have an
 authenticated `gh` CLI for the target Repository.
+
+The Profile declares `agentAction: mohist/opencode` and uses
+`${{ profile.agentAction }}` for every inline Agent task. A Project may bind the
+Profile to another compatible concrete Action such as `mohist/pi`. Run creation
+fixes that Action for Plan, Build, Check, Integrate, Approval feedback, and
+recovery. The versioned Stage graph remains shared and immutable.
 
 Workspace is a rebuildable execution copy. The remote Workflow branch is the
 recovery point between Stages. The Pull Request is a review projection of that

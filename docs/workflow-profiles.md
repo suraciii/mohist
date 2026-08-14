@@ -31,16 +31,20 @@ Mohist provides these built-in Profiles:
   not require a code-hosting platform.
 - `mohist/github-pr`: Delivers through one GitHub pull request.
 
-Profiles under `mohist/*` are updated with Mohist releases and must not be edited
-or deleted. An update affects an active Workflow at the same point as any other
-Profile edit described above. Create a new Project Profile when you need to
-change a built-in flow.
+Profiles under `mohist/*` are updated with Mohist releases. Their source must not
+be edited or deleted. An update affects an active Workflow at the same point as
+any other Profile edit described above. A Project may configure a binding that
+the built-in source explicitly exposes, such as the GitHub PR Profile's Agent
+Action, without copying or editing that source. Create a new Project Profile
+when you need to change the Stage graph or other built-in behavior.
 
 ## Profile Contents
 
 A Profile contains:
 
 - A name and a description of its intended use.
+- An optional default Agent Action when the Profile exposes an Agent Action
+  binding.
 - Stages and the Tasks in each Stage.
 - Stage Checks and Task completion expectations.
 - Approval points.
@@ -115,6 +119,46 @@ The built-in Profiles use the execution Stages `plan`, `build`, `check`, and
 configurable Stage with Tasks. By default, the Workflow waits for approval
 after Plan and Check and advances automatically after Build and Integrate.
 
+### Agent Action Binding
+
+The `mohist/github-pr` Profile exposes one Agent Action binding for all of its
+inline Agent work. Its source declares the default and uses the restricted
+Profile expression wherever an Agent Action is required:
+
+```yaml
+id: mohist/github-pr
+name: GitHub PR
+agentAction: mohist/opencode
+
+stages:
+  - stage: plan
+    tasks:
+      - id: proposal
+        uses: ${{ profile.agentAction }}
+        with:
+          session: plan
+          prompt: ${{ prompts.proposal }}
+          options: ${{ vars.agent }}
+```
+
+Project settings may select another compatible concrete Action, such as
+`mohist/pi`, for this Profile. The selected Action must provide the `agent-turn`
+capability and accept every Agent task input in the materialized Profile. Mohist
+validates the whole Profile before saving the change. If no current Action
+catalog is available, the change is rejected instead of saving an unvalidated
+Action choice.
+
+The binding is not a Variable. `${{ profile.agentAction }}` is valid only as a
+complete `uses` value and cannot be used in `with`, `expect`, or a string. A
+WorkflowRun fixes the effective Action when it starts. Changing the Project
+binding later affects only new Runs; later Stages of the active Run continue to
+use the Action already bound to that Run.
+
+The model selector uses the Runtime projected from the effective Agent Action.
+Changing the binding does not rewrite or clear `vars.agent`; a configured model
+that is absent from the new Runtime remains visible until it is changed or
+cleared explicitly.
+
 ### Variable References
 
 A Profile can read Variables through expressions such as `${{ vars.agent }}`.
@@ -139,6 +183,11 @@ does not configure a built-in key.
 
 `mohist/github-pr` uses the same Plan -> Build -> Check -> Integrate path and
 approval points as `mohist/local`, but it delivers the result differently:
+
+- Project settings can run all inline Agent tasks through the Profile's default
+  `mohist/opencode` Action or another compatible Action such as `mohist/pi`.
+  Approval feedback, recovery, and OpenSpec-generated Build tasks use the same
+  Run-bound Action.
 
 - The remote Workflow branch preserves completed work between Stages. A Runner
   workspace can be rebuilt and is not responsible for preserving completed
@@ -211,8 +260,9 @@ Variables settings.
 ## Manage Profiles
 
 In Settings > Workflows, manage the current Project's Profile collection, edit
-a custom Profile Definition, and select the Project default. The Issue details
-page selects or changes a Profile. It does not edit the Profile Definition.
+a custom Profile Definition, configure bindings exposed by a Profile, and
+select the Project default. The Issue details page selects or changes a Profile.
+It does not edit the Profile Definition or its Project binding.
 
 Editing a Definition affects later Stages in active Workflows that use the
 Profile. Before saving, confirm that the change is also valid for those runs.
@@ -249,3 +299,5 @@ their purpose and remains stable.
   [Workflow Recovery Design](../design/workflow/recovery.md).
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.
+- Profile Agent Action binding, Run-bound materialization, and the configurable
+  `mohist/github-pr` Profile are planned in the current implementation change.
