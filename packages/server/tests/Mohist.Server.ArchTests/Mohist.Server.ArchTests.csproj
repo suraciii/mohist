@@ -49,9 +49,6 @@
     <EmbeddedResource Include="*.cs">
       <LogicalName>TestSources/Mohist.Server.ArchTests/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="spec-file-size-baseline.json">
-      <LogicalName>SpecFileSizeBaseline.json</LogicalName>
-    </EmbeddedResource>
     <EmbeddedResource Include="comment-reference-baseline.json">
       <LogicalName>CommentReferenceBaseline.json</LogicalName>
     </EmbeddedResource>

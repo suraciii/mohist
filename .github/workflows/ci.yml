@@ -12,13 +12,73 @@ on:
 permissions:
   contents: read
 
+# A superseded push to the same PR cancels the obsolete run instead of
+# finishing side by side with the fresh one.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # The Spec suite is split across four independent jobs. Each job discovers the
 # same compiled class list, selects a deterministic disjoint subset, and keeps
 # the existing xUnit collection and thread limits. A final job verifies that
 # the partition manifests cover every discovered class exactly once.
 jobs:
+  changes:
+    name: Detect Changed Paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      dotnet: ${{ steps.filter.outputs.dotnet }}
+      node: ${{ steps.filter.outputs.node }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Filter changed paths
+        id: filter
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          base_ref=""
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base_ref="$PR_BASE_SHA"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            base_ref="$PUSH_BEFORE_SHA"
+          fi
+
+          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]] || ! git rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
+            echo "No comparable base; running every track."
+            echo "dotnet=true" >> "$GITHUB_OUTPUT"
+            echo "node=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          dotnet=false
+          node=false
+          while IFS= read -r file; do
+            case "$file" in
+              packages/server/*|packages/cli/*|Mohist.sln|Directory.Build.props|Directory.Packages.props|global.json|eng/*|.github/workflows/ci.yml)
+                dotnet=true ;;
+            esac
+            case "$file" in
+              packages/web/*|packages/runner/*|packages/mohist-slack/*|package.json|package-lock.json|tsconfig*.json|biome.json|scripts/*|docs/*|design/*|*.md|.github/workflows/ci.yml)
+                node=true ;;
+            esac
+          done <<< "$(git diff --name-only "$base_ref"...HEAD)"
+
+          echo "dotnet=$dotnet" >> "$GITHUB_OUTPUT"
+          echo "node=$node" >> "$GITHUB_OUTPUT"
+
   dotnet-spec:
     name: .NET spec tests (partition ${{ matrix.partition }})
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -78,8 +138,8 @@ jobs:
 
   dotnet-spec-coverage:
     name: .NET spec coverage
-    needs: dotnet-spec
-    if: ${{ always() }}
+    needs: [changes, dotnet-spec]
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -99,6 +159,8 @@ jobs:
 
   dotnet-core:
     name: .NET build and test
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -148,6 +210,8 @@ jobs:
 
   node:
     name: Node build and test
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -167,7 +231,7 @@ jobs:
       - name: Install dependencies
         run: timeout --signal=TERM --kill-after=30s 300s npm ci
 
-      - name: Resolve Node test budget base
+      - name: Resolve file size ratchet base
         shell: bash
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -185,7 +249,13 @@ jobs:
           fi
 
           git rev-parse --verify "${base_ref}^{commit}" >/dev/null
-          printf 'NODE_TEST_BUDGET_BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
+          printf 'FILE_SIZE_BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
+
+      - name: Check format
+        run: timeout --signal=TERM --kill-after=30s 60s npm run format:check
+
+      - name: Check file sizes
+        run: timeout --signal=TERM --kill-after=30s 60s npm run check:filesizes
 
       - name: Check Node architecture scripts
         run: |
