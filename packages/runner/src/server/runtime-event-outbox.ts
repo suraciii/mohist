@@ -34,15 +34,41 @@
 //   - `stop()` cancels network and local-persistence retry timers and
 //     in-flight HTTP attempts but never deletes durable records.
 
-import { errorMessage } from "../core/errors.js"
-import { runnerLogger } from "../system/logger.js"
-import { currentRunnerFileSystem } from "../system/filesystem.js"
-import type { AgentSessionRuntimeEventReceipt } from "./connection.js"
-import { dirname } from "node:path"
+import { errorMessage } from '../core/errors.js'
+import { runnerLogger } from '../system/logger.js'
+import type { AgentSessionRuntimeEventReceipt } from './connection.js'
+import {
+  defaultRuntimeEventOutboxTimer,
+  NodeRuntimeEventOutboxFileSystem,
+  type AgentSessionRuntimeEventOutbox,
+  type AgentSessionRuntimeEventOutboxOptions,
+  type RuntimeEventAcknowledgementPolicy,
+  type RuntimeEventDelivery,
+  type RuntimeEventEntry,
+  type RuntimeEventOutboxFileSystem,
+  type RuntimeEventOutboxTimer,
+  type RuntimeEventRecord,
+  type RuntimeEventTarget,
+  type RuntimeEventWorkMetadata,
+} from './runtime-event-outbox-ports.js'
 
-const log = runnerLogger.child("session")
+export { nextTemporaryFilePath } from './runtime-event-outbox-ports.js'
+export type {
+  AgentSessionRuntimeEventOutbox,
+  AgentSessionRuntimeEventOutboxOptions,
+  RuntimeEventAcknowledgementPolicy,
+  RuntimeEventDelivery,
+  RuntimeEventEntry,
+  RuntimeEventOutboxFileSystem,
+  RuntimeEventOutboxTimer,
+  RuntimeEventRecord,
+  RuntimeEventTarget,
+  RuntimeEventWorkMetadata,
+} from './runtime-event-outbox-ports.js'
 
-export const RUNTIME_EVENT_OUTBOX_FILE = ".mohist/runner-state/runtime-events.json"
+const log = runnerLogger.child('session')
+
+export const RUNTIME_EVENT_OUTBOX_FILE = '.mohist/runner-state/runtime-events.json'
 const RUNTIME_EVENT_OUTBOX_VERSION = 1
 const DEFAULT_DELIVERY_TIMEOUT_MS = 5_000
 const DEFAULT_RETRY_DELAY_MS = 2_000
@@ -62,126 +88,7 @@ const DEFAULT_MAX_RETENTION_ENTRIES = 5_000
 // number of them does not corrupt the transcript, which is rebuilt from
 // later deltas and the final message. These are eligible for batch
 // delivery and are the first to be dropped under retention pressure.
-const STREAMING_DELTA_TYPES = new Set(["reasoning.delta", "message.delta"])
-let temporaryFileSequence = 0
-
-export type RuntimeEventAcknowledgementPolicy = "matching-receipt" | "successful-response"
-
-export interface RuntimeEventRecord {
-  readonly id: string
-  readonly producerFamily: "workflow-session" | "session-followup" | "generic-followup" | "binding-reconcile"
-  readonly target: RuntimeEventTarget
-  readonly runtimeSessionId: string
-  readonly runtime?: string | null
-  readonly sessionTurnId?: string | null
-  readonly work: RuntimeEventWorkMetadata | null
-  readonly event: RuntimeEventEntry
-  readonly acknowledgementPolicy: RuntimeEventAcknowledgementPolicy
-}
-
-export type RuntimeEventTarget =
-  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string }
-  | { kind: "generic"; projectId: string; sessionId: string }
-  | { kind: "session"; sessionId: string }
-
-export interface RuntimeEventWorkMetadata {
-  readonly workId: string
-  readonly workType: string
-  readonly stage: string | null
-  readonly taskRunId?: string | null
-  readonly runnerId?: string | null
-  readonly agentSessionId?: string | null
-  readonly inputDeliveryId?: string | null
-  readonly agentTurnId?: string | null
-}
-
-export interface RuntimeEventEntry {
-  readonly type: string
-  readonly payload: Record<string, unknown>
-}
-
-export interface AgentSessionRuntimeEventOutboxOptions {
-  readonly fileSystem?: RuntimeEventOutboxFileSystem
-  readonly filePath?: string
-  readonly deliver?: RuntimeEventDelivery
-  readonly deliveryTimeoutMs?: number
-  readonly retryDelayMs?: number
-  readonly localRetryDelayMs?: number
-  readonly boundedConcurrency?: number
-  readonly deliveryBatchSize?: number
-  readonly maxRetentionEntries?: number
-  readonly randomId?: () => string
-  readonly monotonicSequence?: () => number
-  readonly clock?: () => Date
-  /**
-   * Inject the Worker-equivalent timer so tests can drive the local
-   * persistence retry timer with `vi.useFakeTimers()`. The default uses
-   * `setTimeout`, which is also controllable by `vi.useFakeTimers()`.
-   */
-  readonly timer?: RuntimeEventOutboxTimer
-}
-
-export interface RuntimeEventOutboxTimer {
-  setTimeout(handler: () => void, ms: number): { unref(): void; [Symbol.dispose]?: () => void } | null
-  clearTimeout(handle: { unref(): void } | null): void
-}
-
-const defaultRuntimeEventOutboxTimer: RuntimeEventOutboxTimer = {
-  setTimeout(handler, ms) {
-    const handle = setTimeout(handler, ms)
-    handle.unref?.()
-    return handle
-  },
-  clearTimeout(handle) {
-    if (handle === null) return
-    clearTimeout(handle as unknown as ReturnType<typeof setTimeout>)
-  },
-}
-
-/**
- * Narrow filesystem port used by the snapshot/import store. Tests inject
- * an in-memory implementation; production uses the Node adapter.
- */
-export interface RuntimeEventOutboxFileSystem {
-  readText(path: string): Promise<string | null>
-  writeAtomicText(path: string, body: string): Promise<void>
-}
-
-export interface RuntimeEventDelivery {
-  send(record: RuntimeEventRecord, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]>
-  /**
-   * Deliver a batch of records sharing one sequence key in a single
-   * server call. Default implementation loops `send`; production
-   * overrides it to POST all events in one request. Returns one receipt
-   * per input record, in order, so the outbox can settle each record
-   * independently by its acknowledgement policy.
-   */
-  sendBatch?(records: readonly RuntimeEventRecord[], signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[][]>
-}
-
-export interface AgentSessionRuntimeEventOutbox {
-  ready(): boolean
-  load(): Promise<void>
-  recover(): Promise<void>
-  enqueueBeforeExecution(
-    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "runtime" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
-  ): Promise<void>
-  awaitInputReceipt?(recordId: string): Promise<AgentSessionRuntimeEventReceipt>
-  enqueueProducedFact(record: RuntimeEventRecord): Promise<void>
-  /**
-   * Enqueue a batch of produced facts sharing one target in one
-   * persistSnapshot write. Used by the Workflow reporter to flush a
-   * turn's worth of streaming deltas without paying one disk snapshot
-   * per token. On persist failure every record of the batch is rolled
-   * back and the outbox goes unhealthy — same semantics as
-   * `enqueueProducedFact`, applied atomically to the whole batch.
-   */
-  enqueueProducedFactBatch(records: readonly RuntimeEventRecord[]): Promise<void>
-  kick(): Promise<void>
-  stop(): Promise<void>
-  /** Snapshot the current ordered records — observable for tests. */
-  snapshot(): readonly RuntimeEventRecord[]
-}
+const STREAMING_DELTA_TYPES = new Set(['reasoning.delta', 'message.delta'])
 
 interface InternalRecord extends RuntimeEventRecord {
   readonly sequence: number
@@ -191,30 +98,6 @@ interface InternalRecord extends RuntimeEventRecord {
 interface SnapshotShape {
   version: number
   entries: InternalRecord[]
-}
-
-export class NodeRuntimeEventOutboxFileSystem implements RuntimeEventOutboxFileSystem {
-  async readText(path: string): Promise<string | null> {
-    try {
-      return await currentRunnerFileSystem().readText(path)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
-      throw error
-    }
-  }
-
-  async writeAtomicText(path: string, body: string): Promise<void> {
-    const fileSystem = currentRunnerFileSystem()
-    await fileSystem.ensureDir(dirname(path))
-    const temporary = nextTemporaryFilePath(path)
-    await fileSystem.writeText(temporary, body, { mode: 0o600 })
-    await fileSystem.rename(temporary, path)
-  }
-}
-
-export function nextTemporaryFilePath(path: string): string {
-  temporaryFileSequence += 1
-  return `${path}.${temporaryFileSequence}.tmp`
 }
 
 export function createAgentSessionRuntimeEventOutbox(
@@ -240,10 +123,13 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private readonly now: () => Date
   private readonly timer: RuntimeEventOutboxTimer
   private readonly records = new Map<string, InternalRecord>()
-  private readonly inputReceiptWaiters = new Map<string, {
-    resolve: (receipt: AgentSessionRuntimeEventReceipt) => void
-    reject: (error: Error) => void
-  }>()
+  private readonly inputReceiptWaiters = new Map<
+    string,
+    {
+      resolve: (receipt: AgentSessionRuntimeEventReceipt) => void
+      reject: (error: Error) => void
+    }
+  >()
   private readonly receivedInputReceipts = new Map<string, AgentSessionRuntimeEventReceipt>()
   private loaded = false
   private healthy = false
@@ -267,7 +153,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.boundedConcurrency = Math.max(1, options.boundedConcurrency ?? DEFAULT_BOUNDED_CONCURRENCY)
     this.deliveryBatchSize = Math.max(1, options.deliveryBatchSize ?? DEFAULT_DELIVERY_BATCH_SIZE)
     this.maxRetentionEntries = Math.max(1, options.maxRetentionEntries ?? DEFAULT_MAX_RETENTION_ENTRIES)
-    this.randomId = options.randomId ?? (() => `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`)
+    this.randomId =
+      options.randomId ?? (() => `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`)
     this.monotonicSequence = options.monotonicSequence ?? (() => ++sharedSequenceCounter)
     this.now = options.clock ?? (() => new Date())
     this.timer = options.timer ?? defaultRuntimeEventOutboxTimer
@@ -311,7 +198,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       // again or another load/save path replaces it.
       this.healthy = false
       this.recoveryRequiresLoad = true
-      this.lastLoadError = new Error("runtime events snapshot is unreadable")
+      this.lastLoadError = new Error('runtime events snapshot is unreadable')
       this.scheduleLocalRetry()
       return
     }
@@ -323,10 +210,21 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   async enqueueBeforeExecution(
-    record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "runtime" | "sessionTurnId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
+    record: Pick<
+      RuntimeEventRecord,
+      | 'id'
+      | 'target'
+      | 'runtimeSessionId'
+      | 'runtime'
+      | 'sessionTurnId'
+      | 'work'
+      | 'event'
+      | 'acknowledgementPolicy'
+      | 'producerFamily'
+    >,
   ): Promise<void> {
-    if (this.stopped) throw new Error("runtime-event outbox is stopped; cannot enqueue")
-    this.requireLoaded("enqueueBeforeExecution")
+    if (this.stopped) throw new Error('runtime-event outbox is stopped; cannot enqueue')
+    this.requireLoaded('enqueueBeforeExecution')
     const sequence = this.monotonicSequence()
     const internal: InternalRecord = {
       ...record,
@@ -344,7 +242,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   async awaitInputReceipt(recordId: string): Promise<AgentSessionRuntimeEventReceipt> {
-    this.requireLoaded("awaitInputReceipt")
+    this.requireLoaded('awaitInputReceipt')
     const received = this.receivedInputReceipts.get(recordId)
     if (received) {
       this.receivedInputReceipts.delete(recordId)
@@ -369,8 +267,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   async enqueueProducedFactBatch(records: readonly RuntimeEventRecord[]): Promise<void> {
-    if (this.stopped) throw new Error("runtime-event outbox is stopped; cannot enqueue")
-    this.requireLoaded("enqueueProducedFactBatch")
+    if (this.stopped) throw new Error('runtime-event outbox is stopped; cannot enqueue')
+    this.requireLoaded('enqueueProducedFactBatch')
     if (records.length === 0) return
     const enqueuedAt = this.now().toISOString()
     for (const record of records) {
@@ -405,9 +303,9 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       overflow -= 1
     }
     if (this.records.size > this.maxRetentionEntries) {
-      log.warn("runtime-event outbox retention cap exceeded", {
+      log.warn('runtime-event outbox retention cap exceeded', {
         reason: `limit=${this.maxRetentionEntries} remaining=${this.records.size}`,
-        session: "outbox",
+        session: 'outbox',
       })
     }
   }
@@ -436,7 +334,11 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       this.localRetry = null
     }
     if (this.snapshotInFlight) {
-      try { await this.snapshotInFlight } catch { /* best effort */ }
+      try {
+        await this.snapshotInFlight
+      } catch {
+        /* best effort */
+      }
     }
     await this.snapshotWriteTail
   }
@@ -461,7 +363,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       }
       if (tick.length === 0) break
       const outcomes = await Promise.allSettled(tick)
-      const acknowledged = outcomes.some((r) => r.status === "fulfilled" && r.value === true)
+      const acknowledged = outcomes.some((r) => r.status === 'fulfilled' && r.value === true)
       if (!acknowledged) break
     }
     if (!signal.aborted && this.healthy && this.records.size > 0) {
@@ -496,7 +398,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (signal.aborted || batch.length === 0) return false
     const controller = new AbortController()
     const abortFromStop = () => controller.abort(signal.reason)
-    signal.addEventListener("abort", abortFromStop, { once: true })
+    signal.addEventListener('abort', abortFromStop, { once: true })
     let timedOut = false
     const timer = this.timer.setTimeout(() => {
       if (!controller.signal.aborted) {
@@ -512,7 +414,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       transportError = error
     } finally {
       this.timer.clearTimeout(timer)
-      signal.removeEventListener("abort", abortFromStop)
+      signal.removeEventListener('abort', abortFromStop)
     }
     if (timedOut) {
       transportError = new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`)
@@ -532,13 +434,16 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       const receipts = perRecord[i] ?? []
       const receipt = matchingReceipt(record.acknowledgementPolicy, record, receipts)
       if (!receipt) {
-        this.rejectInputReceipt(record.id, new Error(`workflow input ${record.id} did not receive a matching Server receipt`))
+        this.rejectInputReceipt(
+          record.id,
+          new Error(`workflow input ${record.id} did not receive a matching Server receipt`),
+        )
         continue
       }
       if (this.records.get(record.id) !== record) continue
       this.records.delete(record.id)
       removed.push(record)
-      if (record.producerFamily === "workflow-session" && record.event.type === "session.input")
+      if (record.producerFamily === 'workflow-session' && record.event.type === 'session.input')
         this.resolveInputReceipt(record.id, receipt)
       anyAcknowledged = true
     }
@@ -700,37 +605,38 @@ function collectGroups(records: InternalRecord[]): GroupSnapshot[] {
 }
 
 function sequenceKey(record: RuntimeEventRecord): SequenceKey {
-  if (record.producerFamily === "workflow-session") {
-    if (record.target.kind !== "workflow") throw new Error("workflow-session family requires workflow target")
+  if (record.producerFamily === 'workflow-session') {
+    if (record.target.kind !== 'workflow') throw new Error('workflow-session family requires workflow target')
     return {
-      family: "workflow-session",
+      family: 'workflow-session',
       projectId: record.target.projectId,
       workflowRunId: record.target.workflowRunId,
       sessionName: record.target.sessionName,
       execution: workflowExecutionIdentity(record),
     }
   }
-  if (record.producerFamily === "binding-reconcile") {
-    if (record.target.kind !== "session") throw new Error("binding-reconcile family requires session target")
+  if (record.producerFamily === 'binding-reconcile') {
+    if (record.target.kind !== 'session') throw new Error('binding-reconcile family requires session target')
     return {
-      family: "binding-reconcile",
+      family: 'binding-reconcile',
       sessionId: record.target.sessionId,
       runtimeSessionId: record.runtimeSessionId,
     }
   }
-  if (record.producerFamily === "session-followup") {
-    if (record.target.kind !== "session") throw new Error("session-followup family requires Session target")
-    if (!nonEmpty(record.sessionTurnId)) throw new Error("session-followup record requires its immutable Agent turn identity")
+  if (record.producerFamily === 'session-followup') {
+    if (record.target.kind !== 'session') throw new Error('session-followup family requires Session target')
+    if (!nonEmpty(record.sessionTurnId))
+      throw new Error('session-followup record requires its immutable Agent turn identity')
     return {
-      family: "session-followup",
+      family: 'session-followup',
       sessionId: record.target.sessionId,
       runtimeSessionId: record.runtimeSessionId,
       sessionTurnId: record.sessionTurnId,
     }
   }
-  if (record.target.kind !== "generic") throw new Error("generic-followup family requires generic target")
+  if (record.target.kind !== 'generic') throw new Error('generic-followup family requires generic target')
   return {
-    family: "generic-followup",
+    family: 'generic-followup',
     projectId: record.target.projectId,
     sessionId: record.target.sessionId,
   }
@@ -752,20 +658,22 @@ export interface WorkflowRuntimeEventExecutionIdentity {
 }
 
 export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowRuntimeEventExecutionIdentity | null {
-  if (record.producerFamily !== "workflow-session" || record.target.kind !== "workflow") return null
+  if (record.producerFamily !== 'workflow-session' || record.target.kind !== 'workflow') return null
   const work = record.work
-  if (!work
-    || !nonEmpty(work.workId)
-    || !nonEmpty(work.taskRunId)
-    || !nonEmpty(work.runnerId)
-    || !nonEmpty(work.agentSessionId)
-    || !nonEmpty(work.inputDeliveryId)
-    || !nonEmpty(record.runtime)
-    || !nonEmpty(record.runtimeSessionId)) {
-    throw new Error("workflow-session execution record requires its complete immutable execution identity")
+  if (
+    !work ||
+    !nonEmpty(work.workId) ||
+    !nonEmpty(work.taskRunId) ||
+    !nonEmpty(work.runnerId) ||
+    !nonEmpty(work.agentSessionId) ||
+    !nonEmpty(work.inputDeliveryId) ||
+    !nonEmpty(record.runtime) ||
+    !nonEmpty(record.runtimeSessionId)
+  ) {
+    throw new Error('workflow-session execution record requires its complete immutable execution identity')
   }
   if (work.agentTurnId !== undefined && work.agentTurnId !== null && !nonEmpty(work.agentTurnId))
-    throw new Error("workflow-session execution record has an invalid Agent turn identity")
+    throw new Error('workflow-session execution record has an invalid Agent turn identity')
   return {
     runnerId: work.runnerId,
     agentSessionId: work.agentSessionId,
@@ -779,11 +687,11 @@ export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowR
 }
 
 function nonEmpty(value: string | null | undefined): value is string {
-  return typeof value === "string" && value.length > 0
+  return typeof value === 'string' && value.length > 0
 }
 
 function sequenceKeyLabel(key: SequenceKey): string {
-  if (key.family === "workflow-session") {
+  if (key.family === 'workflow-session') {
     return JSON.stringify({
       family: key.family,
       projectId: key.projectId,
@@ -792,10 +700,10 @@ function sequenceKeyLabel(key: SequenceKey): string {
       execution: key.execution ?? null,
     })
   }
-  if (key.family === "binding-reconcile") {
+  if (key.family === 'binding-reconcile') {
     return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
   }
-  if (key.family === "session-followup") {
+  if (key.family === 'session-followup') {
     return `session-followup:${key.sessionId}:${key.runtimeSessionId}:${key.sessionTurnId}`
   }
   return `generic-followup:${key.projectId}:${key.sessionId}`
@@ -806,14 +714,14 @@ function matchingReceipt(
   record: RuntimeEventRecord,
   receipts: AgentSessionRuntimeEventReceipt[],
 ): AgentSessionRuntimeEventReceipt | null {
-  if (policy === "successful-response") return receipts[0] ?? { type: record.event.type }
+  if (policy === 'successful-response') return receipts[0] ?? { type: record.event.type }
   const matching = receipts.find((entry) => entry.type === record.event.type)
   if (!matching) return null
-  if (record.producerFamily === "workflow-session" && record.event.type === "session.input" && record.work?.taskRunId) {
-    return matching.inputDeliveryId === record.id
-      && matching.agentSessionId === record.work.agentSessionId
-      && typeof matching.agentTurnId === "string"
-      && matching.agentTurnId.length > 0
+  if (record.producerFamily === 'workflow-session' && record.event.type === 'session.input' && record.work?.taskRunId) {
+    return matching.inputDeliveryId === record.id &&
+      matching.agentSessionId === record.work.agentSessionId &&
+      typeof matching.agentTurnId === 'string' &&
+      matching.agentTurnId.length > 0
       ? matching
       : null
   }
@@ -832,11 +740,15 @@ function serializeSnapshot(entries: InternalRecord[]): string {
 function parseSnapshot(raw: string): SnapshotShape | null {
   try {
     const value = JSON.parse(raw) as unknown
-    if (!isPlainObject(value) || value["version"] !== RUNTIME_EVENT_OUTBOX_VERSION || !Array.isArray(value["entries"])) {
+    if (
+      !isPlainObject(value) ||
+      value['version'] !== RUNTIME_EVENT_OUTBOX_VERSION ||
+      !Array.isArray(value['entries'])
+    ) {
       return null
     }
     const entries: InternalRecord[] = []
-    for (const item of value["entries"]) {
+    for (const item of value['entries']) {
       const parsed = parseInternalRecord(item)
       if (!parsed) return null
       entries.push(parsed)
@@ -849,26 +761,32 @@ function parseSnapshot(raw: string): SnapshotShape | null {
 
 function parseInternalRecord(value: unknown): InternalRecord | null {
   if (!isPlainObject(value)) return null
-  const id = value["id"]
-  const target = value["target"]
-  const family = value["producerFamily"]
-  const runtimeSessionId = value["runtimeSessionId"]
-  const runtime = value["runtime"]
-  const sessionTurnId = value["sessionTurnId"]
-  const event = value["event"]
-  const policy = value["acknowledgementPolicy"]
-  const work = value["work"] ?? null
-  const sequence = value["sequence"]
-  const enqueuedAt = value["enqueuedAt"]
-  if (typeof id !== "string" || !isRuntimeTarget(target)
-    || (family !== "workflow-session" && family !== "session-followup" && family !== "generic-followup" && family !== "binding-reconcile")
-    || typeof runtimeSessionId !== "string"
-    || (runtime !== undefined && runtime !== null && typeof runtime !== "string")
-    || (sessionTurnId !== undefined && sessionTurnId !== null && typeof sessionTurnId !== "string")
-    || !isRuntimeEvent(event)
-    || (policy !== "matching-receipt" && policy !== "successful-response")
-    || typeof sequence !== "number"
-    || typeof enqueuedAt !== "string") {
+  const id = value['id']
+  const target = value['target']
+  const family = value['producerFamily']
+  const runtimeSessionId = value['runtimeSessionId']
+  const runtime = value['runtime']
+  const sessionTurnId = value['sessionTurnId']
+  const event = value['event']
+  const policy = value['acknowledgementPolicy']
+  const work = value['work'] ?? null
+  const sequence = value['sequence']
+  const enqueuedAt = value['enqueuedAt']
+  if (
+    typeof id !== 'string' ||
+    !isRuntimeTarget(target) ||
+    (family !== 'workflow-session' &&
+      family !== 'session-followup' &&
+      family !== 'generic-followup' &&
+      family !== 'binding-reconcile') ||
+    typeof runtimeSessionId !== 'string' ||
+    (runtime !== undefined && runtime !== null && typeof runtime !== 'string') ||
+    (sessionTurnId !== undefined && sessionTurnId !== null && typeof sessionTurnId !== 'string') ||
+    !isRuntimeEvent(event) ||
+    (policy !== 'matching-receipt' && policy !== 'successful-response') ||
+    typeof sequence !== 'number' ||
+    typeof enqueuedAt !== 'string'
+  ) {
     return null
   }
   if (work !== null && !isRuntimeWorkMetadata(work)) return null
@@ -877,8 +795,8 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
     producerFamily: family,
     target,
     runtimeSessionId,
-    runtime: typeof runtime === "string" ? runtime : null,
-    sessionTurnId: typeof sessionTurnId === "string" ? sessionTurnId : null,
+    runtime: typeof runtime === 'string' ? runtime : null,
+    sessionTurnId: typeof sessionTurnId === 'string' ? sessionTurnId : null,
     work,
     event,
     acknowledgementPolicy: policy,
@@ -902,41 +820,48 @@ function stripInternal(record: InternalRecord): RuntimeEventRecord {
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function isRuntimeTarget(value: unknown): value is RuntimeEventTarget {
   if (!isPlainObject(value)) return false
-  if (value["kind"] === "workflow") {
-    return typeof value["projectId"] === "string"
-      && typeof value["workflowRunId"] === "string"
-      && typeof value["sessionName"] === "string"
+  if (value['kind'] === 'workflow') {
+    return (
+      typeof value['projectId'] === 'string' &&
+      typeof value['workflowRunId'] === 'string' &&
+      typeof value['sessionName'] === 'string'
+    )
   }
-  if (value["kind"] === "generic") {
-    return typeof value["projectId"] === "string"
-      && typeof value["sessionId"] === "string"
+  if (value['kind'] === 'generic') {
+    return typeof value['projectId'] === 'string' && typeof value['sessionId'] === 'string'
   }
-  if (value["kind"] === "session") return typeof value["sessionId"] === "string"
+  if (value['kind'] === 'session') return typeof value['sessionId'] === 'string'
   return false
 }
 
 function isRuntimeEvent(value: unknown): value is RuntimeEventEntry {
   if (!isPlainObject(value)) return false
-  const type = value["type"]
-  const payload = value["payload"]
-  return typeof type === "string" && isPlainObject(payload)
+  const type = value['type']
+  const payload = value['payload']
+  return typeof type === 'string' && isPlainObject(payload)
 }
 
 function isRuntimeWorkMetadata(value: unknown): value is RuntimeEventWorkMetadata {
   if (!isPlainObject(value)) return false
-  return typeof value["workId"] === "string"
-    && typeof value["workType"] === "string"
-    && (value["stage"] === null || typeof value["stage"] === "string")
-    && (value["taskRunId"] === undefined || value["taskRunId"] === null || typeof value["taskRunId"] === "string")
-    && (value["runnerId"] === undefined || value["runnerId"] === null || typeof value["runnerId"] === "string")
-    && (value["agentSessionId"] === undefined || value["agentSessionId"] === null || typeof value["agentSessionId"] === "string")
-    && (value["inputDeliveryId"] === undefined || value["inputDeliveryId"] === null || typeof value["inputDeliveryId"] === "string")
-    && (value["agentTurnId"] === undefined || value["agentTurnId"] === null || typeof value["agentTurnId"] === "string")
+  return (
+    typeof value['workId'] === 'string' &&
+    typeof value['workType'] === 'string' &&
+    (value['stage'] === null || typeof value['stage'] === 'string') &&
+    (value['taskRunId'] === undefined || value['taskRunId'] === null || typeof value['taskRunId'] === 'string') &&
+    (value['runnerId'] === undefined || value['runnerId'] === null || typeof value['runnerId'] === 'string') &&
+    (value['agentSessionId'] === undefined ||
+      value['agentSessionId'] === null ||
+      typeof value['agentSessionId'] === 'string') &&
+    (value['inputDeliveryId'] === undefined ||
+      value['inputDeliveryId'] === null ||
+      typeof value['inputDeliveryId'] === 'string') &&
+    (value['agentTurnId'] === undefined || value['agentTurnId'] === null || typeof value['agentTurnId'] === 'string')
+  )
 }
 
 function cloneInternal(record: InternalRecord): InternalRecord {
@@ -958,12 +883,15 @@ function cloneInternal(record: InternalRecord): InternalRecord {
   }
 }
 
-async function defaultDelivery(_record: RuntimeEventRecord, _signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
-  throw new Error("Runtime event outbox has no delivery implementation; inject one via options.deliver")
+async function defaultDelivery(
+  _record: RuntimeEventRecord,
+  _signal: AbortSignal,
+): Promise<AgentSessionRuntimeEventReceipt[]> {
+  throw new Error('Runtime event outbox has no delivery implementation; inject one via options.deliver')
 }
 
 interface SequenceKey {
-  readonly family: "workflow-session" | "session-followup" | "generic-followup" | "binding-reconcile"
+  readonly family: 'workflow-session' | 'session-followup' | 'generic-followup' | 'binding-reconcile'
   readonly projectId?: string
   readonly workflowRunId?: string
   readonly sessionName?: string
