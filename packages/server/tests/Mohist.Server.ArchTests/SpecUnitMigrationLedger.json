@@ -2555,6 +2555,59 @@
         "inlineDataRows": 0,
         "mtpCases": 7
       }
+    },
+    {
+      "id": "current-recording-background-task-launcher",
+      "kind": "current",
+      "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/RecordingBackgroundTaskLauncherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.RecordingBackgroundTaskLauncherTests"
+      },
+      "discovered": {
+        "factMethods": 9,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 9
+      },
+      "status": "REVIEW",
+      "closure": {
+        "classification": "static-light-fake-seam",
+        "symbols": [
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncher",
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncher.PokeWork",
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+        ],
+        "digest": "e868d138d08f54a105807398962defa4151af69cafcbc3cb9dbcf79ee6a051ff",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs case-digest=3efff962a7080862c43049184c27104e53a703b9ff7b89912c73352b81a7dc1e source-content-digest=4f310c12eda988e2584c152d0a83b9599ab12e01803b2590f13f1bf29a9c6bb2 executable-closure-digest=e868d138d08f54a105807398962defa4151af69cafcbc3cb9dbcf79ee6a051ff edges-digest=509a4ec7bfc6122e015248429deb373d726ba0f31d08c632c1393aca04111764"
+      },
+      "owner": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+      "history": {
+        "operation": "current-inventory",
+        "pr": "#423",
+        "commit": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+        "sourceContentDigest": "4f310c12eda988e2584c152d0a83b9599ab12e01803b2590f13f1bf29a9c6bb2",
+        "note": "Current compiled static-light spec introduced after the #423 classification baseline by #429; explicit REVIEW keeps the server-spec owner until a separate Unit migration is implemented."
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+        "caseCount": 9,
+        "caseIdentityDigest": "3efff962a7080862c43049184c27104e53a703b9ff7b89912c73352b81a7dc1e",
+        "closureIdentityDigest": "e868d138d08f54a105807398962defa4151af69cafcbc3cb9dbcf79ee6a051ff",
+        "sourceContentDigest": "4f310c12eda988e2584c152d0a83b9599ab12e01803b2590f13f1bf29a9c6bb2"
+      }
     }
   ]
 }
