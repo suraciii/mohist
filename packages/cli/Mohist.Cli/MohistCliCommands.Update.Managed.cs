@@ -50,11 +50,15 @@ internal partial class SourceCodeUpdater
             return await FinalizeManagedFailureAsync(context, 1, postOutcome);
         }
 
+        Func<CancellationToken, Task<string?>>? beforeActivation = IncludesManagedScope(scope, "runner")
+            ? ConfirmRunnerUpdateInterruptAsync
+            : null;
         var prepared = await _operations.PrepareManagedUpdateAsync(
             repoRoot,
             scope,
             context.JobId,
             resolvedCliPath,
+            beforeActivation,
             cancellationToken);
         if (prepared.Session is null)
         {
@@ -161,6 +165,19 @@ internal partial class SourceCodeUpdater
                 };
         }
 
+        return null;
+    }
+
+    private async Task<string?> ConfirmRunnerUpdateInterruptAsync(CancellationToken cancellationToken)
+    {
+        var interruption = await _runnerRefreshVerifier.InterruptRunnerAsync(cancellationToken);
+        if (!interruption.Succeeded)
+        {
+            return $"runner update interrupt was not confirmed: {interruption.Error ?? "invalid response"}; managed runner service was not restarted";
+        }
+
+        _out.WriteLine(
+            $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
         return null;
     }
 

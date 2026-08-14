@@ -53,11 +53,18 @@ internal sealed class UpdateOperations
         string scope,
         string transactionId,
         string? cliPath,
+        Func<CancellationToken, Task<string?>>? beforeActivation = null,
         CancellationToken cancellationToken = default)
     {
         if (_managedRuntime is null)
             return (null, "service installer does not support managed runtime activation");
-        return await _managedRuntime.PrepareAsync(repoRoot, scope, transactionId, cliPath, cancellationToken);
+        return await _managedRuntime.PrepareAsync(
+            repoRoot,
+            scope,
+            transactionId,
+            cliPath,
+            beforeActivation,
+            cancellationToken);
     }
 
     public Task<int> CommitManagedUpdateAsync(
