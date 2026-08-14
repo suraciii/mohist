@@ -55,7 +55,15 @@ function renderUseWorkflowProfile(id: string | null) {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider
           initialProjectId="proj-1"
-          initialProjects={[{ id: 'proj-1', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}
+          initialProjects={[
+            {
+              id: 'proj-1',
+              name: 'Project',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
         >
           {children}
         </ProjectProvider>
@@ -102,15 +110,17 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
     const { result } = renderUseWorkflowProfile('mohist/local')
 
     await flush()
-    expect(result.current.data).toEqual(expect.objectContaining({
-      id: 'mohist/local',
-      displayName: 'Mohist Local',
-      description: PROFILE_DETAIL.description,
-      isDefault: true,
-      agentAction: 'mohist/opencode',
-      agentRuntime: 'opencode',
-      definitionSource: PROFILE_DETAIL.definitionSource,
-    }))
+    expect(result.current.data).toEqual(
+      expect.objectContaining({
+        id: 'mohist/local',
+        displayName: 'Mohist Local',
+        description: PROFILE_DETAIL.description,
+        isDefault: true,
+        agentAction: 'mohist/opencode',
+        agentRuntime: 'opencode',
+        definitionSource: PROFILE_DETAIL.definitionSource,
+      }),
+    )
 
     expect(result.current.data?.id).toBe('mohist/local')
     expect(result.current.data?.yaml).toBe(PROFILE_DETAIL.definitionSource)

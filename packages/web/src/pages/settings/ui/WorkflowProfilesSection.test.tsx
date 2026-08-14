@@ -1,9 +1,4 @@
-import {
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
 import { setScopedProperty } from '../../../../tests/support/scoped-property'
@@ -67,23 +62,23 @@ const overflowByTestId = new Map<string, boolean>()
 const DETAILS = {
   'mohist/local': { ...DEFAULT_DETAIL, displayName: DEFAULT_DETAIL.name },
   'mohist/quick-fix': {
-        id: 'mohist/quick-fix',
-        displayName: 'Mohist Quick Fix',
-        description: SYSTEM_TEMPLATES[1].description,
-        isDefault: false,
-        yaml: 'description: quick-fix\nstages:\n  - stage: check\n    checks:\n      - merge-ready\n  - stage: integrate\n    requiresApproval: true\n',
-        stages: [
-          { stage: 'check', requiresApproval: false, tasks: [], checks: ['merge-ready'] },
-          { stage: 'integrate', requiresApproval: true, tasks: [], checks: [] },
-        ],
+    id: 'mohist/quick-fix',
+    displayName: 'Mohist Quick Fix',
+    description: SYSTEM_TEMPLATES[1].description,
+    isDefault: false,
+    yaml: 'description: quick-fix\nstages:\n  - stage: check\n    checks:\n      - merge-ready\n  - stage: integrate\n    requiresApproval: true\n',
+    stages: [
+      { stage: 'check', requiresApproval: false, tasks: [], checks: ['merge-ready'] },
+      { stage: 'integrate', requiresApproval: true, tasks: [], checks: [] },
+    ],
   },
   'mohist/experiment': {
-        id: 'mohist/experiment',
-        displayName: 'Mohist Experiment',
-        description: SYSTEM_TEMPLATES[2].description,
-        isDefault: false,
-        yaml: 'description: experiment\nstages: []\n',
-        stages: [],
+    id: 'mohist/experiment',
+    displayName: 'Mohist Experiment',
+    description: SYSTEM_TEMPLATES[2].description,
+    isDefault: false,
+    yaml: 'description: experiment\nstages: []\n',
+    stages: [],
   },
 }
 
@@ -178,12 +173,8 @@ describe('WorkflowProfilesSection', () => {
     it('disables an enabled non-last profile through the switch', async () => {
       render(<WorkflowProfilesSection />)
 
-      const quickFixCard = await waitFor(() =>
-        screen.getByTestId('workflow-profile-mohist/quick-fix'),
-      )
-      fireEvent.click(
-        within(quickFixCard).getByRole('switch', { name: 'Disable workflow profile Mohist Quick Fix' }),
-      )
+      const quickFixCard = await waitFor(() => screen.getByTestId('workflow-profile-mohist/quick-fix'))
+      fireEvent.click(within(quickFixCard).getByRole('switch', { name: 'Disable workflow profile Mohist Quick Fix' }))
 
       await waitFor(() => {
         expect(disableRequests).toEqual(['mohist/quick-fix'])
@@ -204,25 +195,23 @@ describe('WorkflowProfilesSection', () => {
       render(<WorkflowProfilesSection />)
 
       for (const profile of SYSTEM_TEMPLATES) {
-        await waitFor(() =>
-          expect(screen.getByTestId(`workflow-profile-${profile.id}`)).toBeInTheDocument(),
-        )
+        await waitFor(() => expect(screen.getByTestId(`workflow-profile-${profile.id}`)).toBeInTheDocument())
       }
 
       const defaultCard = screen.getByTestId('workflow-profile-mohist/local')
-      const defaultDescription = within(defaultCard).getByTestId(
-        'workflow-profile-mohist/local-description',
-      )
+      const defaultDescription = within(defaultCard).getByTestId('workflow-profile-mohist/local-description')
       expect(defaultDescription.className).toContain('whitespace-pre-line')
-      expect(defaultDescription.textContent).toContain('Full Mohist pipeline for shipping user-visible changes end-to-end.')
+      expect(defaultDescription.textContent).toContain(
+        'Full Mohist pipeline for shipping user-visible changes end-to-end.',
+      )
       expect(defaultDescription.textContent).toContain('Best suited for: new features')
 
       const quickFixCard = screen.getByTestId('workflow-profile-mohist/quick-fix')
-      const quickFixDescription = within(quickFixCard).getByTestId(
-        'workflow-profile-mohist/quick-fix-description',
-      )
+      const quickFixDescription = within(quickFixCard).getByTestId('workflow-profile-mohist/quick-fix-description')
       expect(quickFixDescription.className).toContain('whitespace-pre-line')
-      expect(quickFixDescription.textContent).toContain('Lightweight workflow for small, low-risk, fast-turnaround changes.')
+      expect(quickFixDescription.textContent).toContain(
+        'Lightweight workflow for small, low-risk, fast-turnaround changes.',
+      )
 
       expect(within(defaultCard).getByText('System default')).toBeInTheDocument()
       expect(within(quickFixCard).queryByText('System default')).not.toBeInTheDocument()
@@ -249,12 +238,8 @@ describe('WorkflowProfilesSection', () => {
     it('renders single-line descriptions without truncation or layout issues', async () => {
       render(<WorkflowProfilesSection />)
 
-      const experimentCard = await waitFor(() =>
-        screen.getByTestId('workflow-profile-mohist/experiment'),
-      )
-      const description = within(experimentCard).getByTestId(
-        'workflow-profile-mohist/experiment-description',
-      )
+      const experimentCard = await waitFor(() => screen.getByTestId('workflow-profile-mohist/experiment'))
+      const description = within(experimentCard).getByTestId('workflow-profile-mohist/experiment-description')
       expect(description.textContent).toBe('Short single-line description for test.')
       expect(description.className).toContain('whitespace-pre-line')
       expect(screen.queryByText('Read more')).not.toBeInTheDocument()
@@ -265,9 +250,7 @@ describe('WorkflowProfilesSection', () => {
 
       render(<WorkflowProfilesSection />)
 
-      const defaultDescription = await waitFor(() =>
-        screen.getByTestId('workflow-profile-mohist/local-description'),
-      )
+      const defaultDescription = await waitFor(() => screen.getByTestId('workflow-profile-mohist/local-description'))
       const readMore = screen.getByRole('button', { name: 'Read more' })
 
       fireEvent.keyDown(readMore, { key: 'Enter' })
@@ -286,9 +269,7 @@ describe('WorkflowProfilesSection', () => {
 
       render(<WorkflowProfilesSection />)
 
-      const defaultDescription = await waitFor(() =>
-        screen.getByTestId('workflow-profile-mohist/local-description'),
-      )
+      const defaultDescription = await waitFor(() => screen.getByTestId('workflow-profile-mohist/local-description'))
 
       expect(screen.getByText('Read more')).toBeInTheDocument()
       expect(defaultDescription.className).toContain('line-clamp-2')
@@ -307,7 +288,9 @@ describe('WorkflowProfilesSection', () => {
       render(<WorkflowProfilesSection />)
 
       await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument())
-      await user.click(within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', { name: 'View details' }))
+      await user.click(
+        within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', { name: 'View details' }),
+      )
       await user.click(await screen.findByTestId('workflow-profile-agent-action-selector'))
 
       expect(await screen.findByRole('option', { name: 'mohist/opencode' })).toBeInTheDocument()
@@ -323,7 +306,9 @@ describe('WorkflowProfilesSection', () => {
       render(<WorkflowProfilesSection />)
 
       await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/quick-fix')).toBeInTheDocument())
-      await user.click(within(screen.getByTestId('workflow-profile-mohist/quick-fix')).getByRole('button', { name: 'View details' }))
+      await user.click(
+        within(screen.getByTestId('workflow-profile-mohist/quick-fix')).getByRole('button', { name: 'View details' }),
+      )
 
       expect(screen.queryByTestId('workflow-profile-agent-action-selector')).not.toBeInTheDocument()
     })
@@ -331,9 +316,7 @@ describe('WorkflowProfilesSection', () => {
     it('shows the full multi-line description at the top with readable formatting and whitespace-pre-line', async () => {
       render(<WorkflowProfilesSection />)
 
-      await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
-      )
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument())
 
       fireEvent.click(
         within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', {
@@ -341,9 +324,7 @@ describe('WorkflowProfilesSection', () => {
         }),
       )
 
-      const description = await waitFor(() =>
-        screen.getByTestId('workflow-profile-description'),
-      )
+      const description = await waitFor(() => screen.getByTestId('workflow-profile-description'))
       expect(description.className).toContain('whitespace-pre-line')
       expect(description.className).not.toContain('font-mono')
       expect(description.className).not.toContain('line-clamp')
@@ -359,18 +340,14 @@ describe('WorkflowProfilesSection', () => {
       document.body.appendChild(container)
       render(<WorkflowProfilesSection />, { container })
 
-      await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
-      )
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument())
       fireEvent.click(
         within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', {
           name: 'View details',
         }),
       )
 
-      await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-description')).toBeInTheDocument(),
-      )
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-description')).toBeInTheDocument())
 
       const description = screen.getByTestId('workflow-profile-description')
       const stagesHeading = screen.getByText('Stages')
@@ -384,23 +361,17 @@ describe('WorkflowProfilesSection', () => {
     it('falls back to the All profiles view when the back button is clicked', async () => {
       render(<WorkflowProfilesSection />)
 
-      await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
-      )
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument())
       fireEvent.click(
         within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', {
           name: 'View details',
         }),
       )
 
-      const backButton = await waitFor(() =>
-        screen.getByTestId('workflow-profile-back'),
-      )
+      const backButton = await waitFor(() => screen.getByTestId('workflow-profile-back'))
       fireEvent.click(backButton)
 
-      await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
-      )
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument())
     })
   })
 })
@@ -417,17 +388,13 @@ describe('WORKFLOW_DESCRIPTORS', () => {
   })
 
   it('includes a Workflow Profiles entry that navigates to the section', () => {
-    const profileEntry = WORKFLOW_DESCRIPTORS.find(
-      (e) => e.focusTargetId === 'workflow-profiles-section',
-    )
+    const profileEntry = WORKFLOW_DESCRIPTORS.find((e) => e.focusTargetId === 'workflow-profiles-section')
     expect(profileEntry).toBeDefined()
     expect(profileEntry!.label).toBe('Workflow Profiles')
   })
 
   it('includes a Project Default Workflow entry', () => {
-    const defaultEntry = WORKFLOW_DESCRIPTORS.find(
-      (e) => e.focusTargetId === 'project-default-workflow',
-    )
+    const defaultEntry = WORKFLOW_DESCRIPTORS.find((e) => e.focusTargetId === 'project-default-workflow')
     expect(defaultEntry).toBeDefined()
     expect(defaultEntry!.label).toBe('Project Default Workflow')
   })

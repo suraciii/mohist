@@ -1,8 +1,22 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { ArrowLeftIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
-import { selectAgentTurnActions, useActionCatalog, useDisableWorkflowProfile, useEnableWorkflowProfile, useProjectDefaultWorkflowProfile, useSetWorkflowProfileAgentAction, useWorkflowProfile, useAllWorkflowProfiles } from '../../../entities/settings'
-import type { ActionCatalog, ProjectDefaultWorkflowProfile, WorkflowProfileDetail, WorkflowProfileInfo } from '../../../entities/settings'
+import {
+  selectAgentTurnActions,
+  useActionCatalog,
+  useDisableWorkflowProfile,
+  useEnableWorkflowProfile,
+  useProjectDefaultWorkflowProfile,
+  useSetWorkflowProfileAgentAction,
+  useWorkflowProfile,
+  useAllWorkflowProfiles,
+} from '../../../entities/settings'
+import type {
+  ActionCatalog,
+  ProjectDefaultWorkflowProfile,
+  WorkflowProfileDetail,
+  WorkflowProfileInfo,
+} from '../../../entities/settings'
 import { includesWorkflowProfileId } from '../../../entities/settings'
 import { CardSection } from '../../../shared/ui/components/card-section'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../shared/ui/components/select'
@@ -37,7 +51,11 @@ function YamlViewer({ yaml }: { yaml: string }) {
   )
 }
 
-function StageSummary({ stage }: { stage: { stage: string; requiresApproval: boolean; tasks: string[]; checks: string[] } }) {
+function StageSummary({
+  stage,
+}: {
+  stage: { stage: string; requiresApproval: boolean; tasks: string[]; checks: string[] }
+}) {
   return (
     <div className="flex items-start gap-3 py-2 border-b last:border-b-0">
       <div className="flex-1 min-w-0">
@@ -66,9 +84,11 @@ function StageSummary({ stage }: { stage: { stage: string; requiresApproval: boo
   )
 }
 
-export type WorkflowProfileHook = (
-  profileId: string | null,
-) => { data: WorkflowProfileDetail | undefined; isLoading: boolean; isError: boolean }
+export type WorkflowProfileHook = (profileId: string | null) => {
+  data: WorkflowProfileDetail | undefined
+  isLoading: boolean
+  isError: boolean
+}
 
 export type WorkflowActionCatalogHook = () => {
   data: ActionCatalog | undefined
@@ -106,7 +126,11 @@ export interface WorkflowProfilesSectionComponents {
 
 const useDefaultData: WorkflowProfilesSectionDataHook = () => {
   const { data: allProfiles, isLoading: profilesLoading, isError: profilesError } = useAllWorkflowProfiles()
-  const { data: projectProfile, isLoading: projectProfileLoading, isError: projectProfileError } = useProjectDefaultWorkflowProfile()
+  const {
+    data: projectProfile,
+    isLoading: projectProfileLoading,
+    isError: projectProfileError,
+  } = useProjectDefaultWorkflowProfile()
   return {
     allProfiles,
     profilesLoading,
@@ -150,7 +174,9 @@ function AgentActionSelector({
             agentAction: value === PROFILE_DEFAULT_ACTION ? null : value,
           })
         }}
-        disabled={actionCatalog.isLoading || actionCatalog.isError || agentActions.length === 0 || agentActionMutation.isPending}
+        disabled={
+          actionCatalog.isLoading || actionCatalog.isError || agentActions.length === 0 || agentActionMutation.isPending
+        }
       >
         <SelectTrigger
           aria-labelledby="workflow-profile-agent-action-label"
@@ -168,15 +194,11 @@ function AgentActionSelector({
           ))}
         </SelectContent>
       </Select>
-      {actionCatalog.isError && (
-        <p className="text-xs text-destructive">Failed to load Agent Actions.</p>
-      )}
+      {actionCatalog.isError && <p className="text-xs text-destructive">Failed to load Agent Actions.</p>}
       {!actionCatalog.isLoading && !actionCatalog.isError && agentActions.length === 0 && (
         <p className="text-xs text-muted-foreground">No Agent Actions are available.</p>
       )}
-      {agentActionMutation.error && (
-        <p className="text-xs text-destructive">{agentActionMutation.error.message}</p>
-      )}
+      {agentActionMutation.error && <p className="text-xs text-destructive">{agentActionMutation.error.message}</p>}
     </div>
   )
 }
@@ -207,9 +229,7 @@ function ProfileDetail({
   }
 
   if (isError || !profile) {
-    return (
-      <div className="text-sm text-red-700">Failed to load profile.</div>
-    )
+    return <div className="text-sm text-red-700">Failed to load profile.</div>
   }
 
   return (
@@ -425,13 +445,16 @@ export function WorkflowProfilesSection({
   const builtInProfiles = allProfiles?.filter((p) => p.isBuiltIn === true) ?? []
   const enabledCount = builtInProfiles.filter((p) => !includesWorkflowProfileId(disabledIds, p.id)).length
 
-  const handleToggleDisabled = useCallback((profileId: string, currentlyDisabled: boolean) => {
-    if (currentlyDisabled) {
-      enableMutation.mutate(profileId)
-    } else {
-      disableMutation.mutate(profileId)
-    }
-  }, [enableMutation, disableMutation])
+  const handleToggleDisabled = useCallback(
+    (profileId: string, currentlyDisabled: boolean) => {
+      if (currentlyDisabled) {
+        enableMutation.mutate(profileId)
+      } else {
+        disableMutation.mutate(profileId)
+      }
+    },
+    [enableMutation, disableMutation],
+  )
 
   if (!currentProject) {
     return <NoProjectCard title={sectionLabel} />
@@ -454,21 +477,12 @@ export function WorkflowProfilesSection({
   }
 
   if (profilesError || projectProfileError || !allProfiles || !projectProfile) {
-    return (
-      <SectionState
-        variant="error"
-        title={sectionLabel}
-        message="Failed to load workflow profile settings."
-      />
-    )
+    return <SectionState variant="error" title={sectionLabel} message="Failed to load workflow profile settings." />
   }
 
   return (
     <div id="workflow-profiles-section" tabIndex={-1}>
-      <SettingsSection
-        title={sectionLabel}
-        description={sectionDescription}
-      >
+      <SettingsSection title={sectionLabel} description={sectionDescription}>
         <div className="space-y-4">
           <div id="project-default-workflow" tabIndex={-1}>
             <DefaultWorkflowControl />

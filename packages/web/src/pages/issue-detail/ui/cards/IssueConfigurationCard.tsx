@@ -15,10 +15,7 @@ export type IssueConfigurationCardIssue = Pick<
 export interface IssueConfigurationCardProps {
   issue: IssueConfigurationCardIssue
   projectId: string
-  mutations: Pick<
-    IssueDetailMutations,
-    'addPrerequisiteMutation' | 'removePrerequisiteMutation'
-  >
+  mutations: Pick<IssueDetailMutations, 'addPrerequisiteMutation' | 'removePrerequisiteMutation'>
   unframed?: boolean
   prerequisitePickerIssuesHook?: IssuePrerequisitePickerProps['issuesHook']
 }
@@ -31,7 +28,7 @@ export function IssueConfigurationCard({
   prerequisitePickerIssuesHook,
 }: IssueConfigurationCardProps) {
   const { addPrerequisiteMutation, removePrerequisiteMutation } = mutations
-  const prerequisiteNumbers = issue.prerequisites?.map(p => p.number) ?? []
+  const prerequisiteNumbers = issue.prerequisites?.map((p) => p.number) ?? []
   const blocker: IssueStartBlocker | null = issue.blocker ?? null
 
   const content = (

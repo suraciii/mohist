@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { addComment, approveIssue, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getIssues, getLabels, getParentIssueCandidates, getWorkflowRunDetail, requestChangesIssue, updateIssue } from './client'
+import {
+  addComment,
+  approveIssue,
+  createIssue,
+  getIssueEvents,
+  getIssueWorkflowArtifactContent,
+  getIssues,
+  getLabels,
+  getParentIssueCandidates,
+  getWorkflowRunDetail,
+  requestChangesIssue,
+  updateIssue,
+} from './client'
 
 useMswServer()
 
@@ -57,13 +69,11 @@ describe('getIssueEvents', () => {
         subject: null,
         time: '2026-06-18T00:00:00.0000000Z',
         dataContentType: 'application/json',
-        data: { issueNumber: 42, },
+        data: { issueNumber: 42 },
         extensions: {},
       },
     ]
-    server.use(
-      http.get('*/api/projects/:projectId/issues/:number/events', () => successResponse(stored)),
-    )
+    server.use(http.get('*/api/projects/:projectId/issues/:number/events', () => successResponse(stored)))
 
     const events = await getIssueEvents(42, 'proj-1')
 
@@ -71,9 +81,7 @@ describe('getIssueEvents', () => {
   })
 
   it('returns an empty array when the server sends an empty list', async () => {
-    server.use(
-      http.get('*/api/projects/:projectId/issues/:number/events', () => successResponse([])),
-    )
+    server.use(http.get('*/api/projects/:projectId/issues/:number/events', () => successResponse([])))
 
     const events = await getIssueEvents(42, 'proj-1')
 
@@ -97,11 +105,13 @@ describe('getWorkflowRunDetail', () => {
       }),
     )
 
-    await expect(getWorkflowRunDetail('run-42')).resolves.toEqual(expect.objectContaining({
-      workflowProfileId: 'mohist/github-pr',
-      agentAction: 'mohist/pi',
-      agentRuntime: 'pi',
-    }))
+    await expect(getWorkflowRunDetail('run-42')).resolves.toEqual(
+      expect.objectContaining({
+        workflowProfileId: 'mohist/github-pr',
+        agentAction: 'mohist/pi',
+        agentRuntime: 'pi',
+      }),
+    )
     expect(requests).toHaveLength(1)
     expect(requestPath(requests[0])).toBe('/api/workflow-runs/run-42')
   })
@@ -181,10 +191,7 @@ describe('approval decisions', () => {
     await approveIssue(42, {}, 'proj-1')
     const feedback = await requestChangesIssue(42, { stage: 'plan', body: 'Narrow the scope.' }, 'proj-1')
 
-    expect(requestBodies).toEqual([
-      {},
-      { stage: 'plan', body: 'Narrow the scope.' },
-    ])
+    expect(requestBodies).toEqual([{}, { stage: 'plan', body: 'Narrow the scope.' }])
     expect(feedback).toEqual({ id: 'feedback-1' })
   })
 
@@ -202,7 +209,11 @@ describe('approval decisions', () => {
     )
 
     await approveIssue(42, { displayName: 'Ada' }, 'proj-1')
-    const feedback = await requestChangesIssue(42, { stage: 'plan', body: 'Narrow the scope.', displayName: 'Ada' }, 'proj-1')
+    const feedback = await requestChangesIssue(
+      42,
+      { stage: 'plan', body: 'Narrow the scope.', displayName: 'Ada' },
+      'proj-1',
+    )
 
     expect(requestBodies).toEqual([
       { displayName: 'Ada' },
@@ -216,12 +227,18 @@ describe('getIssueWorkflowArtifactContent', () => {
   it('preserves a JSON file that has directory-like fields', async () => {
     const body = '{\n  "entries": [],\n  "totalSize": 0\n}'
     server.use(
-      http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts/:artifactId/content', () => new HttpResponse(body, {
-        headers: { 'content-type': 'application/json' },
-      })),
+      http.get(
+        '*/api/projects/:projectId/issues/:number/workflow/artifacts/:artifactId/content',
+        () =>
+          new HttpResponse(body, {
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
     )
 
-    await expect(getIssueWorkflowArtifactContent(455, 'artifact-tasks', { artifactKind: 'file' }, 'proj-1')).resolves.toEqual({
+    await expect(
+      getIssueWorkflowArtifactContent(455, 'artifact-tasks', { artifactKind: 'file' }, 'proj-1'),
+    ).resolves.toEqual({
       kind: 'text',
       content: body,
       contentType: 'application/json',
@@ -230,13 +247,17 @@ describe('getIssueWorkflowArtifactContent', () => {
 
   it('keeps directory listings as directory content', async () => {
     server.use(
-      http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts/:artifactId/content', () => HttpResponse.json({
-        entries: [{ relativePath: 'report.md', size: 42, contentType: 'text/markdown' }],
-        totalSize: 42,
-      })),
+      http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts/:artifactId/content', () =>
+        HttpResponse.json({
+          entries: [{ relativePath: 'report.md', size: 42, contentType: 'text/markdown' }],
+          totalSize: 42,
+        }),
+      ),
     )
 
-    await expect(getIssueWorkflowArtifactContent(455, 'artifact-directory', { artifactKind: 'directory' }, 'proj-1')).resolves.toEqual({
+    await expect(
+      getIssueWorkflowArtifactContent(455, 'artifact-directory', { artifactKind: 'directory' }, 'proj-1'),
+    ).resolves.toEqual({
       kind: 'directory',
       entries: [{ relativePath: 'report.md', size: 42, contentType: 'text/markdown' }],
       totalSize: 42,
@@ -264,9 +285,7 @@ describe('getLabels', () => {
   })
 
   it('returns an empty array when the project has no labels', async () => {
-    server.use(
-      http.get('*/api/projects/:projectId/labels', () => successResponse([])),
-    )
+    server.use(http.get('*/api/projects/:projectId/labels', () => successResponse([])))
 
     const keys = await getLabels('proj-empty')
 

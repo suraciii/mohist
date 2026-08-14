@@ -32,7 +32,7 @@ using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
 
-public class MohistDbContext : DbContext
+public partial class MohistDbContext : DbContext
 {
     private static readonly ValueComparer<Dictionary<string, string>> DictionaryStringComparer = new(
         (left, right) => DictionaryEqual(left, right),
@@ -1584,45 +1584,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256);
         });
 
-        modelBuilder.Entity<ProjectWorkflowProfile>(entity =>
-        {
-            entity.ToTable("ProjectWorkflowProfiles");
-            entity.HasKey(e => e.ProjectId);
-            entity.Property(e => e.ProjectId).HasMaxLength(256);
-            entity.Property(e => e.DefaultTemplateId).HasMaxLength(256);
-            entity.Property(e => e.DefaultWorkflowProfileId).HasMaxLength(256);
-            entity.Property(e => e.DefaultWorkflowProfileIdKey).HasMaxLength(256);
-            entity.Property(e => e.Variables).IsRequired();
-            entity.Property(e => e.DisableDefaultIssueTemplate).IsRequired().HasDefaultValue(false);
-            entity.Property(e => e.Prompts)
-                .HasConversion(
-                    v => JSON.Serialize(v),
-                    v => JSON.DeserializeDictionary(v))
-                .IsRequired()
-                .HasDefaultValue(new Dictionary<string, string>());
-            entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
-
-            entity.Property(e => e.AgentActionOverrides)
-                .HasConversion(
-                    v => JSON.Serialize(v),
-                    v => JSON.DeserializeDictionary(v))
-                .IsRequired()
-                .HasDefaultValue(new Dictionary<string, string>());
-            entity.Property(e => e.AgentActionOverrides).Metadata.SetValueComparer(DictionaryStringComparer);
-
-            entity.Property(e => e.DisabledWorkflowProfileIds)
-                .HasConversion(
-                    v => JSON.Serialize(v),
-                    v => JSON.Deserialize<List<string>>(v) ?? new List<string>())
-                .IsRequired()
-                .HasDefaultValue(new List<string>());
-            entity.Property(e => e.DisabledWorkflowProfileIds).Metadata.SetValueComparer(ListStringComparer);
-            entity.HasOne<WorkflowProfileRecordRow>()
-                .WithMany()
-                .HasForeignKey(e => new { e.ProjectId, e.DefaultWorkflowProfileIdKey })
-                .HasPrincipalKey(e => new { e.ProjectId, e.ProfileId })
-                .OnDelete(DeleteBehavior.Restrict);
-        });
+        ConfigureProjectWorkflowProfile(modelBuilder);
 
         modelBuilder.Entity<ProjectWorkflowTemplateRow>(entity =>
         {

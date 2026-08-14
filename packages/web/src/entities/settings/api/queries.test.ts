@@ -64,7 +64,15 @@ describe('getWorkflowProfileAgentRuntime', () => {
   it('matches profile ids without regard to casing', () => {
     expect(
       getWorkflowProfileAgentRuntime(
-        [{ id: 'mohist/local', displayName: 'Mohist Local', description: '', isDefault: true, agentRuntime: 'opencode' }],
+        [
+          {
+            id: 'mohist/local',
+            displayName: 'Mohist Local',
+            description: '',
+            isDefault: true,
+            agentRuntime: 'opencode',
+          },
+        ],
         'MOHIST/LOCAL',
       ),
     ).toBe('opencode')
@@ -73,13 +81,15 @@ describe('getWorkflowProfileAgentRuntime', () => {
 
 describe('selectAgentTurnActions', () => {
   it('uses the declared capability and never infers Agent Actions from names', () => {
-    expect(selectAgentTurnActions({
-      actions: [
-        { name: 'mohist/pi', capabilities: ['agent-turn'] },
-        { name: 'team/looks-like-an-agent', capabilities: [] },
-        { name: 'team/capable', capabilities: ['write-vars', 'agent-turn'] },
-      ],
-    }).map((action) => action.name)).toEqual(['mohist/pi', 'team/capable'])
+    expect(
+      selectAgentTurnActions({
+        actions: [
+          { name: 'mohist/pi', capabilities: ['agent-turn'] },
+          { name: 'team/looks-like-an-agent', capabilities: [] },
+          { name: 'team/capable', capabilities: ['write-vars', 'agent-turn'] },
+        ],
+      }).map((action) => action.name),
+    ).toEqual(['mohist/pi', 'team/capable'])
   })
 })
 
@@ -89,7 +99,14 @@ describe('setWorkflowProfileAgentActionMutationOptions', () => {
     const options = setWorkflowProfileAgentActionMutationOptions('proj-1', qc)
 
     options.onSuccess(
-      { id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false, agentAction: 'mohist/pi', agentRuntime: 'pi' },
+      {
+        id: 'mohist/github-pr',
+        displayName: 'GitHub PR',
+        description: '',
+        isDefault: false,
+        agentAction: 'mohist/pi',
+        agentRuntime: 'pi',
+      },
       { profileId: 'mohist/github-pr', agentAction: 'mohist/pi' },
     )
 
@@ -101,10 +118,7 @@ describe('setWorkflowProfileAgentActionMutationOptions', () => {
 
 describe('projectDefaultWorkflowProfileQueryOptions', () => {
   it('uses a project-scoped query key', () => {
-    expect(projectDefaultWorkflowProfileQueryOptions('proj-1').queryKey).toEqual([
-      'project-workflow-profile',
-      'proj-1',
-    ])
+    expect(projectDefaultWorkflowProfileQueryOptions('proj-1').queryKey).toEqual(['project-workflow-profile', 'proj-1'])
   })
 
   it('is disabled when projectId is missing', () => {

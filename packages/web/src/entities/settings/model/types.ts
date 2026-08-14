@@ -61,7 +61,12 @@ export interface SystemUpdateStartResponse {
 
 export type SystemUpdateOutcome = 'succeeded' | 'recovered' | 'failed' | 'cancelled'
 
-export const SYSTEM_UPDATE_OUTCOMES: readonly SystemUpdateOutcome[] = ['succeeded', 'recovered', 'failed', 'cancelled'] as const
+export const SYSTEM_UPDATE_OUTCOMES: readonly SystemUpdateOutcome[] = [
+  'succeeded',
+  'recovered',
+  'failed',
+  'cancelled',
+] as const
 
 export const SYSTEM_UPDATE_STAGES: readonly string[] = [
   'Building',

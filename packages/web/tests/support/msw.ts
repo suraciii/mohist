@@ -3,16 +3,18 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
 const baselineHandlers = [
-  http.get('*/api/workflow-runs/:workflowRunId', ({ params }) => HttpResponse.json({
-    success: true,
-    data: {
-      status: { workflowRunId: String(params.workflowRunId), status: 'completed' },
-      issueRef: null,
-      workflowProfileId: 'mohist/local',
-      agentAction: null,
-      agentRuntime: null,
-    },
-  })),
+  http.get('*/api/workflow-runs/:workflowRunId', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        status: { workflowRunId: String(params.workflowRunId), status: 'completed' },
+        issueRef: null,
+        workflowProfileId: 'mohist/local',
+        agentAction: null,
+        agentRuntime: null,
+      },
+    }),
+  ),
 ]
 
 interface MswState {
@@ -27,12 +29,12 @@ const testGlobal = globalThis as typeof globalThis & {
 }
 
 // setup 与 inline project 可能在同一 worker 内重复求值，状态必须挂在全局。
-const state = testGlobal.__mohistWebMswState ??= {
+const state = (testGlobal.__mohistWebMswState ??= {
   server: setupServer(...baselineHandlers),
   listening: false,
   installedFetch: null,
   unhandledRequests: new Map(),
-}
+})
 
 export const server = state.server
 

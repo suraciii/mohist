@@ -89,15 +89,11 @@ const issuesHandler = vi.fn((info: { request: Request }) => {
 const parentCandidatesHandler = vi.fn(() => {
   return HttpResponse.json({
     success: true,
-    data: _issuesData
-      .filter((issue) => issue.canBeParent)
-      .map(({ number, title }) => ({ number, title })),
+    data: _issuesData.filter((issue) => issue.canBeParent).map(({ number, title }) => ({ number, title })),
   })
 })
 
-const repositoriesHandler = vi.fn(() =>
-  HttpResponse.json({ success: true, data: _repositoriesData }),
-)
+const repositoriesHandler = vi.fn(() => HttpResponse.json({ success: true, data: _repositoriesData }))
 
 const modelsHandler = vi.fn((info: { request: Request }) => {
   void info.request.url
@@ -109,7 +105,15 @@ const workflowProfilesHandler = vi.fn(() =>
     success: true,
     data: (_workflowProfilesData.length > 0
       ? _workflowProfilesData
-      : [{ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' as const }]
+      : [
+          {
+            id: 'mohist/local',
+            displayName: 'Default',
+            description: '',
+            isDefault: true,
+            agentRuntime: 'opencode' as const,
+          },
+        ]
     ).map((profile) => ({
       projectId: 'proj_create',
       profileId: profile.id,
@@ -155,7 +159,10 @@ useMswServer(
   http.get('*/api/issue-templates*', issueTemplatesHandler),
 )
 
-function setupTemplates(defaultTemplate: typeof TEMPLATE_FIXTURES.default = TEMPLATE_FIXTURES.default, customTemplate: typeof TEMPLATE_FIXTURES.custom | null = TEMPLATE_FIXTURES.custom) {
+function setupTemplates(
+  defaultTemplate: typeof TEMPLATE_FIXTURES.default = TEMPLATE_FIXTURES.default,
+  customTemplate: typeof TEMPLATE_FIXTURES.custom | null = TEMPLATE_FIXTURES.custom,
+) {
   _issueTemplatesData.length = 0
   _issueTemplatesData.push(defaultTemplate)
   if (customTemplate) _issueTemplatesData.push(customTemplate)
@@ -166,7 +173,18 @@ function renderDialog(open = true) {
   const onClose = vi.fn()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+      <ProjectProvider
+        initialProjectId="proj_create"
+        initialProjects={[
+          {
+            id: 'proj_create',
+            name: 'Project',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            repositories: [],
+          },
+        ]}
+      >
         <CreateIssueDialog open={open} onClose={onClose} />
       </ProjectProvider>
     </QueryClientProvider>,
@@ -174,29 +192,43 @@ function renderDialog(open = true) {
   return { onClose, queryClient, ...view }
 }
 
+function resetFixtures() {
+  cleanup()
+  vi.clearAllMocks()
+  _issuesData = []
+  _createIssueResponse = { number: 1 }
+  _modelsData.models = []
+  _modelsData.modelVariants = {}
+  _workflowProfilesData.length = 0
+  _projectWorkflowProfile.defaultTemplateId = null
+  _projectWorkflowProfile.disabledWorkflowProfileIds = []
+  _issueTemplatesData.length = 0
+}
+
 describe('CreateIssueDialog', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-    _issuesData = []
-    _createIssueResponse = { number: 1 }
-    _modelsData.models = []
-    _modelsData.modelVariants = {}
-    _workflowProfilesData.length = 0
-    _projectWorkflowProfile.defaultTemplateId = null
-    _projectWorkflowProfile.disabledWorkflowProfileIds = []
-    _issueTemplatesData.length = 0
-  })
+  afterEach(resetFixtures)
 
   it('serializes the configured default workflow as the current create selection', async () => {
     _projectWorkflowProfile.defaultTemplateId = 'mohist/local'
-    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false, agentRuntime: 'opencode' })
-    _workflowProfilesData.push({ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' })
+    _workflowProfilesData.push({
+      id: 'mohist/github-pr',
+      displayName: 'GitHub PR',
+      description: '',
+      isDefault: false,
+      agentRuntime: 'opencode',
+    })
+    _workflowProfilesData.push({
+      id: 'mohist/local',
+      displayName: 'Default',
+      description: '',
+      isDefault: true,
+      agentRuntime: 'opencode',
+    })
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Disabled default fallback' } })
-    const workflowSelect = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const workflowSelect = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await waitFor(() => expect(workflowSelect.value).toBe('mohist/local'))
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
@@ -207,18 +239,7 @@ describe('CreateIssueDialog', () => {
 })
 
 describe('CreateIssueDialog toast feedback', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-    _issuesData = []
-    _createIssueResponse = { number: 1 }
-    _modelsData.models = []
-    _modelsData.modelVariants = {}
-    _workflowProfilesData.length = 0
-    _projectWorkflowProfile.defaultTemplateId = null
-    _projectWorkflowProfile.disabledWorkflowProfileIds = []
-    _issueTemplatesData.length = 0
-  })
+  afterEach(resetFixtures)
 
   it('shows a success toast with the new issue number on successful create', async () => {
     _createIssueResponse = { number: 223 }
@@ -282,18 +303,7 @@ describe('CreateIssueDialog toast feedback', () => {
 })
 
 describe('CreateIssueDialog template selector', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-    _issuesData = []
-    _createIssueResponse = { number: 1 }
-    _modelsData.models = []
-    _modelsData.modelVariants = {}
-    _workflowProfilesData.length = 0
-    _projectWorkflowProfile.defaultTemplateId = null
-    _projectWorkflowProfile.disabledWorkflowProfileIds = []
-    _issueTemplatesData.length = 0
-  })
+  afterEach(resetFixtures)
 
   it('populates the selector with available templates (non-disabled default + customs)', async () => {
     setupTemplates()
@@ -333,7 +343,7 @@ describe('CreateIssueDialog template selector', () => {
     })
     fireEvent.change(selector, { target: { value: 'feature' } })
 
-    const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
+    const description = (await screen.findByPlaceholderText('Optional description')) as HTMLTextAreaElement
 
     await waitFor(() => {
       expect(description.value).toBe(TEMPLATE_FIXTURES.default.body)
@@ -363,7 +373,7 @@ describe('CreateIssueDialog template selector', () => {
     })
     fireEvent.change(selector, { target: { value: 'team/bug-report' } })
 
-    const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
+    const description = (await screen.findByPlaceholderText('Optional description')) as HTMLTextAreaElement
 
     await waitFor(() => {
       expect(description.value).toBe(TEMPLATE_FIXTURES.custom.body)
@@ -382,7 +392,11 @@ describe('CreateIssueDialog template selector', () => {
     fireEvent.change(selector, { target: { value: 'feature' } })
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated issue' } })
 
-    await waitFor(() => expect((screen.getByPlaceholderText('Optional description') as HTMLTextAreaElement).value).toContain('## User Voice'))
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText('Optional description') as HTMLTextAreaElement).value).toContain(
+        '## User Voice',
+      ),
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
@@ -395,18 +409,7 @@ describe('CreateIssueDialog template selector', () => {
 })
 
 describe('CreateIssueDialog model + variant chips', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-    _issuesData = []
-    _createIssueResponse = { number: 1 }
-    _modelsData.models = []
-    _modelsData.modelVariants = {}
-    _workflowProfilesData.length = 0
-    _projectWorkflowProfile.defaultTemplateId = null
-    _projectWorkflowProfile.disabledWorkflowProfileIds = []
-    _issueTemplatesData.length = 0
-  })
+  afterEach(resetFixtures)
 
   async function modelTrigger() {
     return waitFor(() => {
@@ -436,9 +439,7 @@ describe('CreateIssueDialog model + variant chips', () => {
       )
       expect(chip).toBeInTheDocument()
     }
-    expect(
-      document.querySelector(`[data-testid="create-issue-model-trigger-row-openai/gpt-4-variant-low"]`),
-    ).toBeNull()
+    expect(document.querySelector(`[data-testid="create-issue-model-trigger-row-openai/gpt-4-variant-low"]`)).toBeNull()
   })
 
   it('opens the model picker without dismissing the create dialog', async () => {
@@ -469,19 +470,19 @@ describe('CreateIssueDialog model + variant chips', () => {
 
     await user.click(await modelTrigger())
 
-    const highChip = await screen.findByTestId(
-      'create-issue-model-trigger-row-anthropic/claude-variant-high',
-    )
+    const highChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high')
     await user.click(highChip)
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      model: 'anthropic/claude',
-      modelVariant: 'high',
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        model: 'anthropic/claude',
+        modelVariant: 'high',
+      }),
+    )
   })
 
   it('does not expose or submit an Issue Runtime override', async () => {
@@ -523,7 +524,7 @@ describe('CreateIssueDialog model + variant chips', () => {
     const user = userEvent.setup()
     renderDialog()
 
-    const workflow = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const workflow = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await user.click(await modelTrigger())
     await user.click(await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement))
     expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
@@ -547,7 +548,7 @@ describe('CreateIssueDialog model + variant chips', () => {
     _modelsData.models = ['vendor/custom-model']
     renderDialog()
 
-    const workflow = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const workflow = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await waitFor(() => expect(workflow.value).toBe('team/unknown'))
     expect(screen.queryByRole('button', { name: 'Coder Model' })).not.toBeInTheDocument()
   })
@@ -571,9 +572,11 @@ describe('CreateIssueDialog model + variant chips', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      model: 'anthropic/claude',
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        model: 'anthropic/claude',
+      }),
+    )
     expect(callBody).not.toHaveProperty('modelVariant')
   })
 
@@ -585,9 +588,7 @@ describe('CreateIssueDialog model + variant chips', () => {
 
     await user.click(await modelTrigger())
 
-    const mediumChip = await screen.findByTestId(
-      'create-issue-model-trigger-row-anthropic/claude-variant-medium',
-    )
+    const mediumChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-medium')
     await user.click(mediumChip)
 
     await user.click(await modelTrigger())
@@ -624,26 +625,17 @@ describe('CreateIssueDialog model + variant chips', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }))
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      model: 'anthropic/claude',
-      modelVariant: 'high',
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        model: 'anthropic/claude',
+        modelVariant: 'high',
+      }),
+    )
   })
 })
 
 describe('CreateIssueDialog workflow profile default', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-    _issuesData = []
-    _createIssueResponse = { number: 1 }
-    _modelsData.models = []
-    _modelsData.modelVariants = {}
-    _workflowProfilesData.length = 0
-    _projectWorkflowProfile.defaultTemplateId = null
-    _projectWorkflowProfile.disabledWorkflowProfileIds = []
-    _issueTemplatesData.length = 0
-  })
+  afterEach(resetFixtures)
 
   function setupProfiles() {
     _workflowProfilesData.length = 0
@@ -660,7 +652,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Project default issue' } })
-    const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const select = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
@@ -675,12 +667,18 @@ describe('CreateIssueDialog workflow profile default', () => {
 
     renderDialog()
 
-    const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    const select = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
     await waitFor(() => expect(select.value).toBe('mohist/local'))
   })
 
   it('does not prefill or submit a frontmatter recommendation that is not enabled', async () => {
-    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false, agentRuntime: 'opencode' })
+    _workflowProfilesData.push({
+      id: 'mohist/github-pr',
+      displayName: 'PR',
+      description: '',
+      isDefault: false,
+      agentRuntime: 'opencode',
+    })
     _projectWorkflowProfile.defaultTemplateId = null
 
     renderDialog()
@@ -688,14 +686,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Stale recommendation' } })
     fireEvent.change(screen.getByPlaceholderText('Optional description'), {
       target: {
-        value: [
-          '---',
-          'recommended_workflow: mohist/local',
-          'risk: medium',
-          '---',
-          '',
-          'Body',
-        ].join('\n'),
+        value: ['---', 'recommended_workflow: mohist/local', 'risk: medium', '---', '', 'Body'].join('\n'),
       },
     })
 
@@ -762,18 +753,7 @@ describe('CreateIssueDialog prerequisites', () => {
     _issuesData = issues
   }
 
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-    _issuesData = []
-    _createIssueResponse = { number: 1 }
-    _modelsData.models = []
-    _modelsData.modelVariants = {}
-    _workflowProfilesData.length = 0
-    _projectWorkflowProfile.defaultTemplateId = null
-    _projectWorkflowProfile.disabledWorkflowProfileIds = []
-    _issueTemplatesData.length = 0
-  })
+  afterEach(resetFixtures)
 
   it('renders the Prerequisites picker in buffer mode and sends the selected numbers on submit', async () => {
     setupPickerIssues()
@@ -804,10 +784,12 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      title: 'Plan with deps',
-      prerequisiteNumbers: [5, 7],
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        title: 'Plan with deps',
+        prerequisiteNumbers: [5, 7],
+      }),
+    )
   })
 
   it('removes a buffered chip from the local selection without sending the removed number', async () => {
@@ -839,9 +821,11 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      prerequisiteNumbers: [7],
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        prerequisiteNumbers: [7],
+      }),
+    )
 
     // after submit, the picker re-opened from scratch (dialog was reset); confirm chip state was cleared.
     cleanup()
@@ -878,7 +862,18 @@ describe('CreateIssueDialog prerequisites', () => {
 
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <ProjectProvider
+          initialProjectId="proj_create"
+          initialProjects={[
+            {
+              id: 'proj_create',
+              name: 'Project',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <CreateIssueDialog open onClose={onClose} />
         </ProjectProvider>
       </QueryClientProvider>,
@@ -897,21 +892,45 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      prerequisiteNumbers: [5],
-    }))
+    expect(callBody).toEqual(
+      expect.objectContaining({
+        prerequisiteNumbers: [5],
+      }),
+    )
     expect(onClose).toHaveBeenCalledTimes(1)
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <ProjectProvider
+          initialProjectId="proj_create"
+          initialProjects={[
+            {
+              id: 'proj_create',
+              name: 'Project',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <CreateIssueDialog open={false} onClose={onClose} />
         </ProjectProvider>
       </QueryClientProvider>,
     )
     rerender(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <ProjectProvider
+          initialProjectId="proj_create"
+          initialProjects={[
+            {
+              id: 'proj_create',
+              name: 'Project',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <CreateIssueDialog open onClose={onClose} />
         </ProjectProvider>
       </QueryClientProvider>,
