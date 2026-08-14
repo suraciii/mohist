@@ -10,7 +10,8 @@ internal sealed record ManagedUpdateSession(
     RuntimeTargetSet? PreviousTargets,
     string ReleaseRoot,
     string Scope,
-    ManagedRuntimeSnapshot? SourceSnapshot);
+    ManagedRuntimeSnapshot? SourceSnapshot,
+    ManagedCliLauncherState? CliLauncher);
 
 /// <summary>
 /// Owns the source snapshot to installed release boundary. A service target is only changed after
@@ -27,6 +28,7 @@ internal sealed class ManagedRuntimeTransaction
     private readonly IEnvironmentVariableProvider _environment;
     private readonly UpdateSourceResolver _sourceResolver;
     private readonly IManagedRuntimeActivator _activator;
+    private readonly ManagedCliLauncher _cliLauncher;
     private readonly string? _unitDir;
 
     public ManagedRuntimeTransaction(
@@ -46,6 +48,7 @@ internal sealed class ManagedRuntimeTransaction
         _environment = environment;
         _sourceResolver = sourceResolver;
         _activator = activator;
+        _cliLauncher = new ManagedCliLauncher(output, error, commands, files);
         _unitDir = unitDir;
     }
 
@@ -76,6 +79,7 @@ internal sealed class ManagedRuntimeTransaction
         RunnerLaunchIdentity? runnerLaunchIdentity = null;
         RuntimeTargetSet? activatedTargets = null;
         ManagedRuntimeSnapshot? sourceSnapshot = null;
+        ManagedCliLauncherState? cliLauncher = null;
         var activePointerWritten = false;
 
         try
@@ -150,6 +154,8 @@ internal sealed class ManagedRuntimeTransaction
             var targets = BuildTargetSet(context, releaseRoot, generation, previous, built);
             if (!targets.IsCompleteFor(scope))
                 return (null, "candidate target set is incomplete");
+            if (Includes(scope, "cli") && string.IsNullOrWhiteSpace(context.CliPath))
+                return (null, "stable CLI launcher path is unavailable");
             if (!targets.Cli?.IsAbsoluteTarget ?? false)
                 return (null, "candidate CLI target is not absolute");
             if (targets.Server is not null && !targets.Server.IsAbsoluteTarget)
@@ -176,6 +182,35 @@ internal sealed class ManagedRuntimeTransaction
             activatedTargets = targets;
             activePointerWritten = true;
 
+            if (Includes(scope, "cli"))
+            {
+                var launcher = await _cliLauncher.ActivateAsync(
+                    context.CliPath!,
+                    targets.Cli!.Entrypoint,
+                    targets.Cli.Identity,
+                    Path.Combine(
+                        context.RuntimeRoot,
+                        "transactions",
+                        context.TransactionId,
+                        "cli-launcher.previous").Replace('\\', '/'),
+                    cancellationToken);
+                cliLauncher = launcher.State;
+                if (launcher.Error is not null)
+                {
+                    await RestoreAfterFailureAsync(
+                        context,
+                        activatedTargets,
+                        previous,
+                        sourceSnapshot,
+                        scope,
+                        1,
+                        launcher.Error,
+                        cliLauncher,
+                        CancellationToken.None);
+                    return (null, launcher.Error);
+                }
+            }
+
             var activation = await _activator.ApplyManagedRuntimeAsync(
                 targets,
                 scope,
@@ -184,23 +219,50 @@ internal sealed class ManagedRuntimeTransaction
                 sourceSnapshot);
             if (activation != 0)
             {
-                await RestoreAfterFailureAsync(context, activatedTargets, previous, sourceSnapshot, scope, activation, "service activation failed", CancellationToken.None);
+                await RestoreAfterFailureAsync(
+                    context,
+                    activatedTargets,
+                    previous,
+                    sourceSnapshot,
+                    scope,
+                    activation,
+                    "service activation failed",
+                    cliLauncher,
+                    CancellationToken.None);
                 return (null, $"managed service activation failed with exit code {activation}");
             }
 
             _out.WriteLine($"Staged managed {scope} release {releaseId} from source {context.Source.GitCommit}.");
-            return (new ManagedUpdateSession(context, targets, previous, releaseRoot, scope, sourceSnapshot), null);
+            return (new ManagedUpdateSession(context, targets, previous, releaseRoot, scope, sourceSnapshot, cliLauncher), null);
         }
         catch (OperationCanceledException)
         {
             if (activePointerWritten && activatedTargets is not null)
-                await RestoreAfterFailureAsync(context, activatedTargets, previous, sourceSnapshot, scope, 1, "managed update was cancelled", CancellationToken.None);
+                await RestoreAfterFailureAsync(
+                    context,
+                    activatedTargets,
+                    previous,
+                    sourceSnapshot,
+                    scope,
+                    1,
+                    "managed update was cancelled",
+                    cliLauncher,
+                    CancellationToken.None);
             return (null, "managed update was cancelled before activation completed");
         }
         catch (Exception ex)
         {
             if (activePointerWritten && activatedTargets is not null)
-                await RestoreAfterFailureAsync(context, activatedTargets, previous, sourceSnapshot, scope, 1, "managed update staging failed", CancellationToken.None);
+                await RestoreAfterFailureAsync(
+                    context,
+                    activatedTargets,
+                    previous,
+                    sourceSnapshot,
+                    scope,
+                    1,
+                    "managed update staging failed",
+                    cliLauncher,
+                    CancellationToken.None);
             _err.WriteLine($"Managed update staging failed: {ex.Message}");
             return (null, "managed update staging failed");
         }
@@ -227,8 +289,7 @@ internal sealed class ManagedRuntimeTransaction
             WriteAtomic(
                 Path.Combine(session.Context.RuntimeRoot, "transactions", session.Context.TransactionId, "state.json").Replace('\\', '/'),
                 committed);
-            await Task.CompletedTask;
-            return 0;
+            return await _cliLauncher.FinalizeAsync(session.CliLauncher);
         }
         catch (Exception ex)
         {
@@ -244,32 +305,72 @@ internal sealed class ManagedRuntimeTransaction
     {
         try
         {
-            var restoreResult = await _activator.RestoreManagedRuntimeAsync(
-                session.PreviousTargets,
-                session.Scope,
-                _unitDir,
-                cancellationToken,
-                session.SourceSnapshot);
+            ManagedRuntimeRestoreResult restoreResult;
+            try
+            {
+                restoreResult = await _activator.RestoreManagedRuntimeAsync(
+                    session.PreviousTargets,
+                    session.Scope,
+                    _unitDir,
+                    cancellationToken,
+                    session.SourceSnapshot);
+            }
+            catch (Exception ex)
+            {
+                restoreResult = ManagedRuntimeRestoreResult.FromExitCode(
+                    1,
+                    session.Scope,
+                    $"Managed runtime service restoration failed: {ex.Message}");
+            }
+
+            var launcherRestore = await _cliLauncher.RestoreAsync(session.CliLauncher);
+            restoreResult = IncludeLauncherRestoreResult(restoreResult, launcherRestore);
             if (restoreResult.ExitCode != 0)
             {
                 var diagnostic = $"Managed runtime rollback failed with exit code {restoreResult.ExitCode}; affected scope={session.Scope}. Reason: {reason}";
-                PersistRecoveryFailure(session.Context, session.Targets, session.PreviousTargets, session.Scope, restoreResult, diagnostic);
+                PersistRecoveryFailure(
+                    session.Context,
+                    session.Targets,
+                    session.PreviousTargets,
+                    session.Scope,
+                    restoreResult,
+                    diagnostic,
+                    launcherRestore == 0);
                 _err.WriteLine(diagnostic);
                 return restoreResult.ExitCode;
             }
 
+            var restoredTargets = session.PreviousTargets is null
+                ? NoneTargets(session)
+                : session.PreviousTargets with
+                {
+                    Status = "verified",
+                    Previous = null,
+                    SourceSnapshot = null,
+                    RecoveryDiagnostic = null,
+                    Recovery = null,
+                };
             WriteAtomic(
                 Path.Combine(session.Context.RuntimeRoot, "active.json").Replace('\\', '/'),
-                session.PreviousTargets is null
-                    ? NoneTargets(session)
-                    : session.PreviousTargets with
-                    {
-                        Status = "verified",
-                        Previous = null,
-                        SourceSnapshot = null,
-                        RecoveryDiagnostic = null,
-                        Recovery = null,
-                    });
+                restoredTargets);
+            var verifiedPath = Path.Combine(session.Context.RuntimeRoot, "verified.json").Replace('\\', '/');
+            var verifiedCandidate = ReadVerifiedTargets(session.Context.RuntimeRoot) is
+            {
+                Status: "verified",
+                TransactionId: var transactionId,
+                Generation: var generation,
+            }
+                && string.Equals(transactionId, session.Context.TransactionId, StringComparison.Ordinal)
+                && generation == session.Targets.Generation;
+            if (verifiedCandidate && session.PreviousTargets is null)
+            {
+                if (_files.Exists(verifiedPath))
+                    _files.Delete(verifiedPath);
+            }
+            else if (verifiedCandidate)
+            {
+                WriteAtomic(verifiedPath, restoredTargets);
+            }
             WriteAtomic(
                 Path.Combine(session.Context.RuntimeRoot, "transactions", session.Context.TransactionId, "state.json").Replace('\\', '/'),
                 session.Targets with { Status = "rolled-back", Previous = session.PreviousTargets });
@@ -534,20 +635,42 @@ internal sealed class ManagedRuntimeTransaction
         string scope,
         int activationCode,
         string reason,
+        ManagedCliLauncherState? cliLauncher,
         CancellationToken cancellationToken)
     {
         try
         {
-            var restoreResult = await _activator.RestoreManagedRuntimeAsync(
-                previous,
-                scope,
-                _unitDir,
-                cancellationToken,
-                sourceSnapshot);
+            ManagedRuntimeRestoreResult restoreResult;
+            try
+            {
+                restoreResult = await _activator.RestoreManagedRuntimeAsync(
+                    previous,
+                    scope,
+                    _unitDir,
+                    cancellationToken,
+                    sourceSnapshot);
+            }
+            catch (Exception ex)
+            {
+                restoreResult = ManagedRuntimeRestoreResult.FromExitCode(
+                    1,
+                    scope,
+                    $"Managed runtime service restoration failed: {ex.Message}");
+            }
+
+            var launcherRestore = await _cliLauncher.RestoreAsync(cliLauncher);
+            restoreResult = IncludeLauncherRestoreResult(restoreResult, launcherRestore);
             if (restoreResult.ExitCode != 0)
             {
                 var diagnostic = $"Recovery after activation exit {activationCode} failed with exit code {restoreResult.ExitCode}; affected scope={scope}.";
-                PersistRecoveryFailure(context, candidate, previous, scope, restoreResult, diagnostic);
+                PersistRecoveryFailure(
+                    context,
+                    candidate,
+                    previous,
+                    scope,
+                    restoreResult,
+                    diagnostic,
+                    launcherRestore == 0);
                 _err.WriteLine(diagnostic);
                 return;
             }
@@ -596,7 +719,8 @@ internal sealed class ManagedRuntimeTransaction
         RuntimeTargetSet? previous,
         string scope,
         ManagedRuntimeRestoreResult restoreResult,
-        string diagnostic)
+        string diagnostic,
+        bool cliRestored = true)
     {
         var active = FailClosedTargets(
             previous,
@@ -604,7 +728,8 @@ internal sealed class ManagedRuntimeTransaction
             context.TransactionId,
             candidate?.Generation ?? previous?.Generation ?? 0,
             restoreResult,
-            diagnostic);
+            diagnostic,
+            cliRestored);
         WriteAtomic(
             Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
             active);
@@ -628,7 +753,8 @@ internal sealed class ManagedRuntimeTransaction
         string transactionId,
         long generation,
         ManagedRuntimeRestoreResult restoreResult,
-        string diagnostic)
+        string diagnostic,
+        bool cliRestored)
     {
         if (previous is null)
             return new RuntimeTargetSet(
@@ -648,7 +774,7 @@ internal sealed class ManagedRuntimeTransaction
         {
             Status = "recovery-failed",
             TransactionId = transactionId,
-            Cli = previous.Cli,
+            Cli = Includes(scope, "cli") && !cliRestored ? null : previous.Cli,
             Server = Includes(scope, "server") && restoreResult.Server != ManagedRuntimeRestoreState.Restored ? null : previous.Server,
             Runner = Includes(scope, "runner") && restoreResult.Runner != ManagedRuntimeRestoreState.Restored ? null : previous.Runner,
             Previous = null,
@@ -658,14 +784,40 @@ internal sealed class ManagedRuntimeTransaction
         };
     }
 
+    private static ManagedRuntimeRestoreResult IncludeLauncherRestoreResult(
+        ManagedRuntimeRestoreResult restoreResult,
+        int launcherRestore)
+    {
+        if (launcherRestore == 0)
+            return restoreResult;
+
+        var launcherDiagnostic = $"CLI launcher restoration failed with exit code {launcherRestore}";
+        return restoreResult with
+        {
+            ExitCode = restoreResult.ExitCode != 0 ? restoreResult.ExitCode : launcherRestore,
+            Diagnostic = string.IsNullOrWhiteSpace(restoreResult.Diagnostic)
+                ? launcherDiagnostic
+                : $"{restoreResult.Diagnostic}; {launcherDiagnostic}",
+        };
+    }
+
     private void WriteAtomic(string path, RuntimeTargetSet value)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
             _files.CreateDirectory(directory);
         var temp = $"{path}.{Guid.NewGuid():N}.tmp";
-        _files.WriteAllText(temp, JsonSerializer.Serialize(value, JsonOptions));
-        _files.MoveFile(temp, path);
+        try
+        {
+            _files.WriteAllText(temp, JsonSerializer.Serialize(value, JsonOptions));
+            _files.MoveFile(temp, path);
+        }
+        catch
+        {
+            if (_files.Exists(temp))
+                _files.Delete(temp);
+            throw;
+        }
     }
 
     private static bool IsTrusted(RuntimeTargetSet value)

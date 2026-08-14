@@ -131,6 +131,55 @@ public class RuntimeConsistencyValidatorSpecs
     }
 
     [Fact]
+    public async Task VerifyCliRuntimeIdentityAsync_StableLauncherMatchesSourceRevision_ReportsPass()
+    {
+        var commands = new ScriptedCommandExecutor();
+        var sourceRevision = new string('a', 40);
+        commands.Queue("/home/test/.local/bin/mo", 0, $"0.0.0+{sourceRevision}\n");
+        var validator = BuildValidator(BuildUnusedHttpClient(), commands);
+        var expected = new RuntimeIdentity(
+            "cli",
+            $"0.0.0+{sourceRevision}",
+            sourceRevision,
+            new string('b', 40),
+            new string('c', 64),
+            "mohist-cli-candidate",
+            1);
+
+        var result = await validator.VerifyCliRuntimeIdentityAsync(
+            "/home/test/.local/bin/mo",
+            expected,
+            CancellationToken.None);
+
+        Assert.Equal("CLI identity", result.Component);
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyCliRuntimeIdentityAsync_StableLauncherReportsOldRevision_Fails()
+    {
+        var commands = new ScriptedCommandExecutor();
+        commands.Queue("/home/test/.local/bin/mo", 0, "0.0.0+oldrevision\n");
+        var validator = BuildValidator(BuildUnusedHttpClient(), commands);
+        var expected = new RuntimeIdentity(
+            "cli",
+            "0.0.0+newrevision",
+            "newrevision",
+            "tree",
+            "artifact",
+            "release",
+            1);
+
+        var result = await validator.VerifyCliRuntimeIdentityAsync(
+            "/home/test/.local/bin/mo",
+            expected,
+            CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
+        Assert.Contains("expected source revision", result.Message);
+    }
+
+    [Fact]
     public async Task CheckServerIdentityAsync_ServerHashMatchesSourceHead_ReportsPass()
     {
         var handler = new RecordingHttpHandler((req, _) =>

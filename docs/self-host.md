@@ -402,6 +402,11 @@ cd /opt/mohist
 git pull
 npm ci
 npm run build
+
+# Required once when upgrading an installation whose `mo` binary predates
+# managed CLI launcher activation. This is the reachable bootstrap path.
+bash scripts/install-mo.sh
+
 mo update
 
 # Or update one installed service:
@@ -412,6 +417,11 @@ mo update
 
 `mo update` rebuilds and restarts installed Server, Runner, and Slack services
 and synchronizes the `mo` CLI.
+
+The bootstrap command above is only needed for the first deployment of the
+managed CLI launcher behavior. It publishes the current source checkout
+directly to the stable user path; a pre-change `mo` binary cannot perform this
+migration through a legacy `mo update cli` path.
 
 For Docker:
 
