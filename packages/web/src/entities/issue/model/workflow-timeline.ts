@@ -1,5 +1,11 @@
 import type { WorkflowStage } from './issue'
-import type { StageStateStatus, StageApprovalState, StageTaskStatus, WorkflowAgentResultAttention, WorkflowAgentResultSettlement } from './stage-state'
+import type {
+  StageStateStatus,
+  StageApprovalState,
+  StageTaskStatus,
+  WorkflowAgentResultAttention,
+  WorkflowAgentResultSettlement,
+} from './stage-state'
 import type { WorkflowTaskRequiredFile, WorkflowArtifactSummary } from './artifact'
 
 export interface WorkflowTimelinePendingWork {

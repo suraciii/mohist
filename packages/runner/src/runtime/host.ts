@@ -1,61 +1,66 @@
-import type { RunnerOptions, RunnerRegistration, CleanupPolicy } from "../core/types.js"
-import { join } from "node:path"
-import { ServerConnection } from "../server/connection.js"
-import { RunnerSignalRClient } from "../server/runner-signalr.js"
-import { reportAndRequireDurableAck } from "./work-report.js"
-import { ActionRegistry, createDefaultRegistry } from "../actions/registry.js"
-import "../core/prompt-registry.js"
-import { WorkspaceManager } from "./workspace.js"
-import { WorkspaceRegistry, NamedWorkspaceRegistry } from "./workspace-registry.js"
-import { NamedWorkspaceManager } from "./workspace-entity.js"
+import type { RunnerOptions, RunnerRegistration, CleanupPolicy } from '../core/types.js'
+import { join } from 'node:path'
+import { ServerConnection } from '../server/connection.js'
+import { RunnerSignalRClient } from '../server/runner-signalr.js'
+import { reportAndRequireDurableAck } from './work-report.js'
 import {
-  createNamedWorkspaceCleanupLoop,
-  NamedWorkspaceReclaimProbe,
-} from "./named-workspace-cleanup.js"
+  AWAITING_ACK_RETRY_INTERVAL_MS,
+  boundedSignal,
+  delay,
+  POLL_TIMEOUT_MS,
+  raceInterval,
+  READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS,
+  startTaskLogFlushTrigger,
+  TASK_LOG_FLUSH_INTERVAL_MS,
+  TASK_LOG_FLUSH_LINE_THRESHOLD,
+  TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS,
+  TASK_LOG_UPLOAD_TIMEOUT_MS,
+  terminalDeliveryFailure,
+} from './host-support.js'
+export { startTaskLogFlushTrigger }
+import { ActionRegistry, createDefaultRegistry } from '../actions/registry.js'
+import '../core/prompt-registry.js'
+import { WorkspaceManager } from './workspace.js'
+import { WorkspaceRegistry, NamedWorkspaceRegistry } from './workspace-registry.js'
+import { NamedWorkspaceManager } from './workspace-entity.js'
+import { createNamedWorkspaceCleanupLoop, NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import {
   createAgentSessionRuntimeEventOutbox,
   RUNTIME_EVENT_OUTBOX_FILE,
   type AgentSessionRuntimeEventOutbox,
-} from "../server/runtime-event-outbox.js"
-import { createServerRuntimeEventDelivery } from "../server/runtime-event-delivery.js"
-import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
-import { BindingConvergence } from "./binding-convergence.js"
-import { BindingRecoveryCoordinator } from "./binding-recovery.js"
-import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
-import { WorkExecutor } from "./executor.js"
-import { AgentJobExecutor } from "./agent-job-executor.js"
-import { TaskLogCollector, type TaskLogBatch } from "./task-log.js"
+} from '../server/runtime-event-outbox.js'
+import { createServerRuntimeEventDelivery } from '../server/runtime-event-delivery.js'
+import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from './cleanup-convergence.js'
+import { BindingConvergence } from './binding-convergence.js'
+import { BindingRecoveryCoordinator } from './binding-recovery.js'
+import { CleanupLoop, DefaultCleanupRunner } from './cleanup-loop.js'
+import { WorkExecutor } from './executor.js'
+import { AgentJobExecutor } from './agent-job-executor.js'
+import { TaskLogCollector, type TaskLogBatch } from './task-log.js'
 import {
   TerminalTaskLogDeliveryStoreImpl,
   type TerminalTaskLogDeliveryIdentity,
   type TerminalTaskLogDeliveryRecord,
   type TerminalTaskLogDeliveryStore,
-} from "./terminal-task-log-delivery.js"
-import {
-  getOpenCodeRuntimeFactory,
-  type OpenCodeRuntime,
-} from "./opencode/index.js"
-import { formatDirectoryReclaimSummary } from "./opencode/reclaim-summary.js"
-import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from "./pi/index.js"
-import { SessionCommandJournal } from "./session-command-journal.js"
-import { FollowupOperationJournal } from "./followup-operation-journal.js"
-import { CancelOperationJournal } from "./cancel-operation-journal.js"
-import { loadBuildInfo } from "./build-info.js"
-import type { DispatchWorkItem } from "../core/types.js"
-import type { WorkItemResult } from "../core/types.js"
-import { currentRunnerResources } from "../system/filesystem.js"
-import { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
-import { SkillResolver } from "./skill-resolver.js"
-import { runnerLogger } from "../system/logger.js"
-import { deleteDirectory, exists } from "../system/process.js"
-import {
-  type FollowupTarget,
-  type FollowupTargetResolution,
-  type SessionTarget,
-} from "../server/session-target.js"
+} from './terminal-task-log-delivery.js'
+import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
+import { formatDirectoryReclaimSummary } from './opencode/reclaim-summary.js'
+import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
+import { SessionCommandJournal } from './session-command-journal.js'
+import { FollowupOperationJournal } from './followup-operation-journal.js'
+import { CancelOperationJournal } from './cancel-operation-journal.js'
+import { loadBuildInfo } from './build-info.js'
+import type { DispatchWorkItem } from '../core/types.js'
+import type { WorkItemResult } from '../core/types.js'
+import { currentRunnerResources } from '../system/filesystem.js'
+import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
+import { SkillResolver } from './skill-resolver.js'
+import { runnerLogger } from '../system/logger.js'
+import { deleteDirectory, exists } from '../system/process.js'
+import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
 
-const log = runnerLogger.child("host")
-const cleanupLog = runnerLogger.child("cleanup")
+const log = runnerLogger.child('host')
+const cleanupLog = runnerLogger.child('cleanup')
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -98,19 +103,17 @@ interface AwaitingAckEntry {
  * `workKey` convention.
  */
 function workKey(work: DispatchWorkItem): string {
-  const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-  const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+  const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
+  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
   return `${ownerKind}:${ownerId}:${work.workId}`
 }
 
 function usesOpenCode(work: DispatchWorkItem): boolean {
-  if (work.ownerKind === "agent-job") {
-    const runtime = typeof work.with?.runtime === "string"
-      ? work.with.runtime
-      : work.agentDefinition?.runtime
-    return runtime?.toLowerCase() === "opencode"
+  if (work.ownerKind === 'agent-job') {
+    const runtime = typeof work.with?.runtime === 'string' ? work.with.runtime : work.agentDefinition?.runtime
+    return runtime?.toLowerCase() === 'opencode'
   }
-  return work.uses?.trim().toLowerCase() === "mohist/opencode"
+  return work.uses?.trim().toLowerCase() === 'mohist/opencode'
 }
 
 /**
@@ -227,10 +230,7 @@ export class RunnerHost {
       this.namedWorkspaceRegistry,
       this.connection,
     )
-    this.namedWorkspaceReclaimProbe = new NamedWorkspaceReclaimProbe(
-      this.namedWorkspaceRegistry,
-      this.connection,
-    )
+    this.namedWorkspaceReclaimProbe = new NamedWorkspaceReclaimProbe(this.namedWorkspaceRegistry, this.connection)
     this.namedCleanupLoop = createNamedWorkspaceCleanupLoop(
       this.namedWorkspaceRegistry,
       options.runnerRoot,
@@ -246,7 +246,8 @@ export class RunnerHost {
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
     this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
-    this.terminalTaskLogDelivery = dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
+    this.terminalTaskLogDelivery =
+      dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? delay
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
@@ -277,7 +278,7 @@ export class RunnerHost {
     const binding = target.binding ?? null
     if (!binding) return null
     const runtime = binding.runtime.toLowerCase()
-    if (runtime !== "opencode" && runtime !== "pi") return null
+    if (runtime !== 'opencode' && runtime !== 'pi') return null
     if (binding.runnerId !== this.options.runnerId) return null
     if (!binding.runtimeSessionId) return null
     if (!binding.workDir) return null
@@ -285,7 +286,7 @@ export class RunnerHost {
       runtimeSessionId: binding.runtimeSessionId,
       workDir: binding.workDir,
       projectId: target.projectId,
-      ...(target.kind === "generic" && target.definition ? { definition: target.definition } : {}),
+      ...(target.kind === 'generic' && target.definition ? { definition: target.definition } : {}),
     }
     return resolved
   }
@@ -301,22 +302,22 @@ export class RunnerHost {
       try {
         await this.workspaceRegistry.load()
       } catch (error) {
-        log.error("failed to load workspace registry; starting empty", { exception: error })
+        log.error('failed to load workspace registry; starting empty', { exception: error })
       }
       // Named workspace registry: same rebuildable-index rules as the
       // workflow registry — a missing or corrupt file starts empty.
       try {
         await this.namedWorkspaceRegistry.load()
       } catch (error) {
-        log.error("failed to load named workspace registry; starting empty", { exception: error })
+        log.error('failed to load named workspace registry; starting empty', { exception: error })
       }
       try {
         await this.terminalTaskLogDelivery.load()
       } catch (error) {
-        log.error("failed to load terminal task-log delivery store", { exception: error })
+        log.error('failed to load terminal task-log delivery store', { exception: error })
       }
       if (!this.terminalTaskLogDelivery.ready()) {
-        log.warn("terminal task-log delivery store unavailable; runner admission gated")
+        log.warn('terminal task-log delivery store unavailable; runner admission gated')
       }
       // Load the AgentSession runtime-event outbox BEFORE accepting
       // SignalR commands or claiming work. An unreadable snapshot is
@@ -336,9 +337,18 @@ export class RunnerHost {
       // push channel is available in parallel.
       await this.runConvergenceOnce(signal)
       await this.runBindingConvergenceOnce(signal)
-      const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => log.error("runner heartbeat failed", { exception: error })), this.options.heartbeatIntervalMs)
+      const heartbeat = setInterval(
+        () =>
+          void this.connection
+            .heartbeat(this.registrationState(), signal)
+            .catch((error) => log.error('runner heartbeat failed', { exception: error })),
+        this.options.heartbeatIntervalMs,
+      )
       const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
-      const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
+      const convergenceTimer = setInterval(
+        () => void this.runConvergenceOnce(signal),
+        this.cleanupConvergenceIntervalMs,
+      )
       const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
       try {
         await this.runWorkerPool(signal)
@@ -360,16 +370,20 @@ export class RunnerHost {
       await this.convergence.runOnce(signal)
     } catch (error) {
       // Convergence is best-effort; the next tick or reconnect retries.
-      cleanupLog.error("workspace cleanup convergence pass failed", { exception: error })
+      cleanupLog.error('workspace cleanup convergence pass failed', { exception: error })
     }
   }
 
   private async runBindingConvergenceOnce(signal: AbortSignal): Promise<void> {
-    if (typeof (this.connection as { listAgentSessionsForReconcile?: unknown }).listAgentSessionsForReconcile !== "function") return
+    if (
+      typeof (this.connection as { listAgentSessionsForReconcile?: unknown }).listAgentSessionsForReconcile !==
+      'function'
+    )
+      return
     try {
       await this.bindingConvergence.runOnce(signal)
     } catch (error) {
-      log.error("agent-session binding convergence pass failed", { exception: error, session: "binding" })
+      log.error('agent-session binding convergence pass failed', { exception: error, session: 'binding' })
     }
   }
 
@@ -389,25 +403,26 @@ export class RunnerHost {
       // whole `<runnerRoot>/agent-workspaces/` tree is retired disk
       // data (no registry, no migration to Workspace entities) and is
       // removed here as ordinary disk-policy cleanup.
-      const legacyAgentWorkspaces = join(this.options.runnerRoot, "agent-workspaces")
+      const legacyAgentWorkspaces = join(this.options.runnerRoot, 'agent-workspaces')
       if (exists(legacyAgentWorkspaces)) {
         await deleteDirectory(legacyAgentWorkspaces)
-        cleanupLog.info("removed retired agent-workspaces directory", { path: legacyAgentWorkspaces })
+        cleanupLog.info('removed retired agent-workspaces directory', { path: legacyAgentWorkspaces })
       }
       const runtime = this.openCodeRuntime
       let blockedPaths = new Set<string>()
       if (runtime) {
-        let reclaim: Awaited<ReturnType<OpenCodeRuntime["reclaimWhere"]>>
+        let reclaim: Awaited<ReturnType<OpenCodeRuntime['reclaimWhere']>>
         try {
           reclaim = await runtime.reclaimWhere((directory) => {
             const entry = this.workspaceRegistry.findByWorkspacePath(directory)
-            return entry?.phase === "eligible" || entry?.phase === "stuck"
+            return entry?.phase === 'eligible' || entry?.phase === 'stuck'
           })
         } catch (error) {
-          cleanupLog.error("workspace cleanup runtime reclamation failed", { exception: error })
+          cleanupLog.error('workspace cleanup runtime reclamation failed', { exception: error })
           return
         }
-        if (reclaim.candidates > 0) cleanupLog.info("workspace reclaim completed", { reason: formatDirectoryReclaimSummary(reclaim) })
+        if (reclaim.candidates > 0)
+          cleanupLog.info('workspace reclaim completed', { reason: formatDirectoryReclaimSummary(reclaim) })
         blockedPaths = new Set(reclaim.blockedDirectories)
       }
       const policy = await this.connection.fetchConfig(signal)
@@ -419,30 +434,44 @@ export class RunnerHost {
       try {
         const reclaim = await this.namedWorkspaceReclaimProbe.runOnce(signal)
         if (reclaim.markedEligible > 0 || reclaim.deferred > 0 || reclaim.unobserved > 0) {
-          cleanupLog.info("named workspace reclaim probe", { markedEligible: reclaim.markedEligible, deferred: reclaim.deferred, unobserved: reclaim.unobserved })
+          cleanupLog.info('named workspace reclaim probe', {
+            markedEligible: reclaim.markedEligible,
+            deferred: reclaim.deferred,
+            unobserved: reclaim.unobserved,
+          })
         }
       } catch (error) {
-        cleanupLog.warn("named workspace reclaim probe failed", { exception: error })
+        cleanupLog.warn('named workspace reclaim probe failed', { exception: error })
       }
-      if (this.namedWorkspaceRegistry.list().some((entry) => entry.phase === "eligible")) {
+      if (this.namedWorkspaceRegistry.list().some((entry) => entry.phase === 'eligible')) {
         const namedResult = await this.namedCleanupLoop.runOnce(policy, signal, blockedPaths)
-        if (namedResult.retentionRemoved > 0 || namedResult.budgetRemoved > 0 || namedResult.guardAborted > 0 || namedResult.stuckResolved > 0) {
-          cleanupLog.info("named workspace cleanup completed", {
-            reason: `retention=${namedResult.retentionRemoved} budget=${namedResult.budgetRemoved} guardAborted=${namedResult.guardAborted} stuck=${namedResult.stuckResolved} usage=${namedResult.workspaceUsageBytes ?? "unknown"}`,
+        if (
+          namedResult.retentionRemoved > 0 ||
+          namedResult.budgetRemoved > 0 ||
+          namedResult.guardAborted > 0 ||
+          namedResult.stuckResolved > 0
+        ) {
+          cleanupLog.info('named workspace cleanup completed', {
+            reason: `retention=${namedResult.retentionRemoved} budget=${namedResult.budgetRemoved} guardAborted=${namedResult.guardAborted} stuck=${namedResult.stuckResolved} usage=${namedResult.workspaceUsageBytes ?? 'unknown'}`,
           })
         }
       }
       const result = await this.cleanupLoop.runOnce(policy, signal, blockedPaths)
-      if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0 || result.stuckResolved > 0) {
-        cleanupLog.info("workspace cleanup completed", {
-          reason: `retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} stuck=${result.stuckResolved} usage=${result.workspaceUsageBytes ?? "unknown"}`,
+      if (
+        result.retentionRemoved > 0 ||
+        result.budgetRemoved > 0 ||
+        result.guardAborted > 0 ||
+        result.stuckResolved > 0
+      ) {
+        cleanupLog.info('workspace cleanup completed', {
+          reason: `retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} stuck=${result.stuckResolved} usage=${result.workspaceUsageBytes ?? 'unknown'}`,
         })
       }
     } catch (error) {
       // Cleanup is best-effort; the next tick retries. fetchConfig failures
       // (network blip, server restart) flow through this same catch so the
       // loop stays resilient without a stale-policy fallback.
-      cleanupLog.error("workspace cleanup loop failed", { exception: error })
+      cleanupLog.error('workspace cleanup loop failed', { exception: error })
     }
   }
 
@@ -451,11 +480,11 @@ export class RunnerHost {
     const alive = await this.signalR.probeLiveness(signal).catch(() => false)
     if (signal.aborted) return
     if (alive) return
-    log.warn("dispatch liveness probe failed; forcing reconnect", { reason: "liveness" })
+    log.warn('dispatch liveness probe failed; forcing reconnect', { reason: 'liveness' })
     try {
       await this.signalR.forceReconnect(signal)
     } catch (error) {
-      log.error("forceReconnect failed", { exception: error, reason: "reconnect" })
+      log.error('forceReconnect failed', { exception: error, reason: 'reconnect' })
     }
   }
 
@@ -481,7 +510,7 @@ export class RunnerHost {
     try {
       await this.connection.heartbeat(this.registrationState(), signal)
     } catch (error) {
-      log.error("immediate runner heartbeat failed", { exception: error })
+      log.error('immediate runner heartbeat failed', { exception: error })
     }
   }
 
@@ -494,7 +523,7 @@ export class RunnerHost {
     const policy = parseProviderErrorPolicy(environment)
     if (!policy.ok) {
       this.providerPolicyDiagnostic = `provider error policy invalid (${policy.error.code}): ${policy.error.message}`
-      log.error("provider error policy invalid", { reason: this.providerPolicyDiagnostic })
+      log.error('provider error policy invalid', { reason: this.providerPolicyDiagnostic })
     } else {
       this.providerPolicyDiagnostic = null
     }
@@ -506,13 +535,18 @@ export class RunnerHost {
     })
     const startResult = await this.openCodeRuntime.start(signal)
     if (!startResult.ok) {
-      log.error("opencode runtime not ready at startup; claiming gated until it recovers", { reason: startResult.error.message })
+      log.error('opencode runtime not ready at startup; claiming gated until it recovers', {
+        reason: startResult.error.message,
+      })
     }
     this.syncOpenCodeWorkOwners()
-    this.piRuntime = getPiRuntimeFactory()({ agentDir: this.options.runnerRoot, ...(policy.ok ? { providerErrorPolicy: policy.value } : {}) })
+    this.piRuntime = getPiRuntimeFactory()({
+      agentDir: this.options.runnerRoot,
+      ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
+    })
     const piStart = await this.piRuntime.start()
     if (!piStart.ok) {
-      log.error("pi runtime not ready at startup; claiming gated until it recovers", { reason: piStart.error.message })
+      log.error('pi runtime not ready at startup; claiming gated until it recovers', { reason: piStart.error.message })
     }
     this.workExecutor = new WorkExecutor(
       this.actions,
@@ -521,10 +555,17 @@ export class RunnerHost {
       undefined,
       undefined,
       this.openCodeRuntime,
-      new AgentJobExecutor(this.connection, {
-        openCode: () => this.openCodeRuntime,
-        pi: () => this.piRuntime,
-      }, this.bindingRecoveryCoordinator, process.cwd(), this.skillResolver, this.namedWorkspaceManager),
+      new AgentJobExecutor(
+        this.connection,
+        {
+          openCode: () => this.openCodeRuntime,
+          pi: () => this.piRuntime,
+        },
+        this.bindingRecoveryCoordinator,
+        process.cwd(),
+        this.skillResolver,
+        this.namedWorkspaceManager,
+      ),
       this.agentSessionRuntimeEventOutbox,
       undefined,
       this.piRuntime,
@@ -542,11 +583,13 @@ export class RunnerHost {
       // Loading itself is best effort — `outbox.ready()` reflects the
       // actual durable state and gates the follow-up handler and claim
       // loop.
-      log.error("agent-session runtime event outbox failed to load", { exception: error, session: "outbox" })
+      log.error('agent-session runtime event outbox failed to load', { exception: error, session: 'outbox' })
     }
     if (signal.aborted) return
     if (!outbox.ready()) {
-      log.warn("agent-session runtime event outbox unhealthy at startup; runner admission gated until it recovers", { session: "outbox" })
+      log.warn('agent-session runtime event outbox unhealthy at startup; runner admission gated until it recovers', {
+        session: 'outbox',
+      })
     }
   }
 
@@ -555,11 +598,17 @@ export class RunnerHost {
     if (this.openCodeRuntime !== null) {
       try {
         await this.openCodeRuntime.shutdown()
-      } catch { /* best effort */ }
+      } catch {
+        /* best effort */
+      }
       this.openCodeRuntime = null
     }
     if (this.piRuntime !== null) {
-      try { await this.piRuntime.shutdown() } catch { /* best effort */ }
+      try {
+        await this.piRuntime.shutdown()
+      } catch {
+        /* best effort */
+      }
       this.piRuntime = null
     }
   }
@@ -589,7 +638,7 @@ export class RunnerHost {
         const diagnosticChanged = diagnostic !== lastReadinessDiagnostic
         const reLogDue = now - lastReadinessLoggedAt > READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS
         if (diagnosticChanged || reLogDue) {
-          log.warn("runner not ready; skipping poll", { reason: diagnostic ?? "opencode runtime not ready" })
+          log.warn('runner not ready; skipping poll', { reason: diagnostic ?? 'opencode runtime not ready' })
           lastReadinessDiagnostic = diagnostic
           lastReadinessLoggedAt = now
         }
@@ -604,7 +653,7 @@ export class RunnerHost {
         works = await this.pollOnce(signal)
       } catch (error) {
         if (signal.aborted) break
-        log.warn("runner poll failed; retrying", { reason: `in ${this.options.pollIntervalMs}ms`, exception: error })
+        log.warn('runner poll failed; retrying', { reason: `in ${this.options.pollIntervalMs}ms`, exception: error })
         await raceInterval(this.nextReconciliationInterval(), signal, [])
         continue
       }
@@ -635,9 +684,7 @@ export class RunnerHost {
       // any work settling so a freed slot re-polls promptly. A failed report
       // also bounds the wait: report retries must not inherit a long poll
       // interval.
-      await raceInterval(this.nextReconciliationInterval(), signal, [
-        ...[...this.inFlight.values()].map((e) => e.done),
-      ])
+      await raceInterval(this.nextReconciliationInterval(), signal, [...[...this.inFlight.values()].map((e) => e.done)])
     }
 
     // Drain in-flight executions on abort so completed work can finish its
@@ -652,24 +699,22 @@ export class RunnerHost {
 
   private isReadyForClaim(): boolean {
     const runtime = this.openCodeRuntime
-    return this.providerPolicyDiagnostic === null
-      && this.terminalTaskLogDelivery.ready()
-      && this.agentSessionRuntimeEventOutbox.ready()
-      && this.piRuntime !== null
-      && this.piRuntime.ready()
-      && (runtime?.ready() === true || runtime?.canPollWhileCold() === true)
+    return (
+      this.providerPolicyDiagnostic === null &&
+      this.terminalTaskLogDelivery.ready() &&
+      this.agentSessionRuntimeEventOutbox.ready() &&
+      this.piRuntime !== null &&
+      this.piRuntime.ready() &&
+      (runtime?.ready() === true || runtime?.canPollWhileCold() === true)
+    )
   }
 
   private syncOpenCodeWorkOwners(): void {
     const runtime = this.openCodeRuntime
     if (!runtime) return
     const owners = [
-      ...[...this.inFlight.values()]
-        .filter((entry) => usesOpenCode(entry.work))
-        .map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()]
-        .filter((entry) => usesOpenCode(entry.work))
-        .map((entry) => workKey(entry.work)),
+      ...[...this.inFlight.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
+      ...[...this.awaitingAck.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
     ]
     runtime.setWorkOwners(owners)
   }
@@ -678,24 +723,17 @@ export class RunnerHost {
     const runtime = this.openCodeRuntime
     const owners = works.filter(usesOpenCode).map(workKey)
     if (!runtime || owners.length === 0) return
-    runtime.setWorkOwners([
-      ...this.openCodeOwners(),
-      ...owners,
-    ])
+    runtime.setWorkOwners([...this.openCodeOwners(), ...owners])
     if (!runtime.ready()) {
       const started = await runtime.start(signal)
-      if (!started.ok) log.error("opencode runtime could not be recreated for work", { reason: started.error.message })
+      if (!started.ok) log.error('opencode runtime could not be recreated for work', { reason: started.error.message })
     }
   }
 
   private openCodeOwners(): string[] {
     return [
-      ...[...this.inFlight.values()]
-        .filter((entry) => usesOpenCode(entry.work))
-        .map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()]
-        .filter((entry) => usesOpenCode(entry.work))
-        .map((entry) => workKey(entry.work)),
+      ...[...this.inFlight.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
+      ...[...this.awaitingAck.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
     ]
   }
 
@@ -720,7 +758,9 @@ export class RunnerHost {
     if (this.providerPolicyDiagnostic !== null) return this.providerPolicyDiagnostic
     if (!this.isOpenCodeReadyForClaim()) return this.openCodeReadinessDiagnostic()
     const diagnostic = this.piRuntime?.diagnostic()
-    return diagnostic ? `pi runtime not ready (${diagnostic.code}): ${diagnostic.message}` : "pi runtime not ready; skipping poll"
+    return diagnostic
+      ? `pi runtime not ready (${diagnostic.code}): ${diagnostic.message}`
+      : 'pi runtime not ready; skipping poll'
   }
 
   private async pollOnce(signal: AbortSignal): Promise<DispatchWorkItem[]> {
@@ -754,18 +794,14 @@ export class RunnerHost {
    * `signal` is the run-lifetime signal; reporting uses a fresh signal so
    * a host teardown (SIGINT) still reaches the owner instead of aborting.
    */
-  private async executeAndTransition(
-    work: DispatchWorkItem,
-    signal: AbortSignal,
-    key: string,
-  ): Promise<void> {
+  private async executeAndTransition(work: DispatchWorkItem, signal: AbortSignal, key: string): Promise<void> {
     let result: WorkItemResult
     try {
       result = await this.executeWork(work, signal)
     } catch (error) {
       if (signal.aborted) return
-      log.error("work failed before report", { work: work.workId, exception: error })
-      result = { status: "failed", message: String(error) }
+      log.error('work failed before report', { work: work.workId, exception: error })
+      result = { status: 'failed', message: String(error) }
     }
     if (signal.aborted) return
 
@@ -780,7 +816,7 @@ export class RunnerHost {
       await this.reportOnce(key)
     } catch (error) {
       this.scheduleReportRetry(key)
-      log.warn("first work report failed; will retry", { work: work.workId, exception: error })
+      log.warn('first work report failed; will retry', { work: work.workId, exception: error })
     }
   }
 
@@ -805,18 +841,25 @@ export class RunnerHost {
 
   private async retryDueReports(): Promise<void> {
     const now = Date.now()
-    const due = [...this.awaitingAck.entries()]
-      .filter(([, held]) => held.entry.retryAt !== null && held.entry.retryAt <= now)
+    const due = [...this.awaitingAck.entries()].filter(
+      ([, held]) => held.entry.retryAt !== null && held.entry.retryAt <= now,
+    )
 
-    await Promise.all(due.map(async ([key, held]) => {
-      held.entry.retryAt = null
-      try {
-        await this.reportOnce(key)
-      } catch (error) {
-        this.scheduleReportRetry(key)
-      log.warn("work report retry failed", { work: held.work.workId, attempt: held.entry.attempts, exception: error })
-      }
-    }))
+    await Promise.all(
+      due.map(async ([key, held]) => {
+        held.entry.retryAt = null
+        try {
+          await this.reportOnce(key)
+        } catch (error) {
+          this.scheduleReportRetry(key)
+          log.warn('work report retry failed', {
+            work: held.work.workId,
+            attempt: held.entry.attempts,
+            exception: error,
+          })
+        }
+      }),
+    )
   }
 
   private nextReconciliationInterval(): number {
@@ -835,23 +878,23 @@ export class RunnerHost {
     const timeout = setTimeout(() => cleanup.abort(), 5_000)
     timeout.unref?.()
     try {
-      await Promise.allSettled([
-        this.connection.disconnect(cleanup.signal),
-        this.signalR.stop(),
-      ])
+      await Promise.allSettled([this.connection.disconnect(cleanup.signal), this.signalR.stop()])
     } finally {
       clearTimeout(timeout)
     }
   }
 
   private terminalTaskLogIdentity(work: DispatchWorkItem): TerminalTaskLogDeliveryIdentity {
-    const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-    const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+    const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
+    const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
     if (!ownerId) throw new Error(`terminal task-log work ${work.workId} has no owner identity`)
     return { ownerKind, ownerId, workId: work.workId }
   }
 
-  private async persistTerminalTaskLog(work: DispatchWorkItem, batch: TaskLogBatch): Promise<TerminalTaskLogDeliveryRecord> {
+  private async persistTerminalTaskLog(
+    work: DispatchWorkItem,
+    batch: TaskLogBatch,
+  ): Promise<TerminalTaskLogDeliveryRecord> {
     return await this.terminalTaskLogDelivery.putPending({
       identity: this.terminalTaskLogIdentity(work),
       batch,
@@ -864,14 +907,14 @@ export class RunnerHost {
     try {
       pending = await this.terminalTaskLogDelivery.listPending()
     } catch (error) {
-      log.error("failed to read pending terminal task-log deliveries", { exception: error })
+      log.error('failed to read pending terminal task-log deliveries', { exception: error })
       return
     }
     await Promise.all(pending.map((record) => this.deliverTerminalTaskLog(record, signal)))
   }
 
   private async deliverTerminalTaskLog(record: TerminalTaskLogDeliveryRecord, signal: AbortSignal): Promise<void> {
-    if (record.state !== "pending" || signal.aborted) return
+    if (record.state !== 'pending' || signal.aborted) return
     const key = `${record.identity.ownerKind}:${record.identity.ownerId}:${record.identity.workId}`
     if (this.terminalTaskLogDeliveryInFlight.has(key)) return
     this.terminalTaskLogDeliveryInFlight.add(key)
@@ -880,9 +923,9 @@ export class RunnerHost {
     timeout.unref?.()
     let uploadDeadline: ReturnType<typeof setTimeout> | null = null
     const abortUpload = () => controller.abort()
-    signal.addEventListener("abort", abortUpload, { once: true })
+    signal.addEventListener('abort', abortUpload, { once: true })
     try {
-      let result: Awaited<ReturnType<ServerConnection["uploadTaskLog"]>>
+      let result: Awaited<ReturnType<ServerConnection['uploadTaskLog']>>
       try {
         result = await Promise.race([
           this.connection.uploadTaskLog(
@@ -894,7 +937,10 @@ export class RunnerHost {
             true,
           ),
           new Promise<never>((_resolve, reject) => {
-            uploadDeadline = setTimeout(() => reject(new Error(`task-log terminal upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`)), TASK_LOG_UPLOAD_TIMEOUT_MS)
+            uploadDeadline = setTimeout(
+              () => reject(new Error(`task-log terminal upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`)),
+              TASK_LOG_UPLOAD_TIMEOUT_MS,
+            )
           }),
         ])
       } catch (error) {
@@ -903,29 +949,38 @@ export class RunnerHost {
           try {
             await this.terminalTaskLogDelivery.markFailed(record.identity, failure)
           } catch (persistError) {
-            log.error("failed to persist terminal task-log failure", { work: record.identity.workId, exception: persistError })
+            log.error('failed to persist terminal task-log failure', {
+              work: record.identity.workId,
+              exception: persistError,
+            })
           }
-          log.error("terminal task-log delivery reached a terminal error", { work: record.identity.workId, failure })
+          log.error('terminal task-log delivery reached a terminal error', { work: record.identity.workId, failure })
         } else {
-          log.warn("terminal task-log delivery will recover", { work: record.identity.workId, exception: error })
+          log.warn('terminal task-log delivery will recover', { work: record.identity.workId, exception: error })
         }
         return
       }
 
-      if (result.status !== "changed" && result.status !== "duplicate") {
-        log.error("terminal task-log delivery returned an invalid acknowledgement", { work: record.identity.workId, status: result.status })
+      if (result.status !== 'changed' && result.status !== 'duplicate') {
+        log.error('terminal task-log delivery returned an invalid acknowledgement', {
+          work: record.identity.workId,
+          status: result.status,
+        })
         return
       }
 
       try {
         await this.terminalTaskLogDelivery.acknowledge(record.identity)
       } catch (error) {
-        log.error("terminal task-log acknowledgement could not be persisted", { work: record.identity.workId, exception: error })
+        log.error('terminal task-log acknowledgement could not be persisted', {
+          work: record.identity.workId,
+          exception: error,
+        })
       }
     } finally {
       clearTimeout(timeout)
       if (uploadDeadline) clearTimeout(uploadDeadline)
-      signal.removeEventListener("abort", abortUpload)
+      signal.removeEventListener('abort', abortUpload)
       this.terminalTaskLogDeliveryInFlight.delete(key)
     }
   }
@@ -947,30 +1002,19 @@ export class RunnerHost {
     // dispatches upload under `work.agentJobId`, workflow dispatches
     // under `work.workflowRunId`. Routing through a single uploadTaskLog
     // call keeps the task-log channel symmetric with artifact uploads.
-    const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-    const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+    const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
+    const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
 
     /**
      * Incremental delivery is best effort. Terminal delivery uses the
      * durable outbox below and is never sent through this helper.
      */
-    const uploadTaskLogBatch = async (
-      batch: TaskLogBatch,
-      timeoutMs: number,
-      label: "incremental",
-    ) => {
+    const uploadTaskLogBatch = async (batch: TaskLogBatch, timeoutMs: number, label: 'incremental') => {
       const uploadController = new AbortController()
       let timeout: ReturnType<typeof setTimeout> | null = null
       try {
         await Promise.race([
-          this.connection.uploadTaskLog(
-            ownerId,
-            work.workId,
-            batch,
-            uploadController.signal,
-            ownerKind,
-            false,
-          ),
+          this.connection.uploadTaskLog(ownerId, work.workId, batch, uploadController.signal, ownerKind, false),
           new Promise<never>((_resolve, reject) => {
             timeout = setTimeout(() => {
               uploadController.abort()
@@ -980,7 +1024,7 @@ export class RunnerHost {
           }),
         ])
       } catch (flushError) {
-        log.error("task-log upload failed", { work: work.workId, path: label, exception: flushError })
+        log.error('task-log upload failed', { work: work.workId, path: label, exception: flushError })
       } finally {
         if (timeout) clearTimeout(timeout)
       }
@@ -992,18 +1036,18 @@ export class RunnerHost {
      * under the larger incremental-timeout constant. An empty drain
      * short-circuits — no network round-trip is issued.
      */
-    const flushIncrementalTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
+    const flushIncrementalTaskLog = async (collector: import('./task-log.js').TaskLogCollector | null) => {
       if (!collector) return
       const batch = collector.drain()
       if (batch === null) return
       await uploadTaskLogBatch(
         batch,
         this.options.taskLogIncrementalUploadTimeoutMs ?? TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS,
-        "incremental",
+        'incremental',
       )
     }
 
-    const startIncrementalFlushForCollector = (collector: import("./task-log.js").TaskLogCollector) => {
+    const startIncrementalFlushForCollector = (collector: import('./task-log.js').TaskLogCollector) => {
       const flushTrigger = startTaskLogFlushTrigger(
         () => flushIncrementalTaskLog(collector),
         this.options.taskLogFlushIntervalMs ?? TASK_LOG_FLUSH_INTERVAL_MS,
@@ -1014,7 +1058,7 @@ export class RunnerHost {
     }
 
     if (this.workExecutor === null) {
-      throw new Error("WorkExecutor not initialized; runner host is shutting down")
+      throw new Error('WorkExecutor not initialized; runner host is shutting down')
     }
 
     // Start the incremental flush trigger alongside executeWithLog and
@@ -1056,7 +1100,7 @@ export class RunnerHost {
           const persisted = await this.persistTerminalTaskLog(work, collector.snapshot())
           if (!signal.aborted) await this.deliverTerminalTaskLog(persisted, signal)
         } catch (persistError) {
-          log.error("terminal task-log snapshot could not be persisted", { work: work.workId, exception: persistError })
+          log.error('terminal task-log snapshot could not be persisted', { work: work.workId, exception: persistError })
         }
       }
       throw error
@@ -1073,38 +1117,46 @@ export class RunnerHost {
       actionCatalog: this.actions.catalog(),
       projectId: this.options.projectId,
       connectionId: this.signalR.getConnectionId(),
-      ...(piCatalog ? {
-        runtimeCatalogs: {
-          pi: {
-            models: piCatalog.models.map((model) => `${model.provider}/${model.id}`),
-            variants: Object.fromEntries(
-              piCatalog.models.map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]),
-            ),
-          },
-        },
-      } : {}),
+      ...(piCatalog
+        ? {
+            runtimeCatalogs: {
+              pi: {
+                models: piCatalog.models.map((model) => `${model.provider}/${model.id}`),
+                variants: Object.fromEntries(
+                  piCatalog.models.map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]),
+                ),
+              },
+            },
+          }
+        : {}),
     }
   }
 
   private async connectRunner(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
-        await this.connection.connect({
-          ...this.registrationState(),
-          buildGitHash: this.buildGitHash,
-          component: this.buildInfo.component,
-          version: this.buildInfo.version,
-          sourceRevision: this.buildInfo.sourceRevision ?? this.buildInfo.gitHash,
-          treeHash: this.buildInfo.treeHash,
-          artifactDigest: this.buildInfo.artifactDigest,
-          releaseId: this.buildInfo.releaseId,
-          generation: this.buildInfo.generation,
-          runnerId: this.buildInfo.runnerId ?? this.options.runnerId,
-        }, signal)
+        await this.connection.connect(
+          {
+            ...this.registrationState(),
+            buildGitHash: this.buildGitHash,
+            component: this.buildInfo.component,
+            version: this.buildInfo.version,
+            sourceRevision: this.buildInfo.sourceRevision ?? this.buildInfo.gitHash,
+            treeHash: this.buildInfo.treeHash,
+            artifactDigest: this.buildInfo.artifactDigest,
+            releaseId: this.buildInfo.releaseId,
+            generation: this.buildInfo.generation,
+            runnerId: this.buildInfo.runnerId ?? this.options.runnerId,
+          },
+          signal,
+        )
         await this.signalR.start()
         return
       } catch (error) {
-      log.error("runner connection failed; retrying", { reason: `in ${this.options.pollIntervalMs}ms`, exception: error })
+        log.error('runner connection failed; retrying', {
+          reason: `in ${this.options.pollIntervalMs}ms`,
+          exception: error,
+        })
         await this.disconnectForReconnect()
         await this.waitForConnectionRetry(this.options.pollIntervalMs, signal)
       }
@@ -1116,227 +1168,9 @@ export class RunnerHost {
     const timeout = setTimeout(() => cleanup.abort(), 5_000)
     timeout.unref?.()
     try {
-      await Promise.allSettled([
-        this.connection.disconnect(cleanup.signal),
-        this.signalR.disconnect(),
-      ])
+      await Promise.allSettled([this.connection.disconnect(cleanup.signal), this.signalR.disconnect()])
     } finally {
       clearTimeout(timeout)
     }
-  }
-}
-
-/**
- * Minimum interval between repeated "opencode runtime not ready"
- * warnings while the runner pauses claiming. The gate fires on every
- * loop tick when the runtime is unhealthy; without this throttle a
- * not-ready window would spam the log every poll. The first emission
- * always logs; the same diagnostic message is then re-logged at most
- * once per interval (or as soon as the message changes).
- */
-const READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS = 30_000
-
-/** Maximum time a single poll request may wait before the loop retries. */
-const POLL_TIMEOUT_MS = 10_000
-
-/**
- * Minimum delay before the reconciliation loop re-attempts an awaitingAck
- * entry whose report transport previously failed.
- */
-const AWAITING_ACK_RETRY_INTERVAL_MS = 5_000
-
-const TASK_LOG_UPLOAD_TIMEOUT_MS = 250
-
-/**
- * Maximum time an incremental task-log upload is allowed to take.
- * Distinct from the terminal-batch timeout because incremental batches
- * are smaller but the rail tolerates more slack. Larger
- * than the terminal timeout because we accept second-level latency for
- * the live channel.
- */
-const TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS = 5_000
-
-/**
- * Wall-clock interval between incremental flush trigger fires. The
- * trigger fires regardless of whether new lines have arrived — an
- * empty drain then short-circuits without an upload.
- */
-const TASK_LOG_FLUSH_INTERVAL_MS = 1_500
-
-/**
- * Threshold on the count of new (un-drained) lines buffered past the
- * sent-seq watermark. Crossing this threshold on a write fires the
- * trigger eagerly, so a chatty command does not have to wait for the
- * interval to see its tail in the web view.
- */
-const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
-
-function terminalDeliveryFailure(error: unknown): { kind: "conflict" | "not-found" | "local"; status?: number; code?: string; message: string } | null {
-  const candidate = error as { status?: unknown; code?: unknown; message?: unknown } | null
-  const status = typeof candidate?.status === "number" ? candidate.status : undefined
-  const code = typeof candidate?.code === "string" ? candidate.code : undefined
-  const message = typeof candidate?.message === "string" ? candidate.message : String(error)
-  if (status === 409 || code === "terminal_snapshot_conflict") return { kind: "conflict", ...(status === undefined ? {} : { status }), ...(code ? { code } : {}), message }
-  if (status === 404 || code === "not_found") return { kind: "not-found", ...(status === undefined ? {} : { status }), ...(code ? { code } : {}), message }
-  if (status !== undefined && status >= 400 && status < 500) return { kind: "local", status, ...(code ? { code } : {}), message }
-  if (code === "terminal_ack_missing") return { kind: "local", ...(status === undefined ? {} : { status }), code, message }
-  return null
-}
-
-/**
- * Create an incremental flush trigger. The returned handle exposes
- * `stop()` to clear the interval and wait for any in-flight flush,
- * plus a `noteAppend()` method to register a newly-captured line
- * against the line-count threshold. Callers MUST await `stop()` before
- * the terminal flush so a final drain/upload cannot race the terminal
- * snapshot.
- *
- * `setInterval` is used (rather than a custom timer abstraction) so
- * the trigger is driven by the global JS timer clock and is therefore
- * deterministically controllable by `vi.useFakeTimers` (no real
- * wall-clock, per the project's testing convention).
- *
- * The trigger fires on EITHER:
- *   - an elapsed interval since the last fire (regardless of new
- *     lines — `flush` short-circuits an empty drain), OR
- *   - the line-count threshold being reached between two interval
- *     ticks. `noteAppend` is called once per captured line; when the
- *     running count since the last fire meets or exceeds the threshold,
- *     the trigger fires eagerly.
- *
- * `flush` is the single short-circuit point that skips the network
- * round-trip when the collector's `drain` is empty — the trigger
- * itself always invokes `flush` on a fire. Flushes are serialized per
- * trigger: if a timer/threshold fire happens while an upload is still
- * in flight, one follow-up flush is queued and run after the current
- * one settles.
- *
- * Exported (not just module-private) so the test suite can drive the
- * exact same code path without reimplementing the `setInterval`
- * dance; the host keeps the trigger implementation here as the
- * single source of truth.
- */
-export function startTaskLogFlushTrigger(
-  flush: () => Promise<void> | void,
-  intervalMs: number,
-  lineThreshold: number,
-): { stop: () => Promise<void>; noteAppend: () => void } {
-  // Defensive: a zero/negative interval would create a tight loop.
-  // Clamp to a minimum positive value to keep the trigger harmless
-  // under accidental misconfiguration. Tests that need finer control
-  // can pass an explicit positive `intervalMs`.
-  const safeInterval = Math.max(50, Math.floor(intervalMs))
-  const safeThreshold = Math.max(1, Math.floor(lineThreshold))
-  let pending = 0
-  let inFlight: Promise<void> | null = null
-  let rerunAfterInFlight = false
-
-  const runFlush = (): Promise<void> => {
-    if (inFlight) {
-      rerunAfterInFlight = true
-      return inFlight
-    }
-
-    try {
-      const result = flush()
-      inFlight = Promise.resolve(result)
-        .catch((error) => {
-          log.error("task-log incremental flush failed", { exception: error })
-        })
-        .finally(() => {
-          inFlight = null
-          if (rerunAfterInFlight) {
-            rerunAfterInFlight = false
-            void runFlush()
-          }
-        })
-    } catch (error) {
-      log.error("task-log incremental flush failed", { exception: error })
-      inFlight = null
-    }
-
-    return inFlight ?? Promise.resolve()
-  }
-
-  const waitForIdle = async () => {
-    while (inFlight) await inFlight
-  }
-
-  const tick = () => {
-    pending = 0
-    void runFlush()
-  }
-  const handle = setInterval(tick, safeInterval)
-  handle.unref?.()
-  return {
-    stop: async () => {
-      clearInterval(handle)
-      await waitForIdle()
-    },
-    noteAppend: () => {
-      pending += 1
-      if (pending >= safeThreshold) tick()
-    },
-  }
-}
-
-async function delay(ms: number, signal: AbortSignal) {
-  if (signal.aborted) throw signal.reason
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort)
-      resolve()
-    }, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      reject(signal.reason)
-    }
-    signal.addEventListener("abort", onAbort, { once: true })
-  })
-}
-
-/**
- * Race a poll-interval timer against in-flight work promises. Unlike
- * {@link delay} wrapped in `Promise.race`, the interval timer is owned here:
- * whichever racer settles first, the timer is cleared and its promise
- * resolved, so no pending promise lingers to reject on a later abort and
- * surface as an unhandled rejection. The `signal` aborts the wait promptly
- * (resolving, since every caller re-checks `signal.aborted` afterwards).
- */
-function raceInterval(ms: number, signal: AbortSignal, racers: Promise<unknown>[]): Promise<void> {
-  return new Promise((resolve) => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let settled = false
-    const done = () => {
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      signal.removeEventListener("abort", onAbort)
-      resolve()
-    }
-    const onAbort = done
-    if (signal.aborted) { done(); return }
-    timer = setTimeout(done, ms)
-    timer.unref?.()
-    signal.addEventListener("abort", onAbort, { once: true })
-    for (const r of racers) r.then(done, done)
-  })
-}
-
-function boundedSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortSignal; dispose: () => void } {
-  const controller = new AbortController()
-  const abortFromParent = () => controller.abort(parent.reason)
-  if (parent.aborted) abortFromParent()
-  else parent.addEventListener("abort", abortFromParent, { once: true })
-
-  const timeout = setTimeout(() => controller.abort(new Error(`request timed out after ${timeoutMs}ms`)), timeoutMs)
-  timeout.unref?.()
-
-  return {
-    signal: controller.signal,
-    dispose: () => {
-      clearTimeout(timeout)
-      parent.removeEventListener("abort", abortFromParent)
-    },
   }
 }

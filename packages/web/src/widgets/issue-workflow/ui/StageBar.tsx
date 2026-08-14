@@ -4,7 +4,12 @@ import type { Issue, StageStateRead, StageCheckState } from '../../../entities/i
 import { formatDuration } from './format'
 import { StageStatusIcon } from './StageStatusIcons'
 
-export const WORKFLOW_STAGES: readonly WorkflowStage[] = [WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Integrate]
+export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
+  WorkflowStage.Plan,
+  WorkflowStage.Build,
+  WorkflowStage.Check,
+  WorkflowStage.Integrate,
+]
 
 export function getStageStatus(
   stage: WorkflowStage,
@@ -46,7 +51,9 @@ export function getStageDuration(stage: WorkflowStage, stageStateMap: Map<string
   return total > 0 ? total : null
 }
 
-export function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflowTimeline>['data']): Map<string, StageStateRead> {
+export function workflowTimelineToStageStateMap(
+  timeline: ReturnType<typeof useWorkflowTimeline>['data'],
+): Map<string, StageStateRead> {
   const map = new Map<string, StageStateRead>()
   if (!timeline) return map
 
@@ -148,10 +155,7 @@ export function StageBar({
   onSelectStage: (stage: WorkflowStage) => void
 }) {
   return (
-    <div
-      className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4"
-      data-testid="workflow-stage-bar"
-    >
+    <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" data-testid="workflow-stage-bar">
       {WORKFLOW_STAGES.map((stage) => {
         const status = getStageStatus(stage, stageStateMap, issue)
         const duration = getStageDuration(stage, stageStateMap)

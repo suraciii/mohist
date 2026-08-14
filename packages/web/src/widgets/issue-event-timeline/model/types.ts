@@ -1,4 +1,11 @@
-export type TimelineCategory = 'workflow' | 'attention' | 'approval' | 'integration' | 'success' | 'failure' | 'metadata'
+export type TimelineCategory =
+  | 'workflow'
+  | 'attention'
+  | 'approval'
+  | 'integration'
+  | 'success'
+  | 'failure'
+  | 'metadata'
 
 export type TimelineSource = 'ISSUE' | 'WORKFLOW'
 

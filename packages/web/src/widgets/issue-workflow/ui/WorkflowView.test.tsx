@@ -8,7 +8,15 @@ import { useMswServer } from '../../../../tests/support/msw'
 import { WorkflowView as DefaultWorkflowView, type WorkflowTimelineHook } from './WorkflowView'
 import type { ArtifactContentHook } from './ArtifactContentViewer'
 import type { StepListDependencies } from './InlineApproval'
-import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalFeedback, type Issue, type WorkflowTimeline, type useWorkflowTimeline } from '../../../entities/issue'
+import {
+  IssueStatus,
+  IssueHealth,
+  WorkflowStage,
+  type ApprovalFeedback,
+  type Issue,
+  type WorkflowTimeline,
+  type useWorkflowTimeline,
+} from '../../../entities/issue'
 import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/client'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
@@ -53,7 +61,11 @@ const approveIssueFn: StepListDependencies['approveIssue'] = async (issueNumber)
 }
 
 const requestChangesHook: StepListDependencies['requestChangesHook'] = () =>
-  useMutation<ApprovalFeedback, Error, { issueNumber: number; data: { stage: string; body: string; author?: string | null } }>({
+  useMutation<
+    ApprovalFeedback,
+    Error,
+    { issueNumber: number; data: { stage: string; body: string; author?: string | null } }
+  >({
     mutationFn: async ({ issueNumber, data }) => {
       feedbackRequests.push({
         issueNumber,
@@ -165,22 +177,34 @@ function makeFourStageTimeline(): WorkflowTimeline {
     pendingWork: null,
     stages: stages.map((stage, index) => ({
       stage,
-      status: stage === WorkflowStage.Build ? 'running' as const : index < 1 ? 'completed' as const : 'pending' as const,
+      status:
+        stage === WorkflowStage.Build
+          ? ('running' as const)
+          : index < 1
+            ? ('completed' as const)
+            : ('pending' as const),
       order: index,
       startedAt: index < 2 ? '2026-01-01T00:00:00.000Z' : null,
       completedAt: index < 1 ? '2026-01-01T00:01:00.000Z' : null,
       durationMs: index < 1 ? 60000 : null,
-      tasks: [{
-        id: `${stage}-task`,
-        title: `${stage} inspection task`,
-        uses: 'core/script',
-        status: stage === WorkflowStage.Build ? 'running' as const : index < 1 ? 'completed' as const : 'pending' as const,
-        startedAt: index < 2 ? '2026-01-01T00:00:00.000Z' : null,
-        completedAt: index < 1 ? '2026-01-01T00:01:00.000Z' : null,
-        durationMs: index < 1 ? 60000 : null,
-        attempts: 1,
-        message: null,
-      }],
+      tasks: [
+        {
+          id: `${stage}-task`,
+          title: `${stage} inspection task`,
+          uses: 'core/script',
+          status:
+            stage === WorkflowStage.Build
+              ? ('running' as const)
+              : index < 1
+                ? ('completed' as const)
+                : ('pending' as const),
+          startedAt: index < 2 ? '2026-01-01T00:00:00.000Z' : null,
+          completedAt: index < 1 ? '2026-01-01T00:01:00.000Z' : null,
+          durationMs: index < 1 ? 60000 : null,
+          attempts: 1,
+          message: null,
+        },
+      ],
       checks: [],
       approval: null,
     })),
@@ -214,8 +238,20 @@ function makeTimelineWithArtifacts(): WorkflowTimeline {
             attempts: 1,
             message: 'proposal generated',
             artifactSummaries: [
-              { artifactId: 'artifact-1', path: 'proposal.md', kind: 'file', size: 1234, recordedAt: '2026-01-01T00:02:00.000Z' },
-              { artifactId: 'artifact-2', path: 'design.md', kind: 'file', size: 5678, recordedAt: '2026-01-01T00:02:30.000Z' },
+              {
+                artifactId: 'artifact-1',
+                path: 'proposal.md',
+                kind: 'file',
+                size: 1234,
+                recordedAt: '2026-01-01T00:02:00.000Z',
+              },
+              {
+                artifactId: 'artifact-2',
+                path: 'design.md',
+                kind: 'file',
+                size: 5678,
+                recordedAt: '2026-01-01T00:02:30.000Z',
+              },
             ],
           },
           {
@@ -229,7 +265,13 @@ function makeTimelineWithArtifacts(): WorkflowTimeline {
             attempts: 1,
             message: null,
             artifactSummaries: [
-              { artifactId: 'artifact-3', path: 'specs/', kind: 'directory', size: 4096, recordedAt: '2026-01-01T00:01:15.000Z' },
+              {
+                artifactId: 'artifact-3',
+                path: 'specs/',
+                kind: 'directory',
+                size: 4096,
+                recordedAt: '2026-01-01T00:01:15.000Z',
+              },
             ],
           },
           {
@@ -243,7 +285,13 @@ function makeTimelineWithArtifacts(): WorkflowTimeline {
             attempts: 1,
             message: null,
             artifactSummaries: [
-              { artifactId: 'artifact-4', path: 'design.md', kind: 'file', size: 5678, recordedAt: '2026-01-01T00:02:30.000Z' },
+              {
+                artifactId: 'artifact-4',
+                path: 'design.md',
+                kind: 'file',
+                size: 5678,
+                recordedAt: '2026-01-01T00:02:30.000Z',
+              },
             ],
           },
           {
@@ -370,7 +418,15 @@ describe('WorkflowView', () => {
     }
     setWorkflowTimeline({ data: timeline } as ReturnType<typeof useWorkflowTimeline>)
 
-    render(<WorkflowView issue={makeIssue({ health: IssueHealth.Blocked, workflowStatus: 'blocked', blockedReason: 'Agent result unconfirmed' })} />)
+    render(
+      <WorkflowView
+        issue={makeIssue({
+          health: IssueHealth.Blocked,
+          workflowStatus: 'blocked',
+          blockedReason: 'Agent result unconfirmed',
+        })}
+      />,
+    )
 
     const attention = screen.getByTestId('workflow-agent-result-attention')
     expect(attention).toHaveTextContent('Agent result unconfirmed')
@@ -439,17 +495,37 @@ describe('WorkflowView', () => {
     expect(screen.getByText('plan inspection task')).toBeInTheDocument()
 
     polledTimeline = { ...makeFourStageTimeline(), status: 'AwaitingApproval' }
-    rendered.rerender(<DefaultWorkflowView issue={issue} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    rendered.rerender(
+      <DefaultWorkflowView issue={issue} timelineHook={pollingHook} dependencies={workflowDependencies} />,
+    )
     expect(within(stageBar).getByRole('button', { name: /Plan/i })).toHaveAttribute('aria-current', 'step')
 
-    rendered.rerender(<DefaultWorkflowView issue={makeIssue({ number: 2 })} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    rendered.rerender(
+      <DefaultWorkflowView
+        issue={makeIssue({ number: 2 })}
+        timelineHook={pollingHook}
+        dependencies={workflowDependencies}
+      />,
+    )
     expect(within(stageBar).getByRole('button', { name: /Build/i })).toHaveAttribute('aria-current', 'step')
 
     fireEvent.click(within(stageBar).getByRole('button', { name: /Plan/i }))
-    rendered.rerender(<DefaultWorkflowView issue={makeIssue({ number: 2, projectId: 'other-project' })} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    rendered.rerender(
+      <DefaultWorkflowView
+        issue={makeIssue({ number: 2, projectId: 'other-project' })}
+        timelineHook={pollingHook}
+        dependencies={workflowDependencies}
+      />,
+    )
     expect(within(stageBar).getByRole('button', { name: /Build/i })).toHaveAttribute('aria-current', 'step')
 
-    rendered.rerender(<DefaultWorkflowView issue={makeIssue({ number: 2, projectId: 'other-project', workflowStage: WorkflowStage.Check })} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    rendered.rerender(
+      <DefaultWorkflowView
+        issue={makeIssue({ number: 2, projectId: 'other-project', workflowStage: WorkflowStage.Check })}
+        timelineHook={pollingHook}
+        dependencies={workflowDependencies}
+      />,
+    )
     expect(within(stageBar).getByRole('button', { name: /Check/i })).toHaveAttribute('aria-current', 'step')
   })
 
@@ -465,19 +541,24 @@ describe('WorkflowView', () => {
 
   describe('InlineApproval - evidence rendering without mutation controls', () => {
     it('does not render the InlineApprovalControls or initialize any approval mutation when mounted read-only', () => {
-      setWorkflowTimeline(({
+      setWorkflowTimeline({
         data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+      } as unknown as ReturnType<typeof useWorkflowTimeline>)
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-      })} readOnly />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Plan,
+            health: 'attention' as IssueHealth,
+            approvalState: {
+              status: 'awaiting',
+              stage: WorkflowStage.Plan,
+              requestedAt: '2026-01-01T00:01:00.000Z',
+            },
+          })}
+          readOnly
+        />,
+      )
 
       expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
       expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
@@ -487,19 +568,23 @@ describe('WorkflowView', () => {
     })
 
     it('does not render approve/request-changes mutation controls even when not read-only', () => {
-      setWorkflowTimeline(({
+      setWorkflowTimeline({
         data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+      } as unknown as ReturnType<typeof useWorkflowTimeline>)
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-      })} />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Plan,
+            health: 'attention' as IssueHealth,
+            approvalState: {
+              status: 'awaiting',
+              stage: WorkflowStage.Plan,
+              requestedAt: '2026-01-01T00:01:00.000Z',
+            },
+          })}
+        />,
+      )
 
       expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
       expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
@@ -511,20 +596,25 @@ describe('WorkflowView', () => {
     })
 
     it('renders the read-only approval evidence panel when an approval output is awaiting', () => {
-      setWorkflowTimeline(({
+      setWorkflowTimeline({
         data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+      } as unknown as ReturnType<typeof useWorkflowTimeline>)
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-          output: { result: 'PASS', checks: [] },
-        },
-      })} readOnly />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Plan,
+            health: 'attention' as IssueHealth,
+            approvalState: {
+              status: 'awaiting',
+              stage: WorkflowStage.Plan,
+              requestedAt: '2026-01-01T00:01:00.000Z',
+              output: { result: 'PASS', checks: [] },
+            },
+          })}
+          readOnly
+        />,
+      )
 
       expect(screen.getByTestId('step-list-approval-evidence')).toBeInTheDocument()
     })
@@ -532,10 +622,15 @@ describe('WorkflowView', () => {
     it('hides approval evidence when stage is not awaiting approval', () => {
       setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Active,
-      })} readOnly />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Build,
+            health: IssueHealth.Active,
+          })}
+          readOnly
+        />,
+      )
 
       expect(screen.queryByTestId('step-list-approval-evidence')).not.toBeInTheDocument()
     })
@@ -543,19 +638,24 @@ describe('WorkflowView', () => {
     it('hides approval evidence when stage is running', () => {
       setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Build,
-        workflowStatus: 'running',
-        health: IssueHealth.Active,
-      })} readOnly />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Build,
+            workflowStatus: 'running',
+            health: IssueHealth.Active,
+          })}
+          readOnly
+        />,
+      )
 
       expect(screen.queryByTestId('step-list-approval-evidence')).not.toBeInTheDocument()
     })
 
     it('renders feedback history when feedback records exist', () => {
-      setWorkflowTimeline(({
+      setWorkflowTimeline({
         data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+      } as unknown as ReturnType<typeof useWorkflowTimeline>)
 
       const feedback = [
         {
@@ -574,16 +674,20 @@ describe('WorkflowView', () => {
         },
       ]
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-        feedback,
-      })} />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Plan,
+            health: 'attention' as IssueHealth,
+            approvalState: {
+              status: 'awaiting',
+              stage: WorkflowStage.Plan,
+              requestedAt: '2026-01-01T00:01:00.000Z',
+            },
+            feedback,
+          })}
+        />,
+      )
 
       expect(screen.getByText('Feedback history')).toBeInTheDocument()
       expect(screen.getByText('Cycle 1')).toBeInTheDocument()
@@ -593,9 +697,9 @@ describe('WorkflowView', () => {
     })
 
     it('renders multiple feedback cycles distinctly', () => {
-      setWorkflowTimeline(({
+      setWorkflowTimeline({
         data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+      } as unknown as ReturnType<typeof useWorkflowTimeline>)
 
       const feedback = [
         {
@@ -624,16 +728,20 @@ describe('WorkflowView', () => {
         },
       ]
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-        feedback,
-      })} />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Plan,
+            health: 'attention' as IssueHealth,
+            approvalState: {
+              status: 'awaiting',
+              stage: WorkflowStage.Plan,
+              requestedAt: '2026-01-01T00:01:00.000Z',
+            },
+            feedback,
+          })}
+        />,
+      )
 
       expect(screen.getByText('Cycle 1')).toBeInTheDocument()
       expect(screen.getByText('Cycle 2')).toBeInTheDocument()
@@ -651,9 +759,9 @@ describe('WorkflowView', () => {
     })
 
     it('shows open feedback awaiting-application state', () => {
-      setWorkflowTimeline(({
+      setWorkflowTimeline({
         data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+      } as unknown as ReturnType<typeof useWorkflowTimeline>)
 
       const feedback = [
         {
@@ -668,16 +776,20 @@ describe('WorkflowView', () => {
         },
       ]
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-        feedback,
-      })} />)
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Plan,
+            health: 'attention' as IssueHealth,
+            approvalState: {
+              status: 'awaiting',
+              stage: WorkflowStage.Plan,
+              requestedAt: '2026-01-01T00:01:00.000Z',
+            },
+            feedback,
+          })}
+        />,
+      )
 
       expect(screen.getAllByText('Awaiting application').length).toBeGreaterThan(0)
       expect(screen.getByText(/apply-feedback task is pending/)).toBeInTheDocument()
@@ -688,7 +800,7 @@ describe('WorkflowView', () => {
       // and the server's `RequestChanges` clears the stage approval
       // state, so `issue.approvalState` is null. The feedback-history timeline should still
       // surface the open cycle.
-      setWorkflowTimeline(({
+      setWorkflowTimeline({
         data: {
           ...makeAwaitingApprovalTimeline(),
           status: 'Running',
@@ -700,7 +812,7 @@ describe('WorkflowView', () => {
             },
           ],
         },
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>);
+      } as unknown as ReturnType<typeof useWorkflowTimeline>)
 
       const feedback = [
         {
@@ -713,22 +825,26 @@ describe('WorkflowView', () => {
           createdAt: '2026-01-01T00:00:00.000Z',
           resolution: null,
         },
-      ];
+      ]
 
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        workflowStatus: 'running',
-        health: 'attention' as IssueHealth,
-        approvalState: undefined,
-        feedback,
-      })} />);
+      render(
+        <WorkflowView
+          issue={makeIssue({
+            workflowStage: WorkflowStage.Plan,
+            workflowStatus: 'running',
+            health: 'attention' as IssueHealth,
+            approvalState: undefined,
+            feedback,
+          })}
+        />,
+      )
 
-      expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument();
-      expect(screen.getByText('Feedback history')).toBeInTheDocument();
-      expect(screen.getByText('Pending feedback')).toBeInTheDocument();
-      expect(screen.getByText(/apply-feedback task is pending/)).toBeInTheDocument();
-    });
+      expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
+      expect(screen.getByText('Feedback history')).toBeInTheDocument()
+      expect(screen.getByText('Pending feedback')).toBeInTheDocument()
+      expect(screen.getByText(/apply-feedback task is pending/)).toBeInTheDocument()
+    })
   })
 
   describe('artifact chips on task rows', () => {
@@ -737,7 +853,9 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Generate proposal').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
+      const taskRow = screen
+        .getByText('Generate proposal')
+        .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(within(taskRow!).getByText('proposal.md')).toBeInTheDocument()
       expect(within(taskRow!).getByText('design.md')).toBeInTheDocument()
@@ -748,7 +866,9 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Write specs').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
+      const taskRow = screen
+        .getByText('Write specs')
+        .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(within(taskRow!).getByText('specs/')).toBeInTheDocument()
     })
@@ -758,7 +878,9 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Create design').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
+      const taskRow = screen
+        .getByText('Create design')
+        .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(within(taskRow!).queryByText('design.md')).not.toBeInTheDocument()
     })
@@ -768,9 +890,13 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Review plan').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
+      const taskRow = screen
+        .getByText('Review plan')
+        .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
-      expect(within(taskRow!).queryByRole('button', { name: /proposal\.md|design\.md|specs\// })).not.toBeInTheDocument()
+      expect(
+        within(taskRow!).queryByRole('button', { name: /proposal\.md|design\.md|specs\// }),
+      ).not.toBeInTheDocument()
     })
 
     it('opens ArtifactContentViewer when an artifact chip is clicked', async () => {

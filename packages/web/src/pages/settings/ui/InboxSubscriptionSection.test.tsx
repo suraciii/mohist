@@ -2,10 +2,7 @@ import '@testing-library/jest-dom'
 import { render, screen } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import {
-  InboxSubscriptionSection,
-  type InboxSubscriptionSectionDataHook,
-} from './InboxSubscriptionSection'
+import { InboxSubscriptionSection, type InboxSubscriptionSectionDataHook } from './InboxSubscriptionSection'
 import type { InboxSubscription } from '../../../entities/inbox'
 
 const ALL_ENABLED: InboxSubscription = {

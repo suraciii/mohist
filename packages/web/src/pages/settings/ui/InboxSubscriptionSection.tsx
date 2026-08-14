@@ -84,9 +84,7 @@ export function InboxSubscriptionSection({
   return (
     <SettingsSection title={sectionLabel}>
       <CardSection title="Workflow updates">
-        <p className="mb-4 text-sm text-muted-foreground">
-          Choose which workflow updates create future inbox items.
-        </p>
+        <p className="mb-4 text-sm text-muted-foreground">Choose which workflow updates create future inbox items.</p>
         {isLoading ? (
           <div className="py-2 text-sm text-muted-foreground">Loading subscription preferences...</div>
         ) : (

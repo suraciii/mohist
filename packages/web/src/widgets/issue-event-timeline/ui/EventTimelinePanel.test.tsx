@@ -36,16 +36,8 @@ function makeEntry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
   }
 }
 
-function renderTimelineView(
-  props: Partial<ComponentProps<typeof EventTimelinePanelView>> = {},
-) {
-  return render(
-    <EventTimelinePanelView
-      entries={timeline.entries}
-      isLoading={timeline.isLoading}
-      {...props}
-    />,
-  )
+function renderTimelineView(props: Partial<ComponentProps<typeof EventTimelinePanelView>> = {}) {
+  return render(<EventTimelinePanelView entries={timeline.entries} isLoading={timeline.isLoading} {...props} />)
 }
 
 beforeEach(() => {
@@ -102,12 +94,14 @@ describe('EventTimelinePanel', () => {
 
   it('renders blocked attention outside the failure category', () => {
     timeline = {
-      entries: [makeEntry({
-        id: 'blocked',
-        category: 'attention',
-        attention: true,
-        description: 'Workflow blocked: Agent result unconfirmed',
-      })],
+      entries: [
+        makeEntry({
+          id: 'blocked',
+          category: 'attention',
+          attention: true,
+          description: 'Workflow blocked: Agent result unconfirmed',
+        }),
+      ],
       isLoading: false,
     }
 
@@ -214,7 +208,13 @@ describe('EventTimelinePanel', () => {
   it('expands failure detail inline', () => {
     timeline = {
       entries: [
-        makeEntry({ id: '1', category: 'failure', attention: true, description: 'Run failed', detail: 'compile error' }),
+        makeEntry({
+          id: '1',
+          category: 'failure',
+          attention: true,
+          description: 'Run failed',
+          detail: 'compile error',
+        }),
       ],
       isLoading: false,
     }
@@ -229,7 +229,13 @@ describe('EventTimelinePanel', () => {
   it('expands attention-required detail inline', () => {
     timeline = {
       entries: [
-        makeEntry({ id: '1', category: 'approval', attention: true, description: 'Approval requested', detail: 'needs review' }),
+        makeEntry({
+          id: '1',
+          category: 'approval',
+          attention: true,
+          description: 'Approval requested',
+          detail: 'needs review',
+        }),
       ],
       isLoading: false,
     }
@@ -243,12 +249,7 @@ describe('EventTimelinePanel', () => {
 
   it('does not load history when the panel is mounted disabled in lazy/dialog mode', async () => {
     render(
-      <EventTimelinePanel
-        issueNumber={42}
-        enabled={false}
-        historyHook={historyHook}
-        workflowHook={workflowHook}
-      />,
+      <EventTimelinePanel issueNumber={42} enabled={false} historyHook={historyHook} workflowHook={workflowHook} />,
     )
 
     await waitFor(() => {
@@ -258,9 +259,7 @@ describe('EventTimelinePanel', () => {
   })
 
   it('loads history for the issue by default', async () => {
-    render(
-      <EventTimelinePanel issueNumber={42} historyHook={historyHook} workflowHook={workflowHook} />,
-    )
+    render(<EventTimelinePanel issueNumber={42} historyHook={historyHook} workflowHook={workflowHook} />)
 
     await waitFor(() => {
       expect(requestedIssueNumbers).toEqual(['42'])

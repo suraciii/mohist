@@ -6,8 +6,7 @@ export const NOTIFICATION_KINDS = {
   IssueCompleted: 'issue_completed',
 } as const
 
-export type NotificationKind =
-  (typeof NOTIFICATION_KINDS)[keyof typeof NOTIFICATION_KINDS]
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[keyof typeof NOTIFICATION_KINDS]
 
 export const NOTIFICATION_KIND_VALUES: readonly NotificationKind[] = [
   NOTIFICATION_KINDS.WorkflowFailed,
@@ -21,9 +20,7 @@ export function isNotificationKind(value: string): value is NotificationKind {
   return (NOTIFICATION_KIND_VALUES as readonly string[]).includes(value)
 }
 
-export function parseNotificationKind(
-  value: string | null | undefined,
-): NotificationKind {
+export function parseNotificationKind(value: string | null | undefined): NotificationKind {
   if (value && isNotificationKind(value)) {
     return value
   }

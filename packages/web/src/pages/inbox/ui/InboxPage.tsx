@@ -106,13 +106,7 @@ const useDefaultInboxPageData: InboxPageDataHook = () => {
   }
 }
 
-function InboxItemRow({
-  item,
-  onMarkRead,
-  onArchive,
-  markReadPending,
-  archivePending,
-}: InboxItemRowProps) {
+function InboxItemRow({ item, onMarkRead, onArchive, markReadPending, archivePending }: InboxItemRowProps) {
   const toProjectPath = useProjectPath()
   const descriptor = describeKind(item)
   const { Icon } = descriptor
@@ -165,9 +159,7 @@ function InboxItemRow({
             data-testid="inbox-item-link"
             data-issue-number={item.issueNumber}
           >
-            <span className="font-medium text-foreground break-words">
-              {descriptor.label(item)}
-            </span>
+            <span className="font-medium text-foreground break-words">{descriptor.label(item)}</span>
             <span className="mt-1 block text-sm text-muted-foreground break-words">
               {item.issueTitle || '(no title)'}
             </span>
@@ -205,11 +197,7 @@ function InboxItemRow({
   )
 }
 
-export function InboxPage({
-  dataHook = useDefaultInboxPageData,
-}: {
-  dataHook?: InboxPageDataHook
-} = {}) {
+export function InboxPage({ dataHook = useDefaultInboxPageData }: { dataHook?: InboxPageDataHook } = {}) {
   useDocumentTitle('Inbox — Mohist')
 
   const { items, error, isError, isLoading, refetch, markRead, markAllRead, archive } = dataHook()
@@ -227,9 +215,7 @@ export function InboxPage({
               Inbox
             </h1>
             <p className="text-sm text-muted-foreground" data-testid="inbox-summary">
-              {totalCount === 0
-                ? 'No inbox items yet.'
-                : `${unreadCount} unread of ${totalCount}`}
+              {totalCount === 0 ? 'No inbox items yet.' : `${unreadCount} unread of ${totalCount}`}
             </p>
           </div>
           <Button

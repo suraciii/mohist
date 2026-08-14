@@ -94,12 +94,7 @@ describe('issue event invalidation mapping', () => {
   it('ignores events without the current project identity', () => {
     const queryClient = makeClient()
 
-    invalidateIssueEvent(
-      queryClient,
-      REVERSE_DNS_EVENT_TYPES.IssueCompleted,
-      { issueNumber: 473 },
-      'project-1',
-    )
+    invalidateIssueEvent(queryClient, REVERSE_DNS_EVENT_TYPES.IssueCompleted, { issueNumber: 473 }, 'project-1')
     invalidateIssueEvent(
       queryClient,
       REVERSE_DNS_EVENT_TYPES.IssueCompleted,
@@ -118,12 +113,7 @@ describe('issue event invalidation mapping', () => {
   ])('invalidates detail and list for server-produced structural event %s', (eventName) => {
     const queryClient = makeClient()
 
-    invalidateIssueEvent(
-      queryClient,
-      eventName,
-      { projectId: 'project-1', issueNumber: 473 },
-      'project-1',
-    )
+    invalidateIssueEvent(queryClient, eventName, { projectId: 'project-1', issueNumber: 473 }, 'project-1')
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
       queryKey: issueDetailKeys.detail('project-1', 473),
