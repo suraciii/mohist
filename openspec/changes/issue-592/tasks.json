@@ -1,0 +1,91 @@
+{
+  "project": "mohist-local",
+  "description": "Delete web's dead session surface — the coder-session presentation chain, the SessionEvent view projections, and the unconsumed session data-layer code — and make the session detail data contract the inferred return type of useUnifiedSessionDataSource.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Delete the dead coder-session presentation chain, keep the six live exports",
+      "spec": "specs/session-transcript-timeline/spec.md#the-session-transcript-chain-is-the-only-session-presentation-chain",
+      "description": "Delete the superseded widgets/coder-session presentation chain: SessionCard.tsx (ActiveSessionCard/RecentCard/WaitingCard), SessionTimeline.tsx (including WorkflowStatusTimeline), PlanProgressPanel.tsx, the compaction views (CompactionTimelineEntry, CompactionCompactSummary), and its timeline model (model/anomaly.tsx, model/useSessionTimeline.ts, model/session-timeline-reducer.ts) together with their tests. Prune the slice's index.ts to exactly the still-consumed export families (activity events, usage snapshot, SessionFollowupComposer, SessionRecoveryActions, ContextHealthBar, UsageSnapshotLabel), delete tests/integrate-stage.spec.tsx, and drop the ActiveSessionCard leg from the context-health consistency spec while keeping the CompactSessionCard↔ContextHealthIndicator comparison.",
+      "acceptanceCriteria": [
+        "packages/web/src/widgets/coder-session no longer contains ui/SessionCard.tsx (+test), ui/SessionTimeline.tsx (+test), ui/PlanProgressPanel.tsx, ui/session-health/CompactionTimelineEntry.tsx (+test), ui/session-health/CompactionCompactSummary.tsx (+test), model/anomaly.tsx, model/useSessionTimeline.ts (+dom test), model/session-timeline-reducer.ts (+test), or model/derive-tool-call-title.test.ts.",
+        "widgets/coder-session/index.ts exports exactly the survivor families — useActivityEvents/buildActivityEvents/sortActivityEvents (+ ActivityEvent* types), useActivityUsageSnapshot, SessionFollowupComposer (+props type), SessionRecoveryActions (+props type), ContextHealthBar (+props type), UsageSnapshotLabel — and none of the deleted chain's components, hooks, or types.",
+        "rg sweep over packages/web/src and packages/web/tests for ActiveSessionCard, RecentCard, WaitingCard, SessionTimeline, PlanProgressPanel, CompactionTimelineEntry, CompactionCompactSummary, useSessionTimeline, session-timeline-reducer, deriveToolCallTitle, and WorkflowStatusTimeline returns zero hits.",
+        "tests/integrate-stage.spec.tsx is deleted; tests/context-health-indicator.consistency.spec.tsx no longer references ActiveSessionCard and still asserts the CompactSessionCard↔ContextHealthIndicator health-presentation consistency.",
+        "Surviving widget tests (SessionFollowupComposer, SessionRecoveryActions, UsageSnapshotLabel, ContextHealthBar, activity-events, usage-snapshot) pass unchanged.",
+        "npm run typecheck, npm run check:fsd, npm run check:test-boundaries, and vitest run all pass in packages/web."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pruned packages/web/src/widgets/coder-session slice (index.ts exporting only the six survivor families) with the dead chain files, their tests, and the pruned consistency spec removed; web gates green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "WorkflowStatusTimeline is deleted with SessionTimeline.tsx — it has no production consumer (only its own test), and keeping dead UI contradicts the change. None of the six survivors import anything from the deleted modules (verified in design)."
+    },
+    {
+      "id": "T-002",
+      "title": "Delete the dead session data layer and duplicate clients across coder-session, agent, and pages/session",
+      "spec": "specs/session-detail-data-source/spec.md#unified-session-clients-are-the-only-session-detail-data-clients",
+      "description": "Remove all session data-layer code with no production consumers: the issue-scoped and generic-duplicate client functions, hooks, query options, DTO, helpers, and their orphaned types. Delete useCoderSessions.ts(+test), useFollowupMutation.ts, useStopSessionMutation.ts(+test), and pages/session/data/buildGenericSessionMetadata.ts outright; edit entities/coder-session/api/client.ts, model/sessionActivity.ts, model/types.ts, entities/agent/api/agent-sessions.ts, and both @x re-export files; prune the entities/coder-session and entities/agent index.ts public APIs, the corresponding client test blocks, and tests/session-page-test-utils.tsx. Verified survivors (unified clients/hooks, workflow-run sessions, recovery clients, canFollowupSession/deriveSessionStatusKind, generic operations, launch/observation clients) stay untouched and functional.",
+      "acceptanceCriteria": [
+        "entities/coder-session/api/client.ts no longer exports getCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, getAgentSessionEvents, postFollowup, stopSession, or SessionStopResult, and drops the now-unused createIdempotencyKey import; getUnifiedSessionSummary/getUnifiedSessionTranscript (+query options +hooks), useWorkflowRunSessions + getWorkflowRunSessions, the recovery clients (compactSession/resetSession/compactGenericSession/resetGenericSession), and SessionFollowupResult/SessionAttachment/SessionAttachmentRejection all remain.",
+        "entities/agent/api/agent-sessions.ts no longer exports GenericAgentSessionSummaryDto, getGenericSessionSummary, getGenericSessionTranscript, genericSessionSummaryQueryOptions, genericSessionTranscriptQueryOptions, useGenericSessionSummary, or useGenericSessionTranscript; getAgentSessions, postGenericFollowup, controlGenericSession, useGenericFollowup, useGenericTurnControl, and the launch/observation clients remain; the @x/agent-session import and re-export lists are pruned to the still-consumed types (AgentSessionActivity stays; AgentSessionTranscriptResponse survives as a type because the unified transcript client uses it).",
+        "sessionActivity.ts keeps canFollowupSession and deriveSessionStatusKind with unchanged observable behavior (deriveSessionActivity's normalization is inlined into deriveSessionStatusKind) and drops canRecoverSession/deriveSessionActivity; sessionActivity.test.ts is pruned to match.",
+        "entities/coder-session/model/types.ts drops AgentSessionEvent (with its SessionEvent import), AgentSessionMetadata, AgentSessionMetadataCounts, CoderSessionSummary, CoderSessionItem, CoderSessionDetail, ToolCallEntry, LoopProgress, TaskProgressEntry, TaskProgressMap, and CoderTextBuffer; the two slice index.ts files export no removed symbol.",
+        "Deleted-with-subject and pruned tests: useCoderSessions.test.tsx and useStopSessionMutation.test.ts are gone, client.test.ts and agent-sessions.test.ts drop only the blocks covering removed functions, and tests/session-page-test-utils.tsx loses convertLegacyToAgentMetadata and the dead type imports while keeping makeTurn and renderHookWithQueryClient.",
+        "rg sweep over packages/web/src and packages/web/tests for every removed symbol (useCoderSessions, useFollowupMutation, useStopSessionMutation, postFollowup, stopSession, SessionStopResult, getCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, getAgentSessionEvents, canRecoverSession, deriveSessionActivity, buildGenericSessionMetadata, getGenericSessionSummary, getGenericSessionTranscript, genericSessionSummaryQueryOptions, genericSessionTranscriptQueryOptions, useGenericSessionSummary, useGenericSessionTranscript, GenericAgentSessionSummaryDto, AgentSessionEvent, and the orphaned types) returns zero hits.",
+        "Recovery actions remain functional (SessionRecoveryActions tests green), unified session clients' tests are green, and npm run typecheck, check:fsd, check:test-boundaries, and vitest run all pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pruned session data layer across entities/coder-session, entities/agent, and pages/session/data with surviving clients intact, slice public APIs pruned, and web gates green.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Must run after T-001: ToolCallEntry, LoopProgress, and CoderSessionItem are consumed by the widget-chain files deleted there. Must run before the view-family deletion (T-003): AgentSessionEvent is the last SessionEvent consumer outside the widget chain. Also completes the 'Dead session data-layer code is removed while surviving clients stay intact' requirement. stopGenericSession in entities/agent stays (zero-consumer alias, follow-up per design open question); issueWorkflowKeys in entities/issue survives (live consumers elsewhere); server HTTP routes are untouched."
+    },
+    {
+      "id": "T-003",
+      "title": "Delete the SessionEvent view family so the timeline projection is the only session-event projection",
+      "spec": "specs/session-transcript-timeline/spec.md#the-timeline-projection-is-webs-only-session-event-projection",
+      "description": "Delete the SessionEvent view projections from entities/session: model/view.ts (+ view.test.ts, view.pi.test.ts), the entire model/view/ directory (chat, compact, timeline, helpers + tests), the whole model/types.ts (exclusively the SessionEvent/SessionView* family), and the cross-slice re-export @x/session-view.ts. Prune entities/session/index.ts to timeline-only exports so the timeline projection under model/timeline is web's single session-event presentation projection.",
+      "acceptanceCriteria": [
+        "packages/web/src/entities/session contains no model/types.ts, model/view.ts, model/view.test.ts, model/pi.test counterpart, model/view/ directory, or @x/session-view.ts.",
+        "entities/session/index.ts exports exactly the timeline projection: detectShellDomainAction, detectToolDomainAction, deriveTimelineItems, groupTimelineItems, isTimelineGroup, and the Timeline* types — viewSessionEvents, SessionEvent, and the SessionView*/SessionChat*/SessionCompactView/SessionTimelineRound family are absent.",
+        "rg sweep over packages/web/src and packages/web/tests for viewSessionEvents, SessionView, SessionChat, SessionCompactView, SessionTimelineRound, SessionTimelineToolCall, SessionTimelineCompaction, SessionTimelineRecovery, session-view, and the bare SessionEvent type returns zero hits (widgets/session-transcript's local function names such as matchesSessionEvent are fine).",
+        "tsc -b proves no module — including entities/coder-session model types — imports SessionEvent or any removed view type; entities/coder-session no longer depends on entities/session.",
+        "widgets/session-transcript and entities/session/model/timeline are untouched beyond the index.ts shape they already consume, and their existing tests pass.",
+        "npm run typecheck, npm run check:fsd, npm run check:test-boundaries, and vitest run all pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Timeline-only entities/session public API with the view family files, tests, and @x/session-view.ts deleted; web gates green.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "This is design decision D2, executed after the data-layer deletion (instead of the design's nominal D1→D2→D3 order) so that every intermediate state compiles: AgentSessionEvent in entities/coder-session/model/types.ts — the last SessionEvent consumer — is removed in T-002, and the widget-chain consumers were removed in T-001."
+    },
+    {
+      "id": "T-004",
+      "title": "Make the hook's inferred return type the session detail data contract",
+      "spec": "specs/session-detail-data-source/spec.md#the-hooks-inferred-return-type-is-the-data-contract",
+      "description": "Delete pages/session/data/SessionDataSource.ts (SessionDataSourceResult, SessionTurnControlHandle, SessionStopOptions, StatusKind, EmptyStateKind) and stop returning the unread emptyStateKind from useUnifiedSessionDataSource. Export the contract as an inferred alias (UnifiedSessionDataSourceResult = ReturnType<typeof useUnifiedSessionDataSource>), type SessionDetailShell's data prop and stop handle from that alias using SessionStatusKind instead of the local union, and switch the shell's three test files' makeData fixtures to the alias so a fixture omitting a real field no longer compiles. Conclude with the full gate suite, the production build, and the final union rg sweep over every symbol removed by T-001 through T-004.",
+      "acceptanceCriteria": [
+        "packages/web/src/pages/session/data/SessionDataSource.ts no longer exists, and no module under pages/session/data declares a standalone interface re-declaring the hook's result or turn-control shape.",
+        "useUnifiedSessionDataSource.tsx has no explicit SessionDataSourceResult return annotation and no useMemo<SessionTurnControlHandle> generic (both inferred), inlines the stop callback's options parameter type, drops the emptyStateKind field, and exports export type UnifiedSessionDataSourceResult = ReturnType<typeof useUnifiedSessionDataSource>.",
+        "SessionDetailShell.tsx types data as UnifiedSessionDataSourceResult and the header's stop as UnifiedSessionDataSourceResult['stop'], uses SessionStatusKind from entities/coder-session with its Partial presentation map, and defines no local StatusKind; rg for emptyStateKind, EmptyStateKind, SessionDataSourceResult, SessionTurnControlHandle, and SessionStopOptions over src and tests returns zero hits.",
+        "The stop handle still narrows to state 'queued' | 'executing' only while the current turn is queued or executing (the existing !== 'queued' && !== 'executing' guard plus negative literal narrowing preserves this), and SessionDetailShell's stop.mutate({ onSuccess }) call type-checks unchanged.",
+        "SessionDetailShell.test.tsx, tests/SessionDetailShell.followup-queue.spec.tsx, and tests/SessionDetailShell.sibling-nav-dedup.spec.tsx build their makeData fixtures against UnifiedSessionDataSourceResult with exactly the fields the hook returns (fields the old interface declared but the hook never returns — runtimeSessionLineage, viewedRuntimeSessionId, buildLineageTargetPath, historicalRuntimeTarget, historicalRuntimeId — are gone), and all shell tests pass.",
+        "Final verification for the whole change: npm run typecheck, npm run test:ci (check:fsd + check:test-boundaries + vitest run), and npm run build all pass in packages/web, and an rg sweep over packages/web for every symbol removed by T-001–T-004 returns zero hits."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Single inferred session data contract (UnifiedSessionDataSourceResult) consumed by SessionDetailShell and its tests, SessionDataSource.ts deleted, and the full web gate suite (typecheck, test:ci, build) plus the final removed-symbol sweep green.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Inference is safe per design D4: the current TypeScript performs negative literal narrowing, so the stop handle keeps state 'queued' | 'executing'; fields the old interface declared optional become required — stricter and intended, the only touched code is the shell and its three test files. This task lands last and carries the design's mandatory final gates (step 5 of the migration plan) plus the union rg sweep. stopGenericSession cleanup stays out of scope (follow-up)."
+    }
+  ]
+}
