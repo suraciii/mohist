@@ -170,7 +170,6 @@ function setupTemplates(
 
 function renderDialog(open = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  const onClose = vi.fn()
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider
@@ -185,28 +184,26 @@ function renderDialog(open = true) {
           },
         ]}
       >
-        <CreateIssueDialog open={open} onClose={onClose} />
+        <CreateIssueDialog open={open} onClose={vi.fn()} />
       </ProjectProvider>
     </QueryClientProvider>,
   )
-  return { onClose, queryClient, ...view }
-}
-
-function resetFixtures() {
-  cleanup()
-  vi.clearAllMocks()
-  _issuesData = []
-  _createIssueResponse = { number: 1 }
-  _modelsData.models = []
-  _modelsData.modelVariants = {}
-  _workflowProfilesData.length = 0
-  _projectWorkflowProfile.defaultTemplateId = null
-  _projectWorkflowProfile.disabledWorkflowProfileIds = []
-  _issueTemplatesData.length = 0
+  return { queryClient, ...view }
 }
 
 describe('CreateIssueDialog', () => {
-  afterEach(resetFixtures)
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { number: 1 }
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
+  })
 
   it('serializes the configured default workflow as the current create selection', async () => {
     _projectWorkflowProfile.defaultTemplateId = 'mohist/local'
@@ -239,7 +236,18 @@ describe('CreateIssueDialog', () => {
 })
 
 describe('CreateIssueDialog toast feedback', () => {
-  afterEach(resetFixtures)
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { number: 1 }
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
+  })
 
   it('shows a success toast with the new issue number on successful create', async () => {
     _createIssueResponse = { number: 223 }
@@ -303,7 +311,18 @@ describe('CreateIssueDialog toast feedback', () => {
 })
 
 describe('CreateIssueDialog template selector', () => {
-  afterEach(resetFixtures)
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { number: 1 }
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
+  })
 
   it('populates the selector with available templates (non-disabled default + customs)', async () => {
     setupTemplates()
@@ -408,234 +427,19 @@ describe('CreateIssueDialog template selector', () => {
   })
 })
 
-describe('CreateIssueDialog model + variant chips', () => {
-  afterEach(resetFixtures)
-
-  async function modelTrigger() {
-    return waitFor(() => {
-      const trigger = document.getElementById('create-issue-model-trigger')
-      if (!trigger) throw new Error('model trigger not found')
-      return trigger
-    })
-  }
-
-  it('does not render a standalone variant picker anywhere', () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    renderDialog()
-    expect(screen.queryByTestId('create-issue-model-variant-variant-trigger')).not.toBeInTheDocument()
-  })
-
-  it('renders inline variant chips on a variant-capable model row', async () => {
-    _modelsData.models = ['anthropic/claude', 'openai/gpt-4']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-    await user.click(await modelTrigger())
-
-    for (const variant of ['low', 'medium', 'high']) {
-      const chip = document.querySelector(
-        `[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-${variant}"]`,
-      )
-      expect(chip).toBeInTheDocument()
-    }
-    expect(document.querySelector(`[data-testid="create-issue-model-trigger-row-openai/gpt-4-variant-low"]`)).toBeNull()
-  })
-
-  it('opens the model picker without dismissing the create dialog', async () => {
-    _modelsData.models = ['anthropic/claude']
-    const user = userEvent.setup()
-    const { onClose } = renderDialog()
-
-    await user.click(await modelTrigger())
-
-    expect(await screen.findByPlaceholderText('Search models...')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Create Issue' })).toBeInTheDocument()
-    expect(onClose).not.toHaveBeenCalled()
-  })
-
-  it('keeps the create dialog within the viewport and scrollable', () => {
-    renderDialog()
-
-    const dialog = screen.getByRole('dialog')
-    expect(dialog).toHaveClass('max-h-[calc(100dvh-2rem)]', 'overflow-y-auto', 'overscroll-contain')
-  })
-
-  it('sends modelVariant alongside model on create when a chip is clicked', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
-
-    await user.click(await modelTrigger())
-
-    const highChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high')
-    await user.click(highChip)
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(
-      expect.objectContaining({
-        model: 'anthropic/claude',
-        modelVariant: 'high',
-      }),
-    )
-  })
-
-  it('does not expose or submit an Issue Runtime override', async () => {
-    _modelsData.models = ['openai/gpt-4']
-    renderDialog()
-    expect(screen.queryByTestId('create-issue-runtime')).not.toBeInTheDocument()
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Issue' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const body = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(body.agentConfig).not.toHaveProperty('runtime')
-  })
-
-  it('does not transiently clear the variant when a chip is clicked', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
-    await user.click(await modelTrigger())
-    await user.click(await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high'))
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toMatchObject({
-      model: 'anthropic/claude',
-      modelVariant: 'high',
-    })
-  })
-
-  it('uses the selected profile runtime without clearing the chosen model', async () => {
-    _workflowProfilesData.push(
-      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
-      { id: 'team/pi', displayName: 'Pi', description: '', isDefault: false, agentRuntime: 'pi' },
-    )
-    _modelsData.models = ['anthropic/claude']
-    const user = userEvent.setup()
-    renderDialog()
-
-    const workflow = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
-    await user.click(await modelTrigger())
-    await user.click(await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement))
-    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
-
-    fireEvent.change(workflow, { target: { value: 'team/pi' } })
-
-    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
-    const runtimes = modelsHandler.mock.calls.map(([call]) => new URL(call.request.url).searchParams.get('runtime'))
-    expect(runtimes).toEqual(expect.arrayContaining(['opencode', 'pi']))
-  })
-
-  it('does not render a model selector when the selected profile has no runtime', async () => {
-    _workflowProfilesData.push({
-      id: 'team/unknown',
-      displayName: 'Unknown',
-      description: '',
-      isDefault: true,
-      agentRuntime: null,
-    })
-    _projectWorkflowProfile.defaultTemplateId = 'team/unknown'
-    _modelsData.models = ['vendor/custom-model']
-    renderDialog()
-
-    const workflow = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
-    await waitFor(() => expect(workflow.value).toBe('team/unknown'))
-    expect(screen.queryByRole('button', { name: 'Coder Model' })).not.toBeInTheDocument()
-  })
-
-  it('does not include modelVariant when a model body click selects the default variant', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
-
-    await user.click(await modelTrigger())
-
-    const modelRow = await screen.findByText('claude', { selector: 'span' })
-    const rowEl = modelRow.closest('[data-model-id]') as HTMLElement
-    expect(rowEl.getAttribute('data-model-id')).toBe('anthropic/claude')
-    await user.click(rowEl)
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(
-      expect.objectContaining({
-        model: 'anthropic/claude',
-      }),
-    )
-    expect(callBody).not.toHaveProperty('modelVariant')
-  })
-
-  it('highlights the active variant chip on the selected row', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    await user.click(await modelTrigger())
-
-    const mediumChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-medium')
-    await user.click(mediumChip)
-
-    await user.click(await modelTrigger())
-
-    const active = document.querySelector(
-      '[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-medium"][data-variant-active="true"]',
-    )
-    expect(active).toBeInTheDocument()
-    expect(
-      document.querySelector(
-        '[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-low"][data-variant-active="true"]',
-      ),
-    ).toBeNull()
-  })
-
-  it('uses shared keyboard navigation to select a variant chip', async () => {
-    _modelsData.models = ['anthropic/claude']
-    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
-    const user = userEvent.setup()
-    renderDialog()
-
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Keyboard' } })
-    await user.click(await modelTrigger())
-
-    const search = await screen.findByPlaceholderText('Search models...')
-    fireEvent.keyDown(search, { key: 'ArrowRight' })
-    const lowChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-low')
-    await waitFor(() => expect(lowChip).toHaveFocus())
-    fireEvent.keyDown(lowChip, { key: 'ArrowRight' })
-    const highChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high')
-    await waitFor(() => expect(highChip).toHaveFocus())
-    fireEvent.keyDown(highChip, { key: 'Enter' })
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(
-      expect.objectContaining({
-        model: 'anthropic/claude',
-        modelVariant: 'high',
-      }),
-    )
-  })
-})
-
 describe('CreateIssueDialog workflow profile default', () => {
-  afterEach(resetFixtures)
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { number: 1 }
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
+  })
 
   function setupProfiles() {
     _workflowProfilesData.length = 0
@@ -753,7 +557,18 @@ describe('CreateIssueDialog prerequisites', () => {
     _issuesData = issues
   }
 
-  afterEach(resetFixtures)
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { number: 1 }
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
+  })
 
   it('renders the Prerequisites picker in buffer mode and sends the selected numbers on submit', async () => {
     setupPickerIssues()

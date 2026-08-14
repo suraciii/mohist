@@ -1,15 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CircleStopIcon,
-  AlertTriangleIcon,
-  CheckIcon,
-  CopyIcon,
-  ListIcon,
-  BracesIcon,
-} from 'lucide-react'
+import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, CheckIcon, CopyIcon } from 'lucide-react'
 import { SessionTranscriptLayout as DefaultSessionTranscriptLayout } from '../../../widgets/session-transcript'
 import {
   SessionFollowupComposer as DefaultSessionFollowupComposer,
@@ -22,9 +13,12 @@ import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
 import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
-import type { TimelineItem } from '../../../entities/session'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
+import { SessionErrorsEvidence } from './SessionErrorsEvidence'
+import { TimelineViewToggle } from './TimelineViewToggle'
+import { StatusBadge } from './StatusBadge'
+import { getStageLabel, sessionTimeAnchorMs } from './sessionPresentation'
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -39,138 +33,6 @@ const defaultComponents: SessionDetailShellComponents = {
   SessionFollowupComposer: DefaultSessionFollowupComposer,
   SessionRecoveryActions: DefaultSessionRecoveryActions,
   ContextHealthBar: DefaultContextHealthBar,
-}
-
-interface SessionErrorsEvidenceProps {
-  failureCategory: string | null | undefined
-  toolErrorCount: number | null | undefined
-  failureReason: string | null | undefined
-  failedItems: TimelineItem[]
-  locate: (sourceId: string) => void
-}
-const ERROR_SURFACE_CLASS = 'bg-danger-subtle text-danger border-danger-border'
-
-const FAILURE_CATEGORY_LABELS: Record<string, string> = {
-  cancelled: 'Cancelled',
-  compaction: 'Context compaction',
-  context_limit: 'Context limit',
-  timeout: 'Timed out',
-}
-
-function formatFailureCategory(category: string): string {
-  if (isExecutionUnavailableCategory(category)) return 'Execution unavailable'
-  return FAILURE_CATEGORY_LABELS[category.toLowerCase()] ?? 'Execution failure'
-}
-
-function isExecutionUnavailableCategory(category: string | null | undefined): boolean {
-  const normalized = category?.toLowerCase() ?? ''
-  return (
-    normalized === 'runtime-unavailable' ||
-    normalized === 'execution-unavailable' ||
-    normalized === 'external-agent-unavailable'
-  )
-}
-
-export function SessionErrorsEvidence({
-  failureCategory,
-  toolErrorCount,
-  failureReason,
-  failedItems,
-  locate,
-}: SessionErrorsEvidenceProps) {
-  const hasFailureCategory = failureCategory != null && failureCategory !== ''
-  const hasFailureReason = failureReason != null && failureReason !== ''
-  const effectiveToolErrorCount = Math.max(toolErrorCount ?? 0, failedItems.length)
-  const hasToolErrors = effectiveToolErrorCount > 0
-  const hasFailureEvidence = hasFailureCategory || hasFailureReason
-  const executionUnavailable = isExecutionUnavailableCategory(failureCategory)
-  const [currentIndex, setCurrentIndex] = useState(0)
-  if (!hasFailureEvidence && !hasToolErrors) return null
-
-  const activate = () => {
-    const item = failedItems[currentIndex]
-    if (item) locate(item.sourceIds[0] ?? item.id)
-  }
-  const next = () => {
-    if (failedItems.length === 0) return
-    const nextIndex = (currentIndex + 1) % failedItems.length
-    setCurrentIndex(nextIndex)
-    const item = failedItems[nextIndex]
-    locate(item.sourceIds[0] ?? item.id)
-  }
-
-  return (
-    <div
-      data-testid="session-errors-region"
-      data-failure-category={failureCategory ?? ''}
-      data-tool-error-count={String(effectiveToolErrorCount)}
-      className={`border-b border-border px-4 py-2 ${ERROR_SURFACE_CLASS}`}
-      onClick={activate}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          activate()
-        }
-      }}
-      tabIndex={failedItems.length > 0 ? 0 : undefined}
-      role={failedItems.length > 0 ? 'button' : hasFailureEvidence ? 'status' : undefined}
-      aria-live={failedItems.length > 0 ? undefined : 'polite'}
-    >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <span className="inline-flex items-center gap-1 font-semibold">
-          <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-          {executionUnavailable
-            ? 'Execution unavailable'
-            : hasFailureEvidence || failedItems.length > 0
-              ? 'Execution failed'
-              : 'Tool errors detected'}
-        </span>
-        {hasFailureCategory && (
-          <span
-            className="inline-flex items-center rounded-full border border-danger-border bg-danger-subtle text-danger px-2 py-0.5 text-[10px] font-semibold"
-            data-testid="session-errors-region-category"
-          >
-            {formatFailureCategory(failureCategory)}
-          </span>
-        )}
-        {hasToolErrors && (
-          <span className="inline-flex items-center gap-1" data-testid="session-errors-region-tool-count">
-            <span className="text-danger font-medium">{effectiveToolErrorCount}</span>
-            <span>tool {effectiveToolErrorCount === 1 ? 'error' : 'errors'}</span>
-          </span>
-        )}
-        {failureReason && (
-          <span
-            className="text-danger truncate max-w-[300px]"
-            title={failureReason}
-            data-testid="session-errors-region-reason"
-          >
-            {failureReason}
-          </span>
-        )}
-        {executionUnavailable && (
-          <span data-testid="session-errors-region-next-action" className="text-danger">
-            Wait for the configured runtime or provider to recover, then retry the launch from the Agent.
-          </span>
-        )}
-        {failedItems.length > 1 && (
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            data-testid="session-errors-region-next-error"
-            onClick={(event) => {
-              event.stopPropagation()
-              next()
-            }}
-            className="h-auto p-0 text-xs text-danger"
-          >
-            Next error
-          </Button>
-        )}
-      </div>
-    </div>
-  )
 }
 
 export function SessionDetailShell({
@@ -572,114 +434,13 @@ export function SessionDetailShell({
   )
 }
 
-function TimelineViewToggle({
-  value,
-  onChange,
-}: {
-  value: 'summary' | 'raw'
-  onChange: (value: 'summary' | 'raw') => void
-}) {
-  return (
-    <div
-      className="flex items-center justify-end gap-1 border-b border-border px-4 py-2"
-      data-testid="session-timeline-view-toggle"
-      role="group"
-      aria-label="Timeline view"
-    >
-      <Button
-        type="button"
-        size="sm"
-        variant={value === 'summary' ? 'secondary' : 'ghost'}
-        aria-pressed={value === 'summary'}
-        data-testid="session-timeline-summary-trigger"
-        onClick={() => onChange('summary')}
-      >
-        <ListIcon aria-hidden="true" />
-        Summary
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant={value === 'raw' ? 'secondary' : 'ghost'}
-        aria-pressed={value === 'raw'}
-        data-testid="session-timeline-raw-trigger"
-        onClick={() => onChange('raw')}
-      >
-        <BracesIcon aria-hidden="true" />
-        Raw
-      </Button>
-    </div>
-  )
-}
-
 // ── Sub-components ──
-
-function getStageLabel(stage: string | null): string {
-  if (!stage) return 'Session'
-  return stage.charAt(0).toUpperCase() + stage.slice(1)
-}
-
-function sessionTimeAnchorMs(meta: import('../../../entities/coder-session').SessionMetadata): number | null {
-  return meta.lastActivityAt ? new Date(meta.lastActivityAt).getTime() : null
-}
-
-const sessionStatusPresentation: Partial<
-  Record<StatusKind, { label: string; className: string; dotClassName?: string; withDot?: boolean }>
-> = {
-  active: {
-    label: 'Active',
-    className: 'bg-info-subtle text-info border-info-border',
-    dotClassName: 'bg-info',
-    withDot: true,
-  },
-  idle: {
-    label: 'Idle',
-    className: 'bg-muted text-muted-foreground border-border',
-    dotClassName: 'bg-muted-foreground/60',
-  },
-  unknown: {
-    label: 'Unknown',
-    className: 'bg-warning-subtle text-warning border-warning-border',
-    dotClassName: 'bg-warning',
-  },
-}
 
 const stageChipPresentation: Record<string, string> = {
   plan: 'bg-info-subtle text-info border-info-border',
   review: 'bg-success-subtle text-success border-success-border',
   check: 'bg-warning-subtle text-warning border-warning-border',
   integrate: 'bg-muted text-muted-foreground border-border',
-}
-
-function StatusBadge({ kind }: { kind: StatusKind }) {
-  const presentation = sessionStatusPresentation[kind] ?? sessionStatusPresentation.unknown!
-  const { label, className, dotClassName, withDot } = presentation
-  return (
-    <span
-      data-testid="session-status-badge"
-      data-status-kind={kind}
-      data-tone={
-        className.startsWith('bg-danger')
-          ? 'danger'
-          : className.startsWith('bg-warning')
-            ? 'warning'
-            : className.startsWith('bg-success')
-              ? 'success'
-              : className.startsWith('bg-info')
-                ? 'info'
-                : 'neutral'
-      }
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${className}`}
-    >
-      {withDot && dotClassName && (
-        <span className="relative flex h-2 w-2">
-          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${dotClassName}`} />
-          <span className={`relative inline-flex rounded-full h-2 w-2 ${dotClassName}`} />
-        </span>
-      )}
-      {label}
-    </span>
-  )
 }
 
 function SessionHeader({

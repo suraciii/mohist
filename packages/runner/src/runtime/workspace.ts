@@ -4,18 +4,31 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { JsonObject, DispatchWorkItem } from '../core/types.js'
 import { getSegments, stringAt } from '../core/json-path.js'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../actions/git.js'
-import {
-  deleteDirectory,
-  ensureDir,
-  exists,
-  readText,
-  runCommand,
-  writeText,
-  type CommandResult,
-} from '../system/process.js'
+import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from '../system/process.js'
 import { currentRunnerFileSystem, type RunnerDirectoryHandle } from '../system/filesystem.js'
 import type { WorkspaceBindingIdentity, WorkspaceRegistry } from './workspace-registry.js'
 import { createCredentialMaskerFromEnvironment, type TaskLogger } from './task-log.js'
+import {
+  redactWorkspaceDiagnostic,
+  sanitizeWorkspaceDiagnostic,
+  workspaceNetworkTimeout,
+  WorkspaceBranchMismatchError,
+  WorkspaceCorruptError,
+  WorkspaceIdentityMismatchError,
+  WorkspaceMissingError,
+} from './workspace-errors.js'
+import {
+  issueWorkspacePath,
+  markerPath,
+  readMarker,
+  workspaceBindingIdentity,
+  workspaceIdentity,
+  type IssueWorkspaceMarker,
+} from './workspace-identity.js'
+
+export { issueWorkspacePath, readMarkerWorkflowRunId } from './workspace-identity.js'
+export type { IssueWorkspaceMarker } from './workspace-identity.js'
+export { WorkspaceNetworkTimeoutError } from './workspace-errors.js'
 
 /**
  * `source` tag recorded against every captured workspace-preparation
@@ -27,86 +40,6 @@ export const WORKSPACE_PREP_SOURCE = 'workspace-prep'
 
 function workspacePrepSink(log: TaskLogger | null | undefined) {
   return log ? { log, source: WORKSPACE_PREP_SOURCE } : undefined
-}
-
-export class WorkspaceMissingError extends Error {
-  readonly kind = 'workspace-missing'
-  constructor(
-    message: string,
-    readonly workspacePath?: string,
-    readonly cause?: unknown,
-  ) {
-    super(message)
-    this.name = 'WorkspaceMissingError'
-  }
-}
-
-export class WorkspaceCorruptError extends Error {
-  readonly kind = 'workspace-corrupt'
-  constructor(
-    message: string,
-    readonly workspacePath?: string,
-    readonly cause?: unknown,
-  ) {
-    super(message)
-    this.name = 'WorkspaceCorruptError'
-  }
-}
-
-export class WorkspaceIdentityMismatchError extends Error {
-  readonly kind = 'workspace-identity-mismatch'
-  constructor(
-    message: string,
-    readonly workspacePath?: string,
-    readonly expected?: IssueWorkspaceMarker,
-    readonly actual?: Partial<IssueWorkspaceMarker>,
-    readonly cause?: unknown,
-    readonly originDiagnostic?: WorkspaceOriginDiagnostic,
-  ) {
-    super(message)
-    this.name = 'WorkspaceIdentityMismatchError'
-  }
-}
-
-export interface WorkspaceOriginDiagnostic {
-  kind: 'probe-failed' | 'value-mismatch'
-  exitCode: number
-  diagnostic: string
-}
-
-export class WorkspaceBranchMismatchError extends Error {
-  readonly kind = 'branch-invariant-violation'
-  constructor(
-    message: string,
-    readonly workspacePath: string,
-    readonly expectedBranch: string,
-    readonly observedBranch: string | null,
-    readonly observedRef: string | null = null,
-    readonly detail?: string,
-  ) {
-    super(message)
-    this.name = 'WorkspaceBranchMismatchError'
-  }
-}
-
-export interface WorkspaceNetworkTimeoutStep {
-  name: string
-  command: string
-  exitCode: number
-  output: string
-  status: 'timeout'
-  timeoutMs?: number
-}
-
-export class WorkspaceNetworkTimeoutError extends Error {
-  readonly kind = 'workspace-network-timeout'
-  constructor(
-    message: string,
-    readonly step: WorkspaceNetworkTimeoutStep,
-  ) {
-    super(message)
-    this.name = 'WorkspaceNetworkTimeoutError'
-  }
 }
 
 // The workflow workspace is just a clone of the project repo checked out
@@ -556,32 +489,6 @@ export class WorkspaceManager {
   }
 }
 
-function workspaceNetworkTimeout(
-  name: string,
-  command: string,
-  result: CommandResult,
-  managedPath?: string,
-  displayPath?: string,
-): WorkspaceNetworkTimeoutError {
-  const output = sanitizeWorkspaceDiagnostic(
-    [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n'),
-    managedPath,
-    displayPath,
-  )
-  const visibleCommand = redactWorkspaceDiagnostic(command)
-  return new WorkspaceNetworkTimeoutError(
-    `Workspace preparation network command timed out: ${name} (${visibleCommand}) after ${(result.timeoutMs ?? NETWORK_COMMAND_TIMEOUT_MS) / 1000}s`,
-    {
-      name,
-      command: visibleCommand,
-      exitCode: result.exitCode,
-      output,
-      status: 'timeout',
-      timeoutMs: result.timeoutMs,
-    },
-  )
-}
-
 export function defaultRunnerRoot() {
   return process.env.MOHIST_RUNNER_ROOT ?? process.env.MOHIST_WORKSPACE_ROOT ?? join(homedir(), '.mohist', 'projects')
 }
@@ -592,65 +499,6 @@ export function runnerVariables() {
     hostname: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? 'unknown',
     temp: tmpdir(),
   }
-}
-
-export function issueWorkspacePath(runnerRoot: string, workflowRunId: string) {
-  if (!/^wr[-_A-Za-z0-9]+$/.test(workflowRunId)) throw new WorkspaceIdentityMismatchError('Invalid workflow run id')
-  return resolve(join(runnerRoot, 'workspaces', workflowRunId))
-}
-
-function runBranchName(runId: string | null | undefined) {
-  const safe = (runId ?? '').replace(/[^A-Za-z0-9_-]/g, '')
-  return safe ? `mohist/run-${safe}` : 'mohist/run'
-}
-
-export interface IssueWorkspaceMarker {
-  workflowRunId: string
-  runBranch: string
-}
-
-function workspaceIdentity(workflowRunId: string): IssueWorkspaceMarker {
-  return {
-    workflowRunId,
-    runBranch: runBranchName(workflowRunId),
-  }
-}
-
-function workspaceBindingIdentity(
-  runnerRoot: string,
-  runnerId: string,
-  workflowRunId: string,
-  gitUrl: string,
-  baseBranch: string,
-): WorkspaceBindingIdentity {
-  return {
-    runnerId,
-    runnerRoot: resolve(runnerRoot),
-    workflowRunId,
-    gitUrl: gitUrl.trim(),
-    baseBranch: baseBranch.trim(),
-  }
-}
-
-// Read the workspace marker from disk. Returns `null` when the marker
-// is missing or unreadable; the caller decides what kind of failure
-// that is (corrupt vs missing). Used by both `verify()` (which needs
-// to distinguish missing / corrupt / mismatch) and `planResolution()`
-// (which just needs a yes/no answer).
-export async function readMarker(workspacePath: string): Promise<Partial<IssueWorkspaceMarker> | null> {
-  const path = markerPath(workspacePath)
-  if (!exists(path)) return null
-  try {
-    const raw = await readText(path)
-    return JSON.parse(raw) as Partial<IssueWorkspaceMarker>
-  } catch {
-    return null
-  }
-}
-
-export async function readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {
-  const marker = await readMarker(workspacePath)
-  return marker?.workflowRunId
 }
 
 export async function validateWorkspaceIdentity(
@@ -932,21 +780,6 @@ function sanitizeManagedWorkspaceError(error: unknown, managedPath: string, disp
     })
   }
   return error
-}
-
-function sanitizeWorkspaceDiagnostic(value: string, managedPath?: string, displayPath?: string): string {
-  let sanitized = value
-  if (managedPath && displayPath && sanitized.includes(managedPath))
-    sanitized = sanitized.split(managedPath).join(displayPath)
-  return redactWorkspaceDiagnostic(sanitized)
-}
-
-function redactWorkspaceDiagnostic(value: string): string {
-  return createCredentialMaskerFromEnvironment().mask(value)
-}
-
-function markerPath(workspacePath: string) {
-  return join(workspacePath, '.mohist', 'workspace.json')
 }
 
 async function ensureMarkerExcluded(workspacePath: string) {
