@@ -1,9 +1,11 @@
 import type { WorkItemOrigin, StageApprovalState, WorkflowTaskCause, WorkflowFailureDetails } from './stage-state'
 
 /**
- * Tracks server `WorkflowRunStatus` (packages/server .../WorkflowRun.cs).
- * Each value MUST be the wire token emitted by `WorkflowStatusMapper.WireStatus(WorkflowRunStatus)`.
- * Source of truth is the server enum — extend this union when that enum gains a value.
+ * Tracks the wire status of a WorkflowRun as emitted by
+ * `WorkflowStatusMapper.BuildStatusView`. `blocked` is not a server enum
+ * value: it is derived there from a blocked Agent settlement (nonterminal,
+ * actionable attention) while the run's persisted status keeps its own
+ * lifecycle value.
  */
 export type WorkflowRunStatus =
   | 'created'
@@ -15,16 +17,17 @@ export type WorkflowRunStatus =
   | 'stopped'
   | 'completed'
   | 'failed'
+  | 'blocked'
 
-export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'blocked'
 export type WorkflowCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
 
 /**
- * Tracks server `StageRunStatus` (packages/server .../StageRun.cs).
- * Each value MUST be the wire token emitted by `WorkflowStatusMapper.WireStatus(StageRunStatus)`.
- * `passed` and `skipped` are client-only projections that no server enum value emits.
- * Source of truth is the server enum — extend this union when that enum gains a value
- * (server already emits `completed`; do not remove it).
+ * Tracks the wire status of a workflow stage as emitted by
+ * `WorkflowStatusMapper.BuildStatusView`. `passed` and `skipped` are
+ * client-only projections that no server enum value emits. `blocked` is
+ * derived server-side from a blocked Agent settlement; it is not a server
+ * enum value.
  */
 export type WorkflowStageRunStatus =
   | 'pending'
@@ -34,6 +37,7 @@ export type WorkflowStageRunStatus =
   | 'passed'
   | 'failed'
   | 'skipped'
+  | 'blocked'
 
 export interface WorkflowTaskResetCause {
   type: 'workflow-policy'
