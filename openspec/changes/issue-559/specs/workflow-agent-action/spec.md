@@ -1,0 +1,50 @@
+## ADDED Requirements
+
+### Requirement: Durable Workflow Agent Handoff Fence
+
+For a new Agent-backed Workflow task attempt, the system SHALL persist one
+typed handoff command with a canonical request fingerprint. A replay with the
+same fingerprint SHALL return the original disposition. A conflicting
+fingerprint SHALL not create or alter an invocation.
+
+#### Scenario: A rendered handoff is replayed after response loss
+
+- **WHEN** the same command is prepared again after activation loss
+- **THEN** the Server returns the original frozen invocation or rejection
+- **AND** it does not re-read mutable Agent configuration
+
+#### Scenario: A preflight failure becomes definitive
+
+- **WHEN** the Agent cannot be resolved during the first preflight
+- **THEN** the Server stores a rejection for that command
+- **AND** a later replay remains rejected even if the Agent becomes available
+
+### Requirement: Acceptance Is Not Execution
+
+The Server SHALL persist an immutable invocation and matching Workflow
+acceptance receipt before a later activation slice may create execution
+participants. The handoff foundation SHALL NOT materialize an AgentJob,
+AgentSession, Input, Turn, or Runner work.
+
+#### Scenario: A prepared handoff is accepted
+
+- **WHEN** the Workflow submits the matching command id and fingerprint
+- **THEN** the Server persists an accepted receipt
+- **AND** no Job, Session, or Runner claim exists
+
+### Requirement: Generic Runtime Boundary
+
+The handoff preflight SHALL resolve the immutable generic Agent execution
+definition. It SHALL NOT depend on a particular runtime adapter or use the
+Workflow task-report endpoint as a transport channel.
+
+### Requirement: No Partial Cutover
+
+The system SHALL retain the existing `mohist/agent` dispatch translation while
+typed handoff transport and the Workflow finalizer are absent.
+
+#### Scenario: Only the handoff foundation is available
+
+- **WHEN** a Workflow task uses `mohist/agent`
+- **THEN** no unowned handoff work is dispatched to a Runner
+- **AND** the existing inline execution path remains authoritative
