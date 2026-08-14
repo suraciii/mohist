@@ -10,7 +10,7 @@ export function getStageStatus(
   stage: WorkflowStage,
   stageStateMap: Map<string, StageStateRead>,
   issue: Issue,
-): 'pending' | 'running' | 'completed' | 'failed' | 'awaiting-approval' {
+): 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'awaiting-approval' {
   const stageState = stageStateMap.get(stage)
   const stageOrder = WORKFLOW_STAGES.indexOf(stage)
   const currentStageIdx = issue.workflowStage ? WORKFLOW_STAGES.indexOf(issue.workflowStage) : -1
@@ -20,6 +20,7 @@ export function getStageStatus(
     if (stageState.status === 'awaiting-approval') return 'awaiting-approval'
     if (stageState.status === 'completed' || stageState.status === 'passed') return 'completed'
     if (stageState.status === 'failed') return 'failed'
+    if (stageState.status === 'blocked') return 'blocked'
     if (stageState.status === 'skipped') return 'pending'
   }
 
@@ -72,6 +73,7 @@ export function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useW
         origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
         requiredFiles: task.requiredFiles,
         classification: task.classification,
+        agentResultSettlement: task.agentResultSettlement,
       })),
       checks: stage.checks.map((check) => ({
         checkName: check.name,

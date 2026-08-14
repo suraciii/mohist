@@ -1329,7 +1329,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.ToTable("InboxItems", null, t =>
                         {
-                            t.HasCheckConstraint("CK_InboxItems_NotificationKind", "\"NotificationKind\" IN ('workflow_failed', 'approval_requested', 'issue_started', 'issue_completed', 'agent_response_failed')");
+                            t.HasCheckConstraint("CK_InboxItems_NotificationKind", "\"NotificationKind\" IN ('workflow_failed', 'agent_result_unconfirmed', 'approval_requested', 'issue_started', 'issue_completed', 'agent_response_failed')");
                         });
                 });
 
@@ -1340,6 +1340,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("AgentResponseFailedEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AgentResultUnconfirmedEnabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("ApprovalRequestedEnabled")
@@ -3855,6 +3858,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AttentionStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AssignedWorkerId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -3911,6 +3918,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("MetadataProjectId", "IssueNumber")
                         .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
+
+                    b.HasIndex("MetadataProjectId", "AttentionStatus", "CreatedAt")
+                        .HasDatabaseName("IX_WorkflowRuns_ProjectId_AttentionStatus_CreatedAt");
 
                     b.HasIndex("MetadataProjectId", "WorkflowProfileIdKey")
                         .HasDatabaseName("IX_WorkflowRuns_MetadataProjectId_WorkflowProfileIdKey");

@@ -140,6 +140,80 @@ public partial class WorkflowRunStoreSpecs
     }
 
     [Fact]
+    public async Task SaveAsync_ProjectsBlockedSettlementForIndexedQueriesAndClearsItAfterLateResult()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var blocked = new WorkflowRun
+        {
+            Id = "wr_blocked_attention",
+            Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: ProjectId, IssueNumber: IssueNumber),
+            Status = WorkflowRunStatus.Running,
+            Assignment = new WorkflowAssignment("runner-1", FixedTime),
+            CurrentStageId = "build",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Tasks =
+                    [
+                        new TaskRun
+                        {
+                            Id = "build.1",
+                            DefinitionId = "build",
+                            Attempt = 1,
+                            Title = "Build",
+                            Uses = "mohist/opencode",
+                            Status = TaskRunStatus.Running,
+                            WorkId = "build-work",
+                            WorkerId = "runner-1",
+                            AgentResultSettlement = new AgentResultSettlement
+                            {
+                                State = AgentResultSettlementState.Blocked,
+                                TaskRunId = "build.1",
+                                WorkId = "build-work",
+                                RunnerId = "runner-1",
+                                ReasonCode = "agent-result-unconfirmed",
+                                DeadlineAt = FixedTime.AddMinutes(5),
+                            },
+                        },
+                    ],
+                },
+            ],
+        };
+        var running = new WorkflowRun
+        {
+            Id = "wr_running_attention",
+            Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: ProjectId, IssueNumber: IssueNumber + 1),
+            Status = WorkflowRunStatus.Running,
+            Stages = [],
+        };
+
+        await store.SaveAsync(blocked);
+        await store.SaveAsync(running);
+
+        var querier = new WorkflowRunQuerier(factory);
+        Assert.Equal([blocked.Id], await querier.FindBlockedAsync(ProjectId));
+        Assert.Empty(await querier.FindBlockedAsync("other-project"));
+
+        var task = blocked.CurrentStage().Tasks.Single();
+        task.AgentResultSettlement = null;
+        task.Status = TaskRunStatus.Completed;
+        blocked.Status = WorkflowRunStatus.Completed;
+        await store.SaveAsync(blocked);
+
+        Assert.Empty(await querier.FindBlockedAsync(ProjectId));
+        await using var db = new MohistDbContext(database.Options);
+        var row = await db.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == blocked.Id);
+        Assert.Null(row.AttentionStatus);
+    }
+
+    [Fact]
     public async Task DeleteAsync_RemovesRunTaskMapRows()
     {
         using var database = TestSqliteDatabase.CreateMigrated();

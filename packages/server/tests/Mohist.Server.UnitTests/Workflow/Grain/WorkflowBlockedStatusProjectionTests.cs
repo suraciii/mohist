@@ -1,3 +1,4 @@
+using Mohist.Server.Api;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain.Run;
@@ -36,9 +37,13 @@ public class WorkflowBlockedStatusProjectionTests
         Assert.Null(view!.Failure);
         Assert.Contains(view.AvailableActions, a => a.Name == "stop");
         Assert.DoesNotContain(view.AvailableActions, a => a.Name is "retry" or "rerun");
+        Assert.True(WorkflowControlGuard.IsWorkflowControllableForAction("blocked", WorkflowControlAction.Stop));
+        Assert.False(WorkflowControlGuard.IsWorkflowControllableForAction("blocked", WorkflowControlAction.RetryOrRerun));
+        Assert.False(WorkflowControlGuard.IsWorkflowControllableForAction("blocked", WorkflowControlAction.ActiveOnly));
         var attention = view.AgentResultAttention;
         Assert.NotNull(attention);
-        Assert.Equal("agent-result-unconfirmed", attention!.Reason);
+        Assert.Equal("blocked", attention!.State);
+        Assert.Equal("agent-result-unconfirmed", attention.Reason);
         Assert.Equal("Runner disconnected before the Agent result was accepted.", attention.Message);
         Assert.Equal(TestDeadline, attention.DeadlineAt);
         Assert.Equal("proposal.1", attention.TaskRunId);
@@ -46,6 +51,16 @@ public class WorkflowBlockedStatusProjectionTests
         Assert.Equal("runner-pluto", attention.RunnerId);
         Assert.Equal("agent-session-1", attention.AgentSessionId);
         Assert.Equal("turn-1", attention.AgentTurnId);
+        Assert.Equal(WorkflowStatusMapper.AgentResultSettlementNextAction, attention.NextAction);
+        Assert.Equal(["stop"], attention.RecoveryActions);
+
+        var taskSettlement = view.Stages[0].Tasks[0].AgentResultSettlement;
+        Assert.NotNull(taskSettlement);
+        Assert.Equal("blocked", taskSettlement!.State);
+        Assert.Equal("agent-result-unconfirmed", taskSettlement.Reason);
+        Assert.Equal(TestDeadline, taskSettlement.DeadlineAt);
+        Assert.Equal("agent-session-1", taskSettlement.AgentSessionId);
+        Assert.Equal("turn-1", taskSettlement.AgentTurnId);
     }
 
     [Fact]
@@ -59,6 +74,11 @@ public class WorkflowBlockedStatusProjectionTests
         Assert.Equal("running", view.Stages[0].Status);
         Assert.Equal("running", view.Stages[0].Tasks[0].Status);
         Assert.Null(view.AgentResultAttention);
+        var settlement = view.Stages[0].Tasks[0].AgentResultSettlement;
+        Assert.NotNull(settlement);
+        Assert.Equal("unknown", settlement!.State);
+        Assert.Equal("runner-disconnected", settlement.Reason);
+        Assert.Equal(TestDeadline, settlement.DeadlineAt);
         Assert.DoesNotContain(view.AvailableActions, a => a.Name == "stop");
     }
 
@@ -99,6 +119,7 @@ public class WorkflowBlockedStatusProjectionTests
             AssignedTo: "runner-pluto",
             Metadata: null,
             AgentResultAttention: new AgentResultAttentionView(
+                State: "blocked",
                 Reason: "agent-result-unconfirmed",
                 Message: "Agent result unconfirmed",
                 DeadlineAt: TestDeadline,
@@ -112,7 +133,7 @@ public class WorkflowBlockedStatusProjectionTests
         Assert.Equal("Agent result unconfirmed", projection.BlockedReason);
         var attention = projection.Attention;
         Assert.NotNull(attention);
-        Assert.Equal(WorkflowAttentionReason.Blocked, attention!.Reason);
+        Assert.Equal(WorkflowAttentionReason.AgentResultUnconfirmed, attention!.Reason);
         Assert.Equal(["stop"], attention.AvailableActions);
     }
 

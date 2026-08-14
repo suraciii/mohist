@@ -14,6 +14,7 @@ import { SettingsSection } from './SettingsSection'
 
 const KIND_LABELS: Record<NotificationKind, string> = {
   [NOTIFICATION_KINDS.WorkflowFailed]: 'Workflow failed',
+  [NOTIFICATION_KINDS.AgentResultUnconfirmed]: 'Agent result unconfirmed',
   [NOTIFICATION_KINDS.ApprovalRequested]: 'Approval requested',
   [NOTIFICATION_KINDS.IssueStarted]: 'Issue started',
   [NOTIFICATION_KINDS.IssueCompleted]: 'Issue completed',
@@ -21,6 +22,7 @@ const KIND_LABELS: Record<NotificationKind, string> = {
 
 const KIND_ORDER: NotificationKind[] = [
   NOTIFICATION_KINDS.WorkflowFailed,
+  NOTIFICATION_KINDS.AgentResultUnconfirmed,
   NOTIFICATION_KINDS.ApprovalRequested,
   NOTIFICATION_KINDS.IssueStarted,
   NOTIFICATION_KINDS.IssueCompleted,
@@ -28,6 +30,7 @@ const KIND_ORDER: NotificationKind[] = [
 
 const DEFAULT_SUBSCRIPTION: InboxSubscription = {
   [NOTIFICATION_KINDS.WorkflowFailed]: true,
+  [NOTIFICATION_KINDS.AgentResultUnconfirmed]: true,
   [NOTIFICATION_KINDS.ApprovalRequested]: true,
   [NOTIFICATION_KINDS.IssueStarted]: true,
   [NOTIFICATION_KINDS.IssueCompleted]: true,
@@ -89,7 +92,7 @@ export function InboxSubscriptionSection({
         ) : (
           <div className="space-y-3">
             {KIND_ORDER.map((kind) => {
-              const checked = draft[kind]
+              const checked = draft[kind] ?? true
               return (
                 <Label key={kind} className="flex cursor-pointer items-center justify-between gap-4 py-1">
                   <span>{KIND_LABELS[kind]}</span>

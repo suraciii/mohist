@@ -102,6 +102,20 @@ describe('TaskLogPanel live append', () => {
     expect(subInvoke?.args).toEqual(['wr-1', 'build-task-1'])
   })
 
+  it('keeps a blocked task log subscribed for a late authoritative result', async () => {
+    const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
+
+    renderWithTaskLogProviders(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="blocked" />,
+      testState,
+    )
+
+    const conn = await flushAndGetLastConnection()
+    await conn.waitForInvoke('SubscribeTaskLogAsync')
+    expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(true)
+  })
+
   it('does not subscribe the task-log panel connection to domain or transcript event types', async () => {
     const testState = createTaskLogTestState(makePage([]))
     deferNextFakeConnectionStart()

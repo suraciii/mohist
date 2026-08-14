@@ -69,6 +69,11 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskSt
   'skipped',
 ])
 
+const LIVE_LOG_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskStatus>([
+  'running',
+  'blocked',
+])
+
 export const useDefaultTaskLogData: TaskLogDataHook = ({ issueNumber, taskId, workflowRunId, enabled = true }) =>
   useIssueWorkflowTaskLog(
     issueNumber,
@@ -312,7 +317,7 @@ export function TaskLogPanel({
       return
     }
 
-    if (taskStatus !== 'running') {
+    if (!taskStatus || !LIVE_LOG_TASK_STATUSES.has(taskStatus)) {
       if (subscribedRef.current) {
         subscribedRef.current = false
         const conn = subscribedConnectionRef.current

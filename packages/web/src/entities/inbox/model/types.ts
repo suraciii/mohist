@@ -1,5 +1,6 @@
 export const NOTIFICATION_KINDS = {
   WorkflowFailed: 'workflow_failed',
+  AgentResultUnconfirmed: 'agent_result_unconfirmed',
   ApprovalRequested: 'approval_requested',
   IssueStarted: 'issue_started',
   IssueCompleted: 'issue_completed',
@@ -10,6 +11,7 @@ export type NotificationKind =
 
 export const NOTIFICATION_KIND_VALUES: readonly NotificationKind[] = [
   NOTIFICATION_KINDS.WorkflowFailed,
+  NOTIFICATION_KINDS.AgentResultUnconfirmed,
   NOTIFICATION_KINDS.ApprovalRequested,
   NOTIFICATION_KINDS.IssueStarted,
   NOTIFICATION_KINDS.IssueCompleted,
@@ -30,6 +32,7 @@ export function parseNotificationKind(
 
 export interface InboxSubscription {
   workflow_failed: boolean
+  agent_result_unconfirmed?: boolean
   approval_requested: boolean
   issue_started: boolean
   issue_completed: boolean

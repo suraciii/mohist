@@ -161,6 +161,7 @@ public class WorkflowRunStore : IWorkflowRunStore
                 EpicNumber = epicNumber,
                 ActiveWorkId = projection.ActiveWorkId,
                 ActiveWorkerId = projection.ActiveWorkerId,
+                AttentionStatus = run.HasBlockedAgentResult() ? "blocked" : null,
                 WorkflowProfileIdKey = run.Status.IsTerminal()
                     ? null
                     : WorkflowProfileBindingKey.For(run.WorkflowProfileId),
@@ -176,6 +177,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         entity.State = JSON.Serialize(run);
         entity.ActiveWorkId = projection.ActiveWorkId;
         entity.ActiveWorkerId = projection.ActiveWorkerId;
+        entity.AttentionStatus = run.HasBlockedAgentResult() ? "blocked" : null;
         entity.WorkflowProfileIdKey = run.Status.IsTerminal()
             ? null
             : WorkflowProfileBindingKey.For(run.WorkflowProfileId);

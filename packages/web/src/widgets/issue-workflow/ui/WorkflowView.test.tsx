@@ -331,6 +331,55 @@ describe('WorkflowView', () => {
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument()
   })
 
+  it('renders blocked Agent-result attention without a failure presentation', () => {
+    const timeline = makeTimeline()
+    timeline.status = 'blocked'
+    timeline.stages[0].status = 'blocked'
+    timeline.stages[0].tasks[0] = {
+      ...timeline.stages[0].tasks[0],
+      status: 'blocked',
+      message: 'Runner disconnected before the Agent result was accepted.',
+      agentResultSettlement: {
+        state: 'blocked',
+        reason: 'agent-result-unconfirmed',
+        message: 'Runner disconnected before the Agent result was accepted.',
+        firstUnknownAt: '2026-08-14T10:56:58Z',
+        deadlineAt: '2026-08-14T11:01:58Z',
+        taskRunId: 'build.1',
+        workId: 'build.1',
+        runnerId: 'runner-pluto',
+        agentSessionId: 'session-1',
+        agentTurnId: 'turn-1',
+        nextAction: 'Restore the original Runner and allow the result to replay.',
+        recoveryActions: ['stop'],
+      },
+    }
+    timeline.agentResultAttention = {
+      state: 'blocked',
+      reason: 'agent-result-unconfirmed',
+      message: 'Runner disconnected before the Agent result was accepted.',
+      firstUnknownAt: '2026-08-14T10:56:58Z',
+      deadlineAt: '2026-08-14T11:01:58Z',
+      taskRunId: 'build.1',
+      workId: 'build.1',
+      runnerId: 'runner-pluto',
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-1',
+      nextAction: 'Restore the original Runner and allow the result to replay.',
+      recoveryActions: ['stop'],
+    }
+    setWorkflowTimeline({ data: timeline } as ReturnType<typeof useWorkflowTimeline>)
+
+    render(<WorkflowView issue={makeIssue({ health: IssueHealth.Blocked, workflowStatus: 'blocked', blockedReason: 'Agent result unconfirmed' })} />)
+
+    const attention = screen.getByTestId('workflow-agent-result-attention')
+    expect(attention).toHaveTextContent('Agent result unconfirmed')
+    expect(attention).toHaveTextContent('session-1')
+    expect(attention).toHaveTextContent('turn-1')
+    expect(screen.getByText('blocked')).toBeInTheDocument()
+    expect(screen.queryByText(/Workflow failed/i)).not.toBeInTheDocument()
+  })
+
   it('renders every stage in a fixed two-column mobile grid', async () => {
     setScopedValue(window, 'innerWidth', 390)
     setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
