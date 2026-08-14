@@ -6,7 +6,7 @@
       "id": "T-001",
       "title": "Make TaskRun settlement the authority for Agent outcomes",
       "spec": "specs/workflow-agent-result-settlement/spec.md#workflow-is-the-authority-for-agent-task-outcomes",
-      "description": "Add `AgentResultSettlement` to `TaskRun` as the single arbitration authority for Workflow-owned `mohist/agent`, `mohist/opencode`, and `mohist/pi` attempts. Create it when Agent work is claimed; retain task-run/work/Runner identity; add identity-fenced Workflow operations to bind the physical execution and record inconclusive observations; add reportable-attempt lookup that can find active, unknown, or blocked work by `TaskRun.Id + WorkId + RunnerId`; and expose `HasUnresolvedAgentResult` as the one predicate that later control and projection slices consume. Do not copy settlement state into `TaskRunStatus` or `StageRunStatus`; T-007 may add only the minimum run-level blocked value required for indexed queries.",
+      "description": "Add `AgentResultSettlement` to `TaskRun` as the single arbitration authority for Workflow-owned `mohist/agent`, `mohist/opencode`, and `mohist/pi` attempts. Include identity-fenced bind and observation operations, reportable-attempt lookup for active or unresolved work, and one derived `HasUnresolvedAgentResult` predicate for downstream controls and projections. Keep settlement state out of task and stage status enums, apart from the minimum run-level blocked value later required for indexed queries.",
       "acceptanceCriteria": [
         "Every claimed Workflow Agent task has one `AgentResultSettlement` containing its real `TaskRun.Id`, `WorkId`, and assigned Runner; checks and non-Agent tasks create no settlement.",
         "`BindAgentExecutionAsync` accepts an exact replay as a no-op and rejects a Session, Turn, runtime target, task attempt, work, or Runner mismatch without changing Workflow state.",
@@ -28,7 +28,7 @@
       "id": "T-002",
       "title": "Bound unresolved settlement and make explicit stop safe",
       "spec": "specs/workflow-agent-result-settlement/spec.md#unknown-settlement-reaches-a-bounded-blocked-state",
-      "description": "Implement the Workflow-owned `agent-result-settlement` reminder around the T-001 settlement using injected `TimeProvider`. The first inconclusive observation persists one absolute deadline from a configured five-minute default; every matching duplicate observation and grain activation calls `EnsureReminder` from that persisted deadline. At expiry, move the settlement to nonterminal blocked attention without failure events. Fence dispatch, retry, rerun, runtime task insertion, pending-work projection, snapshots, Runner capacity, and sequential stage locks while unresolved. Define explicit Workflow stop as the sole abandonment transition: cancel the task and stop the run in one commit, retain identity history, then release snapshot/reminder/locks.",
+      "description": "Implement the Workflow-owned `agent-result-settlement` reminder with injected time, one durable deadline from a configured five-minute default, and a nonterminal blocked transition that emits no failure outcome. Fence dispatch, retry, rerun, runtime insertion, desired redelivery, and lock release while the settlement is unresolved, while retaining connected Runner capacity accounting. Make explicit Workflow stop the sole abandonment transition by committing cancellation and run stop before idempotently releasing the snapshot, reminder, and stage lock.",
       "acceptanceCriteria": [
         "The first unknown observation stores `FirstUnknownAt` and one absolute `DeadlineAt`; reconnect, replay, restart, and later observations never extend or replace that deadline.",
         "Every matching duplicate observation invokes `EnsureReminder` after the state decision, and a commit-success/reminder-registration-failure/retry test proves repair without grain reactivation.",
@@ -52,7 +52,7 @@
       "id": "T-003",
       "title": "Fence Agent runtime start on durable Server binding",
       "spec": "specs/workflow-agent-result-settlement/spec.md#unknown-settlement-preserves-one-execution-identity",
-      "description": "Turn Workflow `session.input` into a replay-idempotent pre-execution fence across Runner, AgentSession, and Workflow. Give the input a stable delivery identity and all execution metadata available before Turn creation; preserve those fields through `RunnerRoutes`; freeze one `SessionWorkflowExecutionBinding` on the resulting `AgentTurnRecord`; and call T-001 `BindAgentExecutionAsync`. Return the created or reused `AgentTurnId` in the matching Server receipt only after the AgentSession turn/binding and Workflow binding are both durable. Change the Runner reporter/outbox contract so `awaitInput` waits for that receipt rather than resolving after local snapshot persistence, invokes no Agent runtime before it arrives, and stamps the returned Turn identity on every later event.",
+      "description": "Turn Workflow `session.input` into a replay-idempotent pre-execution fence across Runner, AgentSession, and Workflow. Preserve a stable delivery identity and full execution metadata through `RunnerRoutes`, freeze one `SessionWorkflowExecutionBinding` on the created or reused AgentTurn, and bind that identity to the Workflow settlement before returning the Turn receipt. Gate Agent runtime invocation on that Server receipt and stamp its canonical Turn identity on every later event.",
       "acceptanceCriteria": [
         "The turn-opening `session.input` carries a stable delivery id plus WorkflowRun, real TaskRun/work, authenticated Runner context, target AgentSession, runtime, and runtime Session identity through the HTTP command; it does not require a pre-existing AgentTurn id.",
         "Replaying the same input delivery id creates no second Agent input or turn and retries any missing Workflow binding before returning a receipt.",
@@ -75,7 +75,7 @@
       "id": "T-004",
       "title": "Deliver physical observations with immutable execution identity",
       "spec": "specs/workflow-agent-result-settlement/spec.md#recovery-reconciles-before-repeating-a-physical-effect",
-      "description": "Carry the frozen T-003 execution identity on every Workflow runtime event and use it for every AgentSession observation instead of mutable Session labels. Partition the Runner runtime-event outbox and production batching by full execution identity, including stable input/turn and runtime Session identity, and validate homogeneous batches before HTTP delivery. Replace `ISessionWorkPort.AbandonActiveWorkAsync` call sites with identity-fenced Workflow observations for terminal/idle/stop/recovery facts. Preserve issue #562 stop-operation identity and allow same-operation redelivery only after positive reconciliation proves the exact recorded target is still active.",
+      "description": "Carry the frozen T-003 execution identity on every Workflow runtime event and observation, and partition Runner persistence and delivery batches by that complete identity rather than mutable Session labels. Replace abandonment call sites with identity-fenced physical observations while preserving issue #562 stop-operation ownership, including same-operation redelivery only after positive reconciliation proves the exact recorded target remains active.",
       "acceptanceCriteria": [
         "Every persisted Workflow runtime-event record contains enough immutable execution identity to target one Workflow task attempt and Agent turn without reading the Session's current `work-id` label.",
         "The outbox sequence key includes full execution identity; records for reused Sessions, different work attempts, Turns, Runners, or runtime Sessions cannot enter the same delivery batch.",
@@ -90,14 +90,14 @@
       "type": "WRITE",
       "output": "Full-identity runtime-event persistence/batching, frozen-Turn observation handoff, #562-compatible stop reconciliation, and passing Session-reuse/replay tests.",
       "dependsOn": ["T-001", "T-002", "T-003"],
-      "passes": true,
+      "passes": false,
       "notes": "A batch may still contain many streaming deltas, but only for one exact execution identity. Do not redesign physical stop delivery or move its reminder into Workflow."
     },
     {
       "id": "T-005",
       "title": "Preserve unknown Agent results through Runner loss and reconnect",
       "spec": "specs/workflow-agent-result-settlement/spec.md#runner-loss-preserves-unresolved-workflow-agent-work",
-      "description": "Keep `unknown` separate from authoritative task failure across all Workflow Agent executors and Server report handling. Ensure `mohist/agent`, `mohist/opencode`, and `mohist/pi` emit an explicit unknown result when cleanup or result authority is inconclusive. Route that status through T-001 observation handling rather than `TaskReportStatus.Failed`, and acknowledge it only after the settlement is durable. Make `RunnerGrain.CloseoutLostAsync` Agent-aware so Runner loss records `runner-disconnected` against the original settlement while checks and non-Agent work retain existing conclusive failure behavior. Reconnect must reconcile retained events/results for the original identity without replacement dispatch.",
+      "description": "Keep inconclusive outcomes separate from authoritative failure across all Workflow Agent executors, and route their explicit `unknown` result through durable observation handling rather than `TaskReportStatus.Failed`. Make Runner closeout record `runner-disconnected` against the original Agent settlement while preserving conclusive failure for checks and non-Agent work, and reconcile retained events or results on reconnect without replacement dispatch.",
       "acceptanceCriteria": [
         "All Workflow Agent executor paths use `unknown` for unconfirmed cleanup/result authority and reserve failed for a conclusive Agent result; `TaskReportStatus` remains only succeeded/failed.",
         "`WorkflowItemTranslator` and `WorkflowReportService` route unknown Agent results to `ObserveAgentExecutionAsync` without output/artifact/follow-up side effects and retire the Runner result only after durable acknowledgement.",
@@ -112,14 +112,14 @@
       "type": "WRITE",
       "output": "End-to-end unknown result semantics, Agent-aware Runner loss/reconnect reconciliation, preserved non-Agent failures, and passing regression tests for the observed incidents.",
       "dependsOn": ["T-002", "T-004"],
-      "passes": true,
+      "passes": false,
       "notes": "Connectivity and Session activity are observations, never authoritative results. Do not add blind retry, replacement execution, or an `Unknown` member to `TaskReportStatus`."
     },
     {
       "id": "T-006",
       "title": "Arbitrate late results before replay-safe side effects",
       "spec": "specs/workflow-agent-result-settlement/spec.md#an-authoritative-agent-result-settles-exactly-once",
-      "description": "Move authoritative result selection and all report side effects behind the serialized Workflow grain turn. `WorkflowReportService` performs only pure envelope/shape validation; the grain finds the original T-001 task attempt by work and authenticated Runner, chooses the first eligible result, then binds artifacts, projects follow-up tasks, mutates output/error, appends events, and advances or fails that exact `TaskRun.Id`. Make artifact binding replay-idempotent by persisting `SourceUploadId` on bound artifact rows under a unique index, returning already-bound rows on replay, and recording the real TaskRun id. Accept matching results before or after T-002 blocking; acknowledge every report after terminal settlement as side-effect-free stale without claiming duplicate/conflict discrimination.",
+      "description": "Move authoritative result selection and every report side effect behind the serialized Workflow grain turn so the original task attempt is selected by work identity and authenticated Runner before mutation. Make artifact binding replay-idempotent with uniquely indexed `SourceUploadId`, existing-row return on replay, and real TaskRun attribution. Accept the first matching result before or after blocking, and acknowledge every later report as side-effect-free stale.",
       "acceptanceCriteria": [
         "No artifact bind, follow-up projection, output/error mutation, Workflow event, or advancement occurs before the Workflow grain has selected an eligible active/unknown/blocked task attempt as the winner.",
         "A matching success before or after blocked completes the original TaskRun and resumes normal advancement once; a matching conclusive failure uses normal task/stage/run failure semantics once.",
@@ -135,14 +135,14 @@
       "type": "WRITE",
       "output": "Serialized late-result arbitration, replay-idempotent artifact binding with real TaskRun attribution, side-effect-free stale acknowledgements, and passing result-replay tests.",
       "dependsOn": ["T-005"],
-      "passes": true,
+      "passes": false,
       "notes": "Artifact storage is outside the WorkflowRun transaction, so persisted `SourceUploadId` replay identity is mandatory for every new binding. Do not add a result fingerprint solely to distinguish duplicate from conflicting terminal reports; both are stale by contract."
     },
     {
       "id": "T-007",
       "title": "Project blocked settlement as actionable non-failure attention",
-      "spec": "specs/workflow-agent-result-settlement/spec.md#status-consumers-read-a-blocked-settlement",
-      "description": "Publish first-unknown and blocked Workflow events and expose the authoritative settlement through Server read models and coordinated clients. Add event serialization/catalog/lineage/query support, derive task/stage/run blocked views from the TaskRun settlement plus the minimum indexed run status, and include stable reason `agent-result-unconfirmed`, message, deadline, execution references, and next action in API status. Project blocked attention to Issue, Inbox, Web, and CLI with a nonterminal presentation. Keep blocked out of failure fields, failed-task retry controls, terminal polling, and failure-only GitHub, Hermes, and Agent subscribers.",
+      "spec": "specs/workflow-agent-result-settlement/spec.md#unknown-settlement-reaches-a-bounded-blocked-state",
+      "description": "Publish first-unknown and blocked Workflow events and expose the authoritative settlement through Server read models with stable reason `agent-result-unconfirmed`, deadline, execution references, and next action. Derive blocked task, stage, and run views from settlement state and project nonterminal attention to Issue, Inbox, Web, and CLI. Keep blocked out of failure fields, failed-task retry controls, terminal polling, and failure-only GitHub, Hermes, and Agent subscribers.",
       "acceptanceCriteria": [
         "`AgentTaskResultUnconfirmed`, `TaskBlocked`, `StageBlocked`, and `WorkflowRunBlocked` serialize, persist, query, and map through the event catalog/lineage exactly once without reusing any failed event type.",
         "Task, stage, run, and Issue read models consistently return wire status `running` during unknown and `blocked` after expiry, derived from the authoritative settlement; indexed blocked run queries return the same runs.",
