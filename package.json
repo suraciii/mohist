@@ -31,6 +31,7 @@
     "test:budget": "tsx scripts/test-duration/guard.ts",
     "test:budget:all": "tsx scripts/test-duration/guard.ts --all",
     "docs:check": "tsx scripts/check-docs.ts",
+    "test:canonical": "tsx scripts/test-duration/canonical.ts",
     "ci:agent-job-gate": "tsx scripts/agent-job-ci-gate.ts",
     "archtest": "npm run typecheck:scripts && npm run test:archscripts",
     "build:web": "npm run build -w packages/web",

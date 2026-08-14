@@ -166,9 +166,12 @@ function executionLedgerPlan(track: TrackConfig): {
 export function commandFor(track: TrackConfig, reportRoot: string = repoRoot): { command: string; args: readonly string[] } {
   if (track.kind === 'dotnet-apphost') {
     const apphost = apphostFor(track)
+    const reporterArgs = track.executionLedger
+      ? ['-noAutoReporters', '-reporter', 'mohist-ledger']
+      : ['-noAutoReporters']
     return {
       command: apphost,
-      args: ['-noColor', '-noLogo', '-noAutoReporters', '-trx', resolve(reportRoot, track.report), ...(track.apphostArgs ?? [])],
+      args: ['-noColor', '-noLogo', ...reporterArgs, '-trx', resolve(reportRoot, track.report), ...(track.apphostArgs ?? [])],
     }
   }
   if (track.kind === 'dotnet-vstest') {
