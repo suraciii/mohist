@@ -1,0 +1,24 @@
+# Issue 567: Managed Runner Update Interrupt Boundary
+
+## Problem
+
+Managed `runner` and `full` updates can build a complete release and activate
+its pointer before the currently connected Runner is told to stop admitting
+new work. A restart can therefore race with new dispatch, while an
+unconfirmed interrupt must not activate or restart a candidate.
+
+## Change
+
+Require a connected Runner identity and an authoritative `interrupted` result
+before managed Runner activation. Keep the current active target and service
+unchanged when that precondition is not confirmed. If staging has already
+moved a candidate into a release and fails before active-pointer activation,
+remove only that transaction's exact staged release so a retry can rebuild it.
+
+## Safety Boundary
+
+This change closes admission before a managed Runner restart; it does not
+re-execute interrupted work, infer terminal results, or recover an in-flight
+execution from process state. Server-side reconnect remains the boundary that
+clears the Runner drain state and lets the existing durable work protocol
+reconcile preserved work.

@@ -57,6 +57,7 @@ internal sealed class ManagedRuntimeTransaction
         string scope,
         string transactionId,
         string? cliPath,
+        Func<CancellationToken, Task<string?>>? beforeActivation = null,
         CancellationToken cancellationToken = default)
     {
         var resolved = await _sourceResolver.ResolveAsync(
@@ -80,7 +81,9 @@ internal sealed class ManagedRuntimeTransaction
         RuntimeTargetSet? activatedTargets = null;
         ManagedRuntimeSnapshot? sourceSnapshot = null;
         ManagedCliLauncherState? cliLauncher = null;
+        string? stagedReleaseRoot = null;
         var activePointerWritten = false;
+        var activationPreconditionInvoked = false;
 
         try
         {
@@ -150,6 +153,7 @@ internal sealed class ManagedRuntimeTransaction
                 return (null, "managed release parent is unavailable");
             _files.CreateDirectory(releaseParent);
             _files.Move(context.CandidateRoot, releaseRoot);
+            stagedReleaseRoot = releaseRoot;
 
             var targets = BuildTargetSet(context, releaseRoot, generation, previous, built);
             if (!targets.IsCompleteFor(scope))
@@ -170,6 +174,18 @@ internal sealed class ManagedRuntimeTransaction
                 cancellationToken);
             targets = targets with { SourceSnapshot = sourceSnapshot };
 
+            // The candidate is complete and the current launch state is captured,
+            // but no active target or unit has changed yet. This is the only safe
+            // point to require runner interruption before service activation.
+            activatedTargets = targets;
+            if (beforeActivation is not null)
+            {
+                activationPreconditionInvoked = true;
+                var preconditionError = await beforeActivation(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(preconditionError))
+                    return (null, preconditionError);
+            }
+
             var transactionPath = Path.Combine(
                 context.RuntimeRoot,
                 "transactions",
@@ -179,7 +195,6 @@ internal sealed class ManagedRuntimeTransaction
             WriteAtomic(
                 Path.Combine(context.RuntimeRoot, "active.json").Replace('\\', '/'),
                 targets with { Status = "candidate-activated", Previous = null });
-            activatedTargets = targets;
             activePointerWritten = true;
 
             if (Includes(scope, "cli"))
@@ -237,7 +252,7 @@ internal sealed class ManagedRuntimeTransaction
         }
         catch (OperationCanceledException)
         {
-            if (activePointerWritten && activatedTargets is not null)
+            if ((activePointerWritten || activationPreconditionInvoked) && activatedTargets is not null)
                 await RestoreAfterFailureAsync(
                     context,
                     activatedTargets,
@@ -252,7 +267,7 @@ internal sealed class ManagedRuntimeTransaction
         }
         catch (Exception ex)
         {
-            if (activePointerWritten && activatedTargets is not null)
+            if ((activePointerWritten || activationPreconditionInvoked) && activatedTargets is not null)
                 await RestoreAfterFailureAsync(
                     context,
                     activatedTargets,
@@ -265,6 +280,11 @@ internal sealed class ManagedRuntimeTransaction
                     CancellationToken.None);
             _err.WriteLine($"Managed update staging failed: {ex.Message}");
             return (null, "managed update staging failed");
+        }
+        finally
+        {
+            if (!activePointerWritten && stagedReleaseRoot is not null)
+                DiscardStagedRelease(stagedReleaseRoot);
         }
     }
 
@@ -708,6 +728,18 @@ internal sealed class ManagedRuntimeTransaction
             _err.WriteLine($"Recovery after activation exit {activationCode} failed: {ex.Message}; no success was emitted.");
         }
         _err.WriteLine($"Managed runtime activation was rejected: {reason}.");
+    }
+
+    private void DiscardStagedRelease(string releaseRoot)
+    {
+        try
+        {
+            _files.DeleteDirectory(releaseRoot);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Managed staged release cleanup failed for {releaseRoot}: {ex.Message}");
+        }
     }
 
     private RuntimeTargetSet NoneTargets(ManagedUpdateSession session) =>

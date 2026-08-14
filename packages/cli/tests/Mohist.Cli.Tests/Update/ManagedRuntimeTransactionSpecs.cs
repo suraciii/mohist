@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests.Update;
 
-public sealed class ManagedRuntimeTransactionSpecs
+public sealed partial class ManagedRuntimeTransactionSpecs
 {
     [Fact]
     public void RuntimeIdentity_MatchesArtifactAndGenerationExactly()
