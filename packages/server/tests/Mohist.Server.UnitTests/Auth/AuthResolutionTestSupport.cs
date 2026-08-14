@@ -243,7 +243,8 @@ internal static class AuthResolutionTestSupport
             string name,
             IReadOnlyList<Scope> scopes,
             DateTimeOffset expiresAt,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            DirectApiProjectGrant? directApiProjectGrant = null)
         {
             throw new NotSupportedException();
         }

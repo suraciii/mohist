@@ -409,6 +409,28 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("AgentJobs", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Auth.CredentialProjectGrantRow", b =>
+                {
+                    b.Property<string>("CredentialId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("CredentialId", "ProjectId");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("IX_CredentialProjectGrants_ProjectId");
+
+                    b.HasIndex("CredentialId", "ProjectId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CredentialProjectGrants_CredentialId_ProjectId");
+
+                    b.ToTable("CredentialProjectGrants", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Auth.CredentialRow", b =>
                 {
                     b.Property<string>("Id")
@@ -416,6 +438,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DirectApiProjectGrantKind")
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("ExpiresAt")
@@ -3990,6 +4016,21 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("WorkflowRunId");
 
                     b.ToTable("WorkflowVariables");
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Auth.CredentialProjectGrantRow", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Auth.CredentialRow", null)
+                        .WithMany()
+                        .HasForeignKey("CredentialId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Project.ProjectRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>

@@ -216,10 +216,17 @@ public sealed class RunnerEnrollmentStoreTests
                     "ExpiresAt" TEXT NULL,
                     "RevokedAt" TEXT NULL,
                     "CreatedAt" TEXT NOT NULL,
-                    "ProjectId" TEXT NULL
+                    "ProjectId" TEXT NULL,
+                    "DirectApiProjectGrantKind" TEXT NULL
                 );
                 CREATE UNIQUE INDEX "IX_Credentials_TokenHash" ON "Credentials" ("TokenHash");
                 CREATE UNIQUE INDEX "IX_Credentials_PrincipalId_Name" ON "Credentials" ("PrincipalId", "Name") WHERE "RevokedAt" IS NULL;
+                CREATE TABLE "CredentialProjectGrants" (
+                    "CredentialId" TEXT NOT NULL,
+                    "ProjectId" TEXT NOT NULL,
+                    CONSTRAINT "PK_CredentialProjectGrants" PRIMARY KEY ("CredentialId", "ProjectId")
+                );
+                CREATE UNIQUE INDEX "UX_CredentialProjectGrants_CredentialId_ProjectId" ON "CredentialProjectGrants" ("CredentialId", "ProjectId");
                 CREATE TABLE "EnrollmentTokens" (
                     "Id" TEXT NOT NULL CONSTRAINT "PK_EnrollmentTokens" PRIMARY KEY,
                     "TokenHash" TEXT NOT NULL,
