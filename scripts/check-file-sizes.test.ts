@@ -39,7 +39,10 @@ test('governance covers first-party source under packages/, excluding EF-generat
   assert.equal(isGovernedPath('packages/cli/Mohist.Cli/MohistCliCommands.Slack.cs'), true)
   assert.equal(isGovernedPath('scripts/check-file-sizes.ts'), false)
   assert.equal(isGovernedPath('packages/web/src/pages/page.md'), false)
-  assert.equal(isGovernedPath('packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs'), false)
+  assert.equal(
+    isGovernedPath('packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs'),
+    false,
+  )
 })
 
 test('parseChangedFiles reads NUL-separated name-status with renames', () => {
