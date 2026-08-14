@@ -49,6 +49,13 @@ public class WorkflowRunRow
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public string? Status { get; set; }
 
+    /// <summary>
+    /// Materialized non-failure attention used only for indexed blocked-run
+    /// lookups. It is rebuilt from the authoritative Agent settlement on each
+    /// WorkflowRun save and is never used to decide task or run lifecycle.
+    /// </summary>
+    public string? AttentionStatus { get; set; }
+
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public int? IssueNumber { get; set; }
 

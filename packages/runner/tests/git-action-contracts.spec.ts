@@ -48,10 +48,17 @@ describe('local Git Action manifests', () => {
   })
 
   it('keeps engine-sourced OpenSpec inputs out of the public catalog', () => {
-    const entry = createDefaultRegistry()
-      .catalog()
-      .actions.find((action) => action.name === 'mohist/openspec-tasks')
-    expect(entry?.inputs.map((input) => input.name)).not.toContain('buildPrompt')
+    const registry = createDefaultRegistry()
+    const entries = registry.catalog().actions
+    const taskEntry = entries.find((action) => action.name === 'mohist/openspec-tasks')
+    const archiveEntry = entries.find((action) => action.name === 'mohist/archive-change')
+
+    expect(taskEntry?.inputs.map((input) => input.name)).not.toContain('buildPrompt')
+    expect(archiveEntry?.inputs.map((input) => input.name)).not.toContain('archiveHint')
+
+    const archiveAction = registry.resolve('mohist/archive-change')
+    if (archiveAction.kind !== 'definition') throw new Error('Missing mohist/archive-change')
+    expect(archiveAction.definition.manifest.inputs.archiveHint?.engineSource).toBe('vars.archive')
   })
 })
 

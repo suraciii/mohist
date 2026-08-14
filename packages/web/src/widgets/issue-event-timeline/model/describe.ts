@@ -69,9 +69,7 @@ export function describeEvent(
   const error = getString(payload, 'error') ?? ''
   const taskId = getString(payload, 'taskId')
   const taskStage = getString(payload, 'stage')
-  const taskSubject = taskId
-    ? (taskStage ? resolveTaskTitle?.(taskStage, taskId) : null) ?? taskId
-    : null
+  const taskSubject = taskId ? ((taskStage ? resolveTaskTitle?.(taskStage, taskId) : null) ?? taskId) : null
   const artifactPath = getString(payload, 'path')
 
   switch (type) {
@@ -121,6 +119,18 @@ export function describeEvent(
 
     case 'com.mohist.workflow.task.failed':
       return taskSubject ? `${taskSubject} failed` : 'Task failed'
+
+    case 'com.mohist.workflow.agent-result-unconfirmed':
+      return taskSubject ? `${taskSubject} result unconfirmed` : 'Agent result unconfirmed'
+
+    case 'com.mohist.workflow.task.blocked':
+      return taskSubject ? `${taskSubject} blocked: Agent result unconfirmed` : 'Task blocked: Agent result unconfirmed'
+
+    case 'com.mohist.workflow.stage.blocked':
+      return stage ? `Stage ${stage} blocked: Agent result unconfirmed` : 'Stage blocked: Agent result unconfirmed'
+
+    case 'com.mohist.workflow.run.blocked':
+      return 'Workflow blocked: Agent result unconfirmed'
 
     case 'com.mohist.workflow.artifact.recorded':
       return artifactPath ? `${artifactPath} recorded` : 'Artifact recorded'

@@ -6,10 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { useReducer } from 'react'
 import { NOTIFICATION_KINDS, type InboxItem } from '../../../entities/inbox'
 import { ProjectProvider } from '../../../entities/project'
-import {
-  InboxPage as DefaultInboxPage,
-  type InboxPageDataHook,
-} from './InboxPage'
+import { InboxPage as DefaultInboxPage, type InboxPageDataHook } from './InboxPage'
 
 function makeItem(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -41,6 +38,14 @@ const readFailure = makeItem({
   issueTitle: 'Older failure',
   isRead: true,
   readAt: '2026-06-28T12:00:00.000Z',
+})
+
+const agentResultUnconfirmed = makeItem({
+  itemId: 'inb-blocked',
+  notificationKind: NOTIFICATION_KINDS.AgentResultUnconfirmed,
+  issueNumber: 27,
+  issueTitle: 'Awaiting Agent result',
+  isRead: false,
 })
 
 const approval = makeItem({
@@ -237,7 +242,7 @@ describe('InboxPage error state', () => {
 
 describe('InboxPage list rendering and link', () => {
   beforeEach(() => {
-    resetInboxState([unreadFailure, readFailure, approval, started, completed])
+    resetInboxState([unreadFailure, readFailure, agentResultUnconfirmed, approval, started, completed])
     vi.clearAllMocks()
   })
 
@@ -249,14 +254,14 @@ describe('InboxPage list rendering and link', () => {
     renderPage()
 
     const items = await screen.findAllByTestId('inbox-item')
-    expect(items).toHaveLength(5)
+    expect(items).toHaveLength(6)
   })
 
   it('renders the kind badge for each kind', async () => {
     renderPage()
 
     const kindTexts = (await screen.findAllByTestId('inbox-item-kind')).map((n) => n.textContent)
-    expect(kindTexts).toEqual(expect.arrayContaining(['Failed', 'Approval', 'Started', 'Completed']))
+    expect(kindTexts).toEqual(expect.arrayContaining(['Failed', 'Blocked', 'Approval', 'Started', 'Completed']))
   })
 
   it('renders the issue number and title for each item', async () => {
@@ -265,6 +270,7 @@ describe('InboxPage list rendering and link', () => {
     await screen.findAllByTestId('inbox-item')
     expect(screen.getByText('Snapshot me')).toBeInTheDocument()
     expect(screen.getByText('Older failure')).toBeInTheDocument()
+    expect(screen.getByText('Awaiting Agent result')).toBeInTheDocument()
     expect(screen.getByText('Approve please')).toBeInTheDocument()
     expect(screen.getByText('Started running')).toBeInTheDocument()
     expect(screen.getByText('Done')).toBeInTheDocument()
@@ -285,7 +291,15 @@ describe('InboxPage list rendering and link', () => {
     const links = screen.getAllByTestId('inbox-item-link')
     expect(links.length).toBeGreaterThan(0)
     const hrefs = links.map((l) => l.getAttribute('href'))
-    expect(hrefs).toEqual(expect.arrayContaining(['/demo/issues/42', '/demo/issues/13', '/demo/issues/5', '/demo/issues/9', '/demo/issues/7']))
+    expect(hrefs).toEqual(
+      expect.arrayContaining([
+        '/demo/issues/42',
+        '/demo/issues/13',
+        '/demo/issues/5',
+        '/demo/issues/9',
+        '/demo/issues/7',
+      ]),
+    )
   })
 
   it('distinguishes unread items with data-read="false" and read items with data-read="true"', async () => {
@@ -315,14 +329,14 @@ describe('InboxPage list rendering and link', () => {
     renderPage()
 
     const markReadButtons = await screen.findAllByTestId('inbox-item-mark-read')
-    expect(markReadButtons).toHaveLength(4)
+    expect(markReadButtons).toHaveLength(5)
   })
 
   it('shows a relative-time string on each item', async () => {
     renderPage()
 
     const timeNodes = await screen.findAllByTestId('inbox-item-time')
-    expect(timeNodes).toHaveLength(5)
+    expect(timeNodes).toHaveLength(6)
     expect(timeNodes[0].textContent).toMatch(/ago|just now/)
   })
 
@@ -331,6 +345,7 @@ describe('InboxPage list rendering and link', () => {
 
     await screen.findAllByTestId('inbox-item')
     expect(screen.getByText(/Issue #42 workflow failed/)).toBeInTheDocument()
+    expect(screen.getByText(/Issue #27 agent result is unconfirmed/)).toBeInTheDocument()
     expect(screen.getByText(/Issue #5 needs approval/)).toBeInTheDocument()
     expect(screen.getByText(/Issue #9 started/)).toBeInTheDocument()
     expect(screen.getByText(/Issue #7 completed/)).toBeInTheDocument()
@@ -342,6 +357,7 @@ describe('InboxPage list rendering and link', () => {
     await screen.findAllByTestId('inbox-item')
     const container = screen.getByTestId('inbox-list')
     expect(container.textContent).not.toContain('workflow_failed')
+    expect(container.textContent).not.toContain('agent_result_unconfirmed')
     expect(container.textContent).not.toContain('approval_requested')
     expect(container.textContent).not.toContain('issue_started')
     expect(container.textContent).not.toContain('issue_completed')
@@ -351,7 +367,7 @@ describe('InboxPage list rendering and link', () => {
     renderPage()
 
     await screen.findAllByTestId('inbox-item')
-    expect(screen.getByTestId('inbox-summary').textContent).toContain('4 unread of 5')
+    expect(screen.getByTestId('inbox-summary').textContent).toContain('5 unread of 6')
   })
 })
 

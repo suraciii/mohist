@@ -2,11 +2,7 @@ import { useMemo, useState } from 'react'
 import { ActivityIcon, ArrowDownIcon, ArrowUpIcon } from 'lucide-react'
 import { CategoryFilter } from './CategoryFilter'
 import { EventTimelineRow } from './EventTimelineRow'
-import {
-  useEventTimeline,
-  type EventTimelineHistoryHook,
-  type EventTimelineWorkflowHook,
-} from '../useEventTimeline'
+import { useEventTimeline, type EventTimelineHistoryHook, type EventTimelineWorkflowHook } from '../useEventTimeline'
 import type { TimelineCategory, TimelineEntry } from '../model/types'
 
 export interface EventTimelinePanelProps {
@@ -69,12 +65,13 @@ export function EventTimelinePanelView({
 }: EventTimelinePanelViewProps) {
   const [order, setOrder] = useState<'newest' | 'chronological'>('newest')
   const [selectedCategories, setSelectedCategories] = useState<Set<TimelineCategory>>(
-    new Set(['workflow', 'approval', 'integration', 'success', 'failure', 'metadata']),
+    new Set(['workflow', 'attention', 'approval', 'integration', 'success', 'failure', 'metadata']),
   )
 
   const counts = useMemo(() => {
     const result: Record<TimelineCategory, number> = {
       workflow: 0,
+      attention: 0,
       approval: 0,
       integration: 0,
       success: 0,
@@ -149,7 +146,7 @@ export function EventTimelinePanelView({
                 data-testid="timeline-inactive-badge"
                 className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
               >
-                Live
+                {workflowStatus === 'blocked' ? 'Awaiting result' : 'Live'}
               </span>
             )}
           </div>
@@ -176,15 +173,15 @@ export function EventTimelinePanelView({
       )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <CategoryFilter
-          selected={selectedCategories}
-          onToggle={toggleCategory}
-          counts={counts}
-        />
-        {selectedCategories.size < 6 && (
+        <CategoryFilter selected={selectedCategories} onToggle={toggleCategory} counts={counts} />
+        {selectedCategories.size < 7 && (
           <button
             type="button"
-            onClick={() => setSelectedCategories(new Set(['workflow', 'approval', 'integration', 'success', 'failure', 'metadata']))}
+            onClick={() =>
+              setSelectedCategories(
+                new Set(['workflow', 'attention', 'approval', 'integration', 'success', 'failure', 'metadata']),
+              )
+            }
             className="text-xs font-medium text-muted-foreground hover:text-foreground"
             data-testid="timeline-clear-filters"
           >
@@ -196,7 +193,7 @@ export function EventTimelinePanelView({
       {isLoading && entries.length === 0 && (
         <div className="space-y-2 py-4">
           {[1, 2, 3].map((i) => (
-              <div key={i} className="flex gap-3">
+            <div key={i} className="flex gap-3">
               <div className="h-3 w-12 rounded bg-muted" />
               <div className="h-3 w-3 rounded-full bg-muted" />
               <div className="h-3 flex-1 rounded bg-muted" />

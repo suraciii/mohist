@@ -31,14 +31,40 @@ public sealed record WorkflowStatusView(
 /// </summary>
 [GenerateSerializer]
 public sealed record AgentResultAttentionView(
+    string State,
     string Reason,
     string Message,
+    DateTimeOffset DeadlineAt,
+    string TaskRunId,
+    string WorkId,
+    string? RunnerId = null,
+    string? AgentSessionId = null,
+    string? AgentTurnId = null,
+    string? NextAction = null,
+    IReadOnlyList<string>? RecoveryActions = null);
+
+/// <summary>
+/// The durable result-settlement state for an Agent task attempt. This is
+/// present while the task is awaiting a result, unknown, or blocked; the
+/// aggregate clears it only after an authoritative result wins.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentResultSettlementView(
+    string State,
+    string? Reason,
+    string? Message,
+    DateTimeOffset? FirstUnknownAt,
     DateTimeOffset? DeadlineAt,
     string TaskRunId,
     string WorkId,
     string? RunnerId = null,
     string? AgentSessionId = null,
-    string? AgentTurnId = null);
+    string? AgentTurnId = null,
+    string? Runtime = null,
+    string? RuntimeSessionId = null,
+    string? StopOperationId = null,
+    string? NextAction = null,
+    IReadOnlyList<string>? RecoveryActions = null);
 
 [GenerateSerializer]
 public sealed record StageStatusView(
@@ -123,7 +149,8 @@ public sealed record TaskStatusView(
     DateTimeOffset? CompletedAt = null,
     long? DurationMs = null,
     JsonElement? Output = null,
-    ExecutionError? Error = null);
+    ExecutionError? Error = null,
+    AgentResultSettlementView? AgentResultSettlement = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

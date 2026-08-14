@@ -673,15 +673,16 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
-    public async Task Filter_AcceptsAllFiveTypes()
+    public async Task Filter_AcceptsAllSixTypes()
     {
         var handler = InboxProjectionTestSupport.CreateHandler(InboxProjectionTestSupport.CreateDatabase());
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "p", 1, "e1")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "p", 1, "e2")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "w", "e3")));
-        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e4")));
+        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunBlocked, "w", "e4")));
+        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e5")));
         Assert.True(handler.Filter(new CloudEvent(
-            id: "e5",
+            id: "e6",
             source: new Uri("/mohist/agent-job/job_1", UriKind.Relative),
             type: EventCatalog.ReverseDns.AgentJobFailed,
             time: TestTime.UtcNow,
@@ -701,13 +702,14 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
-    public async Task HasSubscriptionAttributeWithExpectedFiveTypes()
+    public async Task HasSubscriptionAttributeWithExpectedSixTypes()
     {
         var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
             typeof(InboxProjectionHandler), typeof(SubscriptionAttribute));
         Assert.NotNull(attr);
         Assert.Equal(
             EventCatalog.ReverseDns.WorkflowRunFailed + "|" +
+            EventCatalog.ReverseDns.WorkflowRunBlocked + "|" +
             EventCatalog.ReverseDns.StageApprovalRequested + "|" +
             EventCatalog.ReverseDns.IssueWorkStarted + "|" +
             EventCatalog.ReverseDns.IssueCompleted + "|" +

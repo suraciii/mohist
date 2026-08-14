@@ -34,6 +34,28 @@ describe('issue event invalidation mapping', () => {
     })
   })
 
+  it('invalidates issue status resources for blocked Agent-result attention', () => {
+    const queryClient = makeClient()
+
+    invalidateIssueEvent(
+      queryClient,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunBlocked,
+      { projectId: 'project-1', issueNumber: 474 },
+      'project-1',
+    )
+
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: issueDetailKeys.detail('project-1', 474),
+      exact: true,
+    })
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: issueWorkflowKeys.root('project-1', 474),
+    })
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: issueListKeys.project('project-1'),
+    })
+  })
+
   it('does not target issue detail for an inbox hint carrying an issue number', () => {
     const queryClient = makeClient()
 
@@ -72,12 +94,7 @@ describe('issue event invalidation mapping', () => {
   it('ignores events without the current project identity', () => {
     const queryClient = makeClient()
 
-    invalidateIssueEvent(
-      queryClient,
-      REVERSE_DNS_EVENT_TYPES.IssueCompleted,
-      { issueNumber: 473 },
-      'project-1',
-    )
+    invalidateIssueEvent(queryClient, REVERSE_DNS_EVENT_TYPES.IssueCompleted, { issueNumber: 473 }, 'project-1')
     invalidateIssueEvent(
       queryClient,
       REVERSE_DNS_EVENT_TYPES.IssueCompleted,
@@ -96,12 +113,7 @@ describe('issue event invalidation mapping', () => {
   ])('invalidates detail and list for server-produced structural event %s', (eventName) => {
     const queryClient = makeClient()
 
-    invalidateIssueEvent(
-      queryClient,
-      eventName,
-      { projectId: 'project-1', issueNumber: 473 },
-      'project-1',
-    )
+    invalidateIssueEvent(queryClient, eventName, { projectId: 'project-1', issueNumber: 473 }, 'project-1')
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
       queryKey: issueDetailKeys.detail('project-1', 473),

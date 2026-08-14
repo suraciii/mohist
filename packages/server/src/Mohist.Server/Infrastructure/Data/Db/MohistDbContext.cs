@@ -1793,12 +1793,6 @@ public partial class MohistDbContext : DbContext
 
         modelBuilder.Entity<InboxItemRow>(entity =>
         {
-            entity.ToTable("InboxItems", table =>
-            {
-                table.HasCheckConstraint(
-                    "CK_InboxItems_NotificationKind",
-                    "\"NotificationKind\" IN ('workflow_failed', 'approval_requested', 'issue_started', 'issue_completed', 'agent_response_failed')");
-            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
@@ -2079,6 +2073,8 @@ public partial class MohistDbContext : DbContext
             entity.Property(e => e.CredentialFingerprint).HasMaxLength(64);
             entity.Property(e => e.UpdatedAt).IsRequired();
         });
+
+        WorkflowAttentionModelConfiguration.Apply(modelBuilder);
     }
 
     private static bool DictionaryEqual(Dictionary<string, string>? left, Dictionary<string, string>? right)

@@ -29,7 +29,7 @@ public sealed class WorkflowAttention
 
     public static WorkflowAttention AgentResultUnconfirmed(string? workflowRunId, string? message = null) => new()
     {
-        Reason = WorkflowAttentionReason.Blocked,
+        Reason = WorkflowAttentionReason.AgentResultUnconfirmed,
         Message = message,
         Source = "workflow",
         WorkflowRunId = workflowRunId,

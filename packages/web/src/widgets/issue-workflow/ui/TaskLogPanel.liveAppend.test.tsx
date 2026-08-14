@@ -4,11 +4,7 @@ import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import { issueWorkflowTaskLogQueryOptions } from '../../../entities/issue'
 import type { TaskLogPage } from '../../../entities/issue/model/task-log'
-import {
-  TaskLogPanel as DefaultTaskLogPanel,
-  type TaskLogDataHook,
-  type TaskLogPanelProps,
-} from './TaskLogPanel'
+import { TaskLogPanel as DefaultTaskLogPanel, type TaskLogDataHook, type TaskLogPanelProps } from './TaskLogPanel'
 import {
   flushAndGetLastConnection,
   fakeConnections,
@@ -29,14 +25,7 @@ const queryClients = new Set<TaskLogTestState['queryClient']>()
 
 const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
   useQuery({
-    ...issueWorkflowTaskLogQueryOptions(
-      projectId,
-      issueNumber,
-      taskId,
-      { limit: 5000 },
-      true,
-      workflowRunId,
-    ),
+    ...issueWorkflowTaskLogQueryOptions(projectId, issueNumber, taskId, { limit: 5000 }, true, workflowRunId),
     queryFn: async () => _taskLogPageRef.current ?? makePage([]),
   })
 
@@ -73,10 +62,9 @@ describe('TaskLogPanel live append', () => {
   })
 
   it('renders cached log lines in sequence', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, text: 'Cloning repo' }),
-      makeLine({ seq: 2, text: 'CONFLICT' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, text: 'Cloning repo' }), makeLine({ seq: 2, text: 'CONFLICT' })]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
@@ -100,6 +88,20 @@ describe('TaskLogPanel live append', () => {
     await conn.waitForInvoke('SubscribeTaskLogAsync')
     const subInvoke = recordedInvokes.find((inv) => inv.method === 'SubscribeTaskLogAsync')
     expect(subInvoke?.args).toEqual(['wr-1', 'build-task-1'])
+  })
+
+  it('keeps a blocked task log subscribed for a late authoritative result', async () => {
+    const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
+
+    renderWithTaskLogProviders(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="blocked" />,
+      testState,
+    )
+
+    const conn = await flushAndGetLastConnection()
+    await conn.waitForInvoke('SubscribeTaskLogAsync')
+    expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(true)
   })
 
   it('does not subscribe the task-log panel connection to domain or transcript event types', async () => {
@@ -145,9 +147,9 @@ describe('TaskLogPanel live append', () => {
   })
 
   it('live-appends incoming OnTaskLogDelta lines for this task during execution', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'before' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'before' })]),
+    )
     deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
@@ -162,10 +164,12 @@ describe('TaskLogPanel live append', () => {
     expect(handler).toBeDefined()
 
     await act(async () => {
-      handler!(makeEnvelope([
-        { seq: 2, text: 'incremental-1' },
-        { seq: 3, text: 'incremental-2' },
-      ]))
+      handler!(
+        makeEnvelope([
+          { seq: 2, text: 'incremental-1' },
+          { seq: 3, text: 'incremental-2' },
+        ]),
+      )
     })
 
     await waitFor(() => {
@@ -176,10 +180,9 @@ describe('TaskLogPanel live append', () => {
   })
 
   it('deduplicates incoming deltas by seq — already cached and out-of-order low seqs are dropped', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 5, text: 'cached-5' }),
-      makeLine({ seq: 6, text: 'cached-6' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 5, text: 'cached-5' }), makeLine({ seq: 6, text: 'cached-6' })]),
+    )
     deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
@@ -194,11 +197,13 @@ describe('TaskLogPanel live append', () => {
     expect(handler).toBeDefined()
 
     await act(async () => {
-      handler!(makeEnvelope([
-        { seq: 6, text: 'should-be-dropped-already-cached' },
-        { seq: 3, text: 'should-append-out-of-order' },
-        { seq: 7, text: 'should-append' },
-      ]))
+      handler!(
+        makeEnvelope([
+          { seq: 6, text: 'should-be-dropped-already-cached' },
+          { seq: 3, text: 'should-append-out-of-order' },
+          { seq: 7, text: 'should-append' },
+        ]),
+      )
     })
 
     await waitFor(() => {
@@ -350,10 +355,9 @@ describe('TaskLogPanel live append', () => {
   })
 
   it('preserves the truncation indicator from cached data', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 4999, text: 'CONFLICT' }),
-      makeLine({ seq: 5000, text: 'Patch failed' }),
-    ], true))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 4999, text: 'CONFLICT' }), makeLine({ seq: 5000, text: 'Patch failed' })], true),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
@@ -375,10 +379,12 @@ describe('TaskLogPanel live append', () => {
   })
 
   it('shows the full authoritative log when no live subscriber ran', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'authoritative-line-1' }),
-      makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.050Z', text: 'authoritative-line-2' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'authoritative-line-1' }),
+        makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.050Z', text: 'authoritative-line-2' }),
+      ]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,

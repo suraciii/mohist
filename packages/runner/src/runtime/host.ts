@@ -1,6 +1,7 @@
 import type { RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { RunnerSignalRClient } from '../server/runner-signalr.js'
+import { reportAndRequireDurableAck } from './work-report.js'
 import { ActionRegistry, createDefaultRegistry } from '../actions/registry.js'
 import '../core/prompt-registry.js'
 import { WorkspaceManager } from './workspace.js'
@@ -698,23 +699,15 @@ export class RunnerHost {
   }
 
   /**
-   * Reports a single awaitingAck entry. On ack (any non-throwing response
-   * from the owner — Accepted or Stale are both acks), removes the entry.
-   * Throws on transport failure so the caller can schedule
-   * the next attempt.
+   * Reports a single awaitingAck entry. Accepted and stale reports are both
+   * durable acknowledgements. An untracked response leaves the original
+   * result in place for reconciliation rather than silently dropping it.
    */
   private async reportOnce(key: string): Promise<void> {
     const held = this.awaitingAck.get(key)
     if (!held) return
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS)
-    timeout.unref?.()
     held.entry.attempts += 1
-    try {
-      await this.connection.report(held.work, held.entry.result, controller.signal)
-    } finally {
-      clearTimeout(timeout)
-    }
+    await reportAndRequireDurableAck(this.connection, held.work, held.entry.result)
     this.awaitingAck.delete(key)
     this.syncOpenCodeWorkOwners()
   }
@@ -841,14 +834,6 @@ export class RunnerHost {
     }
   }
 }
-
-/**
- * Timeout for a single report HTTP attempt. A report that does not
- * complete within this window is aborted and retried by the reconciliation
- * loop. Long enough to absorb a slow owner under load, short enough that
- * a wedged connection is retried rather than hung.
- */
-const REPORT_TIMEOUT_MS = 10_000
 
 /**
  * Minimum interval between repeated "opencode runtime not ready"
