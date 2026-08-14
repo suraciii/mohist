@@ -3,6 +3,7 @@ import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import { WorkResultJournal, workKey } from './work-result-journal.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
 import { withTestRunnerResources } from '../../tests/support/test-resources.js'
+import type { RunnerFileSystem } from '../system/filesystem.js'
 
 const work: DispatchWorkItem = {
   workflowRunId: 'workflow-1',
@@ -69,7 +70,7 @@ describe('WorkResultJournal', () => {
   })
 
   it('TreatsCorruptStateAsUnavailableInsteadOfReplacingIt', async () => {
-    await withTestRunnerResources(async (fileSystem: MemoryFileSystem) => {
+    await withTestRunnerResources(async (fileSystem: RunnerFileSystem) => {
       await fileSystem.writeText('/runner/.mohist/runner-state/work-results.json', '{not-json')
       const journal = new WorkResultJournal('/runner')
       await journal.load()
