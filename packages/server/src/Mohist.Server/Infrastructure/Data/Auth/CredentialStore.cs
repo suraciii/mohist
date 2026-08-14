@@ -34,7 +34,8 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
         if (!Enum.TryParse<CredentialKind>(row.Kind, ignoreCase: true, out var kind))
             return null;
 
-        return ToCredential(row, kind);
+        var grant = await LoadGrantAsync(db, row, ct).ConfigureAwait(false);
+        return ToCredential(row, kind, grant);
     }
 
     public async Task<PatCreateResult> CreatePatAsync(
@@ -42,8 +43,12 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
         string name,
         IReadOnlyList<Scope> scopes,
         DateTimeOffset expiresAt,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        DirectApiProjectGrant? directApiProjectGrant = null)
     {
+        if (directApiProjectGrant is not null && !directApiProjectGrant.IsValid)
+            return new PatCreateResult(PatCreateStatus.InvalidGrant, null, null);
+
         var token = CredentialToken.Generate(CredentialKind.Pat);
         var row = new CredentialRow
         {
@@ -54,6 +59,7 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             ScopesJson = JSON.Serialize(scopes.Select(scope => scope.Name).ToArray()),
             Name = name,
             Prefix = CredentialToken.DisplayPrefix(token),
+            DirectApiProjectGrantKind = directApiProjectGrant?.StorageValue,
             ExpiresAt = expiresAt,
             CreatedAt = _time.GetUtcNow(),
         };
@@ -62,22 +68,40 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
         if (await NameIsInUseAsync(db, principalId, name, ct).ConfigureAwait(false))
             return new PatCreateResult(PatCreateStatus.DuplicateName, null, null);
 
+        await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
         db.Credentials.Add(row);
+        if (directApiProjectGrant is not null)
+        {
+            db.CredentialProjectGrants.AddRange(directApiProjectGrant.AllowedProjectIds.Select(projectId =>
+                new CredentialProjectGrantRow
+                {
+                    CredentialId = row.Id,
+                    ProjectId = projectId,
+                }));
+        }
+
         try
         {
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
         catch (DbUpdateException)
         {
-            // A concurrent issuance of the same name won the race; the
-            // unique (PrincipalId, Name) index on active rows is the
-            // backstop that turns both into one winner.
-            return new PatCreateResult(PatCreateStatus.DuplicateName, null, null);
+            await transaction.RollbackAsync(ct).ConfigureAwait(false);
+            if (await NameIsInUseAsync(db, principalId, name, ct).ConfigureAwait(false))
+            {
+                // A concurrent issuance of the same name won the race; the
+                // unique (PrincipalId, Name) index on active rows is the
+                // backstop that turns both into one winner.
+                return new PatCreateResult(PatCreateStatus.DuplicateName, null, null);
+            }
+
+            return new PatCreateResult(PatCreateStatus.InvalidGrant, null, null);
         }
 
         return new PatCreateResult(
             PatCreateStatus.Created,
-            ToCredential(row, CredentialKind.Pat),
+            ToCredential(row, CredentialKind.Pat, directApiProjectGrant),
             token);
     }
 
@@ -89,9 +113,10 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             .Where(row => row.PrincipalId == principalId && row.Kind.ToLower() == "pat")
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        var grants = await LoadGrantsAsync(db, rows.Select(row => row.Id), ct).ConfigureAwait(false);
         return rows
             .OrderByDescending(row => row.CreatedAt)
-            .Select(row => ToCredential(row, CredentialKind.Pat))
+            .Select(row => ToCredential(row, CredentialKind.Pat, grants.GetValueOrDefault(row.Id)))
             .ToList();
     }
 
@@ -307,10 +332,61 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             .ConfigureAwait(false);
     }
 
+    private static async Task<DirectApiProjectGrant?> LoadGrantAsync(
+        MohistDbContext db,
+        CredentialRow row,
+        CancellationToken ct)
+    {
+        var grants = await LoadGrantsAsync(db, [row.Id], ct).ConfigureAwait(false);
+        return grants.GetValueOrDefault(row.Id);
+    }
+
+    private static async Task<Dictionary<string, DirectApiProjectGrant>> LoadGrantsAsync(
+        MohistDbContext db,
+        IEnumerable<string> credentialIds,
+        CancellationToken ct)
+    {
+        var ids = credentialIds.Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0)
+            return [];
+
+        var rows = await db.Credentials
+            .AsNoTracking()
+            .Where(row => ids.Contains(row.Id))
+            .Select(row => new { row.Id, row.DirectApiProjectGrantKind })
+            .ToDictionaryAsync(row => row.Id, ct)
+            .ConfigureAwait(false);
+        var projectRows = await db.CredentialProjectGrants
+            .AsNoTracking()
+            .Where(grant => ids.Contains(grant.CredentialId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var result = new Dictionary<string, DirectApiProjectGrant>(StringComparer.Ordinal);
+        foreach (var row in rows.Values)
+        {
+            if (!DirectApiProjectGrant.TryParse(row.DirectApiProjectGrantKind, out var kind))
+                continue;
+
+            var projectIds = projectRows
+                .Where(grant => grant.CredentialId == row.Id)
+                .Select(grant => grant.ProjectId)
+                .ToArray();
+            var grant = new DirectApiProjectGrant(kind, projectIds);
+            if (grant.IsValid)
+                result[row.Id] = grant;
+        }
+
+        return result;
+    }
+
     private static EnrollmentToken ToEnrollmentToken(EnrollmentTokenRow row) =>
         new(row.TokenHash, row.ExpiresAt, row.ConsumedAt);
 
-    private static Credential ToCredential(CredentialRow row, CredentialKind kind) =>
+    private static Credential ToCredential(
+        CredentialRow row,
+        CredentialKind kind,
+        DirectApiProjectGrant? directApiProjectGrant = null) =>
         new(
             row.Id,
             row.PrincipalId,
@@ -323,12 +399,15 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             row.FamilyId,
             row.ExpiresAt,
             row.RevokedAt,
-            row.CreatedAt);
+            row.CreatedAt)
+        {
+            DirectApiProjectGrant = directApiProjectGrant,
+        };
 
     public async Task CreateAsync(Credential credential, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        db.Credentials.Add(new CredentialRow
+        var row = new CredentialRow
         {
             Id = credential.Id,
             PrincipalId = credential.PrincipalId,
@@ -339,10 +418,23 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             Prefix = credential.Prefix,
             ProjectId = credential.ProjectId,
             FamilyId = credential.FamilyId,
+            DirectApiProjectGrantKind = credential.DirectApiProjectGrant?.StorageValue,
             ExpiresAt = credential.ExpiresAt,
             RevokedAt = credential.RevokedAt,
             CreatedAt = credential.CreatedAt,
-        });
+        };
+        db.Credentials.Add(row);
+        if (credential.DirectApiProjectGrant is { } grant)
+        {
+            if (!grant.IsValid)
+                throw new ArgumentException("Credential carries an invalid direct API Project grant.", nameof(credential));
+            db.CredentialProjectGrants.AddRange(grant.AllowedProjectIds.Select(projectId =>
+                new CredentialProjectGrantRow
+                {
+                    CredentialId = row.Id,
+                    ProjectId = projectId,
+                }));
+        }
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 

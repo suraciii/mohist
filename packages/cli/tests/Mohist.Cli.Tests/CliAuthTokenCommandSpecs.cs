@@ -50,6 +50,110 @@ public sealed class CliAuthTokenCommandSpecs
     }
 
     [Fact]
+    public async Task Create_RepeatedProjects_SendsAnExplicitGrant()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    id = "pat_1",
+                    name = "ci",
+                    scope = "operator",
+                    prefix = "moh_pat_AbCdEf12",
+                    token = "moh_pat_explicit",
+                    expiresAt = "2026-10-28T00:00:00+00:00",
+                    createdAt = "2026-07-30T00:00:00+00:00",
+                },
+            })));
+
+        var exitCode = await RunAsync(
+            http,
+            ["auth", "token", "create", "--name", "ci", "--project", "proj_a", "--project", "proj_b"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(Assert.Single(handler.Requests).Body!)!;
+        Assert.Equal(
+            ["proj_a", "proj_b"],
+            body["projectIds"]!.AsArray().Select(node => node!.GetValue<string>()).ToArray());
+        Assert.False(body["allProjects"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task Create_AllProjects_SendsTheExplicitOperatorWideGrant()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    id = "pat_1",
+                    name = "ci",
+                    scope = "operator",
+                    prefix = "moh_pat_AbCdEf12",
+                    token = "moh_pat_all",
+                    expiresAt = "2026-10-28T00:00:00+00:00",
+                    createdAt = "2026-07-30T00:00:00+00:00",
+                },
+            })));
+
+        var exitCode = await RunAsync(
+            http,
+            ["auth", "token", "create", "--name", "ci", "--scope", "operator", "--all-projects"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(Assert.Single(handler.Requests).Body!)!;
+        Assert.Null(body["projectIds"]);
+        Assert.True(body["allProjects"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task Create_ProjectAndAllProjects_AreRejectedBeforeTheRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await RunAsync(
+            http,
+            ["auth", "token", "create", "--name", "ci", "--project", "proj_a", "--all-projects"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("--project cannot be combined with --all-projects", error.ToString());
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Create_AllProjectsWithoutOperatorScope_AreRejectedBeforeTheRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await RunAsync(
+            http,
+            ["auth", "token", "create", "--name", "ci", "--scope", "readonly", "--all-projects"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("--all-projects requires --scope operator", error.ToString());
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task Create_DefaultsToOperatorScope_AndOmitsTtlForServerDefault()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(

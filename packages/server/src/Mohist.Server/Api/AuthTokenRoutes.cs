@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
 
@@ -29,6 +30,7 @@ public static class AuthTokenRoutes
         CreatePatRequest request,
         ICredentialStore store,
         IAuthAuditRecorder audit,
+        ProjectRefResolver projects,
         TimeProvider time,
         CancellationToken ct)
     {
@@ -60,8 +62,48 @@ public static class AuthTokenRoutes
                 $"--ttl must be between 1 and {PatPolicy.MaxTtlHours} hours", "pat_ttl_invalid");
         }
 
+        var hasExplicitGrant = request.ProjectIds is not null;
+        if (hasExplicitGrant && request.AllProjects)
+            return Forbidden("--project and --all-projects cannot be combined");
+
+        DirectApiProjectGrant? directApiProjectGrant = null;
+        if (request.AllProjects)
+        {
+            if (!scope.Equals(Scope.Operator))
+                return Forbidden("--all-projects requires operator scope");
+            directApiProjectGrant = DirectApiProjectGrant.OperatorAll;
+        }
+        else if (hasExplicitGrant)
+        {
+            if (request.ProjectIds!.Count == 0)
+                return Forbidden("At least one --project is required for an explicit grant");
+
+            var projectIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var projectRef in request.ProjectIds)
+            {
+                var normalizedProjectRef = projectRef?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedProjectRef))
+                    return Forbidden("Every --project value must identify a private Project");
+
+                var project = await projects.ResolveAsync(normalizedProjectRef).ConfigureAwait(false);
+                if (project is null)
+                    return Forbidden("Every --project value must identify a private Project");
+                projectIds.Add(project.Id);
+            }
+
+            directApiProjectGrant = DirectApiProjectGrant.Explicit(projectIds);
+        }
+
         var result = await store.CreatePatAsync(
-            principal.Id, name, [scope], expiresAt, ct).ConfigureAwait(false);
+            principal.Id,
+            name,
+            [scope],
+            expiresAt,
+            ct,
+            directApiProjectGrant).ConfigureAwait(false);
+        if (result.Status == PatCreateStatus.InvalidGrant)
+            return Forbidden("The requested Project grant could not be bound");
+
         if (result.Status == PatCreateStatus.DuplicateName || result.Credential is null || result.Token is null)
         {
             return ApiResults.Conflict(
@@ -145,6 +187,9 @@ public static class AuthTokenRoutes
             new ApiResponse<object>(false, Error: "Authentication required.", Code: "unauthorized"),
             statusCode: StatusCodes.Status401Unauthorized);
 
+    private static IResult Forbidden(string message) =>
+        ApiResults.Fail(message, StatusCodes.Status403Forbidden, "forbidden");
+
     private static bool ResolveScope(string? raw, out Scope scope)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -158,7 +203,12 @@ public static class AuthTokenRoutes
     }
 }
 
-public sealed record CreatePatRequest(string? Name, string? Scope, int? TtlHours);
+public sealed record CreatePatRequest(
+    string? Name,
+    string? Scope,
+    int? TtlHours,
+    IReadOnlyList<string>? ProjectIds = null,
+    bool AllProjects = false);
 
 public sealed record PatCreatedResponse(
     string Id,
