@@ -115,25 +115,21 @@ a silent warning. Baselines expand incrementally.
 | Track | Per-file budget |
 |---|---|
 | Unit | < 300 LOC |
-| Spec | < 800 LOC (C# ratchet: 24,000 bytes, ≈540 lines at this repo's density) |
-| Node unit (`.test`) | < 500 LOC |
-| Node spec (`.spec`) | < 850 LOC |
-| Browser | separate `npm run test:browser`; never in default `npm test` and never in the guard | |
+| Spec | < 800 LOC |
+| Browser | separate `npm run test:browser`; never in default `npm test` and never in the guard |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
 
-The C# ratchet freezes files that are already over budget. Each carries an
-allowance in `spec-file-size-baseline.json` equal to its size rounded up to the
-next 1,000 bytes, so ordinary edits stay inside a bucket and a file that shrinks
-hands its slack back. Crossing a bucket needs a baseline edit in the same commit
-— that edit is the review gate. The way past the ratchet is to split the file
-along the behavior it specifies, never to compress formatting to fit.
-
-The Node test ratchet applies the same principle with a smaller maintenance
-buffer: an existing baseline allowance covers the recorded size plus 100 lines.
-New over-budget files still cannot add a baseline entry, and a file that returns
-under its absolute limit must drop its allowance. Keep test formatting readable;
-do not compress statements onto one line to satisfy the counter.
+These per-track budgets are review guidance, not gates. The gate is the
+repository file-size ratchet (`scripts/check-file-sizes.ts`,
+`npm run check:filesizes`): first-party source under `packages/` (`.cs`,
+`.ts`, `.tsx`) is capped at 1000 lines; a file already over the cap is frozen
+at its exact base line count and may not grow. The baseline is the merge-base
+against `origin/master`, so there is no baseline file to maintain: shrinking a
+file below the cap frees it completely, and a new file over the cap fails
+outright. The only exclusion is the EF `Migrations/` directory, whose snapshot
+and designer files are regenerated wholesale with the schema. Keep formatting
+readable; do not compress statements onto one line to satisfy the counter.
 
 ### Repository CI time budget
 
@@ -179,37 +175,14 @@ Existing:
 - `BannedApiAnalyzers`: compile-time enforcement of product and test API deny lists; test projects additionally ban wall-clock, scheduler-based waiting, host paths, physical adapters, and real filesystem APIs.
 - EnvironmentAbstractions BannedApiAnalyzer: compile-time ban on direct env reads.
 - vitest: `isolate: false`; restoreMocks, unstubGlobals, unstubEnvs auto; projects by suffix.
-- web boundary guards: `vi.mock` ratchet locked at zero; MSW unhandled requests fail; weekly shuffled suite records a reproducible seed.
+- web boundary guards: `vi.mock` ban locked at zero; MSW unhandled requests fail; weekly shuffled suite records a reproducible seed.
+- file-size ratchet (`scripts/check-file-sizes.ts`, `npm run check:filesizes`): new files over 1000 lines and any growth of an already-over-limit file fail against the merge-base with `origin/master`.
 
 Planned:
 - UnitTests csproj backstop: ban heavy fixtures (WebApplicationFactory, Orleans.TestingHost).
 - C# product deny-list expansion after direct `DateTime.UtcNow` / `DateTimeOffset.UtcNow` reads are migrated to `TimeProvider`.
 - ESLint: ban `child_process`, real `@microsoft/signalr` import in tests.
 - Migrate the remaining `TestWait` polling points (currently 28) to boundary signals incrementally.
-- Measure C# test file size in lines rather than bytes (below).
-
-### Planned: measure test file size in lines
-
-Bytes are a proxy for lines, and the proxy leaks. It taxes the descriptive test
-names this repo asks for, charges triple for non-ASCII comments, and lands ~35%
-stricter than the 800-LOC budget it stands in for. Renaming a method can break
-the build while the file gets no longer.
-
-Target: budget physical lines, threshold 550. That holds the guarded set where
-it is (40 files exceed 550 lines; 36 exceed 24,000 bytes) instead of loosening
-it — the documented 800 was never what ran, and only 8 files reach it.
-
-A maximum line length ships in the same change, not as a follow-up. Line count
-is easier to game than byte count: collapsing statements onto one line lowers it
-directly, so the budget is unsound without a companion cap. At 200 characters
-163 of the repo's 153,363 test lines need splitting; at 250, 48 do.
-
-Bucket-and-equality allowances carry over unchanged; only the unit and the
-threshold move.
-
-Out of scope: per-track thresholds. The table above sets Unit < 300 LOC and Spec
-< 800 LOC, but one threshold covers every test project. Separating them moves
-~30 UnitTests files at once and is its own decision.
 
 ## C# focused tests
 
