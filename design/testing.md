@@ -152,8 +152,8 @@ timeout -k 10s 270s npm run verify
 ```
 
 CI applies a five-minute job deadline to checkout, setup, install, the gate, and
-diagnostic upload together. Its gate step uses `timeout -k 10s 240s npm run
-verify`, leaving the rest of the job wall for those non-gate phases and for
+diagnostic upload together. Its gate step uses `timeout -k 10s 270s npm run
+verify`, leaving the remaining job wall for those non-gate phases and for
 bounded process-tree convergence.
 
 It is not followed by `npm test` or `npm run test:budget -- --all`: the
