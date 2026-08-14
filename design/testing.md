@@ -145,18 +145,18 @@ to diagnose, not a normal way to finish a test run.
 
 ### Canonical local gate
 
-`npm run verify` is the one final local acceptance command. Its outer command
-contract is:
+`npm run verify` is the one final local acceptance command. The canonical
+executor owns bounded setup and measured-duration phases, including process
+tree cleanup, so callers must not add a shorter shell timeout around it:
 
 ```bash
-timeout -k 10s 390s npm run verify
+npm run verify
 ```
 
 CI applies an eight-minute outer job deadline to checkout, setup, install, the
-gate, diagnostic upload, and bounded process-tree convergence. Its gate step
-uses `timeout -k 10s 390s npm run verify`; the canonical executor still owns
-the five-minute measured deadline, while the outer wrapper supplies enough
-time for the executor to finish its own bounded cleanup and emit evidence.
+gate, diagnostic upload, and bounded process-tree convergence. The canonical
+executor still owns the five-minute measured deadline; the job boundary is
+only a final external safeguard and is not a test or performance threshold.
 
 It is not followed by `npm test` or `npm run test:budget -- --all`: the
 canonical gate already covers their controlled work. Focused commands,
@@ -323,7 +323,7 @@ are deliberately per-run claims: they prevent this gate from oversubscribing
 itself, but cannot reserve CPU, Orleans scheduling, or ports from an arbitrary
 direct apphost, build, or test loop in another worktree. A local duration
 acceptance run therefore has a host-exclusive precondition: before starting
-`timeout -k 10s 390s npm run verify`, its operator obtains a host with no other
+`npm run verify`, its operator obtains a host with no other
 Mohist build or Server Spec host running. A result captured while that condition
 is false remains useful raw failure evidence, but is not a valid performance
 baseline or a basis for changing the p95 policy. The foreign process is stopped
