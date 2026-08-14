@@ -263,14 +263,14 @@ export async function main(
   const abortSignal = termination?.signal ?? new AbortController().signal
   let artifactRoot: string | undefined
   try {
-    const startedAt = runtime.now()
-    const runId = `${startedAt}-${runtime.pid()}`
+    const setupStartedAt = runtime.now()
+    const runId = `${setupStartedAt}-${runtime.pid()}`
     artifactRoot = runtime.createArtifactRoot(runId, artifactParent)
-    const deadlines = suiteDeadlines(startedAt, suiteDeadlineMs, killGraceMs)
+    const setupDeadlines = suiteDeadlines(setupStartedAt, suiteDeadlineMs, killGraceMs)
     const sourceRevision = runtime.sourceRevision?.()
     runtime.writeFile(
-      resolve(artifactRoot, 'run.json'),
-      JSON.stringify({ runId, startedAt, suiteDeadlineMs, sourceRevision }, null, 2) + '\n',
+      resolve(artifactRoot, 'setup.json'),
+      JSON.stringify({ runId, setupStartedAt, sourceRevision }, null, 2) + '\n',
     )
     runtime.report(`canonical-gate diagnostics: ${artifactRoot}`)
 
@@ -279,26 +279,26 @@ export async function main(
       'npm',
       ['run', 'docs:check'],
       artifactRoot,
-      deadlines,
+      setupDeadlines,
       runtime.now,
       abortSignal,
       runtime.timeoutScheduler,
     )
     if (docs.timedOut || docs.cancelled || docs.cleanupComplete === false || docs.exitCode !== 0) return 1
-    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
+    if (abortSignal.aborted || runtime.now() >= setupDeadlines.executionDeadlineAt) return 1
 
     const build = await runtime.runPhase(
       'build',
       'npm',
       ['run', 'build'],
       artifactRoot,
-      deadlines,
+      setupDeadlines,
       runtime.now,
       abortSignal,
       runtime.timeoutScheduler,
     )
     if (build.timedOut || build.cancelled || build.cleanupComplete === false || build.exitCode !== 0) return 1
-    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
+    if (abortSignal.aborted || runtime.now() >= setupDeadlines.executionDeadlineAt) return 1
 
     runtime.writeFile(
       resolve(artifactRoot, 'build-stamp.json'),
@@ -309,14 +309,24 @@ export async function main(
       'npm',
       ['run', 'archtest'],
       artifactRoot,
-      deadlines,
+      setupDeadlines,
       runtime.now,
       abortSignal,
       runtime.timeoutScheduler,
     )
     if (boundary.timedOut || boundary.cancelled || boundary.cleanupComplete === false || boundary.exitCode !== 0)
       return 1
-    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
+    if (abortSignal.aborted || runtime.now() >= setupDeadlines.executionDeadlineAt) return 1
+
+    // Setup and the measured duration gate have separate clocks. The build
+    // stamp is written before this boundary, so every lane still consumes the
+    // exact build produced by this run while receiving the full duration wall.
+    const durationStartedAt = runtime.now()
+    const deadlines = suiteDeadlines(durationStartedAt, suiteDeadlineMs, killGraceMs)
+    runtime.writeFile(
+      resolve(artifactRoot, 'run.json'),
+      JSON.stringify({ runId, startedAt: durationStartedAt, suiteDeadlineMs, sourceRevision }, null, 2) + '\n',
+    )
 
     const durationCode = await runtime.runDurationGate(
       [
