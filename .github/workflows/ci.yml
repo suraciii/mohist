@@ -82,7 +82,7 @@ jobs:
     # The canonical gate has its own five-minute absolute deadline. Keep
     # setup, cold restore/build, diagnostics, and process-tree cleanup outside
     # that measured budget so the job cannot cancel a still-running gate.
-    timeout-minutes: 7
+    timeout-minutes: 8
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
@@ -143,17 +143,17 @@ jobs:
         run: timeout --signal=TERM --kill-after=30s 60s npm run format:check
 
       - name: Run canonical gate
-        # TERM starts at 330s and KILL follows after ten seconds. The remaining
+        # TERM starts at 390s and KILL follows after ten seconds. The remaining
         # job wall belongs to checkout, setup, install, and diagnostic upload;
         # the job timeout above is only an outer setup/cleanup margin.
         # npm run verify first executes the master file-size ratchet, then the
         # canonical scheduler.
-        timeout-minutes: 6
+        timeout-minutes: 7
         env:
           TMPDIR: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: timeout -k 10s 330s npm run verify
+        run: timeout -k 10s 390s npm run verify
 
       - name: Upload canonical diagnostics
         if: always()
