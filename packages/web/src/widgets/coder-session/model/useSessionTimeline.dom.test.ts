@@ -5,13 +5,11 @@ import { createElement, type ReactNode } from 'react'
 import { http, HttpResponse } from 'msw'
 import { dispatchAgentEvent } from '../../../entities/agent'
 import { ProjectProvider } from '../../../entities/project'
-import { reconstructRoundsFromEvents, useSessionTimeline } from './useSessionTimeline'
+import { useSessionTimeline } from './useSessionTimeline'
 import { useMswServer } from '../../../../tests/support/msw'
 
 useMswServer(
-  http.get('*/agent/status', () =>
-    HttpResponse.json({ success: true, data: { running: true, issueNumber: 123, } }),
-  ),
+  http.get('*/agent/status', () => HttpResponse.json({ success: true, data: { running: true, issueNumber: 123 } })),
 )
 
 const queryClients: QueryClient[] = []
@@ -25,238 +23,33 @@ function renderTimelineHook() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClients.push(queryClient)
   return renderHook(
-    () => useSessionTimeline(123, {
-      id: 'coder-1',
-      runtimeSessionId: 'runtime-1',
-      executionId: null,
-      taskDescription: null,
-      status: 'active',
-      createdAt: '2024-01-01T00:00:00.000Z',
-      completedAt: null,
-      model: null,
-      runtime: null,
-      stage: null,
-      title: null,
-      lastDataAt: null,
-      probeSentAt: null,
-      probeDeadlineAt: null,
-      failureReason: null,
-    }),
+    () =>
+      useSessionTimeline(123, {
+        id: 'coder-1',
+        runtimeSessionId: 'runtime-1',
+        executionId: null,
+        taskDescription: null,
+        status: 'active',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        completedAt: null,
+        model: null,
+        runtime: null,
+        stage: null,
+        title: null,
+        lastDataAt: null,
+        probeSentAt: null,
+        probeDeadlineAt: null,
+        failureReason: null,
+      }),
     {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        createElement(
-          ProjectProvider,
-          {
-            initialProjectId: 'proj-1',
-            children: createElement(QueryClientProvider, { client: queryClient }, children),
-          },
-        )
-      ),
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(ProjectProvider, {
+          initialProjectId: 'proj-1',
+          children: createElement(QueryClientProvider, { client: queryClient }, children),
+        }),
     },
   )
 }
-
-function makeSessionEvent(overrides: Partial<{
-  id: number
-  sequence: number
-  type: string
-  payload: unknown
-  createdAt: string
-}> = {}) {
-  const sequence = overrides.sequence ?? 0
-  return {
-    id: overrides.id ?? sequence,
-    sequence,
-    type: overrides.type ?? 'input',
-    payload: overrides.payload,
-    createdAt: overrides.createdAt ?? '2024-01-01T00:00:00.000Z',
-  }
-}
-
-describe('reconstructRoundsFromEvents', () => {
-  it('returns empty array for empty events', () => {
-    expect(reconstructRoundsFromEvents([])).toEqual([])
-  })
-
-  it('routes events through viewSessionEvents timeline projection', async () => {
-    const viewModule = await import('../../../entities/session/model/view')
-    const spy = vi.spyOn(viewModule, 'viewSessionEvents')
-    try {
-      const events = [makeSessionEvent({ type: 'input', payload: { text: 'hello' } })]
-      reconstructRoundsFromEvents(events)
-      expect(spy).toHaveBeenCalledWith(events, 'timeline')
-    } finally {
-      spy.mockRestore()
-    }
-  })
-
-  it('creates one round per input with assistant and thought content grouped', () => {
-    const events = [
-      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'first prompt', kind: 'initial' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({ sequence: 1, type: 'assistant_text', payload: { text: 'Hello' }, createdAt: '2024-01-01T00:00:01Z' }),
-      makeSessionEvent({ sequence: 2, type: 'assistant_text', payload: { text: ' world' }, createdAt: '2024-01-01T00:00:02Z' }),
-      makeSessionEvent({ sequence: 3, type: 'assistant_reasoning', payload: { text: 'thinking' }, createdAt: '2024-01-01T00:00:03Z' }),
-      makeSessionEvent({ sequence: 4, type: 'input', payload: { text: 'second prompt', kind: 'task' }, createdAt: '2024-01-01T00:00:04Z' }),
-      makeSessionEvent({ sequence: 5, type: 'assistant_text', payload: { text: 'second' }, createdAt: '2024-01-01T00:00:05Z' }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-
-    expect(rounds).toHaveLength(2)
-    expect(rounds[0].roundIndex).toBe(0)
-    expect(rounds[0].userText).toBe('first prompt')
-    expect(rounds[0].agentText).toBe('Hello world')
-    expect(rounds[0].thoughtText).toBe('thinking')
-    expect(rounds[0].startedAt).toBe('2024-01-01T00:00:00Z')
-    expect(rounds[1].roundIndex).toBe(1)
-    expect(rounds[1].userText).toBe('second prompt')
-    expect(rounds[1].agentText).toBe('second')
-    expect(rounds[1].thoughtText).toBe('')
-  })
-
-  it('groups tool_call and tool_call by toolCallId with updated status', () => {
-    const events = [
-      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'use tools' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({ sequence: 1, type: 'tool_call', payload: { toolCallId: 'call-1', kind: 'bash', title: 'bash', rawInput: '{"command":"ls"}' }, createdAt: '2024-01-01T00:00:01Z' }),
-      makeSessionEvent({ sequence: 2, type: 'tool_call', payload: { toolCallId: 'call-1', status: 'completed', rawOutput: 'file.txt' }, createdAt: '2024-01-01T00:00:02Z' }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-
-    expect(rounds).toHaveLength(1)
-    expect(rounds[0].toolCalls).toHaveLength(1)
-    expect(rounds[0].toolCalls[0].toolCallId).toBe('call-1')
-    expect(rounds[0].toolCalls[0].toolName).toBe('bash')
-    expect(rounds[0].toolCalls[0].state).toBe('completed')
-    expect(rounds[0].toolCalls[0].rawOutput).toBe('file.txt')
-    expect(rounds[0].toolCalls[0].rawInput).toBe('{"command":"ls"}')
-  })
-
-  it('maps session.liveness events to recovery events on the active round', () => {
-    const events = [
-      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({ sequence: 1, type: 'session.liveness', payload: { status: 'probing', activeProbeVersion: 2 }, createdAt: '2024-01-01T00:00:01Z' }),
-      makeSessionEvent({ sequence: 2, type: 'session.liveness', payload: { status: 'failed', failureReason: 'timeout' }, createdAt: '2024-01-01T00:00:02Z' }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-
-    expect(rounds).toHaveLength(1)
-    expect(rounds[0].recoveryEvents).toHaveLength(2)
-    expect(rounds[0].recoveryEvents[0].status).toBe('recovering')
-    expect(rounds[0].recoveryEvents[0].attempt).toBe(2)
-    expect(rounds[0].recoveryEvents[1].status).toBe('failed')
-    expect(rounds[0].recoveryEvents[1].reason).toBe('timeout')
-  })
-
-  it('infers round labels from total count', () => {
-    const events = [
-      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p1' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({ sequence: 1, type: 'input', payload: { text: 'p2' }, createdAt: '2024-01-01T00:00:01Z' }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-
-    expect(rounds[0].label).toBe('proposal.md')
-    expect(rounds[1].label).toBe('specs/')
-  })
-
-  it('projects a compaction event into the active round with before/after counts', () => {
-    const events = [
-      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({
-        sequence: 1,
-        type: 'compaction',
-        payload: {
-          strategy: 'summary',
-          contextWindowUsedBefore: 950_000,
-          contextWindowUsedAfter: 400_000,
-          contextWindowSize: 1_000_000,
-          summary: 'Kept the original task instructions.',
-        },
-        createdAt: '2024-01-01T00:00:05Z',
-      }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-
-    expect(rounds).toHaveLength(1)
-    expect(rounds[0].compactions).toHaveLength(1)
-    const compaction = rounds[0].compactions[0]
-    expect(compaction.strategy).toBe('summary')
-    expect(compaction.contextWindowUsedBefore).toBe(950_000)
-    expect(compaction.contextWindowUsedAfter).toBe(400_000)
-    expect(compaction.contextWindowSize).toBe(1_000_000)
-    expect(compaction.summary).toBe('Kept the original task instructions.')
-    expect(compaction.recordedAt).toBe('2024-01-01T00:00:05Z')
-  })
-
-  it('also recognises compaction_event type as a compaction source', () => {
-    const events = [
-      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({
-        sequence: 1,
-        type: 'compaction_event',
-        payload: {
-          strategy: 'summary',
-          contextWindowUsedBefore: 500_000,
-          contextWindowUsedAfter: 100_000,
-        },
-        createdAt: '2024-01-01T00:00:01Z',
-      }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-    expect(rounds).toHaveLength(1)
-    expect(rounds[0].compactions).toHaveLength(1)
-    expect(rounds[0].compactions[0].contextWindowUsedBefore).toBe(500_000)
-    expect(rounds[0].compactions[0].contextWindowUsedAfter).toBe(100_000)
-  })
-
-  it('attaches orphan compaction events (no preceding input) to a synthesised round', () => {
-    const events = [
-      makeSessionEvent({
-        sequence: 0,
-        type: 'compaction',
-        payload: {
-          contextWindowUsedBefore: 800_000,
-          contextWindowUsedAfter: 200_000,
-        },
-        createdAt: '2024-01-01T00:00:00Z',
-      }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-    expect(rounds).toHaveLength(1)
-    expect(rounds[0].compactions).toHaveLength(1)
-    expect(rounds[0].agentText).toBe('')
-    expect(rounds[0].userText).toBe('')
-  })
-
-  it('records multiple compaction events in the same round in stream order', () => {
-    const events = [
-      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({
-        sequence: 1,
-        type: 'compaction',
-        payload: { contextWindowUsedBefore: 900_000, contextWindowUsedAfter: 400_000 },
-        createdAt: '2024-01-01T00:00:05Z',
-      }),
-      makeSessionEvent({
-        sequence: 2,
-        type: 'compaction',
-        payload: { contextWindowUsedBefore: 800_000, contextWindowUsedAfter: 350_000 },
-        createdAt: '2024-01-01T00:00:30Z',
-      }),
-    ]
-
-    const rounds = reconstructRoundsFromEvents(events)
-    expect(rounds).toHaveLength(1)
-    expect(rounds[0].compactions).toHaveLength(2)
-    expect(rounds[0].compactions[0].contextWindowUsedAfter).toBe(400_000)
-    expect(rounds[0].compactions[1].contextWindowUsedAfter).toBe(350_000)
-  })
-})
 
 describe('useSessionTimeline context health events', () => {
   it('uses server-provided usage.updated percent and healthStatus without deriving from window ratio', async () => {
@@ -327,7 +120,17 @@ describe('useSessionTimeline context health events', () => {
 
 describe('useSessionTimeline event-wiring integration', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'Date', 'requestAnimationFrame', 'cancelAnimationFrame'] })
+    vi.useFakeTimers({
+      toFake: [
+        'setTimeout',
+        'setInterval',
+        'clearTimeout',
+        'clearInterval',
+        'Date',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+      ],
+    })
     vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'))
   })
 
@@ -341,7 +144,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -372,7 +176,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'custom-step',
         roundLabel: 'Custom Step',
         roundIndex: 7,
@@ -394,7 +199,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 999,        projectId: 'proj-1',
+        issueNumber: 999,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Should be dropped',
         roundIndex: 0,
@@ -407,7 +213,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Should also be dropped',
         roundIndex: 0,
@@ -462,7 +269,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'self-review',
         roundLabel: 'Self Review',
         roundIndex: 4,
@@ -472,7 +280,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'self-review',
         roundIndex: 4,
         duration: 1234,
@@ -496,7 +305,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'specs',
         roundLabel: 'Specs',
         roundIndex: 1,
@@ -506,7 +316,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'specs',
         roundIndex: 1,
         duration: 500,
@@ -527,7 +338,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'self-review',
         roundLabel: 'Self Review',
         roundIndex: 4,
@@ -537,7 +349,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'self-review',
         roundIndex: 4,
         duration: 1234,
@@ -547,7 +360,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'self-review',
         roundIndex: 4,
         duration: 999,
@@ -567,7 +381,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -577,7 +392,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('coder_recovery_status', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         executionId: 'exec-1',
         runtimeSessionId: 'runtime-1',
         status: 'recovering',
@@ -600,7 +416,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('coder_recovery_status', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         executionId: 'exec-1',
         runtimeSessionId: 'runtime-1',
         status: 'recovered',
@@ -618,7 +435,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -653,7 +471,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -703,7 +522,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -736,7 +556,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -779,7 +600,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -789,7 +611,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         sessionId: 'coder-1',
         strategy: 'summary',
         contextWindowUsedBefore: 800_000,
@@ -822,7 +645,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         sessionId: 'coder-1',
         contextWindowUsedAfter: 100_000,
         recordedAt: '2024-01-01T00:00:01.000Z',
@@ -840,7 +664,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-health-updated', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         sessionId: 'coder-1',
         healthStatus: 'yellow',
         contextUsagePercent: 65,
@@ -863,7 +688,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -931,7 +757,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -941,7 +768,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_session_update', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',
@@ -950,7 +778,8 @@ describe('useSessionTimeline event-wiring integration', () => {
         runtimeSessionId: 'runtime-1',
       })
       dispatchAgentEvent('plan_session_update', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',
@@ -981,7 +810,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -991,7 +821,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_session_update', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',
@@ -1016,7 +847,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_session_update', {
-        issueNumber: 123,        projectId: 'proj-1',
+        issueNumber: 123,
+        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',
