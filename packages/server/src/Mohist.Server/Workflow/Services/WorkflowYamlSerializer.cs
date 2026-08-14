@@ -71,8 +71,11 @@ public static class WorkflowYamlSerializer
         var id = root.GetProperty("id").GetString() ?? throw new InvalidOperationException("Workflow Profile requires id");
         var name = root.GetProperty("name").GetString() ?? throw new InvalidOperationException("Workflow Profile requires name");
         var description = root.GetProperty("description").GetString() ?? string.Empty;
+        var agentAction = root.TryGetProperty("agentAction", out var agentActionElement)
+            ? agentActionElement.GetString()
+            : null;
         var definition = root.GetProperty("definition").GetRawText();
-        return new WorkflowProfile(id, name, description, FromJson(definition));
+        return new WorkflowProfile(id, name, description, FromJson(definition), agentAction);
     }
 
     public static WorkflowDefinition FromYaml(string yaml)

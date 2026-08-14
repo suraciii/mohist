@@ -76,6 +76,7 @@ public class WorkflowRunDetailApiSpecs
         var stages = data.GetProperty("status").GetProperty("stages");
         Assert.Equal(JsonValueKind.Array, stages.ValueKind);
         Assert.True(stages.GetArrayLength() >= 1, "stage progress must carry at least one stage");
+        Assert.Equal("mohist/local", data.GetProperty("workflowProfileId").GetString());
 
         // Associated issue joins through IssueQuerier.GetIssueRefForWorkflowRunAsync.
         var issueRef = data.GetProperty("issueRef");

@@ -1,5 +1,15 @@
 import { ApiError, projectApiPath, request } from '../../../shared/api/client'
-import type { AgentRuntime, AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
+import type {
+  ActionCatalog,
+  AgentRuntime,
+  AgentRuntimeConfig,
+  GeneralConfig,
+  RuntimeConsistencyResponse,
+  SystemInfo,
+  SystemUpdateStartResponse,
+  SystemUpdateStatusEnvelope,
+  WorkflowProfileDetail,
+} from '../model/types'
 
 export const AGENT_RUNTIME_OPENCODE = 'opencode'
 export const AGENT_RUNTIME_PI = 'pi'
@@ -41,15 +51,25 @@ export function setLogLevel(level: string) {
 export type OpencodeModelVariants = Record<string, string[]>
 
 export function getOpencodeModels(projectId?: string | null) {
-  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(projectApiPath(projectId, '/opencode/models'))
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(
+    projectApiPath(projectId, '/opencode/models'),
+  )
 }
 
-export function getModels(projectId: string | null | undefined, runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
+export function getModels(
+  projectId: string | null | undefined,
+  runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME,
+) {
   const query = `?runtime=${encodeURIComponent(runtime)}`
-  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(projectApiPath(projectId, `/opencode/models${query}`))
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(
+    projectApiPath(projectId, `/opencode/models${query}`),
+  )
 }
 
-export function getOpencodeModelVariantsFor(modelIds: ReadonlyArray<string | null | undefined>, variantsMap?: OpencodeModelVariants | null): OpencodeModelVariants {
+export function getOpencodeModelVariantsFor(
+  modelIds: ReadonlyArray<string | null | undefined>,
+  variantsMap?: OpencodeModelVariants | null,
+): OpencodeModelVariants {
   const result: OpencodeModelVariants = {}
   if (!variantsMap) return result
   for (const id of modelIds) {
@@ -78,14 +98,17 @@ export function getOpencodeModel(projectId?: string | null) {
   }))
 }
 
-export function updateOpencodeModel(projectId: string | null | undefined, model: string | null, variant?: string | null) {
+export function updateOpencodeModel(
+  projectId: string | null | undefined,
+  model: string | null,
+  variant?: string | null,
+) {
   const agent: Record<string, unknown> = { model }
   if (variant !== undefined) agent.variant = variant
-  return patchProjectWorkflowVariables(projectId, { vars: { agent } })
-    .then((variables) => ({
-      model: getAgentModel(variables.vars),
-      variant: getAgentVariant(variables.vars),
-    }))
+  return patchProjectWorkflowVariables(projectId, { vars: { agent } }).then((variables) => ({
+    model: getAgentModel(variables.vars),
+    variant: getAgentVariant(variables.vars),
+  }))
 }
 
 export function getModel() {
@@ -119,7 +142,7 @@ export const SUPPORTED_RUNTIME_KEYS = [
   'maxGracePeriods',
 ] as const
 
-export type SupportedRuntimeKey = typeof SUPPORTED_RUNTIME_KEYS[number]
+export type SupportedRuntimeKey = (typeof SUPPORTED_RUNTIME_KEYS)[number]
 
 const RUNTIME_KEY_TO_CONFIG_KEY: Record<keyof AgentRuntimeConfig, SupportedRuntimeKey> = {
   timeout: 'agentTimeout',
@@ -214,19 +237,24 @@ export function getStageModels(projectId?: string | null) {
   }))
 }
 
-export function setStageModel(projectId: string | null | undefined, stage: string, model: string | null, variant?: string | null) {
+export function setStageModel(
+  projectId: string | null | undefined,
+  stage: string,
+  model: string | null,
+  variant?: string | null,
+) {
   const agent: Record<string, unknown> = { model }
   if (variant !== undefined) agent.variant = variant
-  return patchProjectWorkflowVariables(projectId, { stages: { [stage]: { vars: { agent } } } })
-    .then((variables) => ({
-      stageModels: getStageModelMap(variables),
-      stageModelVariants: getStageModelVariantMap(variables),
-    }))
+  return patchProjectWorkflowVariables(projectId, { stages: { [stage]: { vars: { agent } } } }).then((variables) => ({
+    stageModels: getStageModelMap(variables),
+    stageModelVariants: getStageModelVariantMap(variables),
+  }))
 }
 
 export function getWorkflowProfiles(projectId: string) {
-  return request<WorkflowProfileCollectionEntryResponse[]>(projectApiPath(projectId, '/workflow-profiles'))
-    .then((profiles) => profiles.map(mapWorkflowProfileInfo))
+  return request<WorkflowProfileCollectionEntryResponse[]>(projectApiPath(projectId, '/workflow-profiles')).then(
+    (profiles) => profiles.map(mapWorkflowProfileInfo),
+  )
 }
 
 interface WorkflowProfileCollectionEntryResponse {
@@ -237,6 +265,7 @@ interface WorkflowProfileCollectionEntryResponse {
   sourceProvenance: string
   isBuiltIn: boolean
   definitionSource: string | null
+  agentAction?: string | null
   agentRuntime?: AgentRuntime | null
 }
 
@@ -256,6 +285,7 @@ function mapWorkflowProfileInfo(profile: WorkflowProfileCollectionEntryResponse)
     description: profile.description,
     isDefault: profile.profileId === 'mohist/local',
     isBuiltIn: profile.isBuiltIn,
+    agentAction: profile.agentAction ?? null,
     agentRuntime: profile.agentRuntime ?? null,
   }
 }
@@ -273,8 +303,20 @@ function mapWorkflowProfileDetail(profile: WorkflowProfileDetailResponse): Workf
 }
 
 export function getWorkflowProfile(projectId: string, id: string, requester: typeof request = request) {
-  return requester<WorkflowProfileDetailResponse>(projectApiPath(projectId, `/workflow-profiles/${id}`))
-    .then(mapWorkflowProfileDetail)
+  return requester<WorkflowProfileDetailResponse>(projectApiPath(projectId, `/workflow-profiles/${id}`)).then(
+    mapWorkflowProfileDetail,
+  )
+}
+
+export function getActionCatalog(projectId: string) {
+  return request<ActionCatalog>(projectApiPath(projectId, '/actions'))
+}
+
+export function patchWorkflowProfileAgentAction(projectId: string, profileId: string, agentAction: string | null) {
+  return request<WorkflowProfileCollectionEntryResponse>(projectApiPath(projectId, `/workflow-profiles/${profileId}`), {
+    method: 'PATCH',
+    body: JSON.stringify({ agentAction }),
+  }).then(mapWorkflowProfileInfo)
 }
 
 export interface ProjectDefaultWorkflowProfile {
@@ -294,13 +336,10 @@ export function getProjectDefaultWorkflowProfile(projectId?: string | null) {
 }
 
 export function setProjectDefaultWorkflowProfile(projectId: string | null | undefined, templateId: string) {
-  return request<{ projectId: string; profileId: string }>(
-    projectApiPath(projectId, '/workflow-profile/default'),
-    {
-      method: 'PUT',
-      body: JSON.stringify({ profileId: templateId }),
-    },
-  )
+  return request<{ projectId: string; profileId: string }>(projectApiPath(projectId, '/workflow-profile/default'), {
+    method: 'PUT',
+    body: JSON.stringify({ profileId: templateId }),
+  })
 }
 
 export function disableWorkflowProfile(projectId: string | null | undefined, profileId: string) {

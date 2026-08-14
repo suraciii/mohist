@@ -18,7 +18,7 @@ The semantic model is separate from its carrier syntax. YAML is parsed into the 
 The engine, Runner, and validator operate on these types, not on a syntax tree.
 
 ```text literal
-WorkflowDefinition(Approval?, Stages[])
+WorkflowDefinition(Approval?, Stages[], Recoveries?)
 Approval(FeedbackTasks: Task[])
 Stage(Name, RequiresApproval = false, LockBehavior?, Resources[], Tasks[], Checks[])
 Task(Id, Uses, Title?, With?, Expect?, Artifacts?, SetVars?, Recovery?)
@@ -45,8 +45,12 @@ Check(Id, Uses, Title?, With?)
   YAML; see [`recovery.md`](recovery.md).
 - Variable values and Prompt bodies: these are separate resources, and the model only holds
   `${{ }}` references.
-- Profile metadata, including ID, name, and applicable scenario: the Profile resource owns this
-  metadata. The Definition top level contains only `approval` and `stages`.
+- Profile metadata, including ID, name, applicable scenario, and optional `agentAction`: the
+  Profile resource owns this metadata. The Definition top level contains only `approval`,
+  `stages`, and `recoveries`.
+- `${{ profile.agentAction }}` is Profile source syntax, not a dynamic Definition expression. The
+  Profile layer replaces each complete `uses` value before it calls the Definition parser. The
+  semantic model and every runtime consumer therefore contain only concrete Action names.
 
 ### Placement
 
@@ -59,7 +63,9 @@ and local `mo` validation run the same code.
 
 ### Parsing Is Validation
 
-There is one entry point: `Parse(yaml) -> Definition | Error[]`.
+There is one Definition entry point: `Parse(yaml) -> Definition | Error[]`. Profile source first
+passes through the Profile parser and its restricted Agent Action materializer, then this entry
+point receives ordinary Definition YAML.
 
 - An unknown key is an error, not something to ignore or downgrade to a warning. The Agent's
   generate-validate-repair loop depends on this signal.
@@ -76,8 +82,8 @@ stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 
 | Location | Rule |
 |---|---|
-| top level | Only `approval` and `stages` are allowed; `stages` must not be empty |
-| approval.feedback | `tasks` must not be empty; every item follows the task rules |
+| top level | Only `approval`, `stages`, and `recoveries` are allowed; `stages` must not be empty |
+| approval.feedback | Optional; when present, `tasks` must not be empty and every item follows the task rules |
 | stage | `stage` name must not be empty and must be unique within the Definition; `tasks` must not be empty |
 | stage | `lockBehavior` only accepts `sequential` and must appear with non-empty `resources`; `resources` cannot appear alone |
 | task | `id` must not be empty and must be unique within its task list; `uses` is required; `title` is optional |
@@ -91,38 +97,51 @@ stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 | template | An ID referenced by `tasks.<id>` must be declared in the Definition |
 | with | Omitted or a JSON object; the Definition validator does not interpret internal keys and only recursively validates template expressions in values |
 
+Profile validation additionally requires `${{ profile.agentAction }}` to occupy an entire `uses`
+scalar, a matching non-empty `agentAction` default, and one bound inline Agent Action across Stage,
+Approval, recovery, and deferred task-default paths. These are Profile composition rules and do not
+add a dynamic `uses` form to `TaskDefinition`.
+
 ### Validation Entry Points
 
 The same implementation is exposed through three entry points, with only one copy of the rules
 above:
 
-- Profile save API: rejects an invalid Definition and returns the error list.
+- Profile save API: materializes Profile bindings, rejects an invalid Definition, and returns the
+  combined Profile, Definition, and Action-contract error list.
 - `mo workflow validate --file <path>`: validates locally without resolving a Project or contacting
   Server; `--file -` reads from stdin.
 - CI: built-in Profiles and complete examples from `docs/workflow-definition.md` are golden cases
   and must validate. This locks the syntax reference and validator together. Skeleton snippets that
   contain `<...>` placeholders are excluded.
 
-The Profile save entry point combines two non-overlapping decisions. The validator in this
-document owns Definition structure, field types, and the template language. The Action catalog
-owns whether `uses` exists and which `with` keys, required fields, and types it accepts. Both kinds
-of errors use the same YAML path convention and identify their source, but neither duplicates the
-other's rules. The pure local command runs only Definition validation. The save entry point passes
-the parsed semantic model to Action catalog validation.
+The Profile save entry point combines three non-overlapping decisions. The Profile compiler owns
+Profile metadata and Agent Action binding syntax. The validator in this document owns Definition
+structure, field types, and the runtime template language. The Action catalog owns whether a
+concrete `uses` exists, whether a selected Profile Agent Action declares `agent-turn`, and which
+`with` keys, required fields, and types it accepts. All errors use the same YAML path convention
+and identify their source, but none repeats another layer's rules. The pure local command runs
+Profile composition and Definition validation. The save entry point also validates the materialized
+semantic model against the Action catalog.
 
 ### Runtime Tasks
 
 `WorkflowDefinition` is not a complete execution plan, and `WorkflowRun` does not store a
 Definition snapshot. Run creation materializes the StageRun and approval facts required to advance
-the lifecycle. When each Stage initializes, it rereads the current Definition of the selected
-Profile. Later edits do not retroactively rewrite an initialized Stage. During a run, recovery,
+the lifecycle and stores the concrete Agent Action selected for the Profile. When each Stage
+initializes, it rereads the current Definition of the selected Profile and materializes Agent
+references with the Run-bound Action. Later edits do not retroactively rewrite an initialized Stage
+or switch the Run's Agent Action. Profile save rejects an edit that cannot be materialized and
+Action-contract validated with every distinct Action bound to an active Run. During a run, recovery,
 retry, approval feedback, and control commands such as `mo issue rebase`, which inserts
 `uses: mohist/rebase`, may all create new `TaskRun` instances. They use the same dispatch, report,
 and Variables resolution semantics.
 
 Runtime-inserted tasks do not pass through Definition validation again. Runner-built recovery
-tasks come from a subtree of an already validated Definition. The producer of a task built by a
-Server control command is responsible for its validity.
+tasks come from a subtree of an already validated and materialized Definition. The producer of a
+task built by a Server control command is responsible for its validity. `mohist/openspec-tasks`
+uses its materialized `task.uses` default for every inserted task and rejects a source task that
+tries to replace it.
 
 ## Examples
 

@@ -87,10 +87,12 @@ For an Inline Agent, `uses` selects the execution backend:
 | `mohist/opencode` | OpenCode |
 | `mohist/pi` | Pi |
 
-Project and Issue model selectors use the effective Workflow Profile to show
-models reported by that backend. They do not add `runtime` to `vars.agent` and
-do not change the selected Action. `vars.agent` continues to contain only
-Action options such as `model` and `variant`.
+Project, create-Issue, and Issue selectors without an active bound Run use the
+effective Workflow Profile to show models reported by that backend. While a
+bound Run is active, the Issue selector uses `agentRuntime` from that Run so a
+later Project binding change cannot switch its catalog. Selectors do not add
+`runtime` to `vars.agent` or change the selected Action. `vars.agent` continues
+to contain only Action options such as `model` and `variant`.
 
 When a Profile has no single Inline Agent Runtime, Mohist does not show a shared
 Workflow model selector. A task using `mohist/agent` is configured through its

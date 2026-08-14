@@ -12,11 +12,12 @@ plane. You can also use it to configure and use a Mohist Agent directly.
 | .NET SDK | 11.0+ | `dotnet --version` |
 | Node.js | 22.19.0+ | `node --version` |
 | npm | 10+ | `npm --version` |
-| opencode CLI | Must start successfully | `opencode --version` |
+| Agent Runtime | OpenCode CLI or configured Pi Runtime | `opencode --version` for OpenCode |
 
-If `opencode` is not installed, follow the
-[official opencode documentation](https://opencode.ai). Mohist does not include
-an AI model. An Inline Agent uses OpenCode to execute tasks.
+For OpenCode, follow the [official opencode documentation](https://opencode.ai)
+when the CLI is not installed. Pi runs through the Runner's in-process Pi SDK
+and uses the Runner user's Pi configuration. Mohist does not include an AI
+model. A Workflow Profile selects the concrete Inline Agent Action.
 
 ## 1. Get the Source and Install Dependencies
 
@@ -117,20 +118,27 @@ The rest of this guide uses a third-party External Agent or `mo`. You do not
 need to create a Mohist Agent first. If you do not use an External Agent, run
 the `mo` commands in this guide directly.
 
-## 6. Configure the Inline Agent Model
+## 6. Configure the Inline Agent Action and Model
 
-Mohist invokes an LLM through opencode. Confirm that opencode works:
+The selected Workflow Profile determines the Inline Agent Action. The
+`mohist/github-pr` Profile defaults to `mohist/opencode`; Project Workflow
+settings can bind it to another compatible Action such as `mohist/pi` without
+copying the Profile. A WorkflowRun fixes this choice when it starts.
+
+When using OpenCode, confirm that its CLI works:
 
 ```bash
 # Confirm that opencode can start.
 opencode --help
 ```
 
-Without an explicit model, an Inline Agent uses the OpenCode default model. To
-select a model explicitly, set it directly in the task `options`. You can also
-configure it in Workflow Variables and pass it with
-`options: ${{ vars.agent }}`. See
-[`mohist/opencode` Action](actions/opencode.md) for the complete configuration.
+Without an explicit model, the selected Action uses its Runtime default. The
+model selector requests the catalog for the effective Profile Action before a
+Run starts, and for the Run-bound Action while that Run is active. To select a
+model explicitly, set it directly in the task `options`, or configure it in
+Workflow Variables and pass it with `options: ${{ vars.agent }}`. See the
+[`mohist/opencode` Action](actions/opencode.md) and
+[`mohist/pi` Action](actions/pi.md) for Runtime-specific configuration.
 
 ## 7. Create Your First Project
 

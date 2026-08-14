@@ -42,7 +42,11 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
         }
 
         var workflow = _grains.GetGrain<IWorkflowGrain>(evt.Data.WorkflowRunId);
-        var issueContext = new WorkflowIssueContext(issue.ProjectId, issue.Number, issue.EpicNumber);
+        var issueContext = new WorkflowIssueContext(
+            issue.ProjectId,
+            issue.Number,
+            issue.EpicNumber,
+            evt.Data.WorkflowProfileId);
 
         // When the Issue transaction captured an
         // immutable repository/workspace snapshot, replay it verbatim into

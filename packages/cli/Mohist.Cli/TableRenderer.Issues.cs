@@ -521,6 +521,12 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"run id:        {runId}");
         _out.WriteLine($"status:        {runStatus}");
         _out.WriteLine($"current stage: {currentStage}");
+        var workflowProfileId = StringOf(data, "workflowProfileId");
+        var agentAction = StringOf(data, "agentAction");
+        var agentRuntime = StringOf(data, "agentRuntime");
+        _out.WriteLine($"profile:       {(string.IsNullOrEmpty(workflowProfileId) ? "(none)" : workflowProfileId)}");
+        _out.WriteLine($"agent action:  {(string.IsNullOrEmpty(agentAction) ? "(none)" : agentAction)}");
+        _out.WriteLine($"agent runtime: {(string.IsNullOrEmpty(agentRuntime) ? "(none)" : agentRuntime)}");
         if (!string.IsNullOrEmpty(assignedTo))
             _out.WriteLine($"assigned to:   {assignedTo}");
 

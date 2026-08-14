@@ -4,8 +4,10 @@ import { server, useMswServer } from '../../../../tests/support/msw'
 import {
   agentRuntimeToConfigKey,
   configToAgentRuntime,
+  getActionCatalog,
   getAgentRuntime,
   getLogLevel,
+  patchWorkflowProfileAgentAction,
   setLogLevel,
   updateAgentRuntime,
 } from './client'
@@ -74,17 +76,17 @@ describe('settings client agent runtime adapter', () => {
       pollInterval: 10000,
       maxGracePeriods: 5,
     })
-    expect(requests).toEqual([{
-      path: '/api/config',
-      method: 'GET',
-      contentType: 'application/json',
-    }])
+    expect(requests).toEqual([
+      {
+        path: '/api/config',
+        method: 'GET',
+        contentType: 'application/json',
+      },
+    ])
   })
 
   it('propagates a load failure from /api/config without falling back to defaults', async () => {
-    server.use(
-      http.get('*/api/config', () => errorResponse('server unavailable', 500, 'server_error')),
-    )
+    server.use(http.get('*/api/config', () => errorResponse('server unavailable', 500, 'server_error')))
 
     await expect(getAgentRuntime()).rejects.toMatchObject({
       name: 'ApiError',
@@ -148,12 +150,14 @@ describe('settings client agent runtime adapter', () => {
       pollInterval: 5000,
       maxGracePeriods: 3,
     })
-    expect(requests).toEqual([{
-      path: '/api/config/agentTimeout',
-      method: 'PUT',
-      contentType: 'application/json',
-      body: { value: 1200 },
-    }])
+    expect(requests).toEqual([
+      {
+        path: '/api/config/agentTimeout',
+        method: 'PUT',
+        contentType: 'application/json',
+        body: { value: 1200 },
+      },
+    ])
   })
 
   it('sends only changed supported fields and skips unaffected ones', async () => {
@@ -162,28 +166,30 @@ describe('settings client agent runtime adapter', () => {
       http.put('*/api/config/:key', async ({ request }) => {
         await captureRequest(request, requests)
         const path = new URL(request.url).pathname
-        return configResponse(path.endsWith('/maxConcurrentAgents')
-          ? { maxConcurrentAgents: 7 }
-          : { maxGracePeriods: 2 })
+        return configResponse(
+          path.endsWith('/maxConcurrentAgents') ? { maxConcurrentAgents: 7 } : { maxGracePeriods: 2 },
+        )
       }),
     )
 
     await updateAgentRuntime({ maxConcurrent: 7, maxGracePeriods: 2 })
 
-    expect(requests).toEqual(expect.arrayContaining([
-      {
-        path: '/api/config/maxConcurrentAgents',
-        method: 'PUT',
-        contentType: 'application/json',
-        body: { value: 7 },
-      },
-      {
-        path: '/api/config/maxGracePeriods',
-        method: 'PUT',
-        contentType: 'application/json',
-        body: { value: 2 },
-      },
-    ]))
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        {
+          path: '/api/config/maxConcurrentAgents',
+          method: 'PUT',
+          contentType: 'application/json',
+          body: { value: 7 },
+        },
+        {
+          path: '/api/config/maxGracePeriods',
+          method: 'PUT',
+          contentType: 'application/json',
+          body: { value: 2 },
+        },
+      ]),
+    )
     expect(requests).toHaveLength(2)
   })
 
@@ -211,12 +217,14 @@ describe('settings client agent runtime adapter', () => {
     const result = await updateAgentRuntime({ pollInterval: 15000 })
 
     expect(result.pollInterval).toBe(15000)
-    expect(requests).toEqual([{
-      path: '/api/config/pollInterval',
-      method: 'PUT',
-      contentType: 'application/json',
-      body: { value: 15000 },
-    }])
+    expect(requests).toEqual([
+      {
+        path: '/api/config/pollInterval',
+        method: 'PUT',
+        contentType: 'application/json',
+        body: { value: 15000 },
+      },
+    ])
     expect(result.pollInterval).not.toBe(5000)
   })
 
@@ -243,11 +251,13 @@ describe('settings client log level', () => {
     const result = await getLogLevel()
 
     expect(result).toEqual({ level: 'WARN' })
-    expect(requests).toEqual([{
-      path: '/api/config',
-      method: 'GET',
-      contentType: 'application/json',
-    }])
+    expect(requests).toEqual([
+      {
+        path: '/api/config',
+        method: 'GET',
+        contentType: 'application/json',
+      },
+    ])
   })
 
   it('persists log level changes through PUT /api/config/logLevel', async () => {
@@ -262,17 +272,21 @@ describe('settings client log level', () => {
     const result = await setLogLevel('ERROR')
 
     expect(result).toEqual({ level: 'ERROR' })
-    expect(requests).toEqual([{
-      path: '/api/config/logLevel',
-      method: 'PUT',
-      contentType: 'application/json',
-      body: { value: 'ERROR' },
-    }])
+    expect(requests).toEqual([
+      {
+        path: '/api/config/logLevel',
+        method: 'PUT',
+        contentType: 'application/json',
+        body: { value: 'ERROR' },
+      },
+    ])
   })
 
   it('surfaces server-side validation failures from the config API', async () => {
     server.use(
-      http.put('*/api/config/logLevel', () => errorResponse('logLevel must be one of DEBUG, INFO, WARN, ERROR', 400, 'bad_request')),
+      http.put('*/api/config/logLevel', () =>
+        errorResponse('logLevel must be one of DEBUG, INFO, WARN, ERROR', 400, 'bad_request'),
+      ),
     )
 
     await expect(setLogLevel('TRACE')).rejects.toMatchObject({
@@ -280,5 +294,68 @@ describe('settings client log level', () => {
       message: 'logLevel must be one of DEBUG, INFO, WARN, ERROR',
       status: 400,
     })
+  })
+})
+
+describe('settings client workflow Profile Agent Actions', () => {
+  it('loads the project Action catalog without deriving candidates from Action names', async () => {
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/actions', async ({ request }) => {
+        await captureRequest(request, requests)
+        return HttpResponse.json({
+          success: true,
+          data: { actions: [{ name: 'team/agent', capabilities: ['agent-turn'] }] },
+        })
+      }),
+    )
+
+    await expect(getActionCatalog('proj-1')).resolves.toEqual({
+      actions: [{ name: 'team/agent', capabilities: ['agent-turn'] }],
+    })
+    expect(requests).toEqual([
+      {
+        path: '/api/projects/proj-1/actions',
+        method: 'GET',
+        contentType: 'application/json',
+      },
+    ])
+  })
+
+  it('PATCHes the selected Agent Action on the Profile resource', async () => {
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.patch('*/api/projects/:projectId/workflow-profiles/*', async ({ request }) => {
+        await captureRequest(request, requests)
+        return HttpResponse.json({
+          success: true,
+          data: {
+            projectId: 'proj-1',
+            profileId: 'mohist/github-pr',
+            name: 'GitHub PR',
+            description: '',
+            sourceProvenance: 'BuiltIn',
+            isBuiltIn: true,
+            definitionSource: null,
+            agentAction: 'mohist/pi',
+            agentRuntime: 'pi',
+          },
+        })
+      }),
+    )
+
+    const result = await patchWorkflowProfileAgentAction('proj-1', 'mohist/github-pr', 'mohist/pi')
+
+    expect(result).toEqual(
+      expect.objectContaining({ id: 'mohist/github-pr', agentAction: 'mohist/pi', agentRuntime: 'pi' }),
+    )
+    expect(requests).toEqual([
+      {
+        path: '/api/projects/proj-1/workflow-profiles/mohist/github-pr',
+        method: 'PATCH',
+        contentType: 'application/json',
+        body: { agentAction: 'mohist/pi' },
+      },
+    ])
   })
 })

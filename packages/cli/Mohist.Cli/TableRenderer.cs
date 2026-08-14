@@ -84,6 +84,12 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.WorkflowProfile:
                 RenderWorkflowProfile(data);
                 break;
+            case MohistCliApi.TableShape.WorkflowProfileList:
+                RenderWorkflowProfileList(data);
+                break;
+            case MohistCliApi.TableShape.WorkflowProfileDetail:
+                RenderWorkflowProfileDetail(data);
+                break;
             case MohistCliApi.TableShape.WorkflowVariables:
                 RenderWorkflowProfileVariables(data);
                 break;

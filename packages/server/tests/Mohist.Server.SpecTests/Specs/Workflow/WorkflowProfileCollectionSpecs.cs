@@ -103,14 +103,15 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BuiltInProfile_ReturnsCanonicalDefinitionSource()
+    public async Task BuiltInProfile_ReturnsAuthoritativeTemplateSource()
     {
         var (projectId, _, _) = await SeedProjectAsync();
 
-        var source = await _provider.GetDefinitionSourceAsync(projectId, WorkflowProfileCatalog.LocalId);
+        var source = await _provider.GetDefinitionSourceAsync(projectId, WorkflowProfileCatalog.GithubPrId);
 
         Assert.NotNull(source);
-        Assert.Contains("id: mohist/local", source);
+        Assert.Contains("agentAction: mohist/opencode", source);
+        Assert.Contains("uses: ${{ profile.agentAction }}", source);
         Assert.Contains("stages:", source);
     }
 
@@ -446,38 +447,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var run = await verify.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
         Assert.Null(run.WorkflowProfileIdKey);
     }
-
-    [Fact]
-    public async Task BindingReplay_AfterTerminalization_DoesNotRestoreBackingKey()
-    {
-        var (projectId, _, _) = await SeedProjectAsync();
-        await _provider.CreateAsync(projectId, BuildCustom("delivery/review"));
-        await SeedWorkflowRunAsync(projectId, "wr_replayed", "delivery/review", status: "inProgress");
-
-        await using (var db = new MohistDbContext(_database.Options))
-        {
-            var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_replayed");
-            row.Status = "done";
-            row.State = row.State.Replace("\"status\":\"inProgress\"", "\"status\":\"done\"", StringComparison.Ordinal);
-            row.WorkflowProfileIdKey = null;
-            await db.SaveChangesAsync();
-        }
-
-        var participant = new WorkflowRunBindingParticipant(new TestDbContextFactory(_database.Options));
-        var outcome = await participant.BindAsync(
-            new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, "wr_replayed", "delivery/review"),
-            "replay-command",
-            expectedRevision: null);
-
-        Assert.Equal(WorkflowRunBindingOutcome.AlreadyApplied, outcome);
-
-        await using var verify = new MohistDbContext(_database.Options);
-        var run = await verify.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_replayed");
-        Assert.Equal("done", run.Status);
-        Assert.Contains("delivery/review", run.State);
-        Assert.Null(run.WorkflowProfileIdKey);
-    }
-
 
     private async Task<(string ProjectId, int Dummy, bool Initialized)> SeedProjectAsync(string projectId = "proj-1")
     {

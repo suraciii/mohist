@@ -1,9 +1,25 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
 import { Command as CommandRoot } from 'cmdk'
-import { getWorkflowProfileAgentRuntime, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useModelVariants, useOpencodeModel, useWorkflowProfiles } from '../../../entities/settings'
+import {
+  getWorkflowProfileAgentRuntime,
+  isAgentRuntime,
+  useAvailableModelIds,
+  useEffectiveDefaultWorkflowProfile,
+  useModelVariants,
+  useOpencodeModel,
+  useWorkflowProfiles,
+} from '../../../entities/settings'
 import type { AgentRuntime } from '../../../entities/settings'
-import { getIssueWorkflowVariables, issueDetailKeys, issueListKeys, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
+import {
+  getIssueWorkflowVariables,
+  isTerminalWorkflowRunStatus,
+  issueDetailKeys,
+  issueListKeys,
+  patchIssueWorkflowDefinitionVar,
+  patchIssueWorkflowStageDefinitionVar,
+  useWorkflowRunDetail,
+} from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
 import { variantListFor } from '../../../shared/ui/model-variants'
@@ -21,6 +37,7 @@ interface Props {
   issueNumber: number
   currentModel?: string | null
   currentStageModels?: Record<string, string> | null
+  workflowRunId?: string | null
   workflowProfileId?: string | null
   dependencies?: IssueModelSelectorDependencies
 }
@@ -31,6 +48,7 @@ export interface IssueModelSelectorDependencies {
   useOpencodeModel: typeof useOpencodeModel
   useWorkflowProfiles: typeof useWorkflowProfiles
   useEffectiveDefaultWorkflowProfile: typeof useEffectiveDefaultWorkflowProfile
+  useWorkflowRunDetail: typeof useWorkflowRunDetail
   getIssueWorkflowVariables: typeof getIssueWorkflowVariables
   patchIssueWorkflowDefinitionVar: typeof patchIssueWorkflowDefinitionVar
   patchIssueWorkflowStageDefinitionVar: typeof patchIssueWorkflowStageDefinitionVar
@@ -42,6 +60,7 @@ const defaultDependencies: IssueModelSelectorDependencies = {
   useOpencodeModel,
   useWorkflowProfiles,
   useEffectiveDefaultWorkflowProfile,
+  useWorkflowRunDetail,
   getIssueWorkflowVariables,
   patchIssueWorkflowDefinitionVar,
   patchIssueWorkflowStageDefinitionVar,
@@ -61,7 +80,9 @@ function agentVariant(vars?: Record<string, unknown> | null): string | null {
   return typeof variant === 'string' && variant.length > 0 ? variant : null
 }
 
-function stageModelMap(stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null): Record<string, string> {
+function stageModelMap(
+  stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null,
+): Record<string, string> {
   const result: Record<string, string> = {}
   if (!stages) return result
   for (const [stage, stageVars] of Object.entries(stages)) {
@@ -71,7 +92,9 @@ function stageModelMap(stages?: Record<string, { vars?: Record<string, unknown> 
   return result
 }
 
-function stageVariantMap(stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null): Record<string, string> {
+function stageVariantMap(
+  stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null,
+): Record<string, string> {
   const result: Record<string, string> = {}
   if (!stages) return result
   for (const [stage, stageVars] of Object.entries(stages)) {
@@ -90,7 +113,7 @@ function getRecent(): string[] {
 }
 
 function addRecent(modelId: string) {
-  const recent = getRecent().filter(id => id !== modelId)
+  const recent = getRecent().filter((id) => id !== modelId)
   recent.unshift(modelId)
   localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, MAX_RECENT)))
 }
@@ -122,7 +145,11 @@ function ChevronDownIcon() {
 function ChevronRightIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M7.21 8.145a.75.75 0 011.06-.02L10 9.835l1.73-1.71a.75.75 0 011.04 1.08l-2.25 2.22a.75.75 0 01-1.04 0l-2.25-2.22a.75.75 0 01-.02-1.06z" clipRule="evenodd" />
+      <path
+        fillRule="evenodd"
+        d="M7.21 8.145a.75.75 0 011.06-.02L10 9.835l1.73-1.71a.75.75 0 011.04 1.08l-2.25 2.22a.75.75 0 01-1.04 0l-2.25-2.22a.75.75 0 01-.02-1.06z"
+        clipRule="evenodd"
+      />
     </svg>
   )
 }
@@ -131,12 +158,20 @@ function modelDisplayName(modelId: string): string {
   return describeModel(modelId).name
 }
 
-export function IssueModelSelector({ issueNumber, currentModel, currentStageModels, workflowProfileId, dependencies = defaultDependencies }: Props) {
+export function IssueModelSelector({
+  issueNumber,
+  currentModel,
+  currentStageModels,
+  workflowRunId,
+  workflowProfileId,
+  dependencies = defaultDependencies,
+}: Props) {
   const {
     useAvailableModelIds,
     useOpencodeModel,
     useWorkflowProfiles,
     useEffectiveDefaultWorkflowProfile,
+    useWorkflowRunDetail,
     getIssueWorkflowVariables,
     patchIssueWorkflowDefinitionVar,
     patchIssueWorkflowStageDefinitionVar,
@@ -146,7 +181,25 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const { data: workflowProfiles } = useWorkflowProfiles()
   const { effectiveTemplateId } = useEffectiveDefaultWorkflowProfile()
   const selectedProfileId = workflowProfileId ?? effectiveTemplateId
-  const selectedRuntime: AgentRuntime | null = getWorkflowProfileAgentRuntime(workflowProfiles, selectedProfileId)
+  const profileRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, selectedProfileId)
+  const {
+    data: workflowRun,
+    isLoading: isWorkflowRunLoading,
+    error: workflowRunError,
+  } = useWorkflowRunDetail(workflowRunId)
+  const hasActiveRun = !!workflowRun && !isTerminalWorkflowRunStatus(workflowRun.status.status)
+  const runProfileRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, workflowRun?.workflowProfileId)
+  const selectedRuntime: AgentRuntime | null = !workflowRunId
+    ? profileRuntime
+    : isWorkflowRunLoading || workflowRunError || !workflowRun
+      ? null
+      : !hasActiveRun
+        ? profileRuntime
+        : workflowRun.agentAction != null
+          ? isAgentRuntime(workflowRun.agentRuntime)
+            ? workflowRun.agentRuntime
+            : null
+          : runProfileRuntime
   const catalog = useAvailableModelIds(selectedRuntime)
   const { data: availableModels, isLoading, error } = catalog
   const { data: opencodeModelData } = useOpencodeModel()
@@ -199,11 +252,11 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
 
   const allModels: string[] = availableModels?.models ?? []
   const recentModelIds = getRecent()
-  const recentModels = recentModelIds.filter(id => allModels.includes(id))
+  const recentModels = recentModelIds.filter((id) => allModels.includes(id))
 
-  const searchableModels = allModels.map(id => ({ id, display: modelDisplayName(id) }))
+  const searchableModels = allModels.map((id) => ({ id, display: modelDisplayName(id) }))
   const filteredResults = searchQuery.trim()
-    ? fuzzysort.go(searchQuery, searchableModels, { keys: ['display', 'id'] }).map(r => r.obj.id)
+    ? fuzzysort.go(searchQuery, searchableModels, { keys: ['display', 'id'] }).map((r) => r.obj.id)
     : []
 
   const displayedModels = searchQuery.trim() ? filteredResults : allModels
@@ -244,29 +297,32 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     [issueNumber, projectId, queryClient],
   )
 
-  const handleClear = useCallback(
-    async () => {
-      try {
-        if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null, variant: null }, projectId)
-        setLocalWorkflowModel(null)
-        setLocalWorkflowVariant(null)
-        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
-        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
-        setPopoverOpen(false)
-      } catch (err) {
-        console.error('Failed to clear issue model:', err)
-      }
-    },
-    [issueNumber, projectId, queryClient],
-  )
+  const handleClear = useCallback(async () => {
+    try {
+      if (!projectId) throw new Error('Project is required')
+      await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null, variant: null }, projectId)
+      setLocalWorkflowModel(null)
+      setLocalWorkflowVariant(null)
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      setPopoverOpen(false)
+    } catch (err) {
+      console.error('Failed to clear issue model:', err)
+    }
+  }, [issueNumber, projectId, queryClient])
 
   const handleSetStageModel = useCallback(
     async (stage: string, modelId: string) => {
       try {
         const updated = { ...localStageModels, [stage]: modelId }
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: modelId, variant: null }, projectId)
+        await patchIssueWorkflowStageDefinitionVar(
+          issueNumber,
+          stage,
+          'agent',
+          { model: modelId, variant: null },
+          projectId,
+        )
         setLocalStageModels(updated)
         setLocalStageVariants((prev) => {
           const next = { ...prev }
@@ -288,7 +344,13 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         const updated = { ...localStageModels }
         delete updated[stage]
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: null, variant: null }, projectId)
+        await patchIssueWorkflowStageDefinitionVar(
+          issueNumber,
+          stage,
+          'agent',
+          { model: null, variant: null },
+          projectId,
+        )
         setLocalStageModels(updated)
         setLocalStageVariants((prev) => {
           const next = { ...prev }
@@ -309,9 +371,21 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
       try {
         if (!projectId) throw new Error('Project is required')
         if (variant) {
-          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: modelId, variant }, projectId)
+          await patchIssueWorkflowStageDefinitionVar(
+            issueNumber,
+            stage,
+            'agent',
+            { model: modelId, variant },
+            projectId,
+          )
         } else {
-          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: modelId, variant: null }, projectId)
+          await patchIssueWorkflowStageDefinitionVar(
+            issueNumber,
+            stage,
+            'agent',
+            { model: modelId, variant: null },
+            projectId,
+          )
         }
         setLocalStageModels((prev) => ({ ...prev, [stage]: modelId }))
         setLocalStageVariants((prev) => {
@@ -357,8 +431,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
 
   const handleCommandKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      const isRightOrTab =
-        event.key === 'ArrowRight' || (event.key === 'Tab' && !event.shiftKey)
+      const isRightOrTab = event.key === 'ArrowRight' || (event.key === 'Tab' && !event.shiftKey)
       if (!isRightOrTab) return
 
       const target = event.target as HTMLElement | null
@@ -472,8 +545,8 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                 popoverOpen
                   ? 'border-blue-500 bg-blue-50 text-blue-700'
                   : configuredModel
-                  ? 'border-blue-200 bg-blue-50 text-blue-700'
-                  : 'border-gray-300 bg-background text-foreground hover:bg-muted'
+                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 bg-background text-foreground hover:bg-muted'
               }`}
             />
           }
@@ -508,9 +581,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
 
             <CommandRoot.List className="max-h-80 scroll-py-1 overflow-x-hidden overflow-y-auto overscroll-y-contain outline-none border-t">
               {isLoading && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
-                  Loading models...
-                </div>
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">Loading models...</div>
               )}
 
               {error && !isLoading && (
@@ -530,7 +601,9 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                     onSelect={handleClear}
                     className="px-3 py-2 text-sm text-amber-700 cursor-pointer hover:bg-amber-50 data-selected:bg-amber-50 data-selected:text-amber-700"
                   >
-                    <span className="font-medium">Use default{defaultModelId ? ` (${describeModel(defaultModelId).name})` : ''}</span>
+                    <span className="font-medium">
+                      Use default{defaultModelId ? ` (${describeModel(defaultModelId).name})` : ''}
+                    </span>
                   </CommandRoot.Item>
                 </CommandGroup>
               )}
@@ -578,53 +651,53 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
               )}
 
               {!isLoading && !error && displayedModels.length === 0 && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
-                  No models found
-                </div>
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">No models found</div>
               )}
 
-              {!isLoading && !error && Array.from(groupedModels.entries()).map(([provider, models]) => (
-                <CommandGroup
-                  key={provider}
-                  heading={provider}
-                  value={provider}
-                  className="**:[[cmdk-group-heading]]:sticky **:[[cmdk-group-heading]]:top-0 **:[[cmdk-group-heading]]:z-10 **:[[cmdk-group-heading]]:bg-muted"
-                >
-                  {models.map((modelId) => {
-                    if (!chipRefs.current[modelId]) chipRefs.current[modelId] = []
-                    const variants = variantListFor(modelId, modelVariantsMap)
-                    const isSelected = modelId === configuredModel
-                    return (
-                      <CommandRoot.Item
-                        key={modelId}
-                        value={modelId}
-                        data-model-id={modelId}
-                        onSelect={() => handleSelect(modelId)}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-none cursor-pointer px-3 py-1.5',
-                          isSelected && 'bg-accent text-accent-foreground',
-                        )}
-                      >
-                        <div className="flex min-w-0 flex-col items-start">
-                          <span className="w-full truncate font-medium text-sm">{modelDisplayName(modelId)}</span>
-                          <span className="w-full truncate text-muted-foreground text-xs">{modelId}</span>
-                        </div>
-                        {variants.length > 0 && (
-                          <ModelVariantChips
-                            modelId={modelId}
-                            modelVariants={modelVariantsMap}
-                            activeVariant={isSelected ? localWorkflowVariant : null}
-                            baseTestId={`issue-coder-model-variant-${modelId}`}
-                            chipRefs={chipRefs.current[modelId]}
-                            onChipKeyDown={(e, idx) => handleChipKeyDown(e, modelId, idx)}
-                            onSelect={(id, variant) => handleSelectWithVariant(id, variant ?? '')}
-                          />
-                        )}
-                      </CommandRoot.Item>
-                    )
-                  })}
-                </CommandGroup>
-              ))}
+              {!isLoading &&
+                !error &&
+                Array.from(groupedModels.entries()).map(([provider, models]) => (
+                  <CommandGroup
+                    key={provider}
+                    heading={provider}
+                    value={provider}
+                    className="**:[[cmdk-group-heading]]:sticky **:[[cmdk-group-heading]]:top-0 **:[[cmdk-group-heading]]:z-10 **:[[cmdk-group-heading]]:bg-muted"
+                  >
+                    {models.map((modelId) => {
+                      if (!chipRefs.current[modelId]) chipRefs.current[modelId] = []
+                      const variants = variantListFor(modelId, modelVariantsMap)
+                      const isSelected = modelId === configuredModel
+                      return (
+                        <CommandRoot.Item
+                          key={modelId}
+                          value={modelId}
+                          data-model-id={modelId}
+                          onSelect={() => handleSelect(modelId)}
+                          className={cn(
+                            'flex w-full items-center justify-between gap-2 rounded-none cursor-pointer px-3 py-1.5',
+                            isSelected && 'bg-accent text-accent-foreground',
+                          )}
+                        >
+                          <div className="flex min-w-0 flex-col items-start">
+                            <span className="w-full truncate font-medium text-sm">{modelDisplayName(modelId)}</span>
+                            <span className="w-full truncate text-muted-foreground text-xs">{modelId}</span>
+                          </div>
+                          {variants.length > 0 && (
+                            <ModelVariantChips
+                              modelId={modelId}
+                              modelVariants={modelVariantsMap}
+                              activeVariant={isSelected ? localWorkflowVariant : null}
+                              baseTestId={`issue-coder-model-variant-${modelId}`}
+                              chipRefs={chipRefs.current[modelId]}
+                              onChipKeyDown={(e, idx) => handleChipKeyDown(e, modelId, idx)}
+                              onSelect={(id, variant) => handleSelectWithVariant(id, variant ?? '')}
+                            />
+                          )}
+                        </CommandRoot.Item>
+                      )
+                    })}
+                  </CommandGroup>
+                ))}
             </CommandRoot.List>
 
             <div className="border-t p-2 text-xs text-muted-foreground/70 text-center">
@@ -634,9 +707,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         </PopoverContent>
       </Popover>
       {configuredModel && (
-        <p className="text-xs text-muted-foreground/70">
-          Override active. Falls back to default when cleared.
-        </p>
+        <p className="text-xs text-muted-foreground/70">Override active. Falls back to default when cleared.</p>
       )}
 
       <div className="pt-2 border-t">
@@ -645,7 +716,9 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
           onClick={() => setAdvancedOpen(!advancedOpen)}
           className="flex items-center gap-1.5 w-full justify-start h-auto px-0 py-0 font-normal hover:bg-transparent"
         >
-          <ChevronRightIcon className={`h-3.5 w-3.5 text-muted-foreground/70 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
+          <ChevronRightIcon
+            className={`h-3.5 w-3.5 text-muted-foreground/70 transition-transform ${advancedOpen ? 'rotate-90' : ''}`}
+          />
           <span className="text-xs text-muted-foreground">Per-stage overrides</span>
           {Object.keys(localStageModels).length > 0 && (
             <span className="text-xs text-blue-500">({Object.keys(localStageModels).length})</span>
@@ -668,12 +741,12 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                       id={`issue-stage-model-${stage}`}
                       value={stageModel}
                       placeholder="Default"
-                       models={stageModels}
+                      models={stageModels}
                       onChange={(modelId) => handleSetStageModel(stage, modelId)}
                       onClear={() => handleClearStageModel(stage)}
                       allowClear={!!stageModel}
                       size="compact"
-                       modelVariants={stageVariants}
+                      modelVariants={stageVariants}
                       valueVariant={stageVariant}
                       onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, modelId, variant)}
                     />

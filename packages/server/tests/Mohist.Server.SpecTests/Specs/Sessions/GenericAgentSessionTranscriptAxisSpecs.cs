@@ -33,30 +33,25 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             project.Id,
             "transcript-axis-launch");
 
-        try
-        {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
-                project.Id,
-                agent.Id,
-                new { prompt = "transcript-axis launch", context = new { workspace = workspaceName } });
-            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
-            var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
+        using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+            project.Id,
+            agent.Id,
+            new { prompt = "transcript-axis launch", context = new { workspace = workspaceName } });
+        Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+        var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+        var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
+        var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
 
-            Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkId));
-            Assert.Equal(string.Empty, polledWork.WorkflowRunId);
-            Assert.Equal(sessionId, polledWork.AgentSessionId);
-            Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polledWork.OwnerKind);
-            Assert.Equal(project.Id, polledWork.ProjectId);
-            Assert.False(string.IsNullOrWhiteSpace(polledWork.AgentJobId));
-        }
-        finally
-        {
-            await DrainRemainingDispatchAsync(_runnerId);
-        }
+        Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkId));
+        Assert.Equal(string.Empty, polledWork.WorkflowRunId);
+        Assert.Equal(sessionId, polledWork.AgentSessionId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polledWork.OwnerKind);
+        Assert.Equal(project.Id, polledWork.ProjectId);
+        Assert.False(string.IsNullOrWhiteSpace(polledWork.AgentJobId));
+
+        await ReportDispatchCompletedAsync(_runnerId, polledWork);
     }
 
     [Fact]

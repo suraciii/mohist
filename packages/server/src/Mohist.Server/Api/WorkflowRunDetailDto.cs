@@ -28,4 +28,10 @@ namespace Mohist.Server.Api;
 public sealed record WorkflowRunDetailDto(
     WorkflowStatusView Status,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    WorkflowRunIssueRef? IssueRef);
+    WorkflowRunIssueRef? IssueRef,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    string? WorkflowProfileId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    string? AgentAction,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    string? AgentRuntime);

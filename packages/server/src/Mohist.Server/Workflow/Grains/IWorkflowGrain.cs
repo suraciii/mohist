@@ -59,7 +59,8 @@ public sealed record WorkflowStartInput(
 public sealed record WorkflowIssueContext(
     [property: Id(0)] string ProjectId,
     [property: Id(1)] int IssueNumber,
-    [property: Id(2)] int? EpicNumber);
+    [property: Id(2)] int? EpicNumber,
+    [property: Id(3)] string? WorkflowProfileId = null);
 
 /// <summary>
 /// immutable start snapshot carried by the

@@ -236,16 +236,12 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         var (repositoryContext, workspace, issueContext) = await PrepareWorkflowStartContextAsync(project, wrId, repo);
 
-        // Synchronously start the workflow run carrying the immutable
-        // repository/workspace snapshot captured at this transaction. The
-        // IssueWorkStarted durable event (emitted by SaveIssueAsync below)
-        // drives the same snapshot-aware EnsureStartedAsync on replay/restart,
-        // so the run reads run-owned repository facts rather than live
-        // Project metadata regardless of which path created it first.
-        var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         var snapshot = new WorkflowStartSnapshot(repositoryContext, workspace);
-        var startContext = new WorkflowIssueContext(issueContext.ProjectId, issueContext.IssueNumber, null);
-        await wfGrain.EnsureStartedAsync(startContext, snapshot);
+        var startContext = new WorkflowIssueContext(
+            issueContext.ProjectId,
+            issueContext.IssueNumber,
+            null,
+            _issue.WorkflowProfileId);
 
         _issue!.Start(
             wrId,
@@ -261,24 +257,13 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             context: issueContext,
             workspaceName: workspaceName,
             hasChildren: hasChildren);
-        try
-        {
-            await SaveIssueAsync();
-        }
-        catch
-        {
-            // The workflow run was already committed, but the issue state/event
-            // transaction rolled back. A retry would mint a new wrId and leave
-            // this run orphaned. Compensate by stopping the run so it does not
-            // linger as active work the issue no longer references.
-            try { await wfGrain.StopAsync("issue save failed; compensating orphaned workflow start"); }
-            catch (Exception compEx)
-            {
-                _log.LogWarning(compEx,
-                    "Issue {Key} compensating stop of orphaned workflow {WrId} failed", GrainKey, wrId);
-            }
-            throw;
-        }
+        await SaveIssueAsync();
+
+        // IssueWorkStarted is the durable start intent. Only after that intent
+        // commits may the run become executable. The subscription replays this
+        // same idempotent call if the process exits before or during delivery.
+        var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
+        await wfGrain.EnsureStartedAsync(startContext, snapshot);
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }

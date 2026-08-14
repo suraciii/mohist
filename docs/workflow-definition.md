@@ -10,25 +10,34 @@ During a run, retry, recovery, approval feedback, and control commands such as
 `mo issue rebase` can produce additional Tasks. These Tasks belong to the
 current WorkflowRun and do not rewrite the Definition.
 
+A complete Profile source may also contain `id`, `name`, `description`, and
+`agentAction` metadata. Those fields belong to the Profile and are removed
+before Mohist parses the Definition described here.
+
 ## Top-Level Structure
 
-A Definition has only two top-level sections:
+A Definition has only three top-level sections:
 
 ```yaml
-approval:      # Optional. Feedback repair Tasks after an approval rejection.
+approval:      # Optional. Configures work created from rejected approvals.
   feedback:
-    tasks:     # An ordered Task list.
+    tasks:     # Required when feedback is configured; non-empty and ordered.
       - <Task>
 
 stages:        # Required. An ordered Stage list.
   - <Stage>
+
+recoveries:    # Optional. Named recovery declarations reused by Tasks.
+  <name>: <Recovery>
 ```
 
-After an approval rejection, Mohist runs `approval.feedback.tasks` in order to
-apply the feedback. The first Task usually continues the rejected Stage's
-session. Later Tasks can publish the repaired work. When all feedback Tasks
-finish, Mohist runs the Stage Checks again. The approver then sees the current,
-published work.
+When a rejected approval includes feedback, Mohist runs
+`approval.feedback.tasks` in order to apply it. The first Task usually
+continues the rejected Stage's session. Later Tasks can publish the repaired
+work. When all feedback Tasks finish, Mohist runs the Stage Checks again. The
+approver then sees the current, published work. Mohist does not create a default
+feedback Task, so a feedback request is rejected when the Profile does not
+declare one.
 
 ## Stage
 
@@ -70,6 +79,12 @@ inputs and outputs. Each Action declares its input names, required fields,
 default values, output fields, and error codes. Mohist validates `with` against
 that declaration. It rejects unknown fields, missing required fields, and
 invalid types instead of ignoring them.
+
+`uses` normally contains a literal concrete Action name. A Profile that declares
+`agentAction` may instead use the complete scalar `${{ profile.agentAction }}`.
+Mohist replaces it with the effective Project binding before Definition and
+Action-contract validation. It is not a runtime expression, cannot be embedded
+in another string, and never reaches a TaskRun or Runner.
 
 ### `expect`: Completion Requirements
 
@@ -152,6 +167,10 @@ Fields under `with` and `expect` can use `${{ }}` expressions. The following
 table lists every available namespace. A root reference not listed here is
 invalid.
 
+`${{ profile.agentAction }}` is the one compile-time Profile expression. It is
+valid only as a complete `uses` value and is not part of the runtime namespace
+table below.
+
 | Expression | Meaning |
 |---|---|
 | `workflow.runId` | The current Run identifier |
@@ -192,19 +211,21 @@ invalid.
 
 ## Validate a Definition
 
-When you save a Profile, Mohist validates the Definition structure, field
-types, and template expressions and returns all problems in one response. You
-can also validate a file locally without a running Server:
+When you save a Profile, Mohist first validates and materializes the optional
+Agent Action binding, then validates the Definition structure, field types,
+template expressions, and concrete Action contracts. It returns all problems
+in one response. You can validate Profile composition and Definition syntax
+locally without a running Server:
 
 ```bash
 mo workflow validate --file workflow.yaml
 mo workflow validate --file -
 ```
 
-The local command only validates the Workflow Definition language. The save
-operation must use Action contracts from the current Runner to determine
-whether a `uses` value is available and whether `with` satisfies the selected
-Action's input contract.
+The local command cannot check current Action availability. The save operation
+uses Action contracts from the current Runner to determine whether the effective
+`agentAction` declares `agent-turn`, whether each concrete `uses` is available,
+and whether `with` satisfies the selected Action's input contract.
 
 ## Complete Example
 
@@ -323,9 +344,11 @@ stages:
 
 ## Validation Boundary
 
-The authoritative validator checks the Definition structure, field types, and
-template expressions when a Profile is saved. `mo workflow validate --file`
-provides the same language validation locally. CI continuously validates the
-built-in Profiles and the complete example in this document. The selected
-Action contract still decides which `with` keys are valid, required, and of the
-correct type. That check is outside the Definition validator's responsibility.
+The Profile compiler owns `agentAction` and the restricted
+`${{ profile.agentAction }}` form. The authoritative Definition validator owns
+Definition structure, field types, and runtime template expressions.
+`mo workflow validate --file` runs both language layers locally. CI continuously
+validates the built-in Profiles and the complete example in this document. The
+selected Action contract still decides whether the concrete Action is available,
+whether it declares `agent-turn` when selected as `agentAction`, and which
+`with` keys are valid, required, and of the correct type.

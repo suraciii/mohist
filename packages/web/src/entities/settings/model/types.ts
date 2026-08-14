@@ -61,7 +61,12 @@ export interface SystemUpdateStartResponse {
 
 export type SystemUpdateOutcome = 'succeeded' | 'recovered' | 'failed' | 'cancelled'
 
-export const SYSTEM_UPDATE_OUTCOMES: readonly SystemUpdateOutcome[] = ['succeeded', 'recovered', 'failed', 'cancelled'] as const
+export const SYSTEM_UPDATE_OUTCOMES: readonly SystemUpdateOutcome[] = [
+  'succeeded',
+  'recovered',
+  'failed',
+  'cancelled',
+] as const
 
 export const SYSTEM_UPDATE_STAGES: readonly string[] = [
   'Building',
@@ -119,6 +124,7 @@ export interface WorkflowProfileInfo {
   description: string
   isDefault: boolean
   isBuiltIn?: boolean
+  agentAction?: string | null
   agentRuntime?: AgentRuntime | null
 }
 
@@ -140,7 +146,18 @@ export interface WorkflowProfileDetail {
   definitionSource?: string | null
   yaml: string
   stages: WorkflowProfileStageSummary[]
+  agentAction?: string | null
   agentRuntime?: AgentRuntime | null
+}
+
+export interface ActionCatalogEntry {
+  name: string
+  description?: string | null
+  capabilities?: string[] | null
+}
+
+export interface ActionCatalog {
+  actions: ActionCatalogEntry[]
 }
 
 export type ModelBadge = 'free' | 'latest'

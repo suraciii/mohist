@@ -117,6 +117,7 @@ useMswServer(
 
 function renderDialog(open = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const onClose = vi.fn()
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider
@@ -131,11 +132,11 @@ function renderDialog(open = true) {
           },
         ]}
       >
-        <CreateIssueDialog open={open} onClose={vi.fn()} />
+        <CreateIssueDialog open={open} onClose={onClose} />
       </ProjectProvider>
     </QueryClientProvider>,
   )
-  return { queryClient, ...view }
+  return { onClose, queryClient, ...view }
 }
 
 describe('CreateIssueDialog model + variant chips', () => {
@@ -181,6 +182,25 @@ describe('CreateIssueDialog model + variant chips', () => {
       expect(chip).toBeInTheDocument()
     }
     expect(document.querySelector(`[data-testid="create-issue-model-trigger-row-openai/gpt-4-variant-low"]`)).toBeNull()
+  })
+
+  it('opens the model picker without dismissing the create dialog', async () => {
+    _modelsData.models = ['anthropic/claude']
+    const user = userEvent.setup()
+    const { onClose } = renderDialog()
+
+    await user.click(await modelTrigger())
+
+    expect(await screen.findByPlaceholderText('Search models...')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Create Issue' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('keeps the create dialog within the viewport and scrollable', () => {
+    renderDialog()
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveClass('max-h-[calc(100dvh-2rem)]', 'overflow-y-auto', 'overscroll-contain')
   })
 
   it('sends modelVariant alongside model on create when a chip is clicked', async () => {

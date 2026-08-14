@@ -58,6 +58,7 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.IssueTemplateList] = D<IssueTemplateInfo>(),
             [MohistCliApi.TableShape.IssueTemplateShow] = D<IssueTemplateDetail>(),
             [MohistCliApi.TableShape.WorkflowProfileList] = D<WorkflowProfileCollectionEntry>(),
+            [MohistCliApi.TableShape.WorkflowProfileDetail] = D<WorkflowProfileDetailResponse>(),
             [MohistCliApi.TableShape.RunnerList] = D<RunnerStatusView>(),
             [MohistCliApi.TableShape.RunnerShow] = D<RunnerStatusView>(),
             [MohistCliApi.TableShape.Models] = S("models endpoint returns a runtime-specific string collection"),

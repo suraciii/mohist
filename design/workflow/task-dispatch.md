@@ -6,6 +6,10 @@ form with the dispatch and does not expand templates in advance. Runner expands 
 the execution entry point before invoking an Action. The Prompt body, Effective Stage Variables,
 runtime context, and failure context are part of the immutable snapshot for an attempt.
 
+`${{ profile.agentAction }}` is outside this runtime rendering boundary. The Profile provider
+resolves it to a concrete `uses` before Definition validation and stores the effective Action when
+the WorkflowRun starts. Runner never receives a Profile template expression.
+
 ## Rendering Boundary
 
 Template evaluation happens only at the Runner execution entry point before an Action call, and
@@ -32,7 +36,9 @@ does **not** happen during Server dispatch:
 Once dispatched, an attempt's context snapshot remains unchanged throughout that attempt. Later
 changes to Variables, Prompts, Profile Definition, or a Stage overlay affect only tasks not yet
 dispatched and later attempts, including retry, recovery continuation, and rerun-from-stage. They
-do not change an already dispatched attempt.
+do not change an already dispatched attempt. The Profile's Project-scoped Agent Action override is
+the exception: a WorkflowRun fixes that binding when it starts, so an override change affects only
+new Runs. Later tasks and Stages in the active Run continue to use its bound concrete Action.
 
 ## Template Expression Rules
 
@@ -59,11 +65,12 @@ Action input channel.
 ## Deferred Rendering
 
 `render: deferred` is declared on an input field in an Action manifest. Runner preserves a
-deferred field unchanged, including internal `${{ ... }}`, through manifest validation and the
-Action call. Fields not declared deferred are recursively expanded under the rules above,
-including nested objects and arrays. An Action can read retained internal templates only from a
-deferred field. No input channel exposes raw `with`, raw `expect`, a Variables resource, or the
-complete dispatch context.
+deferred field unchanged, including internal runtime `${{ ... }}`, through manifest validation and
+the Action call. Profile materialization happens earlier and still replaces
+`${{ profile.agentAction }}` in a deferred task default. Fields not declared deferred are
+recursively expanded under the rules above, including nested objects and arrays. An Action can
+read retained internal templates only from a deferred field. No input channel exposes raw `with`,
+raw `expect`, a Variables resource, or the complete dispatch context.
 
 Runner resolves the workspace exactly once for each WorkItem and provides it as
 `ActionContext.workDir`. An Action must not select a working directory again from
