@@ -12,15 +12,19 @@ The managed transaction owns a small `ManagedCliLauncher` collaborator.
 For a CLI-containing scope:
 
 1. Resolve the default target to the managed stable launcher path. An explicit
-   `--cli-path` remains the requested stable entrypoint.
+   `--cli-path` must name an existing absolute entrypoint and remains the
+   requested stable entrypoint. A missing or relative explicit path is rejected
+   before source staging, so the update cannot report success for a path that
+   was never a real invocation target.
 2. Publish the candidate and persist the candidate target set as today.
 3. If the stable entrypoint does not already delegate to the exact candidate
    runtime identity, copy its existing contents to the transaction directory,
    write an executable shell launcher to a temporary file, and atomically move
    that file over the stable entrypoint.
-4. Invoke the stable entrypoint with `--version`. Success requires the
-   candidate source revision in its output; merely starting an executable is
-   insufficient.
+4. Invoke the exact activated entrypoint with `--version`. Success requires
+   the candidate source revision in its output; merely starting an executable
+   is insufficient. This means an explicit `--cli-path` is both activated and
+   identity-verified at the path the caller named.
 5. Commit active, verified, and transaction pointers, then discard the backup.
 
 The launcher state is held only in the in-process managed update session. The
@@ -38,6 +42,22 @@ ELF remains executable after restoration.
   failure.
 - If launcher restoration itself cannot be proven, the managed transaction
   keeps its existing fail-closed recovery record and does not emit success.
+
+## First Deployment
+
+An installation running a pre-change CLI cannot self-apply this transaction:
+that binary routes `mo update cli` through the old behavior. The supported
+bootstrap is executable from the source checkout:
+
+```bash
+bash scripts/install-mo.sh
+mo update cli
+```
+
+The script publishes the current CLI and places it at the stable user path
+before the managed flow is used. `npm run install:cli` remains the documented
+initial tool installation path; it is not described as a legacy update escape
+hatch.
 
 ## Alternatives Considered
 

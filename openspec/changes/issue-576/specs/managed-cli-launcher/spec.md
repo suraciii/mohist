@@ -13,6 +13,21 @@ path, before it reports a successful update.
 - **AND** the stable entrypoint atomically delegates to the candidate CLI
 - **AND** successful commit removes the temporary backup
 
+#### Scenario: Explicit CLI path is the activated entrypoint
+
+- **WHEN** `--cli-path` names an existing absolute direct executable outside
+  the default managed path
+- **THEN** the transaction replaces that exact path with the candidate launcher
+- **AND** identity verification invokes that same exact path
+- **AND** successful commit makes the named path run the candidate CLI
+
+#### Scenario: Invalid explicit CLI path fails closed
+
+- **WHEN** `--cli-path` is relative or names a path that does not exist
+- **THEN** the managed update fails before candidate staging
+- **AND** no runtime pointer or launcher is changed
+- **AND** the output identifies the source-checkout bootstrap command
+
 #### Scenario: Repeating the same candidate is idempotent
 
 - **WHEN** the stable launcher already delegates to the same complete runtime
@@ -45,3 +60,16 @@ before returning failure.
   wrong source revision
 - **THEN** the preceding direct executable or launcher is restored
 - **AND** no candidate verified pointer remains
+
+### Requirement: First deployment has a reachable bootstrap
+
+The first deployment of this behavior MUST be executable without relying on a
+pre-change binary to expose a legacy managed-update path.
+
+#### Scenario: Existing installation bootstraps from the source checkout
+
+- **WHEN** an operator runs `bash scripts/install-mo.sh` from the current source
+  checkout
+- **THEN** the current CLI is published to the stable user path
+- **AND** a subsequent managed `mo update cli` can activate and verify the
+  candidate launcher

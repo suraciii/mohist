@@ -50,6 +50,27 @@ public sealed class ManagedCliLauncherSpecs
         Assert.False(fixture.Files.HasFile(BackupPath(fixture, verified.TransactionId)));
     }
 
+    [Theory]
+    [InlineData("/home/test/custom/mo")]
+    [InlineData("custom/mo")]
+    public async Task UpdateCli_InvalidExplicitPath_FailsClosedBeforeCandidateMutation(string launcherPath)
+    {
+        var fixture = CreateFixture();
+        var error = new StringWriter();
+
+        var exitCode = await fixture.BuildManagedServerUpdater(
+                new SequenceHttpHandler(System.Net.HttpStatusCode.OK),
+                error: error)
+            .UpdateCliAsync("/repo", dryRun: false, cliPath: launcherPath);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("existing absolute mo entrypoint", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("bash scripts/install-mo.sh", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Commands.ExecutedCommands, command => command.FileName is "dotnet" or "npm" or "git");
+        Assert.False(fixture.Files.HasFile(fixture.ActivePath));
+        Assert.False(fixture.Files.HasFile(fixture.VerifiedPath));
+    }
+
     [Fact]
     public async Task UpdateCli_WhenLauncherIdentityDoesNotMatch_RestoresDirectBinaryAndActivePointer()
     {

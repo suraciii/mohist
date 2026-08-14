@@ -498,6 +498,19 @@ internal sealed class UpdateOperations
         return null;
     }
 
+    public Task<string?> ResolveManagedCliPathAsync(string? explicitPath)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            var normalized = explicitPath.Replace('\\', '/');
+            if (!Path.IsPathRooted(normalized) || !_fileSystem.Exists(normalized))
+                return Task.FromResult<string?>(null);
+            return Task.FromResult<string?>(normalized);
+        }
+
+        return Task.FromResult<string?>(ResolveManagedCliLauncherPath());
+    }
+
     public string ResolveManagedCliLauncherPath() =>
         ResolveCliWrapperPath(_getUserHome?.Invoke());
 

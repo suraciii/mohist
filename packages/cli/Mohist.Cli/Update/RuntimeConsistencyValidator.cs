@@ -55,7 +55,7 @@ internal sealed class RuntimeConsistencyValidator
         if (string.IsNullOrWhiteSpace(context.CliPath))
         {
             return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Fail,
-                "CLI binary path was not resolved; cannot invoke mo --version. Reinstall with 'mo update' or pass --cli-path.");
+                "CLI binary path was not resolved; cannot invoke mo --version. Bootstrap from the source checkout with 'bash scripts/install-mo.sh' or pass --cli-path.");
         }
 
         try

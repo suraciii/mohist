@@ -10,8 +10,8 @@ internal partial class SourceCodeUpdater
         CancellationToken cancellationToken,
         bool postOutcome)
     {
-        var resolvedCliPath = IncludesManagedScope(scope, "cli") && string.IsNullOrWhiteSpace(cliPath)
-            ? _operations.ResolveManagedCliLauncherPath()
+        var resolvedCliPath = IncludesManagedScope(scope, "cli")
+            ? await _operations.ResolveManagedCliPathAsync(cliPath)
             : await ResolveCliPathAsync(cliPath);
         var context = new UpdateContext(
             dryRun,
@@ -22,10 +22,11 @@ internal partial class SourceCodeUpdater
         context.Stage = UpdateStage.Preflight;
         context.RecordStage("Capturing immutable source", "starting");
 
-        if (string.Equals(scope, "full", StringComparison.Ordinal)
+        if (IncludesManagedScope(scope, "cli")
             && string.IsNullOrWhiteSpace(resolvedCliPath))
         {
-            _err.WriteLine("Could not resolve mo executable path. Pass --cli-path to update the CLI explicitly.");
+            _err.WriteLine("Managed CLI update refused: --cli-path must name an existing absolute mo entrypoint.");
+            _err.WriteLine("Bootstrap or refresh the CLI from the source checkout with: bash scripts/install-mo.sh (or npm run install:cli for initial installation).");
             context.LastExitCode = 1;
             return await FinalizeManagedFailureAsync(context, 1, postOutcome);
         }
