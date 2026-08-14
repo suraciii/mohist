@@ -118,6 +118,33 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     }
 
     [Fact]
+    public async Task PrepareAsync_RejectionReplayAfterActivationLoss_DoesNotRerunPreflight()
+    {
+        var projectId = $"workflow-handoff-rejection-replay-{Guid.NewGuid():N}";
+        var agentId = $"agent_missing_replay_{Guid.NewGuid():N}";
+        var command = Command(projectId, agentId, "persist the definitive rejection");
+        var handoff = Handoff(command);
+
+        var rejected = await handoff.PrepareAsync(command);
+        await handoff.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+
+        var replay = await handoff.PrepareAsync(command);
+        var plan = await handoff.GetPlanAsync();
+
+        Assert.Equal(WorkflowAgentHandoffDisposition.Rejected, rejected.Disposition);
+        Assert.Equal("agent_not_found", rejected.Rejection!.Code);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Rejected, replay.Disposition);
+        Assert.True(replay.AlreadyPersisted);
+        Assert.Equal(rejected.Rejection, replay.Rejection);
+        Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.NotNull(plan);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Rejected, plan!.Disposition);
+        Assert.Null(plan.Invocation);
+        Assert.Empty(await ListEligibleAgentJobsAsync(projectId));
+    }
+
+    [Fact]
     public async Task AcceptAsync_WritesOnlyReceipt_AndLeavesJobAndSessionUnmaterialized()
     {
         var projectId = $"workflow-handoff-accept-{Guid.NewGuid():N}";
@@ -141,6 +168,65 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, replay.Disposition);
         Assert.True(replay.AlreadyPersisted);
         Assert.NotNull(plan!.AcceptedAt);
+        await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ReplayAfterActivationLoss_ReusesThePersistedReceipt()
+    {
+        var projectId = $"workflow-handoff-accept-replay-{Guid.NewGuid():N}";
+        var agentId = $"agent_accept_replay_{Guid.NewGuid():N}";
+        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        var command = Command(projectId, agentId, "replay the acceptance receipt");
+        var handoff = Handoff(command);
+        var prepared = await handoff.PrepareAsync(command);
+        var acceptance = new WorkflowAgentHandoffAcceptance(
+            command.CommandId,
+            WorkflowAgentHandoffCodec.Fingerprint(command));
+
+        var accepted = await handoff.AcceptAsync(acceptance);
+        var acceptedPlan = await handoff.GetPlanAsync();
+        await handoff.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+
+        var replay = await handoff.AcceptAsync(acceptance);
+        var replayPlan = await handoff.GetPlanAsync();
+
+        Assert.Equal(WorkflowAgentHandoffDisposition.Prepared, prepared.Disposition);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, accepted.Disposition);
+        Assert.False(accepted.AlreadyPersisted);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, replay.Disposition);
+        Assert.True(replay.AlreadyPersisted);
+        Assert.Equal(accepted.Invocation, replay.Invocation);
+        Assert.Equal(acceptedPlan!.AcceptedAt, replayPlan!.AcceptedAt);
+        await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ConflictingFingerprint_PreservesTheAcceptedReceipt()
+    {
+        var projectId = $"workflow-handoff-accept-conflict-{Guid.NewGuid():N}";
+        var agentId = $"agent_accept_conflict_{Guid.NewGuid():N}";
+        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        var command = Command(projectId, agentId, "accept the original prompt");
+        var handoff = Handoff(command);
+        var prepared = await handoff.PrepareAsync(command);
+        var accepted = await handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+            command.CommandId,
+            WorkflowAgentHandoffCodec.Fingerprint(command)));
+        var conflicting = command with { Prompt = "accept a different prompt" };
+
+        var error = await Assert.ThrowsAsync<WorkflowAgentHandoffConflictException>(() =>
+            handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+                command.CommandId,
+                WorkflowAgentHandoffCodec.Fingerprint(conflicting))));
+        var plan = await handoff.GetPlanAsync();
+
+        Assert.Equal(command.CommandId, error.CommandId);
+        Assert.Equal(WorkflowAgentHandoffCodec.Fingerprint(command), error.ExistingFingerprint);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, accepted.Disposition);
+        Assert.NotNull(plan);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, plan!.Disposition);
+        Assert.Equal(prepared.Invocation, plan.Invocation);
         await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
     }
 
