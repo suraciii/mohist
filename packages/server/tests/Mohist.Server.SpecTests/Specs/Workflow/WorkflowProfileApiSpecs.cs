@@ -324,6 +324,97 @@ public class WorkflowProfileApiSpecs
         }
     }
 
+    [Fact]
+    public async Task PutApprovalChange_RejectsActiveRunStructureChangeAndPreservesStoredProfile()
+    {
+        var project = await CreateProjectAsync();
+        var runnerId = $"workflow-profile-approval-{Guid.NewGuid():N}";
+        var catalog = new ActionCatalog(
+            [new ActionCatalogEntry("mohist/opencode", [], [], [], Capabilities: ["agent-turn"])],
+            []);
+
+        try
+        {
+            using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
+            {
+                capabilities = new[] { "spec/*" },
+                hostname = "workflow-profile-approval-spec",
+                actionCatalog = catalog,
+            });
+            register.EnsureSuccessStatusCode();
+
+            const string profileId = "approval-structure";
+            using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
+            {
+                profileId,
+                name = "Approval Structure",
+                definitionSource = ApprovalProfile(requiresApproval: true),
+            });
+            Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+            var runId = $"approval-structure-{Guid.NewGuid():N}";
+            var bound = await _grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
+                .BindWorkflowRunAsync(
+                    new WorkflowProfileCommandPayload.BindWorkflowRun(
+                        project.Id,
+                        runId,
+                        IssueNumber: 42,
+                        EpicNumber: null,
+                        ExplicitProfileId: profileId,
+                        Metadata: new WorkflowRunMetadata(
+                            "Approval structure run",
+                            new DateTimeOffset(2026, 8, 15, 0, 0, 0, TimeSpan.Zero),
+                            ProjectId: project.Id,
+                            IssueNumber: 42)),
+                    $"approval-structure:{runId}",
+                    expectedRevision: null);
+            Assert.True(bound.IsApplied);
+
+            using var response = await _client.PutAsJsonAsync(
+                $"/api/projects/{project.Id}/workflow-profiles/{profileId}",
+                new
+                {
+                    name = "Approval Structure",
+                    definitionSource = ApprovalProfile(requiresApproval: false),
+                });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var errors = json.GetProperty("details").GetProperty("definitionErrors").EnumerateArray().ToArray();
+            Assert.Contains(errors, error =>
+                error.GetProperty("message").GetString()!.Contains(
+                    "retain requiresApproval=true",
+                    StringComparison.Ordinal));
+
+            var stored = await _client.GetDataAsync<JsonElement>(
+                $"/api/projects/{project.Id}/workflow-profiles/{profileId}");
+            Assert.Contains("requiresApproval: true", stored.GetProperty("definitionSource").GetString());
+        }
+        finally
+        {
+            await _client.PostAsJsonAsync($"/api/runner/{runnerId}/unregister", new { });
+        }
+    }
+
+    private static string ApprovalProfile(bool requiresApproval) => """
+        agentAction: mohist/opencode
+        approval:
+          feedback:
+            tasks:
+              - id: apply-feedback
+                uses: ${{ profile.agentAction }}
+        stages:
+          - stage: build
+            requiresApproval: REQUIRES_APPROVAL
+            tasks:
+              - id: implement
+                uses: ${{ profile.agentAction }}
+            checks: []
+        """.Replace(
+            "REQUIRES_APPROVAL",
+            requiresApproval.ToString().ToLowerInvariant(),
+            StringComparison.Ordinal);
+
     private Task<ProjectInfo> CreateProjectAsync() =>
         _client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
             "/api/projects",

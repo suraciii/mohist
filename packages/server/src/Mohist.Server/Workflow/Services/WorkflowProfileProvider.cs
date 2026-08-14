@@ -399,11 +399,25 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
                 request.DefinitionSource,
                 request.ProfileId,
                 agentActionOverride: run.AgentAction);
-            var updatedStageIds = updated.Definition.Stages
-                .Select(stage => stage.Stage)
-                .ToHashSet(StringComparer.Ordinal);
-            foreach (var stage in run.Stages.Where(stage => !updatedStageIds.Contains(stage.Id)))
-                definitionErrors.Add(new ValidationError("stages", $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}'"));
+            var updatedStages = updated.Definition.Stages
+                .ToDictionary(stage => stage.Stage, StringComparer.Ordinal);
+            foreach (var stage in run.Stages)
+            {
+                if (!updatedStages.TryGetValue(stage.Id, out var updatedStage))
+                {
+                    definitionErrors.Add(new ValidationError(
+                        "stages",
+                        $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}'"));
+                    continue;
+                }
+
+                if (updatedStage.RequiresApproval != stage.RequiresApproval)
+                {
+                    definitionErrors.Add(new ValidationError(
+                        "stages",
+                        $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}' to retain requiresApproval={stage.RequiresApproval.ToString().ToLowerInvariant()}"));
+                }
+            }
         }
 
         var catalog = await _catalogSource.GetCatalogAsync();

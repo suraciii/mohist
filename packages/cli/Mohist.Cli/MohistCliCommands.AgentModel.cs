@@ -17,7 +17,7 @@ internal static class AgentModelCommands
             "list",
             "List available coder model IDs for the runtime (one per line; use with --model).");
 
-        var runtimeOpt = new Option<string?>("--runtime") { Description = "Filter by runtime (default: project's configured runtime)" };
+        var runtimeOpt = new Option<string?>("--runtime") { Description = "Filter by runtime (default: opencode)" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.Models)));
 
