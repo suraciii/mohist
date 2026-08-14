@@ -287,7 +287,10 @@ It does not edit the Profile Definition or its Project binding.
 Editing a Definition affects later Stages in active Workflows that use the
 Profile. Mohist validates the edit with every Agent Action bound to an active
 Run and rejects an edit that removes the binding or is incompatible with one of
-those Actions.
+those Actions. An edit must also retain every Stage used by an active Run. The
+active Run keeps its original Stage order and Approval points, so an edit must
+retain valid Approval feedback while that Run can still request it. Added or
+reordered Stages apply only to future Runs.
 
 Before saving, run `mo workflow validate --file <path>` to check the Definition
 structure, field types, and template expressions locally. Use `--file -` to

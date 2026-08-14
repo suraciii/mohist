@@ -180,6 +180,10 @@ selectedProfileId =
   validate when materialized with every distinct Action stored by its active Runs. The update is rejected
   if it removes `agentAction`, replaces a bound Agent reference with a literal Agent Action, or introduces
   Action Input that is incompatible with an active Run's Action.
+- A custom Profile update must retain every Stage ID in each active Run's stored startup skeleton. The Run
+  keeps its stored Stage order and `requiresApproval` values; new or reordered Stages affect only future
+  Runs. If any stored Stage still requires Approval, the updated Profile must retain non-empty Approval
+  feedback tasks that validate with that Run's bound Action.
 
 WorkflowRun does not store a complete Workflow Definition snapshot. Run creation materializes only the
 StageRun and Approval facts needed to advance the lifecycle. When each Stage initializes, it uses
@@ -221,10 +225,17 @@ Profile outside the start-binding command.
 
 The existing Project-scoped `WorkflowProfileReferenceCoordinator` serializes custom Profile updates,
 Project Agent Action override changes, and WorkflowRun binding. An update validates the future effective
-Action and the distinct bound Actions read from active Run state before it writes the Profile. A Run bind
-reads one accepted Profile version and materializes one `BoundWorkflowStart` containing the Profile ID,
-concrete Agent Action, and ordered `StageStructure { stage, requiresApproval }` values. The coordinator
-persists that resolved command payload in its pending fence before delivery.
+Action, the distinct bound Actions, and the stored startup skeletons read from active Run state before it
+writes the Profile. A Run start has the stable identity `{ workflowRunId, projectId, issueNumber }` and
+carries the Issue's explicit Profile selection snapshot. The coordinator settles any pending fence first,
+then asks the participant for an existing Run with that ID. Matching Project/Issue identity returns its
+persisted startup binding without reading the current Project default, Profile source, or Action override;
+conflicting ownership is rejected.
+
+When no Run exists, the coordinator reads one accepted Profile version and materializes one
+`BoundWorkflowStart` containing the start identity, Profile ID, concrete Agent Action, and ordered
+`StageStructure { stage, requiresApproval }` values. The coordinator persists that resolved command payload
+in its pending fence before delivery.
 `IWorkflowRunBindingParticipant` then creates the `Created` Run row with that complete binding and Stage
 skeleton in one transaction. It never patches a separately created Run. The Workflow grain does not resolve
 startup structure or save a partial Run before this command; after the participant commit it loads the
@@ -232,9 +243,12 @@ persisted Run and continues the ordinary idempotent start transition.
 
 Redelivery uses the `BoundWorkflowStart` captured in the fence. The participant returns the same persisted
 binding when the Run already exists with identical startup facts and rejects a conflicting existing Run.
-A crash before participant commit is replayed; a crash after commit is observed as already applied. The
-coordinator order is therefore the linearization point: a concurrent Run starts entirely before or after a
-Profile or override change, never between its resolution, validation, and initial persistence.
+A pending `commandId` is a replay only when its kind and complete canonical payload match. A crash before
+participant commit is replayed; a crash after commit is observed as already applied. If the coordinator
+cleared its fence and the response was then lost, the retry returns the binding stored in the Run instead of
+resolving newer configuration. The coordinator order is therefore the linearization point: a concurrent Run
+starts entirely before or after a Profile or override change, never between its resolution, validation, and
+initial persistence.
 
 ## API
 
@@ -253,8 +267,8 @@ The Project's `defaultWorkflowProfileId` and the Issue's `workflowProfileId` ref
 They are modified through the Project and Issue resources, respectively. Profile deletion must protect a
 Profile that is still referenced by a default, an Issue, or an active WorkflowRun. Updating the Definition
 while keeping the same ID is allowed. Before committing an update, Server validates the future effective
-Action and every distinct Action bound to an active Run. An active WorkflowRun reads the accepted version
-at a later Stage initialization.
+Action, every distinct Action bound to an active Run, and every active Run's stored Stage/Approval skeleton.
+An active WorkflowRun reads the accepted version at a later Stage initialization.
 
 `profileId` is a terminal catch-all, so it can address an ID such as `mohist/local` without loss. Variables
 and Prompts use separate APIs. They are not children of `/workflow-profiles/{*profileId}`.
@@ -305,5 +319,6 @@ Runtime.
 
 Planned in the Profile Agent Action binding change: `agentAction` source defaults and Project overrides,
 the restricted `${{ profile.agentAction }}` compiler, Run-bound concrete Actions, capability-aware catalog
-validation, active-Run read projection, explicit Approval feedback validation, and `mohist/github-pr`
-adoption. These items must land together before this section becomes implemented behavior.
+validation, response-loss-safe startup replay, active-Run structure compatibility, active-Run read
+projection, explicit Approval feedback validation, and `mohist/github-pr` adoption. These items must land
+together before this section becomes implemented behavior.
