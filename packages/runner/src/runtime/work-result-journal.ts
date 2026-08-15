@@ -100,6 +100,46 @@ export class WorkResultJournal {
     }, true)
   }
 
+  /**
+   * Admission for a recovery dispatch. A `started` fence hit by a
+   * recovery dispatch is re-armed with the re-rendered payload (the
+   * recorded execution died with the process that fenced it; the fence
+   * identity — owner + work id — is unchanged, so the payload swap
+   * cannot fork execution) and reconciled by the caller instead of
+   * refusing replay. A `completed` entry is returned as-is: the
+   * awaiting-ack machinery owns reporting that result.
+   */
+  beginRecovery(work: DispatchWorkItem): Promise<WorkResultJournalBegin> {
+    return this.mutate(async () => {
+      const key = workKey(work)
+      const existing = this.entries.get(key)
+      if (existing) {
+        if (existing.state === 'completed') return 'completed'
+        if (!sameWork(existing.work, work)) {
+          const prior = cloneWork(existing.work)
+          existing.work = cloneWork(work)
+          try {
+            await this.persist()
+          } catch (error) {
+            existing.work = prior
+            this.persistencePending = true
+            throw error
+          }
+        }
+        return 'started'
+      }
+      this.entries.set(key, { work: cloneWork(work), state: 'started' })
+      try {
+        await this.persist()
+      } catch (error) {
+        this.entries.delete(key)
+        this.persistencePending = true
+        throw error
+      }
+      return 'new'
+    }, true)
+  }
+
   async complete(work: DispatchWorkItem, result: WorkItemResult): Promise<WorkResultJournalPersistence> {
     return await this.mutate(async () => {
       const key = workKey(work)

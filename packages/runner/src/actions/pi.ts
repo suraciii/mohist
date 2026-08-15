@@ -1,4 +1,4 @@
-import type { ActionResult, JsonObject, ParentIssueContext } from '../core/types.js'
+import type { ActionResult, AgentRecoveryBinding, JsonObject, ParentIssueContext } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { TaskLogger } from '../runtime/task-log.js'
 import type { PiRuntime } from '../runtime/pi/index.js'
@@ -43,6 +43,7 @@ interface ActionInvocationContext {
   cleanupAttempt?: number | null
   preparedPrompt?: string
   preparedOptions?: PiOptions
+  agentRecovery?: AgentRecoveryBinding | null
   log?: TaskLogger | null
 }
 
@@ -81,6 +82,7 @@ export async function piAction(
         cleanupAttempt: host.cleanupAttempt,
       }
     : (contextOrInputs as ActionInvocationContext)
+  if (context.agentRecovery) return await reconcileRecoveredTurn(context)
   const parsed = await parseInput(context)
   if (parsed.kind === 'failure') return parsed.result
   const { prompt, options } = parsed
@@ -313,6 +315,55 @@ export async function piAction(
       turnFact: { finalAssistantText: null },
     })
   return succeed(null, { exitCode: 0, turnFact: { finalAssistantText: finalText } })
+}
+
+/**
+ * Reconciliation for a recovery dispatch: the server re-delivered work
+ * whose result reporting was lost across a runner restart, carrying the
+ * recorded runtime binding. No prompt is ever submitted. The bound
+ * session's recorded turn decides: a terminal turn is adopted as the
+ * authoritative action result (the normal executor tail — expect,
+ * artifacts, worktree, set-vars — runs unchanged); anything not
+ * provably terminal (missing binding, missing session, foreign active
+ * turn, unready runtime) reports the wire `unknown`, which the server
+ * routes into settlement arbitration. An `unknown` report retires the
+ * runner fence but leaves the settlement unresolved, so the server
+ * keeps re-delivering and reconciliation re-runs idempotently.
+ */
+async function reconcileRecoveredTurn(context: ActionInvocationContext): Promise<ActionResult> {
+  const recovery = context.agentRecovery!
+  const runtime = context.piRuntime
+  if (!runtime || !runtime.ready()) {
+    return fail('runtime-unavailable', 'mohist/pi recovery requires a ready Pi runtime; reporting unknown', {
+      outcome: 'unknown',
+    })
+  }
+  if (recovery.runtime !== 'pi') {
+    return fail('turn-unresolved', `Runtime '${recovery.runtime}' exposes no turn adoption; reporting unknown`, {
+      outcome: 'unknown',
+    })
+  }
+  const inspected = await runtime.inspectTurn({
+    target: { runtime: 'pi', runtimeSessionId: recovery.runtimeSessionId, workDir: context.workDir },
+  })
+  if (!inspected.ok) {
+    return fail(runtimeErrorCode(inspected.error.kind), inspected.error.message, { outcome: 'unknown' })
+  }
+  const facts = inspected.value
+  if (facts.activeTurn) {
+    // Pi turns run in-process; a restarted runner can never own one. An
+    // active turn on the bound session belongs to a foreign process.
+    return fail('turn-unresolved', 'The bound Pi Session is streaming under another process; reporting unknown', {
+      outcome: 'unknown',
+    })
+  }
+  if (facts.failed) {
+    return fail('turn-failed', facts.errorMessage ?? 'The recorded Pi turn failed', {
+      exitCode: 1,
+      turnFact: { finalAssistantText: null },
+    })
+  }
+  return succeed(null, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
 }
 
 function buildPromptLoaderContext(

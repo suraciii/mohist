@@ -103,6 +103,17 @@ export interface AgentSessionStartup {
   agentName?: string | null
 }
 
+/**
+ * Server-recorded runtime binding attached to an unresolved-agent
+ * redelivery. Its presence marks the dispatch as a recovery probe: the
+ * runner must reconcile the recorded execution, never submit a new
+ * prompt. Mirrors `WorkDispatch.AgentRecovery` on the server.
+ */
+export interface AgentRecoveryBinding {
+  runtime: string
+  runtimeSessionId: string
+}
+
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
@@ -156,6 +167,12 @@ export type WorkDispatchResponse = {
    * `WorkDispatch.InitialTurnId` on the server.
    */
   initialTurnId?: string | null
+  /**
+   * Server-recorded runtime binding for unresolved-agent redelivery.
+   * Present only on recovery dispatches; marks the work as a
+   * reconciliation probe. Mirrors `WorkDispatch.AgentRecovery`.
+   */
+  agentRecovery?: AgentRecoveryBinding | null
 }
 
 /**
@@ -249,6 +266,7 @@ export interface DispatchWorkItem {
    * `WorkDispatch.InitialTurnId` on the server.
    */
   initialTurnId?: string | null
+  agentRecovery?: AgentRecoveryBinding | null
 }
 
 export interface AddTaskInput {

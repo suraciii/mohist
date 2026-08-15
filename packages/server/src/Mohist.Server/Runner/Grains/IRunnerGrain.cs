@@ -262,10 +262,26 @@ public record WorkDispatch(
     /// the Turn without trusting mutable Session labels.
     /// </summary>
     [property: Id(26)] string? TaskRunId = null,
-    [property: Id(27)] CapabilityClaimExpectation? CapabilityClaim = null)
+    [property: Id(27)] CapabilityClaimExpectation? CapabilityClaim = null,
+    /// <summary>
+    /// Runtime binding recorded on the attempt's agent result settlement.
+    /// Present only on re-delivered dispatches for still-unresolved agent
+    /// work: the runner must reconcile against the bound execution instead
+    /// of submitting a new prompt. Null on fresh dispatches.
+    /// </summary>
+    [property: Id(28)] AgentRecoveryBinding? AgentRecovery = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }
+
+/// <summary>
+/// The runtime facts a runner needs to reconcile already-started agent work:
+/// enough to probe and adopt the recorded execution, nothing more.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentRecoveryBinding(
+    [property: Id(0)] string Runtime,
+    [property: Id(1)] string RuntimeSessionId);
 
 public static class WorkDispatchOwnerKinds
 {

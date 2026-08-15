@@ -40,6 +40,27 @@ export class RecoveredStartedWork {
     }
   }
 
+  /**
+   * Admits a delivery-driven reconciliation into the unknown-report
+   * path (runtimes with no turn-adoption API). Distinct from
+   * `recover()`: this is current-process state for work the server just
+   * re-delivered, not a startup fence sweep.
+   */
+  enqueue(work: DispatchWorkItem): void {
+    const key = workKey(work)
+    if (this.entries.has(key)) return
+    this.entries.set(key, { work, attempts: 0, retryAt: 0 })
+  }
+
+  /**
+   * Cancels a startup unknown-report entry because a re-delivered
+   * dispatch has taken over reconciliation of that work identity under
+   * the journal fence.
+   */
+  drop(key: string): void {
+    this.entries.delete(key)
+  }
+
   async retryDue(now: number): Promise<void> {
     const due = [...this.entries.entries()].filter(([, entry]) => entry.retryAt !== null && entry.retryAt <= now)
     await Promise.all(

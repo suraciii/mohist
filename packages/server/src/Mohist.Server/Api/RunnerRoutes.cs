@@ -804,7 +804,8 @@ public static partial class RunnerRoutes
             ParentIssueContext: parentIssueContext,
             AgentDefinition: work.AgentDefinition,
             AgentSessionStartup: work.AgentSessionStartup,
-            TaskRunId: work.TaskRunId);
+            TaskRunId: work.TaskRunId,
+            AgentRecovery: work.AgentRecovery);
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
@@ -1103,37 +1104,7 @@ public record RunnerRuntimeEventReceipt(
     string? InputDeliveryId = null,
     string? AgentTurnId = null,
     string? AgentSessionId = null);
-public record WorkDispatchResponse(
-    string WorkflowRunId,
-    string WorkId,
-    string? Uses,
-    string? With,
-    string? Variables,
-    string WorkType,
-    string? Stage,
-    string? Title,
-    string? ProjectId = null,
-    int? IssueNumber = null,
-    int? EpicNumber = null,
-    string? Artifacts = null,
-    string? SetVars = null,
-    string? OwnerKind = null,
-    string? AgentJobId = null,
-    /// <summary>
-    /// AgentSession id for the dispatch envelope. Set for agent-job
-    /// dispatches whose launch minted a generic (non-workflow)
-    /// AgentSession; the runner uses it verbatim as the session
-    /// identity for runtime events. Null for workflow dispatches and
-    /// AgentJob validation dispatches.
-    /// </summary>
-    string? AgentSessionId = null,
-    string? Recovery = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
-    string? Expect = null,
-    ParentIssueContextResponse? ParentIssueContext = null,
-    AgentExecutionDefinition? AgentDefinition = null,
-    AgentSessionStartup? AgentSessionStartup = null,
-    string? TaskRunId = null);
+
 
 public sealed record ParentIssueContextResponse(string Title, string? Body);
 

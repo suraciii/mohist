@@ -88,9 +88,9 @@ public sealed class DispatchService : IScopedService
             reportedWorkKeys,
             dispatches,
             ct);
-        // Unresolved Agent work is deliberately absent from desired
-        // redelivery, but a connected Runner still reports its execution as
-        // occupying a slot until it retires the key itself.
+        // Unresolved Agent work re-enters desired redelivery for its recorded
+        // runner as a recovery probe; a connected Runner that still reports
+        // the key suppresses the re-delivery.
         activeWorkKeys.UnionWith(reportedWorkKeys);
         var spare = slots - activeWorkKeys.Count;
         if (spare <= 0)
@@ -145,7 +145,7 @@ public sealed class DispatchService : IScopedService
         foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(runnerId, ct))
         {
             ct.ThrowIfCancellationRequested();
-            var (workKey, dispatch) = await RenderActiveWorkflowAsync(
+            var (workKey, dispatch, reserveSlot) = await RenderActiveWorkflowAsync(
                 workflowRunId,
                 runnerId,
                 reportedWorkKeys,
@@ -153,7 +153,10 @@ public sealed class DispatchService : IScopedService
             if (workKey is null)
                 continue;
 
-            activeWorkKeys.Add(workKey);
+            // A recovery render is a reconciliation probe, not an execution:
+            // it occupies a slot only while the runner reports holding it.
+            if (reserveSlot)
+                activeWorkKeys.Add(workKey);
             if (dispatch is not null)
                 dispatches.Add(dispatch);
         }
@@ -321,7 +324,7 @@ public sealed class DispatchService : IScopedService
         return null;
     }
 
-    private async Task<(string? WorkKey, WorkDispatch? Dispatch)> RenderActiveWorkflowAsync(
+    private async Task<(string? WorkKey, WorkDispatch? Dispatch, bool ReserveSlot)> RenderActiveWorkflowAsync(
         string workflowRunId,
         string runnerId,
         IReadOnlySet<string> reportedWorkKeys,
@@ -329,18 +332,18 @@ public sealed class DispatchService : IScopedService
     {
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
         if (run is null)
-            return (WorkflowOwnerKey(workflowRunId), null);
+            return (WorkflowOwnerKey(workflowRunId), null, ReserveSlot: true);
         if (run.HasUnresolvedAgentResult())
-            return (null, null);
+            return await RenderUnresolvedAgentRecoveryAsync(run, workflowRunId, runnerId, reportedWorkKeys, ct);
 
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is null)
-            return (WorkflowOwnerKey(workflowRunId), null);
+            return (WorkflowOwnerKey(workflowRunId), null, ReserveSlot: true);
 
         var workId = activeWork.WorkId;
         var workKey = WorkflowWorkKey(workflowRunId, workId);
         if (reportedWorkKeys.Contains(workKey))
-            return (workKey, null);
+            return (workKey, null, ReserveSlot: true);
 
         try
         {
@@ -348,22 +351,22 @@ public sealed class DispatchService : IScopedService
             {
                 var storedJson = await _dispatchSnapshots.LoadJsonAsync(workflowRunId, workId, ct);
                 if (storedJson is not null)
-                    return (workKey, JSON.Deserialize<WorkDispatch>(storedJson)!);
+                    return (workKey, JSON.Deserialize<WorkDispatch>(storedJson)!, ReserveSlot: true);
             }
 
             var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
             var concrete = WithIssueFromRun(dispatch, run);
             if (activeWork.IsChecks)
-                return (workKey, concrete);
+                return (workKey, concrete, ReserveSlot: true);
 
             var saved = await StoreDispatchAsync(workflowRunId, runnerId, workId, concrete);
-            return (workKey, saved);
+            return (workKey, saved, ReserveSlot: true);
         }
         catch (WorkflowDispatchRejectedException ex)
         {
             ct.ThrowIfCancellationRequested();
             await RejectWorkflowDispatchAsync(workflowRunId, runnerId, workId, ex);
-            return (null, null);
+            return (null, null, ReserveSlot: true);
         }
         catch (OperationCanceledException)
         {
@@ -375,7 +378,70 @@ public sealed class DispatchService : IScopedService
                 "failed to render redelivery dispatch for run {run} work {work}",
                 workflowRunId,
                 workId);
-            return (workKey, null);
+            return (workKey, null, ReserveSlot: true);
+        }
+    }
+
+    /// <summary>
+    /// Unresolved agent work is re-delivered only to the runner identity
+    /// recorded on the attempt and only while a full runtime binding lets
+    /// the runner reconcile (adopt or surface unknown) instead of
+    /// re-executing. The dispatch is re-rendered from persisted facts —
+    /// settlement reconciliation deletes dispatch snapshots — and is never
+    /// stored: snapshot storage is closed for unresolved runs.
+    /// </summary>
+    private async Task<(string? WorkKey, WorkDispatch? Dispatch, bool ReserveSlot)> RenderUnresolvedAgentRecoveryAsync(
+        WorkflowRun run,
+        string workflowRunId,
+        string runnerId,
+        IReadOnlySet<string> reportedWorkKeys,
+        CancellationToken ct)
+    {
+        var settlementTask = run.FindUnresolvedAgentResultSettlementTask();
+        if (settlementTask is null)
+            return (null, null, ReserveSlot: false);
+
+        var settlement = settlementTask.Task.AgentResultSettlement!;
+        var binding = settlement.Runtime is not null && settlement.RuntimeSessionId is not null
+            ? new AgentRecoveryBinding(settlement.Runtime, settlement.RuntimeSessionId)
+            : null;
+        var activeWork = run.CurrentActiveWorkFor(runnerId);
+        if (binding is null
+            || activeWork is not { IsTask: true }
+            || !string.Equals(activeWork.TaskRunId, settlementTask.Task.Id, StringComparison.Ordinal)
+            || !string.Equals(settlement.RunnerId, runnerId, StringComparison.Ordinal))
+        {
+            return (null, null, ReserveSlot: false);
+        }
+
+        var workKey = WorkflowWorkKey(workflowRunId, activeWork.WorkId);
+        if (reportedWorkKeys.Contains(workKey))
+            return (workKey, null, ReserveSlot: false);
+
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
+            var recovery = WithIssueFromRun(dispatch, run) with { AgentRecovery = binding };
+            return (workKey, recovery, ReserveSlot: false);
+        }
+        catch (WorkflowDispatchRejectedException ex)
+        {
+            ct.ThrowIfCancellationRequested();
+            await RejectWorkflowDispatchAsync(workflowRunId, runnerId, activeWork.WorkId, ex);
+            return (null, null, ReserveSlot: false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "failed to render agent recovery dispatch for run {run} work {work}",
+                workflowRunId,
+                activeWork.WorkId);
+            return (workKey, null, ReserveSlot: false);
         }
     }
 
