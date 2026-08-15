@@ -19,6 +19,18 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
+    public void BuiltInMohistSlackWithoutSelectedModel_IsUnknownAndAdmitted()
+    {
+        var result = AgentReadinessService.Evaluate(
+            BuiltInAgentCatalog.Resolve(BuiltInAgentCatalog.MohistSlackName),
+            null);
+
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
+        Assert.Empty(result.Gaps);
+        Assert.True(AgentConnectionDispatchDecision.For(result.State).Accepted);
+    }
+
+    [Fact]
     public void MissingAgentConfiguration_IsNotConfigured()
     {
         var result = AgentReadinessService.Evaluate(Agent() with { AgentConfig = null }, null);

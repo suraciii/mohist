@@ -57,6 +57,7 @@ public sealed class AgentReadinessService : IScopedService
 
     public async Task<AgentExecutabilityResult> GetAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
     {
+        if (IsBuiltInAgent(agent)) return Unknown();
         var structuralGaps = StructuralGaps(agent);
         if (structuralGaps.Count > 0) return NotConfigured(structuralGaps);
         return Evaluate(agent, await _jobs.GetLatestExecutionAsync(projectId, agent.Id, ct));
@@ -71,6 +72,7 @@ public sealed class AgentReadinessService : IScopedService
 
     public static AgentExecutabilityResult Evaluate(AgentInfo agent, AgentExecutionHistory? history)
     {
+        if (IsBuiltInAgent(agent)) return Unknown();
         var structuralGaps = StructuralGaps(agent);
         if (structuralGaps.Count > 0) return NotConfigured(structuralGaps);
         if (history is null || !MatchesCurrentDefinition(agent, history.Input)) return Unknown();
@@ -132,6 +134,11 @@ public sealed class AgentReadinessService : IScopedService
             && string.Equals(AgentLauncher.ResolveReasoningEffort(agent.AgentConfig), input.ReasoningEffort, StringComparison.Ordinal)
             && agent.Skills.SequenceEqual(input.Skills ?? [], StringComparer.Ordinal);
     }
+
+    private static bool IsBuiltInAgent(AgentInfo agent) =>
+        string.Equals(agent.Id, $"builtin:{BuiltInAgentCatalog.MohistSlackName}", StringComparison.Ordinal)
+        && string.Equals(agent.ProjectId, BuiltInAgentCatalog.MohistSlackProjectId, StringComparison.Ordinal)
+        && string.Equals(agent.Name, BuiltInAgentCatalog.MohistSlackName, StringComparison.Ordinal);
 
     private static bool IsConfigurationFailure(string? category)
     {

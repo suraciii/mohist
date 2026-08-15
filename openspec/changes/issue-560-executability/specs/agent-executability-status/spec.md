@@ -25,6 +25,13 @@ persisted.
 - **THEN** the Agent's executability is `not-executable`
 - **AND** it is not presented as a missing-definition gap
 
+#### Scenario: The canonical Slack manager has no selected model
+
+- **WHEN** the Agent is the catalog's canonical `mohist-slack` built-in
+- **THEN** its executability is `unknown` even though its runtime-only
+  definition has no model
+- **AND** no saved project Agent receives this exception
+
 ### Requirement: One admission boundary
 
 All Agent launch entry points SHALL consume the Server executability projection.
