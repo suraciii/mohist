@@ -64,6 +64,52 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task RunnerRestart_StartedFenceObservation_EntersUnknownWithoutTerminalFailure()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            "agent-job-recovery-unknown-runner",
+            projectId: "agent-job-recovery-unknown-project");
+        var jobKey = "agent-job-recovery-unknown";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("preserve unknown after runner restart", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.UnregisterAsync();
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+
+        var unknown = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult(
+                "unknown",
+                "Runner restarted after a durable started fence without a completed result receipt."));
+
+        Assert.True(unknown.Accepted);
+        Assert.Equal("unknown", unknown.Reason);
+        var unknownResult = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Unknown, unknownResult.Status);
+        Assert.Contains("durable started fence", unknownResult.FailureReason, StringComparison.Ordinal);
+
+        var duplicateUnknown = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult("unknown", "same observation"));
+        Assert.True(duplicateUnknown.Accepted);
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
+
+        var terminal = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult("completed", "authoritative result after reconciliation"));
+        Assert.True(terminal.Accepted);
+        Assert.Equal(AgentJobStatus.Completed, await job.GetStatusAsync());
+        await runner.UnregisterAsync();
+    }
+
+    [Fact]
     public async Task RunnerRestart_PreservesEveryActiveAgentWorkWithoutPartialTerminalization()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(

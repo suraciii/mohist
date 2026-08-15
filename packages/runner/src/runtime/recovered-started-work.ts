@@ -92,6 +92,13 @@ export class RecoveredStartedWork {
 
 function isRecoverableAgentStartedWork(work: DispatchWorkItem): boolean {
   const ownerKind = work.ownerKind?.trim().toLowerCase()
+  if (ownerKind === 'agent-job') {
+    // AgentJob has its own durable Unknown state. The receipt is still
+    // runtime-neutral: the owner identity is enough to establish that the
+    // original physical dispatch must not be replayed.
+    return Boolean(work.agentJobId?.trim()) && Boolean(work.workId.trim())
+  }
+
   const uses = work.uses?.trim().toLowerCase()
   return (
     (!ownerKind || ownerKind === 'workflow') &&
