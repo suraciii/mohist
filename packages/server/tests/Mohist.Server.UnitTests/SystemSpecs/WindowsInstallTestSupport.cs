@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading.Channels;
 using Mohist.Cli;
 using Mohist.Server.TestSupport;
 
@@ -21,11 +22,13 @@ internal static class WindowsInstallTestSupport
     internal static string ServerMetadata => Path.Combine(ServiceDir, "mohist-server.install.json");
     internal static string RunnerMetadata => Path.Combine(ServiceDir, "mohist-runner.install.json");
     internal static string ServerLog => Path.Combine(UserProfile, ".mohist", "server", "out.log");
+    internal static string RunnerLog => Path.Combine(UserProfile, ".mohist", "runner", "out.log");
 
     internal static WindowsScheduledTaskInstaller CreateInstaller(
         FakeFileSystem files,
         FakeCommandExecutor commands,
         StringWriter? output = null,
+        StringWriter? error = null,
         Func<ProcessStartInfo, Process?>? processLauncher = null,
         Func<string, ILogChangeObserver>? logChangeObserverFactory = null,
         Func<string, Task<bool>>? healthProbe = null)
@@ -33,7 +36,7 @@ internal static class WindowsInstallTestSupport
         processLauncher ??= static _ => null;
         return new WindowsScheduledTaskInstaller(
             output ?? new StringWriter(),
-            new StringWriter(),
+            error ?? new StringWriter(),
             files,
             commands,
             processLauncher,
@@ -84,6 +87,35 @@ internal static class WindowsInstallTestSupport
         }
     }
 
+    internal sealed class FakeFileSystemWatcher : ILogChangeObserver
+    {
+        private readonly Channel<TaskCompletionSource> _changes = Channel.CreateUnbounded<TaskCompletionSource>();
+
+        public async Task ObserveAsync(Func<Task> onChanged, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await foreach (var completed in _changes.Reader.ReadAllAsync(cancellationToken))
+                {
+                    await onChanged();
+                    completed.TrySetResult();
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+        }
+
+        public async Task RaiseChangedAsync()
+        {
+            var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await _changes.Writer.WriteAsync(completed);
+            await completed.Task;
+        }
+
+        public void Dispose() => _changes.Writer.TryComplete();
+    }
+
     internal static string Launcher(WindowsServiceTarget target) =>
         target == WindowsServiceTarget.Server ? ServerLauncher : RunnerLauncher;
 
@@ -93,8 +125,14 @@ internal static class WindowsInstallTestSupport
     internal static string Metadata(WindowsServiceTarget target) =>
         target == WindowsServiceTarget.Server ? ServerMetadata : RunnerMetadata;
 
+    internal static string Log(WindowsServiceTarget target) =>
+        target == WindowsServiceTarget.Server ? ServerLog : RunnerLog;
+
     internal static string TaskName(WindowsServiceTarget target) =>
         target == WindowsServiceTarget.Server ? "Mohist_Server" : "Mohist_Runner";
+
+    internal static string ProcessName(WindowsServiceTarget target) =>
+        target == WindowsServiceTarget.Server ? "dotnet.exe" : "node.exe";
 
     internal static ServiceInstallOptions TargetInstallOptions(WindowsServiceTarget target) =>
         target == WindowsServiceTarget.Server
@@ -108,4 +146,22 @@ internal static class WindowsInstallTestSupport
         target == WindowsServiceTarget.Server
             ? installer.InstallServerAsync(options)
             : installer.InstallRunnerAsync(options);
+
+    internal static Task<int> StartAsync(WindowsScheduledTaskInstaller installer, WindowsServiceTarget target, ServiceCommandOptions options) =>
+        target == WindowsServiceTarget.Server ? installer.StartServerAsync(options) : installer.StartRunnerAsync(options);
+
+    internal static Task<int> StopAsync(WindowsScheduledTaskInstaller installer, WindowsServiceTarget target, ServiceCommandOptions options) =>
+        target == WindowsServiceTarget.Server ? installer.StopServerAsync(options) : installer.StopRunnerAsync(options);
+
+    internal static Task<int> RestartAsync(WindowsScheduledTaskInstaller installer, WindowsServiceTarget target, ServiceCommandOptions options) =>
+        target == WindowsServiceTarget.Server ? installer.RestartServerAsync(options) : installer.RestartRunnerAsync(options);
+
+    internal static Task<int> StatusAsync(WindowsScheduledTaskInstaller installer, WindowsServiceTarget target, ServiceCommandOptions options) =>
+        target == WindowsServiceTarget.Server ? installer.StatusServerAsync(options) : installer.StatusRunnerAsync(options);
+
+    internal static Task<int> LogsAsync(WindowsScheduledTaskInstaller installer, WindowsServiceTarget target, ServiceCommandOptions options) =>
+        target == WindowsServiceTarget.Server ? installer.LogsServerAsync(options) : installer.LogsRunnerAsync(options);
+
+    internal static Task<int> UninstallAsync(WindowsScheduledTaskInstaller installer, WindowsServiceTarget target, ServiceCommandOptions options) =>
+        target == WindowsServiceTarget.Server ? installer.UninstallServerAsync(options) : installer.UninstallRunnerAsync(options);
 }

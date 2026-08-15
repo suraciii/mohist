@@ -2292,7 +2292,7 @@
     },
     {
       "id": "current-windows-service-lifecycle",
-      "kind": "current",
+      "kind": "moved",
       "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs",
@@ -2330,9 +2330,32 @@
       "owner": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests",
       "moveContract": {
         "owner": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests",
-        "helpers": [{"role": "filesystem"}, {"role": "command"}, {"role": "process"}, {"role": "watcher"}, {"role": "time"}],
-        "target": {"path": "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs", "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests"},
-        "split": {"maxTargetLines": 299, "maxTargetFiles": 2, "maxHelperFiles": 5}
+        "helpers": [
+          {
+            "role": "filesystem"
+          },
+          {
+            "role": "command"
+          },
+          {
+            "role": "process"
+          },
+          {
+            "role": "watcher"
+          },
+          {
+            "role": "time"
+          }
+        ],
+        "target": {
+          "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs",
+          "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests"
+        },
+        "split": {
+          "maxTargetLines": 299,
+          "maxTargetFiles": 2,
+          "maxHelperFiles": 5
+        }
       },
       "history": {
         "operation": "residual-review",
@@ -2351,11 +2374,17 @@
         "caseIdentityDigest": "509ddac3aff2c35f5390d71caea9710f3fe5420992423c473414a252840674f3",
         "closureIdentityDigest": "372db43df8c415252b11e963476c409589a2fc3816f9d65a8483fbd7cb7fb607",
         "sourceContentDigest": "8aac709cc3297158e1e6302c3407b81e3868ba78ebe70dde1abbf620bc8fbceb"
+      },
+      "moved": {
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs",
+        "targetPath": "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs",
+        "targetFqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests"
       }
     },
     {
       "id": "current-fail-if-marker-review",
-      "kind": "current",
+      "kind": "moved",
       "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
@@ -2375,7 +2404,7 @@
         "inlineDataRows": 0,
         "mtpCases": 3
       },
-      "status": "BLOCKED",
+      "status": "MOVE",
       "closure": {
         "classification": "serializer-only-no-fixture-body",
         "symbols": [
@@ -2412,9 +2441,26 @@
       "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
       "moveContract": {
         "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
-        "helpers": [{"role": "serializer"}, {"role": "extension"}, {"role": "fixture"}],
-        "target": {"path": "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs", "fqn": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests"},
-        "split": {"maxTargetLines": 299, "maxTargetFiles": 1, "maxHelperFiles": 3}
+        "helpers": [
+          {
+            "role": "serializer"
+          },
+          {
+            "role": "extension"
+          },
+          {
+            "role": "fixture"
+          }
+        ],
+        "target": {
+          "path": "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs",
+          "fqn": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests"
+        },
+        "split": {
+          "maxTargetLines": 299,
+          "maxTargetFiles": 1,
+          "maxHelperFiles": 3
+        }
       },
       "history": {
         "operation": "residual-review",
@@ -2433,11 +2479,17 @@
         "caseIdentityDigest": "25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884",
         "closureIdentityDigest": "925bbae144c1470d6800a3d96159bf5ba2e5b2b8fa69fa97e7607c054f0242b1",
         "sourceContentDigest": "9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b"
+      },
+      "moved": {
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
+        "targetPath": "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs",
+        "targetFqn": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests"
       }
     },
     {
       "id": "current-mohist-hub",
-      "kind": "current",
+      "kind": "moved",
       "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
@@ -2455,9 +2507,20 @@
       "owner": "Mohist.Server.UnitTests.Events.MohistHubTests",
       "moveContract": {
         "owner": "Mohist.Server.UnitTests.Events.MohistHubTests",
-        "helpers": [{"role": "events"}],
-        "target": {"path": "Mohist.Server.UnitTests/Events/MohistHubTests.cs", "fqn": "Mohist.Server.UnitTests.Events.MohistHubTests"},
-        "split": {"maxTargetLines": 299, "maxTargetFiles": 1, "maxHelperFiles": 1}
+        "helpers": [
+          {
+            "role": "events"
+          }
+        ],
+        "target": {
+          "path": "Mohist.Server.UnitTests/Events/MohistHubTests.cs",
+          "fqn": "Mohist.Server.UnitTests.Events.MohistHubTests"
+        },
+        "split": {
+          "maxTargetLines": 299,
+          "maxTargetFiles": 1,
+          "maxHelperFiles": 1
+        }
       },
       "history": {
         "operation": "current-inventory",
@@ -2494,11 +2557,17 @@
         "theoryMethods": 0,
         "inlineDataRows": 0,
         "mtpCases": 9
+      },
+      "moved": {
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs",
+        "targetPath": "Mohist.Server.UnitTests/Events/MohistHubTests.cs",
+        "targetFqn": "Mohist.Server.UnitTests.Events.MohistHubTests"
       }
     },
     {
       "id": "current-mohist-hub-project-affinity",
-      "kind": "current",
+      "kind": "moved",
       "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
@@ -2516,9 +2585,20 @@
       "owner": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests",
       "moveContract": {
         "owner": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests",
-        "helpers": [{"role": "events"}],
-        "target": {"path": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs", "fqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"},
-        "split": {"maxTargetLines": 299, "maxTargetFiles": 1, "maxHelperFiles": 1}
+        "helpers": [
+          {
+            "role": "events"
+          }
+        ],
+        "target": {
+          "path": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
+          "fqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"
+        },
+        "split": {
+          "maxTargetLines": 299,
+          "maxTargetFiles": 1,
+          "maxHelperFiles": 1
+        }
       },
       "history": {
         "operation": "current-inventory",
@@ -2556,11 +2636,17 @@
         "theoryMethods": 0,
         "inlineDataRows": 0,
         "mtpCases": 7
+      },
+      "moved": {
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs",
+        "targetPath": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
+        "targetFqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"
       }
     },
     {
       "id": "current-recording-background-task-launcher",
-      "kind": "current",
+      "kind": "moved",
       "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
@@ -2580,7 +2666,7 @@
         "inlineDataRows": 0,
         "mtpCases": 9
       },
-      "status": "REVIEW",
+      "status": "MOVE",
       "closure": {
         "classification": "static-light-fake-seam",
         "symbols": [
@@ -2609,6 +2695,12 @@
         "caseIdentityDigest": "3efff962a7080862c43049184c27104e53a703b9ff7b89912c73352b81a7dc1e",
         "closureIdentityDigest": "e868d138d08f54a105807398962defa4151af69cafcbc3cb9dbcf79ee6a051ff",
         "sourceContentDigest": "4f310c12eda988e2584c152d0a83b9599ab12e01803b2590f13f1bf29a9c6bb2"
+      },
+      "moved": {
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+        "targetPath": "Mohist.Server.UnitTests/Events/RecordingBackgroundTaskLauncherTests.cs",
+        "targetFqn": "Mohist.Server.UnitTests.Events.RecordingBackgroundTaskLauncherTests"
       }
     }
   ]
