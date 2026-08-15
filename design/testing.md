@@ -91,9 +91,10 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 ### 4. Fast and concise
 
 The duration budget is enforced by the test-duration guard
-(`scripts/test-duration/`, `npm run test:budget`) through the canonical gate in
-both local and CI execution. CI never substitutes independent suite jobs plus a
-later report-only check for the scheduler. The guard is two hard constraints,
+(`scripts/test-duration/`, `npm run test:budget`) through the canonical local
+gate. CI keeps its regular build-and-test checks; it does not reconstruct
+duration evidence from independently restored jobs, because that changes the
+resource ownership and duration environment. The guard is two hard constraints,
 both FAIL — never a warning:
 
 | Constraint | What it proves | Threshold |
@@ -143,13 +144,11 @@ readable; do not compress statements onto one line to satisfy the counter.
 
 ### Repository CI time budget
 
-The whole CI job and the local canonical gate must each finish within five
-minutes. The test-duration guard enforces one absolute five-minute deadline
-(cross-platform Node-spawned kill; never the Linux `timeout` binary as the only
-executor) plus the per-track deadlines above. CI and local run the same guard.
-Their outer process walls reserve different setup and cleanup margins, but both
-are stricter than the guard's deadline. Reaching any deadline is an abnormal
-condition to diagnose, not a normal way to finish a test run.
+The local canonical gate must finish within five minutes. The test-duration
+guard enforces one absolute five-minute deadline (cross-platform Node-spawned
+kill; never the Linux `timeout` binary as the only executor) plus the per-track
+deadlines above. Reaching any deadline is an abnormal condition to diagnose,
+not a normal way to finish a test run.
 
 ### Canonical local gate
 
@@ -160,10 +159,9 @@ contract is:
 timeout -k 10s 300s npm run verify
 ```
 
-CI gives the job seven minutes for checkout, setup, install, the gate, cleanup,
-and diagnostic upload. Its gate step uses `timeout -k 10s 300s npm run verify`,
-matching the canonical absolute deadline while leaving the job-level wall for
-bounded process-tree convergence and artifact upload.
+CI does not run the canonical gate. Its regular jobs stay the required green
+checks for merge; the gate's five-minute proof is a local, host-exclusive
+acceptance obligation.
 
 It is not followed by `npm test` or `npm run test:budget -- --all`: the
 canonical gate already covers their controlled work. Focused commands,
@@ -333,13 +331,12 @@ lanes cancelled or not started by fail-fast; cancelled lanes are not recast as
 independent report-production failures. A completed lane with a missing, stale,
 empty, failed, skipped, or not-run report is a failure, not a green omission.
 
-CI invokes `npm run verify` once in one job after one dependency install. That
-job runs the same canonical scheduler, fresh build, resources, duration
-measurement prefix, two Spec partitions, coverage lane, report parser, and
-failure semantics as local execution. CI uploads that one external diagnostic
-run directory after success or failure; it does not reconstruct a gate by
-downloading reports from separately built jobs. The CI machine boundary supplies
-the host-exclusive precondition for that invocation.
+CI does not invoke the canonical gate. Its regular build-and-test jobs remain
+the required merge checks; the gate's five-minute, host-exclusive proof is a
+local acceptance obligation recorded on the tracking issue. Local evidence
+bundles the run directory, plan, build stamp, and report totals from one clean
+invocation instead of reconstructing a gate by downloading reports from
+separately built jobs.
 
 #### Host-exclusive performance measurements
 
@@ -348,12 +345,12 @@ are deliberately per-run claims: they prevent this gate from oversubscribing
 itself, but cannot reserve CPU, Orleans scheduling, or ports from an arbitrary
 direct apphost, build, or test loop in another worktree. A local duration
 acceptance run therefore has a host-exclusive precondition: before starting
-`timeout -k 10s 270s npm run verify`, its operator obtains a host with no other
+`timeout -k 10s 300s npm run verify`, its operator obtains a host with no other
 Mohist build or Server Spec host running. A result captured while that condition
 is false remains useful raw failure evidence, but is not a valid performance
 baseline or a basis for changing the p95 policy. The foreign process is stopped
 by its owner; the canonical gate never waits for, polls, retries, or terminates
-it. CI satisfies this condition through the job machine boundary.
+it.
 
 The gate intentionally has neither an OS-wide process scanner nor a
 cross-worktree lock. Process enumeration is not a reliable cross-platform
