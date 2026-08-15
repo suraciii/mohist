@@ -10,6 +10,8 @@ export interface PartitionPlan {
   readonly count: number
   readonly allClasses: readonly string[]
   readonly selectedClasses: readonly string[]
+  readonly selectedCaseCount: number
+  readonly totalCaseCount: number
 }
 
 export interface PartitionArtifact {
@@ -18,6 +20,8 @@ export interface PartitionArtifact {
   readonly count: number
   readonly allClasses: readonly string[]
   readonly selectedClasses: readonly string[]
+  readonly selectedCaseCount: number
+  readonly totalCaseCount: number
 }
 
 export function partitionExecutionArguments(
@@ -52,16 +56,7 @@ function requireInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer`)
 }
 
-export function planPartitionClasses(
-  discoveredOutput: string,
-  partitionIndex: number,
-  partitionCount: number,
-): PartitionPlan {
-  requireInteger(partitionIndex, 'partition-index')
-  requireInteger(partitionCount, 'partition-count')
-  if (partitionCount === 0) throw new Error('partition-count must be greater than zero')
-  if (partitionIndex >= partitionCount) throw new Error('partition-index must be less than partition-count')
-
+function parseClassNames(discoveredOutput: string): string[] {
   const rawClasses = discoveredOutput
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -75,12 +70,82 @@ export function planPartitionClasses(
   }
   const classes = [...rawClasses].sort(compareText)
   for (let index = 1; index < classes.length; index++) {
-    if (classes[index] === classes[index - 1])
+    if (classes[index] === classes[index - 1]) {
       throw new Error(`class discovery returned duplicate classes: ${classes[index]}`)
+    }
   }
-  const selectedClasses = classes.filter((_, index) => index % partitionCount === partitionIndex)
+  return classes
+}
+
+function parseCaseCounts(testDiscoveryOutput: string, classes: readonly string[]): Map<string, number> {
+  const counts = new Map(classes.map((className) => [className, 0]))
+  const prefixes = [...classes].sort((left, right) => right.length - left.length || compareText(left, right))
+  for (const line of testDiscoveryOutput
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean)) {
+    const owner = prefixes.find((className) => line.startsWith(`${className}.`))
+    if (owner === undefined) throw new Error(`test discovery returned unknown test: ${line}`)
+    counts.set(owner, counts.get(owner)! + 1)
+  }
+  for (const className of classes) {
+    if (counts.get(className) === 0) throw new Error(`test discovery returned no tests for class: ${className}`)
+  }
+  return counts
+}
+
+function assignWeightedClasses(
+  classes: readonly string[],
+  caseCounts: ReadonlyMap<string, number>,
+  partitionCount: number,
+): Array<{
+  readonly index: number
+  readonly total: number
+  readonly classes: string[]
+}> {
+  const buckets = Array.from({ length: partitionCount }, (_, index) => ({
+    index,
+    total: 0,
+    classes: [] as string[],
+  }))
+  const weighted = classes
+    .map((className) => ({ className, cases: caseCounts.get(className) ?? 0 }))
+    .sort((left, right) => right.cases - left.cases || compareText(left.className, right.className))
+  for (const item of weighted) {
+    const bucket = buckets.reduce((best, current) => (current.total < best.total ? current : best))
+    bucket.classes.push(item.className)
+    bucket.total += item.cases
+  }
+  return buckets
+}
+
+export function planPartitionClasses(
+  discoveredOutput: string,
+  partitionIndex: number,
+  partitionCount: number,
+  testDiscoveryOutput?: string,
+): PartitionPlan {
+  requireInteger(partitionIndex, 'partition-index')
+  requireInteger(partitionCount, 'partition-count')
+  if (partitionCount === 0) throw new Error('partition-count must be greater than zero')
+  if (partitionIndex >= partitionCount) throw new Error('partition-index must be less than partition-count')
+
+  const classes = parseClassNames(discoveredOutput)
+  const caseCounts =
+    testDiscoveryOutput === undefined
+      ? new Map(classes.map((className) => [className, 1]))
+      : parseCaseCounts(testDiscoveryOutput, classes)
+  const buckets = assignWeightedClasses(classes, caseCounts, partitionCount)
+  const selectedClasses = [...buckets[partitionIndex].classes].sort(compareText)
   if (selectedClasses.length === 0) throw new Error(`partition ${partitionIndex} has no classes`)
-  return { index: partitionIndex, count: partitionCount, allClasses: classes, selectedClasses }
+  return {
+    index: partitionIndex,
+    count: partitionCount,
+    allClasses: classes,
+    selectedClasses,
+    selectedCaseCount: buckets[partitionIndex].total,
+    totalCaseCount: classes.reduce((total, className) => total + caseCounts.get(className)!, 0),
+  }
 }
 
 export function verifyPartitionArtifacts(artifacts: readonly PartitionArtifact[]): {
@@ -96,8 +161,19 @@ export function verifyPartitionArtifacts(artifacts: readonly PartitionArtifact[]
   const selected = new Set<string>()
   const canonicalClasses = [...first.allClasses].sort(compareText)
   if (canonicalClasses.length === 0) throw new Error('partition artifact has no discovered classes')
+  if (!Number.isInteger(first.totalCaseCount) || first.totalCaseCount <= 0) {
+    throw new Error('partition artifact has no discovered test cases')
+  }
+  let selectedCaseCount = 0
   for (const artifact of artifacts) {
     if (artifact.count !== first.count) throw new Error('partitions declare different counts')
+    if (artifact.totalCaseCount !== first.totalCaseCount) {
+      throw new Error('partitions discovered different test case totals')
+    }
+    if (!Number.isInteger(artifact.selectedCaseCount) || artifact.selectedCaseCount <= 0) {
+      throw new Error(`partition ${artifact.index} has no discovered test cases`)
+    }
+    selectedCaseCount += artifact.selectedCaseCount
     if (artifact.index < 0 || artifact.index >= artifact.count) {
       throw new Error(`partition index ${artifact.index} is outside count ${artifact.count}`)
     }
@@ -118,6 +194,9 @@ export function verifyPartitionArtifacts(artifacts: readonly PartitionArtifact[]
   if (selected.size !== canonicalClasses.length || canonicalClasses.some((className) => !selected.has(className))) {
     throw new Error('selected class union does not equal complete discovered class list')
   }
+  if (selectedCaseCount !== first.totalCaseCount) {
+    throw new Error('selected test case union does not equal complete discovered test list')
+  }
   return { classes: canonicalClasses.length, partitions: first.count }
 }
 
@@ -127,7 +206,7 @@ function writePlan(manifestDirectory: string, plan: PartitionPlan): void {
   writeFileSync(resolve(manifestDirectory, 'selected-classes.txt'), `${plan.selectedClasses.join('\n')}\n`)
   writeFileSync(
     resolve(manifestDirectory, 'partition.txt'),
-    `index=${plan.index}\ncount=${plan.count}\ntotal_classes=${plan.allClasses.length}\nselected_classes=${plan.selectedClasses.length}\n`,
+    `index=${plan.index}\ncount=${plan.count}\ntotal_classes=${plan.allClasses.length}\nselected_classes=${plan.selectedClasses.length}\ntotal_cases=${plan.totalCaseCount}\nselected_cases=${plan.selectedCaseCount}\n`,
   )
 }
 
@@ -135,7 +214,12 @@ function readLines(path: string): string[] {
   return readFileSync(path, 'utf8').split(/\r?\n/).filter(Boolean)
 }
 
-function parseMetadata(path: string): { readonly index: number; readonly count: number } {
+function parseMetadata(path: string): {
+  readonly index: number
+  readonly count: number
+  readonly totalCaseCount: number
+  readonly selectedCaseCount: number
+} {
   const values = new Map<string, string>()
   for (const line of readLines(path)) {
     const separator = line.indexOf('=')
@@ -143,10 +227,14 @@ function parseMetadata(path: string): { readonly index: number; readonly count: 
   }
   const index = Number(values.get('index'))
   const count = Number(values.get('count'))
+  const totalCaseCount = Number(values.get('total_cases'))
+  const selectedCaseCount = Number(values.get('selected_cases'))
   requireInteger(index, 'index')
   requireInteger(count, 'count')
+  requireInteger(totalCaseCount, 'total_cases')
+  requireInteger(selectedCaseCount, 'selected_cases')
   if (count === 0) throw new Error('partition metadata has a zero count')
-  return { index, count }
+  return { index, count, totalCaseCount, selectedCaseCount }
 }
 
 function loadArtifacts(directory: string): PartitionArtifact[] {
@@ -172,6 +260,8 @@ function loadArtifacts(directory: string): PartitionArtifact[] {
         count: metadata.count,
         allClasses: readLines(allPath),
         selectedClasses: readLines(selectedPath),
+        totalCaseCount: metadata.totalCaseCount,
+        selectedCaseCount: metadata.selectedCaseCount,
       }
     })
 }
@@ -207,12 +297,15 @@ async function runPartition(
   reportPath: string,
 ): Promise<void> {
   if (!existsSync(apphost)) throw new Error(`apphost does not exist: ${apphost}`)
-  const discovery = await runCommand(apphost, ['-list', 'classes', '-noColor', '-noLogo', '-noAutoReporters'])
+  const discoveryArgs = ['-noColor', '-noLogo', '-noAutoReporters']
+  const discovery = await runCommand(apphost, ['-list', 'classes', ...discoveryArgs])
   if (discovery.exitCode !== 0) throw new Error('xUnit class discovery failed')
-  const plan = planPartitionClasses(discovery.output, partitionIndex, partitionCount)
+  const testDiscovery = await runCommand(apphost, ['-list', 'tests', '-preEnumerateTheories', ...discoveryArgs])
+  if (testDiscovery.exitCode !== 0) throw new Error('xUnit test discovery failed')
+  const plan = planPartitionClasses(discovery.output, partitionIndex, partitionCount, testDiscovery.output)
   writePlan(manifestDirectory, plan)
   console.log(
-    `Spec partition ${plan.index + 1}/${plan.count}: ${plan.selectedClasses.length} of ${plan.allClasses.length} classes`,
+    `Spec partition ${plan.index + 1}/${plan.count}: ${plan.selectedClasses.length} of ${plan.allClasses.length} classes (${plan.selectedCaseCount}/${plan.totalCaseCount} cases)`,
   )
   mkdirSync(dirname(reportPath), { recursive: true })
   const execution = await runCommand(
