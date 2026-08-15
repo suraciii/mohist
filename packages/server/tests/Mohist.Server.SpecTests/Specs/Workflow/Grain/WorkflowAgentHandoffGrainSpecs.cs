@@ -465,7 +465,7 @@ public sealed class WorkflowAgentHandoffGrainFixture : IAsyncLifetime
 public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPreflight
 {
     private readonly object _gate = new();
-    private readonly Dictionary<(string ProjectId, string AgentRef), WorkflowAgentHandoffAgent> _definitions = [];
+    private readonly Dictionary<(string ProjectId, string AgentRef), AgentExecutionIdentitySnapshot> _definitions = [];
     private readonly Dictionary<(string ProjectId, string AgentRef), int> _resolveCounts = [];
 
     public void Reset()
@@ -495,13 +495,13 @@ public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPr
             return _resolveCounts.GetValueOrDefault((projectId, agentRef));
     }
 
-    public Task<WorkflowAgentHandoffAgent?> ResolveAgentAsync(string projectId, string agentRef)
+    public Task<AgentExecutionIdentitySnapshot?> ResolveAgentAsync(string projectId, string agentRef)
     {
         lock (_gate)
         {
             var key = (projectId, agentRef);
             _resolveCounts[key] = _resolveCounts.GetValueOrDefault(key) + 1;
-            return Task.FromResult<WorkflowAgentHandoffAgent?>(
+            return Task.FromResult<AgentExecutionIdentitySnapshot?>(
                 _definitions.GetValueOrDefault(key));
         }
     }

@@ -48,7 +48,7 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
         }
 
         var rejection = Validate(command);
-        WorkflowAgentHandoffAgent? agent = null;
+        AgentExecutionIdentitySnapshot? agent = null;
         WorkflowAgentInvocation? invocation = null;
         if (rejection is null)
         {
