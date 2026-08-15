@@ -30,6 +30,7 @@ import { SessionCommandJournal } from './session-command-journal.js'
 import { FollowupOperationJournal } from './followup-operation-journal.js'
 import { CancelOperationJournal } from './cancel-operation-journal.js'
 import { WorkResultJournal, workKey as journalWorkKey } from './work-result-journal.js'
+import { RecoveredStartedWork } from './recovered-started-work.js'
 import { loadBuildInfo } from './build-info.js'
 import type { DispatchWorkItem } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
@@ -147,13 +148,12 @@ export class RunnerHost {
   private readonly followupOperationJournal: FollowupOperationJournal
   private readonly cancelOperationJournal: CancelOperationJournal
   private readonly workResultJournal: WorkResultJournal
+  private readonly recoveredStartedWork: RecoveredStartedWork
   private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
 
-  // The active outer-run signal. The onReconnected callback fires from
-  // outside the run loop, so we capture the signal here to bound the
-  // immediate heartbeat it triggers.
+  // Lets an out-of-loop reconnect callback bound its immediate heartbeat.
   private activeSignal: AbortSignal | null = null
 
   // WorkExecutor is created once per host
@@ -228,6 +228,7 @@ export class RunnerHost {
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
     this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
     this.workResultJournal = new WorkResultJournal(options.runnerRoot)
+    this.recoveredStartedWork = new RecoveredStartedWork(this.workResultJournal, this.connection)
     this.terminalTaskLogDelivery =
       dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? delay
@@ -481,6 +482,7 @@ export class RunnerHost {
       return
     }
     this.promoteDurableJournalResults(0)
+    this.recoveredStartedWork.recover()
   }
 
   private async shutdownSharedConnection() {
@@ -824,6 +826,7 @@ export class RunnerHost {
         }
       }),
     )
+    await this.recoveredStartedWork.retryDue(now)
   }
 
   private nextReconciliationInterval(): number {
@@ -833,6 +836,7 @@ export class RunnerHost {
         earliestRetryAt = entry.retryAt
       }
     }
+    earliestRetryAt = this.recoveredStartedWork.earlierRetryAt(earliestRetryAt)
     if (earliestRetryAt === null) return this.options.pollIntervalMs
     return Math.min(this.options.pollIntervalMs, Math.max(0, earliestRetryAt - Date.now()))
   }

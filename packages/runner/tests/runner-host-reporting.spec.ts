@@ -238,6 +238,145 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('Restart_ReportsOnlyRecoveredAgentStartedFencesAsUnknownWithoutReplayingWork', async () => {
+    const observationAcknowledged = deferred<void>()
+    const agentWork = {
+      workflowRunId: 'wr-recovered-agent-started',
+      workId: 'work-recovered-agent-started',
+      taskRunId: 'task-recovered-agent-started',
+      workType: 'task',
+      uses: 'mohist/pi',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const ordinaryWork = {
+      workflowRunId: 'wr-recovered-ordinary-started',
+      workId: 'work-recovered-ordinary-started',
+      taskRunId: 'task-recovered-ordinary-started',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(agentWork)
+    await journal.begin(ordinaryWork)
+
+    const originalAcknowledgeUnconfirmed = WorkResultJournal.prototype.acknowledgeUnconfirmed
+    const acknowledgeUnconfirmed = vi
+      .spyOn(WorkResultJournal.prototype, 'acknowledgeUnconfirmed')
+      .mockImplementation(async function (this: WorkResultJournal, work) {
+        await originalAcknowledgeUnconfirmed.call(this, work)
+        if (work.workId === agentWork.workId) observationAcknowledged.resolve()
+      })
+    report.mockResolvedValue({ tracked: true, reason: 'accepted' })
+    poll.mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await observationAcknowledged.promise
+
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflowRunId: agentWork.workflowRunId,
+          workId: agentWork.workId,
+          taskRunId: agentWork.taskRunId,
+        }),
+        expect.objectContaining({
+          status: 'unknown',
+          message: 'Runner restarted after a durable started fence without a completed result receipt.',
+        }),
+        expect.any(AbortSignal),
+      )
+      expect(blockingAction).not.toHaveBeenCalled()
+
+      const persisted = new WorkResultJournal('/virtual/mohist-runner-test')
+      await persisted.load()
+      expect(persisted.started()).toEqual([{ work: ordinaryWork, state: 'started' }])
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      acknowledgeUnconfirmed.mockRestore()
+    }
+  })
+
+  it('Restart_RetriesRecoveredAgentStartedObservationUntilItsFenceCanBeDurablyRetired', async () => {
+    const firstObservation = deferred<void>()
+    const retired = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-recovered-started-retry',
+      workId: 'work-recovered-started-retry',
+      taskRunId: 'task-recovered-started-retry',
+      workType: 'task',
+      uses: 'mohist/opencode',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+
+    let attempts = 0
+    report.mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) {
+        firstObservation.resolve()
+        return { tracked: false, reason: 'observation-not-durable' }
+      }
+      return { tracked: true, reason: 'accepted' }
+    })
+    const originalAcknowledgeUnconfirmed = WorkResultJournal.prototype.acknowledgeUnconfirmed
+    const acknowledgeUnconfirmed = vi
+      .spyOn(WorkResultJournal.prototype, 'acknowledgeUnconfirmed')
+      .mockImplementation(async function (this: WorkResultJournal, acknowledged) {
+        await originalAcknowledgeUnconfirmed.call(this, acknowledged)
+        if (acknowledged.workId === work.workId) retired.resolve()
+      })
+    poll.mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await firstObservation.promise
+      const retained = new WorkResultJournal('/virtual/mohist-runner-test')
+      await retained.load()
+      expect(retained.started()).toEqual([{ work, state: 'started' }])
+
+      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
+      await retired.promise
+
+      expect(report.mock.calls.map((calls) => calls[1]?.status)).toEqual(['unknown', 'unknown'])
+      const retiredJournal = new WorkResultJournal('/virtual/mohist-runner-test')
+      await retiredJournal.load()
+      expect(retiredJournal.started()).toEqual([])
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      acknowledgeUnconfirmed.mockRestore()
+    }
+  })
+
   it('AbortAfterReturnedResult_PersistsAndRedrivesTheReceiptWithoutReexecution', async () => {
     const executionStarted = deferred<void>()
     const receiptAcknowledged = deferred<void>()

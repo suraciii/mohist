@@ -136,6 +136,11 @@ export class WorkResultJournal {
       .map(cloneEntry)
   }
 
+  started(): WorkResultJournalEntry[] {
+    this.ensureReady()
+    return [...this.entries.values()].filter((entry) => entry.state === 'started').map(cloneEntry)
+  }
+
   async acknowledge(work: DispatchWorkItem): Promise<void> {
     await this.mutate(async () => {
       const key = workKey(work)
@@ -144,6 +149,30 @@ export class WorkResultJournal {
       if (!sameWork(existing.work, work)) throw new Error(`Work result journal identity conflict for ${key}`)
       if (existing.state !== 'completed')
         throw new Error(`Work result journal cannot acknowledge unfinished work ${key}`)
+      this.entries.delete(key)
+      try {
+        await this.persist()
+      } catch (error) {
+        this.entries.set(key, existing)
+        this.persistencePending = true
+        throw error
+      }
+    }, true)
+  }
+
+  /**
+   * Retires a recovered execution fence after the owner durably acknowledges
+   * a non-terminal unknown-outcome observation. This does not represent a
+   * work result and is deliberately separate from completed-result ack.
+   */
+  async acknowledgeUnconfirmed(work: DispatchWorkItem): Promise<void> {
+    await this.mutate(async () => {
+      const key = workKey(work)
+      const existing = this.entries.get(key)
+      if (!existing) return
+      if (!sameWork(existing.work, work)) throw new Error(`Work result journal identity conflict for ${key}`)
+      if (existing.state !== 'started')
+        throw new Error(`Work result journal cannot acknowledge a non-started work ${key}`)
       this.entries.delete(key)
       try {
         await this.persist()

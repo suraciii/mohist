@@ -28,6 +28,24 @@ entry and awaiting-ack work, so an accepted result can be replayed safely.
 5. Report the original work identity. Remove the journal entry only after the
    existing durable Accepted/Stale acknowledgement contract succeeds.
 
+On process startup, the Runner snapshots durable `started` entries before it
+claims any new work. For a Workflow Agent dispatch with a non-empty persisted
+task-run identity, it reports `status: unknown` through the existing result
+route after connection. That is an explicit result-unconfirmed observation, not
+a synthesized `WorkItemResult`: the Server matches the original
+`runnerId`/`taskRunId`/`workId` tuple and enters its existing unknown/blocked
+settlement. The Runner retains the `started` fence until that observation gets
+an Accepted or Stale acknowledgement, then removes it atomically. A transport
+or local-delete failure leaves the original fence durable and retries the same
+observation.
+
+Only entries loaded before this process begins admitting work are eligible.
+Current-process `started` entries, checks, AgentJobs, ordinary tasks, and
+legacy entries without a complete Workflow Agent attempt identity stay fenced;
+they are never projected as unknown reports. This prevents an active execution
+from being mistaken for a lost result and prevents the generic task fallback
+from turning an unsupported work type into a failure.
+
 This is identity redelivery, not physical execution replay. It recovers the
 result-before-report crash window. A process that died while the physical
 execution was still unresolved remains unknown and is not inferred from a
