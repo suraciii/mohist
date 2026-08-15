@@ -51,6 +51,21 @@ payload, but an interruption needs its own state; mapping it to a failed or
 unknown `WorkItemResult` would respectively fail the workflow or re-enter the
 existing blocked path rather than recover it.
 
+## Shutdown Handoff
+
+The `update-interrupted` payload's triggering fact is Server-owned: the CLI
+is the only party to the interrupt confirmation, and no existing Runner
+channel carries update knowledge. The Runner therefore establishes the fact
+at shutdown, the moment the receipt decision is made: with in-flight work it
+performs a bounded, authenticated query for its most recent not-yet-settled
+update operation, whose response carries the operation id, creation time, and
+affected-work inventory. A returned operation — and only that — makes the
+shutdown update-caused and supplies the operation id receipts reference.
+Receipts are written only for in-flight works the returned inventory names.
+An ordinary restart with no pending operation, an unreachable Server, or an
+expired handoff budget yields no receipts: `started` fences stand and the
+work is reported unresolved, exactly like a stop that cannot be confirmed.
+
 ## Server Arbitration
 
 The WorkflowRun owns receipt arbitration in the same persistence transaction
@@ -79,6 +94,8 @@ settle the replacement execution.
 | --- | --- |
 | Exact terminal receipt, delivery fails | Retain and replay the same receipt |
 | Exact confirmed update interruption, delivery fails | Retain and replay the same receipt |
+| Shutdown handoff: no pending operation (ordinary restart) | No receipts; `started` fences stand |
+| Shutdown handoff: unreachable or budget expired | No receipts; `started` fences stand; honest unresolved |
 | Runner update while receipt is not yet durable | Do not restart as recovered; retain the existing unresolved fence |
 | OOM or process loss with only `started` | Preserve `agent-result-unconfirmed`; no re-execution |
 | Idle/missing runtime or transcript text | Preserve `agent-result-unconfirmed`; no inference |

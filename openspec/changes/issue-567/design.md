@@ -165,26 +165,61 @@ need. The payload contract remains the runtime-neutral
 `RuntimeRecoveryReceipt` from [`recovery.md`](recovery.md) (exactly one of
 `terminal-result` | `update-interrupted`; the latter carries no task outcome).
 
-### D3. Runtime stop confirmation reuses the existing `stopConfirmed` protocol
+### D3. A bounded pending-operation handoff establishes the update fact; stop confirmation reuses the existing `stopConfirmed` protocol
 
-On shutdown, `RunnerHost` performs a bounded cooperative interruption of each
-in-flight turn: call the runtime adapter's stop path (Pi: `cancel`-style
-`session.abort()` + `isStreaming` watch → `stopConfirmed`; OpenCode: its
-lifecycle stop, confirmed via its event subscription) and wait within a fixed
-budget. Outcomes map to the receipt contract:
+The receipt's triggering input is Server-owned: only the Server knows that a
+shutdown is update-caused and which operation it belongs to, and (see
+Context) no existing channel delivers that fact to the Runner process. The
+Runner therefore establishes it at the moment of decision — shutdown:
 
-- Turn returned a result before/after the abort signal → `terminal-result`
-  receipt (D2/landed path).
-- Runtime confirms the bound turn is no longer executing →
-  `update-interrupted` receipt referencing the update operation.
-- Stop unconfirmed, runtime unreachable, or budget expired → **no receipt**;
-  the entry stays a `started` fence and the work is honestly reported
-  unresolved. An idle observation or transcript text never manufactures a
-  receipt.
+1. **Handoff.** On shutdown with in-flight work, the Runner queries the
+   Server over the existing authenticated runner API (e.g.
+   `GET /api/runner/{id}/update-operation/pending`) for its most recent
+   update operation that is not yet fully settled. The query has its own
+   small fixed budget — brief retries included, so a `full` update's
+   just-restarted Server can still answer (the Server restarts before the
+   Runner in that flow) — and completes before the cooperative stop begins;
+   with nothing in flight it is skipped. A returned operation carries the
+   operation id, creation time, and the affected-work inventory. That
+   response, and only that, is what makes this shutdown update-caused: an
+   ordinary service restart finds no pending operation and must not produce
+   receipts. It is also the receipts' sole source of the operation id — the
+   CLI's `/update-interrupt` confirmation never reaches the Runner.
+2. **Cooperative stop.** The Runner then performs a bounded cooperative
+   interruption of each in-flight turn: call the runtime adapter's stop path
+   (Pi: `cancel`-style `session.abort()` + `isStreaming` watch →
+   `stopConfirmed`; OpenCode: its lifecycle stop, confirmed via its event
+   subscription) and wait within a fixed budget. Outcomes map to the receipt
+   contract:
+   - Turn returned a result before/after the abort signal → `terminal-result`
+     receipt (D2/landed path).
+   - Runtime confirms the bound turn is no longer executing *and* the
+     handoff's inventory names the work → `update-interrupted` receipt
+     referencing the fetched operation.
+   - Stop unconfirmed, runtime unreachable, budget expired, work not named
+     by the inventory, or no operation known (handoff empty, unreachable, or
+     expired) → **no receipt**; the entry stays a `started` fence and the
+     work is honestly reported unresolved. An idle observation or transcript
+     text never manufactures a receipt.
+
+The inventory rule keeps a stale pending operation (e.g. an abandoned
+confirmed interrupt) safe and quiet: works it does not name get no receipts,
+and the Server's arbitration remains the authority for any mismatch.
 
 Update-caused stop failures (e.g. `session.abort` transport failure while the
 host tears down) are classified in this layer as update-interruption context,
 not surfaced as raw fetch errors (see D6).
+
+*Why a shutdown-time fetch rather than a SignalR push at fence creation or a
+poll-response field:* a push can be lost (reconnecting Runner) and would
+still need a fetch fallback at the decision point; a poll field can be
+missed (the 204-when-idle contract; the service stop can beat the next poll)
+and would cache a fact that a later unrelated restart could act on. The
+fetch is authoritative at the moment the receipt decision is made,
+distinguishes update-caused from ordinary shutdown by construction, needs no
+new Runner-side durability, and handles chained updates naturally (a second
+confirmed update fences the replacement identities; the next shutdown's
+fetch returns the new operation).
 
 ### D4. Receipt delivery rides a dedicated acknowledge-and-retry endpoint
 
@@ -256,6 +291,7 @@ claims.
 
 - [Fence creation spans several grains; a crash mid-marking leaves a partial operation] -> The operation record is persisted first and every marking call is idempotent; retry of `/update-interrupt` completes the marking set; the confirmation (and restart authorization) is only returned once all markings are committed.
 - [Runtime refuses or cannot confirm a stop within the budget] -> No receipt is written; the `started` fence stands; the update reports that work unresolved. Honest failure over a guessed receipt — this is the core safety property.
+- [Shutdown handoff cannot reach the Server (e.g. a `full` update just restarted it)] -> The handoff budget includes brief retries; on expiry no receipts are written, `started` fences stand, and the update reports that work unresolved — the same honest-failure rule as a stop-unconfirmed. `runner`-scope updates always have the Server up.
 - [Old Runner still running pre-change code during first rollout] -> It sends no receipts; the fence still exists and the work is reported unresolved; the legacy `agent-result-unconfirmed` path remains the backstop. Safe degradation, no rollback needed.
 - [Journal file grows with retained interrupted entries awaiting ack] -> Entries retire on acknowledgement exactly like `completed` today; bounded by the number of affected works per update.
 - [Late old-turn events racing the replacement] -> Original settlement frozen; arbitration rejects any event or report carrying the original AgentTurn/work identity once a replacement exists; stale is a terminal ack.
@@ -289,9 +325,7 @@ settlement deadline, matching pre-change behavior.
 
 ## Open Questions
 
-- Default and maximum values for the cooperative stop budget (Runner) and the
-  CLI recovery-wait bound — start with constants, make them configurable
-  where ops needs vary?
+- Default and maximum values for the cooperative stop budget, the shutdown-handoff budget, and the CLI recovery-wait bound — start with constants, make them configurable where ops needs vary?
 - Should `AgentJob` replacement dispatch reuse the job's prompt/input as-is,
   or is a fresh input envelope required for turn-coordinator bookkeeping?
 - Does the OpenCode stop confirmation need a new runtime-side surface, or is
