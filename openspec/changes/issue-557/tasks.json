@@ -1,0 +1,174 @@
+{
+  "project": "mohist-local",
+  "description": "Make reasoning effort a first-class execution configuration: a canonical reasoningEffort vocabulary on every write surface, the frozen (runtime, model, reasoningEffort, variant) + capabilityRevision tuple in all durable snapshots, versioned runtime catalog evidence separating variants from efforts, a pure typed-disposition resolver gating admission behind a claim-time capability fence, runtime-private native translation (Pi thinking level; OpenCode explicit unsupported), readiness/evidence/Web/CLI surfacing, and the deliberate removal of the Pi variant/thinking-level smuggling with no compatibility layer.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Canonical reasoningEffort write surface: AgentConfigSchema, issue override, and CLI",
+      "spec": "specs/agent-reasoning-effort/spec.md#write-surfaces-accept-reasoneffort",
+      "description": "Add the canonical `reasoningEffort` vocabulary (`off|minimal|low|medium|high|xhigh|max` or unset) as an ordinary string-or-null key in `AgentConfigSchema`, accepted by both the Agent-definition surface (`AllowedKeys`) and the issue-level override (`IssueAllowedKeys`), with a shared `CanonicalReasoningEfforts` set and `ValidateReasoningEffort` helper so API, Web, and CLI use one list. Extend `mo agent create/update/view` with `--reasoning-effort` and mutually exclusive `--clear-reasoning-effort` (local validation against the canonical set, `ValidateClearSetPair` pattern, table rendering). The issue write-side merge paths (`IssueVariableBuilder`, `ConfigService`) pick the key up automatically via `IssueAllowedKeys`; `runtime` stays Agent-owned.",
+      "acceptanceCriteria": [
+        "`agentConfig.reasoningEffort` accepts each of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` and persists verbatim; a value outside the set (e.g. `extreme`) is rejected with an error naming all accepted values and nothing partial is persisted.",
+        "Wrong type, empty string, or non-null-non-string values are rejected under the same string-or-null, non-empty rules as `model` and `variant`; omitted or null effort is accepted.",
+        "Effort and variant stay independent: a config with both `reasoningEffort: high` and `variant: balanced` keeps both in separate fields, neither derived from or validated against the other.",
+        "The issue-level `agentConfig` override accepts `reasoningEffort` beside `model` and `variant` while still rejecting the Agent-owned `runtime` key, and the stored issue profile forwards the effort into the `vars.agent` execution options consumed by workflow agent tasks.",
+        "`mo agent create --reasoning-effort high` persists the effort and `mo agent view` renders it; `mo agent update --clear-reasoning-effort` removes only the effort key; passing both effort flags fails with a usage error; an invalid value is rejected locally before any request, listing accepted values.",
+        "Server schema tests cover the canonical set, wrong type/empty rejection, effort/variant independence, unset validity, and both write surfaces; CLI tests cover create/update/clear/view and local validation; relevant Server and CLI tests pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Canonical effort vocabulary and validation in AgentConfigSchema, issue-surface acceptance with vars.agent forwarding, CLI effort flags and view rendering, with passing schema and CLI tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1 + the CLI slice of D8. Also satisfies the requirements 'Canonical reasoning-effort vocabulary' and 'CLI exposes the effort on agent create, update, and view'. Keep the error message style mirroring the existing `runtime` message (names all accepted values). No write-time validation against a runner catalog — canonical-set validation only."
+    },
+    {
+      "id": "T-002",
+      "title": "Freeze the effort tuple in every durable execution snapshot across all launch paths",
+      "spec": "specs/agent-reasoning-effort/spec.md#every-launch-path-freezes-the-effort-in-the-execution-snapshot",
+      "description": "Resolve and freeze `reasoningEffort` exactly like `variant` on every launch path: `AgentLauncher.ResolveReasoningEffort` feeding the `AgentExecutionSnapshot` composition; append-only record fields on `AgentExecutionDefinition` (Id 6), `AgentJobInput` (Id 25), and `RoutedAgentLaunchPlan` (Id 22); `AgentJobGrain.BuildDispatchAsync` writes `with[\"reasoningEffort\"]` only when non-empty; `WorkflowItemTranslator` forwards `vars.agent.reasoningEffort` into `mohist/agent` dispatch options; the Runner plumbs `reasoningEffort` through `session-target.ts`, `followup-handler.ts` options, and `agent-job-executor.ts` (`readOptionalString`) into both turn executors. Later Agent edits, Agent deletion, or catalog changes never rewrite a frozen snapshot.",
+      "acceptanceCriteria": [
+        "Every durable snapshot — `AgentJobInput`, `RoutedAgentLaunchPlan`, the `WorkDispatch` `with` payload, `AgentExecutionDefinition`, and runner session-target/follow-up definitions — carries the resolved effort beside model and variant, on manual HTTP, subscription/routed, mention, and workflow-task launch paths.",
+        "The dispatch `with` payload delivers the effort to the Runner, which reads it from the frozen payload and never re-reads the Agent definition to obtain it.",
+        "Editing the Agent's effort to `low` or deleting the Agent after a job was prepared with effort `high` leaves the in-flight job executing with the frozen `high`.",
+        "Append-only Orleans record conventions are respected: existing ids are unchanged, new fields use the design-assigned ids and deserialize when absent.",
+        "Runner executor tests cover payload plumbing into session-target, follow-up, and both turn executors, including absent effort; Server tests cover snapshot freezing on every launch path and immutability under Agent edit/delete.",
+        "Relevant Server and Runner tests and `npm run test:fast` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Effort resolution and append-only freezing across all server snapshot records, dispatch payload delivery, runner options/executor plumbing, and passing freezing/plumbing tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D2. Do not pack effort into the variant string — one more frozen member of the same tuple. The capabilityRevision field of the tuple is added by T-006 when the expectation protocol lands; this task freezes the four data members."
+    },
+    {
+      "id": "T-003",
+      "title": "Versioned runtime catalog entries separating true variants from reasoning efforts",
+      "spec": "specs/runtime-reasoning-capability/spec.md#versioned-runtime-catalog-entries-separate-variants-from-reasoning-efforts",
+      "description": "Extend the catalog wire contract append-only: `RuntimeCatalogEntry` on `IRunnerGrain.cs` (Orleans Ids 2–5) and the Runner's `core/types.ts` gain per-model `ReasoningEfforts`, `SupportsReasoningEffort`, `Complete`, and a content-derived `CapabilityRevision`; old runners omitting the fields deserialize fine on the Server. In `runtime/host.ts registrationState()`, Pi publishes its native thinking levels under `reasoningEfforts` with `supportsReasoningEffort: true`, `complete: true` only once the catalog has loaded, and an empty true-variant map — thinking levels stop appearing as variants; OpenCode registers `supportsReasoningEffort: false` with its true variants unchanged and no efforts. `RunnerRoutes`/`RunnerRegistryGrain` store the entry verbatim in `RunnerInfo.RuntimeCatalogs`, and the Web settings/runner model-metadata queries expose `reasoningEfforts` through the existing plumbing.",
+      "acceptanceCriteria": [
+        "Pi registration publishes each model's thinking levels under `reasoningEfforts` and its `variants` map contains no thinking level; OpenCode reports `supportsReasoningEffort=false`, preserves its true variants, and publishes no reasoning efforts.",
+        "`capabilityRevision` is derived from catalog content so an identical re-registration (runner restart/reconnect) keeps the same revision, while a real capability change produces a new immutable revision; earlier revisions remain identifiable in stored snapshots.",
+        "`complete` is reported true only once the runtime's catalog has actually loaded; a catalog entry without `Complete` and `CapabilityRevision` round-trips as non-authoritative (fields absent) rather than crashing old or new readers.",
+        "The Server stores entries verbatim in `RunnerInfo.RuntimeCatalogs` and the Web settings/runner model-metadata queries expose per-model `reasoningEfforts` alongside variants.",
+        "Runner tests cover Pi and OpenCode registration shapes, revision stability across identical re-registration, new revision on capability change, and complete-only-after-load; Server tests cover append-only deserialization of legacy entries and verbatim storage; relevant tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Append-only capability fields on both sides of the catalog wire, honest Pi/OpenCode registration with the variant/effort split, content-derived capability revisions, verbatim server storage, Web metadata exposure, and passing registration/wire tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D3. This lands the catalog half of the Pi variant/thinking-level break (levels no longer published as variants); the adapter half is T-004 and the explicit rejection is T-006. Confirm the content-hash revision is stable across serialization order on both sides before freeze (open question in design)."
+    },
+    {
+      "id": "T-004",
+      "title": "Native effort translation inside runtime adapters; delete the Pi variant/thinking-level smuggling",
+      "spec": "specs/runtime-reasoning-capability/spec.md#native-effort-translation-stays-inside-the-runtime-adapter",
+      "description": "Remove the variant→thinking-level application in `runtime/pi/runtime.ts` (both sites) and add private `mapThinkingLevel(options.reasoningEffort)` applied via `session.setThinkingLevel`, including the session-reuse carry-over path; the applied effort flows into the projector's `model_change`/resolved-model payload as `appliedReasoningEffort` only when an effort was frozen. `runtime/opencode/runtime.ts` fails an explicit `reasoningEffort` in dispatch options with category `unsupported_execution_configuration` — never appending it to the model id, writing it to the variant, or silently ignoring it. No runtime ever receives another runtime's native value.",
+      "acceptanceCriteria": [
+        "A supported Pi tuple with effort `high` and no variant maps `high` to Pi's native thinking level privately, and the execution evidence reports the applied effort.",
+        "A Pi dispatch carrying a variant but no effort never applies the variant to the thinking-level input; the old `if (options?.variant) session.setThinkingLevel(...)` paths are gone, and reused sessions carry over the effort-derived thinking level instead of a variant-derived one.",
+        "An OpenCode dispatch carrying an explicit reasoning effort fails with the `unsupported_execution_configuration` category; the effort never reaches the model id, variant, or is silently dropped.",
+        "A Pi-native thinking-level name never appears in any non-Pi adapter's model, variant, or effort fields (cross-runtime guard).",
+        "Absent effort is never synthesized into a default thinking level on any path.",
+        "Runner tests cover Pi effort→thinking-level mapping, variant-never-touches-thinking-level (including session reuse/carry-over), `appliedReasoningEffort` projection, and OpenCode explicit-effort rejection; relevant Runner tests and `npm run test:fast` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pi adapter applying canonical effort as a private thinking level with applied-effort projection, removed variant smuggling, OpenCode explicit-effort failure, and passing adapter tests.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Design D6 plus the adapter half of the Pi break. Keep the canonical→native mapping a private module function so Pi may diverge without a wire change. Saved Pi thinking-level variants become inert here; they become explicit deterministic rejections once T-006's resolver gates admission — the full 'removed with no compatibility layer' requirement is jointly met by T-003 + T-004 + T-006 with no migration, aliasing, or reinterpretation of stored data."
+    },
+    {
+      "id": "T-005",
+      "title": "Pure server-side capability resolver with five typed dispositions",
+      "spec": "specs/runtime-reasoning-capability/spec.md#a-pure-resolver-returns-typed-dispositions-for-the-frozen-tuple",
+      "description": "Add `Agent/Services/AgentExecutionCapabilityResolver` as a pure function over `(runtime, model, reasoningEffort, variant, catalog snapshot)` returning exactly one disposition — `supported` (with compatible runner identity), `needs-setup`, `unavailable`, `unsupported_execution_configuration`, `incompatible_execution_configuration` — per the design decision table. It mutates no owner state, claims no work, and executes nothing; explicit rejections are deterministic and unset effort imposes no requirement.",
+      "acceptanceCriteria": [
+        "A complete catalog revision listing the tuple's model, effort, and variant returns `supported` with the compatible runner identity.",
+        "An absent, incomplete, or revision-less catalog entry returns `needs-setup` (non-terminal); a known-but-not-ready runtime returns `unavailable` (pending).",
+        "`supportsReasoningEffort=false` plus an explicit effort returns `unsupported_execution_configuration`; a complete catalog explicitly lacking the tuple's model, effort, or variant returns `incompatible_execution_configuration` with the frozen tuple preserved in the failure evidence.",
+        "An unset effort on an effort-unsupported runtime produces no rejection.",
+        "Re-evaluating the same tuple against the same catalog reproduces the same disposition (determinism), and the resolver performs no grain writes, claims, or execution (enforced by its pure signature and tests).",
+        "Unit tests cover the full decision table — every disposition, every scenario in the spec requirement, legacy non-authoritative entries, determinism, and the unset-effort exemption; relevant Server tests pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pure AgentExecutionCapabilityResolver implementing the five-disposition decision table with runner identity on supported, and passing decision-table unit tests.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Design D4. A missing catalog must stay `needs-setup`, never `incompatible` — a transient registration gap must not become a terminal user error. Consumed by T-006's admission path on the same runner catalog snapshot that produces the dispatch."
+    },
+    {
+      "id": "T-006",
+      "title": "Resolver-gated admission with the conditional-claim capability fence and deterministic preflight failures",
+      "spec": "specs/runtime-reasoning-capability/spec.md#claims-are-fenced-by-an-immutable-capability-expectation",
+      "description": "Wire the capability fence from the prerequisite design: `AgentJob` gains a read-only pending-dispatch projection and a conditional claim that persists the capability revision with the ledger dispatch snapshot before claim-visibility; Workflow exposes a read-only next-work projection with a stable pending work id that `DispatchService` translates into a conditional claim. `IRunnerGrain.TryClaimAgentJobAsync`/`TryClaimWorkflowAsync` accept the immutable expectation (frozen tuple + capability revision + generations) and compare it against the grain's current `RunnerInfo` catalog under `_lifecycleGate`. `DispatchService.AddPendingDispatchesAsync` runs the T-005 resolver before the claim on the same runner catalog snapshot that produces the dispatch; only `supported` is admitted; the Runner validates incoming dispatch snapshots against its current `capabilityRevision` and deterministically rejects stale ones (re-pending the work). Explicit rejections become preflight failures carrying the frozen tuple, with `unsupported_execution_configuration`/`incompatible_execution_configuration` registered as EventCatalog failure categories.",
+      "acceptanceCriteria": [
+        "Only a `supported` disposition is admitted; `needs-setup` and `unavailable` skip the candidate without recording any failure, leaving the work pending — an absent or incomplete catalog never produces a dispatch or a terminal failure.",
+        "An explicit `unsupported_execution_configuration` or `incompatible_execution_configuration` disposition fails the work as a deterministic preflight failure carrying the frozen tuple and a matching EventCatalog failure category; re-evaluating the same tuple against the same catalog reproduces the same disposition.",
+        "A claim whose expectation matches the runner's current catalog revision is granted and the dispatch delivered; a re-registered catalog that no longer lists the frozen tuple refuses the claim and the work stays pending for re-resolution — the comparison happens under `_lifecycleGate` so heartbeat catalog repair cannot race the claim.",
+        "A dispatch snapshot frozen at revision R arriving at a runner whose current revision differs is rejected deterministically without execution, and the work is re-pended rather than silently executed with changed capability semantics.",
+        "The AgentJob conditional claim persists the capability revision with the ledger dispatch snapshot before the work becomes claim-visible, and `StoreActiveWorkDispatchAsync` remains the durable first-writer snapshot for Workflow claims.",
+        "The saved-Pi-thinking-level-variant scenario fails explicitly at preflight with the frozen tuple recorded — never applied as a thinking level, never silently dropped, with no migration or aliasing.",
+        "Server tests cover the fence (matching vs changed catalog, lifecycle-gate race), pending-on-absent-catalog, deterministic preflight failure with the frozen tuple, and both AgentJob and Workflow conditional-claim paths; Runner tests cover stale-snapshot rejection and re-pending; relevant tests pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Conditional AgentJob/Workflow claims with immutable capability expectations, resolver-gated admission on a single catalog snapshot, runner-side stale-snapshot rejection, preflight failure categories with frozen tuples, and passing fence/admission tests.",
+      "dependsOn": ["T-002", "T-003", "T-005"],
+      "passes": false,
+      "notes": "Design D5, also satisfying 'Only supported tuples are admitted'. Resolution and claim must observe the same catalog snapshot. Decide the open question on non-Agent workflow tasks (`mohist/pi`/`mohist/opencode` actions): freeze the tuple with unset effort for uniformity unless implementation shows an exemption is required — record the decision in the code. Mixed-version fleets degrade safely to `needs-setup`."
+    },
+    {
+      "id": "T-007",
+      "title": "Agent Readiness and execution evidence surface the effort",
+      "spec": "specs/agent-reasoning-effort/spec.md#agent-readiness-includes-the-effort",
+      "description": "Extend `AgentReadinessService`: `MatchesCurrentDefinition` compares the resolved reasoning effort beside model/variant; `StructuralGaps` reports an actionable `effort-without-model` setup gap; `IsConfigurationFailure` classifies `unsupported_execution_configuration` and `incompatible_execution_configuration` (normalized `_`→`-`) as Needs setup with guidance to update the Agent's execution configuration. Execution evidence records the applied effort: session model facts record the adapter-reported `appliedReasoningEffort` distinct from model and variant, and the AgentJob terminal result carries the frozen effort beside model and variant; absent effort is recorded as absent, never synthesized.",
+      "acceptanceCriteria": [
+        "An execution that ran with effort `high` no longer matches the current definition when the Agent defines effort `low` (and vice versa); matching executions require equal resolved effort.",
+        "An Agent with `reasoningEffort` set but no model yields a Needs-setup gap with actionable guidance naming the problem.",
+        "A latest execution failed with category `unsupported_execution_configuration` or `incompatible_execution_configuration` yields Needs setup with guidance to update the Agent's execution configuration.",
+        "A turn completing with frozen effort `high` records `high` as the applied effort in the session model facts and the AgentJob terminal output carries the effort beside model and variant.",
+        "A turn completing without a frozen effort records the effort as absent — no default value is synthesized anywhere in the evidence chain.",
+        "Server tests cover readiness definition-matching with effort, the effort-without-model gap, configuration-failure classification, and evidence recording (applied vs absent); relevant Server tests pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Effort-aware readiness matching, structural and failure-classification gaps, applied-effort evidence in session facts and AgentJob terminal results, and passing readiness/evidence tests.",
+      "dependsOn": ["T-002", "T-004", "T-006"],
+      "passes": false,
+      "notes": "Design D7 + the readiness/evidence half of D8, also satisfying 'Execution evidence records the applied effort'. Readiness failure messages should tell the user exactly which key to re-enter (`reasoningEffort`) — the escape hatch for saved Pi thinking-level variants."
+    },
+    {
+      "id": "T-008",
+      "title": "Web effort control and readiness display; runtime docs; end-to-end spec verification",
+      "spec": "specs/agent-reasoning-effort/spec.md#web-exposes-effort-as-its-own-control",
+      "description": "Give `AgentProfileEditor` a reasoning-effort control separate from the variant control, driven by the selected runtime/model's catalog `reasoningEfforts` (via the T-003 settings/runner model-metadata queries) — never by the `variants` map; `model-variants.ts`/`ModelOptionList` keep serving true variants only. A selection with no `reasoningEfforts` or `supportsReasoningEffort=false` renders no effort options and saves no effort for that selection; readiness display surfaces effort gaps from T-007. Update `design/runtimes/pi.md` (effort maps to a thinking level, variant no longer does), `design/runtimes/opencode.md` (effort-unsupported contract), and the Agent-configuration user docs. Own the final cross-slice verification of both capability specs' scenarios.",
+      "acceptanceCriteria": [
+        "The effort control offers exactly the selected model's catalog `reasoningEfforts` and offers nothing from the `variants` map; selecting effort `high` saves `agentConfig.reasoningEffort: high` and leaves any `variant` value unchanged.",
+        "For a selection reporting no `reasoningEfforts` or `supportsReasoningEffort=false`, the control renders no effort values and cannot save an effort for that selection.",
+        "The Web readiness display surfaces effort setup gaps (effort-without-model, execution-configuration failures) with actionable guidance.",
+        "`design/runtimes/pi.md`, `design/runtimes/opencode.md`, and the Agent-configuration user docs describe the effort vocabulary, the removed Pi variant semantics, and the re-entry path for saved thinking-level variants.",
+        "Spec/system tests cover both capability specs' scenarios end-to-end: pending on absent catalog, explicit rejection recorded with the frozen tuple, snapshot immutability, Pi effort application with recorded evidence, OpenCode explicit failure, and no-migration behavior.",
+        "Web unit tests cover the effort control's catalog-driven options and no-support rendering; `npm run test:fast` and the full `npm run verify` gate pass."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Catalog-driven Web effort control and readiness surfacing, updated runtime/user docs, end-to-end spec verification, and a passing full repository verification gate.",
+      "dependsOn": ["T-001", "T-003", "T-007"],
+      "passes": false,
+      "notes": "Design D8 (Web + docs) and D9 (spec/system coverage); this final coordinated slice owns `npm run verify`. The issue-level override UI stays Agent-profile-only in this change (per-launch UX is issue 556); the issue write surface itself already accepts the key from T-001."
+    }
+  ]
+}
