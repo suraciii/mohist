@@ -394,6 +394,18 @@ The fence itself never opens: `begin()` still refuses to return `new` for a
 execution no matter how often it repeats; each delivery just re-runs the same
 reconciliation decision (idempotent by construction).
 
+*Note on the landed `runner-work-result-recovery` spec:* its "process
+restarts before a result exists" scenario requires refusing re-execution
+and leaving Workflow outcome arbitration to the existing
+unresolved/authoritative-result/explicit-stop paths. Both MUSTs remain
+satisfied here: the fence never opens (no re-execution), and the definite
+outcomes surfaced in (3) flow *through* those existing arbitration paths —
+the wire `unknown` report routes into `ObserveAgentResultUnknownAsync`
+settlement, and non-agent failures reconcile as ordinary reports under the
+original identity — rather than fabricating results beside them. What
+changes is only that the runner acts on its local dead-execution facts
+instead of staying silent while the server deadline resolves the work.
+
 *Alternatives considered:*
 
 - Keep refusing and rely on the server deadline (D2) — rejected: it leaves
