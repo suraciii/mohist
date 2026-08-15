@@ -175,6 +175,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var runnerId = $"launch-name-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "name-fallback");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        string? jobId = null;
 
         try
         {
@@ -186,11 +187,13 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var data = payload.GetProperty("data");
+            jobId = data.GetProperty("jobId").GetString();
             Assert.Equal(agent.Id, data.GetProperty("agentId").GetString());
             Assert.Equal("name-fallback", data.GetProperty("agentName").GetString());
         }
         finally
         {
+            await CleanupLaunchedAgentJobAsync(runnerId, jobId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -266,7 +269,10 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         finally
         {
             if (claim is not null)
+            {
                 await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
+                await DrainDispatchAsync(runnerId);
+            }
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }

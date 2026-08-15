@@ -72,7 +72,10 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         finally
         {
             if (claim is not null)
+            {
                 await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.WorkId);
+                await DrainDispatchAsync(runnerId);
+            }
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -88,7 +91,7 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
             projectId,
             runnerId,
             "launch-exactly-once");
-        PollSnapshot? polled = null;
+        ClaimResult? claim = null;
 
         try
         {
@@ -107,18 +110,21 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
             var sessionsAfter = await CountAgentLaunchSessionsAsync(projectId);
             Assert.Equal(sessionsBefore + 1, sessionsAfter);
 
-            // Exactly one AgentJob: exactly one dispatch carrying that
-            // session id is observable on the runner, and that dispatch
-            // references the launched job id verbatim.
-            polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            Assert.Equal(jobId, polled.AgentJobId);
-            Assert.Equal(sessionId, polled.AgentSessionId);
-            Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);
+            // Exactly one AgentJob: the runner claims the durable dispatch
+            // that carries the launched identities verbatim.
+            claim = await AcquirePreparedAgentJobAsync(jobId, runnerId, projectId);
+            AssertPreparedAgentJobClaim(claim, jobId, runnerId, sessionId);
+            Assert.Equal(jobId, claim.AgentJobId);
+            Assert.Equal(sessionId, claim.Dispatch.AgentSessionId);
+            Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claim.Dispatch.OwnerKind);
         }
         finally
         {
-            if (polled is not null && polled.AgentJobId is not null)
-                await CompleteClaimedAgentJobAsync(runnerId, polled.AgentJobId, polled.WorkId);
+            if (claim is not null)
+            {
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
+                await DrainDispatchAsync(runnerId);
+            }
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }

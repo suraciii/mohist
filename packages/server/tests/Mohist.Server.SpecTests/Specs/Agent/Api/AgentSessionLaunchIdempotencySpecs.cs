@@ -23,27 +23,35 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-replay-renamed-agent");
         var agent = await CreateAgentAsync(projectId, "original-agent-name");
         const string idempotencyKey = "replay-after-agent-rename";
+        LaunchReferences? original = null;
 
-        using var first = await LaunchAsync(
-            projectId,
-            "original-agent-name",
-            new { prompt = "preserve original launch" },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
-        var original = await LaunchReferencesAsync(first);
+        try
+        {
+            using var first = await LaunchAsync(
+                projectId,
+                "original-agent-name",
+                new { prompt = "preserve original launch" },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+            original = await LaunchReferencesAsync(first);
 
-        using var rename = await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}",
-            new { name = "renamed-agent" });
-        rename.EnsureSuccessStatusCode();
+            using var rename = await _fixture.Client.PatchAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}",
+                new { name = "renamed-agent" });
+            rename.EnsureSuccessStatusCode();
 
-        using var replay = await LaunchAsync(
-            projectId,
-            "original-agent-name",
-            new { prompt = "preserve original launch" },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
-        Assert.Equal(original, await LaunchReferencesAsync(replay));
+            using var replay = await LaunchAsync(
+                projectId,
+                "original-agent-name",
+                new { prompt = "preserve original launch" },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
+            Assert.Equal(original, await LaunchReferencesAsync(replay));
+        }
+        finally
+        {
+            await CleanupLaunchedAgentJobAsync(null, original?.JobId);
+        }
     }
 
     [Fact]
@@ -52,26 +60,34 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-replay-archived-agent");
         var agent = await CreateAgentAsync(projectId, "replay-archived-agent");
         const string idempotencyKey = "replay-after-agent-archive";
+        LaunchReferences? original = null;
 
-        using var first = await LaunchAsync(
-            projectId,
-            agent.Id,
-            new { prompt = "preserve archived launch" },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
-        var original = await LaunchReferencesAsync(first);
+        try
+        {
+            using var first = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "preserve archived launch" },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+            original = await LaunchReferencesAsync(first);
 
-        using var archive = await _fixture.Client.DeleteAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}");
-        archive.EnsureSuccessStatusCode();
+            using var archive = await _fixture.Client.DeleteAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}");
+            archive.EnsureSuccessStatusCode();
 
-        using var replay = await LaunchAsync(
-            projectId,
-            agent.Id,
-            new { prompt = "preserve archived launch" },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
-        Assert.Equal(original, await LaunchReferencesAsync(replay));
+            using var replay = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "preserve archived launch" },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
+            Assert.Equal(original, await LaunchReferencesAsync(replay));
+        }
+        finally
+        {
+            await CleanupLaunchedAgentJobAsync(null, original?.JobId);
+        }
     }
 
     [Fact]
@@ -80,22 +96,31 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-replay-agent-reference");
         var agent = await CreateAgentAsync(projectId, "same-agent-different-reference");
         const string idempotencyKey = "different-agent-reference";
+        LaunchReferences? original = null;
 
-        using var first = await LaunchAsync(
-            projectId,
-            agent.Id,
-            new { prompt = "same prompt" },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        try
+        {
+            using var first = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "same prompt" },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+            original = await LaunchReferencesAsync(first);
 
-        using var replay = await LaunchAsync(
-            projectId,
-            "same-agent-different-reference",
-            new { prompt = "same prompt" },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
-        var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("launch_idempotency_conflict", payload.GetProperty("code").GetString());
+            using var replay = await LaunchAsync(
+                projectId,
+                "same-agent-different-reference",
+                new { prompt = "same prompt" },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+            var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("launch_idempotency_conflict", payload.GetProperty("code").GetString());
+        }
+        finally
+        {
+            await CleanupLaunchedAgentJobAsync(null, original?.JobId);
+        }
     }
 
     [Fact]
@@ -104,22 +129,31 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-replay-whitespace-prompt");
         var agent = await CreateAgentAsync(projectId, "whitespace-prompt-agent");
         const string idempotencyKey = "different-whitespace-prompt";
+        LaunchReferences? original = null;
 
-        using var first = await LaunchAsync(
-            projectId,
-            agent.Id,
-            new { prompt = "accepted prompt" },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        try
+        {
+            using var first = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "accepted prompt" },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+            original = await LaunchReferencesAsync(first);
 
-        using var replay = await LaunchAsync(
-            projectId,
-            agent.Id,
-            new { prompt = "   " },
-            idempotencyKey);
-        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
-        var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("launch_idempotency_conflict", payload.GetProperty("code").GetString());
+            using var replay = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "   " },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+            var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("launch_idempotency_conflict", payload.GetProperty("code").GetString());
+        }
+        finally
+        {
+            await CleanupLaunchedAgentJobAsync(null, original?.JobId);
+        }
     }
 
     /// <summary>
@@ -202,8 +236,15 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
                 if (claim is null && original is not null)
                     claim = await ClaimPreparedAgentJobAsync(original.JobId, runnerId, projectId, original.SessionId);
                 if (claim is not null)
+                {
                     await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.WorkId);
+                    await DrainDispatchAsync(runnerId);
+                }
                 await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            }
+            else
+            {
+                await CleanupLaunchedAgentJobAsync(null, original?.JobId);
             }
         }
     }
@@ -230,17 +271,25 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         }
 
         _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.EnsureInitialLaunch);
-        using var recovered = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
-        var refs = await LaunchReferencesAsync(recovered);
+        LaunchReferences? refs = null;
+        try
+        {
+            using var recovered = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
+            refs = await LaunchReferencesAsync(recovered);
 
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(refs.SessionId);
-        var initial = await session.GetInitialLaunchAsync();
-        Assert.NotNull(initial);
-        Assert.Equal(refs.InputId, initial!.Input?.Id);
-        Assert.Equal(AgentSessionInputAcceptance.Accepted, initial.Input?.Acceptance);
-        Assert.Equal(refs.TurnId, initial.Turn?.Id);
-        Assert.Equal(AgentTurnStatus.Queued, initial.Turn?.Status);
+            var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(refs.SessionId);
+            var initial = await session.GetInitialLaunchAsync();
+            Assert.NotNull(initial);
+            Assert.Equal(refs.InputId, initial!.Input?.Id);
+            Assert.Equal(AgentSessionInputAcceptance.Accepted, initial.Input?.Acceptance);
+            Assert.Equal(refs.TurnId, initial.Turn?.Id);
+            Assert.Equal(AgentTurnStatus.Queued, initial.Turn?.Status);
+        }
+        finally
+        {
+            await CleanupLaunchedAgentJobAsync(null, refs?.JobId);
+        }
     }
 
     private async Task AssertInitialLaunchChildStateAsync(

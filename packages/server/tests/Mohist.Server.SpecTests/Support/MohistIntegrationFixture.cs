@@ -28,6 +28,8 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Prompts;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
 using Orleans.Configuration;
 using Orleans.TestingHost;
 using Xunit;
@@ -174,6 +176,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly int _siloPort;
     private readonly int _gatewayPort;
     private readonly bool _otelEnabled;
+    private readonly TestClusterPortAllocator? _portAllocator;
     public AgentSessionPersistenceTestProbe Persistence { get; }
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
@@ -216,8 +219,17 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _systemUpdateStatePath = systemUpdateStatePath;
         _logsPath = logsPath;
         _timeProvider = timeProvider ?? new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
-        _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
-        _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
+        if (siloPort is null || gatewayPort is null)
+        {
+            if (siloPort is not null || gatewayPort is not null)
+                throw new ArgumentException("Test silo and gateway ports must be supplied together.");
+
+            _portAllocator = new TestClusterPortAllocator();
+            (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
+        }
+
+        _siloPort = siloPort.Value;
+        _gatewayPort = gatewayPort.Value;
         _otelEnabled = otelEnabled;
         Persistence = new AgentSessionPersistenceTestProbe(
             () => _timeProvider.Advance(TimeSpan.FromSeconds(1)));
@@ -225,7 +237,14 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // WebApplicationFactory must never fall through to the production
+        // Kestrel listener. Keep any accidental real-host path on an OS-
+        // assigned port and route requests through TestServer instead.
+        builder.UseTestServer();
+        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://127.0.0.1:0");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
+        builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:0");
+        builder.UseSetting("Mohist:Otel:Endpoint", "http://127.0.0.1:0/otel");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
@@ -247,6 +266,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
+                ["Mohist:ServerUrl"] = "http://127.0.0.1:0",
+                ["Mohist:Otel:Endpoint"] = "http://127.0.0.1:0/otel",
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = ArtifactStorageRoot,
@@ -304,6 +325,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(_timeProvider);
+            services.PostConfigure<OtlpExporterOptions>("tracing", ConfigureInMemoryOtlpExporter);
+            services.PostConfigure<OtlpExporterOptions>("metrics", ConfigureInMemoryOtlpExporter);
             services.RemoveAll<IAgentJobDispatchObserver>();
             services.AddSingleton<AgentJobDispatchProbe>();
             services.AddSingleton<IAgentJobDispatchObserver>(provider => provider.GetRequiredService<AgentJobDispatchProbe>());
@@ -369,6 +392,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         if (disposing)
         {
             _otelKeeper?.Dispose();
+            _portAllocator?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -398,6 +422,12 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         // CountRunningAssignedToAsync) have the column and index they
         // expect. Idempotent — safe to call before/after Migrate().
         GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
+    }
+
+    private static void ConfigureInMemoryOtlpExporter(OtlpExporterOptions options)
+    {
+        options.ExportProcessorType = ExportProcessorType.Simple;
+        options.HttpClientFactory = () => new HttpClient(new InMemoryOtlpExporterHandler());
     }
 
 }

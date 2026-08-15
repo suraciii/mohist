@@ -1292,7 +1292,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             Key, runnerId, workId, now);
 
         await EnsureRecoveryReminderAsync();
-        await SafeAssignmentPreparedAsync(runnerId, workId);
 
         if (State.ConcurrencyPermitHeld
             && State.ConcurrencyPermitId is not null
@@ -1310,6 +1309,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Dispatched;
             await PersistAsync();
         }
+
+        // The test-only signal is the admission boundary: all durable
+        // assignment and concurrency state must be visible before polling.
+        await SafeAssignmentPreparedAsync(runnerId, workId);
 
         return true;
     }

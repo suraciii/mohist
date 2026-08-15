@@ -6,9 +6,9 @@ namespace Mohist.Server.TestSupport;
 
 /// <summary>
 /// Test-only probe for the best-effort AgentJob dispatch-observer side
-/// channel. The prepared signal is emitted after the durable assignment
-/// ledger write; tests may use it to order a subsequent protocol request
-/// while keeping the HTTP poll as the claim assertion.
+/// channel. The prepared signal is emitted after the durable assignment and
+/// concurrency state is complete; tests may use it to order a subsequent
+/// protocol request while keeping the HTTP poll as the claim assertion.
 /// </summary>
 public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 {
