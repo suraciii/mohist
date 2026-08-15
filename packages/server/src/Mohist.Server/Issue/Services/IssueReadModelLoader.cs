@@ -392,12 +392,12 @@ public class IssueReadModelLoader : IScopedService
 
         var total = userTasks.Count;
         var completed = userTasks.Count(t => t.Status == "completed");
-        var running = userTasks.Count(t => t.Status == "running");
+        var running = userTasks.Count(t => t.Status is "running" or "recoverable-interrupted");
         var failed = userTasks.Count(t => t.Status == "failed");
 
         if (total == 0) return null;
 
-        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "running" or "pending")?.Title;
+        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "running" or "recoverable-interrupted" or "pending")?.Title;
 
         return new WorkflowStageProgress(
             status.CurrentStage!,

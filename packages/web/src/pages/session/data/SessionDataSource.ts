@@ -8,7 +8,7 @@ import type {
 } from '../../../entities/session'
 import type { SessionTimelineCurrentActivity } from '../../../widgets/session-transcript'
 
-export type StatusKind = SessionStatusKind | 'live' | 'finalizing' | 'probing' | 'completed' | 'failed' | 'stale'
+export type StatusKind = SessionStatusKind | 'live' | 'finalizing' | 'probing' | 'recovering' | 'completed' | 'failed' | 'stale'
 export type EmptyStateKind = 'active-no-content' | 'idle-no-content' | 'unknown-no-content'
 
 export interface SessionStopOptions {

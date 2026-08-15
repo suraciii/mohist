@@ -43,6 +43,15 @@ const RUNNING_PRESENTATION: StatusPresentation = {
   testId: 'workflow-run-status-running',
 }
 
+const RECOVERABLE_INTERRUPTED_PRESENTATION: StatusPresentation = {
+  label: 'Recoverable interruption',
+  bg: 'bg-amber-100',
+  text: 'text-amber-800',
+  dot: 'bg-amber-500',
+  icon: HourglassIcon,
+  testId: 'workflow-run-status-recoverable-interrupted',
+}
+
 const AWAITING_APPROVAL_PRESENTATION: StatusPresentation = {
   label: 'Awaiting approval',
   bg: 'bg-amber-100',
@@ -120,6 +129,7 @@ const PRESENTATION_BY_STATUS: Record<WorkflowRunStatus, StatusPresentation> = {
   pending: PENDING_PRESENTATION,
   ready: READY_PRESENTATION,
   running: RUNNING_PRESENTATION,
+  'recoverable-interrupted': RECOVERABLE_INTERRUPTED_PRESENTATION,
   'awaiting-approval': AWAITING_APPROVAL_PRESENTATION,
   paused: PAUSED_PRESENTATION,
   stopped: STOPPED_PRESENTATION,

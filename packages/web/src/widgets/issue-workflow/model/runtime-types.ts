@@ -3,6 +3,7 @@ import type { Issue, WorkflowTimeline } from '../../../entities/issue'
 
 export type RuntimeSummary =
   | 'running'
+  | 'recoverable-interrupted'
   | 'queued'
   | 'approval-required'
   | 'blocked'
@@ -55,6 +56,7 @@ export interface RuntimeDecisionInput {
     | 'health'
     | 'approvalState'
     | 'blockedReason'
+    | 'attention'
     | 'recovery'
     | 'convergence'
     | 'drift'

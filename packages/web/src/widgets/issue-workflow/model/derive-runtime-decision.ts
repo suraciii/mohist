@@ -76,6 +76,10 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return 'cancelled'
   }
 
+  if (status === 'recoverable-interrupted' || issue.attention?.reason === 'recoverable-interrupted') {
+    return 'recoverable-interrupted'
+  }
+
   const recovery = issue.recovery
   const failedScriptHealthCheck = findFailedScriptHealthCheck(input.timeline)
 

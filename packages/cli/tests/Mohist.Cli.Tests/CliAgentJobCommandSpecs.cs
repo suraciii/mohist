@@ -137,6 +137,79 @@ public class CliAgentJobCommandSpecs
     }
 
     [Fact]
+    public async Task JobView_Recovering_ShowsReasonAndDeadlineWithoutTerminalFailureRows()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    jobId = "agent-job-recovering",
+                    status = "recovering",
+                    message = (string?)null,
+                    output = (string?)null,
+                    artifactUploadIds = Array.Empty<string>(),
+                    failureReason = "runner-lost",
+                    exitCode = (int?)null,
+                    recoveryDeadlineAt = "2026-08-15T01:15:00Z",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "job", "view", "agent-job-recovering"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("status:          recovering", stdout, StringComparison.Ordinal);
+        Assert.Contains("recovery reason: runner-lost", stdout, StringComparison.Ordinal);
+        Assert.Contains("recovery deadline: 2026-08-15T01:15:00Z", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("exit code", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task JobObservation_Recovering_RendersReasonAndDeadline()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            Assert.EndsWith("/agent-jobs/job-recovering/launch-observation", request.RequestUri?.PathAndQuery, StringComparison.Ordinal);
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    jobId = "job-recovering",
+                    jobStatus = "recovering",
+                    jobMessage = (string?)null,
+                    jobOutput = (string?)null,
+                    jobFailureReason = "runner-lost",
+                    jobExitCode = (int?)null,
+                    sessionId = "session-1",
+                    sessionActivity = "unknown",
+                    sessionRuntime = "pi",
+                    transcriptUrl = "/transcript",
+                    inputId = "input-1",
+                    inputAcceptance = "accepted",
+                    turnId = "turn-1",
+                    turnStatus = "unknown",
+                    turnResult = (object?)null,
+                    observationUrl = "/observation",
+                    recoveryDeadlineAt = "2026-08-15T01:15:00Z",
+                },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "job", "observation", "job-recovering"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("status:              recovering", stdout, StringComparison.Ordinal);
+        Assert.Contains("reason:              runner-lost", stdout, StringComparison.Ordinal);
+        Assert.Contains("recovery deadline:   2026-08-15T01:15:00Z", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task JobView_NonTerminal_ShowsStatusWithoutTerminalRows()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

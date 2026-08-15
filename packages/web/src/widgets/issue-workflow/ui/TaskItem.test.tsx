@@ -98,6 +98,31 @@ describe('TaskItem', () => {
     expect(screen.getByTestId('task-log-panel')).toBeVisible()
   })
 
+  it('renders recoverable interruption reason and deadline without failed treatment', async () => {
+    renderTask(
+      makeTask({
+        status: 'recoverable-interrupted',
+        interruption: {
+          reasonCode: 'runner-lost',
+          workId: 'build.1',
+          ownerId: 'workflow-1',
+          recordedAt: '2026-08-15T01:00:00Z',
+          recoveryDeadlineAt: '2026-08-15T01:15:00Z',
+        },
+      }),
+    )
+
+    const disclosure = screen.getByRole('button', { name: /Canonical workflow task title/ })
+    expect(disclosure).toHaveTextContent('recoverable-interrupted')
+    fireEvent.click(disclosure)
+    await act(async () => { await Promise.resolve() })
+
+    const interruption = screen.getByTestId('workflow-task-recoverable-interruption')
+    expect(interruption).toHaveTextContent('runner-lost')
+    expect(interruption).toHaveTextContent('2026-08-15T01:15:00Z')
+    expect(screen.queryByText('failed')).not.toBeInTheDocument()
+  })
+
   it('renders blocked Agent settlement details without a failed task treatment', async () => {
     renderTask(
       makeTask({

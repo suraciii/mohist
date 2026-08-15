@@ -2,6 +2,7 @@ import '@testing-library/jest-dom'
 import { fireEvent, render, screen, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import type { SessionMetadata } from '../../../entities/coder-session'
 import type { TimelineFact, TimelineItem } from '../../../entities/session'
 import type { SessionDataSourceResult } from '../data/SessionDataSource'
@@ -132,6 +133,35 @@ describe('SessionDetailShell timeline integration', () => {
     expect(screen.getByTestId('timeline-fixture')).toHaveTextContent(sourceId)
     expect(screen.queryByTestId('session-input-turn-evidence')).not.toBeInTheDocument()
     expect(screen.queryByTestId('session-recovery-history')).not.toBeInTheDocument()
+  })
+
+  it('renders a recovering launch observation with its recorded reason and deadline', () => {
+    const data = makeData()
+    data.statusKind = 'recovering'
+    data.launchObservation = {
+      jobId: 'job-1',
+      jobStatus: 'recovering',
+      jobFailureReason: 'runner-lost',
+      sessionId: 'session-1',
+      sessionActivity: 'unknown',
+      sessionRuntime: 'opencode',
+      transcriptUrl: '/transcript',
+      inputAcceptance: 'accepted',
+      turnStatus: 'unknown',
+      observationUrl: '/observation',
+      recoveryDeadlineAt: '2026-08-15T01:15:00Z',
+    } satisfies AgentLaunchObservationDto
+
+    render(
+      <MemoryRouter>
+        <SessionDetailShell data={data} components={makeComponents()} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('session-status-badge')).toHaveTextContent('Recovering')
+    const recovery = screen.getByTestId('launch-observation-recovering')
+    expect(recovery).toHaveTextContent('runner-lost')
+    expect(recovery).toHaveTextContent('2026-08-15T01:15:00Z')
   })
 
   it('switches between summary and raw views on the same source anchor', () => {

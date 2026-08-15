@@ -62,9 +62,11 @@ public static class WorkflowStatusMapper
         if (run is null) return null;
 
         var blocked = FindBlockedSettlement(run);
+        var interruption = FindCurrentInterruption(run);
 
         var stages = run.Stages.Select((s, i) =>
         {
+            var stageInterruption = FindStageInterruption(s);
             var stageFailure = s.Failure is not null
                 ? new FailureStatusView(
                     s.Failure.Reason.ToString(),
@@ -77,7 +79,7 @@ public static class WorkflowStatusMapper
 
             return new StageStatusView(
                 s.Id,
-                DeriveStageStatus(s, blocked),
+                DeriveStageStatus(s, blocked, stageInterruption),
                 i,
                 MapTasks(s, definition),
                 MapChecks(s, definition),
@@ -85,7 +87,8 @@ public static class WorkflowStatusMapper
                     ? new ApprovalStatusView(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt, s.ApprovalStatus.DecidedBy, s.ApprovalStatus.DisplayName)
                     : null,
                 stageFailure,
-                MapFeedback(run, s.Id));
+                MapFeedback(run, s.Id),
+                MapInterruption(stageInterruption));
         }).ToList();
 
         var pending = BuildPendingWork(run);
@@ -107,7 +110,9 @@ public static class WorkflowStatusMapper
 
         return new WorkflowStatusView(
             run.Id,
-            blocked is not null ? "blocked" : WireStatus(run.Status),
+            blocked is not null
+                ? "blocked"
+                : interruption is not null ? "recoverable-interrupted" : WireStatus(run.Status),
             run.CurrentStageId,
             stages,
             pending,
@@ -115,7 +120,8 @@ public static class WorkflowStatusMapper
             actions,
             run.AssignedTo,
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt),
-            MapAgentResultAttention(blocked));
+            MapAgentResultAttention(blocked),
+            MapInterruption(interruption));
     }
 
     /// <summary>
@@ -142,12 +148,42 @@ public static class WorkflowStatusMapper
         task.Status == TaskRunStatus.Running
         && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked
             ? "blocked"
-            : WireStatus(task.Status);
+            : task.Status == TaskRunStatus.Running && task.Interruption is not null
+                ? "recoverable-interrupted"
+                : WireStatus(task.Status);
 
-    private static string DeriveStageStatus(StageRun stage, WorkflowAgentResultSettlementTask? blocked) =>
+    private static string DeriveStageStatus(
+        StageRun stage,
+        WorkflowAgentResultSettlementTask? blocked,
+        WorkInterruption? interruption) =>
         blocked is not null && blocked.Stage == stage.Id
             ? "blocked"
-            : WireStatus(stage.Status);
+            : stage.Status == StageRunStatus.Running && interruption is not null
+                ? "recoverable-interrupted"
+                : WireStatus(stage.Status);
+
+    private static WorkInterruption? FindCurrentInterruption(WorkflowRun run)
+    {
+        if (run.CurrentStageId is not { } currentStageId)
+            return null;
+
+        var current = run.Stages.FirstOrDefault(stage => stage.Id == currentStageId);
+        return current?.RunningTask?.Interruption ?? current?.Interruption;
+    }
+
+    private static WorkInterruption? FindStageInterruption(StageRun stage) =>
+        stage.Interruption
+        ?? stage.Tasks.FirstOrDefault(task => task.Status == TaskRunStatus.Running)?.Interruption;
+
+    private static WorkInterruptionView? MapInterruption(WorkInterruption? interruption) =>
+        interruption is null
+            ? null
+            : new WorkInterruptionView(
+                interruption.ReasonCode,
+                interruption.WorkId,
+                interruption.OwnerId,
+                interruption.RecordedAt,
+                interruption.RecoveryDeadlineAt);
 
     private static AgentResultAttentionView? MapAgentResultAttention(WorkflowAgentResultSettlementTask? blocked)
     {
@@ -244,7 +280,8 @@ public static class WorkflowStatusMapper
                         : null,
                     Output: MapTaskOutput(t.Output),
                     Error: t.Error,
-                    AgentResultSettlement: MapAgentResultSettlement(t)))
+                    AgentResultSettlement: MapAgentResultSettlement(t),
+                    Interruption: MapInterruption(t.Interruption)))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
@@ -280,7 +317,21 @@ public static class WorkflowStatusMapper
     public static List<CheckStatusView> MapChecks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Checks.Count > 0)
-            return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, WireStatus(c.Status), c.Message, c.Error)).ToList();
+        {
+            var interruption = MapInterruption(stage.Interruption);
+            return stage.Checks
+                .Select(c => new CheckStatusView(
+                    c.Name,
+                    c.Title,
+                    c.Uses,
+                    c.Status == StageCheckStatus.Running && interruption is not null
+                        ? "recoverable-interrupted"
+                        : WireStatus(c.Status),
+                    c.Message,
+                    c.Error,
+                    interruption))
+                .ToList();
+        }
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (stageDefinition is null) return [];

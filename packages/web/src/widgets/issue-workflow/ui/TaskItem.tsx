@@ -199,6 +199,7 @@ export function TaskItem({
   const { projectId } = useProject()
   const isPending = task.status === 'pending'
   const isRunning = task.status === 'running'
+  const isRecoverableInterrupted = task.status === 'recoverable-interrupted'
   const isFailed = task.status === 'failed'
   const isBlocked = task.status === 'blocked'
   const settlement = task.agentResultSettlement
@@ -209,7 +210,11 @@ export function TaskItem({
   const hasArtifacts = artifactSummaries.length > 0
   const isDeliveryTask = isDeliveryFailureTask(task)
   const taskReason =
-    task.error?.message ?? (typeof task.reason === 'string' ? task.reason : null) ?? settlement?.message ?? null
+    task.error?.message
+    ?? (typeof task.reason === 'string' ? task.reason : null)
+    ?? settlement?.message
+    ?? task.interruption?.reasonCode
+    ?? null
   const deliveryFailure = isFailed && isDeliveryTask ? getDeliveryFailureGuidance(task.error?.code) : null
   const resolvedTaskLogHook = taskLogHook ?? useDefaultTaskLogData
   const taskLogResult = resolvedTaskLogHook({
@@ -221,14 +226,14 @@ export function TaskItem({
   })
   const hasLogs = task.taskId.trim().length > 0 && (isRunning || (taskLogResult.data?.lines.length ?? 0) > 0)
   const canExpand =
-    hasLogs || hasArtifacts || hasRequiredFiles || isFailed || isBlocked || hasOutput || deliveryFailure != null
+    hasLogs || hasArtifacts || hasRequiredFiles || isFailed || isBlocked || isRecoverableInterrupted || hasOutput || deliveryFailure != null
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
     icon = <CheckmarkIcon className="h-4 w-4 text-success flex-shrink-0" />
   } else if (isFailed) {
     icon = <CrossIcon className="h-4 w-4 text-danger flex-shrink-0" />
-  } else if (task.status === 'blocked') {
+  } else if (isBlocked || isRecoverableInterrupted) {
     icon = <HourglassIcon className="h-4 w-4 text-warning flex-shrink-0" />
   } else if (isRunning) {
     icon = <SpinnerIcon className="h-4 w-4 text-info animate-spin flex-shrink-0" />
@@ -254,6 +259,7 @@ export function TaskItem({
       </span>
       {isFailed && <span className="shrink-0 text-xs text-danger">failed</span>}
       {isBlocked && <span className="shrink-0 text-xs text-warning">blocked</span>}
+      {isRecoverableInterrupted && <span className="shrink-0 text-xs text-warning">recoverable-interrupted</span>}
       {canExpand && (
         <ChevronDownIcon
           className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
@@ -265,7 +271,7 @@ export function TaskItem({
 
   return (
     <div
-      className={`rounded-md border overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-danger-border bg-danger-subtle/40' : isBlocked ? 'border-warning-border bg-warning-subtle/40' : 'border-border bg-card'}`}
+      className={`rounded-md border overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-danger-border bg-danger-subtle/40' : isBlocked || isRecoverableInterrupted ? 'border-warning-border bg-warning-subtle/40' : 'border-border bg-card'}`}
       data-testid="workflow-task-item"
       data-task-title={task.title}
     >
@@ -327,6 +333,16 @@ export function TaskItem({
               />
             )}
             {hasReason && <div className="text-xs text-warning bg-warning-subtle rounded px-2 py-1">{taskReason}</div>}
+            {isRecoverableInterrupted && task.interruption && (
+              <div
+                className="space-y-1 rounded border border-warning-border bg-warning-subtle px-2 py-1.5 text-xs text-warning"
+                data-testid="workflow-task-recoverable-interruption"
+              >
+                <div className="font-semibold">Recoverable interruption</div>
+                <div>Reason: {task.interruption.reasonCode}</div>
+                <div>Recovery deadline: {task.interruption.recoveryDeadlineAt}</div>
+              </div>
+            )}
             {isBlocked && settlement && (
               <div
                 className="space-y-1 rounded border border-warning-border bg-warning-subtle px-2 py-1.5 text-xs text-warning"

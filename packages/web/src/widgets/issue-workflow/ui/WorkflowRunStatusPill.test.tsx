@@ -90,6 +90,17 @@ describe('WorkflowRunStatusPill', () => {
     expect(pendingClasses).not.toEqual(runningClasses)
   })
 
+  it('renders recoverable-interrupted as distinct from healthy running and failure', () => {
+    renderPill('recoverable-interrupted')
+
+    const pill = screen.getByTestId('workflow-run-status-recoverable-interrupted')
+    expect(pill).toBeInTheDocument()
+    expect(pill.dataset.status).toBe('recoverable-interrupted')
+    expect(pill).toHaveTextContent(/recoverable interruption/i)
+    expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-failed')).not.toBeInTheDocument()
+  })
+
   it('renders awaiting-approval as a distinct presentation', () => {
     renderPill('awaiting-approval')
 

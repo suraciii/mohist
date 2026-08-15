@@ -32,6 +32,7 @@ public class CliRunReadsSpecs
         string status = "running",
         string? currentStage = "build",
         object? agentResultAttention = null,
+        object? interruption = null,
         string? agentAction = "mohist/pi",
         string? agentRuntime = "pi") => new
     {
@@ -68,6 +69,7 @@ public class CliRunReadsSpecs
             failure = (object?)null,
             availableActions = Array.Empty<object>(),
             agentResultAttention,
+            interruption,
             metadata = new { name = "Mohist", labels = new Dictionary<string, string>(), createdAt = "2026-07-05T00:00:00Z" },
         },
         issueRef = new { projectId = "proj_abc", number = 42, title = "Close the agent subscriptions gap" },
@@ -355,6 +357,35 @@ public class CliRunReadsSpecs
         // header inside the run detail view (RenderWorkflowRunStages).
         Assert.Contains("stage", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("approval", stdout, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task View_RecoverableInterruptionRendersReasonAndDeadlineWithoutFailure()
+    {
+        var interruption = new
+        {
+            reasonCode = "runner-lost",
+            workId = "build.1",
+            ownerId = WrId,
+            recordedAt = "2026-08-15T01:00:00Z",
+            recoveryDeadlineAt = "2026-08-15T01:15:00Z",
+        };
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
+                return RecordingHttpHandler.Json(new { success = true, data = SampleRunDetail(WrId, "recoverable-interrupted", "build", interruption: interruption) });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["run", "view", WrId], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("status:        recoverable-interrupted", stdout);
+        Assert.Contains("recoverable interruption:", stdout);
+        Assert.Contains("reason:    runner-lost", stdout);
+        Assert.Contains("deadline:  2026-08-15T01:15:00Z", stdout);
+        Assert.DoesNotContain("failure:", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

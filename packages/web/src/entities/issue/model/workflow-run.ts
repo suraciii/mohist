@@ -1,4 +1,4 @@
-import type { WorkItemOrigin, StageApprovalState, WorkflowTaskCause, WorkflowFailureDetails } from './stage-state'
+import type { WorkItemOrigin, StageApprovalState, WorkflowTaskCause, WorkflowFailureDetails, WorkInterruption } from './stage-state'
 
 /**
  * Tracks the wire status of a WorkflowRun as emitted by
@@ -12,6 +12,7 @@ export type WorkflowRunStatus =
   | 'pending'
   | 'ready'
   | 'running'
+  | 'recoverable-interrupted'
   | 'awaiting-approval'
   | 'paused'
   | 'stopped'
@@ -38,8 +39,8 @@ export function isTerminalWorkflowRunStatus(status: WorkflowRunStatus | string |
   return status === 'stopped' || status === 'completed'
 }
 
-export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'blocked'
-export type WorkflowCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
+export type WorkflowTaskStatus = 'pending' | 'running' | 'recoverable-interrupted' | 'completed' | 'failed' | 'skipped' | 'blocked'
+export type WorkflowCheckStatus = 'pending' | 'running' | 'recoverable-interrupted' | 'passed' | 'failed' | 'error'
 
 /**
  * Tracks the wire status of a workflow stage as emitted by
@@ -108,6 +109,7 @@ export interface WorkflowTask {
   resetBy: WorkflowTaskResetCause | null
   startedAt: string | null
   completedAt: string | null
+  interruption?: WorkInterruption | null
 }
 
 export interface WorkflowCheck {
@@ -120,6 +122,7 @@ export interface WorkflowCheck {
   runCount: number
   lastRunAt: string | null
   origin?: WorkItemOrigin | null
+  interruption?: WorkInterruption | null
 }
 
 export interface WorkflowStageRun {
@@ -138,4 +141,5 @@ export interface WorkflowStageRun {
   startedAt: string | null
   completedAt: string | null
   updatedAt?: string
+  interruption?: WorkInterruption | null
 }

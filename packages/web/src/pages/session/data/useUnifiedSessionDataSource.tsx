@@ -116,10 +116,11 @@ export function useUnifiedSessionDataSource(
     [initialTurns.length, summary],
   )
   const activity = summary?.activity
-  const statusKind = deriveSessionStatusKind(activity)
-  const isRunning = activity === 'active'
+  const isRecovering = launchObservation?.jobStatus === 'recovering'
+  const statusKind = isRecovering ? 'recovering' : deriveSessionStatusKind(activity)
+  const isRunning = activity === 'active' && !isRecovering
   const runtimeSessionId = summary?.runtimeSessionId ?? ''
-  const canFollowup = canFollowupSession(activity) && !!runtimeSessionId && !!summary?.runtime
+  const canFollowup = !isRecovering && canFollowupSession(activity) && !!runtimeSessionId && !!summary?.runtime
   const metadataQueryKey = useMemo(
     () => ['unified-session', projectId, sessionId] as const,
     [projectId, sessionId],

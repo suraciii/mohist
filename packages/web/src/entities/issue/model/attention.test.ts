@@ -62,6 +62,31 @@ describe('isIntegrateFailure', () => {
   })
 })
 
+describe('deriveAttentionItems — recoverable interruption rule', () => {
+  it('surfaces a recoverable interruption with reason and deadline instead of failure treatment', () => {
+    const items = deriveAttentionItems([
+      makeIssue({
+        number: 17,
+        status: IssueStatus.InProgress,
+        workflowStage: WorkflowStage.Build,
+        attention: {
+          reason: 'recoverable-interrupted',
+          state: 'recoverable-interrupted',
+          reasonCode: 'runner-lost',
+          recoveryDeadlineAt: '2026-08-15T01:15:00Z',
+        },
+      }),
+    ], NO_AGENT)
+
+    expect(items).toEqual([{
+      kind: 'recoverable-interrupted',
+      issueNumber: 17,
+      label: 'Recoverable interruption',
+      detail: 'runner-lost; recovery deadline 2026-08-15T01:15:00Z',
+    }])
+  })
+})
+
 describe('deriveAttentionItems — approval-pending rule', () => {
   it('surfaces an awaiting approval as "Approval needed" with title as detail', () => {
     const items = deriveAttentionItems([
@@ -482,6 +507,7 @@ describe('deriveAttentionItems — union is exhaustive', () => {
     const issueKinds = new Set([
       'approval-needed',
       'integration-failed',
+      'recoverable-interrupted',
       'blocked',
     ])
     const runnerKinds = new Set([

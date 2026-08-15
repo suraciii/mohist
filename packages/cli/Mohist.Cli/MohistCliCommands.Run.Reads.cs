@@ -320,11 +320,19 @@ internal static partial class RunCommands
         var status = data["status"] as JsonObject;
         var statusText = status?["status"]?.GetValue<string>();
         var stageText = status?["currentStage"]?.GetValue<string>();
-        var snapshot = new WatchSnapshot(runId, statusText, stageText);
+        var interruption = status?["interruption"] as JsonObject;
+        var reason = interruption?["reasonCode"]?.GetValue<string>();
+        var deadline = interruption?["recoveryDeadlineAt"]?.GetValue<string>();
+        var snapshot = new WatchSnapshot(runId, statusText, stageText, reason, deadline);
         return (0, snapshot);
     }
 
-    private sealed record WatchSnapshot(string Id, string? Status, string? Stage)
+    private sealed record WatchSnapshot(
+        string Id,
+        string? Status,
+        string? Stage,
+        string? InterruptionReason,
+        string? RecoveryDeadlineAt)
     {
         public bool IsTerminal => !string.IsNullOrEmpty(Status) && TerminalRunStatuses.Contains(Status);
 
@@ -336,6 +344,10 @@ internal static partial class RunCommands
                 ["status"] = Status,
                 ["stage"] = Stage,
             };
+            if (!string.IsNullOrWhiteSpace(InterruptionReason))
+                node["interruptionReason"] = InterruptionReason;
+            if (!string.IsNullOrWhiteSpace(RecoveryDeadlineAt))
+                node["recoveryDeadlineAt"] = RecoveryDeadlineAt;
             return node.ToJsonString(MohistCliApi.JsonCompactOutputOptions);
         }
     }

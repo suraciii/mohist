@@ -446,8 +446,8 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var headers = new[] { "job id", "status", "submitted", "terminal" };
-        var widths = new[] { IdSoftCap, 12, 24, 24 };
+        var headers = new[] { "job id", "status", "submitted", "terminal", "reason", "recovery deadline" };
+        var widths = new[] { IdSoftCap, 12, 24, 24, 20, 25 };
 
         var cells = new List<string[]>();
         foreach (var row in rows)
@@ -458,6 +458,8 @@ internal sealed partial class TableRenderer
                 Truncate(StringOf(row, "status"), 12),
                 Truncate(StringOf(row, "submittedAt"), 24),
                 Truncate(StringOf(row, "terminalAt"), 24),
+                Truncate(StringOf(row, "failureReason"), 20),
+                Truncate(StringOf(row, "recoveryDeadlineAt"), 25),
             });
         }
 
@@ -484,10 +486,45 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"artifacts:       {string.Join(",", artifacts.Select(a => a?.GetValue<string>() ?? ""))}");
         var failureReason = StringOf(data, "failureReason");
         if (!string.IsNullOrEmpty(failureReason))
-            _out.WriteLine($"failure reason:  {failureReason}");
+        {
+            if (String.Equals(StringOf(data, "status"), "recovering", StringComparison.Ordinal))
+                _out.WriteLine($"recovery reason: {failureReason}");
+            else
+                _out.WriteLine($"failure reason:  {failureReason}");
+        }
+        var recoveryDeadline = StringOf(data, "recoveryDeadlineAt");
+        if (!string.IsNullOrEmpty(recoveryDeadline))
+            _out.WriteLine($"recovery deadline: {recoveryDeadline}");
         var exitCode = NumberOf(data, "exitCode");
         if (!string.IsNullOrEmpty(exitCode))
             _out.WriteLine($"exit code:       {exitCode}");
+    }
+
+    private void RenderAgentLaunchObservation(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"job id:              {StringOf(data, "jobId")}");
+        _out.WriteLine($"status:              {StringOf(data, "jobStatus")}");
+        var jobMessage = StringOf(data, "jobMessage");
+        if (!string.IsNullOrEmpty(jobMessage))
+            _out.WriteLine($"message:             {Truncate(jobMessage, BodySoftCap)}");
+        var reason = StringOf(data, "jobFailureReason");
+        if (!string.IsNullOrEmpty(reason))
+            _out.WriteLine($"reason:              {reason}");
+        var deadline = StringOf(data, "recoveryDeadlineAt");
+        if (!string.IsNullOrEmpty(deadline))
+            _out.WriteLine($"recovery deadline:   {deadline}");
+        _out.WriteLine($"session id:          {StringOf(data, "sessionId")}");
+        _out.WriteLine($"session activity:    {StringOf(data, "sessionActivity")}");
+        _out.WriteLine($"input acceptance:    {StringOf(data, "inputAcceptance")}");
+        _out.WriteLine($"turn status:         {StringOf(data, "turnStatus")}");
+        _out.WriteLine($"transcript:          {StringOf(data, "transcriptUrl")}");
+        _out.WriteLine($"observation:         {StringOf(data, "observationUrl")}");
     }
 
     private void RenderSessionList(JsonNode? data)

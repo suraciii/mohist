@@ -129,6 +129,7 @@ export interface AgentLaunchObservationDto {
     exitCode?: number | null
   } | null
   observationUrl: string
+  recoveryDeadlineAt?: string | null
 }
 
 export type AgentLaunchObservationMeaning = 'observe' | 'result' | 'reconcile'

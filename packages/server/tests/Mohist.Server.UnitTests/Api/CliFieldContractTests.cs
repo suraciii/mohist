@@ -100,6 +100,7 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.IssueWatchList] = S("watch list is a CLI projection over issue watch state"),
             [MohistCliApi.TableShape.AgentJobList] = D<AgentJobListItemDto>(),
             [MohistCliApi.TableShape.AgentJobView] = D<AgentJobViewDto>(),
+            [MohistCliApi.TableShape.AgentLaunchObservation] = D<AgentLaunchObservationDto>(),
             [MohistCliApi.TableShape.SessionList] = D<UnifiedSessionListItemDto>(),
             [MohistCliApi.TableShape.SessionShow] = D<UnifiedSessionSummaryDto>(),
             [MohistCliApi.TableShape.SessionTree] = D<AgentSessionTreePage>(),
@@ -130,9 +131,6 @@ public sealed class CliFieldContractTests
         new(MohistCliApi.TableShape.SessionScheduleCreate, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
         new(MohistCliApi.TableShape.SessionScheduleList, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
         new(MohistCliApi.TableShape.SessionScheduleCancel, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
-        new(MohistCliApi.TableShape.AgentJobList, "failureReason", DeviationKind.Omit, "agent-job recovery presentation is added by the status-surface task"),
-        new(MohistCliApi.TableShape.AgentJobList, "recoveryDeadlineAt", DeviationKind.Omit, "agent-job recovery presentation is added by the status-surface task"),
-        new(MohistCliApi.TableShape.AgentJobView, "recoveryDeadlineAt", DeviationKind.Omit, "agent-job recovery presentation is added by the status-surface task"),
     ];
 
     [Fact]
