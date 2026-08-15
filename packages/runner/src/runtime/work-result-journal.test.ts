@@ -81,7 +81,7 @@ describe('WorkResultJournal', () => {
     })
   })
 
-  it('FailsClosedWhenSettledResultCannotBePersisted', async () => {
+  it('RetainsASettledResultUntilTemporaryPersistenceRecovers', async () => {
     const fileSystem = new FailingWriteFileSystem()
     await withTestRunnerResources(
       async () => {
@@ -90,9 +90,22 @@ describe('WorkResultJournal', () => {
         await journal.begin(work)
         fileSystem.failWrites = true
 
-        await expect(journal.complete(work, result)).rejects.toThrow('disk full')
+        const completion = await journal.complete(work, result)
+        expect(completion.state).toBe('pending')
         expect(journal.ready()).toBe(false)
+        expect(journal.needsPersistenceRecovery()).toBe(true)
         await expect(journal.acknowledge(work)).rejects.toThrow('unavailable')
+
+        // The retained result is process-local. A restarted runner observes
+        // only the durable started fence and must not replay or infer it.
+        const restarted = new WorkResultJournal('/runner')
+        await restarted.load()
+        expect(await restarted.begin(work)).toBe('started')
+
+        fileSystem.failWrites = false
+        await expect(journal.retryPendingPersistence()).resolves.toEqual({ state: 'durable' })
+        expect(journal.ready()).toBe(true)
+        expect(journal.completed()).toEqual([{ work, state: 'completed', result }])
       },
       { fileSystem },
     )

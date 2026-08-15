@@ -343,6 +343,108 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('PendingJournalCompletion_IsNotReportedUntilTheNextControlPlaneBoundaryMakesItDurable', async () => {
+    const completionHeld = deferred<void>()
+    const pendingRedelivery = deferred<void>()
+    const recoveredReport = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-pending-journal',
+      workId: 'work-pending-journal',
+      taskRunId: 'task-pending-journal',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    let executions = 0
+    let failCompletedJournalWrite = true
+    const fileSystem = currentReportingTestState().resources.fileSystem
+    const originalWriteText = fileSystem.writeText.bind(fileSystem)
+    const writeText = vi.spyOn(fileSystem, 'writeText').mockImplementation(async (path, content, options) => {
+      if (
+        failCompletedJournalWrite &&
+        path.endsWith('/.mohist/runner-state/work-results.json.tmp') &&
+        content.includes('"state": "completed"')
+      ) {
+        throw new Error('ENOSPC')
+      }
+      await originalWriteText(path, content, options)
+    })
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (_work, _signal, collector) => {
+        executions += 1
+        return {
+          result: { status: 'completed', output: { answer: 'retained until durable' } },
+          collector: collector!,
+        }
+      })
+    const stopLog = onCapturedLog((record) => {
+      if (record.message === 'work result journal persistence deferred; retaining result in memory')
+        completionHeld.resolve()
+    })
+    let pollCount = 0
+    poll.mockImplementation(async () => {
+      pollCount += 1
+      if (pollCount === 1) return [work]
+      if (pollCount === 2) {
+        pendingRedelivery.resolve()
+        return [work]
+      }
+      return []
+    })
+    report.mockImplementation(async (reportedWork: { workId?: string }) => {
+      if (reportedWork.workId === work.workId) recoveredReport.resolve()
+      return { tracked: true, reason: 'accepted' }
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: POLL_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await completionHeld.promise
+      expect(report).not.toHaveBeenCalled()
+      expect(executions).toBe(1)
+
+      // A new process can see only the persisted started fence while the
+      // original host retains its exact result in memory.
+      const restarted = new WorkResultJournal('/virtual/mohist-runner-test')
+      await restarted.load()
+      expect(await restarted.begin(work)).toBe('started')
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await pendingRedelivery.promise
+      expect(report).not.toHaveBeenCalled()
+      expect(executions).toBe(1)
+
+      failCompletedJournalWrite = false
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await recoveredReport.promise
+
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'completed', output: { answer: 'retained until durable' } }),
+        expect.any(AbortSignal),
+      )
+      expect(executions).toBe(1)
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      writeText.mockRestore()
+      executeWithLog.mockRestore()
+      stopLog()
+    }
+  })
+
   it('PollBody_CarriesInFlightAndAwaitingAck_Keys', async () => {
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()

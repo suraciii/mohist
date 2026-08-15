@@ -14,6 +14,8 @@ export interface WorkResultJournalEntry {
 
 export type WorkResultJournalBegin = 'new' | WorkResultJournalState
 
+export type WorkResultJournalPersistence = { state: 'durable' } | { state: 'pending'; error: unknown }
+
 interface WorkResultJournalFile {
   version: 1
   entries: Record<string, WorkResultJournalEntry>
@@ -29,6 +31,7 @@ export class WorkResultJournal {
   private entries = new Map<string, WorkResultJournalEntry>()
   private loaded = false
   private unavailable = false
+  private persistencePending = false
   private writeChain = Promise.resolve()
 
   constructor(runnerRoot: string, options: { filePath?: string } = {}) {
@@ -39,6 +42,9 @@ export class WorkResultJournal {
 
   async load(): Promise<void> {
     this.entries.clear()
+    this.loaded = false
+    this.unavailable = false
+    this.persistencePending = false
     try {
       const raw = await currentRunnerFileSystem().readText(this.filePath)
       const file = parseJournal(raw)
@@ -61,11 +67,17 @@ export class WorkResultJournal {
   }
 
   ready(): boolean {
-    return this.loaded && !this.unavailable
+    return this.loaded && !this.unavailable && !this.persistencePending
+  }
+
+  /** True only while this process retains results that have not been durably written. */
+  needsPersistenceRecovery(): boolean {
+    return this.loaded && !this.unavailable && this.persistencePending
   }
 
   disable(): void {
     this.unavailable = true
+    this.persistencePending = false
   }
 
   begin(work: DispatchWorkItem): Promise<WorkResultJournalBegin> {
@@ -80,16 +92,16 @@ export class WorkResultJournal {
       try {
         await this.persist()
       } catch (error) {
-        this.unavailable = true
         this.entries.delete(key)
+        this.persistencePending = true
         throw error
       }
       return 'new'
-    })
+    }, true)
   }
 
-  async complete(work: DispatchWorkItem, result: WorkItemResult): Promise<void> {
-    await this.mutate(async () => {
+  async complete(work: DispatchWorkItem, result: WorkItemResult): Promise<WorkResultJournalPersistence> {
+    return await this.mutate(async () => {
       const key = workKey(work)
       const existing = this.entries.get(key)
       if (!existing || !sameWork(existing.work, work)) {
@@ -97,23 +109,28 @@ export class WorkResultJournal {
       }
       if (existing.state === 'completed') {
         if (!sameResult(existing.result, result)) throw new Error(`Work result journal result conflict for ${key}`)
-        return
+        return this.persistencePending ? await this.persistOrRetain() : { state: 'durable' }
       }
       existing.state = 'completed'
       existing.result = cloneResult(result)
-      try {
-        await this.persist()
-      } catch (error) {
-        this.unavailable = true
-        existing.state = 'started'
-        delete existing.result
-        throw error
-      }
+      return await this.persistOrRetain()
+    })
+  }
+
+  /**
+   * Retries a prior local persistence failure without making a retained result
+   * visible to reporting first. A restarted process cannot call this for a
+   * lost in-memory result; its durable started entry remains a recovery fence.
+   */
+  async retryPendingPersistence(): Promise<WorkResultJournalPersistence> {
+    return await this.mutate(async () => {
+      if (!this.persistencePending) return { state: 'durable' }
+      return await this.persistOrRetain()
     })
   }
 
   completed(): WorkResultJournalEntry[] {
-    this.ensureAvailable()
+    this.ensureReady()
     return [...this.entries.values()]
       .filter((entry) => entry.state === 'completed' && entry.result !== undefined)
       .map(cloneEntry)
@@ -131,16 +148,37 @@ export class WorkResultJournal {
       try {
         await this.persist()
       } catch (error) {
-        this.unavailable = true
         this.entries.set(key, existing)
+        this.persistencePending = true
         throw error
       }
-    })
+    }, true)
   }
 
-  private async mutate<T>(work: () => Promise<T>): Promise<T> {
-    this.ensureAvailable()
-    const run = this.writeChain.then(work, work)
+  private async persistOrRetain(): Promise<WorkResultJournalPersistence> {
+    try {
+      await this.persist()
+      this.persistencePending = false
+      return { state: 'durable' }
+    } catch (error) {
+      this.persistencePending = true
+      return { state: 'pending', error }
+    }
+  }
+
+  private async mutate<T>(work: () => Promise<T>, requiresReady = false): Promise<T> {
+    const run = this.writeChain.then(
+      async () => {
+        if (requiresReady) this.ensureReady()
+        else this.ensureMutable()
+        return await work()
+      },
+      async () => {
+        if (requiresReady) this.ensureReady()
+        else this.ensureMutable()
+        return await work()
+      },
+    )
     this.writeChain = run.then(
       () => undefined,
       () => undefined,
@@ -148,8 +186,13 @@ export class WorkResultJournal {
     return await run
   }
 
-  private ensureAvailable(): void {
+  private ensureMutable(): void {
     if (!this.loaded || this.unavailable) throw new Error('Work result journal is unavailable')
+  }
+
+  private ensureReady(): void {
+    this.ensureMutable()
+    if (this.persistencePending) throw new Error('Work result journal is unavailable')
   }
 
   private async persist(): Promise<void> {
