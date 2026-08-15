@@ -68,7 +68,7 @@ public sealed class AgentQuerierListDefinitionsSpecs : IAsyncLifetime
 
         var agent = Assert.Single(agents);
         Assert.Equal(agentId, agent.Id);
-        Assert.Null(agent.Readiness);
+        Assert.Null(agent.Executability);
         Assert.DoesNotContain(commands.CommandTexts, command =>
             command.Contains("AgentJobs", StringComparison.OrdinalIgnoreCase));
     }

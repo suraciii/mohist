@@ -6,6 +6,7 @@ export type AgentSubscriptionState =
   | 'configured'
   | 'empty'
   | 'unconfigured'
+  | 'not_executable'
   | 'unavailable'
   | 'no_connection'
 
@@ -27,7 +28,7 @@ export interface AgentSubscriptionListDto {
   subscriptions: AgentSubscriptionDto[]
   state: AgentSubscriptionState
   agentStatus: string
-  readiness: 'Ready' | 'Needs setup' | 'Unknown'
+  executability: 'not-configured' | 'not-executable' | 'unknown' | 'executable'
   connection: 'connected' | 'unavailable' | 'no_connection'
 }
 
@@ -62,11 +63,7 @@ export function listAgentSubscriptions(projectId: string, agentRef: string) {
   return request<AgentSubscriptionListDto>(subscriptionsPath(projectId, agentRef))
 }
 
-export function createAgentSubscription(
-  projectId: string,
-  agentRef: string,
-  data: AgentSubscriptionCreateRequest,
-) {
+export function createAgentSubscription(projectId: string, agentRef: string, data: AgentSubscriptionCreateRequest) {
   const { idempotencyKey, ...body } = data
   const key = idempotencyKey ?? createIdempotencyKey()
   return request<AgentSubscriptionDto>(subscriptionsPath(projectId, agentRef), {
@@ -76,9 +73,7 @@ export function createAgentSubscription(
   })
     .then((resource): AgentSubscriptionCreateResult => ({ ...resource, idempotencyKey: key }))
     .catch((error: unknown) => {
-      const retryable = error instanceof Error
-        ? error
-        : new Error('Subscription create response was lost.')
+      const retryable = error instanceof Error ? error : new Error('Subscription create response was lost.')
       Object.assign(retryable, { idempotencyKey: key })
       throw retryable as AgentSubscriptionCreateError
     })

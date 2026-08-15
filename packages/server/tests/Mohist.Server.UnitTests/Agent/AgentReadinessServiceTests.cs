@@ -8,83 +8,97 @@ namespace Mohist.Server.UnitTests.Agent;
 public sealed class AgentReadinessServiceTests
 {
     [Fact]
-    public void NeverExecuted_IsUnknown()
+    public void NeverExecuted_IsUnknownAndAdmitted()
     {
         var result = AgentReadinessService.Evaluate(Agent(), null);
 
-        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
         Assert.Empty(result.Gaps);
-        Assert.Null(result.Setup);
+        Assert.NotNull(result.PendingLaunchNote);
+        Assert.True(AgentConnectionDispatchDecision.For(result.State).Accepted);
     }
 
     [Fact]
-    public void MissingAgentConfiguration_RequiresSetup()
+    public void BuiltInMohistSlackWithoutSelectedModel_IsUnknownAndAdmitted()
+    {
+        var result = AgentReadinessService.Evaluate(
+            BuiltInAgentCatalog.Resolve(BuiltInAgentCatalog.MohistSlackName),
+            null);
+
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
+        Assert.Empty(result.Gaps);
+        Assert.True(AgentConnectionDispatchDecision.For(result.State).Accepted);
+    }
+
+    [Fact]
+    public void MissingAgentConfiguration_IsNotConfigured()
     {
         var result = AgentReadinessService.Evaluate(Agent() with { AgentConfig = null }, null);
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
         Assert.Contains(result.Gaps, gap => gap.Code == "model-missing");
-        Assert.NotNull(result.Setup);
+        Assert.Equal("/agents/agent-1", Assert.Single(result.Gaps).FixEntryPoint.Path);
+        Assert.True(AgentExecutabilityStates.IsBlocked(result.State));
     }
 
     [Fact]
-    public void SuccessfulExecution_IsReady_IndependentOfRuntimeAvailability()
+    public void SuccessfulExecution_IsExecutable_IndependentOfRuntimeAvailability()
     {
         var result = AgentReadinessService.Evaluate(
             Agent(),
             History(AgentJobStatus.Completed));
 
-        Assert.Equal(AgentReadinessConclusions.Ready, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
+        Assert.Null(result.PendingLaunchNote);
     }
 
     [Fact]
-    public void StructuralGaps_RequireSetup()
+    public void StructuralGaps_AreNotConfigured()
     {
         var agent = Agent(
             config: "{\"variant\":\"fast\",\"model\":\"bad-reference\"}");
 
         var result = AgentReadinessService.Evaluate(agent, null);
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
         Assert.Contains(result.Gaps, gap => gap.Code == "model-reference-malformed");
         Assert.DoesNotContain(result.Gaps, gap => gap.Code == "variant-without-model");
-        Assert.NotNull(result.Setup);
-        Assert.Equal("/agents/agent-1", result.Setup!.Path);
+        Assert.Equal("/agents/agent-1", Assert.Single(result.Gaps).FixEntryPoint.Path);
     }
 
     [Fact]
-    public void VariantWithoutModel_IsAConfirmedStructuralGap()
+    public void VariantWithoutModel_IsNotConfigured()
     {
         var result = AgentReadinessService.Evaluate(
             Agent(config: "{\"variant\":\"fast\"}"),
             null);
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
         Assert.Contains(result.Gaps, gap => gap.Code == "variant-without-model");
     }
 
     [Fact]
-    public void ReasoningEffortWithoutModel_IsAConfirmedStructuralGap()
+    public void ReasoningEffortWithoutModel_IsNotConfigured()
     {
         var result = AgentReadinessService.Evaluate(
             Agent(config: "{\"reasoningEffort\":\"high\"}"),
             null);
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
         Assert.Contains(result.Gaps, gap => gap.Code == "model-missing");
         Assert.Contains(result.Gaps, gap => gap.Code == "reasoning-effort-without-model");
     }
 
     [Fact]
-    public void ExecutionConfigurationFailure_RequiresSetup()
+    public void ExecutionConfigurationFailure_IsNotExecutable()
     {
         var result = AgentReadinessService.Evaluate(
             Agent(),
             History(AgentJobStatus.Failed, "unauthorized"));
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotExecutable, result.State);
         Assert.Equal("execution-config-failure", Assert.Single(result.Gaps).Code);
-        Assert.NotNull(result.Setup);
+        Assert.True(AgentExecutabilityStates.IsBlocked(result.State));
     }
 
     [Theory]
@@ -92,13 +106,13 @@ public sealed class AgentReadinessServiceTests
     [InlineData("runtime-invalid")]
     [InlineData("unsupported-execution-configuration")]
     [InlineData("incompatible-execution-configuration")]
-    public void DeterministicRuntimeConfigurationFailure_RequiresSetup(string category)
+    public void DeterministicRuntimeConfigurationFailure_IsNotExecutable(string category)
     {
         var result = AgentReadinessService.Evaluate(
             Agent(),
             History(AgentJobStatus.Failed, category));
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotExecutable, result.State);
         Assert.Equal("execution-config-failure", Assert.Single(result.Gaps).Code);
     }
 
@@ -112,9 +126,9 @@ public sealed class AgentReadinessServiceTests
             Agent(),
             History(AgentJobStatus.Failed, category));
 
-        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
         Assert.Empty(result.Gaps);
-        Assert.Null(result.Setup);
+        Assert.NotNull(result.PendingLaunchNote);
     }
 
     [Fact]
@@ -124,10 +138,10 @@ public sealed class AgentReadinessServiceTests
             Agent(),
             History(AgentJobStatus.Failed, "invalid-input"));
 
-        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
         Assert.Empty(result.Gaps);
-        Assert.Null(result.Setup);
-        Assert.True(AgentConnectionDispatchDecision.For(result.Conclusion).Accepted);
+        Assert.NotNull(result.PendingLaunchNote);
+        Assert.True(AgentConnectionDispatchDecision.For(result.State).Accepted);
     }
 
     [Fact]
@@ -137,7 +151,7 @@ public sealed class AgentReadinessServiceTests
             Agent(),
             History(AgentJobStatus.Unknown));
 
-        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
     }
 
     [Fact]
@@ -147,7 +161,18 @@ public sealed class AgentReadinessServiceTests
             Agent(config: "{\"model\":\"provider/new-model\"}"),
             History(AgentJobStatus.Completed, model: "provider/old-model"));
 
-        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
+    }
+
+    [Theory]
+    [InlineData(AgentExecutabilityStates.NotConfigured)]
+    [InlineData(AgentExecutabilityStates.NotExecutable)]
+    public void BlockedExecutability_RejectsConnectionDispatch(string state)
+    {
+        var decision = AgentConnectionDispatchDecision.For(state);
+
+        Assert.False(decision.Accepted);
+        Assert.Equal(state == AgentExecutabilityStates.NotConfigured ? "agent_not_configured" : "agent_not_executable", decision.Kind);
     }
 
     private static AgentInfo Agent(string config = "{\"model\":\"provider/model\"}") => new(

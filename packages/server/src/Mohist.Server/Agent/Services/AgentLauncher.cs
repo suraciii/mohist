@@ -427,6 +427,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         ArgumentNullException.ThrowIfNull(origin);
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
 
+        await EnsureLaunchableAsync(agent, ct);
+
         var context = new AgentLaunchContext(agent.ProjectId);
         var key = $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
         var definition = ResolveExecutionDefinition(agent);
@@ -719,9 +721,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
     private async Task EnsureLaunchableAsync(AgentInfo agent, CancellationToken ct)
     {
-        var readiness = await _readiness.GetAsync(agent.ProjectId, agent, ct);
-        if (readiness.Conclusion == AgentReadinessConclusions.NeedsSetup)
-            throw new AgentReadinessException(readiness);
+        await _readiness.EnsureLaunchableAsync(agent.ProjectId, agent, ct);
     }
 
     private async Task<AgentExecutionDefinition> ResolveDefinitionAsync(AgentInfo agent)

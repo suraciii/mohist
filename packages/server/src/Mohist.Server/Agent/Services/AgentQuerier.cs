@@ -32,7 +32,7 @@ public class AgentQuerier : IScopedService
             .FirstOrDefault();
         return agent is null || _readiness is null
             ? agent
-            : agent with { Readiness = await _readiness.GetAsync(projectId, agent, ct) };
+            : agent with { Executability = await _readiness.GetAsync(projectId, agent, ct) };
     }
 
     /// <summary>
@@ -60,7 +60,7 @@ public class AgentQuerier : IScopedService
             .FirstOrDefault();
         return agent is null || _readiness is null
             ? agent
-            : agent with { Readiness = await _readiness.GetAsync(projectId, agent) };
+            : agent with { Executability = await _readiness.GetAsync(projectId, agent) };
     }
 
     public async Task<IReadOnlyList<AgentInfo>> ListAsync(
@@ -75,7 +75,7 @@ public class AgentQuerier : IScopedService
         var hydrated = new List<AgentInfo>(infos.Count);
         foreach (var info in infos)
         {
-            hydrated.Add(info with { Readiness = await _readiness.GetAsync(projectId, info, ct) });
+            hydrated.Add(info with { Executability = await _readiness.GetAsync(projectId, info, ct) });
         }
         return hydrated;
     }

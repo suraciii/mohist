@@ -6,35 +6,91 @@ import { ProjectProvider } from '../../../entities/project'
 import { SubscriptionsSection, type SubscriptionOperationsHook } from './SubscriptionsSection'
 import type { AgentInfo, AgentSubscriptionDto, AgentSubscriptionListDto } from '../../../entities/agent'
 
-const mocks = { data: undefined as AgentSubscriptionListDto | undefined, loading: false, error: false, create: [] as unknown[], createFailures: 0, update: [] as unknown[], remove: [] as unknown[] }
+const mocks = {
+  data: undefined as AgentSubscriptionListDto | undefined,
+  loading: false,
+  error: false,
+  create: [] as unknown[],
+  createFailures: 0,
+  update: [] as unknown[],
+  remove: [] as unknown[],
+}
 
 function subscription(overrides: Partial<AgentSubscriptionDto> = {}): AgentSubscriptionDto {
   return {
-    id: 'rule_x', projectId: 'proj-1', agentId: 'agent-1', name: 'fallback',
-    match: 'event.type == "com.example.failed"', responsePrompt: 'inspect', continue: false,
-    position: 1, status: 'active', createdAt: '2026-08-09T00:00:00.000Z', updatedAt: '2026-08-09T00:00:00.000Z', ...overrides,
+    id: 'rule_x',
+    projectId: 'proj-1',
+    agentId: 'agent-1',
+    name: 'fallback',
+    match: 'event.type == "com.example.failed"',
+    responsePrompt: 'inspect',
+    continue: false,
+    position: 1,
+    status: 'active',
+    createdAt: '2026-08-09T00:00:00.000Z',
+    updatedAt: '2026-08-09T00:00:00.000Z',
+    ...overrides,
   }
 }
 
 function agent(overrides: Partial<AgentInfo> = {}): AgentInfo {
   return {
-    id: 'agent-1', projectId: 'proj-1', name: 'Agent', description: '', instructions: '...', agentConfig: null,
-    skills: [], maxConcurrentRuns: null, status: 'active', createdAt: '', updatedAt: '', ...overrides,
+    id: 'agent-1',
+    projectId: 'proj-1',
+    name: 'Agent',
+    description: '',
+    instructions: '...',
+    agentConfig: null,
+    skills: [],
+    maxConcurrentRuns: null,
+    status: 'active',
+    createdAt: '',
+    updatedAt: '',
+    ...overrides,
   }
 }
 
 const operations: SubscriptionOperationsHook = () => ({
-  subscriptionsQuery: { data: mocks.data, isLoading: mocks.loading, isError: mocks.error, error: mocks.error ? new Error('request failed') : null },
-  createMutation: { mutate: (data: unknown, options?: { onSuccess?: () => void }) => { mocks.create.push(data); if (mocks.createFailures > 0) mocks.createFailures -= 1; else options?.onSuccess?.() }, isPending: false },
-  updateMutation: { mutate: (data: unknown, options?: { onSuccess?: () => void }) => { mocks.update.push(data); options?.onSuccess?.() }, isPending: false },
-  deleteMutation: { mutate: (data: unknown, options?: { onSuccess?: () => void }) => { mocks.remove.push(data); options?.onSuccess?.() }, isPending: false },
+  subscriptionsQuery: {
+    data: mocks.data,
+    isLoading: mocks.loading,
+    isError: mocks.error,
+    error: mocks.error ? new Error('request failed') : null,
+  },
+  createMutation: {
+    mutate: (data: unknown, options?: { onSuccess?: () => void }) => {
+      mocks.create.push(data)
+      if (mocks.createFailures > 0) mocks.createFailures -= 1
+      else options?.onSuccess?.()
+    },
+    isPending: false,
+  },
+  updateMutation: {
+    mutate: (data: unknown, options?: { onSuccess?: () => void }) => {
+      mocks.update.push(data)
+      options?.onSuccess?.()
+    },
+    isPending: false,
+  },
+  deleteMutation: {
+    mutate: (data: unknown, options?: { onSuccess?: () => void }) => {
+      mocks.remove.push(data)
+      options?.onSuccess?.()
+    },
+    isPending: false,
+  },
 })
 
 function renderSection(value = agent()) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{ id: 'proj-1', name: 'Project', createdAt: '', updatedAt: '', repositories: [] }]}>
-        <MemoryRouter><SubscriptionsSection agent={value} operationsHook={operations} /></MemoryRouter>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[{ id: 'proj-1', name: 'Project', createdAt: '', updatedAt: '', repositories: [] }]}
+      >
+        <MemoryRouter>
+          <SubscriptionsSection agent={value} operationsHook={operations} />
+        </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
   )
@@ -42,10 +98,24 @@ function renderSection(value = agent()) {
 
 describe('SubscriptionsSection', () => {
   beforeEach(() => {
-    mocks.data = { subscriptions: [], state: 'empty', agentStatus: 'active', readiness: 'Ready', connection: 'no_connection' }
-    mocks.loading = false; mocks.error = false; mocks.create.length = 0; mocks.createFailures = 0; mocks.update.length = 0; mocks.remove.length = 0
+    mocks.data = {
+      subscriptions: [],
+      state: 'empty',
+      agentStatus: 'active',
+      executability: 'executable',
+      connection: 'no_connection',
+    }
+    mocks.loading = false
+    mocks.error = false
+    mocks.create.length = 0
+    mocks.createFailures = 0
+    mocks.update.length = 0
+    mocks.remove.length = 0
   })
-  afterEach(() => { cleanup(); vi.clearAllMocks() })
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
 
   it('shows the explicit empty state and connection state', () => {
     renderSection()
