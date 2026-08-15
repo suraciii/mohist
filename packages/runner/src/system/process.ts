@@ -393,8 +393,11 @@ function startResourceWatchdog(
   }
 }
 
-/** Sum VmRSS for a process and its descendants on Linux. */
+/** Sum resident memory for a process and its descendants on supported Unix hosts. */
 export async function readProcessTreeRssBytes(pid: number): Promise<number | null> {
+  if (process.platform === 'darwin') return await readDarwinProcessTreeRssBytes(pid)
+  if (process.platform !== 'linux') return null
+
   const pending = [pid]
   const seen = new Set<number>()
   let total = 0
@@ -408,20 +411,64 @@ export async function readProcessTreeRssBytes(pid: number): Promise<number | nul
       readFile(`/proc/${current}/task/${current}/children`, 'utf8').catch(() => null),
     ])
     if (status !== null) {
-      const match = /^VmRSS:\s+(\\d+)\\s+kB$/m.exec(status)
+      const match = /^VmRSS:\s+(\d+)\s+kB$/m.exec(status)
       if (match) {
         total += Number(match[1]) * 1024
         found = true
       }
     }
     if (children !== null) {
-      for (const value of children.trim().split(/\\s+/)) {
+      for (const value of children.trim().split(/\s+/)) {
         const childPid = Number(value)
         if (Number.isInteger(childPid) && childPid > 0) pending.push(childPid)
       }
     }
   }
   return found ? total : null
+}
+
+async function readDarwinProcessTreeRssBytes(pid: number): Promise<number | null> {
+  try {
+    assertExternalProcessAllowed('system/process.readDarwinProcessTreeRssBytes')
+    const child = spawn('ps', ['-axo', 'pid=,ppid=,rss='], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      shell: false,
+    })
+    registerExternalProcess(child)
+    const output = await new Promise<string | null>((resolve) => {
+      const chunks: Buffer[] = []
+      child.stdout?.on('data', (chunk: Buffer) => chunks.push(chunk))
+      child.once('error', () => resolve(null))
+      child.once('close', (code) => resolve(code === 0 ? Buffer.concat(chunks).toString('utf8') : null))
+    })
+    if (output === null) return null
+
+    const processes = new Map<number, { parentPid: number; rssBytes: number }>()
+    for (const line of output.split(/\r?\n/)) {
+      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line)
+      if (match) processes.set(Number(match[1]), { parentPid: Number(match[2]), rssBytes: Number(match[3]) * 1024 })
+    }
+
+    const pending = [pid]
+    const seen = new Set<number>()
+    let total = 0
+    let found = false
+    while (pending.length > 0) {
+      const current = pending.pop()!
+      if (seen.has(current)) continue
+      seen.add(current)
+      const processInfo = processes.get(current)
+      if (!processInfo) continue
+      total += processInfo.rssBytes
+      found = true
+      for (const [childPid, childInfo] of processes) {
+        if (childInfo.parentPid === current) pending.push(childPid)
+      }
+    }
+    return found ? total : null
+  } catch {
+    return null
+  }
 }
 
 interface LineBufferState {
