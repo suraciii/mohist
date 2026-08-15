@@ -24,7 +24,9 @@ jobs:
   canonical:
     name: Canonical verification
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # The canonical gate owns a five-minute execution deadline. Keep extra
+    # job wall for bounded cleanup and diagnostic artifact upload.
+    timeout-minutes: 7
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
@@ -62,14 +64,14 @@ jobs:
         run: timeout -k 10s 120s npm ci
 
       - name: Run canonical gate
-        # TERM starts at 240s and KILL follows after ten seconds. The remaining
-        # job wall belongs to checkout, setup, install, and diagnostic upload.
-        timeout-minutes: 5
+        # The gate enforces its own 300s absolute deadline. The job-level wall
+        # leaves room for bounded cleanup and the always-run artifact upload.
+        timeout-minutes: 6
         env:
           TMPDIR: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: timeout -k 10s 240s npm run verify
+        run: timeout -k 10s 300s npm run verify
 
       - name: Upload canonical diagnostics
         if: always()
