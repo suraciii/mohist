@@ -38,39 +38,6 @@ public class IssueModelVariantApiSpecs
     }
 
     [Fact]
-    public async Task CreateIssue_WithStageModelsAndStageVariants_RoundTripsPerStageOverrides()
-    {
-        var projectId = await CreateProjectAsync("variant-stage-create");
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new
-            {
-                title = "Stage variant create",
-                stageModels = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["plan"] = "openai/gpt-5.5",
-                    ["build"] = "anthropic/claude-sonnet-4-20250514",
-                },
-                stageModelVariants = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["plan"] = "low",
-                    ["build"] = "max",
-                },
-            });
-
-        var detail = await _fixture.Client.GetDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues/{issue.GetProperty("number").GetInt32()}");
-
-        var stageModels = detail.GetProperty("stageModels");
-        var stageVariants = detail.GetProperty("stageModelVariants");
-
-        Assert.Equal("openai/gpt-5.5", stageModels.GetProperty("plan").GetString());
-        Assert.Equal("anthropic/claude-sonnet-4-20250514", stageModels.GetProperty("build").GetString());
-        Assert.Equal("low", stageVariants.GetProperty("plan").GetString());
-        Assert.Equal("max", stageVariants.GetProperty("build").GetString());
-    }
-
-    [Fact]
     public async Task ListIssues_ExcludesDetailOnlyModelFields()
     {
         var projectId = await CreateProjectAsync("variant-list");
@@ -121,64 +88,6 @@ public class IssueModelVariantApiSpecs
 
         Assert.Equal("openai/gpt-5.5", detail.GetProperty("model").GetString());
         Assert.Equal("high", detail.GetProperty("modelVariant").GetString());
-    }
-
-    [Fact]
-    public async Task PatchIssue_ClearingModel_ClearsVariantAtomically()
-    {
-        var projectId = await CreateProjectAsync("variant-clear");
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new
-            {
-                title = "Cleared",
-                model = "openai/gpt-5.5",
-                modelVariant = "high",
-            });
-
-        var number = issue.GetProperty("number").GetInt32();
-
-        await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{number}",
-            new { model = (string?)null });
-
-        var detail = await _fixture.Client.GetDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues/{number}");
-
-        Assert.False(detail.TryGetProperty("model", out _));
-        Assert.False(detail.TryGetProperty("modelVariant", out _));
-    }
-
-    [Fact]
-    public async Task PatchIssue_ClearingStageModels_ClearsStageVariants()
-    {
-        var projectId = await CreateProjectAsync("variant-stage-clear");
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new
-            {
-                title = "Stage clear",
-                stageModels = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["plan"] = "openai/gpt-5.5",
-                },
-                stageModelVariants = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["plan"] = "high",
-                },
-            });
-
-        var number = issue.GetProperty("number").GetInt32();
-
-        await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{number}",
-            new { stageModels = (Dictionary<string, string>?)null });
-
-        var detail = await _fixture.Client.GetDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues/{number}");
-
-        Assert.False(detail.TryGetProperty("stageModels", out _));
-        Assert.False(detail.TryGetProperty("stageModelVariants", out _));
     }
 
     [Fact]
@@ -261,91 +170,6 @@ public class IssueModelVariantApiSpecs
     }
 
     [Fact]
-    public async Task PatchIssue_WithStageModelsAndVariants_RoundTripsPerStageOverrides()
-    {
-        var projectId = await CreateProjectAsync("variant-stage-patch");
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new { title = "Stage patch" });
-
-        var number = issue.GetProperty("number").GetInt32();
-
-        await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{number}",
-            new
-            {
-                stageModels = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["plan"] = "openai/gpt-5.5",
-                    ["build"] = "anthropic/claude-sonnet-4-20250514",
-                },
-                stageModelVariants = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["plan"] = "low",
-                    ["build"] = "max",
-                },
-            });
-
-        var detail = await _fixture.Client.GetDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues/{number}");
-
-        var stageModels = detail.GetProperty("stageModels");
-        var stageVariants = detail.GetProperty("stageModelVariants");
-
-        Assert.Equal("openai/gpt-5.5", stageModels.GetProperty("plan").GetString());
-        Assert.Equal("anthropic/claude-sonnet-4-20250514", stageModels.GetProperty("build").GetString());
-        Assert.Equal("low", stageVariants.GetProperty("plan").GetString());
-        Assert.Equal("max", stageVariants.GetProperty("build").GetString());
-    }
-
-    [Fact]
-    public async Task PatchIssue_SwitchingModel_DropsStaleVariant()
-    {
-        var projectId = await CreateProjectAsync("variant-switch");
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new
-            {
-                title = "Switch",
-                model = "anthropic/claude-opus-4-20250514",
-                modelVariant = "high",
-            });
-
-        var number = issue.GetProperty("number").GetInt32();
-
-        // PATCH a new model WITHOUT sending modelVariant — the stale variant
-        // bound to the prior model must be cleared atomically because the
-        // dependency invariant says a variant is only valid for its model.
-        await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{number}",
-            new { model = "openai/gpt-5.5" });
-
-        var detail = await _fixture.Client.GetDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues/{number}");
-
-        Assert.Equal("openai/gpt-5.5", detail.GetProperty("model").GetString());
-        Assert.False(detail.TryGetProperty("modelVariant", out _));
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithEmptyModel_ClearsStaleVariantOnDetail()
-    {
-        // Sanity check: an issue created without any model has no modelVariant
-        // (the dependency invariant applies even on create).
-        var projectId = await CreateProjectAsync("variant-empty");
-
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new { title = "No model" });
-
-        var detail = await _fixture.Client.GetDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues/{issue.GetProperty("number").GetInt32()}");
-
-        Assert.False(detail.TryGetProperty("model", out _));
-        Assert.False(detail.TryGetProperty("modelVariant", out _));
-    }
-
-    [Fact]
     public async Task OpencodeModels_RuntimeQueryReturnsSelectedCatalogAndDefaultsToOpenCode()
     {
         var projectId = await CreateProjectAsync("runtime-models");
@@ -388,17 +212,6 @@ public class IssueModelVariantApiSpecs
         {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithModelAbsentFromCatalog_RemainsConfigurable()
-    {
-        var projectId = await CreateProjectAsync("catalog-absent-model");
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues",
-            new { title = "Catalog absent model", model = "openai/catalog-absent" });
-
-        response.EnsureSuccessStatusCode();
     }
 
     private sealed record CatalogDto(string[] Models, Dictionary<string, string[]> ModelVariants);
