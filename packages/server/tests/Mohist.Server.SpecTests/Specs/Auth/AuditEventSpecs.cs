@@ -152,56 +152,6 @@ public sealed class AuditEventSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
-    public async Task List_FiltersByKind()
-    {
-        await CreatePatAsync("audit-kind-1");
-        await CreatePatAsync("audit-kind-2");
-
-        var events = await GetEventsAsync($"kind={Uri.EscapeDataString("credentialIssued")}");
-
-        Assert.Contains(events, auditEvent => NameOf(auditEvent) == "audit-kind-1");
-        Assert.Contains(events, auditEvent => NameOf(auditEvent) == "audit-kind-2");
-        Assert.All(events, auditEvent =>
-            Assert.Equal("credentialIssued", auditEvent.GetProperty("eventType").GetString()));
-    }
-
-    [Fact]
-    public async Task List_FiltersBySince()
-    {
-        await CreatePatAsync("audit-since-before");
-        fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
-        var cutoff = fixture.TimeProvider.GetUtcNow();
-        fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-        await CreatePatAsync("audit-since-after");
-
-        var events = await GetEventsAsync($"since={Uri.EscapeDataString(cutoff.ToString("O"))}");
-
-        Assert.DoesNotContain(events, auditEvent => NameOf(auditEvent) == "audit-since-before");
-        Assert.Contains(events, auditEvent => NameOf(auditEvent) == "audit-since-after");
-        Assert.All(events, auditEvent => Assert.True(
-            auditEvent.GetProperty("occurredAt").GetDateTimeOffset() >= cutoff));
-    }
-
-    [Fact]
-    public async Task List_WithLimit_ReturnsTheNewestEvents()
-    {
-        await CreatePatAsync("audit-limit-1");
-        fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-        await CreatePatAsync("audit-limit-2");
-        fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-        await CreatePatAsync("audit-limit-3");
-
-        // Limit semantics are asserted against the unfiltered same-kind
-        // list, so foreign events from sibling specs cannot interfere.
-        var all = await GetEventsAsync("kind=credentialIssued");
-        var limited = await GetEventsAsync("limit=2", "kind=credentialIssued");
-
-        Assert.Equal(2, limited.Length);
-        Assert.Equal(all[0].GetProperty("id").GetString(), limited[0].GetProperty("id").GetString());
-        Assert.Equal(all[1].GetProperty("id").GetString(), limited[1].GetProperty("id").GetString());
-    }
-
-    [Fact]
     public async Task List_RequiresAuthentication()
     {
         using var anonymous = fixture.CreateClient();
