@@ -309,7 +309,12 @@ internal sealed class ManagedRuntimeTransaction
             WriteAtomic(
                 Path.Combine(session.Context.RuntimeRoot, "transactions", session.Context.TransactionId, "state.json").Replace('\\', '/'),
                 committed);
-            return await _cliLauncher.FinalizeAsync(session.CliLauncher);
+            var launcherFinalized = await _cliLauncher.FinalizeAsync(session.CliLauncher);
+            if (launcherFinalized != 0)
+                return launcherFinalized;
+
+            ReclaimCommittedTransactionPayload(session);
+            return 0;
         }
         catch (Exception ex)
         {
@@ -739,6 +744,42 @@ internal sealed class ManagedRuntimeTransaction
         catch (Exception ex)
         {
             _err.WriteLine($"Managed staged release cleanup failed for {releaseRoot}: {ex.Message}");
+        }
+    }
+
+    private void ReclaimCommittedTransactionPayload(ManagedUpdateSession session)
+    {
+        string transactionRoot;
+        try
+        {
+            transactionRoot = Path.Combine(
+                session.Context.RuntimeRoot,
+                "transactions",
+                session.Context.TransactionId).Replace('\\', '/');
+            if (_files.IsSymbolicLink(transactionRoot))
+                return;
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Managed transaction payload cleanup could not inspect {session.Context.TransactionId}: {ex.Message}");
+            return;
+        }
+
+        // These directories are only inputs to staging and rollback. The committed
+        // pointers and immutable release remain available after launcher finalization.
+        foreach (var name in new[] { "snapshot", "build", "candidate" })
+        {
+            var payloadRoot = Path.Combine(transactionRoot, name).Replace('\\', '/');
+            try
+            {
+                if (!_files.DirectoryExists(payloadRoot) || _files.IsSymbolicLink(payloadRoot))
+                    continue;
+                _files.DeleteDirectory(payloadRoot);
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Managed transaction payload cleanup failed for {payloadRoot}: {ex.Message}");
+            }
         }
     }
 
