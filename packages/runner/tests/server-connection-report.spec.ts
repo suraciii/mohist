@@ -32,6 +32,37 @@ describe("ServerConnection.report", () => {
     expect(body.cleanupAttempts).toBe(3)
   })
 
+  it("preservesRunnerRestartedUnknownStatusAndOriginalWorkflowIdentity", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ tracked: true }) }))
+    const connection = new ServerConnection(options())
+    await connection.report(
+      {
+        workflowRunId: "wf-restart",
+        workId: "work-restart",
+        taskRunId: "task-restart",
+        workType: "task",
+        uses: "mohist/opencode",
+        ownerKind: "workflow",
+        projectId: "project-1",
+      },
+      {
+        status: "unknown",
+        message: "runner-restarted",
+        error: { code: "runner-restarted", message: "runner-restarted" },
+      },
+      new AbortController().signal,
+    )
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body).toMatchObject({
+      workflowRunId: "wf-restart",
+      workId: "work-restart",
+      taskRunId: "task-restart",
+      ownerKind: "workflow",
+      status: "unknown",
+      error: { code: "runner-restarted" },
+    })
+  })
+
   it("sendsNullCleanupAttemptsWhenResultOmitsThem", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "{}" }))
     const connection = new ServerConnection(options())

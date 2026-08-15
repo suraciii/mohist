@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import { WorkResultJournal, workKey } from './work-result-journal.js'
+import { runnerRestartedResult } from './work-report.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
 import { withTestRunnerResources } from '../../tests/support/test-resources.js'
 import type { RunnerFileSystem } from '../system/filesystem.js'
@@ -61,6 +62,29 @@ describe('WorkResultJournal', () => {
       expect(restarted.started()).toEqual([])
       expect(await restarted.begin(work)).toBe('new')
       expect(workKey(work)).toBe('workflow:workflow-1:work-1')
+    })
+  })
+
+  it('CompletesAStartedFenceWithAnInterruptionFactAndRetiresItAfterAck', async () => {
+    await withTestRunnerResources(async (_fileSystem) => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      await journal.begin(work)
+      const interruption = runnerRestartedResult(work)
+      await journal.completeInterrupted(work, interruption.result, interruption.interruption)
+
+      const restarted = new WorkResultJournal('/runner')
+      await restarted.load()
+      expect(restarted.completed()).toEqual([
+        expect.objectContaining({
+          work,
+          state: 'completed',
+          result: expect.objectContaining({ status: 'unknown', message: 'runner-restarted' }),
+          interruption: expect.objectContaining({ reason: 'runner-restarted', workId: work.workId }),
+        }),
+      ])
+      await restarted.acknowledge(work)
+      expect(restarted.completed()).toEqual([])
     })
   })
 

@@ -1,5 +1,14 @@
-import type { OpenCodeRuntime, RuntimeResult, RuntimeSessionCreateResult } from "./opencode/index.js"
-import type { PiResult, PiRuntime, PiSessionResult } from "./pi/index.js"
+import type { DispatchWorkItem } from '../core/types.js'
+import type { ServerConnection, AgentSession } from '../server/connection.js'
+import { workflowSessionName } from '../actions/workflow-session-name.js'
+import type {
+  OpenCodeRuntime,
+  RuntimeResult,
+  RuntimeSessionCreateResult,
+  RuntimeSessionTarget,
+  RuntimeTurnResult,
+} from './opencode/index.js'
+import type { PiResult, PiRuntime, PiSessionResult, PiSessionTarget, PiTurnResult } from './pi/index.js'
 
 export type RecoverableRuntime =
   | { readonly kind: "opencode"; readonly runtime: OpenCodeRuntime }
@@ -19,6 +28,16 @@ export type BindingProbeResult =
 export type BindingRecoveryResult =
   | { readonly ok: true; readonly binding: RuntimeBinding; readonly recovered: boolean }
   | { readonly ok: false; readonly kind: string; readonly message: string; readonly candidateRuntimeSessionId?: string }
+
+export type RuntimeTurnRecoveryResult =
+  | RuntimeResult<RuntimeTurnResult>
+  | PiResult<PiTurnResult>
+
+export type PersistedWorkBinding =
+  | { readonly kind: 'bound'; readonly binding: RuntimeBinding; readonly sessionId: string }
+  | { readonly kind: 'missing'; readonly reason: string }
+  | { readonly kind: 'not-runtime-backed' }
+  | { readonly kind: 'unavailable'; readonly message: string }
 
 export interface ResolveOrRecoverBindingRequest {
   readonly runnerId: string
@@ -49,6 +68,77 @@ export class BindingRecoveryCoordinator {
     this.inFlight.set(key, current)
     return current
   }
+}
+
+/**
+ * Finds the server-owned runtime binding for a redelivered work item. This
+ * lookup is intentionally read-only: reconciliation must never open a fresh
+ * session or mutate a binding before the journal fence has decided what to do.
+ */
+export async function resolvePersistedWorkBinding(
+  work: DispatchWorkItem,
+  connection: Pick<ServerConnection, 'getAgentSession' | 'getWorkflowAgentSession'>,
+  runnerId: string,
+  signal: AbortSignal,
+): Promise<PersistedWorkBinding> {
+  const runtime = runtimeForWork(work)
+  if (!runtime) return { kind: 'not-runtime-backed' }
+  if (!work.projectId) return { kind: 'missing', reason: 'runner-restarted' }
+
+  let session: AgentSession | null
+  try {
+    if ((work.ownerKind ?? '').trim().toLowerCase() === 'agent-job') {
+      if (!work.agentSessionId) return { kind: 'missing', reason: 'runner-restarted' }
+      session = await connection.getAgentSession(work.projectId, work.agentSessionId, signal)
+    } else {
+      const workflowSession = await connection.getWorkflowAgentSession(
+        work.projectId,
+        work.workflowRunId,
+        workflowSessionName(work.with, work.workId),
+        signal,
+      )
+      session = workflowSession
+    }
+  } catch (error) {
+    return { kind: 'unavailable', message: error instanceof Error ? error.message : String(error) }
+  }
+
+  const runtimeSessionId = session?.runtimeSessionId ?? null
+  const workDir = session?.workDir ?? null
+  if (!session || !runtimeSessionId || !workDir || (session.runtime ?? '').trim().toLowerCase() !== runtime) {
+    return { kind: 'missing', reason: 'runner-restarted' }
+  }
+  return {
+    kind: 'bound',
+    sessionId: session.sessionId,
+    binding: { runnerId, runtime, runtimeSessionId, workDir },
+  }
+}
+
+export async function probeRuntimeBinding(
+  runtime: RecoverableRuntime,
+  binding: RuntimeBinding,
+): Promise<BindingProbeResult> {
+  try {
+    const result = runtime.kind === 'opencode'
+      ? await runtime.runtime.resolveSession({ target: opencodeTarget(binding) })
+      : await runtime.runtime.resolveSession({ target: piTarget(binding) })
+    return result.ok
+      ? { ok: true, activeTurn: result.value.activeTurn }
+      : { ok: false, kind: result.error.kind, message: result.error.message }
+  } catch (error) {
+    return { ok: false, kind: 'unavailable-runtime', message: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+export async function reattachRuntimeTurn(
+  runtime: RecoverableRuntime,
+  binding: RuntimeBinding,
+  signal: AbortSignal,
+): Promise<RuntimeTurnRecoveryResult> {
+  return runtime.kind === 'opencode'
+    ? runtime.runtime.reattachTurn({ target: opencodeTarget(binding) }, signal)
+    : runtime.runtime.reattachTurn({ target: piTarget(binding) }, signal)
 }
 
 export async function resolveOrRecoverBinding(
@@ -117,6 +207,22 @@ export async function createEmptySession(
   return await handle.runtime.createSession({
     target: { runtime: "pi", runtimeSessionId: null, workDir: binding.workDir },
   })
+}
+
+function runtimeForWork(work: DispatchWorkItem): 'opencode' | 'pi' | null {
+  const declared = typeof work.with?.runtime === 'string' ? work.with.runtime : work.agentDefinition?.runtime
+  const candidate = (declared ?? work.uses ?? '').trim().toLowerCase()
+  if (candidate === 'pi' || candidate === 'mohist/pi') return 'pi'
+  if (candidate === 'opencode' || candidate === 'mohist/opencode') return 'opencode'
+  return null
+}
+
+function opencodeTarget(binding: RuntimeBinding): RuntimeSessionTarget {
+  return { runtime: 'opencode', runtimeSessionId: binding.runtimeSessionId, workDir: binding.workDir }
+}
+
+function piTarget(binding: RuntimeBinding): PiSessionTarget {
+  return { runtime: 'pi', runtimeSessionId: binding.runtimeSessionId, workDir: binding.workDir }
 }
 
 function failure(kind: string, message: string): BindingRecoveryResult {

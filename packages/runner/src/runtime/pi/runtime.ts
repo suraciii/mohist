@@ -28,6 +28,7 @@ import type {
   PiRuntimeEvent,
   PiSessionCreateRequest,
   PiSessionResolveRequest,
+  PiSessionTarget,
   PiSessionResolveResult,
   PiSessionResult,
   PiTurnObserver,
@@ -340,6 +341,66 @@ export class PiRuntime {
             diagnostic('session-open-failed', this.mask(message(cause))),
           ])
     }
+  }
+
+  /**
+   * Adopt a Pi turn that was already submitted before the runner process
+   * restarted. The existing session is observed until its current stream
+   * settles; this method never calls prompt() or steer().
+   */
+  async reattachTurn(
+    request: { readonly target: PiSessionTarget },
+    signal: AbortSignal,
+    observer?: PiTurnObserver,
+  ): Promise<PiResult<PiTurnResult>> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    const runtimeSessionId = request.target.runtimeSessionId
+    if (!runtimeSessionId) return this.failure("missing-session", "Pi turn requires a bound Session")
+    const path = normalizedPath(runtimeSessionId)
+    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    const session = await this.resolveFollowupSession(path, request.target.workDir)
+    if (!session.ok) return session.failure
+    if (signal.aborted) return this.finishFailure("interrupted", "Reattached Pi turn wait was interrupted")
+
+    const result = await new Promise<PiResult<PiTurnResult>>((resolve) => {
+      let settled = false
+      let timer: ReturnType<typeof setInterval> | null = null
+      let unsubscribe = () => {}
+      const finish = (value: PiResult<PiTurnResult>) => {
+        if (settled) return
+        settled = true
+        if (timer) clearInterval(timer)
+        unsubscribe()
+        signal.removeEventListener("abort", onAbort)
+        resolve(value)
+      }
+      const check = () => {
+        if (!session.value.isStreaming) {
+          finish({
+            ok: true,
+            value: { facts: { finalAssistantText: finalText(session.value.messages), runtimeSessionId: path, workDir: request.target.workDir }, diagnostics: [] },
+            diagnostics: [],
+          })
+        }
+      }
+      const onAbort = () => finish(this.finishFailure("interrupted", "Reattached Pi turn wait was interrupted"))
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      signal.addEventListener("abort", onAbort, { once: true })
+      unsubscribe = session.value.subscribe(() => {
+        // Existing runtime events were produced while the prior runner was
+        // attached. Adoption only waits for terminal state; it does not
+        // promote replayed observations into a new authoritative result.
+        void observer
+        check()
+      })
+      timer = setInterval(check, 100)
+      timer.unref?.()
+      check()
+    })
+    return result
   }
 
   /**

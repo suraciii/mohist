@@ -17,7 +17,14 @@ import {
 import { createServerRuntimeEventDelivery } from '../server/runtime-event-delivery.js'
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from './cleanup-convergence.js'
 import { BindingConvergence } from './binding-convergence.js'
-import { BindingRecoveryCoordinator } from './binding-recovery.js'
+import {
+  BindingRecoveryCoordinator,
+  probeRuntimeBinding,
+  reattachRuntimeTurn,
+  resolvePersistedWorkBinding,
+  type RecoverableRuntime,
+  type RuntimeTurnRecoveryResult,
+} from './binding-recovery.js'
 import { CleanupLoop, DefaultCleanupRunner } from './cleanup-loop.js'
 import { WorkExecutor } from './executor.js'
 import { AgentJobExecutor } from './agent-job-executor.js'
@@ -26,13 +33,26 @@ import { createHostCleanup } from './host-cleanup.js'
 import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
 import { AWAITING_ACK_RETRY_INTERVAL_MS, boundedSignal, delay, POLL_TIMEOUT_MS, raceInterval } from './host-timing.js'
 import { TerminalTaskLogDeliveryStoreImpl, type TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
-import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
-import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
+import {
+  getOpenCodeRuntimeFactory,
+  type OpenCodeRuntime,
+  type RuntimeResult,
+  type RuntimeTurnResult,
+} from './opencode/index.js'
+import {
+  getPiRuntimeFactory,
+  parseProviderErrorPolicy,
+  type PiResult,
+  type PiRuntime,
+  type PiTurnResult,
+} from './pi/index.js'
 import { SessionCommandJournal } from './session-command-journal.js'
 import { FollowupOperationJournal } from './followup-operation-journal.js'
 import { CancelOperationJournal } from './cancel-operation-journal.js'
 import { WorkResultJournal, workKey as journalWorkKey } from './work-result-journal.js'
 import { RecoveredStartedWork } from './recovered-started-work.js'
+import { runnerRestartedResult } from './work-report.js'
+import { projectPiTurnToWorkItemResult, projectTurnToWorkItemResult } from './agent-job-turn.js'
 import { loadBuildInfo } from './build-info.js'
 import type { DispatchWorkItem } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
@@ -93,11 +113,67 @@ interface AwaitingAckEntry {
 const workKey = journalWorkKey
 
 function usesOpenCode(work: DispatchWorkItem): boolean {
+  return runtimeKindForWork(work) === 'opencode'
+}
+
+type RuntimeKind = 'opencode' | 'pi'
+
+function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {
+  const declared = typeof work.with?.runtime === 'string' ? work.with.runtime : work.agentDefinition?.runtime
+  const candidate = (declared ?? work.uses ?? '').trim().toLowerCase()
+  if (candidate === 'opencode' || candidate === 'mohist/opencode') return 'opencode'
+  if (candidate === 'pi' || candidate === 'mohist/pi') return 'pi'
+  return null
+}
+
+function runtimeForKind(
+  kind: RuntimeKind,
+  openCodeRuntime: OpenCodeRuntime | null,
+  piRuntime: PiRuntime | null,
+): RecoverableRuntime | null {
+  if (kind === 'opencode') return openCodeRuntime ? { kind, runtime: openCodeRuntime } : null
+  return piRuntime ? { kind, runtime: piRuntime } : null
+}
+
+function projectReattachedRuntimeResult(
+  work: DispatchWorkItem,
+  runtimeKind: RuntimeKind,
+  adopted: RuntimeTurnRecoveryResult,
+): WorkItemResult {
+  const model = stringProperty(work.with, 'model') ?? work.agentDefinition?.model ?? null
+  const variant = stringProperty(work.with, 'variant') ?? work.agentDefinition?.variant ?? null
   if (work.ownerKind === 'agent-job') {
-    const runtime = typeof work.with?.runtime === 'string' ? work.with.runtime : work.agentDefinition?.runtime
-    return runtime?.toLowerCase() === 'opencode'
+    return runtimeKind === 'opencode'
+      ? projectTurnToWorkItemResult(adopted as RuntimeResult<RuntimeTurnResult>, runtimeKind, model, variant)
+      : projectPiTurnToWorkItemResult(adopted as PiResult<PiTurnResult>, runtimeKind, model, variant)
   }
-  return work.uses?.trim().toLowerCase() === 'mohist/opencode'
+  if (!adopted.ok) {
+    return {
+      status: 'failed',
+      message: adopted.error.message,
+      error: { code: adopted.error.kind, message: adopted.error.message },
+      exitCode: 1,
+    }
+  }
+  return {
+    status: 'completed',
+    message: 'Agent turn completed after runner restart',
+    output: {
+      kind: runtimeKind,
+      status: 'success',
+      runtimeSessionId: adopted.value.facts.runtimeSessionId,
+      model,
+      variant,
+      text: adopted.value.facts.finalAssistantText,
+      diagnostics: adopted.value.diagnostics.map((diagnostic) => ({ code: diagnostic.code, message: diagnostic.message })),
+    },
+    exitCode: 0,
+  }
+}
+
+function stringProperty(value: Record<string, unknown> | null | undefined, key: string): string | null {
+  const candidate = value?.[key]
+  return typeof candidate === 'string' ? candidate : null
 }
 
 /**
@@ -600,20 +676,25 @@ export class RunnerHost {
           })
           continue
         }
-        if (!recovery && admission !== 'new') {
-          log.warn('work dispatch has a durable unfinished result; refusing replay', {
-            work: work.workId,
-            state: admission,
-          })
+        if (admission !== 'new') {
+          if (admission === 'started') {
+            // An explicit redelivery takes precedence over the startup
+            // unknown observation. It remains a hard physical-execution
+            // fence: reconciliation can adopt a live bound turn or surface
+            // the runner-restarted fact, but it can never call executeWork.
+            this.recoveredStartedWork.drop(key)
+            const done = this.reconcileStartedDispatch(work, signal, key)
+            this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
+            this.syncOpenCodeWorkOwners()
+          } else {
+            log.warn('work dispatch has a durable unfinished result; retaining fence', {
+              work: work.workId,
+              state: admission,
+            })
+          }
           continue
         }
         if (recovery) {
-          if (admission === 'completed') {
-            log.warn('recovery dispatch has a durable completed result; awaiting its report', {
-              work: work.workId,
-            })
-            continue
-          }
           // The delivery-driven reconciliation supersedes the startup
           // unknown-report sweep for this identity.
           this.recoveredStartedWork.drop(key)
@@ -734,6 +815,97 @@ export class RunnerHost {
   private isOpenCodeReadyForClaim(): boolean {
     const runtime = this.openCodeRuntime
     return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
+  }
+
+  /**
+   * Reconciles a post-restart `started` entry. A null result means the
+   * runtime/server fact was not determinate yet; the entry remains started
+   * and the next delivery may retry the probe. No branch in this method can
+   * call the normal executor for a fenced work item.
+   */
+  private async reconcileStartedDispatch(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+    key: string,
+  ): Promise<void> {
+    let result: WorkItemResult | null
+    let interruption: ReturnType<typeof runnerRestartedResult>['interruption'] | undefined
+    try {
+      const reconciliation = await this.reconcileStartedWork(work, signal)
+      if (signal.aborted || reconciliation === null) {
+        this.inFlight.delete(key)
+        this.syncOpenCodeWorkOwners()
+        return
+      }
+      result = reconciliation.result
+      interruption = reconciliation.interruption
+    } catch (error) {
+      this.inFlight.delete(key)
+      this.syncOpenCodeWorkOwners()
+      log.warn('started work reconciliation deferred; retaining fence', { work: work.workId, exception: error })
+      return
+    }
+
+    await this.completeAndQueueResult(work, result, key, interruption)
+  }
+
+  private async reconcileStartedWork(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+  ): Promise<{ result: WorkItemResult; interruption?: ReturnType<typeof runnerRestartedResult>['interruption'] } | null> {
+    if (signal.aborted) return null
+    const runtimeKind = runtimeKindForWork(work)
+    if (!runtimeKind) return runnerRestartedResult(work)
+
+    const binding = await resolvePersistedWorkBinding(work, this.connection, this.options.runnerId, signal)
+    if (binding.kind === 'unavailable') return null
+    if (binding.kind !== 'bound') return runnerRestartedResult(work)
+
+    const runtime = runtimeForKind(runtimeKind, this.openCodeRuntime, this.piRuntime)
+    if (!runtime) return null
+    const probe = await probeRuntimeBinding(runtime, binding.binding)
+    if (!probe.ok) {
+      // A transport/runtime failure is uncertainty, not proof that the
+      // physical turn died. Missing bindings are proof of a dead execution.
+      if (probe.kind !== 'missing-session') return null
+      return runnerRestartedResult(work)
+    }
+    if (!probe.activeTurn) return runnerRestartedResult(work)
+
+    const adopted = await reattachRuntimeTurn(runtime, binding.binding, signal)
+    if (signal.aborted) return null
+    return { result: projectReattachedRuntimeResult(work, runtimeKind, adopted) }
+  }
+
+  /**
+   * Persists the terminal result before moving a work into awaitingAck. The
+   * same helper is used for normal execution and reconciliation so the
+   * journal cannot be retired before the server has acknowledged the report.
+   */
+  private async completeAndQueueResult(
+    work: DispatchWorkItem,
+    result: WorkItemResult,
+    key: string,
+    interruption?: ReturnType<typeof runnerRestartedResult>['interruption'],
+  ): Promise<void> {
+    try {
+      if (interruption) await this.workResultJournal.completeInterrupted(work, result, interruption)
+      else await this.workResultJournal.complete(work, result)
+    } catch (error) {
+      log.error('work result journal could not persist settled result', { work: work.workId, exception: error })
+      this.workResultJournal.disable()
+      return
+    }
+
+    this.inFlight.delete(key)
+    this.awaitingAck.set(key, { work, entry: { result, attempts: 0, retryAt: null } })
+    this.syncOpenCodeWorkOwners()
+    try {
+      await this.reportOnce(key)
+    } catch (error) {
+      this.scheduleReportRetry(key)
+      log.warn('first work report failed; will retry', { work: work.workId, exception: error })
+    }
   }
 
   /**

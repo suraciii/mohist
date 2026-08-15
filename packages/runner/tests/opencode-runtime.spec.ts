@@ -62,6 +62,7 @@ interface FakeClientHandles {
   sessionCreate: ReturnType<typeof vi.fn>
   sessionGet: ReturnType<typeof vi.fn>
   sessionStatus: ReturnType<typeof vi.fn>
+  sessionMessages: ReturnType<typeof vi.fn>
 }
 
 interface BuildArgs {
@@ -101,6 +102,7 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
     }
     return { data: { id: params.sessionID } }
   })
+  const sessionMessages = vi.fn(async () => ({ data: [], cursor: {} }))
   const sessionStatus = vi.fn(async () => {
     if (args.failSessionStatus) {
       throw Object.assign(new Error("status endpoint missing"), { status: 404 })
@@ -116,13 +118,14 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
   }
   const clientProxy = {
     global: { health },
-    session: { create: sessionCreate, get: sessionGet, status: sessionStatus },
+    session: { create: sessionCreate, get: sessionGet, status: sessionStatus, messages: sessionMessages },
   }
   const clientHandles: FakeClientHandles = {
     health,
     sessionCreate,
     sessionGet,
     sessionStatus,
+    sessionMessages,
   }
   const server: OpencodeServerHandle = {
     url: "http://fake",
@@ -464,6 +467,28 @@ describe("OpenCodeRuntime.resolveSession", () => {
     })
     if (!result.ok) throw new Error(`expected resolveSession to succeed: ${result.error.kind}`)
     expect(result.value.activeTurn).toBe(true)
+  })
+
+  it("reattaches to an active session and reads its terminal result without prompting", async () => {
+    const { deps, client } = buildDeps({ resolveSession: { runtimeSessionId: "ses_existing", activeTurn: true } })
+    let statusReads = 0
+    client.sessionStatus.mockImplementation(async () => {
+      statusReads += 1
+      return { data: { ses_existing: { type: statusReads === 1 ? "streaming" : "idle" } } }
+    })
+    client.sessionMessages.mockResolvedValue({
+      data: [{ type: "assistant", content: [{ type: "text", text: "adopted answer" }] }],
+      cursor: {},
+    })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.reattachTurn({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    }, new AbortController().signal)
+
+    expect(result).toMatchObject({ ok: true, value: { facts: { finalAssistantText: "adopted answer" } } })
+    expect(client.sessionMessages).toHaveBeenCalledTimes(1)
   })
 
   it("classifies a confirmed missing session.get (404) as missing-session", async () => {

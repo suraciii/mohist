@@ -218,6 +218,178 @@ export async function runTurn(
   }
 }
 
+/**
+ * Adopt a turn that was already submitted before the runner process died.
+ * This path never calls session.prompt: the existing runtime execution is
+ * the physical execution being recovered. OpenCode does not expose a
+ * resumable prompt promise, so the binding is watched until the session is
+ * idle and the terminal assistant message is read from the runtime's
+ * persisted session state.
+ */
+export async function reattachTurn(
+  request: RuntimeTurnRequest,
+  deps: TurnExecutionDeps,
+  signal: AbortSignal,
+  observer?: RuntimeTurnObserver,
+): Promise<RuntimeResult<RuntimeTurnResult>> {
+  const sessionId = request.target.runtimeSessionId
+  if (!sessionId) {
+    const error = normalizeMissingSession()
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+  if (signal.aborted) {
+    const error = normalizeInterrupted()
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+
+  const initial = await readSessionStatus(deps.client, request.target.workDir, sessionId)
+  if (!initial.ok) return initial.error
+  if (initial.status !== 'idle') {
+    const waited = await waitForSessionIdle(deps, request.target.workDir, sessionId, signal, observer)
+    if (waited) return waited
+  } else if (signal.aborted) {
+    const error = normalizeInterrupted()
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+
+  if (signal.aborted) {
+    const error = normalizeInterrupted()
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+  try {
+    const messages = await (deps.client.session as unknown as {
+      messages: (parameters: { sessionID: string; limit?: number }, options?: { throwOnError?: boolean }) => Promise<unknown>
+    }).messages({ sessionID: sessionId, limit: 100 }, { throwOnError: true })
+    const finalAssistantText = extractReattachedAssistantText(messages)
+    return {
+      ok: true,
+      value: {
+        facts: { finalAssistantText, runtimeSessionId: sessionId, workDir: request.target.workDir },
+        diagnostics: [],
+      },
+      diagnostics: [],
+    }
+  } catch (cause) {
+    const error = normalizeTurnFailed({ message: errorMessage(cause, 'Failed to read the reattached Runtime Session result') })
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+}
+
+async function waitForSessionIdle(
+  deps: TurnExecutionDeps,
+  directory: string,
+  sessionId: string,
+  signal: AbortSignal,
+  observer?: RuntimeTurnObserver,
+): Promise<RuntimeResult<RuntimeTurnResult> | null> {
+  return await new Promise<RuntimeResult<RuntimeTurnResult> | null>((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setInterval> | null = null
+    let unsubscribe = () => {}
+    const finish = (result: RuntimeResult<RuntimeTurnResult> | null) => {
+      if (settled) return
+      settled = true
+      if (timer) clearInterval(timer)
+      unsubscribe()
+      signal.removeEventListener('abort', onAbort)
+      resolve(result)
+    }
+    const check = async () => {
+      if (settled) return
+      const status = await readSessionStatus(deps.client, directory, sessionId)
+      if (!status.ok) {
+        finish(status.error)
+        return
+      }
+      if (status.status === 'idle') finish(null)
+    }
+    const onAbort = () => {
+      const error = normalizeInterrupted()
+      finish({ ok: false, error, diagnostics: error.diagnostics })
+    }
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    unsubscribe = deps.events.subscribe((event) => {
+      if (event.sessionID !== undefined && event.sessionID !== sessionId) return
+      if (event.type === 'session.idle') void check()
+      if (event.type === 'session.error' || event.type === 'session.next.step.failed') {
+        const error = normalizeTurnFailed({ message: 'The reattached Runtime Session reported a terminal failure' })
+        finish({ ok: false, error, diagnostics: error.diagnostics })
+      }
+      // Reattached work does not replay observations into the AgentSession;
+      // the original event producer owns those facts. The observer is kept in
+      // the signature for the same runtime boundary as ordinary turns.
+      void observer
+    })
+    timer = setInterval(() => void check(), 250)
+    timer.unref?.()
+    void check()
+  })
+}
+
+async function readSessionStatus(
+  client: OpencodeClient,
+  directory: string,
+  sessionId: string,
+): Promise<{ ok: true; status: string } | { ok: false; error: RuntimeResult<RuntimeTurnResult> }> {
+  try {
+    const response = await client.session.status({ directory }, { throwOnError: true })
+    const statuses = response.data
+    if (!statuses || typeof statuses !== 'object') throw new Error('session.status returned no status map')
+    const status = (statuses as Record<string, ProviderRetryStatus>)[sessionId]
+    return { ok: true, status: status?.type ?? 'idle' }
+  } catch (cause) {
+    const error = toUnavailableOrTurnError(cause, 'Failed to read reattached Runtime Session status')
+    return { ok: false, error: { ok: false, error, diagnostics: error.diagnostics } }
+  }
+}
+
+function extractReattachedAssistantText(response: unknown): string | null {
+  const responseRecord = recordValue(response)
+  const rawData = responseRecord?.['data']
+  if (Array.isArray(rawData)) return finalAssistantTextFromMessages(rawData)
+  const data = recordValue(rawData)
+  if (!data) return null
+  const messages = data['messages']
+  if (Array.isArray(messages)) return finalAssistantTextFromMessages(messages)
+  const info = recordValue(data['info'])
+  const parts = data['parts']
+  if (info && Array.isArray(parts)) return textFromParts(parts)
+  return null
+}
+
+function finalAssistantTextFromMessages(messages: readonly unknown[]): string | null {
+  for (const message of [...messages].reverse()) {
+    const record = recordValue(message)
+    if (!record || record['type'] !== 'assistant') continue
+    const text = textFromParts(record['content'])
+    if (text) return text
+  }
+  return null
+}
+
+function textFromParts(parts: unknown): string | null {
+  if (!Array.isArray(parts)) return null
+  const text = parts
+    .map((part) => {
+      const record = recordValue(part)
+      if (!record) return ''
+      if (typeof record['text'] === 'string') return record['text']
+      if (record['type'] === 'text' && typeof record['content'] === 'string') return record['content']
+      return ''
+    })
+    .join('')
+    .trim()
+  return text || null
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
+
 function normalizeDeadline(value: number | null | undefined): number | undefined {
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined

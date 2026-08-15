@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import { OpenCodeRuntime } from '../src/runtime/opencode/runtime.js'
+import { WorkResultJournal } from '../src/runtime/work-result-journal.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import { deferred } from './support/deferred.js'
@@ -20,6 +22,8 @@ type ReportingMocks = Record<
   | 'report'
   | 'uploadTaskLog'
   | 'fetchConfig'
+  | 'getWorkflowAgentSession'
+  | 'getAgentSession'
   | 'startSignalR'
   | 'stopSignalR'
   | 'getConnectionId'
@@ -70,6 +74,8 @@ const poll = scopedMock('poll')
 const report = scopedMock('report')
 const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
+const getWorkflowAgentSession = scopedMock('getWorkflowAgentSession')
+const getAgentSession = scopedMock('getAgentSession')
 const startSignalR = scopedMock('startSignalR')
 const stopSignalR = scopedMock('stopSignalR')
 const getConnectionId = scopedMock('getConnectionId')
@@ -86,6 +92,8 @@ function createReportingMocks(): ReportingMocks {
     report: vi.fn(async () => ({ tracked: true })),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
+    getWorkflowAgentSession: vi.fn(async () => null),
+    getAgentSession: vi.fn(async () => null),
     startSignalR: vi.fn(async () => undefined),
     stopSignalR: vi.fn(async () => undefined),
     getConnectionId: vi.fn(() => 'conn-1'),
@@ -116,6 +124,8 @@ vi.mock('../src/server/connection.js', () => ({
     report = report
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
+    getWorkflowAgentSession = getWorkflowAgentSession
+    getAgentSession = getAgentSession
   },
 }))
 
@@ -482,6 +492,218 @@ describe('RunnerHost', () => {
       await run.catch(() => undefined)
       executeWithLog.mockRestore()
       stopLog()
+    }
+  })
+
+  it('StartedFenceWithoutExecution_ReportsRunnerRestartedAndRetiresOnAck', async () => {
+    const reported = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-restarted',
+      workId: 'work-restarted',
+      taskRunId: 'task-restarted',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+    report.mockImplementation(async () => {
+      reported.resolve()
+      return { tracked: true, reason: 'accepted' }
+    })
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await reported.promise
+      await vi.advanceTimersByTimeAsync(0)
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'failed', message: 'runner-restarted', error: { code: 'runner-restarted', message: 'runner-restarted' } }),
+        expect.any(AbortSignal),
+      )
+      expect(blockingAction).not.toHaveBeenCalled()
+      const after = new WorkResultJournal('/virtual/mohist-runner-test')
+      await after.load()
+      expect(after.completed()).toEqual([])
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('StartedFenceDeadAgentJob_ReportsUnknownForSettlementArbitration', async () => {
+    const reported = deferred<void>()
+    const work = {
+      workflowRunId: 'agent-job-workflow',
+      workId: 'agent-work-restarted',
+      workType: 'agent-job',
+      ownerKind: 'agent-job',
+      agentJobId: 'job-restarted',
+      projectId: 'project-1',
+      with: { prompt: 'resume', runtime: 'opencode' },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+    report.mockImplementation(async () => {
+      reported.resolve()
+      return { tracked: true, reason: 'accepted' }
+    })
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await reported.promise
+      await vi.advanceTimersByTimeAsync(0)
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ agentJobId: work.agentJobId, workId: work.workId }),
+        expect.objectContaining({ status: 'unknown', message: 'runner-restarted' }),
+        expect.any(AbortSignal),
+      )
+      expect(blockingAction).not.toHaveBeenCalled()
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('StartedFenceRepeatedDelivery_ReconcilesOnceWhileTheReceiptAwaitsAck', async () => {
+    const reportStarted = deferred<void>()
+    const releaseReport = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-restarted-repeat',
+      workId: 'work-restarted-repeat',
+      taskRunId: 'task-restarted-repeat',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      await releaseReport.promise
+      return { tracked: true, reason: 'accepted' }
+    })
+    poll.mockResolvedValueOnce([work]).mockResolvedValueOnce([work]).mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: POLL_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await reportStarted.promise
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(blockingAction).not.toHaveBeenCalled()
+      releaseReport.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      controller.abort()
+      releaseReport.resolve()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('StartedFenceWithLiveWorkflowBinding_ReattachesWithoutExecutingAgain', async () => {
+    const reported = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-restarted-live',
+      workId: 'work-restarted-live',
+      taskRunId: 'task-restarted-live',
+      workType: 'task',
+      uses: 'mohist/opencode',
+      ownerKind: 'workflow',
+      projectId: 'project-1',
+      with: { prompt: 'continue' },
+      agentDefinition: { instructions: '', runtime: 'opencode', skills: [] },
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+    getWorkflowAgentSession.mockResolvedValue({
+      sessionId: 'session-1',
+      runtime: 'opencode',
+      runtimeSessionId: 'runtime-session-1',
+      workDir: '/virtual/work',
+    })
+    const resolveSession = vi.spyOn(OpenCodeRuntime.prototype, 'resolveSession').mockResolvedValue({
+      ok: true,
+      value: { runtimeSessionId: 'runtime-session-1', workDir: '/virtual/work', activeTurn: true },
+      diagnostics: [],
+    })
+    const reattachTurn = vi.spyOn(OpenCodeRuntime.prototype, 'reattachTurn').mockResolvedValue({
+      ok: true,
+      value: {
+        facts: { finalAssistantText: 'recovered', runtimeSessionId: 'runtime-session-1', workDir: '/virtual/work' },
+        diagnostics: [],
+      },
+      diagnostics: [],
+    })
+    report.mockImplementation(async () => {
+      reported.resolve()
+      return { tracked: true, reason: 'accepted' }
+    })
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await reported.promise
+      expect(getWorkflowAgentSession).toHaveBeenCalledWith('project-1', 'wr-restarted-live', 'work-restarted-live', expect.any(AbortSignal))
+      expect(resolveSession).toHaveBeenCalledTimes(1)
+      expect(reattachTurn).toHaveBeenCalledTimes(1)
+      expect(blockingAction).not.toHaveBeenCalled()
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'completed', output: expect.objectContaining({ text: 'recovered' }) }),
+        expect.any(AbortSignal),
+      )
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      resolveSession.mockRestore()
+      reattachTurn.mockRestore()
     }
   })
 })

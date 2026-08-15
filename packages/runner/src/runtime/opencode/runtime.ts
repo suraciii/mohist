@@ -33,6 +33,7 @@ import type {
   RuntimeSessionCreateResult,
   RuntimeSessionResolveRequest,
   RuntimeSessionResolveResult,
+  RuntimeSessionTarget,
   RuntimeTurnObserver,
   RuntimeTurnOptions,
   RuntimeTurnRequest,
@@ -55,7 +56,13 @@ import { boundedTimeoutMs, boundedWait } from "../bounded-wait.js"
 import { createTimeoutSignal } from "../../system/timeout-signal.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
 import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
-import { abortAndConfirmSession, runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
+import {
+  abortAndConfirmSession,
+  runTurn,
+  reattachTurn as waitForReattachedTurn,
+  bindTurnInFlightTracker,
+  type TurnExecutionDeps,
+} from "./turn.js"
 import {
   OpenCodeDirectoryInstances,
   type DirectoryReclaimResult,
@@ -370,6 +377,86 @@ export class OpenCodeRuntime {
     observer?: RuntimeTurnObserver,
   ): Promise<RuntimeResult<RuntimeTurnResult>> {
     return await this.withRuntimeOperation(() => this.runTurnCore(request, signal, observer))
+  }
+
+  /**
+   * Adopt an already-running physical turn after the host process restarted.
+   * This operation shares generation drain tracking with ordinary turns but
+   * deliberately does not submit another prompt.
+   */
+  async reattachTurn(
+    request: { readonly target: RuntimeSessionTarget },
+    signal: AbortSignal,
+    observer?: RuntimeTurnObserver,
+  ): Promise<RuntimeResult<RuntimeTurnResult>> {
+    return await this.withRuntimeOperation(() => this.reattachTurnCore(request, signal, observer))
+  }
+
+  private async reattachTurnCore(
+    request: { readonly target: RuntimeSessionTarget },
+    signal: AbortSignal,
+    observer?: RuntimeTurnObserver,
+  ): Promise<RuntimeResult<RuntimeTurnResult>> {
+    const generation = this.acquireReadyGeneration()
+    if (!generation) {
+      const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const inFlight = this.ensureInFlightTracker()
+    const sessionKey = request.target.runtimeSessionId ?? `${request.target.workDir}::pending`
+    if (!inFlight.start(sessionKey)) {
+      this.releaseGeneration(generation)
+      const error = normalizeUnavailableRuntime([{
+        severity: "error",
+        code: "in-flight",
+        message: "Another work prompt is already running for this AgentSession",
+      }])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    let resolveForced!: () => void
+    const forced = new Promise<void>((resolve) => { resolveForced = resolve })
+    const activeTurn: ActiveGenerationTurn = {
+      abortController: new AbortController(),
+      forced,
+      resolveForced,
+      forcedFailure: false,
+    }
+    generation.activeTurns.add(activeTurn)
+    const combined = combineAbortSignals(signal, activeTurn.abortController.signal)
+    try {
+      return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+        const deps: TurnExecutionDeps = {
+          client: generation.server.client,
+          events: generation.events,
+          ...(this.deps.providerErrorPolicy ? { policy: this.deps.providerErrorPolicy } : {}),
+          markDirectoryUsed: lease.markUsed,
+          trackPendingOperation: lease.trackPending,
+        }
+        const adopted = await Promise.race([
+          waitForReattachedTurn(
+            { target: request.target, prompt: "", options: null },
+            deps,
+            combined.signal,
+            observer,
+          ).then((result) => ({ kind: "result" as const, result })),
+          activeTurn.forced.then(() => ({ kind: "forced" as const })),
+        ])
+        if (adopted.kind === "forced") {
+          const error = normalizeGenerationDrainTimeout(this.quarantineDrainTimeoutMs)
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        if (activeTurn.forcedFailure) {
+          const error = normalizeGenerationDrainTimeout(this.quarantineDrainTimeoutMs)
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        return adopted.result
+      })
+    } finally {
+      combined.dispose()
+      generation.activeTurns.delete(activeTurn)
+      inFlight.end(sessionKey)
+      this.releaseGeneration(generation)
+    }
   }
 
   private async runTurnCore(
