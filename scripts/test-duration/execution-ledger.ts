@@ -46,7 +46,8 @@ export async function readCurrentExecutionIdentity(
     reader.readSourceSha256(input.sourceRoots),
     reader.readDiscovery(),
   ])
-  if (!/^[0-9a-f]{64}$/i.test(assemblySha256)) throw new Error('current assembly reader returned an invalid SHA-256 digest')
+  if (!/^[0-9a-f]{64}$/i.test(assemblySha256))
+    throw new Error('current assembly reader returned an invalid SHA-256 digest')
   if (!/^[0-9a-f]{64}$/i.test(sourceSha256)) throw new Error('current source reader returned an invalid SHA-256 digest')
   return {
     manifest: manifestFromDiscovery(discovery),
@@ -62,9 +63,11 @@ export function validateCurrentExecutionIdentity(
   current: CurrentExecutionIdentity,
 ): readonly string[] {
   const errors: string[] = []
-  if (saved.manifest.hash !== current.manifest.hash ||
-      saved.manifest.cases.length !== current.manifest.cases.length ||
-      saved.manifest.cases.some((item, index) => JSON.stringify(item) !== JSON.stringify(current.manifest.cases[index]))) {
+  if (
+    saved.manifest.hash !== current.manifest.hash ||
+    saved.manifest.cases.length !== current.manifest.cases.length ||
+    saved.manifest.cases.some((item, index) => JSON.stringify(item) !== JSON.stringify(current.manifest.cases[index]))
+  ) {
     errors.push('saved execution provenance discovery does not match the current executable')
   }
   if (saved.assemblyPath !== current.assemblyPath) {
@@ -88,12 +91,14 @@ function sha256(value: string): string {
 
 function manifestFromCases(cases: readonly ExecutionManifestCase[]): ExecutionManifest {
   if (cases.length === 0) throw new Error('compiled discovery returned no test cases')
-  const ordered = [...cases].sort((left, right) => left.uid < right.uid ? -1 : left.uid > right.uid ? 1 : 0)
+  const ordered = [...cases].sort((left, right) => (left.uid < right.uid ? -1 : left.uid > right.uid ? 1 : 0))
   const uids = new Set<string>()
   for (const item of ordered) {
-    if (!/^[0-9a-f]{64}$/i.test(item.uid)) throw new Error(`compiled discovery returned invalid test case UID ${item.uid}`)
+    if (!/^[0-9a-f]{64}$/i.test(item.uid))
+      throw new Error(`compiled discovery returned invalid test case UID ${item.uid}`)
     if (uids.has(item.uid)) throw new Error(`compiled discovery returned duplicate test case UID ${item.uid}`)
-    if (!item.name || !item.className || !item.methodName) throw new Error(`compiled discovery returned incomplete metadata for ${item.uid}`)
+    if (!item.name || !item.className || !item.methodName)
+      throw new Error(`compiled discovery returned incomplete metadata for ${item.uid}`)
     uids.add(item.uid)
   }
   return { cases: ordered, hash: sha256(JSON.stringify(ordered)) }
@@ -154,7 +159,8 @@ export function parseExecutionProvenance(json: string): ExecutionLedgerExpectati
   const sourceSha256 = requiredString(raw, 'sourceSha256', errors)
   const parallelism = requiredString(raw, 'parallelism', errors)
   if (manifestHash && !/^[0-9a-f]{64}$/i.test(manifestHash)) errors.push('manifestHash must be a SHA-256 hex digest')
-  if (assemblySha256 && !/^[0-9a-f]{64}$/i.test(assemblySha256)) errors.push('assemblySha256 must be a SHA-256 hex digest')
+  if (assemblySha256 && !/^[0-9a-f]{64}$/i.test(assemblySha256))
+    errors.push('assemblySha256 must be a SHA-256 hex digest')
   if (sourceSha256 && !/^[0-9a-f]{64}$/i.test(sourceSha256)) errors.push('sourceSha256 must be a SHA-256 hex digest')
   let manifest: ExecutionManifest | undefined
   try {
@@ -182,7 +188,12 @@ export function manifestFromDiscovery(output: string): ExecutionManifest {
     const name = value.DisplayName
     const className = value.Class
     const methodName = value.Method
-    if (typeof uid !== 'string' || typeof name !== 'string' || typeof className !== 'string' || typeof methodName !== 'string') {
+    if (
+      typeof uid !== 'string' ||
+      typeof name !== 'string' ||
+      typeof className !== 'string' ||
+      typeof methodName !== 'string'
+    ) {
       throw new Error(`compiled discovery case ${index} has unsupported metadata`)
     }
     return { uid, name, className, methodName }
@@ -196,10 +207,13 @@ export function discoverManifest(process: DiscoveryProcess): ExecutionManifest {
 
 export function createExecutionRunId(clock: GateClock, idFactory: () => string): string {
   const now = clock.now()
-  if (!Number.isSafeInteger(now) || now < 0) throw new Error('gate clock returned an invalid timestamp')
+  if (!Number.isFinite(now) || now < 0 || now > Number.MAX_SAFE_INTEGER) {
+    throw new Error('gate clock returned an invalid timestamp')
+  }
+  const timestamp = Math.floor(now)
   const id = idFactory()
   if (!id) throw new Error('run id factory returned an empty value')
-  return `${now.toString(36)}-${id}`
+  return `${timestamp.toString(36)}-${id}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -277,7 +291,8 @@ export function parseExecutionLedger(json: string): ExecutionLedgerValidation & 
   if (!isRecord(raw)) return { cases: [], errors: ['ledger root must be an object'] }
 
   if (raw.schemaVersion !== 2) errors.push('ledger schemaVersion must be 2')
-  if (raw.durationSource !== EXECUTION_TIME_SOURCE) errors.push(`ledger durationSource must be ${EXECUTION_TIME_SOURCE}`)
+  if (raw.durationSource !== EXECUTION_TIME_SOURCE)
+    errors.push(`ledger durationSource must be ${EXECUTION_TIME_SOURCE}`)
   if (raw.durationUnit !== EXECUTION_TIME_UNIT) errors.push(`ledger durationUnit must be ${EXECUTION_TIME_UNIT}`)
   const runId = requiredString(raw, 'runId', errors)
   const manifestHash = requiredString(raw, 'manifestHash', errors)
@@ -292,9 +307,12 @@ export function parseExecutionLedger(json: string): ExecutionLedgerValidation & 
   const xunitVersion = requiredString(raw, 'xunitVersion', errors)
   const mtpVersion = requiredString(raw, 'mtpVersion', errors)
   const parallelism = requiredString(raw, 'parallelism', errors)
-  if (manifestHash && !/^[0-9a-f]{64}$/i.test(manifestHash)) errors.push('ledger manifestHash must be a SHA-256 hex digest')
-  if (assemblySha256 && !/^[0-9a-f]{64}$/i.test(assemblySha256)) errors.push('ledger assemblySha256 must be a SHA-256 hex digest')
-  if (sourceSha256 && !/^[0-9a-f]{64}$/i.test(sourceSha256)) errors.push('ledger sourceSha256 must be a SHA-256 hex digest')
+  if (manifestHash && !/^[0-9a-f]{64}$/i.test(manifestHash))
+    errors.push('ledger manifestHash must be a SHA-256 hex digest')
+  if (assemblySha256 && !/^[0-9a-f]{64}$/i.test(assemblySha256))
+    errors.push('ledger assemblySha256 must be a SHA-256 hex digest')
+  if (sourceSha256 && !/^[0-9a-f]{64}$/i.test(sourceSha256))
+    errors.push('ledger sourceSha256 must be a SHA-256 hex digest')
   if (xunitVersion === 'unknown' || mtpVersion === 'unknown') errors.push('ledger framework versions must be known')
   const rawCases = raw.cases
   if (!Array.isArray(rawCases) || rawCases.length === 0) {
@@ -352,12 +370,18 @@ export function validateExecutionEvidence(
   if (!ledger) return { cases: [], errors }
 
   if (ledger.runId !== expected.runId) errors.push('execution ledger run ID does not match the current run')
-  if (ledger.manifestHash !== expected.manifest.hash) errors.push('execution ledger manifest hash does not match compiled discovery')
-  if (ledger.manifestCount !== expected.manifest.cases.length) errors.push('execution ledger manifest count does not match compiled discovery')
-  if (ledger.assemblyPath !== expected.assemblyPath) errors.push('execution ledger assembly path does not match the current build')
-  if (ledger.assemblySha256 !== expected.assemblySha256) errors.push('execution ledger assembly hash does not match the current build')
-  if (ledger.sourceSha256 !== expected.sourceSha256) errors.push('execution ledger source hash does not match the current source tree')
-  if (ledger.parallelism !== expected.parallelism) errors.push('execution ledger parallelism does not match the current invocation')
+  if (ledger.manifestHash !== expected.manifest.hash)
+    errors.push('execution ledger manifest hash does not match compiled discovery')
+  if (ledger.manifestCount !== expected.manifest.cases.length)
+    errors.push('execution ledger manifest count does not match compiled discovery')
+  if (ledger.assemblyPath !== expected.assemblyPath)
+    errors.push('execution ledger assembly path does not match the current build')
+  if (ledger.assemblySha256 !== expected.assemblySha256)
+    errors.push('execution ledger assembly hash does not match the current build')
+  if (ledger.sourceSha256 !== expected.sourceSha256)
+    errors.push('execution ledger source hash does not match the current source tree')
+  if (ledger.parallelism !== expected.parallelism)
+    errors.push('execution ledger parallelism does not match the current invocation')
 
   const manifestByUid = new Map(expected.manifest.cases.map((item) => [item.uid, item]))
   const coveredManifestUids = new Set<string>()
@@ -382,14 +406,19 @@ export function validateExecutionEvidence(
     }
     const trx = trxByName.get(ledgerCase.name)
     if (!trx) errors.push(`TRX is missing executed test ${ledgerCase.name}`)
-    const expectedOutcome = ledgerCase.outcome === 'passed' ? 'passed' : ledgerCase.outcome === 'failed' ? 'failed' : 'skipped'
-    if (trx && trx.outcome !== expectedOutcome) errors.push(`TRX and execution ledger outcome mismatch for ${ledgerCase.name}`)
-    if (ledgerCase.outcome === 'skipped' || ledgerCase.outcome === 'not-run') errors.push(`CLI execution ledger contains non-executed test ${ledgerCase.name}`)
+    const expectedOutcome =
+      ledgerCase.outcome === 'passed' ? 'passed' : ledgerCase.outcome === 'failed' ? 'failed' : 'skipped'
+    if (trx && trx.outcome !== expectedOutcome)
+      errors.push(`TRX and execution ledger outcome mismatch for ${ledgerCase.name}`)
+    if (ledgerCase.outcome === 'skipped' || ledgerCase.outcome === 'not-run')
+      errors.push(`CLI execution ledger contains non-executed test ${ledgerCase.name}`)
   }
   for (const item of expected.manifest.cases) {
-    if (!coveredManifestUids.has(item.uid)) errors.push(`execution ledger is missing discovered test case UID ${item.uid}`)
+    if (!coveredManifestUids.has(item.uid))
+      errors.push(`execution ledger is missing discovered test case UID ${item.uid}`)
   }
-  for (const name of trxByName.keys()) if (!ledgerByName.has(name)) errors.push(`TRX contains test missing from execution ledger ${name}`)
+  for (const name of trxByName.keys())
+    if (!ledgerByName.has(name)) errors.push(`TRX contains test missing from execution ledger ${name}`)
 
   return errors.length > 0 ? { cases: [], errors } : { cases: parsed.cases, errors: [] }
 }
