@@ -100,6 +100,26 @@ export interface PiTurnResult {
   readonly diagnostics: readonly PiDiagnostic[]
 }
 
+/**
+ * Inputs for inspecting the recorded turn of a bound Pi Session without
+ * running one. Recovery reconciliation uses this to adopt a terminal
+ * turn's outcome or to establish that the execution context is gone.
+ */
+export interface PiInspectTurnRequest {
+  readonly target: PiSessionTarget
+}
+
+export interface PiInspectTurnFacts {
+  readonly runtimeSessionId: string
+  readonly workDir: string
+  readonly activeTurn: boolean
+  readonly finalAssistantText: string | null
+  readonly failed: boolean
+  readonly errorMessage: string | null
+}
+
+export type PiInspectTurnResult = PiResult<PiInspectTurnFacts>
+
 export interface PiTurnObserver {
   readonly onEvent?: (event: PiRuntimeEvent) => void | Promise<void>
 }

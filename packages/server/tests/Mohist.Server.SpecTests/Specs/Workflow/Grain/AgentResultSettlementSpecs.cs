@@ -401,8 +401,10 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Null(unresolved.NextWork());
         Assert.Null(unresolved.CurrentPendingWork());
         Assert.Null(await workflow.ClaimNextAsync(runnerId));
-        Assert.Empty((await Services.GetRequiredService<DispatchService>()
+        var recovery = Assert.Single((await Services.GetRequiredService<DispatchService>()
             .PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(work.WorkId, recovery.WorkId);
+        Assert.NotNull(recovery.AgentRecovery);
 
         var pendingWorkflowId = $"{_workflowId}-pending";
         var projectId = TestProjectId(_workflowId!);
