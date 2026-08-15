@@ -337,3 +337,11 @@ Channel decision (grounded in live source):
   Definition, 1855 CLI, 2667 Server Unit, 3936 Server Spec, 68 Arch), Web
   typecheck and 4727 tests, Runner typecheck and 1647 tests. Verification
   generated no Git-visible changes beyond the intended catalog edit.
+- Follow-up reproduction on the repaired HEAD: the unit command ran all 2667
+  tests because Microsoft Testing Platform ignores the legacy VSTest filter,
+  and passed; the xUnit v3 focused Server class
+  `AgentSessionLaunchRuntimeResolutionSpecs` passed 10/10. The full
+  `npm run verify` gate then passed: build (0 warnings/errors), Workflow
+  Definition 178, CLI 1855, Server Unit 2667, Server Spec 3936, Arch 68, Web
+  4727, Runner 1647, and Slack 70. The worktree remained clean after all
+  verification commands.
