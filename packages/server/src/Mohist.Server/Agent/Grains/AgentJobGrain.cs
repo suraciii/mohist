@@ -1401,29 +1401,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    private bool MatchesCapabilityExpectation(
-        CapabilityClaimExpectation expectation,
-        WorkDispatch dispatch,
-        string runnerId)
-    {
-        if (!string.Equals(expectation.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
-            || !string.Equals(expectation.OwnerId, Key, StringComparison.Ordinal)
-            || !string.Equals(expectation.WorkId, State.WorkId, StringComparison.Ordinal)
-            || !string.Equals(expectation.WorkId, dispatch.WorkId, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var definition = dispatch.AgentDefinition;
-        return definition is not null
-            && string.Equals(definition.Runtime, expectation.Runtime, StringComparison.Ordinal)
-            && string.Equals(definition.Model, expectation.Model, StringComparison.Ordinal)
-            && string.Equals(definition.ReasoningEffort, expectation.ReasoningEffort, StringComparison.Ordinal)
-            && string.Equals(definition.Variant, expectation.Variant, StringComparison.Ordinal)
-            && (expectation.CapabilityRevision is null || expectation.CapabilityRevision.Length > 0)
-            && !string.IsNullOrWhiteSpace(runnerId);
-    }
-
     private void ArmJobTimeout()
     {
         if (_options.JobTimeout <= TimeSpan.Zero)
@@ -1855,67 +1832,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             obligation,
             extensions,
             sessionLaunchPrompt);
-    }
-
-    public async Task ReceiveReminder(string reminderName, TickStatus status)
-    {
-        if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
-            return;
-
-        await HydrateAsync();
-
-        if (IsTerminal)
-        {
-            await TryReleaseConcurrencyPermitAsync();
-            if (State.PendingSessionClose is not null)
-                await DeliverTerminalToSessionAsync(State.PendingSessionClose);
-            if (State.PendingFailureEvent is not null)
-                await EmitFailureEventAsync(State.PendingFailureEvent);
-            if (State.PendingTerminalDeliveryEvent is not null)
-                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
-            if (State.PendingSubagentTerminalEvent is not null)
-                await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
-            if (State.PendingSessionClose is null
-                && State.PendingFailureEvent is null
-                && State.PendingTerminalDeliveryEvent is null
-                && State.PendingSubagentTerminalEvent is null
-                && !State.ConcurrencyReleasePending)
-            {
-                await UnregisterSelfAsync(reminderName);
-                return;
-            }
-            return;
-        }
-
-        if (State.Input is null && State.RoutedPlan is null)
-        {
-            await UnregisterSelfAsync(reminderName);
-            return;
-        }
-
-        if (State.RoutedPlan is not null && State.Input is null && !State.RunnerAccepted)
-        {
-            await AdvancePreparedLaunchAsync();
-            return;
-        }
-
-        if (State.Status == AgentJobStatus.Unknown)
-        {
-            if (State.PendingInitialTurnTerminalDelivery is { } pending)
-                await DeliverInitialTurnTerminalAsync(pending);
-            if (State.PendingInitialTurnTerminalDelivery is null)
-                await UnregisterSelfAsync(reminderName);
-            return;
-        }
-
-        if (State.Status == AgentJobStatus.Pending)
-        {
-            await EvaluatePendingAsync();
-            return;
-        }
-
-        // Non-terminal, non-prepared state: no recoverable obligation.
-        await UnregisterSelfAsync(reminderName);
     }
 
     private async Task UnregisterSelfAsync(string reminderName)

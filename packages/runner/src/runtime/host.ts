@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto'
 import type { RunnerOptions, RunnerRegistration, RuntimeReadinessWitness } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { RunnerSignalRClient } from '../server/runner-signalr.js'
 import { reportAndRequireDurableAck } from './work-report.js'
+import { buildRegistrationState } from './registration-state.js'
 import { ActionRegistry, createDefaultRegistry } from '../actions/registry.js'
 import '../core/prompt-registry.js'
 import { WorkspaceManager } from './workspace.js'
@@ -862,36 +862,9 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
-    const piCatalog = this.piRuntime?.catalog()
-    const piModels = piCatalog?.models.map((model) => `${model.provider}/${model.id}`) ?? []
-    const piReasoningEfforts = Object.fromEntries(
-      piCatalog?.models.map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]) ?? [],
+    return buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
+      this.signalR.getConnectionId(),
     )
-    const piCapabilityRevision = piCatalog
-      ? createHash('sha256')
-          .update(JSON.stringify({ models: piModels, reasoningEfforts: piReasoningEfforts }))
-          .digest('hex')
-      : null
-    return {
-      capabilities: [],
-      actionCatalog: this.actions.catalog(),
-      projectId: this.options.projectId,
-      connectionId: this.signalR.getConnectionId(),
-      ...(piCatalog
-        ? {
-            runtimeCatalogs: {
-              pi: {
-                models: piModels,
-                variants: {},
-                reasoningEfforts: piReasoningEfforts,
-                supportsReasoningEffort: true,
-                complete: true,
-                capabilityRevision: piCapabilityRevision,
-              },
-            },
-          }
-        : {}),
-    }
   }
 
   private async connectRunner(signal: AbortSignal) {
