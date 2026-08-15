@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -8,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Sessions.Domain;
@@ -21,8 +21,12 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 /// <summary>
-/// Issue-467 T-001: history-bounded <c>/api/agent/status</c> selection.
-/// Deterministic coverage that the new
+/// Issue-421: history-bounded status selection, asserted at its lower
+/// owners (<see cref="AgentSessionQuery.ListStatusCandidatesAsync"/> and
+/// <see cref="WorkflowActivityQuerier.ListActiveAgentsResultAsync"/>).
+/// The HTTP wire contract for these routes is owned by
+/// <c>AgentPathAmplificationSpecs</c> (wire counters) and OTel parity by
+/// <c>AgentPathAmplificationOtelEnabledSpecs</c>. Deterministic coverage that the
 /// <see cref="AgentSessionQuery.ListStatusCandidatesAsync"/> path:
 /// <list type="bullet">
 /// <item>materializes only active direct Sessions and Sessions for
@@ -47,12 +51,10 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 public sealed class AgentStatusHistoryBoundedSelectionSpecs
 {
     private readonly AgentStatusHistoryBoundedFixture _fixture;
-    private readonly HttpClient _client;
 
     public AgentStatusHistoryBoundedSelectionSpecs(AgentStatusHistoryBoundedFixture fixture)
     {
         _fixture = fixture;
-        _client = fixture.Client;
     }
 
     [Fact]
@@ -62,26 +64,20 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         await InsertActiveDirectSessionsAsync(project, count: 2);
         using var scope = _fixture.Services.CreateScope();
         var sessionQuery = scope.ServiceProvider.GetRequiredService<AgentSessionQuery>();
-        var small = await GetStatusDataAsync(project);
-        var smallAmplification = small.GetProperty("amplification");
+        var small = await ListStatusAsync(project);
         var smallMaterializedRows = await CountMaterializedRowsAsync(sessionQuery, project);
 
         await InsertInactiveHistoricalSessionsAsync(project, count: 1500);
 
-        var status = await GetStatusDataAsync(project);
-        var amplification = status.GetProperty("amplification");
+        var status = await ListStatusAsync(project);
         var materializedRows = await CountMaterializedRowsAsync(sessionQuery, project);
 
-        Assert.True(JsonElement.DeepEquals(small.GetProperty("activeAgents"), status.GetProperty("activeAgents")));
-        Assert.Equal(smallAmplification.GetProperty("candidates").GetInt64(), amplification.GetProperty("candidates").GetInt64());
-        Assert.Equal(smallAmplification.GetProperty("processed").GetInt64(), amplification.GetProperty("processed").GetInt64());
+        Assert.Equal(
+            small.ActiveAgents.Select(a => a.SessionId).OrderBy(x => x, StringComparer.Ordinal),
+            status.ActiveAgents.Select(a => a.SessionId).OrderBy(x => x, StringComparer.Ordinal));
+        Assert.Equal(small.Candidates, status.Candidates);
+        Assert.Equal(small.ActiveAgents.Count, status.ActiveAgents.Count);
         Assert.Equal(smallMaterializedRows, materializedRows);
-        Assert.Equal(
-            smallAmplification.GetProperty("databaseCalls").GetInt64(),
-            amplification.GetProperty("databaseCalls").GetInt64());
-        Assert.Equal(
-            smallAmplification.GetProperty("downstreamCalls").GetInt64(),
-            amplification.GetProperty("downstreamCalls").GetInt64());
     }
 
     [Fact]
@@ -90,12 +86,10 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         var project = await CreateProjectAsync("status-direct-active-only");
         var activeSessionId = (await InsertActiveDirectSessionsAsync(project, count: 1)).Single();
 
-        var status = await GetStatusDataAsync(project);
-        var activeAgents = status.GetProperty("activeAgents").EnumerateArray().ToList();
+        var status = await ListStatusAsync(project);
 
-        var entry = Assert.Single(activeAgents,
-            a => a.GetProperty("sessionId").GetString() == activeSessionId);
-        Assert.Equal(project, entry.GetProperty("projectId").GetString());
+        var entry = Assert.Single(status.ActiveAgents, a => a.SessionId == activeSessionId);
+        Assert.Equal(project, entry.ProjectId);
     }
 
     [Fact]
@@ -104,10 +98,9 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         var project = await CreateProjectAsync("status-direct-inactive");
         var sessionId = await InsertIdleDirectSessionAsync(project);
 
-        var status = await GetStatusDataAsync(project);
-        var activeAgents = status.GetProperty("activeAgents").EnumerateArray().ToList();
+        var status = await ListStatusAsync(project);
 
-        Assert.DoesNotContain(activeAgents, a => a.GetProperty("sessionId").GetString() == sessionId);
+        Assert.DoesNotContain(status.ActiveAgents, a => a.SessionId == sessionId);
     }
 
     [Fact]
@@ -121,11 +114,10 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         // sessions whose Workflow Run is currently Running.
         _ = sessionId;
 
-        var status = await GetStatusDataAsync(project);
-        var activeAgents = status.GetProperty("activeAgents").EnumerateArray().ToList();
+        var status = await ListStatusAsync(project);
 
-        Assert.DoesNotContain(activeAgents, a => a.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal(0, status.GetProperty("amplification").GetProperty("candidates").GetInt64());
+        Assert.DoesNotContain(status.ActiveAgents, a => a.SessionId == sessionId);
+        Assert.Equal(0, status.Candidates);
     }
 
     [Fact]
@@ -141,11 +133,11 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
 
         var rows = await CountMaterializedRowsAsync(sessionQuery, project);
-        var status = await GetStatusDataAsync(project);
+        var status = await ListStatusAsync(project);
 
         Assert.Equal(0, rows);
-        Assert.Equal(0, status.GetProperty("amplification").GetProperty("candidates").GetInt64());
-        Assert.Equal(0, status.GetProperty("activeAgents").GetArrayLength());
+        Assert.Equal(0, status.Candidates);
+        Assert.Empty(status.ActiveAgents);
         Assert.Equal(0, stubQuerier.GetStatusCallCount(workflowRunId));
     }
 
@@ -167,11 +159,10 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
         stubQuerier.SetStatus(workflowRunId, BuildRunningViewWithPendingWork(workflowRunId, workId));
 
-        var status = await GetStatusDataAsync(project);
+        var status = await ListStatusAsync(project);
 
-        Assert.Equal(1, status.GetProperty("amplification").GetProperty("candidates").GetInt64());
-        Assert.Contains(status.GetProperty("activeAgents").EnumerateArray(),
-            agent => agent.GetProperty("sessionId").GetString() == sessionId);
+        Assert.Equal(1, status.Candidates);
+        Assert.Contains(status.ActiveAgents, agent => agent.SessionId == sessionId);
     }
 
     [Fact]
@@ -213,17 +204,15 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
         stubQuerier.SetStatus(workflowRunId, BuildRunningViewWithPendingWork(workflowRunId, workId));
 
-        var status = await GetStatusDataAsync(project);
+        var status = await ListStatusAsync(project);
 
         // The post-selection Workflow status read must be deduped
         // across the 4 candidates that reference the same Workflow.
         Assert.Equal(1, stubQuerier.GetStatusCallCount(workflowRunId));
 
         // The post-selection pending-work match keeps every Session.
-        var activeSessionIds = status.GetProperty("activeAgents").EnumerateArray()
-            .Select(a => a.GetProperty("sessionId").GetString()!)
-            .ToHashSet();
-        Assert.Superset(activeSessionIds, new HashSet<string>(sessionIds));
+        var activeSessionIds = status.ActiveAgents.Select(a => a.SessionId).ToHashSet();
+        Assert.Superset(activeSessionIds, sessionIds.ToHashSet());
     }
 
     [Fact]
@@ -246,10 +235,9 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
         stubQuerier.SetStatus(workflowRunId, BuildRunningViewWithPendingWork(workflowRunId, workId));
 
-        var status = await GetStatusDataAsync(selectedProject);
+        var status = await ListStatusAsync(selectedProject);
 
-        Assert.DoesNotContain(status.GetProperty("activeAgents").EnumerateArray(),
-            a => a.GetProperty("sessionId").GetString() == sessionId);
+        Assert.DoesNotContain(status.ActiveAgents, a => a.SessionId == sessionId);
         // No Sessions in the selected project can reference the
         // Workflow, so no status read should be issued for it.
         Assert.Equal(0, stubQuerier.GetStatusCallCount(workflowRunId));
@@ -260,12 +248,10 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
     {
         var project = await CreateProjectAsync("status-empty-zero");
 
-        var status = await GetStatusDataAsync(project);
-        var amplification = status.GetProperty("amplification");
+        var status = await ListStatusAsync(project);
 
-        Assert.Equal(0, amplification.GetProperty("candidates").GetInt64());
-        Assert.Equal(0, amplification.GetProperty("processed").GetInt64());
-        Assert.Equal(0, status.GetProperty("activeAgents").GetArrayLength());
+        Assert.Equal(0, status.Candidates);
+        Assert.Empty(status.ActiveAgents);
     }
 
     [Fact]
@@ -306,27 +292,31 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         return captured;
     }
 
-    private async Task<JsonElement> GetStatusDataAsync(string projectId)
+    private async Task<ActiveAgentsListResult> ListStatusAsync(string projectId)
     {
-        using var response = await _client.GetAsync($"/api/projects/{projectId}/agent/status");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await JsonSerializer.DeserializeAsync<JsonElement>(await response.Content.ReadAsStreamAsync());
-        return envelope.GetProperty("data");
+        using var scope = _fixture.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
+        var sessionQuery = scope.ServiceProvider.GetRequiredService<AgentSessionQuery>();
+        var projection = new WorkflowActivityQuerier(dbFactory, stubQuerier, sessionQuery);
+        return await projection.ListActiveAgentsResultAsync(projectId);
     }
 
     private async Task<string> CreateProjectAsync(string suffix)
     {
         var raw = $"{suffix}-{Guid.NewGuid():N}".ToLowerInvariant();
-        var name = raw.Length > 63 ? raw[..63] : raw;
-        using var response = await _client.PostAsJsonAsync("/api/projects", new
+        var id = raw.Length > 63 ? raw[..63] : raw;
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        db.Projects.Add(new ProjectRow
         {
-            name,
-            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+            Id = id,
+            Name = id,
+            RepositoriesJson = "[]",
         });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException($"CreateProject '{name}' returned no id");
+        await db.SaveChangesAsync();
+        return id;
     }
 
     private async Task<IReadOnlyList<string>> InsertActiveDirectSessionsAsync(string projectId, int count)
