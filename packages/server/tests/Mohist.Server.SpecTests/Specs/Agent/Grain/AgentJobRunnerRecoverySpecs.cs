@@ -37,17 +37,35 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.Equal(AgentJobFailureReasons.RunnerLost, recovering.FailureReason);
         Assert.NotNull(recovering.RecoveryDeadlineAt);
 
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IServiceScopeFactory>()
+            .CreateScope();
+        var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
             ["spec/*"],
             "agent-job-host",
             projectId));
 
-        using var scope = _fixture.Cluster.GetSiloServiceProvider(null)
-            .GetRequiredService<IServiceScopeFactory>()
-            .CreateScope();
-        var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var redelivery = Assert.Single(
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(jobKey, redelivery.AgentJobId);
+        Assert.Equal(originalWorkId, redelivery.WorkId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, redelivery.OwnerKind);
+
+        var repeated = Assert.Single(
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(redelivery.AgentJobId, repeated.AgentJobId);
+        Assert.Equal(redelivery.WorkId, repeated.WorkId);
+        Assert.Equal(redelivery.OwnerKind, repeated.OwnerKind);
+        Assert.Equal(redelivery.With, repeated.With);
+        Assert.Equal(redelivery.Variables, repeated.Variables);
+
+        var workKey = $"{WorkDispatchOwnerKinds.AgentJob}:{jobKey}:{originalWorkId}";
+        Assert.Empty(
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([workKey], []))).Dispatches);
 
         var firstReport = await job.ReportResultAsync(
             runnerId,
@@ -62,6 +80,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.False(duplicateReport.Accepted);
         Assert.Equal("stale", duplicateReport.Reason);
         Assert.Equal(AgentJobStatus.Completed, (await job.GetTerminalResultAsync()).Status);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         await runner.UnregisterAsync();
     }
 
@@ -110,6 +129,41 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.True(terminal.Accepted);
         Assert.Equal(AgentJobStatus.Completed, await job.GetStatusAsync());
         await runner.UnregisterAsync();
+    }
+
+    [Fact]
+    public async Task RecoveringAgentJob_IsNotTakenOverByAnotherRunner()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-recovery-owner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-recovery-owner-project-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-recovery-owner-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("keep the original runner", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var original = await job.GetRuntimeSnapshotAsync();
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+
+        var otherRunnerId = $"agent-job-recovery-other-{Guid.NewGuid():N}";
+        var otherRunner = Grains.GetGrain<IRunnerGrain>(otherRunnerId);
+        await otherRunner.RegisterAsync(new RunnerInfo(
+            otherRunnerId,
+            ["spec/*"],
+            "agent-job-other-host",
+            projectId));
+
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IServiceScopeFactory>()
+            .CreateScope();
+        var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
+        Assert.Empty((await dispatch.PollAsync(otherRunnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        var after = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, after.RunnerId);
+        Assert.Equal(original.CurrentWorkId, after.CurrentWorkId);
+        Assert.True(after.IsRecovering);
+        await otherRunner.UnregisterAsync();
     }
 
     [Fact]
@@ -199,7 +253,14 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             .GetRequiredService<IServiceScopeFactory>()
             .CreateScope();
         var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var redeliveries = (await dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], []))).Dispatches;
+        Assert.Equal(2, redeliveries.Count);
+        Assert.Contains(redeliveries, work => work.AgentJobId == firstJob.GetPrimaryKeyString()
+            && work.WorkId == firstWorkId);
+        Assert.Contains(redeliveries, work => work.AgentJobId == secondJob.GetPrimaryKeyString()
+            && work.WorkId == secondWorkId);
 
         var firstReport = await firstJob.ReportResultAsync(
             runnerId,

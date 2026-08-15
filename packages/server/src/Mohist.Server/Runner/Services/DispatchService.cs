@@ -88,9 +88,10 @@ public sealed class DispatchService : IScopedService
             reportedWorkKeys,
             dispatches,
             ct);
-        // Unresolved Agent work re-enters desired redelivery for its recorded
-        // runner as a recovery probe; a connected Runner that still reports
-        // the key suppresses the re-delivery.
+        // Recovering Agent work is absent while its recorded runner is away;
+        // once that same runner reconnects, its persisted ledger snapshot is
+        // part of desired redelivery as a recovery probe. A connected Runner
+        // that reports the key suppresses the re-delivery until it settles.
         activeWorkKeys.UnionWith(reportedWorkKeys);
         var spare = slots - activeWorkKeys.Count;
         if (spare <= 0)
@@ -161,7 +162,9 @@ public sealed class DispatchService : IScopedService
                 dispatches.Add(dispatch);
         }
 
-        foreach (var record in await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
+        var agentWork = (await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
+            .Concat(await _agentJobs.ListRecoveringForRunnerAsync(runnerId, ct));
+        foreach (var record in agentWork)
         {
             ct.ThrowIfCancellationRequested();
             var workKey = AgentJobWorkKey(record.JobKey, record.WorkId);

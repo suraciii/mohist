@@ -22,3 +22,12 @@
 - AgentJob detail/list and launch-observation server projections expose `recovering`, reason, and future deadline while the durable status remains Unknown. CLI field catalogs intentionally omit the new detail fields until the later T-004 status-surface slice.
 - T-003 redelivery remains separate: T-002 tests settle the original work identity with a direct authoritative report after recovery; DispatchService does not yet include recovering Unknown AgentJobs in reconnect redelivery.
 - Verification: focused Agent/Runner specs 64/64, assembler unit specs 4/4, full SpecTests 3,928/3,928, UnitTests 2,666/2,666, and ArchTests exit 0. Use `-p:SkipWebBuild=true` because this environment has no `tsc` for the web workspace.
+
+## T-003 Working Notes
+
+- `AgentJobStatus.Unknown` recovery rows retain `AssignedRunnerId`, `WorkId`, and `DispatchJson`; reconnect redelivery can therefore reuse the ledger snapshot without claiming or minting a new identity.
+- `IAgentJobStore.ListRecoveringForRunnerAsync` is the desired-set boundary: it selects only rows assigned to the requested runner with `runner-lost` and a future persisted `RecoveryDeadlineAt`. Ordinary or expired Unknown rows remain absent.
+- `DispatchService` unions running and recovering AgentJob ledgers, then applies the existing `reportedWorkKeys` check. A reported in-flight/awaiting-ack key suppresses redelivery; repeated omitted polls return the same snapshot until Accepted/Stale settlement removes the row from the desired set.
+- Workflow interruption redelivery already uses the persisted dispatch snapshot/translator through `FindRunningAssignedToAsync` and remains restricted to the recorded runner assignment; no cross-runner claim path was changed.
+- Focused T-003 verification passed: DispatchServiceReconciliationSpecs 16/16, AgentJobRunnerRecoverySpecs 5/5, MixedOwnerDispatchSpecs 6/6, AgentJobStoreSpecs 26/26, and RunnerOutstandingWorkSpecs 9/9. The direct xUnit runner is needed for class filtering because the repository's Microsoft Testing Platform wrapper ignores VSTest filters.
+- Final verification passed: direct full SpecTests 3,931/3,931, UnitTests 2,666/2,666, and ArchTests 68/68. The first Microsoft Testing Platform full-suite invocation had one shared-fixture failure in `AgentSessionLaunchRuntimeResolutionSpecs`; its class passed 10/10 when rerun directly, and the direct full run passed.
