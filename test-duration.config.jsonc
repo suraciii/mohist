@@ -88,7 +88,7 @@
           ] }
       ]
     },
-    { "id": "server-arch", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    { "id": "server-arch", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "arch", "absoluteMs": 500, "allowlist": [
           { "id": "Mohist.Server.ArchTests.ArchitectureRules.Migrations_AreInInfrastructureData", "observedMs": 5257.4, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
           { "id": "Mohist.Server.ArchTests.ArchitectureRules.DbContexts_AreInInfrastructureData", "observedMs": 5085.2, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },

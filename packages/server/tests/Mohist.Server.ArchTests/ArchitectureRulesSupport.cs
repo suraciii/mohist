@@ -10,7 +10,7 @@ internal static class ArchitectureRulesSupport
     internal static readonly Architecture Architecture = new ArchLoader()
         // The rule providers are scoped to Mohist.Server.*; loading the CLI
         // assembly adds startup cost without contributing architecture facts.
-        .LoadNamespacesWithinAssembly(System.Reflection.Assembly.Load("Mohist.Server"), "Mohist.Server")
+        .LoadAssemblies(System.Reflection.Assembly.Load("Mohist.Server"))
         .Build();
 
     private static readonly ConcurrentDictionary<string, Lazy<IReadOnlyList<ArchitectureRules.EmbeddedSource>>> EmbeddedSourceCache = new();

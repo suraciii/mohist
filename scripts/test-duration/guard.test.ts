@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
-import { readFileSync } from 'node:fs'
 
 import {
   cleanupDeadlineAt,
@@ -21,21 +20,11 @@ import {
   specPartitionCommand,
   writeExecutionProvenance,
 } from './guard.js'
-import { parseSuiteConfig } from './config.js'
 import { formatEvaluation, formatSummary, formatTrackRun, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
 import type { ExecutionLedgerExpectation, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
 
 const fastCaseUid = '1'.repeat(64)
-
-test('checked-in server-arch track uses isolated xUnit execution', () => {
-  const config = parseSuiteConfig(readFileSync(new URL('../../test-duration.config.jsonc', import.meta.url), 'utf8'))
-  const track = config.tracks.find((candidate) => candidate.id === 'server-arch')
-
-  assert.ok(track)
-  assert.deepEqual(track.apphostArgs, ['-parallel', 'none'])
-  assert.equal(parallelismFor(track), 'xunit-v3:parallel=none;parallelAlgorithm=conservative;maxThreads=default')
-})
 
 function fastManifest() {
   return manifestFromDiscovery(
