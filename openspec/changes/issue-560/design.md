@@ -130,6 +130,7 @@ with the existing coordinator and no new state:
    Narrowing the replay contract instead (excluding model/variant from
    conflict detection) was rejected: it leaves exactly that silent-ignore
    trap for corrected hints.
+
 2. **The Agent id is pre-minted deterministically from the idempotency key** —
    `agent_{StableToken($"{projectId}\n{idempotencyKey}\nagent")}` — mirroring
    the route's existing `preMintedSessionId`/`InputId`/`TurnId` pattern. The
