@@ -1,6 +1,7 @@
 using ArchUnitNET.Domain;
 using ArchUnitNET.Loader;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace Mohist.Server.ArchTests;
 
@@ -34,4 +35,10 @@ internal static class ArchitectureRulesSupport
             .ToArray()
             .AsReadOnly();
     }
+}
+
+internal static class ArchitectureRulesWarmup
+{
+    [ModuleInitializer]
+    internal static void Initialize() => _ = ArchitectureRulesSupport.Architecture;
 }
