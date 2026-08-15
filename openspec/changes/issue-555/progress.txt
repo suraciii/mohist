@@ -47,7 +47,13 @@ Files changed:
 ## Status
 
 - [x] Read self-review, plan artifacts, spec, target contract
-- [x] progress.txt created
-- [x] design.md fixed (MF-1 + Obs 1 prose)
-- [x] tasks.json fixed (T-006 description + criterion, T-004 note)
-- [x] Commits: one per artifact + progress updates
+- [x] progress.txt created (commit f27fb3748)
+- [x] design.md fixed (MF-1 + Obs 1 prose) (commit 4afbf4ead)
+- [x] tasks.json fixed (T-006 description + criterion, T-004 note); JSON
+      validated (commit after 4afbf4ead)
+- [x] Final sweep: no remaining caller-unbound stop scope references in the
+      plan artifacts; self-review.md untouched; working tree clean
+
+Disposition summary: MF-1 FIXED; observations 1-7 no action required
+(observation 1's prose count fixed in passing per the reviewer's note);
+no won't-fix dispositions — no must-fix finding was left unfixed.
