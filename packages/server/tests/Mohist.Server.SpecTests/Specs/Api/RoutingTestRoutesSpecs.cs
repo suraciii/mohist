@@ -67,19 +67,12 @@ public sealed class RoutingTestRoutesSpecs : ProjectEventsApiTestSupport
         Assert.Null(response.Message);
         Assert.Equal(1, response.Last);
         var trace = Assert.Single(response.Events);
-        Assert.Collection(trace.Rules,
-            first =>
-            {
-                Assert.True(first.Matched);
-                Assert.Equal("continue", first.Decision);
-                Assert.Equal("agent-first", first.WouldTriggerAgent);
-            },
-            second =>
-            {
-                Assert.True(second.Matched);
-                Assert.Equal("stop", second.Decision);
-                Assert.Equal("agent-second", second.WouldTriggerAgent);
-            });
+        // Rule ordering and continue/stop decisions are owned by
+        // RoutingTableEvaluatorTests; the wire contract here is that the
+        // endpoint projects the configured rules in position order with
+        // their target agents.
+        Assert.Equal(["first", "second"], trace.Rules.Select(r => r.RuleName));
+        Assert.Equal(["agent-first", "agent-second"], trace.Rules.Select(r => r.WouldTriggerAgent));
     }
 
     private async Task SeedActiveAgentAsync(string projectId, string agentId)
