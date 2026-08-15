@@ -261,6 +261,14 @@ result. A successful AgentJob therefore means that the Runtime processed the
 first delegation; it does not mean that every broad goal in the conversation is
 finished. The user can continue the same AgentSession after the AgentJob ends.
 
+### Execution Context Privacy
+
+Session lists and summaries, and any Agent history projection, identify context
+with the Issue, Epic, repository, and named Workspace when those facts exist.
+They never expose a filesystem `workspacePath`. That path remains an internal
+launch and recovery fact; users navigate with the named Workspace rather than a
+materialization location.
+
 A Workflow uses the same AgentSession model, but its TaskRun owns the work
 result. An AgentSession records execution evidence and does not advance a
 Workflow. Business work that must reach Done belongs in an Issue and Workflow,

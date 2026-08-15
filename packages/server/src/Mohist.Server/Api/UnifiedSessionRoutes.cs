@@ -216,7 +216,7 @@ public static class UnifiedSessionRoutes
 
     private static UnifiedSessionContextRefsDto? MapWorkflowContextRefs(int? issueNumber) =>
         issueNumber is > 0
-            ? new UnifiedSessionContextRefsDto(issueNumber, null, null, null, null)
+            ? new UnifiedSessionContextRefsDto(issueNumber, null, null, null)
             : null;
 
 }

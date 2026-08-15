@@ -204,7 +204,7 @@ public sealed record WorkflowSessionDto(
 /// output, and the legacy runner-protocol <c>cancelled</c> alias is
 /// normalised to <c>stopped</c>. <see cref="ContextRefs"/> is the
 /// optional envelope of context references stamped on the session at
-/// launch (issue / epic / repository / workspace path); absent when the
+/// launch (issue / epic / repository / workspace name); absent when the
 /// session carried no such reference. Workflow-shaped fields
 /// (<c>workflowRunId</c>, <c>sessionName</c>, <c>workId</c>,
 /// <c>workType</c>, <c>stage</c>) are omitted by construction.
@@ -231,8 +231,7 @@ public sealed record AgentSessionListContextRefsDto(
     int? IssueNumber,
     int? EpicNumber,
     string? Repository,
-    string? WorkspaceName,
-    string? WorkspacePath);
+    string? WorkspaceName);
 
 /// <summary>
 /// Read shape for the generic-session summary route
@@ -253,7 +252,7 @@ public sealed record AgentSessionListContextRefsDto(
 /// </summary>
 /// <remarks>
 /// <see cref="ContextRefs"/> is the optional envelope of context
-/// references (issue / epic / repository / workspace path) recorded on
+/// references (issue / epic / repository / workspace name) recorded on
 /// the session metadata at launch; it is <c>null</c> when the session
 /// carried no context reference, in line with "absent rather than null".
 /// </remarks>
@@ -371,8 +370,7 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
     int? IssueNumber,
     int? EpicNumber,
     string? Repository,
-    string? WorkspaceName,
-    string? WorkspacePath);
+    string? WorkspaceName);
 
 /// <summary>
 /// Unified read shape for an AgentSession addressed by its stable
@@ -489,8 +487,7 @@ public sealed record UnifiedSessionContextRefsDto(
     int? IssueNumber,
     int? EpicNumber,
     string? Repository,
-    string? WorkspaceName,
-    string? WorkspacePath);
+    string? WorkspaceName);
 
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 

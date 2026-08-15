@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
@@ -15,10 +17,8 @@ namespace Mohist.Server.UnitTests.Sessions;
 /// <see cref="AgentSessionQuerier.BuildAgentSessionListContextRefs"/>
 /// and
 /// <see cref="AgentSessionQuerier.BuildGenericSessionSummaryContextRefs"/>.
-/// Round-trips both wrapper call sites to prove the wire-format DTOs
-/// (<see cref="AgentSessionListContextRefsDto"/>,
-/// <see cref="GenericAgentSessionSummaryContextRefsDto"/>) are
-/// byte-identical to the pre-consolidation values.
+/// Round-trips both wrapper call sites to prove the public DTOs retain named
+/// context while excluding internal materialization paths.
 /// </summary>
 public sealed class AgentSessionContextRefsTests
 {
@@ -131,7 +131,7 @@ public sealed class AgentSessionContextRefsTests
         var refs = AgentSessionContextRefs.TryBuild(record);
         var dto = refs is null
             ? null
-            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName);
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
@@ -148,7 +148,7 @@ public sealed class AgentSessionContextRefsTests
         var refs = AgentSessionContextRefs.TryBuild(record);
         var dto = refs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName);
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
@@ -165,28 +165,48 @@ public sealed class AgentSessionContextRefsTests
         var listRefs = AgentSessionContextRefs.TryBuild(record);
         var listDto = listRefs is null
             ? null
-            : new AgentSessionListContextRefsDto(listRefs.Value.IssueNumber, listRefs.Value.EpicNumber, listRefs.Value.Repository, listRefs.Value.WorkspaceName, listRefs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(listRefs.Value.IssueNumber, listRefs.Value.EpicNumber, listRefs.Value.Repository, listRefs.Value.WorkspaceName);
 
         var summaryRefs = AgentSessionContextRefs.TryBuild(record);
         var summaryDto = summaryRefs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(summaryRefs.Value.IssueNumber, summaryRefs.Value.EpicNumber, summaryRefs.Value.Repository, summaryRefs.Value.WorkspaceName, summaryRefs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(summaryRefs.Value.IssueNumber, summaryRefs.Value.EpicNumber, summaryRefs.Value.Repository, summaryRefs.Value.WorkspaceName);
 
         Assert.Null(listDto);
         Assert.Null(summaryDto);
+    }
+
+    [Fact]
+    public void TryBuild_PublicDto_DoesNotSerializeInternalWorkspacePath()
+    {
+        var record = BuildRecord(issueNumber: "42", workspacePath: "/srv/private/worktree");
+        var refs = AgentSessionContextRefs.TryBuild(record);
+
+        Assert.NotNull(refs);
+        var dto = new AgentSessionListContextRefsDto(
+            refs!.Value.IssueNumber,
+            refs.Value.EpicNumber,
+            refs.Value.Repository,
+            refs.Value.WorkspaceName);
+        var json = JsonSerializer.Serialize(dto, JSON.Options);
+
+        Assert.DoesNotContain("workspacePath", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("/srv/private/worktree", json, StringComparison.Ordinal);
     }
 
     private static AgentSessionRecord BuildRecord(
         string? issueNumber = null,
         string? epic = null,
         string? repo = null,
-        string? workspace = null)
+        string? workspace = null,
+        string? workspacePath = null)
     {
         var labels = new Dictionary<string, string>(StringComparer.Ordinal);
         if (issueNumber is not null) labels[GenericAgentSessionMetadata.IssueNumber] = issueNumber;
         if (epic is not null) labels[GenericAgentSessionMetadata.EpicNumber] = epic;
         if (repo is not null) labels[GenericAgentSessionMetadata.Repository] = repo;
         if (workspace is not null) labels[GenericAgentSessionMetadata.WorkspaceName] = workspace;
+        if (workspacePath is not null) labels[GenericAgentSessionMetadata.WorkspacePath] = workspacePath;
         return new AgentSessionRecord(
             new AgentSessionRow(),
             new AgentSession { Id = "s_test", Runtime = new AgentSessionRuntime("r", null) },

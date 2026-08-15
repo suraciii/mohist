@@ -361,7 +361,7 @@ public class AgentSessionQuerier : IScopedService
         var refs = AgentSessionContextRefs.TryBuild(record);
         return refs is null
             ? null
-            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName);
     }
 
     public async Task<string?> ResolveIssueSessionIdAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
@@ -901,15 +901,13 @@ public class AgentSessionQuerier : IScopedService
         var epicNumber = agentRefs?.EpicNumber;
         var repository = agentRefs?.Repository;
         var workspaceName = agentRefs?.WorkspaceName;
-        var workspacePath = agentRefs?.WorkspacePath;
 
         if (issueNumber is null && epicNumber is null
             && string.IsNullOrWhiteSpace(repository)
-            && string.IsNullOrWhiteSpace(workspaceName)
-            && string.IsNullOrWhiteSpace(workspacePath))
+            && string.IsNullOrWhiteSpace(workspaceName))
             return null;
 
-        return new UnifiedSessionContextRefsDto(issueNumber, epicNumber, repository, workspaceName, workspacePath);
+        return new UnifiedSessionContextRefsDto(issueNumber, epicNumber, repository, workspaceName);
     }
 
     /// <summary>
@@ -925,7 +923,7 @@ public class AgentSessionQuerier : IScopedService
         var refs = AgentSessionContextRefs.TryBuild(record);
         return refs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName);
     }
 
     private async Task<AgentSessionMetadataDto> BuildSessionMetadataDtoAsync(

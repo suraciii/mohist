@@ -62,7 +62,6 @@ export interface UnifiedSessionContextRefsDto {
   epicNumber?: number | null
   repository?: string | null
   workspaceName?: string | null
-  workspacePath?: string | null
 }
 
 export interface UnifiedSessionSummaryDto {
