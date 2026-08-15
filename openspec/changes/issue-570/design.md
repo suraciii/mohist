@@ -447,10 +447,31 @@ systemd unit environment / config file; default memory bound per work, e.g.
 `memoryMb`) bounds each work. Enforcement differs by where the work's memory
 actually lives:
 
-- **Action subprocess work**: the executor applies spawn-time OS limits to the
-  work's child process tree (RLIMIT_AS/RLIMIT_DATA on Linux via the existing
-  spawn seam; a watchdog terminates the tree if it exceeds the bound), plus a
-  wall-clock kill. Exceeding the bound terminates only that tree.
+- **Action subprocess work**: spawn-time OS limits bound the work's child
+  process tree, backed by an aggregate-RSS watchdog and a wall-clock kill.
+  Node's `spawn`/`SpawnOptions` exposes no resource-limit support
+  (`resourceLimits` exists only for worker threads), so the limits are
+  applied through a util-linux `prlimit(1)` wrapper at the `runCommand`
+  boundary: `system/process.ts` gains an optional per-command
+  resource-limit option on `CommandLineOptions` — layered in exactly like
+  `timeoutMs`, omitted ⇒ byte-identical spawn — and the process-action
+  spawn path (`actions/built-in-core.ts`) executes
+  `prlimit --as=<bytes> --data=<bytes> -- <command> <args…>` through the
+  unchanged `ProcessSpawner` seam when the option is set and the `prlimit`
+  binary is available (probed once at runner startup). `prlimit` sets its
+  own limits and `exec`s the target in place, so the child PID and its
+  detached process-group leadership are stable: `killProcess`'s
+  `process.kill(-pid)` group kill and `runCommand`'s timeout/`onClose`
+  machinery keep working unchanged. Over-limit allocation then fails in the
+  kernel — allocation failure or a killed process, no detection latency —
+  and the executor maps that abnormal exit to the `resource-containment`
+  failure. Where `prlimit` is unavailable (macOS, minimal containers)
+  enforcement is watchdog + wall-clock only: the watchdog samples the
+  tree's aggregate RSS on a short interval and terminates the process group
+  on breach (bounded detection latency; see Risks). Limits are inherited
+  per process rather than aggregated per tree, so the OS bound is
+  per-process; the watchdog's aggregate sampling covers tree-wide growth.
+  Exceeding a bound terminates only that tree.
 - **Runtime-backed work (OpenCode/pi turns)**: the heavy state lives in shared
   runtime processes that cannot be RLIMIT-ed per work without process-per-work
   (rejected below). Containment is budget-based: per-work resource watchdog
@@ -474,6 +495,23 @@ terminated tree/generation.
   multiple works' turns. Noted as future hardening for action work only.
 - Process-per-work runtimes — full isolation but a redesign of the shared
   runtime/generation model and a large regression in startup cost.
+- Post-spawn `prlimit(2)` applied to the child PID after spawn — rejected: a
+  race window between spawn and limit landing exactly when a
+  fast-allocating work is hottest, and it needs the same host binary as the
+  wrapper form, so the wrapper is strictly better.
+- Shell `ulimit` preexec (`sh -c 'ulimit -v …; exec …'`) — rejected: inserts a
+  shell whose quoting must survive arbitrary action arguments and whose
+  flag semantics vary by shell; the wrapper keeps the direct in-place `exec`
+  and a single spawn.
+- Watchdog-only enforcement (drop the OS limits) — rejected as the primary
+  mechanism: a work allocating faster than one watchdog sample can exhaust
+  host memory and let the kernel OOM killer select the runner process
+  itself — the exact incident class. Watchdog + wall-clock remain the
+  fallback where `prlimit` is absent and the second line of defense
+  everywhere. Relying on the util-linux `prlimit` host binary is probed, not
+  assumed — consistent with the runner's existing host-tool reliance
+  (`git`, `gh`) and the no-new-external-dependencies constraint (no npm or
+  native packages are added).
 
 ### D8. Quarantined generation drain is deadline-bounded
 
@@ -534,6 +572,15 @@ best-effort and the OS reaps the rest.
   bounds (systemd `MemoryMax` on the unit) — losing the runner process is now
   recoverable end-to-end, so the blast radius of that residual event is
   bounded by this design.
+- [Watchdog-only hosts (no `prlimit` binary): containment detection
+  latency] -> the watchdog terminates on its next RSS sample (interval on
+  the order of seconds); a work allocating faster than one sample can
+  exhaust host free memory first. Residual is deployment-bounded (systemd
+  `MemoryMax` on the runner unit) and runner loss is recoverable end-to-end
+  by this design. Related knob semantics: RLIMIT_AS bounds virtual address
+  space — conservative, large sparse mappings fail at modest RSS;
+  RLIMIT_DATA is the closer-to-RSS knob on Linux ≥ 4.7 — so `memoryMb`
+  defaults must leave headroom for the toolchain's virtual reservations.
 - [Breaking change: consumers treating `runner-lost` as terminal] -> ship
   server + web + CLI in one deployment (they release together); the wire
   never carried `runner-lost` as a distinct terminal code outside failure
