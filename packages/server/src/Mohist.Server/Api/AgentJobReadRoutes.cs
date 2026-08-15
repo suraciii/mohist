@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Project.Services;
@@ -182,7 +183,9 @@ public static class AgentJobReadRoutes
             FailureReason: failureReason,
             ExitCode: exitCode,
             ExecutionDefinition: snapshot.ExecutionDefinition,
-            RecoveryDeadlineAt: isRecovering ? snapshot.RecoveryDeadlineAt : null));
+            RecoveryDeadlineAt: isRecovering ? snapshot.RecoveryDeadlineAt : null,
+            Interruption: AgentWorkInterruptionDto.From(snapshot.Interruption),
+            InterruptionHistory: snapshot.InterruptionHistory?.Select(AgentWorkInterruptionDto.From).Where(item => item is not null).Cast<AgentWorkInterruptionDto>().ToArray()));
     }
 
     private static string ToStatusString(AgentJobStatus status, bool isRecovering = false) =>
@@ -249,4 +252,35 @@ public sealed record AgentJobViewDto(
     string? FailureReason,
     int? ExitCode,
     AgentExecutionDefinition? ExecutionDefinition,
-    DateTimeOffset? RecoveryDeadlineAt = null);
+    DateTimeOffset? RecoveryDeadlineAt = null,
+    AgentWorkInterruptionDto? Interruption = null,
+    IReadOnlyList<AgentWorkInterruptionDto>? InterruptionHistory = null);
+
+public sealed record AgentWorkInterruptionDto(
+    string State,
+    string UpdateOperationId,
+    string WorkId,
+    string? TaskRunId,
+    int RecoveryGeneration,
+    string? OriginalTurnId,
+    string? ReplacementTurnId,
+    string? StopFailure,
+    string ExpectedRecoveryPath,
+    string RecordedAt)
+{
+    public static AgentWorkInterruptionDto? From(AgentWorkInterruptionTransition? transition) =>
+        transition is null
+            ? null
+            : new(
+                transition.State,
+                transition.UpdateOperationId,
+                transition.WorkId,
+                transition.TaskRunId,
+                transition.RecoveryGeneration,
+                transition.OriginalTurnId,
+                transition.ReplacementTurnId,
+                AgentWorkInterruptionProjection.SanitizeStopFailure(transition.StopFailure),
+                transition.ExpectedRecoveryPath,
+                transition.RecordedAt.ToString("o"));
+}
+

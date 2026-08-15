@@ -2763,7 +2763,9 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             s.Runtime.Runtime,
             usage.CachedWriteTokens,
             s.BindingEpoch,
-            s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus);
+            s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus,
+            AgentWorkInterruptionProjection.Latest(s.Status.InterruptionHistory),
+            s.Status.InterruptionHistory);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)
@@ -3724,6 +3726,20 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             return;
         var session = await GetRequiredAsync();
         var events = session.MarkTurnExecuting(turnId, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task ApplyInterruptionAsync(AgentWorkInterruptionTransition transition)
+    {
+        ArgumentNullException.ThrowIfNull(transition);
+        var session = await GetRequiredAsync();
+        var events = session.ApplyInterruption(transition, Now());
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);

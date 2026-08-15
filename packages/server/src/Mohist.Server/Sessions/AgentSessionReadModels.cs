@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions;
@@ -55,7 +56,9 @@ public sealed record AgentSessionMetadataDto(
     [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata,
     [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
-    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
+    [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null,
+    [property: JsonPropertyName("interruptionHistory")] IReadOnlyList<AgentWorkInterruptionTransitionDto>? InterruptionHistory = null);
 
 public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("partCount")] int PartCount,
@@ -154,7 +157,9 @@ public sealed record AgentSessionSummaryDto(
     string? FailureReason,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
-    [property: JsonPropertyName("workflowRunId")] string? WorkflowRunId = null);
+    [property: JsonPropertyName("workflowRunId")] string? WorkflowRunId = null,
+    [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null,
+    [property: JsonPropertyName("interruptionHistory")] IReadOnlyList<AgentWorkInterruptionTransitionDto>? InterruptionHistory = null);
 
 public sealed record AgentSessionInfoDto(
     int IssueNumber,
@@ -191,7 +196,9 @@ public sealed record WorkflowSessionDto(
     string? FailureReason,
     int? ExitCode,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null,
+    [property: JsonPropertyName("interruptionHistory")] IReadOnlyList<AgentWorkInterruptionTransitionDto>? InterruptionHistory = null);
 
 /// <summary>
 /// Read shape for a generic (non-workflow) <see cref="Sessions.Domain.AgentSession"/>
@@ -276,6 +283,8 @@ public sealed record GenericAgentSessionSummaryDto(
     [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
     [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
+    [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null,
+    [property: JsonPropertyName("interruptionHistory")] IReadOnlyList<AgentWorkInterruptionTransitionDto>? InterruptionHistory = null,
     string? Origin = null,
     string? TargetId = null);
 
@@ -318,7 +327,8 @@ public sealed record AgentTurnObservationDto(
     long Sequence,
     IReadOnlyList<string> InputIds,
     string Status,
-    [property: JsonPropertyName("result")] AgentTurnResultObservationDto? Result = null);
+    [property: JsonPropertyName("result")] AgentTurnResultObservationDto? Result = null,
+    [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null);
 
 public sealed record AgentTurnResultObservationDto(
     string? Message,
@@ -326,6 +336,18 @@ public sealed record AgentTurnResultObservationDto(
     string? FailureReason,
     string? FailureCategory,
     int? ExitCode);
+
+public sealed record AgentWorkInterruptionTransitionDto(
+    string State,
+    string UpdateOperationId,
+    string WorkId,
+    string? TaskRunId,
+    int RecoveryGeneration,
+    string? OriginalTurnId,
+    string? ReplacementTurnId,
+    string? StopFailure,
+    string ExpectedRecoveryPath,
+    string RecordedAt);
 
 public sealed record AgentSessionRecoveryObservationDto(
     string Type,
@@ -449,6 +471,8 @@ public sealed record UnifiedSessionSummaryDto(
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
     [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
     [property: JsonPropertyName("recoveryHistory")] IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory = null,
+    [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null,
+    [property: JsonPropertyName("interruptionHistory")] IReadOnlyList<AgentWorkInterruptionTransitionDto>? InterruptionHistory = null,
     string? Origin = null,
     string? TargetId = null);
 

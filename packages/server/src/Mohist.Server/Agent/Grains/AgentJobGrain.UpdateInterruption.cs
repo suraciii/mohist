@@ -62,37 +62,4 @@ public sealed partial class AgentJobGrain
             throw new InvalidOperationException($"AgentJob '{Key}' update interruption event is not committed.");
         return true;
     }
-
-    private async Task EmitUpdateInterruptionEventAsync(PendingUpdateInterruptionEvent obligation)
-    {
-        try
-        {
-            await _eventStore.AppendAsync(BuildUpdateInterruptionEnvelope(obligation), CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "AgentJob {Id} could not append update interruption event (eventId={EventId}); reminder will retry",
-                Key,
-                obligation.EventId);
-            await EnsureRecoveryReminderAsync();
-            return;
-        }
-
-        State.PendingUpdateInterruptionEvent = null;
-        await PersistAsync();
-        _log.LogInformation(
-            "AgentJob {Id} emitted {Type} event (eventId={EventId}, operationId={OperationId})",
-            Key,
-            EventCatalog.ReverseDns.AgentJobUpdateInterrupted,
-            obligation.EventId,
-            obligation.UpdateOperationId);
-    }
-
-    private CloudEvent BuildUpdateInterruptionEnvelope(PendingUpdateInterruptionEvent obligation)
-    {
-        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
-        return AgentJobLineage.BuildUpdateInterruptionEnvelope(Key, obligation, extensions);
-    }
 }

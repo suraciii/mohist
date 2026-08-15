@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain.Artifacts;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -21,6 +22,7 @@ public union WorkflowEvent(
     TaskInterrupted,
     TaskCancelled,
     AgentTaskUpdateInterrupted,
+    AgentTaskInterruptionLifecycleChanged,
     AgentTaskResultUnconfirmed,
     TaskBlocked,
     StageBlocked,
@@ -69,6 +71,11 @@ public sealed record AgentTaskUpdateInterrupted(
     string TaskId,
     string WorkId,
     string UpdateOperationId);
+
+public sealed record AgentTaskInterruptionLifecycleChanged(
+    string Stage,
+    string TaskId,
+    AgentWorkInterruptionTransition Transition);
 public sealed record AgentTaskResultUnconfirmed(
     string Stage,
     string TaskId,

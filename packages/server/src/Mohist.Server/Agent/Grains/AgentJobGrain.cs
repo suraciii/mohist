@@ -256,7 +256,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             IsRecovering: IsRecovering,
             RecoveryGeneration: State.RecoveryGeneration,
             OriginalWorkId: State.RecoveryAttempts.FirstOrDefault()?.WorkId,
-            UpdateInterruptionDeadlineAt: State.UpdateInterruptionDeadlineAt));
+            UpdateInterruptionDeadlineAt: State.UpdateInterruptionDeadlineAt,
+            Interruption: State.Interruption,
+            InterruptionHistory: State.InterruptionHistory));
 
     private bool MatchesRecoveryReceiptBinding(RuntimeRecoveryReceipt receipt)
     {
@@ -1977,6 +1979,48 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }
 
+    private async Task ApplySessionInterruptionAsync(
+        string? sessionId,
+        AgentWorkInterruptionTransition transition)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return;
+        var session = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        if (await session.GetAsync() is null) return;
+        await session.ApplyInterruptionAsync(transition);
+    }
+
+    private async Task EmitUpdateInterruptionEventAsync(PendingUpdateInterruptionEvent obligation)
+    {
+        try
+        {
+            await _eventStore.AppendAsync(BuildUpdateInterruptionEnvelope(obligation), CancellationToken.None);
+            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} could not append update interruption event (eventId={EventId}); reminder will retry",
+                Key,
+                obligation.EventId);
+            await EnsureRecoveryReminderAsync();
+            return;
+        }
+
+        State.PendingUpdateInterruptionEvent = null;
+        await PersistAsync();
+        _log.LogInformation(
+            "AgentJob {Id} emitted {Type} event (eventId={EventId}, operationId={OperationId})",
+            Key,
+            EventCatalog.ReverseDns.AgentJobUpdateInterrupted,
+            obligation.EventId,
+            obligation.UpdateOperationId);
+    }
+
+    internal CloudEvent BuildUpdateInterruptionEnvelope(PendingUpdateInterruptionEvent obligation)
+    {
+        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
+        return AgentJobLineage.BuildUpdateInterruptionEnvelope(Key, obligation, extensions);
+    }
     private async Task EmitFailureEventAsync(PendingFailureEvent obligation)
     {
         var envelope = BuildFailureEnvelope(obligation);

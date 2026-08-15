@@ -202,6 +202,8 @@ export function TaskItem({
   const isRecoverableInterrupted = task.status === 'recoverable-interrupted'
   const isFailed = task.status === 'failed'
   const isBlocked = task.status === 'blocked'
+  const agentInterruption = task.agentInterruption ?? null
+  const isInterruption = agentInterruption != null
   const settlement = task.agentResultSettlement
   const taskOutput = task.output
   const hasOutput = taskOutput != null
@@ -209,12 +211,13 @@ export function TaskItem({
   const artifactSummaries = task.artifactSummaries ?? []
   const hasArtifacts = artifactSummaries.length > 0
   const isDeliveryTask = isDeliveryFailureTask(task)
-  const taskReason =
-    task.error?.message ??
-    (typeof task.reason === 'string' ? task.reason : null) ??
-    settlement?.message ??
-    task.interruption?.reasonCode ??
-    null
+  const taskReason = isInterruption
+    ? null
+    : task.error?.message ??
+      (typeof task.reason === 'string' ? task.reason : null) ??
+      settlement?.message ??
+      task.interruption?.reasonCode ??
+      null
   const deliveryFailure = isFailed && isDeliveryTask ? getDeliveryFailureGuidance(task.error?.code) : null
   const resolvedTaskLogHook = taskLogHook ?? useDefaultTaskLogData
   const taskLogResult = resolvedTaskLogHook({
@@ -242,6 +245,10 @@ export function TaskItem({
     icon = <CrossIcon className="h-4 w-4 text-danger flex-shrink-0" />
   } else if (isBlocked || isRecoverableInterrupted) {
     icon = <HourglassIcon className="h-4 w-4 text-warning flex-shrink-0" />
+  } else if (isInterruption && agentInterruption.state === 'recovering') {
+    icon = <SpinnerIcon className="h-4 w-4 text-warning animate-spin flex-shrink-0" />
+  } else if (isInterruption) {
+    icon = <HourglassIcon className="h-4 w-4 text-warning flex-shrink-0" />
   } else if (isRunning) {
     icon = <SpinnerIcon className="h-4 w-4 text-info animate-spin flex-shrink-0" />
   } else {
@@ -267,6 +274,7 @@ export function TaskItem({
       {isFailed && <span className="shrink-0 text-xs text-danger">failed</span>}
       {isBlocked && <span className="shrink-0 text-xs text-warning">blocked</span>}
       {isRecoverableInterrupted && <span className="shrink-0 text-xs text-warning">recoverable-interrupted</span>}
+      {isInterruption && <span className="shrink-0 text-xs text-warning">{task.agentInterruption?.state}</span>}
       {canExpand && (
         <ChevronDownIcon
           className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
@@ -300,7 +308,8 @@ export function TaskItem({
       originLabel ||
       sessionName ||
       task.startedAt ||
-      task.attempts > 1 ? (
+      task.attempts > 1 ||
+      isInterruption ? (
         <div
           className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pl-9 text-xs text-muted-foreground"
           data-testid="workflow-task-metadata"
@@ -324,6 +333,11 @@ export function TaskItem({
             </span>
           )}
           {sessionName && <TaskSessionChip sessionName={sessionName} sessionId={sessionId} />}
+          {isInterruption && (
+            <span className="text-warning" data-testid="workflow-task-interruption-state">
+              Runner update: {agentInterruption.state}
+            </span>
+          )}
 
           {task.attempts > 1 && <span>{task.attempts} attempts</span>}
           <TaskLifecycleTime task={task} />
@@ -361,6 +375,20 @@ export function TaskItem({
                 {settlement.agentSessionId && <div>Session: {settlement.agentSessionId}</div>}
                 {settlement.agentTurnId && <div>Turn: {settlement.agentTurnId}</div>}
                 {settlement.nextAction && <div>{settlement.nextAction}</div>}
+              </div>
+            )}
+            {isInterruption && (
+              <div
+                className="space-y-1 rounded border border-warning-border bg-warning-subtle px-2 py-1.5 text-xs text-warning"
+                data-testid="workflow-task-interruption-attention"
+              >
+                <div className="font-semibold">Runner update interruption: {agentInterruption.state}</div>
+                <div>Update: <span className="font-mono break-all">{agentInterruption.updateOperationId}</span></div>
+                <div>Work: <span className="font-mono break-all">{agentInterruption.workId}</span></div>
+                <div>Recovery generation: {agentInterruption.recoveryGeneration}</div>
+                {agentInterruption.replacementTurnId && <div>Replacement turn: <span className="font-mono break-all">{agentInterruption.replacementTurnId}</span></div>}
+                <div>{agentInterruption.expectedRecoveryPath}</div>
+                {agentInterruption.stopFailure && <div>{agentInterruption.stopFailure}</div>}
               </div>
             )}
             {hasArtifacts && (

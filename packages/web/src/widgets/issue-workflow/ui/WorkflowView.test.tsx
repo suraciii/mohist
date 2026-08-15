@@ -379,6 +379,36 @@ describe('WorkflowView', () => {
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument()
   })
 
+  it('renders the update interruption lifecycle with operation and replacement context', () => {
+    const timeline = makeTimeline()
+    timeline.interruptionAttention = {
+      state: 'recovering',
+      updateOperationId: 'update-567',
+      workId: 'work-old.recovery.1',
+      taskRunId: 'build-task-1.recovery',
+      recoveryGeneration: 1,
+      originalTurnId: 'turn-old',
+      replacementTurnId: 'turn-recovery',
+      expectedRecoveryPath: 'The replacement dispatch will resume this work.',
+      stopFailure: null,
+      recordedAt: '2026-08-15T00:02:00.000Z',
+    }
+    timeline.stages[0].tasks[0].agentInterruption = timeline.interruptionAttention
+
+    renderWithProviders(
+      <WorkflowView
+        issue={makeIssue()}
+        timelineHook={() => ({ data: timeline })}
+      />,
+    )
+
+    const panel = screen.getByTestId('workflow-agent-interruption-attention')
+    expect(panel).toHaveTextContent('recovering')
+    expect(panel).toHaveTextContent('update-567')
+    expect(panel).toHaveTextContent('turn-recovery')
+    expect(panel).not.toHaveTextContent('session.abort fetch failed')
+  })
+
   it('renders blocked Agent-result attention without a failure presentation', () => {
     const timeline = makeTimeline()
     timeline.status = 'blocked'

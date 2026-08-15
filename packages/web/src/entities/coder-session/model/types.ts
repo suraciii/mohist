@@ -48,6 +48,21 @@ export interface AgentSessionUsage {
   contextUsageHistory?: ContextUsageHistoryEntry[] | null
 }
 
+export type AgentWorkInterruptionState = 'interrupting' | 'interrupted' | 'recovering' | 'recovered'
+
+export interface AgentWorkInterruption {
+  state: AgentWorkInterruptionState
+  updateOperationId: string
+  workId: string
+  taskRunId?: string | null
+  recoveryGeneration: number
+  originalTurnId?: string | null
+  replacementTurnId?: string | null
+  stopFailure?: string | null
+  expectedRecoveryPath: string
+  recordedAt: string
+}
+
 export interface AgentSessionEventSummary {
   resolvedModel?: string | null
   failureCategory?: string | null
@@ -91,6 +106,8 @@ export interface UnifiedSessionSummaryDto {
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
   recoveryHistory?: SessionRecoveryObservation[] | null
+  interruption?: AgentWorkInterruption | null
+  interruptionHistory?: AgentWorkInterruption[] | null
 }
 
 export interface AgentSessionMetadataCounts {
@@ -130,6 +147,8 @@ export interface AgentSessionMetadata {
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
   recoveryHistory?: SessionRecoveryObservation[] | null
+  interruption?: AgentWorkInterruption | null
+  interruptionHistory?: AgentWorkInterruption[] | null
 }
 
 export interface SessionInputObservation {
@@ -155,6 +174,7 @@ export interface AgentTurnObservation {
   inputIds: string[]
   status: string
   result?: AgentTurnResultObservation | null
+  interruption?: AgentWorkInterruption | null
 }
 
 export interface AgentTurnResultObservation {
@@ -241,6 +261,8 @@ export interface WorkflowRunSession {
   exitCode: number | null
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  interruption?: AgentWorkInterruption | null
+  interruptionHistory?: AgentWorkInterruption[] | null
 }
 
 export type CoderSessionItem = CoderSessionSummary
@@ -300,6 +322,8 @@ export interface SessionMetadata {
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
   recoveryHistory?: SessionRecoveryObservation[] | null
+  interruption?: AgentWorkInterruption | null
+  interruptionHistory?: AgentWorkInterruption[] | null
 }
 
 export interface TextPart {

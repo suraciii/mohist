@@ -84,6 +84,8 @@ function buildMetadata(summary: UnifiedSessionSummaryDto, turnCount: number): Se
     inputs: summary.inputs,
     turns: summary.turns,
     recoveryHistory: summary.recoveryHistory,
+    interruption: summary.interruption,
+    interruptionHistory: summary.interruptionHistory,
   }
 }
 

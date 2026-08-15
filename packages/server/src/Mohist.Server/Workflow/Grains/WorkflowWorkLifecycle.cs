@@ -253,7 +253,8 @@ internal sealed class WorkflowWorkLifecycle
             recoveryGeneration,
             workId,
             turnId,
-            run.Stages.SelectMany(candidate => candidate.Tasks));
+            run.Stages.SelectMany(candidate => candidate.Tasks),
+            now);
 
         interrupted.Status = TaskRunStatus.Interrupted;
         interrupted.FinishedAt = now;

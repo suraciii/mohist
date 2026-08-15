@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Contracts;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Runner.Grains;
@@ -36,6 +37,12 @@ public sealed class TaskRun
     public AgentResultSettlement? AgentResultSettlement { get; set; }
     public WorkInterruption? Interruption { get; set; }
 
+    /// <summary>
+    /// Additive update-interruption visibility for this attempt. The old
+    /// attempt keeps <c>interrupted</c> while its replacement advances
+    /// independently through recovering and recovered.
+    /// </summary>
+    public AgentWorkInterruptionTransition? AgentInterruption { get; set; }
     /// <summary>
     /// Recovery generation for a replacement attempt. The original attempt is
     /// generation zero; interrupted history remains immutable while the next
@@ -214,7 +221,8 @@ public static class TaskRunExtensions
             int recoveryGeneration,
             string workId,
             string agentTurnId,
-            IEnumerable<TaskRun> occupiedTaskRuns)
+            IEnumerable<TaskRun> occupiedTaskRuns,
+            DateTimeOffset now)
         {
             if (interrupted.AgentResultSettlement is not { } originalSettlement)
                 throw new InvalidOperationException("A recovery attempt requires an Agent result settlement");
@@ -240,12 +248,32 @@ public static class TaskRunExtensions
                 WorkId = workId,
                 RunnerId = originalSettlement.RunnerId,
                 RecoveryGeneration = recoveryGeneration,
+                UpdateOperationId = originalSettlement.UpdateOperationId,
                 // The session will confirm the physical turn when the
                 // replacement dispatch is accepted. Keep a durable logical
                 // turn allocation now so the replacement is distinct even
                 // before the Runner binds it.
                 AgentTurnId = agentTurnId,
                 Runtime = originalSettlement.Runtime
+            };
+            task.AgentInterruption = (interrupted.AgentInterruption ?? new AgentWorkInterruptionTransition(
+                AgentWorkInterruptionStates.Interrupted,
+                originalSettlement.UpdateOperationId ?? string.Empty,
+                originalSettlement.WorkId,
+                originalSettlement.TaskRunId,
+                originalSettlement.RecoveryGeneration,
+                originalSettlement.AgentTurnId,
+                null,
+                null,
+                "The replacement Runner dispatch will resume this work.",
+                now)) with
+            {
+                State = AgentWorkInterruptionStates.Recovering,
+                WorkId = workId,
+                TaskRunId = task.Id,
+                RecoveryGeneration = recoveryGeneration,
+                ReplacementTurnId = agentTurnId,
+                RecordedAt = now,
             };
             return task;
         }

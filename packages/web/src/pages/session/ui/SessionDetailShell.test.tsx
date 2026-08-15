@@ -3,7 +3,7 @@ import { fireEvent, render, screen, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
-import type { SessionMetadata } from '../../../entities/coder-session'
+import type { AgentWorkInterruption, SessionMetadata } from '../../../entities/coder-session'
 import type { TimelineFact, TimelineItem } from '../../../entities/session'
 import type { SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionDetailShell, type SessionDetailShellComponents } from './SessionDetailShell'
@@ -29,7 +29,7 @@ const item: TimelineItem = {
   isTerminal: true,
 }
 
-function makeData(): SessionDataSourceResult {
+function makeData(interruption?: AgentWorkInterruption): SessionDataSourceResult {
   const meta: SessionMetadata = {
     sessionId: 'session-1',
     sessionName: 'Session one',
@@ -51,6 +51,7 @@ function makeData(): SessionDataSourceResult {
     inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
     turns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'completed' }],
     recoveryHistory: [{ type: 'reset', recordedAt: '2026-08-03T10:01:00.000Z', reason: 'reset' }],
+    interruption,
   }
 
   return {
@@ -169,6 +170,33 @@ describe('SessionDetailShell timeline integration', () => {
     const recovery = screen.getByTestId('launch-observation-recovering')
     expect(recovery).toHaveTextContent('runner-lost')
     expect(recovery).toHaveTextContent('2026-08-15T01:15:00Z')
+  })
+
+  it('renders update interruption context instead of a raw runtime abort failure', () => {
+    render(
+      <MemoryRouter>
+        <SessionDetailShell
+          data={makeData({
+            state: 'interrupted',
+            updateOperationId: 'update-567',
+            workId: 'work-old',
+            recoveryGeneration: 0,
+            originalTurnId: 'turn-old',
+            replacementTurnId: 'turn-recovery',
+            expectedRecoveryPath: 'The replacement dispatch will resume this work.',
+            stopFailure: 'Stop confirmation is pending; recovery remains durable and will be retried.',
+            recordedAt: '2026-08-15T00:00:00.000Z',
+          })}
+          components={makeComponents()}
+        />
+      </MemoryRouter>,
+    )
+
+    const banner = screen.getByTestId('session-interruption-banner')
+    expect(banner).toHaveTextContent('update-567')
+    expect(banner).toHaveTextContent('work-old')
+    expect(banner).toHaveTextContent('turn-recovery')
+    expect(banner).not.toHaveTextContent('session.abort fetch failed')
   })
 
   it('switches between summary and raw views on the same source anchor', () => {

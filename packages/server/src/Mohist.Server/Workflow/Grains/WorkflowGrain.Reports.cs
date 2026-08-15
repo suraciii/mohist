@@ -1,6 +1,8 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -30,12 +32,15 @@ public partial class WorkflowGrain
         if (_run is null)
             return ReportAck.Stale;
 
+        var interruptedAtValue = interruptedAt ?? Now();
+        var existingTask = _run.FindTaskForRecoveryReceipt(taskRunId, workId);
+        var existingSettlement = existingTask?.AgentResultSettlement;
         var update = _run.MarkUpdateInterrupted(
             taskRunId,
             workId,
             runnerId,
             updateOperationId,
-            interruptedAt ?? Now(),
+            interruptedAtValue,
             settlementTimeout ?? _agentResultSettlementTimeout);
         if (update == AgentExecutionUpdate.Rejected)
             return ReportAck.Stale;
@@ -43,11 +48,30 @@ public partial class WorkflowGrain
         {
             var stage = _run.Stages.Single(stage => stage.Tasks.Any(task =>
                 string.Equals(task.Id, taskRunId, StringComparison.Ordinal)));
-            await CommitAsync([new AgentTaskUpdateInterrupted(
-                stage.Id,
-                taskRunId,
+            var settlement = existingTask!.AgentResultSettlement!;
+            var transition = new AgentWorkInterruptionTransition(
+                AgentWorkInterruptionStates.Interrupted,
+                updateOperationId,
                 workId,
-                updateOperationId)]);
+                taskRunId,
+                settlement.RecoveryGeneration,
+                existingSettlement?.AgentTurnId,
+                null,
+                null,
+                "The Runner will deliver a confirmed interruption receipt; the replacement dispatch will then resume this work.",
+                interruptedAtValue);
+            existingTask.AgentInterruption = transition;
+            await CommitAsync([
+                new AgentTaskInterruptionLifecycleChanged(
+                    stage.Id,
+                    taskRunId,
+                    transition with { State = AgentWorkInterruptionStates.Interrupting }),
+                new AgentTaskUpdateInterrupted(stage.Id, taskRunId, workId, updateOperationId),
+                new AgentTaskInterruptionLifecycleChanged(stage.Id, taskRunId, transition)]);
+            await ApplySessionInterruptionAsync(
+                settlement.AgentSessionId,
+                transition with { State = AgentWorkInterruptionStates.Interrupting });
+            await ApplySessionInterruptionAsync(settlement.AgentSessionId, transition);
         }
 
         // A receipt can arrive at any time before this deadline. If it does
@@ -367,12 +391,24 @@ public partial class WorkflowGrain
             // The replacement task, new work identity, and receipt ledger are
             // persisted together. Nothing below this commit can be observed
             // as an acknowledgement by the Runner.
+            var replacementTask = _run.Stages
+                .SelectMany(stage => stage.Tasks)
+                .Single(task => string.Equals(task.Id, replacement.ReplacementTaskRunId, StringComparison.Ordinal));
+            var recoveringTransition = replacementTask.AgentInterruption
+                ?? throw new InvalidOperationException("Recovery replacement is missing interruption visibility.");
             _run.AppliedRecoveryReceipts.Add(new AppliedRuntimeRecoveryReceipt(
                 receipt.ReceiptId,
                 requestFingerprint,
                 RuntimeRecoveryReceiptAckStatuses.Accepted,
                 "replacement-created"));
-            await CommitAsync([]);
+            await CommitAsync([
+                new AgentTaskInterruptionLifecycleChanged(
+                    replacement.StageId,
+                    replacement.ReplacementTaskRunId,
+                    recoveringTransition)]);
+            await ApplySessionInterruptionAsync(
+                settlement.AgentSessionId,
+                recoveringTransition);
             await SettleUpdateOperationWorkAsync(receipt, payload.UpdateOperationId!);
             _log.LogInformation(
                 "run {run} recovered interrupted task {task}: generation={generation} work={work} turn={turn}",
@@ -465,6 +501,10 @@ public partial class WorkflowGrain
         if (task is null) return ReportAck.Stale;
         var hadAgentResultSettlement = task.AgentResultSettlement is not null;
         var hadRunnerLossInterruption = task.Interruption is not null;
+        var recoveringTransition = task.AgentInterruption is { State: AgentWorkInterruptionStates.Recovering }
+            ? task.AgentInterruption
+            : null;
+        var recoverySessionId = task.AgentResultSettlement?.AgentSessionId;
 
         _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
             GrainKey, activeWork.WorkId, report.Status, report.Detail ?? "(none)");
@@ -493,13 +533,28 @@ public partial class WorkflowGrain
         effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
         _run.ClearWorkInterruption(activeWork.WorkId, workerId);
 
-        var events = await _workLifecycle.ApplyTaskReportAsync(
+        var events = (await _workLifecycle.ApplyTaskReportAsync(
             _run,
             effectiveReport,
             activeWork.Item.Stage,
-            activeWork.TaskRunId);
+            activeWork.TaskRunId)).ToList();
+        if (recoveringTransition is not null)
+        {
+            var recovered = recoveringTransition with
+            {
+                State = AgentWorkInterruptionStates.Recovered,
+                RecordedAt = Now(),
+            };
+            task.AgentInterruption = recovered;
+            events.Add(new AgentTaskInterruptionLifecycleChanged(
+                activeWork.Item.Stage,
+                activeWork.TaskRunId,
+                recovered));
+        }
 
         await CommitAsync(events);
+        if (recoveringTransition is not null)
+            await ApplySessionInterruptionAsync(recoverySessionId, task.AgentInterruption!);
         if (hadAgentResultSettlement)
             await ReconcileAgentResultSettlementAsync();
         else
@@ -576,6 +631,16 @@ public partial class WorkflowGrain
         if (hadRunnerLossInterruption)
             await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
+    }
+
+    private async Task ApplySessionInterruptionAsync(
+        string? sessionId,
+        AgentWorkInterruptionTransition transition)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return;
+        var session = GrainFactory.GetGrain<IAgentSessionGrain>(sessionId);
+        if (await session.GetAsync() is null) return;
+        await session.ApplyInterruptionAsync(transition);
     }
 
     private async Task SettleUpdateOperationWorkAsync(

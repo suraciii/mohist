@@ -19,6 +19,28 @@ import { SessionErrorsEvidence } from './SessionErrorsEvidence'
 import { TimelineViewToggle } from './TimelineViewToggle'
 import { StatusBadge } from './StatusBadge'
 import { getStageLabel, sessionTimeAnchorMs } from './sessionPresentation'
+import type { AgentWorkInterruption } from '../../../entities/coder-session'
+
+function SessionInterruptionBanner({ interruption }: { interruption: AgentWorkInterruption }) {
+  return (
+    <section
+      className="border-b border-warning-border bg-warning-subtle px-4 py-2.5 text-sm text-warning"
+      data-testid="session-interruption-banner"
+      role="status"
+    >
+      <div className="font-semibold">Runner update interruption: {interruption.state}</div>
+      <div className="mt-1 grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
+        <span>Update</span><span className="break-all font-mono">{interruption.updateOperationId}</span>
+        <span>Work</span><span className="break-all font-mono">{interruption.workId}</span>
+        <span>Recovery generation</span><span>{interruption.recoveryGeneration}</span>
+        {interruption.originalTurnId && <><span>Original turn</span><span className="break-all font-mono">{interruption.originalTurnId}</span></>}
+        {interruption.replacementTurnId && <><span>Replacement turn</span><span className="break-all font-mono">{interruption.replacementTurnId}</span></>}
+      </div>
+      <p className="mt-1 text-xs">{interruption.expectedRecoveryPath}</p>
+      {interruption.stopFailure && <p className="mt-1 text-xs">{interruption.stopFailure}</p>}
+    </section>
+  )
+}
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -387,6 +409,7 @@ export function SessionDetailShell({
             turnCount={displayTurnCount}
           />
           <SessionUsageSummary usage={meta.usage} />
+          {meta.interruption && <SessionInterruptionBanner interruption={meta.interruption} />}
           {errorsEvidence}
           {observationGuidance && (
             <div

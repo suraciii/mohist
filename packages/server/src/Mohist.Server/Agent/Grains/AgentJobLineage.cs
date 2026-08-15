@@ -85,6 +85,10 @@ public static class AgentJobLineage
             runnerId = payload.RunnerId,
             updateOperationId = payload.UpdateOperationId,
             status = "recoverably-interrupted",
+            lifecycleState = "interrupted",
+            recoveryGeneration = payload.RecoveryGeneration,
+            replacementTurnId = (string?)null,
+            expectedRecoveryPath = "The Runner will deliver a confirmed interruption receipt; a fresh AgentJob dispatch will resume this work.",
         }, JSON.Options);
         return new CloudEvent(
             id: payload.EventId,

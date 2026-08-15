@@ -32,6 +32,7 @@ public static class EventCatalog
         ReverseDns.TaskInterrupted,
         ReverseDns.TaskCancelled,
         ReverseDns.AgentTaskUpdateInterrupted,
+        ReverseDns.AgentTaskInterruptionLifecycleChanged,
         ReverseDns.AgentTaskResultUnconfirmed,
         ReverseDns.TaskBlocked,
         ReverseDns.StageBlocked,
@@ -48,6 +49,7 @@ public static class EventCatalog
         ReverseDns.AgentSessionContextCompacted,
         ReverseDns.AgentSessionContextExhausted,
         ReverseDns.AgentSessionContextHealthUpdated,
+        ReverseDns.AgentSessionInterruptionLifecycleChanged,
         ReverseDns.RunnerDisconnected,
         ReverseDns.AgentJobFailed,
         ReverseDns.AgentJobUpdateInterrupted,
@@ -174,6 +176,7 @@ public static class EventCatalog
         public const string TaskInterrupted = "com.mohist.workflow.task.interrupted";
         public const string TaskCancelled = "com.mohist.workflow.task.cancelled";
         public const string AgentTaskUpdateInterrupted = "com.mohist.workflow.agent.task.update-interrupted";
+        public const string AgentTaskInterruptionLifecycleChanged = "com.mohist.workflow.agent.task.interruption-lifecycle-changed";
         public const string AgentTaskResultUnconfirmed = "com.mohist.workflow.agent-result-unconfirmed";
         public const string TaskBlocked = "com.mohist.workflow.task.blocked";
         public const string StageBlocked = "com.mohist.workflow.stage.blocked";
@@ -191,6 +194,7 @@ public static class EventCatalog
         public const string AgentSessionContextCompacted = "com.mohist.agent-session.context-compacted";
         public const string AgentSessionContextExhausted = "com.mohist.agent-session.context-exhausted";
         public const string AgentSessionContextHealthUpdated = "com.mohist.agent-session.context-health-updated";
+        public const string AgentSessionInterruptionLifecycleChanged = "com.mohist.agent-session.interruption-lifecycle-changed";
 
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
 

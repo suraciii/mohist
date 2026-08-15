@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
@@ -80,6 +81,8 @@ public sealed class AgentJobState
     /// without a confirmed receipt transitions to a terminal Interrupted state.
     /// </summary>
     [Id(42)] public DateTimeOffset? UpdateInterruptionDeadlineAt { get; set; }
+    [Id(43)] public AgentWorkInterruptionTransition? Interruption { get; set; }
+    [Id(44)] public List<AgentWorkInterruptionTransition> InterruptionHistory { get; set; } = [];
 }
 
 

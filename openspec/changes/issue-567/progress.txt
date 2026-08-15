@@ -269,3 +269,28 @@ Channel decision (grounded in live source):
 - Final verification: full `Mohist.Server.SpecTests` passed 3935/3935;
   `npm run test:fast` passed all configured typechecks, Server unit/
   architecture/workflow/CLI suites, Runner 1647/1647, and Web 4724/4724.
+
+## T-007 Implementation Notes
+
+- Added the shared `AgentWorkInterruptionTransition` contract and monotonic,
+  generation-keyed projection. Session turns, session summaries, Workflow task
+  read models, Workflow sessions, and AgentJob read models now expose the
+  operation id, work identity, lifecycle state, recovery generation, original
+  and replacement turns, expected recovery path, and sanitized stop context.
+- Fence marking emits `interrupting` then `interrupted`; Workflow and AgentJob
+  recovery allocation emits `recovering`; replacement settlement emits
+  `recovered`. Original Workflow attempts remain in the task history while
+  replacement attempts carry the next recovery generation and new identity.
+- Added session lifecycle events and AgentJob/Workflow durable interruption
+  event paths with replay-safe state projection. Unaffected work has no
+  interruption visibility, and duplicate or out-of-order transitions cannot
+  oscillate a projected identity.
+- Added session and Workflow Web panels/cards for all lifecycle states, with
+  update-operation, work, generation, turn, recovery-path, and actionable
+  stop-failure context. Browser fixtures assert the rendered recovery state and
+  absence of raw `session.abort fetch failed` transport text.
+- T-007 focused verification: Server interruption projection/session tests,
+  Web focused tests (35 tests), Web typecheck, and FSD boundary checks passed.
+  The targeted Playwright workflow inspector passed 2/2 tests.
+- Final `npm run test:fast` passed: Server unit/architecture/workflow/CLI
+  suites, Runner 1647/1647, and Web 4727/4727, plus all fast typechecks.

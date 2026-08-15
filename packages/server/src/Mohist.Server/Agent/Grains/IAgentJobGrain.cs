@@ -292,7 +292,15 @@ public sealed record AgentJobRuntimeSnapshot(
     /// Bounded arbitration deadline for an update-interrupted job awaiting a
     /// confirmed receipt. Expiry is explicit Interrupted terminal state.
     /// </summary>
-    [property: Id(16)] DateTimeOffset? UpdateInterruptionDeadlineAt = null);
+    [property: Id(16)] DateTimeOffset? UpdateInterruptionDeadlineAt = null,
+    /// <summary>
+    /// Current agent work interruption transition projection.
+    /// </summary>
+    [property: Id(17)] AgentWorkInterruptionTransition? Interruption = null,
+    /// <summary>
+    /// History of agent work interruption transitions.
+    /// </summary>
+    [property: Id(18)] IReadOnlyList<AgentWorkInterruptionTransition>? InterruptionHistory = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
@@ -351,7 +359,8 @@ public sealed record PendingUpdateInterruptionEvent(
     [property: Id(1)] string UpdateOperationId,
     [property: Id(2)] string RunnerId,
     [property: Id(3)] string WorkId,
-    [property: Id(4)] DateTimeOffset RecordedAt);
+    [property: Id(4)] DateTimeOffset RecordedAt,
+    [property: Id(5)] int RecoveryGeneration = 0);
 
 public static class AgentJobSessionDeliveryIds
 {
