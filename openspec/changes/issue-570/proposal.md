@@ -22,6 +22,14 @@ runtime process cannot establish a Workflow task outcome. Existing unresolved
 and blocked Workflow work therefore remains subject to the explicit stop and
 authoritative-result paths; this change does not release or guess-replay it.
 
+When a restarted Runner has a durable `started` entry for an identified
+Workflow Agent task, it may report only the non-terminal
+`agent-result-unconfirmed` observation with the original task attempt and work
+identity. The Server's durable acknowledgement of that observation permits the
+Runner to retire the fence. This observation starts the existing unknown/blocked
+settlement path; it never supplies a task result, infers an outcome from an
+idle/runtime/artifact fact, or authorizes a replacement execution.
+
 ## Server Receipt Boundary
 
 The Server already has one safe admission path for a recovered result: the

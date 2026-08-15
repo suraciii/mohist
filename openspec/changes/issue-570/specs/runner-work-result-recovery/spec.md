@@ -19,8 +19,41 @@ acknowledgement for that same identity.
 
 - WHEN the Runner restarts with only a `started` journal entry
 - THEN it MUST refuse to execute that dispatch again
-- AND it MUST leave Workflow outcome arbitration to the existing unresolved,
-  authoritative-result, and explicit-stop paths
+- AND it MUST leave terminal Workflow outcome arbitration to the existing
+  authoritative-result and explicit-stop paths
+
+## Requirement: recovered Agent started fences report only an unconfirmed observation
+
+When startup loads a durable `started` entry for a Workflow Agent task with its
+original task-run and work identity, the Runner MUST report `status: unknown`
+through the normal report route after connection. The report MUST retain the
+original Workflow owner, task-run, work, and authenticated Runner identities.
+It is an `agent-result-unconfirmed` observation only; it MUST NOT contain or
+infer success, failure, output, artifacts, or replacement work.
+
+The Runner MUST remove that started fence only after the Server durably
+acknowledges the observation as Accepted or Stale. A failed delivery or local
+delete MUST retain the fence and retry the same observation. Entries not loaded
+at startup, non-Agent tasks, checks, AgentJobs, or records missing the complete
+Workflow Agent identity MUST remain fences and MUST NOT be sent through this
+unknown-result route.
+
+### Scenario: recovered Agent started fence enters settlement without a terminal result
+
+- WHEN a Runner restarts with a durable `started` entry for a Workflow Agent
+  task and no completed receipt
+- THEN it MUST report the original identity with `status: unknown`
+- AND the Server MUST preserve the running task under the existing unknown or
+  blocked settlement rather than write task success or failure
+- AND the Runner MUST NOT execute the original dispatch again
+
+### Scenario: unknown observation acknowledgement is interrupted
+
+- WHEN the Server accepts a recovered started-fence observation but the Runner
+  cannot durably remove the local fence
+- THEN the Runner MUST retain and redeliver the same non-terminal observation
+- AND duplicate delivery MUST remain side-effect free under the original
+  identity contract
 
 ### Scenario: local journal persistence fails
 
