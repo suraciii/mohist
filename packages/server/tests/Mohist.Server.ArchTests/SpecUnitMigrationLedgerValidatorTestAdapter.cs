@@ -36,4 +36,19 @@ internal static partial class SpecUnitMigrationLedgerValidator
         ValidateRequiredNamedRows(rows.ToArray(), violations);
         return violations;
     }
+
+    internal static IReadOnlyList<string> ValidateMovedRowForTests(
+        SpecUnitMigrationLedgerRow row, SpecUnitMigrationInventory inventory)
+    {
+        var violations = new List<string>();
+        ValidateMovedRow(row, inventory, violations);
+        return violations;
+    }
+
+    internal static IReadOnlyList<string> ValidatePlannedUnitTargetForTests(SpecUnitMigrationLedgerRow row)
+    {
+        var violations = new List<string>();
+        ValidatePlannedUnitTarget(row, violations);
+        return violations;
+    }
 }

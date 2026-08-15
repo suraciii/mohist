@@ -30,12 +30,15 @@ internal static class SpecUnitMigrationLedgerProof
     {
         foreach (var row in rows)
         {
-            if (row.Kind is not ("current" or "historical"))
+            if (row.Kind is not ("current" or "historical" or "moved"))
                 violations.Add($"{row.Id}: ledger kind is not allowlisted: {row.Kind}");
 
-            var valid = row.Kind == "current"
-                ? row.Status is "MOVE" or "REVIEW" or "KEEP" or "BLOCKED"
-                : row.Status is "MOVE" or "DELETE";
+            var valid = row.Kind switch
+            {
+                "current" => row.Status is "MOVE" or "REVIEW" or "KEEP" or "BLOCKED",
+                "moved" => row.Status is "MOVE",
+                _ => row.Status is "MOVE" or "DELETE",
+            };
             if (!valid) violations.Add($"{row.Id}: ledger status {row.Status} is not valid for kind {row.Kind}");
         }
     }

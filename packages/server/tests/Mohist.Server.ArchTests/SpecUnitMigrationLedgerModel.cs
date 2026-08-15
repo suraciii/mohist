@@ -46,8 +46,29 @@ internal static partial class SpecUnitMigrationLedgerValidator
 
         foreach (var row in rows.Where(row => row.Kind == "historical"))
             ValidateHistoricalRow(row, inventory, provenance, violations);
-        ValidateRequiredNamedRows(currentRows, violations);
+        foreach (var row in rows.Where(row => row.Kind == "moved"))
+            ValidateMovedRow(row, inventory, violations);
+        ValidateRequiredNamedRows([.. rows], violations);
         return violations;
+    }
+
+    private static void ValidateMovedRow(SpecUnitMigrationLedgerRow row, SpecUnitMigrationInventory inventory,
+        ICollection<string> violations)
+    {
+        if (row.Legacy is null || row.Target is null || row.Discovered is null) return;
+        if (inventory.TryGetCurrentSpecClassification(row.Legacy.Fqn ?? "", out _))
+            violations.Add($"{row.Id}: moved source is still a current Spec candidate: {row.Legacy.Path}");
+        if (!inventory.TryGetExecutable(row.Target.Fqn ?? "", row.Target.Path ?? "", out var target))
+        {
+            violations.Add($"{row.Id}: moved target is not a compiled discoverable type: {row.Target.Path}/{row.Target.Fqn}");
+            return;
+        }
+        if (row.Discovered.MtpCases != target.CaseCount)
+            violations.Add($"{row.Id}: moved target case count mismatch; ledger={row.Discovered.MtpCases}, compiled={target.CaseCount}");
+        if (row.Moved?.SourcePath != row.Legacy.Path || row.Moved?.SourceFqn != row.Legacy.Fqn
+            || row.Moved?.TargetPath != row.Target.Path || row.Moved?.TargetFqn != row.Target.Fqn)
+            violations.Add($"{row.Id}: moved record must bind the legacy and target endpoints");
+        ValidateRequiredRowFields(row, violations);
     }
 
     private static void ValidateCurrentRow(SpecUnitMigrationLedgerRow row, SpecUnitMigrationCandidate classification,
@@ -220,18 +241,36 @@ internal static partial class SpecUnitMigrationLedgerValidator
 
     private static void ValidateRequiredNamedRows(IReadOnlyList<SpecUnitMigrationLedgerRow> rows, ICollection<string> violations)
     {
-        var windows = rows.SingleOrDefault(row => row.Id == "current-windows-service-lifecycle");
-        if (windows is null || windows.Status != "MOVE") violations.Add("WindowsServiceLifecycleSpecs must be status MOVE");
-        else ValidatePlannedNamedRow(windows, "MOVE", "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs",
+        ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-windows-service-lifecycle"),
+            "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs",
             "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests", violations);
-        var failIf = rows.SingleOrDefault(row => row.Id == "current-fail-if-marker-review");
-        if (failIf is null || failIf.Status != "BLOCKED") violations.Add("FailIfMarkerSpecs must be explicitly BLOCKED");
-        else ValidatePlannedNamedRow(failIf, "BLOCKED", "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs",
+        ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-fail-if-marker-review"),
+            "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs",
             "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests", violations);
-        ValidatePlannedNamedRow(rows.SingleOrDefault(row => row.Id == "current-mohist-hub"), "MOVE",
+        ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-mohist-hub"),
             "Mohist.Server.UnitTests/Events/MohistHubTests.cs", "Mohist.Server.UnitTests.Events.MohistHubTests", violations);
-        ValidatePlannedNamedRow(rows.SingleOrDefault(row => row.Id == "current-mohist-hub-project-affinity"), "MOVE",
-            "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs", "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests", violations);
+        ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-mohist-hub-project-affinity"),
+            "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
+            "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests", violations);
+        ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-recording-background-task-launcher"),
+            "Mohist.Server.UnitTests/Events/RecordingBackgroundTaskLauncherTests.cs",
+            "Mohist.Server.UnitTests.Events.RecordingBackgroundTaskLauncherTests", violations);
+    }
+
+    private static void ValidateMovedNamedRow(SpecUnitMigrationLedgerRow? row, string path, string fqn,
+        ICollection<string> violations)
+    {
+        if (row is null)
+        {
+            violations.Add($"moved Unit row is missing: {fqn}");
+            return;
+        }
+        if (row.Kind != "moved" || row.Status != "MOVE")
+            violations.Add($"{row.Id}: planned Unit migration must be recorded as a moved MOVE row");
+        if (row.Target?.Path != path || row.Target.Fqn != fqn)
+            violations.Add($"{row.Id}: moved Unit target mismatch");
+        if (row.Current?.Path == path || row.Current?.Fqn == fqn)
+            violations.Add($"{row.Id}: moved Unit target must not masquerade as the legacy Spec endpoint");
     }
 
     private static void ValidatePlannedNamedRow(SpecUnitMigrationLedgerRow? row, string status, string path, string fqn,

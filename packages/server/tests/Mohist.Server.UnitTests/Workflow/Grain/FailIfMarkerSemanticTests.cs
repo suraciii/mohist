@@ -2,14 +2,12 @@ using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.TestSupport;
-using Mohist.Server.SpecTests.Specs.Workflow;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.Grain;
 
-public class FailIfMarkerSpecs : WorkflowGrainSpecs
+public class FailIfMarkerSemanticTests
 {
-    public FailIfMarkerSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
     public void WorkflowYamlSerializer_PreservesFailIfInTaskExpect()

@@ -110,11 +110,11 @@ public sealed class SpecUnitMigrationLedgerRules
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, ProductionInventory.Value, provenance),
             violation => violation.Contains("absent from embedded PR #388 raw Git provenance", StringComparison.Ordinal));
 
-        var current = SpecUnitMigrationLedger.Read(LedgerResourceName).Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var classification = CurrentClassification(ProductionInventory.Value, current.Current!.Fqn!);
-        current.History!.Commit = "34f0f666d988a3a38ba218cad088f1062a55d5e";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(current, classification, ProductionInventory.Value),
-            violation => violation.Contains("validationHead history mismatch", StringComparison.Ordinal));
+        var mutatedHead = SpecUnitMigrationLedger.Read(LedgerResourceName);
+        var current = mutatedHead.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
+        current.ValidationHead = "34f0f666d988a3a38ba218cad088f1062a55d5e";
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(mutatedHead, ProductionInventory.Value), violation =>
+            violation.Contains("validationHead must be", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -136,10 +136,39 @@ public sealed class SpecUnitMigrationLedgerRules
     [Fact]
     public void SpecUnitMigrationLedger_NegativeProof_RejectsClosureEvidenceDigestAndCompiledDiscoveryMutations()
     {
-        var inventory = ProductionInventory.Value;
-        var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
-        var row = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var classification = CurrentClassification(inventory, row.Current!.Fqn!);
+        const string fqn = "Mohist.Server.SpecTests.Specs.Negative.TamperedClosureSpecs";
+        var inventory = SpecUnitMigrationInventory.Create(
+            [Source("Mohist.Server.SpecTests/Specs/Negative/TamperedClosureSpecs.cs", """
+                using Xunit;
+                namespace Mohist.Server.SpecTests.Specs.Negative;
+                public class TamperedClosureSpecs { [Fact] public void IsARealCandidate() { } }
+                """)],
+            SpecUnitMigrationCompiledDiscovery.ForTests((fqn,
+                new SpecUnitMigrationMtpFacts(1, 0, 0, 1, SpecUnitMigrationInventory.Digest(["synthetic-case"]), false))));
+        var classification = CurrentClassification(inventory, fqn);
+        var row = new SpecUnitMigrationLedgerRow
+        {
+            Id = "synthetic-current-row",
+            Kind = "current",
+            Source = "synthetic",
+            Legacy = new SpecUnitMigrationEndpoint { Path = classification.Path, Fqn = fqn },
+            Current = new SpecUnitMigrationEndpoint { Path = classification.Path, Fqn = fqn },
+            Target = new SpecUnitMigrationEndpoint { Path = "Mohist.Server.UnitTests/Negative/TamperedClosureTests.cs", Fqn = "Mohist.Server.UnitTests.Negative.TamperedClosureTests" },
+            Discovered = new SpecUnitMigrationCounts { FactMethods = classification.FactMethods, TheoryMethods = classification.TheoryMethods, InlineDataRows = classification.InlineDataRows, MtpCases = classification.ExecutableCaseCount },
+            Executable = new SpecUnitMigrationExecutable { Path = classification.Path, Fqn = fqn, CaseCount = classification.ExecutableCaseCount, CaseIdentityDigest = classification.ExecutableCaseIdentityDigest, ClosureIdentityDigest = classification.ClosureIdentityDigest, SourceContentDigest = classification.SourceContentDigest },
+            Status = "MOVE",
+            Closure = new SpecUnitMigrationClosure { Symbols = [], Digest = classification.ClosureIdentityDigest, Evidence = Evidence(classification) },
+            Owner = "Mohist.Server.UnitTests.Negative.TamperedClosureTests",
+            MoveContract = new SpecUnitMigrationMoveContract
+            {
+                Owner = "Mohist.Server.UnitTests.Negative.TamperedClosureTests",
+                Helpers = [new SpecUnitMigrationMoveHelper { Role = "time" }],
+                Target = new SpecUnitMigrationEndpoint { Path = "Mohist.Server.UnitTests/Negative/TamperedClosureTests.cs", Fqn = "Mohist.Server.UnitTests.Negative.TamperedClosureTests" },
+                Split = new SpecUnitMigrationSplitBudget { MaxTargetLines = 299, MaxTargetFiles = 1, MaxHelperFiles = 1 },
+            },
+            History = new SpecUnitMigrationRowHistory { Pr = "#423", Operation = "residual-review", Commit = SpecUnitMigrationLedgerValidator.ValidationHead, SourcePath = classification.Path, SourceFqn = fqn, SourceContentDigest = classification.SourceContentDigest },
+            ValidationHead = SpecUnitMigrationLedgerValidator.ValidationHead,
+        };
 
         row.Closure!.Evidence = row.Closure.Evidence!.Replace("edges-digest=", "edges-digest=mutated-", StringComparison.Ordinal);
         Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(row, classification, inventory),
@@ -162,17 +191,14 @@ public sealed class SpecUnitMigrationLedgerRules
         var inventory = ProductionInventory.Value;
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var failIf = ledger.Rows!.Single(candidate => candidate.Id == "current-fail-if-marker-review");
-        var failIfClassification = CurrentClassification(inventory, failIf.Current!.Fqn!);
-        failIf.Status = "KEEP";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(failIf, failIfClassification, inventory),
-            violation => violation.Contains("blocked current row cannot escape", StringComparison.Ordinal));
+        failIf.Kind = "current";
+        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(ledger, inventory),
+            violation => violation.Contains("STALE current row", StringComparison.Ordinal));
 
         var windows = ledger.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
-        var windowsClassification = CurrentClassification(inventory, windows.Current!.Fqn!);
-        windows.Target!.Path = "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs";
-        windows.Target.Fqn = "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests";
-        windows.MoveContract = null;
-        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateCurrentRowForTests(windows, windowsClassification, inventory),
+        windows.Target!.Path = "Mohist.Server.UnitTests/SystemSpecs/NonexistentTests.cs";
+        windows.Target.Fqn = "Mohist.Server.UnitTests.SystemSpecs.NonexistentTests";
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateMovedRowForTests(windows, inventory),
             violation => violation.Contains("not a compiled discoverable type", StringComparison.Ordinal));
     }
 
@@ -227,14 +253,13 @@ public sealed class SpecUnitMigrationLedgerRules
     {
         var rows = SpecUnitMigrationLedger.Read(LedgerResourceName).Rows!;
         var hub = rows.Single(row => row.Id == "current-mohist-hub");
-        hub.Status = "KEEP";
+        hub.Kind = "current";
         hub.Target = hub.Current;
-        hub.MoveContract = null;
 
         var violations = SpecUnitMigrationLedgerValidator.ValidateNamedRowsForTests(rows);
 
-        Assert.Contains(violations, violation => violation.Contains("planned Unit status must be MOVE", StringComparison.Ordinal));
-        Assert.Contains(violations, violation => violation.Contains("planned Unit target mismatch", StringComparison.Ordinal));
+        Assert.Contains(violations, violation => violation.Contains("planned Unit migration must be recorded as a moved MOVE row", StringComparison.Ordinal));
+        Assert.Contains(violations, violation => violation.Contains("moved Unit target mismatch", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -244,7 +269,7 @@ public sealed class SpecUnitMigrationLedgerRules
         var windows = rows.Single(row => row.Id == "current-windows-service-lifecycle");
         windows.MoveContract!.Split!.MaxTargetLines = 300;
 
-        var violations = SpecUnitMigrationLedgerValidator.ValidateNamedRowsForTests(rows);
+        var violations = SpecUnitMigrationLedgerValidator.ValidatePlannedUnitTargetForTests(windows);
 
         Assert.Contains(violations, violation => violation.Contains("less than 300", StringComparison.Ordinal));
     }
@@ -262,7 +287,7 @@ public sealed class SpecUnitMigrationLedgerRules
 
     private static SpecUnitMigrationInventory CreateProductionInventory()
     {
-        var specAssembly = typeof(Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs).Assembly;
+        var specAssembly = typeof(Mohist.Server.SpecTests.Specs.Agent.Api.AgentSessionLaunchValidationRoutesSpecs).Assembly;
         var unitAssembly = typeof(Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests).Assembly;
         var ledger = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var requestedFqns = (ledger.Rows ?? []).SelectMany(row => new[]

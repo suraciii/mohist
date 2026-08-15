@@ -1,4 +1,3 @@
-using Mohist.Server.SpecTests.Support;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
@@ -9,9 +8,9 @@ using Orleans;
 using Xunit;
 using Mohist.Server.Infrastructure.Events;
 
-namespace Mohist.Server.SpecTests.Specs.Events;
+namespace Mohist.Server.UnitTests.Events;
 
-public class MohistHubSpecs
+public class MohistHubTests
 {
     [Fact]
     public async Task OnConnectedAsync_FreshConnection_LeavesRegistrySubscriptionSetEmpty()
@@ -293,16 +292,16 @@ public class MohistHubSpecs
         TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
             => throw new NotSupportedException();
 
         IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)
