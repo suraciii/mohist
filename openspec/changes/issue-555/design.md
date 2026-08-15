@@ -117,18 +117,23 @@ New table `direct_api_idempotency_mappings`:
 | Column | Purpose |
 |---|---|
 | `command` | `launch` / `followup` / `stop` |
-| `scope_key` | Canonical scope: `projectId\|agentId\|key` (launch), `sessionId\|key` (follow-up), `turnId\|key` (stop) |
-| `caller_key_id` | Credential ID; required and load-bearing for stop, attribution for the others |
+| `scope_key` | Canonical scope: `projectId\|agentId\|key` (launch), `sessionId\|key` (follow-up), `turnId\|callerKeyId\|key` (stop — caller-bound, see below) |
+| `caller_key_id` | Credential ID; embedded in the stop `scope_key` (stop uniqueness is caller-scoped), attribution for the others |
 | `fingerprint` | Server-computed SHA-256 of the versioned canonical request |
 | `state` | `pending` / `completed` / `rejected` |
 | `outcome` | Canonical IDs (`jobId`, `sessionId`, `inputId`, `turnId`), public rejection error code, or stop outcome |
 | `frozen_target` (stop) | Frozen turn revision, context generation, binding, deadline, operation ID |
 | timestamps | created / completed |
 
-Unique index on `(command, scope_key)`. A stop mapping additionally has a
-filtered unique index on `turnId WHERE command='stop' AND state IN
-('pending')` — this is the database-level lock that makes a second, different
-key hit `409 stop_outcome_unknown` while the first stop's outcome is unknown.
+Unique index on `(command, scope_key)`. Because the stop `scope_key` embeds
+`callerKeyId`, stop uniqueness is caller-scoped: caller B presenting caller
+A's `(turnId, key)` never lands in A's replay path — B is always answered
+from B's own request (B's own mapping, or the cross-caller block below),
+never from A's row or outcome. A stop mapping additionally has a filtered
+unique index on `turnId WHERE command='stop' AND state IN ('pending')` —
+this is the database-level lock that makes any other stop request for the
+Turn — a different key, or another caller replaying the first caller's key
+— hit `409 stop_outcome_unknown` while the first stop's outcome is unknown.
 SQLite supports partial indexes; EF Core expresses this via `HasFilter`.
 
 Write path, identical shape for all three commands:
@@ -138,15 +143,32 @@ Write path, identical shape for all three commands:
    Server builds itself — `{ v, command, projectId, agentId?, sessionId?, turnId?, body }`
    — with property order fixed by construction, text preserved byte-exactly
    (no trim, no case folding). Reuse the `AgentLaunchCoordinatorCodec.StableToken`
-   hashing convention.
+   hashing convention. The caller is deliberately not part of the fingerprint:
+   stop caller separation comes from the caller-scoped `scope_key`, so two
+   callers' identical stop requests legitimately carry the same fingerprint in
+   their own rows.
 3. `INSERT` the mapping row (`state=pending`) under the unique index. On
    conflict: load the existing row — same fingerprint → replay path; different
-   fingerprint → `409 idempotency_key_reused` (stable, no effects). For stop,
-   the insert also contends on the per-turn filtered index, producing
-   `stop_outcome_unknown` when another key's stop is unresolved.
+   fingerprint → `409 idempotency_key_reused` (stable, no effects). For stop, the
+   insert also contends on the per-turn filtered index, producing
+   `stop_outcome_unknown` while any other stop mapping for the Turn is still
+   pending. The violated constraint is discriminated by index name: a
+   `(command, scope_key)` hit is always the caller's own scope (replay or
+   reuse conflict); a per-turn filtered-index hit is the cross-key block and
+   persists nothing.
 4. Perform the canonical operation once, then update the row to
    `completed`/`rejected` with the canonical IDs or public rejection.
 5. Response = the mapped observation (see Decision E).
+
+Cross-caller stop outcomes fall out of the two indexes. While caller A's
+stop for a Turn is unresolved (`state=pending`), caller B — replaying A's
+key string or using a different key — contends on the per-turn filtered
+index and receives `409 stop_outcome_unknown`; nothing of B's is persisted.
+Once no unresolved stop remains for the Turn, B's key inserts B's own
+durable mapping (never A's row), and classification evaluates it against
+the Turn's current state: already-terminal → durable no-op observation;
+queued → local cancel; running → a new fenced stop operation. B is thereby
+never served A's mapping, outcome, or frozen target.
 
 The mapping is durable before the 200 returns. A crash between insert and
 update leaves `state=pending`; a retry finds the row, and the canonical
@@ -203,8 +225,8 @@ the accepted body, so a caller cannot smuggle derived values.
   row's `frozen_target` is written before the first Runner effect; a matching
   retry reads the frozen row and never re-reads the current binding. An
   `unknown` delivery outcome leaves the row `pending`, which is exactly what
-  blocks other keys (`409 stop_outcome_unknown`) until the fenced lifecycle
-  resolves it.
+  blocks any other stop request for the Turn — another key or another caller
+  (`409 stop_outcome_unknown`) — until the fenced lifecycle resolves it.
 
 Admission rejections (queue full, spawn admission denied) are definitive
 outcomes of the canonical operation: the row moves to `state=rejected` with a
@@ -218,7 +240,7 @@ New tables under `Infrastructure/Data/PublicApi/`:
 
 1. `public_execution_snapshots` — one row per public anchor
    (`anchor_type` = job / session / input / turn, `anchor_id`): the serialized
-   `PublicExecutionRead` JSON (all 20 keys, nulls explicit), the internal
+   `PublicExecutionRead` JSON (all 22 keys, nulls explicit), the internal
    terminal fence/revision, the Session binding, and the last projected
    sequence. Job anchors exist before Session acceptance (`jobStatus=
    preparing`, null live IDs) and are updated in place when the joined
