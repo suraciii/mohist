@@ -398,7 +398,7 @@ internal sealed partial class TableRenderer
             var issueNumber = NumberOf(contextRefs, "issueNumber");
             var epicNumber = StringOf(contextRefs, "epicNumber");
             var repository = StringOf(contextRefs, "repository");
-            var workspacePath = StringOf(contextRefs, "workspacePath");
+            var workspaceName = StringOf(contextRefs, "workspaceName");
             var parts = new List<string>();
             if (!string.IsNullOrEmpty(issueNumber))
                 parts.Add($"issue #{issueNumber}");
@@ -406,8 +406,8 @@ internal sealed partial class TableRenderer
                 parts.Add($"epic #{epicNumber}");
             if (!string.IsNullOrEmpty(repository))
                 parts.Add($"repo: {repository}");
-            if (!string.IsNullOrEmpty(workspacePath))
-                parts.Add($"ws: {workspacePath}");
+            if (!string.IsNullOrEmpty(workspaceName))
+                parts.Add($"workspace: {workspaceName}");
             if (parts.Count > 0)
                 _out.WriteLine($"context:           {string.Join(", ", parts)}");
         }
@@ -556,7 +556,7 @@ internal sealed partial class TableRenderer
             var issueNumber = NumberOf(contextRefs, "issueNumber");
             var epicNumber = StringOf(contextRefs, "epicNumber");
             var repository = StringOf(contextRefs, "repository");
-            var workspacePath = StringOf(contextRefs, "workspacePath");
+            var workspaceName = StringOf(contextRefs, "workspaceName");
             var parts = new List<string>();
             if (!string.IsNullOrEmpty(issueNumber))
                 parts.Add($"issue #{issueNumber}");
@@ -564,8 +564,8 @@ internal sealed partial class TableRenderer
                 parts.Add($"epic #{epicNumber}");
             if (!string.IsNullOrEmpty(repository))
                 parts.Add($"repo: {repository}");
-            if (!string.IsNullOrEmpty(workspacePath))
-                parts.Add($"ws: {workspacePath}");
+            if (!string.IsNullOrEmpty(workspaceName))
+                parts.Add($"workspace: {workspaceName}");
             if (parts.Count > 0)
                 _out.WriteLine($"context:        {string.Join(", ", parts)}");
         }
