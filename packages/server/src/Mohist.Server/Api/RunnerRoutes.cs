@@ -804,7 +804,8 @@ public static partial class RunnerRoutes
             ParentIssueContext: parentIssueContext,
             AgentDefinition: work.AgentDefinition,
             AgentSessionStartup: work.AgentSessionStartup,
-            TaskRunId: work.TaskRunId);
+            TaskRunId: work.TaskRunId,
+            AgentRecovery: work.AgentRecovery);
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
@@ -1133,7 +1134,8 @@ public record WorkDispatchResponse(
     ParentIssueContextResponse? ParentIssueContext = null,
     AgentExecutionDefinition? AgentDefinition = null,
     AgentSessionStartup? AgentSessionStartup = null,
-    string? TaskRunId = null);
+    string? TaskRunId = null,
+    AgentRecoveryBinding? AgentRecovery = null);
 
 public sealed record ParentIssueContextResponse(string Title, string? Body);
 
