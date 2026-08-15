@@ -126,6 +126,48 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             entry.Envelope.Type == EventCatalog.ReverseDns.TaskFailed);
     }
 
+    [Fact]
+    public async Task RecoveredStartedFenceObservation_RequiresTheOriginalAttemptAndDoesNotWriteATerminalResult()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var service = Services.GetRequiredService<WorkflowReportService>();
+        var observation = new WorkResult(
+            "unknown",
+            "Runner restarted after a durable started fence without a completed result receipt.");
+
+        var accepted = await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            observation);
+        Assert.Equal("accepted", accepted.Ack);
+        Assert.Equal("Running", accepted.WorkflowStatus);
+
+        var stale = await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            "other-task-attempt",
+            observation);
+        Assert.Equal("stale", stale.Ack);
+
+        var unresolved = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(unresolved.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(AgentResultSettlementState.Unknown, task.AgentResultSettlement!.State);
+        Assert.Equal(work.TaskRunId, task.AgentResultSettlement.TaskRunId);
+        Assert.Equal(work.WorkId, task.AgentResultSettlement.WorkId);
+        Assert.Equal(runnerId, task.AgentResultSettlement.RunnerId);
+        Assert.Null(task.Output);
+        Assert.DoesNotContain(await EventStore.ListAsync(_workflowId!), entry =>
+            entry.Envelope.Type is EventCatalog.ReverseDns.TaskCompleted
+                or EventCatalog.ReverseDns.TaskFailed);
+    }
+
     [Theory]
     [InlineData(AgentExecutionObservationKind.Idle)]
     [InlineData(AgentExecutionObservationKind.Completed)]
