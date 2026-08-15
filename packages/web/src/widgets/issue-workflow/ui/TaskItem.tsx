@@ -235,6 +235,7 @@ export function TaskItem({
     isFailed ||
     isBlocked ||
     isRecoverableInterrupted ||
+    isInterruption ||
     hasOutput ||
     deliveryFailure != null
 

@@ -30,11 +30,24 @@ function SessionInterruptionBanner({ interruption }: { interruption: AgentWorkIn
     >
       <div className="font-semibold">Runner update interruption: {interruption.state}</div>
       <div className="mt-1 grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
-        <span>Update</span><span className="break-all font-mono">{interruption.updateOperationId}</span>
-        <span>Work</span><span className="break-all font-mono">{interruption.workId}</span>
-        <span>Recovery generation</span><span>{interruption.recoveryGeneration}</span>
-        {interruption.originalTurnId && <><span>Original turn</span><span className="break-all font-mono">{interruption.originalTurnId}</span></>}
-        {interruption.replacementTurnId && <><span>Replacement turn</span><span className="break-all font-mono">{interruption.replacementTurnId}</span></>}
+        <span>Update</span>
+        <span className="break-all font-mono">{interruption.updateOperationId}</span>
+        <span>Work</span>
+        <span className="break-all font-mono">{interruption.workId}</span>
+        <span>Recovery generation</span>
+        <span>{interruption.recoveryGeneration}</span>
+        {interruption.originalTurnId && (
+          <>
+            <span>Original turn</span>
+            <span className="break-all font-mono">{interruption.originalTurnId}</span>
+          </>
+        )}
+        {interruption.replacementTurnId && (
+          <>
+            <span>Replacement turn</span>
+            <span className="break-all font-mono">{interruption.replacementTurnId}</span>
+          </>
+        )}
       </div>
       <p className="mt-1 text-xs">{interruption.expectedRecoveryPath}</p>
       {interruption.stopFailure && <p className="mt-1 text-xs">{interruption.stopFailure}</p>}

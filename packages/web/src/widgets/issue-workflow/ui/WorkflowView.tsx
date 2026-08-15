@@ -37,11 +37,24 @@ export function AgentInterruptionAttentionPanel({ interruption }: { interruption
     >
       <div className="font-semibold">Runner update interruption: {interruption.state}</div>
       <dl className="mt-1 grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
-        <dt>Update</dt><dd className="break-all font-mono">{interruption.updateOperationId}</dd>
-        <dt>Work</dt><dd className="break-all font-mono">{interruption.workId}</dd>
-        <dt>Recovery generation</dt><dd>{interruption.recoveryGeneration}</dd>
-        {interruption.originalTurnId && <><dt>Original turn</dt><dd className="break-all font-mono">{interruption.originalTurnId}</dd></>}
-        {interruption.replacementTurnId && <><dt>Replacement turn</dt><dd className="break-all font-mono">{interruption.replacementTurnId}</dd></>}
+        <dt>Update</dt>
+        <dd className="break-all font-mono">{interruption.updateOperationId}</dd>
+        <dt>Work</dt>
+        <dd className="break-all font-mono">{interruption.workId}</dd>
+        <dt>Recovery generation</dt>
+        <dd>{interruption.recoveryGeneration}</dd>
+        {interruption.originalTurnId && (
+          <>
+            <dt>Original turn</dt>
+            <dd className="break-all font-mono">{interruption.originalTurnId}</dd>
+          </>
+        )}
+        {interruption.replacementTurnId && (
+          <>
+            <dt>Replacement turn</dt>
+            <dd className="break-all font-mono">{interruption.replacementTurnId}</dd>
+          </>
+        )}
       </dl>
       <p className="mt-1 text-xs">{interruption.expectedRecoveryPath}</p>
       {interruption.stopFailure && <p className="mt-1 text-xs">{interruption.stopFailure}</p>}
@@ -128,7 +141,9 @@ export function WorkflowView({
 
       {timeline?.interruption && <RecoverableInterruptionPanel interruption={timeline.interruption} />}
       {timeline?.agentResultAttention && <AgentResultAttentionPanel attention={timeline.agentResultAttention} />}
-      {timeline?.interruptionAttention && <AgentInterruptionAttentionPanel interruption={timeline.interruptionAttention} />}
+      {timeline?.interruptionAttention && (
+        <AgentInterruptionAttentionPanel interruption={timeline.interruptionAttention} />
+      )}
 
       {!readOnly && (isBacklog || issue.health === IssueHealth.Blocked) && (
         <SpecialStatePanel issue={issue} issueNumber={issue.number} />

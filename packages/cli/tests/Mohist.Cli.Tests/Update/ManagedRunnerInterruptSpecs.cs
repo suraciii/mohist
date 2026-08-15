@@ -24,8 +24,9 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                 (HttpMethod.Get, "/api/runner/identity"),
                 (HttpMethod.Post, "/api/runner/runner-pluto/update-interrupt"),
                 (HttpMethod.Get, "/api/runner/identity"),
+                (HttpMethod.Get, "/api/runner/runner-pluto/update-operation/runner-update:managed/recovery-status"),
             ],
-            handler.Requests.Select(request => (request.Method, request.RequestUri!.AbsolutePath)));
+            handler.Requests.Select(request => (request.Method, Uri.UnescapeDataString(request.RequestUri!.AbsolutePath))));
         var runnerRestart = fixture.Commands.ExecutedCommands.FindIndex(command =>
             command.FileName == "systemctl"
             && command.Args.SequenceEqual(["--user", "restart", "mohist-runner.service"]));
@@ -165,6 +166,35 @@ public sealed partial class ManagedRuntimeTransactionSpecs
         return new RecordingHttpHandler((request, _) =>
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get
+                && Uri.UnescapeDataString(path) == "/api/runner/runner-pluto/update-operation/runner-update:managed/recovery-status")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        operationId = "runner-update:managed",
+                        runnerId = "runner-pluto",
+                        operationStatus = "settled",
+                        complete = true,
+                        affectedWorks = new[]
+                        {
+                            new
+                            {
+                                ownerKind = "agent-job",
+                                ownerId = "job-1",
+                                workId = "agent-job-1",
+                                taskRunId = (string?)null,
+                                workType = "agent-job",
+                                status = "receipt-acked",
+                                acknowledged = true,
+                            },
+                        },
+                    },
+                }));
+            }
+
             if (request.Method == HttpMethod.Post
                 && updateInterruptId is not null
                 && path == $"/api/runner/runner-pluto/update-interrupt/{updateInterruptId}/cancel")
@@ -201,6 +231,18 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                             updateInterruptId,
                             interruptedWorkIds = new[] { "agent-job-1" },
                             interruptedWorkCount = 1,
+                            operationId = "runner-update:managed",
+                            affectedWorks = new[]
+                            {
+                                new
+                                {
+                                    ownerKind = "agent-job",
+                                    ownerId = "job-1",
+                                    workId = "agent-job-1",
+                                    taskRunId = (string?)null,
+                                    workType = "agent-job",
+                                },
+                            },
                         },
                     })
                     : RecordingHttpHandler.JsonError(

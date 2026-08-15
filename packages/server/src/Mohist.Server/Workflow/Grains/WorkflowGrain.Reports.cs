@@ -473,6 +473,13 @@ public partial class WorkflowGrain
             RuntimeRecoveryReceiptAckStatuses.Accepted));
         await CommitAsync(events);
         await ReconcileAgentResultSettlementAsync();
+        await GrainFactory
+            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+            .MarkReceiptAckedAsync(
+                WorkDispatchOwnerKinds.Workflow,
+                GrainKey,
+                receipt.WorkId,
+                receipt.TaskRunId);
         return new RuntimeRecoveryReceiptAcknowledgement(
             receipt.ReceiptId,
             RuntimeRecoveryReceiptAckStatuses.Accepted);
@@ -504,6 +511,16 @@ public partial class WorkflowGrain
         var recoveringTransition = task.AgentInterruption is { State: AgentWorkInterruptionStates.Recovering }
             ? task.AgentInterruption
             : null;
+        var recoveryOriginal = recoveringTransition is null
+            ? null
+            : _run.Stages
+                .SelectMany(stage => stage.Tasks)
+                .FirstOrDefault(candidate =>
+                    candidate.Id != task.Id
+                    && candidate.AgentInterruption is { } interruption
+                    && string.Equals(interruption.UpdateOperationId, recoveringTransition.UpdateOperationId, StringComparison.Ordinal)
+                    && interruption.RecoveryGeneration == recoveringTransition.RecoveryGeneration - 1
+                    && string.Equals(interruption.State, AgentWorkInterruptionStates.Interrupted, StringComparison.Ordinal));
         var recoverySessionId = task.AgentResultSettlement?.AgentSessionId;
 
         _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
@@ -554,7 +571,21 @@ public partial class WorkflowGrain
 
         await CommitAsync(events);
         if (recoveringTransition is not null)
+        {
             await ApplySessionInterruptionAsync(recoverySessionId, task.AgentInterruption!);
+            if (recoveryOriginal?.WorkId is { } originalWorkId
+                && recoveryOriginal.AgentResultSettlement?.TaskRunId is { } originalTaskRunId)
+            {
+                await GrainFactory
+                    .GetGrain<IRunnerUpdateOperationGrain>(recoveryOriginal.AgentResultSettlement!.RunnerId)
+                    .MarkRecoverySettledAsync(
+                        recoveringTransition.UpdateOperationId,
+                        WorkDispatchOwnerKinds.Workflow,
+                        GrainKey,
+                        originalWorkId,
+                        originalTaskRunId);
+            }
+        }
         if (hadAgentResultSettlement)
             await ReconcileAgentResultSettlementAsync();
         else

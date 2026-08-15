@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using Mohist.Cli;
 using Xunit;
 
@@ -6,6 +7,40 @@ namespace Mohist.Cli.Tests.Update;
 
 public class UpdateOutcomeSpecs
 {
+    [Fact]
+    public async Task UpdateOutcomeReporter_PersistsPerWorkRecoveryResults()
+    {
+        var handler = new OutcomeCapturingHttpHandler(UpdateTestFactory.HealthySystemInfoJson());
+        var output = new StringWriter();
+        var reporter = new UpdateOutcomeReporter(
+            new HttpClient(handler) { BaseAddress = new Uri(UpdateTestFactory.ServerAddress) },
+            output);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/system/update/outcome")
+        {
+            Content = JsonContent.Create(
+                new CliOutcomeRequest(
+                    "job-recovery",
+                    "failed",
+                    "Verifying workflow runtime",
+                    "failed",
+                    "Runner work recovery unresolved",
+                    [],
+                    "abc123",
+                    [
+                        new CliRecoveryWorkOutcome("workflow", "run-1", "work-1", "task-1", "task", "recovered", "receipt-acked"),
+                        new CliRecoveryWorkOutcome("agent-job", "job-1", "job-work-1", null, "agent-job", "unresolved", "receipt-pending"),
+                    ]),
+                options: CliOutcomeJson.Options),
+        };
+
+        Assert.True(await reporter.PostAsync(request, CancellationToken.None));
+        Assert.NotNull(handler.LastOutcomeRequest!.Recovery);
+        var persisted = handler.LastOutcomeRequest.Recovery!;
+        Assert.Equal(["recovered", "unresolved"], persisted.Select(work => work.Status));
+        Assert.Equal("work-1", persisted[0].WorkId);
+        Assert.Equal("job-work-1", persisted[1].WorkId);
+    }
+
     [Fact]
     public async Task UpdateAll_WhenServerReachable_PostsOutcomeToServer()
     {

@@ -116,6 +116,74 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
     }
 
     [Fact]
+    public async Task RecoveryStatus_ProjectsReceiptAcknowledgedAndReplacementSettledPerWork()
+    {
+        var runnerId = $"runner-recovery-status-{Guid.NewGuid():N}";
+        var operationId = $"runner-update:{Guid.NewGuid():N}";
+        var work = new RunnerUpdateWork(
+            WorkDispatchOwnerKinds.AgentJob,
+            "job-recovery-status",
+            "work-recovery-status",
+            null,
+            "agent-job");
+        var operation = await _fixture.Grains
+            .GetGrain<IRunnerUpdateOperationGrain>(runnerId)
+            .StartOrGetAsync(new RunnerUpdateOperation(
+                operationId,
+                runnerId,
+                new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                new[] { work }));
+        await _fixture.Grains
+            .GetGrain<IRunnerUpdateOperationGrain>(runnerId)
+            .MarkWorkAsync(
+                operationId,
+                work.OwnerKind,
+                work.OwnerId,
+                work.WorkId,
+                work.TaskRunId,
+                RunnerUpdateWorkStatus.Marked);
+
+        using var pending = await _fixture.Client.GetAsync(
+            $"/api/runner/{runnerId}/update-operation/{Uri.EscapeDataString(operationId)}/recovery-status");
+        Assert.Equal(HttpStatusCode.OK, pending.StatusCode);
+        var pendingBody = await pending.Content.ReadFromJsonAsync<JsonElement>();
+        var pendingWork = Assert.Single(pendingBody.GetProperty("data").GetProperty("affectedWorks").EnumerateArray());
+        Assert.Equal("unresolved", pendingWork.GetProperty("status").GetString());
+        Assert.False(pendingWork.GetProperty("acknowledged").GetBoolean());
+
+        await _fixture.Grains
+            .GetGrain<IRunnerUpdateOperationGrain>(runnerId)
+            .MarkWorkAsync(
+                operationId,
+                work.OwnerKind,
+                work.OwnerId,
+                work.WorkId,
+                work.TaskRunId,
+                RunnerUpdateWorkStatus.Settled);
+        using var receiptAcked = await _fixture.Client.GetAsync(
+            $"/api/runner/{runnerId}/update-operation/{Uri.EscapeDataString(operationId)}/recovery-status");
+        var receiptBody = await receiptAcked.Content.ReadFromJsonAsync<JsonElement>();
+        var receiptWork = Assert.Single(receiptBody.GetProperty("data").GetProperty("affectedWorks").EnumerateArray());
+        Assert.Equal("receipt-acked", receiptWork.GetProperty("status").GetString());
+        Assert.True(receiptWork.GetProperty("acknowledged").GetBoolean());
+
+        await _fixture.Grains
+            .GetGrain<IRunnerUpdateOperationGrain>(runnerId)
+            .MarkRecoverySettledAsync(
+                operationId,
+                work.OwnerKind,
+                work.OwnerId,
+                work.WorkId,
+                work.TaskRunId);
+        using var replacement = await _fixture.Client.GetAsync(
+            $"/api/runner/{runnerId}/update-operation/{Uri.EscapeDataString(operationId)}/recovery-status");
+        var replacementBody = await replacement.Content.ReadFromJsonAsync<JsonElement>();
+        var replacementWork = Assert.Single(replacementBody.GetProperty("data").GetProperty("affectedWorks").EnumerateArray());
+        Assert.Equal("replacement-settled", replacementWork.GetProperty("status").GetString());
+        Assert.True(replacementBody.GetProperty("data").GetProperty("complete").GetBoolean());
+    }
+
+    [Fact]
     public async Task Config_ConfiguredPolicy_ProjectsAllFields()
     {
         _fixture.SetPolicy(new CleanupPolicyOptions

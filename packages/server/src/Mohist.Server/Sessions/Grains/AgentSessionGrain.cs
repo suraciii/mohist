@@ -2706,12 +2706,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         return _session;
     }
 
-    private void RejectIfReloadRequired()
-    {
-        if (_sessionReloadRequired)
-            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
-    }
-
     private async Task CommitAsync(AgentSession session, IReadOnlyList<AgentSessionEvent> events)
     {
         try
@@ -3726,20 +3720,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             return;
         var session = await GetRequiredAsync();
         var events = session.MarkTurnExecuting(turnId, Now());
-        if (events.Count == 0)
-        {
-            await _stateStore.SaveAsync(SessionId, session);
-            _session = session;
-            return;
-        }
-        await CommitAsync(session, events);
-    }
-
-    public async Task ApplyInterruptionAsync(AgentWorkInterruptionTransition transition)
-    {
-        ArgumentNullException.ThrowIfNull(transition);
-        var session = await GetRequiredAsync();
-        var events = session.ApplyInterruption(transition, Now());
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);

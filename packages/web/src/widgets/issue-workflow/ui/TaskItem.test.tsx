@@ -173,7 +173,8 @@ describe('TaskItem', () => {
           recoveryGeneration: 0,
           originalTurnId: 'turn-old',
           replacementTurnId: null,
-          expectedRecoveryPath: 'The Runner will deliver a confirmed interruption receipt; the replacement dispatch will then resume this work.',
+          expectedRecoveryPath:
+            'The Runner will deliver a confirmed interruption receipt; the replacement dispatch will then resume this work.',
           stopFailure: 'Stop confirmation is pending; recovery remains durable and will be retried.',
           recordedAt: '2026-08-15T00:00:00.000Z',
         },

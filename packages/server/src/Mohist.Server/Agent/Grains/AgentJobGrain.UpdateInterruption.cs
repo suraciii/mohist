@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.Agent.Grains;
@@ -45,18 +46,45 @@ public sealed partial class AgentJobGrain
             return false;
         }
 
+        var interruptedAt = _timeProvider.GetUtcNow();
         State.Status = AgentJobStatus.RecoverablyInterrupted;
         State.UpdateOperationId = updateOperationId;
+        State.InterruptedWorkId = workId;
+        State.RecoveryTerminalReason = null;
+        State.UpdateInterruptionDeadlineAt = interruptedAt + ResolveUpdateInterruptionTimeout();
         State.RunningSince = null;
+        var interruption = new AgentWorkInterruptionTransition(
+            AgentWorkInterruptionStates.Interrupted,
+            updateOperationId,
+            workId,
+            null,
+            State.RecoveryGeneration,
+            State.Input?.InitialTurnId,
+            null,
+            null,
+            "The Runner will deliver a confirmed interruption receipt; a fresh AgentJob dispatch will resume this work.",
+            interruptedAt);
+        State.InterruptionHistory = AgentWorkInterruptionProjection.Apply(
+            State.InterruptionHistory,
+            interruption with { State = AgentWorkInterruptionStates.Interrupting }).ToList();
+        State.InterruptionHistory = AgentWorkInterruptionProjection.Apply(
+            State.InterruptionHistory,
+            interruption).ToList();
+        State.Interruption = interruption;
         State.PendingUpdateInterruptionEvent = new PendingUpdateInterruptionEvent(
             AgentJobSessionDeliveryIds.UpdateInterruptionEventId(Key, updateOperationId),
             updateOperationId,
             runnerId,
             workId,
-            _timeProvider.GetUtcNow());
+            interruptedAt,
+            State.RecoveryGeneration);
         DisposeJobTimeoutTimer();
         await EnsureRecoveryReminderAsync();
         await PersistAsync();
+        await ApplySessionInterruptionAsync(
+            State.Input?.AgentSessionId,
+            interruption with { State = AgentWorkInterruptionStates.Interrupting });
+        await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, interruption);
         await EmitUpdateInterruptionEventAsync(State.PendingUpdateInterruptionEvent);
         if (State.PendingUpdateInterruptionEvent is not null)
             throw new InvalidOperationException($"AgentJob '{Key}' update interruption event is not committed.");

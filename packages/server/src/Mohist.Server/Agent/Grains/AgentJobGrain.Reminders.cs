@@ -59,9 +59,20 @@ public sealed partial class AgentJobGrain
 
         if (State.Status == AgentJobStatus.RecoverablyInterrupted)
         {
+            if (EnsureUpdateInterruptionDeadline())
+                await PersistAsync();
+            if (UpdateInterruptionDeadlineExceeded())
+            {
+                await EnterRecoveryTerminalStateAsync("agent-result-unconfirmed");
+                return;
+            }
+
             if (State.PendingUpdateInterruptionEvent is { } pending)
                 await EmitUpdateInterruptionEventAsync(pending);
-            if (State.PendingUpdateInterruptionEvent is null)
+            // Keep the reminder armed until the receipt deadline even after
+            // the interruption event has been durably delivered.
+            if (State.PendingUpdateInterruptionEvent is null
+                && State.UpdateInterruptionDeadlineAt is null)
                 await UnregisterSelfAsync(reminderName);
             return;
         }

@@ -294,3 +294,28 @@ Channel decision (grounded in live source):
   The targeted Playwright workflow inspector passed 2/2 tests.
 - Final `npm run test:fast` passed: Server unit/architecture/workflow/CLI
   suites, Runner 1647/1647, and Web 4727/4727, plus all fast typechecks.
+
+## T-008 Implementation Notes
+
+- Added `GET /api/runner/{runnerId}/update-operation/{operationId}/recovery-status`.
+  The durable operation projects each affected work as `unresolved`,
+  `receipt-acked`, or `replacement-settled`; the read is side-effect free.
+  Receipt acknowledgements from terminal-result receipts are also recorded so
+  returned results cannot be reported unresolved.
+- Added a bounded, injectable CLI recovery poll with 30-second and 500-ms
+  defaults. It starts only after managed activation and runner identity
+  verification, carries the interrupt operation/work inventory, and maps the
+  final list to recovered/unresolved output. Zero affected work explicitly
+  claims no recovery; an expired wait makes the command non-successful.
+- Extended the persisted system-update outcome with the same per-work recovery
+  identity/state list and added the optional web DTO field. Replacement result
+  settlement updates the operation phase without mutating the original fence.
+- Added deterministic CLI coverage for bounded expiry, mixed outcomes, full
+  acknowledgement, zero-work, old-Runner loss, command non-success semantics,
+  and persisted per-work results. Added Server API coverage for all recovery
+  status phases.
+- Focused verification: the new CLI recovery reporting class passed 5/5;
+  related CLI update/outcome/managed-runner classes passed 45/45; and the
+  Server RunnerConfig API class passed 9/9. A default full Server spec run
+  still showed the known unrelated AgentJob dispatch timing failure; the
+  focused RunnerConfig class passes directly.

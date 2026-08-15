@@ -157,6 +157,8 @@ export class WorkResultJournal {
       if (!existing || !sameWork(existing.work, work)) {
         throw new Error(`Work result journal cannot complete unknown work ${key}`)
       }
+      if (existing.state === 'interrupted')
+        throw new Error(`Work result journal already has an interruption receipt for ${key}`)
       if (existing.state === 'completed') {
         if (!sameResult(existing.result, result) || !sameReceipt(existing.receipt, receipt)) {
           throw new Error(`Work result journal result conflict for ${key}`)
@@ -266,7 +268,7 @@ export class WorkResultJournal {
       const existing = this.entries.get(key)
       if (!existing) return
       if (!sameWork(existing.work, work)) throw new Error(`Work result journal identity conflict for ${key}`)
-      if (existing.state !== 'completed')
+      if (existing.state !== 'completed' && existing.state !== 'interrupted')
         throw new Error(`Work result journal cannot acknowledge unfinished work ${key}`)
       this.entries.delete(key)
       try {

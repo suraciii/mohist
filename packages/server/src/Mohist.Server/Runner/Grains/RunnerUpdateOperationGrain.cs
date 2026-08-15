@@ -14,6 +14,17 @@ public interface IRunnerUpdateOperationGrain : IGrainWithStringKey
         string workId,
         string? taskRunId,
         RunnerUpdateWorkStatus status);
+    Task<RunnerUpdateOperation> MarkRecoverySettledAsync(
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId);
+    Task<RunnerUpdateOperation?> MarkReceiptAckedAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId);
 }
 
 /// <summary>
@@ -36,7 +47,8 @@ public sealed record RunnerUpdateWork(
     [property: Id(2)] string WorkId,
     [property: Id(3)] string? TaskRunId,
     [property: Id(4)] string WorkType,
-    [property: Id(5)] RunnerUpdateWorkStatus Status = RunnerUpdateWorkStatus.Pending)
+    [property: Id(5)] RunnerUpdateWorkStatus Status = RunnerUpdateWorkStatus.Pending,
+    [property: Id(6)] RunnerUpdateRecoveryStatus RecoveryStatus = RunnerUpdateRecoveryStatus.Pending)
 {
     public string Key => string.Join('\u001f', OwnerKind, OwnerId, WorkId, TaskRunId ?? string.Empty);
 }
@@ -53,6 +65,13 @@ public enum RunnerUpdateWorkStatus
     Marked,
     AlreadyEnded,
     Settled,
+}
+
+public enum RunnerUpdateRecoveryStatus
+{
+    Pending,
+    ReceiptAcked,
+    ReplacementSettled,
 }
 
 [GenerateSerializer]
@@ -146,7 +165,15 @@ public sealed class RunnerUpdateOperationGrain(
             return operation;
 
         if (nextStatus != currentStatus)
-            works[workIndex] = works[workIndex] with { Status = nextStatus };
+        {
+            works[workIndex] = works[workIndex] with
+            {
+                Status = nextStatus,
+                RecoveryStatus = nextStatus is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled
+                    ? RunnerUpdateRecoveryStatus.ReceiptAcked
+                    : works[workIndex].RecoveryStatus,
+            };
+        }
         var nextOperation = operation with
         {
             AffectedWorks = works,
@@ -155,6 +182,84 @@ public sealed class RunnerUpdateOperationGrain(
                 : operation.Status,
         };
         state.State.Operations[index] = nextOperation;
+        await state.WriteStateAsync();
+        return nextOperation;
+    }
+
+    public async Task<RunnerUpdateOperation> MarkRecoverySettledAsync(
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId)
+    {
+        await LoadAsync();
+        var index = state.State.Operations.FindIndex(operation =>
+            string.Equals(operation.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0)
+            throw new InvalidOperationException($"Update operation '{operationId}' does not exist.");
+
+        var operation = state.State.Operations[index];
+        var key = string.Join('\u001f', ownerKind, ownerId, workId, taskRunId ?? string.Empty);
+        var workIndex = operation.AffectedWorks.ToList().FindIndex(work => work.Key == key);
+        if (workIndex < 0)
+            throw new InvalidOperationException($"Update operation '{operationId}' does not name work '{key}'.");
+
+        var works = operation.AffectedWorks.ToArray();
+        var current = works[workIndex];
+        if (current.RecoveryStatus == RunnerUpdateRecoveryStatus.ReplacementSettled)
+            return operation;
+
+        works[workIndex] = current with
+        {
+            Status = RunnerUpdateWorkStatus.Settled,
+            RecoveryStatus = RunnerUpdateRecoveryStatus.ReplacementSettled,
+        };
+        var nextOperation = operation with
+        {
+            AffectedWorks = works,
+            Status = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+                ? RunnerUpdateOperationStatus.Settled
+                : operation.Status,
+        };
+        state.State.Operations[index] = nextOperation;
+        await state.WriteStateAsync();
+        return nextOperation;
+    }
+
+    public async Task<RunnerUpdateOperation?> MarkReceiptAckedAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId)
+    {
+        await LoadAsync();
+        var key = string.Join('\u001f', ownerKind, ownerId, workId, taskRunId ?? string.Empty);
+        var operationIndex = state.State.Operations.FindLastIndex(operation =>
+            operation.AffectedWorks.Any(work => work.Key == key));
+        if (operationIndex < 0)
+            return null;
+
+        var operation = state.State.Operations[operationIndex];
+        var works = operation.AffectedWorks.ToArray();
+        var workIndex = Array.FindIndex(works, work => work.Key == key);
+        var current = works[workIndex];
+        if (current.RecoveryStatus == RunnerUpdateRecoveryStatus.ReplacementSettled)
+            return operation;
+
+        works[workIndex] = current with
+        {
+            Status = RunnerUpdateWorkStatus.Settled,
+            RecoveryStatus = RunnerUpdateRecoveryStatus.ReceiptAcked,
+        };
+        var nextOperation = operation with
+        {
+            AffectedWorks = works,
+            Status = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+                ? RunnerUpdateOperationStatus.Settled
+                : operation.Status,
+        };
+        state.State.Operations[operationIndex] = nextOperation;
         await state.WriteStateAsync();
         return nextOperation;
     }

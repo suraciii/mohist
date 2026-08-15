@@ -57,6 +57,7 @@ public static partial class RunnerRoutes
 
         group.MapPost("/heartbeat", HandleHeartbeatAsync);
         MapUpdateInterruptRoutes(group);
+        MapRunnerUpdateRecoveryRoutes(group);
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
         {
             if (req is null || req.Slots <= 0)
@@ -203,84 +204,6 @@ public static partial class RunnerRoutes
             var tracked = ack != "missing-workflow";
             return Results.Ok(new RunnerReportResponse(
                 req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
-        });
-
-        group.MapPost("/recovery-receipt", async (
-            string runnerId,
-            HttpRequest request,
-            IGrainFactory grains,
-            CancellationToken ct) =>
-        {
-            RuntimeRecoveryReceipt? receipt;
-            try
-            {
-                receipt = await request.ReadFromJsonAsync<RuntimeRecoveryReceipt>(JSON.Options, ct);
-            }
-            catch (JsonException)
-            {
-                return ApiResults.BadRequest("Invalid recovery receipt body", "invalid_recovery_receipt");
-            }
-
-            if (receipt is null)
-                return ApiResults.BadRequest("request body is required", "invalid_recovery_receipt");
-
-            var contractErrors = receipt.ValidateContract();
-            if (contractErrors.Count > 0)
-            {
-                return ApiResults.BadRequest(
-                    "Recovery receipt contract is invalid",
-                    "invalid_recovery_receipt",
-                    new { errors = contractErrors });
-            }
-
-            // The path identity is checked before owner routing. The
-            // acknowledgement is terminal for mismatch handling and does
-            // not disclose another Runner's receipt state.
-            if (!string.Equals(receipt.RunnerId, runnerId, StringComparison.Ordinal))
-            {
-                return Results.Ok(new RuntimeRecoveryReceiptAcknowledgement(
-                    receipt.ReceiptId,
-                    RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
-                    "runner-identity-mismatch"));
-            }
-
-            var ownerKind = string.IsNullOrWhiteSpace(receipt.OwnerKind)
-                ? RuntimeRecoveryReceiptOwnerKinds.Workflow
-                : receipt.OwnerKind.Trim().ToLowerInvariant();
-            RuntimeRecoveryReceiptAcknowledgement acknowledgement;
-            if (ownerKind == RuntimeRecoveryReceiptOwnerKinds.AgentJob)
-            {
-                if (string.IsNullOrWhiteSpace(receipt.AgentJobId))
-                {
-                    return Results.Ok(new RuntimeRecoveryReceiptAcknowledgement(
-                        receipt.ReceiptId,
-                        RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
-                        "agent-job-identity-missing"));
-                }
-
-                acknowledgement = await grains
-                    .GetGrain<IAgentJobGrain>(receipt.AgentJobId)
-                    .ReceiveRecoveryReceiptAsync(receipt);
-            }
-            else
-            {
-                // Workflow-owned receipts are arbitrated by the Workflow
-                // grain; it validates the frozen binding and durable update
-                // fence before changing task state.
-                acknowledgement = await grains
-                    .GetGrain<IWorkflowGrain>(receipt.WorkflowRunId)
-                    .ReceiveRecoveryReceiptAsync(receipt);
-            }
-
-            if (string.Equals(acknowledgement.Status, RuntimeRecoveryReceiptAckStatuses.Retryable, StringComparison.Ordinal))
-            {
-                return Results.Json(
-                    acknowledgement,
-                    JSON.Options,
-                    statusCode: StatusCodes.Status409Conflict);
-            }
-
-            return Results.Ok(acknowledgement);
         });
 
         // Batch status query for the runner's convergence backstop. The
@@ -1041,59 +964,6 @@ public static partial class RunnerRoutes
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
     };
 
-    private static IReadOnlyList<RunnerUpdateWork> BuildUpdateOperationWorks(
-        IReadOnlyList<RunnerActiveWorkItem> activeWorks) =>
-        activeWorks
-            .Where(work =>
-                work.OwnerKind == WorkDispatchOwnerKinds.AgentJob
-                || (work.OwnerKind == WorkDispatchOwnerKinds.Workflow
-                    && work.IsAgentWork
-                    && string.Equals(work.WorkType, "task", StringComparison.Ordinal)
-                    && !string.IsNullOrWhiteSpace(work.TaskRunId)))
-            .Select(work => new RunnerUpdateWork(
-                work.OwnerKind,
-                work.OwnerId,
-                work.WorkId,
-                work.TaskRunId,
-                work.WorkType))
-            .GroupBy(work => work.Key, StringComparer.Ordinal)
-            .Select(group => group.First())
-            .ToArray();
-
-    private static async Task<RunnerUpdateWorkStatus> MarkUpdateWorkAsync(
-        IGrainFactory grains,
-        RunnerUpdateOperation operation,
-        RunnerUpdateWork work)
-    {
-        if (work.OwnerKind == WorkDispatchOwnerKinds.Workflow
-            && !string.IsNullOrWhiteSpace(work.TaskRunId))
-        {
-            var ack = await grains.GetGrain<IWorkflowGrain>(work.OwnerId)
-                .MarkUpdateInterruptedAsync(
-                    work.TaskRunId,
-                    work.WorkId,
-                    operation.RunnerId,
-                    operation.OperationId);
-            return ack == ReportAck.Accepted
-                ? RunnerUpdateWorkStatus.Marked
-                : RunnerUpdateWorkStatus.AlreadyEnded;
-        }
-
-        if (work.OwnerKind == WorkDispatchOwnerKinds.AgentJob)
-        {
-            var marked = await grains.GetGrain<IAgentJobGrain>(work.OwnerId)
-                .MarkUpdateInterruptedAsync(
-                    operation.RunnerId,
-                    work.WorkId,
-                    operation.OperationId);
-            return marked
-                ? RunnerUpdateWorkStatus.Marked
-                : RunnerUpdateWorkStatus.AlreadyEnded;
-        }
-
-        throw new InvalidOperationException(
-            $"Update operation '{operation.OperationId}' contains unsupported owner kind '{work.OwnerKind}'.");
-    }
 }
 
 public record RunnerRegisterRequest(

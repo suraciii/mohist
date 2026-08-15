@@ -405,6 +405,10 @@ public sealed class DispatchService : IScopedService
             return (null, null, ReserveSlot: false);
 
         var settlement = settlementTask.Task.AgentResultSettlement!;
+        // Update-interrupted work waits for a recovery receipt and a fresh
+        // replacement dispatch; it never reconciles through redelivery.
+        if (!string.IsNullOrWhiteSpace(settlement.UpdateOperationId))
+            return (null, null, ReserveSlot: false);
         var binding = settlement.Runtime is not null && settlement.RuntimeSessionId is not null
             ? new AgentRecoveryBinding(settlement.Runtime, settlement.RuntimeSessionId)
             : null;

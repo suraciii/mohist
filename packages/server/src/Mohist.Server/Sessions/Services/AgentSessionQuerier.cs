@@ -1171,29 +1171,6 @@ public sealed record FollowupTarget(
     string SessionName,
     bool IsActive);
 
-/// <summary>
-/// Followup target for a generic (non-workflow) <see cref="AgentSession"/>
-///. Identifies a session by its minted
-/// <see cref="SessionId"/> alone — there is no <c>workflowRunId</c> /
-/// <c>sessionName</c> pair to carry. The runner resolves the session
-/// through the OpenCode runtime's <c>generic:</c>-prefixed binding
-/// lookup at Follow-up / stop dispatch time.
-/// </summary>
-public sealed record GenericFollowupTarget(
-    string RunnerId,
-    string SessionId,
-    bool IsActive);
-
-public sealed record SessionStopTarget(
-    string RunnerId,
-    string SessionId,
-    string SourceKind,
-    string? WorkflowRunId,
-    string? SessionName,
-    string? Runtime,
-    string? RuntimeSessionId,
-    string? WorkDir);
-
 internal sealed record UnifiedTranscriptSummary(
     string? ResolvedModel,
     string? FailureCategory,

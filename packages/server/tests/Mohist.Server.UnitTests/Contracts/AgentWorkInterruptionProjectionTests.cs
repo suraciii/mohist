@@ -46,7 +46,19 @@ public sealed class AgentWorkInterruptionProjectionTests
     public void SessionProjection_AttachesReplacementToNewTurnAndPreservesOriginalHistory()
     {
         var at = DateTimeOffset.Parse("2026-08-15T00:00:00Z").UtcDateTime;
-        var session = AgentSession.Create("session-1", "runner-1", "/work", now: at);
+        var session = AgentSession.Create(
+            "session-1",
+            "runner-1",
+            "/work",
+            metadata: new AgentSessionMetadata(
+                new Dictionary<string, string>
+                {
+                    ["mohist.io/project-id"] = "project-1",
+                    ["mohist.io/source-kind"] = "agent-connection",
+                    ["mohist.io/agent-id"] = "agent-1",
+                }),
+            now: at,
+            runtime: "opencode");
         session.Status = session.Status with
         {
             Turns =
@@ -88,7 +100,11 @@ public sealed class AgentWorkInterruptionProjectionTests
     [Fact]
     public void StopFailureIsReplacedWithActionableRecoveryContext()
     {
-        var transition = Transition(AgentWorkInterruptionStates.Interrupted, "work-1", 0, DateTimeOffset.UtcNow)
+        var transition = Transition(
+                AgentWorkInterruptionStates.Interrupted,
+                "work-1",
+                0,
+                new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero))
             with { StopFailure = "session.abort fetch failed: socket closed" };
 
         var projected = AgentWorkInterruptionProjection.Apply([], transition).Single();
@@ -102,7 +118,11 @@ public sealed class AgentWorkInterruptionProjectionTests
     [Fact]
     public void UnnamedWorkHasNoProjection()
     {
-        var transition = Transition(AgentWorkInterruptionStates.Interrupted, "named-work", 0, DateTimeOffset.UtcNow);
+        var transition = Transition(
+            AgentWorkInterruptionStates.Interrupted,
+            "named-work",
+            0,
+            new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
         Assert.Null(AgentWorkInterruptionProjection.Latest([transition], "other-work"));
     }

@@ -395,12 +395,7 @@ describe('WorkflowView', () => {
     }
     timeline.stages[0].tasks[0].agentInterruption = timeline.interruptionAttention
 
-    renderWithProviders(
-      <WorkflowView
-        issue={makeIssue()}
-        timelineHook={() => ({ data: timeline })}
-      />,
-    )
+    renderWithProviders(<WorkflowView issue={makeIssue()} timelineHook={() => ({ data: timeline })} />)
 
     const panel = screen.getByTestId('workflow-agent-interruption-attention')
     expect(panel).toHaveTextContent('recovering')
