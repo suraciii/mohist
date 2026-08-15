@@ -2,8 +2,8 @@ using Mohist.Cli.Tests.Compatibility;
 using global::System.Text.Json;
 using global::System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
+using CliCompositionTestFactory = Mohist.Cli.Tests.Support.CliCompositionTestFactory;
 using EnvironmentAbstractions.TestHelpers;
 using Xunit;
 
@@ -454,34 +454,12 @@ public sealed class SkillsContentTests
     {
         output ??= TextWriter.Null;
         error ??= TextWriter.Null;
-        var services = new ServiceCollection();
-        services.AddSingleton(new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), output, error, _files, new NoopCommandExecutor()));
-        services.AddSingleton(output);
-        services.AddSingleton(error);
-        services.AddSingleton<IFileSystem>(_files);
-        services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
-        services.AddSingleton<IEnvironmentVariableProvider>(_environment);
-        services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(output, error, _files, sp.GetRequiredService<ICommandExecutor>()));
-        services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), _files, _environment));
-        services.AddSingleton(new RuntimeConsistencyValidator(RejectingHttpMessageHandler.CreateClient(), new NoopCommandExecutor(), _files, _environment, output));
-        services.AddSingleton(new ServiceReadinessProbe(RejectingHttpMessageHandler.CreateClient(), output));
-        services.AddSingleton(new RunnerRefreshVerifier(RejectingHttpMessageHandler.CreateClient(), new NoopCommandExecutor(), _files));
-        services.AddSingleton(new UpdateOutcomeReporter(RejectingHttpMessageHandler.CreateClient(), output));
-        services.AddSingleton<SourceCodeUpdater>();
-        services.AddSingleton(assets ?? BuildDefaultService());
-        services.AddSingleton<InfoVerboseCollector>();
-        services.AddSingleton<InfoCollector>();
-        services.AddSingleton<InfoRenderer>();
-        services.AddSingleton<SkillInstallService>(_ => new SkillInstallService(
-            _.GetRequiredService<SkillAssetService>(),
-            _.GetRequiredService<IFileSystem>(),
-            _.GetRequiredService<IEnvironmentVariableProvider>(),
+        return CliCompositionTestFactory.Create(
+            _files,
+            _environment,
+            assets ?? BuildDefaultService(),
             output,
-            error));
-
-        var provider = services.BuildServiceProvider();
-        var api = provider.GetRequiredService<MohistCliApi>();
-        return MohistCliCommands.Build(api, provider);
+            error).Root;
     }
 
     private SkillAssetService BuildDefaultService()

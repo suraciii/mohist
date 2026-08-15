@@ -25,6 +25,7 @@ internal sealed class RuntimeConsistencyValidator
     private readonly Func<string?>? _getUserHome;
     private readonly TextWriter _out;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
     private readonly TimeSpan _runnerIdentityTimeout;
     private readonly TimeSpan _runnerIdentityPollInterval;
 
@@ -37,7 +38,8 @@ internal sealed class RuntimeConsistencyValidator
         Func<string?>? getUserHome = null,
         TimeProvider? timeProvider = null,
         TimeSpan? runnerIdentityTimeout = null,
-        TimeSpan? runnerIdentityPollInterval = null)
+        TimeSpan? runnerIdentityPollInterval = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         _http = http;
         _commandExecutor = commandExecutor;
@@ -46,9 +48,14 @@ internal sealed class RuntimeConsistencyValidator
         _getUserHome = getUserHome;
         _out = output;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _pollWait = pollWait
+            ?? ((delay, cancellationToken) => Task.Delay(delay, _timeProvider, cancellationToken));
         _runnerIdentityTimeout = runnerIdentityTimeout ?? DefaultRunnerIdentityTimeout;
         _runnerIdentityPollInterval = runnerIdentityPollInterval ?? DefaultRunnerIdentityPollInterval;
     }
+
+    internal TimeProvider TimeProvider => _timeProvider;
+    internal Func<TimeSpan, CancellationToken, Task> PollWait => _pollWait;
 
     internal async Task<RuntimeCheckResult> CheckCliBinaryAsync(UpdateContext context, CancellationToken token)
     {
@@ -347,7 +354,7 @@ internal sealed class RuntimeConsistencyValidator
                 : _runnerIdentityPollInterval;
             try
             {
-                await Task.Delay(delay, _timeProvider, waitToken);
+                await _pollWait(delay, waitToken);
             }
             catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
             {
