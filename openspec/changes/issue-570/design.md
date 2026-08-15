@@ -109,3 +109,43 @@ Workflow must not synchronously query AgentSession to infer a result. That
 would turn an execution observation into an outcome and reintroduce a
 cross-owner arbitration path. The Runner result receipt remains the one
 authoritative cross-boundary payload.
+
+## Recovery slice: unresolved-agent redelivery + started-fence reconciliation (D2/D4)
+
+This slice implements the deadlock-breaker subset of the agreed runner-loss
+design recorded in issue #570's run workspace (`runner-loss-work-recovery`,
+decisions D2/D4 there): workflow-owned agent tasks whose result reporting was
+lost across a runner restart recover without duplicate execution. The full
+interruption-recording and deadline machinery (D1/D2 there) is intentionally
+out of scope; the landed settlement arbitration (`Unknown` → `Blocked`) and
+the work-result journal are reused unchanged.
+
+Server (`DispatchService`): a run with an unresolved settlement is included
+in desired redelivery for the recorded runner only, and only while the
+settlement task is still `Running` with a full runtime binding. The rendered
+dispatch reuses the translator path (settlement reconcile deletes snapshots)
+and carries the recorded binding in a new optional `WorkDispatch.AgentRecovery`
+block. Recovery renders do not reserve runner slots — they are probes, not
+executions. Without a full binding the work stays absent (the deadline and
+explicit-stop paths own it), because a binding-less redelivery to a runner
+with no journal fence could not be reconciled and would re-execute.
+
+Runner (`host.ts` admission + `mohist/pi` action): a dispatch carrying
+`agentRecovery` never submits a new prompt. The pi action switches to
+reconciliation: it inspects the bound session's recorded turn; a terminal
+turn is adopted — its recorded outcome becomes the action result and the
+normal executor tail (expect/artifacts/worktree/set-vars) runs unchanged; a
+missing session or a foreign active turn reports the wire `unknown`, which
+the server routes into settlement. A `started` fence hit by a recovery
+dispatch re-arms its payload and executes the same reconciliation; fences
+without a recovery dispatch still refuse silently. OpenCode recovery
+dispatches are not executed in this slice (the OpenCode runtime does not yet
+expose an API for adopting a terminal turn's facts); they report `unknown`
+and adoption remains future work.
+
+Capacity note: recovery renders do not reserve poll slots, but the runner
+grain's claim gate still counts every Running-assigned run, so a runner at
+capacity with lingering unresolved runs takes no fresh work until those runs
+settle (recovery dispatches themselves are never capacity-gated) or an
+operator stops them. Freeing that capacity automatically is the full design's
+deadline machinery, out of scope here.
