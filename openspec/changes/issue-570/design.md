@@ -42,3 +42,40 @@ runtime binding, idle observation, or reconnect.
   boundary required by the Workflow settlement contract.
 - Removing `HasUnresolvedAgentResult` from dispatch rendering: this would turn
   unresolved work into duplicate physical execution rather than recovery.
+
+## Server Receipt Admission
+
+The Runner's completed journal entry is the only recovery artifact that can
+reconstruct a Workflow result. It carries the original dispatch and full
+`WorkItemResult`, including output, error, artifact-upload, and follow-up-task
+fields. On restart, Runner places that entry in `awaitingAck` and reports it
+through the existing Workflow result route. The Server accepts it only when
+the persisted Workflow attempt still matches the original `taskRunId`,
+`workId`, and authenticated `runnerId`; an unknown or blocked settlement is
+still reportable under that same tuple.
+
+The Server has no safe source for a result from a `started` entry. The
+Workflow work projection stores lookup and active-work facts, not a result.
+AgentSession terminal observations and the runtime close event carry physical
+activity, status, and exit information, but not the complete Workflow result
+contract. Terminal task-log ownership is written after Workflow task
+settlement and authorizes log upload only; it is not a result receipt. The
+Workflow therefore must retain `unknown` or `blocked` when those are the only
+facts available.
+
+This preserves a single recovery rule:
+
+1. A completed receipt replays the original identity and may settle that
+   original attempt exactly once.
+2. A started-only record cannot be replayed physically or translated into a
+   terminal result.
+3. If the original result is permanently unavailable, the current operator
+   escape hatch is explicit Workflow stop. This slice deliberately provides no
+   replacement-execution command. Any future product capability that schedules
+   replacement work after abandonment must allocate a new TaskRun and work
+   identity, so a late report for the old attempt remains stale.
+
+Workflow must not synchronously query AgentSession to infer a result. That
+would turn an execution observation into an outcome and reintroduce a
+cross-owner arbitration path. The Runner result receipt remains the one
+authoritative cross-boundary payload.
