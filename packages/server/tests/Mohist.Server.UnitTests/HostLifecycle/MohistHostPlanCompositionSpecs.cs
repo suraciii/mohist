@@ -77,6 +77,21 @@ public class MohistHostPlanCompositionSpecs
     }
 
     [Fact]
+    public void CreatePrimaryPlan_ZeroCollectorPortKeepsOtelEnabledWithoutBindingAListener()
+    {
+        var builder = NewBuilder();
+        builder.Environment.EnvironmentName = MohistHostEnvironment.Testing;
+        builder.Configuration["Mohist:Otel:Enabled"] = "true";
+        builder.Configuration["Mohist:Otel:Port"] = "0";
+        var factory = new MohistHostFactory([], builder);
+
+        var plan = factory.CreatePrimaryPlan(new RuntimeEpoch(Start));
+
+        Assert.True(plan.Enabled);
+        Assert.Null(plan.ListenerIntent);
+    }
+
+    [Fact]
     public void ApplyPlan_RegistersExactlyOneDiagnosticsSamplerPerPlan()
     {
         var primaryPlan = MohistHostPlan.Primary(

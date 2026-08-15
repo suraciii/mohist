@@ -46,7 +46,9 @@ public sealed class OtelOptions
     /// <summary>
     /// OTLP HTTP ingestion port. The default matches
     /// <see cref="DefaultPort"/> (the OpenTelemetry spec's conventional
-    /// HTTP port).
+    /// HTTP port). A value of <c>0</c> disables the inbound collector
+    /// listener while keeping the OTel SDK and query/ingest services
+    /// available to an in-process host.
     /// </summary>
     public int Port { get; set; } = DefaultPort;
 
