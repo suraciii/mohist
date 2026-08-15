@@ -30,8 +30,6 @@ using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Prompts;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
-using Orleans.Configuration;
-using Orleans.TestingHost;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
 
@@ -47,11 +45,6 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private SqliteConnection _keeper = null!;
     private MohistWebApplicationFactory _factory = null!;
     private readonly bool _otelEnabled;
-    // Allocates distinct silo/gateway ports per fixture so multiple integration
-    // collections can run in parallel without fighting over 11111 / 30000.
-    // Pattern from dotnet/orleans test/Orleans.Runtime.Tests/LocalhostSiloTests.cs.
-    private TestClusterPortAllocator? _portAllocator;
-
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
@@ -82,18 +75,13 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _keeper = new SqliteConnection(ConnectionString);
         await _keeper.OpenAsync();
 
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-
         _factory = new MohistWebApplicationFactory(
             ConnectionString,
             VirtualRunnerRoot,
             VirtualSystemUpdateStatePath,
             VirtualLogsPath,
             TimeProvider,
-            siloPort,
-            gatewayPort,
-            _otelEnabled);
+            otelEnabled: _otelEnabled);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {OperatorToken}");
         Client.DefaultRequestHeaders.Add(
@@ -154,7 +142,6 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _factory?.Dispose();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
-        _portAllocator?.Dispose();
     }
 }
 
@@ -173,10 +160,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _systemUpdateStatePath;
     private readonly string _logsPath;
     private readonly FakeTimeProvider _timeProvider;
-    private readonly int _siloPort;
-    private readonly int _gatewayPort;
     private readonly bool _otelEnabled;
-    private readonly TestClusterPortAllocator? _portAllocator;
     public AgentSessionPersistenceTestProbe Persistence { get; }
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
@@ -189,8 +173,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         string runnerRoot,
         string systemUpdateStatePath,
         FakeTimeProvider? timeProvider = null,
-        int? siloPort = null,
-        int? gatewayPort = null,
         bool otelEnabled = false)
         : this(
             connectionString,
@@ -198,8 +180,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             systemUpdateStatePath,
             "/mohist-tests/logs",
             timeProvider,
-            siloPort,
-            gatewayPort,
             otelEnabled)
     {
     }
@@ -210,8 +190,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         string systemUpdateStatePath,
         string logsPath,
         FakeTimeProvider? timeProvider = null,
-        int? siloPort = null,
-        int? gatewayPort = null,
         bool otelEnabled = false)
     {
         _connectionString = connectionString;
@@ -219,17 +197,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _systemUpdateStatePath = systemUpdateStatePath;
         _logsPath = logsPath;
         _timeProvider = timeProvider ?? new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
-        if (siloPort is null || gatewayPort is null)
-        {
-            if (siloPort is not null || gatewayPort is not null)
-                throw new ArgumentException("Test silo and gateway ports must be supplied together.");
-
-            _portAllocator = new TestClusterPortAllocator();
-            (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-        }
-
-        _siloPort = siloPort.Value;
-        _gatewayPort = gatewayPort.Value;
         _otelEnabled = otelEnabled;
         Persistence = new AgentSessionPersistenceTestProbe(
             () => _timeProvider.Advance(TimeSpan.FromSeconds(1)));
@@ -243,6 +210,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseTestServer();
         builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://127.0.0.1:0");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
+        builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:0");
         builder.UseSetting("Mohist:Otel:Endpoint", "http://127.0.0.1:0/otel");
         // OTel tracing remains enabled for this fixture, but its inbound
@@ -256,8 +224,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:LogsPath", _logsPath);
         builder.UseSetting("Mohist:Otel:Enabled", _otelEnabled ? "true" : "false");
         builder.UseSetting("Mohist:Otel:ExportEnabled", "false");
-        builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         builder.ConfigureServices(services =>
         {
@@ -279,8 +245,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:LogsPath"] = _logsPath,
                 ["Mohist:Otel:Enabled"] = _otelEnabled ? "true" : "false",
                 ["Mohist:Otel:ExportEnabled"] = "false",
-                ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["Mohist:Testing:InMemoryOrleansTransport"] = "true",
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
@@ -397,7 +362,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         if (disposing)
         {
             _otelKeeper?.Dispose();
-            _portAllocator?.Dispose();
         }
         base.Dispose(disposing);
     }

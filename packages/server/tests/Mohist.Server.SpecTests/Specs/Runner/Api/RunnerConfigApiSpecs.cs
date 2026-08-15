@@ -13,7 +13,6 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
@@ -267,19 +266,14 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
 /// factory's <c>IConfigureOptions&lt;CleanupPolicyOptions&gt;</c> reads
 /// at request time (the endpoint uses
 /// <c>IOptionsSnapshot&lt;CleanupPolicyOptions&gt;</c>, which re-binds on
-/// every request). Unique silo/gateway ports are allocated via
-/// <see cref="TestClusterPortAllocator"/> so the class can run in
-/// parallel with other integration collections.
+/// every request). The shared test host uses Orleans in-memory transport,
+/// so this class does not claim any host ports.
 /// </summary>
 public class RunnerConfigFixture : IAsyncLifetime
 {
     private SqliteConnection _keeper = null!;
     private ConfigWebApplicationFactory _factory = null!;
     private readonly List<string> _registeredRunnerIds = [];
-    // Allocates distinct silo/gateway ports so the fixture can run in
-    // parallel with other integration collections without fighting over
-    // 11111 / 30000.
-    private TestClusterPortAllocator? _portAllocator;
 
     public CleanupPolicyOptions Policy { get; } = new();
     public HttpClient Client { get; private set; } = null!;
@@ -293,16 +287,12 @@ public class RunnerConfigFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
 
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         _factory = new ConfigWebApplicationFactory(
             connectionString,
             "/mohist-tests/runner-config/runner",
             "/mohist-tests/runner-config/system-update.json",
             Policy,
-            TimeProvider,
-            siloPort,
-            gatewayPort);
+            TimeProvider);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
@@ -403,7 +393,6 @@ public class RunnerConfigFixture : IAsyncLifetime
         Client?.Dispose();
         _factory?.Dispose();
         await _keeper.DisposeAsync();
-        _portAllocator?.Dispose();
     }
 
     /// <summary>
@@ -427,10 +416,8 @@ public class RunnerConfigFixture : IAsyncLifetime
             string runnerRoot,
             string systemUpdateStatePath,
             CleanupPolicyOptions policy,
-            FakeTimeProvider timeProvider,
-            int siloPort,
-            int gatewayPort)
-            : base(connectionString, runnerRoot, systemUpdateStatePath, timeProvider, siloPort, gatewayPort)
+            FakeTimeProvider timeProvider)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, timeProvider)
         {
             _policy = policy;
         }

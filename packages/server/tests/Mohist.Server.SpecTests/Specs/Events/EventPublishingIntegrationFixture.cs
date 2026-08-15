@@ -7,7 +7,6 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
@@ -24,22 +23,17 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
 {
     private readonly EventPublishingWebApplicationFactory _factory;
     private readonly string _connectionString;
-    private readonly TestClusterPortAllocator _portAllocator;
     private SqliteConnection _keeper = null!;
 
     public EventPublishingIntegrationFixture()
     {
         _connectionString = $"Data Source=event-publishing-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         _factory = new EventPublishingWebApplicationFactory(
             _connectionString,
             "/mohist-tests/event-publishing/runner",
             "/mohist-tests/event-publishing/system-update.json",
             "/mohist-tests/event-publishing/logs",
-            TimeProvider,
-            siloPort,
-            gatewayPort);
+            TimeProvider);
     }
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
@@ -67,7 +61,6 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         _factory.Dispose();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
-        _portAllocator.Dispose();
     }
 
     private sealed class EventPublishingWebApplicationFactory : MohistWebApplicationFactory
@@ -80,10 +73,8 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
             string runnerRoot,
             string systemUpdateStatePath,
             string logsPath,
-            FakeTimeProvider timeProvider,
-            int siloPort,
-            int gatewayPort)
-            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider, siloPort, gatewayPort)
+            FakeTimeProvider timeProvider)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider)
         {
             RecordingPublisher = new RecordingIEventPublisher(new NoopEventPublisher());
             RecordingTranscriptPublisher = new RecordingTranscriptEventPublisher();

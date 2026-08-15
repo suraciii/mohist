@@ -23,8 +23,6 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
-using Orleans.Configuration;
-using Orleans.TestingHost;
 using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
@@ -44,10 +42,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _systemUpdateStatePath;
     private readonly SqliteConnection _otelKeeper;
     private readonly OtelDb _otelDb;
-    private readonly int _siloPort;
-    private readonly int _gatewayPort;
     private readonly bool? _otelEnabled;
-    private readonly TestClusterPortAllocator? _portAllocator;
 
     public int OtlpPort { get; }
     public FakeTimeProvider TimeProvider { get; private set; } = null!;
@@ -59,25 +54,12 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         // TestServer does not bind a socket. Port 0 is therefore a logical
         // listener identity used only by the isolation middleware/header.
         int otlpPort = 0,
-        int? siloPort = null,
-        int? gatewayPort = null,
         bool? otelEnabled = null)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         OtlpPort = otlpPort;
-        if (siloPort is null || gatewayPort is null)
-        {
-            if (siloPort is not null || gatewayPort is not null)
-                throw new ArgumentException("Test silo and gateway ports must be supplied together.");
-
-            _portAllocator = new TestClusterPortAllocator();
-            (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-        }
-
-        _siloPort = siloPort.Value;
-        _gatewayPort = gatewayPort.Value;
         _otelEnabled = otelEnabled;
         (_otelDb, _otelKeeper) = InMemoryOtelDb.Create();
     }
@@ -93,6 +75,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseTestServer();
         builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://127.0.0.1:0");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
+        builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:0");
         builder.UseSetting("Mohist:Otel:Endpoint", "http://127.0.0.1:0/otel");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
@@ -103,8 +86,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         if (_otelEnabled is { } otelEnabled)
             builder.UseSetting("Mohist:Otel:Enabled", otelEnabled ? "true" : "false");
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
-        builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -117,9 +98,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
                 ["Mohist:Otel:ExportEnabled"] = "false",
+                ["Mohist:Testing:InMemoryOrleansTransport"] = "true",
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
-                ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
@@ -176,7 +156,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         if (disposing)
         {
             _otelKeeper.Dispose();
-            _portAllocator?.Dispose();
         }
         base.Dispose(disposing);
     }

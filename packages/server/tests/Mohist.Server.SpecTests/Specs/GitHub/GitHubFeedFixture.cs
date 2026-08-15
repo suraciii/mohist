@@ -8,7 +8,6 @@ using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Ports;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
@@ -77,22 +76,17 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
 {
     private readonly GitHubFeedWebApplicationFactory _factory;
     private readonly string _connectionString;
-    private readonly TestClusterPortAllocator _portAllocator;
     private SqliteConnection _keeper = null!;
 
     public GitHubFeedFixture()
     {
         _connectionString = $"Data Source=github-feed-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         _factory = new GitHubFeedWebApplicationFactory(
             _connectionString,
             "/mohist-tests/github-feed/runner",
             "/mohist-tests/github-feed/system-update.json",
             "/mohist-tests/github-feed/logs",
-            TimeProvider,
-            siloPort,
-            gatewayPort);
+            TimeProvider);
     }
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
@@ -116,7 +110,6 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
         _factory?.Dispose();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
-        _portAllocator?.Dispose();
     }
 
     private sealed class GitHubFeedWebApplicationFactory : MohistWebApplicationFactory
@@ -128,10 +121,8 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
             string runnerRoot,
             string systemUpdateStatePath,
             string logsPath,
-            FakeTimeProvider timeProvider,
-            int siloPort,
-            int gatewayPort)
-            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider, siloPort, gatewayPort)
+            FakeTimeProvider timeProvider)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider)
         {
         }
 
