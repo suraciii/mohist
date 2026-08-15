@@ -5,15 +5,16 @@ namespace Mohist.Server.Sessions.Services;
 /// <summary>
 /// Shared construction for the context-reference envelope on AgentSession
 /// list items and generic-session summaries.
-/// Reads the four launch labels (<see cref="GenericAgentSessionMetadata.IssueNumber"/>,
+/// Reads the public launch labels (<see cref="GenericAgentSessionMetadata.IssueNumber"/>,
 /// <see cref="GenericAgentSessionMetadata.EpicNumber"/>,
 /// <see cref="GenericAgentSessionMetadata.Repository"/>,
 /// <see cref="GenericAgentSessionMetadata.WorkspaceName"/>) with the same
 /// parse-and-null-when-all-empty semantics, returns a nullable value tuple
 /// so each caller maps the resolved labels to its own distinct DTO wire
 /// shape (<see cref="AgentSessionListContextRefsDto"/> vs.
-/// <see cref="GenericAgentSessionSummaryContextRefsDto"/>). Pure refactor:
-/// the resolved envelope is byte-identical to the pre-consolidation result.
+/// <see cref="GenericAgentSessionSummaryContextRefsDto"/>). Internal workspace
+/// paths remain available through launch metadata for dispatch and recovery,
+/// but are deliberately excluded from this public projection.
 /// </summary>
 internal static class AgentSessionContextRefs
 {
@@ -21,8 +22,7 @@ internal static class AgentSessionContextRefs
         int? IssueNumber,
         int? EpicNumber,
         string? Repository,
-        string? WorkspaceName,
-        string? WorkspacePath);
+        string? WorkspaceName);
 
     /// <summary>
     /// Reads the four launch labels from <paramref name="record"/> and
@@ -41,17 +41,14 @@ internal static class AgentSessionContextRefs
         var epicNumber = TryReadPositiveNumber(record.Label(GenericAgentSessionMetadata.EpicNumber));
         var repository = record.Label(GenericAgentSessionMetadata.Repository);
         var workspaceName = record.Label(GenericAgentSessionMetadata.WorkspaceName);
-        var workspacePath = record.Label(GenericAgentSessionMetadata.WorkspacePath);
-
         if (issueNumber is null && epicNumber is null
             && string.IsNullOrWhiteSpace(repository)
-            && string.IsNullOrWhiteSpace(workspaceName)
-            && string.IsNullOrWhiteSpace(workspacePath))
+            && string.IsNullOrWhiteSpace(workspaceName))
         {
             return null;
         }
 
-        return new ContextRefs(issueNumber, epicNumber, repository, workspaceName, workspacePath);
+        return new ContextRefs(issueNumber, epicNumber, repository, workspaceName);
     }
 
     private static int? TryReadPositiveNumber(string? value) =>
