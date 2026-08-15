@@ -127,7 +127,8 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(49)] string? Origin = null,
     [property: Id(50)] string? TargetId = null,
-    [property: Id(51)] string? ReasoningEffort = null);
+    [property: Id(51)] string? ReasoningEffort = null,
+    [property: Id(52)] string? ExecutionOverrideJson = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -186,7 +187,14 @@ public sealed record AgentLaunchCoordinatorRequest(
     /// </summary>
     [property: Id(12)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(13)] string? Origin = null,
-    [property: Id(14)] string? TargetId = null);
+    [property: Id(14)] string? TargetId = null,
+    /// <summary>
+    /// Canonical JSON for the nested launch execution override. The
+    /// coordinator does not deserialize this request-only value; it is an
+    /// idempotency fence that preserves omitted versus explicit-null fields.
+    /// The resolved execution definition remains in the plan fields above.
+    /// </summary>
+    [property: Id(15)] string? ExecutionOverrideJson = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -311,6 +319,7 @@ public static class AgentLaunchCoordinatorCodec
             request.Title?.Trim() ?? string.Empty,
             request.Origin?.Trim() ?? string.Empty,
             request.TargetId?.Trim() ?? string.Empty,
+            request.ExecutionOverrideJson ?? string.Empty,
             attachments,
             connectionOrigin?.ConnectionId ?? string.Empty,
             connectionOrigin?.WorkspaceTeamId ?? string.Empty,

@@ -158,7 +158,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch,
                 WorkspaceRepositories: command.WorkspaceRepositories,
                 Origin: command.Origin ?? command.Request.Origin,
-                TargetId: command.TargetId ?? command.Request.TargetId);
+                TargetId: command.TargetId ?? command.Request.TargetId,
+                ExecutionOverrideJson: command.ExecutionOverrideJson ?? command.Request.ExecutionOverrideJson);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -996,4 +997,5 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(36)] string? Origin = null,
     [property: Id(37)] string? TargetId = null,
-    [property: Id(38)] string? ReasoningEffort = null);
+    [property: Id(38)] string? ReasoningEffort = null,
+    [property: Id(39)] string? ExecutionOverrideJson = null);
