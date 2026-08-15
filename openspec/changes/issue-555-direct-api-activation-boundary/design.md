@@ -22,6 +22,28 @@ Write routes follow only after that slice. Each write adds its own durable
 idempotency record and a concrete handler in the same change; it is never
 enabled merely because a route template or shared middleware exists.
 
+### First route boundary
+
+The first mapped route is `GET /api/v1/projects/{projectId}/agent-jobs/{jobId}`.
+It is deliberately a Job-only read, not the `PublicExecutionRead` join
+described for later launch and Session routes. The AgentJob owner ledger already
+has one stable source identity and an optimistic, monotonically increasing
+revision. Its writer commits a strict allowlisted Job snapshot and that source
+revision in the same database transaction as the canonical ledger state.
+
+The direct handler first checks a Bearer PAT's persisted grant against the
+canonical `projectId` path segment, then reads only that persisted snapshot.
+It checks the Job ledger revision as read-only metadata. A missing or stale
+snapshot is `503 projection_lag`; the handler never serializes the canonical
+ledger JSON as a fallback. This provides a recoverable read boundary without
+claiming that Job and Session facts are atomically joined.
+
+The Job snapshot deliberately omits output and raw errors. It exposes only
+safe status, terminal outcome/reason category, IDs, and timestamps. A later
+Session-aware projection will use its own source positions, checkpoint set,
+event deduplication, and stream generation; it must not extend this route by
+reading the Session live.
+
 ## Source contract
 
 The public projector has two canonical source families in v1:

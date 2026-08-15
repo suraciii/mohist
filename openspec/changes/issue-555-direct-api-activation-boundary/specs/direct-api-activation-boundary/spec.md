@@ -23,6 +23,42 @@ path in the same implementation slice.
 - **AND** it returns only a persisted public projection or `503 projection_lag`
 - **AND** it never returns a placeholder response
 
+### Requirement: The first Job read is a Job-only projection
+
+`GET /api/v1/projects/{projectId}/agent-jobs/{jobId}` is the first direct
+route. It accepts only a Bearer PAT with a durable Project grant and readonly
+or operator scope. The grant check for the canonical `projectId` MUST happen
+before the route reads the Job source.
+
+The route returns a persisted allowlisted Job snapshot whose checkpoint is the
+AgentJob ledger revision. The snapshot may contain only the Project, Agent,
+Job, public aggregate status, safe terminal outcome/reason code, and public
+timestamps. It MUST NOT expose a Runner, runtime, workspace, prompt, input,
+turn, Session, transcript, provider result, raw failure, or execution
+definition.
+
+This slice intentionally projects no AgentSession state and emits no public
+events. A Session/Input/Turn read or event route requires its own
+cross-aggregate checkpoint and is not implied by this Job route.
+
+#### Scenario: Uncovered Job revision returns projection lag
+
+- **GIVEN** the persisted Job snapshot checkpoint is older than the Job ledger
+  revision
+- **WHEN** an authorized granted PAT reads that Job
+- **THEN** the route returns `503 projection_lag`
+- **AND** it does not fall back to the canonical Job JSON
+- **AND** it does not start, retry, cancel, or otherwise advance execution
+
+#### Scenario: Project grants are checked before Job lookup
+
+- **GIVEN** a valid Bearer PAT has a Project grant that excludes `proj_b`
+- **WHEN** it requests a Job route under `proj_b`
+- **THEN** the route returns `403 forbidden` before it reads whether the Job
+  exists
+- **AND** a session cookie or a non-PAT credential cannot substitute for that
+  PAT
+
 ### Requirement: Public projection uses durable source positions
 
 Every public snapshot and public event MUST be derived from a durable canonical

@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Runner.Domain;
@@ -137,11 +139,13 @@ public class AgentJobStore : IAgentJobStore
         var existing = await db.AgentJobs.FindAsync(key);
         if (existing is null)
         {
+            StageDirectApiProjection(row);
             db.AgentJobs.Add(row);
         }
         else
         {
             existing.State = stateJson;
+            StageDirectApiProjection(existing);
         }
         await db.SaveChangesAsync();
     }
@@ -167,6 +171,7 @@ public class AgentJobStore : IAgentJobStore
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = ToRow(record);
         row.Revision = 1;
+        StageDirectApiProjection(row);
         db.AgentJobs.Add(row);
         await StageTerminalLogOwnershipAsync(db, record, ct);
         await db.SaveChangesAsync(ct);
@@ -198,6 +203,7 @@ public class AgentJobStore : IAgentJobStore
 
         ApplyTo(existing, record);
         existing.Revision = record.Revision + 1;
+        StageDirectApiProjection(existing);
         await StageTerminalLogOwnershipAsync(db, record, ct);
         await db.SaveChangesAsync(ct);
         return ToRecord(existing);
@@ -206,6 +212,7 @@ public class AgentJobStore : IAgentJobStore
     public async Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var existing = await db.AgentJobs.FirstOrDefaultAsync(r => r.JobKey == key, ct);
 
         if (existing is null)
@@ -269,7 +276,8 @@ public class AgentJobStore : IAgentJobStore
                 $"AgentJob ledger row {key} claim lost the revision race (expected {existing.Revision}, no rows updated).");
         }
 
-        var updated = await db.AgentJobs.AsNoTracking()
+        db.ChangeTracker.Clear();
+        var updated = await db.AgentJobs
             .FirstOrDefaultAsync(r => r.JobKey == key, ct);
         if (updated is null)
         {
@@ -281,6 +289,10 @@ public class AgentJobStore : IAgentJobStore
             throw new AgentJobLedgerConflictException(
                 $"AgentJob ledger row {key} claim revision mismatch after update (expected {nextRevision}, saw {updated.Revision}).");
         }
+
+        StageDirectApiProjection(updated);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         _log.LogInformation(
             "AgentJob {Key} claimed by {Runner} at {RunningSince}",
@@ -561,6 +573,17 @@ public class AgentJobStore : IAgentJobStore
         existing.InitialTurnId = record.InitialTurnId;
         existing.PinnedRunnerId = record.PinnedRunnerId;
         existing.LaunchVisibility = record.LaunchVisibility;
+    }
+
+    private void StageDirectApiProjection(AgentJobRow row)
+    {
+        var snapshot = DirectApiAgentJobProjection.Create(
+            row.JobKey,
+            row.State,
+            row.Revision,
+            _timeProvider.GetUtcNow());
+        row.DirectApiProjectionJson = snapshot is null ? null : JSON.Serialize(snapshot);
+        row.DirectApiProjectionRevision = snapshot is null ? null : row.Revision;
     }
 
     internal static string? FormatTimestamp(DateTimeOffset? value) =>
