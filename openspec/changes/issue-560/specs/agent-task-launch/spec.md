@@ -132,7 +132,7 @@ AgentSession.
 
 #### Scenario: A conflicting replay is rejected
 
-- **WHEN** the same idempotency key is replayed with a different prompt, or with different execution hints — a changed, added, or removed `runtime`, `model`, or `variant`
+- **WHEN** the same idempotency key is replayed with a different prompt or different execution hints
 - **THEN** the Server responds 409 `launch_idempotency_conflict`
 
 #### Scenario: A rejected plan stays rejected

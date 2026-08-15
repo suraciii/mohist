@@ -63,17 +63,15 @@ command SHALL print the raw Server response unchanged.
 The command SHALL exit 0 only for an accepted launch, including an idempotent
 replay, and non-zero for every rejection, printing an actionable error. An
 unresolvable execution configuration SHALL name both repairs: pass
-`--runtime`/`--model`/`--variant` or configure the Project default, and
-SHALL name `mo agent model list` as the entry to view the available models.
-A conflict SHALL identify its cause, and a pending convergence SHALL
-instruct retrying with the same key. A rejection MUST NOT leave local state
-that requires cleanup.
+`--runtime`/`--model`/`--variant` or configure the Project default. A conflict
+SHALL identify its cause, and a pending convergence SHALL instruct retrying
+with the same key. A rejection MUST NOT leave local state that requires
+cleanup.
 
 #### Scenario: Missing execution configuration fails with guidance
 
 - **WHEN** the Project has no default execution configuration and the command runs without execution hints
 - **THEN** the command exits non-zero and prints the missing-configuration error naming both repairs
-- **AND** the error names `mo agent model list` as the way to view the available models
 - **AND** no Agent is created on the Server
 
 #### Scenario: Replay success exits zero
