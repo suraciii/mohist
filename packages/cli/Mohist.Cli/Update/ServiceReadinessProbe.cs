@@ -30,13 +30,23 @@ internal sealed class ServiceReadinessProbe
     private readonly HttpClient _http;
     private readonly TextWriter _out;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
 
-    public ServiceReadinessProbe(HttpClient http, TextWriter output, TimeProvider? timeProvider = null)
+    public ServiceReadinessProbe(
+        HttpClient http,
+        TextWriter output,
+        TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         _http = http;
         _out = output;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _pollWait = pollWait
+            ?? ((delay, cancellationToken) => Task.Delay(delay, _timeProvider, cancellationToken));
     }
+
+    internal TimeProvider TimeProvider => _timeProvider;
+    internal Func<TimeSpan, CancellationToken, Task> PollWait => _pollWait;
 
     public async Task<ServerReadinessResult> WaitForServerReadyWithProgressAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -235,7 +245,7 @@ internal sealed class ServiceReadinessProbe
     private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
         delay <= TimeSpan.Zero
             ? Task.CompletedTask
-            : Task.Delay(delay, _timeProvider, cancellationToken);
+            : _pollWait(delay, cancellationToken);
 
     private ITimer? StartTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)
     {

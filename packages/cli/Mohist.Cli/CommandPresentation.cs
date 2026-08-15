@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.Runtime.CompilerServices;
 
 namespace Mohist.Cli;
 
@@ -23,25 +22,35 @@ internal sealed record CommandPresentation(
     IReadOnlyList<string>? JsonFields = null,
     IReadOnlyList<JsonFieldGroup>? JsonFieldGroups = null);
 
+internal sealed class CliRootCommand(string description) : RootCommand(description)
+{
+    private readonly Dictionary<Command, CommandPresentation> _presentations =
+        new(ReferenceEqualityComparer.Instance);
+
+    internal void Attach(Command command, CommandPresentation presentation) =>
+        _presentations[command] = presentation;
+
+    internal CommandPresentation? Get(Command command) =>
+        _presentations.TryGetValue(command, out var presentation) ? presentation : null;
+}
+
+internal sealed class CliJsonOption(string name, params string[] aliases) : Option<string?>(name, aliases)
+{
+    internal ResourceDescriptor? Descriptor { get; set; }
+}
+
 internal static class CommandPresentationCatalog
 {
-    private static readonly ConditionalWeakTable<Command, CommandPresentation> Table = new();
-    private static readonly ConditionalWeakTable<Option, ResourceDescriptor> JsonFields = new();
-
     public static void Attach(Command? command, CommandPresentation presentation)
     {
         if (command is null) return;
-        if (Table.TryGetValue(command, out var existing))
-        {
-            if (ReferenceEquals(existing, presentation))
-                return;
-            Table.Remove(command);
-        }
-        Table.Add(command, presentation);
+        var root = FindRoot(command)
+            ?? throw new InvalidOperationException("Command presentation requires a CliRootCommand owner.");
+        root.Attach(command, presentation);
     }
 
     public static CommandPresentation? Get(Command? command) =>
-        command is not null && Table.TryGetValue(command, out var presentation) ? presentation : null;
+        command is not null ? FindRoot(command)?.Get(command) : null;
 
     public static CommandPresentation Require(Command command) =>
         Get(command) is { } presentation && !string.IsNullOrWhiteSpace(presentation.Summary)
@@ -57,14 +66,27 @@ internal static class CommandPresentationCatalog
         return presentation;
     }
 
-    public static bool Has(Command? command) => command is not null && Table.TryGetValue(command, out _);
+    public static bool Has(Command? command) => Get(command) is not null;
 
     public static void AttachJsonFields(Option option, ResourceDescriptor descriptor)
     {
-        JsonFields.Remove(option);
-        JsonFields.Add(option, descriptor);
+        if (option is not CliJsonOption jsonOption)
+            throw new InvalidOperationException("JSON field metadata requires a CliJsonOption owner.");
+        jsonOption.Descriptor = descriptor;
     }
 
     public static IReadOnlyList<string>? GetJsonFields(Option option) =>
-        JsonFields.TryGetValue(option, out var descriptor) ? descriptor.Fields : null;
+        option is CliJsonOption { Descriptor: { } descriptor } ? descriptor.Fields : null;
+
+    private static CliRootCommand? FindRoot(Command command)
+    {
+        Command? current = command;
+        while (current is not null)
+        {
+            if (current is CliRootCommand root)
+                return root;
+            current = current.Parents.OfType<Command>().FirstOrDefault();
+        }
+        return null;
+    }
 }

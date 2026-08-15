@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using EnvironmentAbstractions.TestHelpers;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Cli;
 using Xunit;
 
@@ -76,9 +77,28 @@ internal sealed class UpdateTestFactory
         string? unitDir = null,
         TimeProvider? timeProvider = null,
         bool managedUpdatesEnabled = false,
-        IServiceInstaller? serviceInstaller = null)
+        IServiceInstaller? serviceInstaller = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         var home = userHome ?? Root;
+        timeProvider ??= new FakeTimeProvider(
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        if (pollWait is null)
+        {
+            if (timeProvider is not FakeTimeProvider fakeTimeProvider)
+            {
+                throw new ArgumentException(
+                    "A deterministic pollWait is required with a non-fake time provider.",
+                    nameof(pollWait));
+            }
+
+            pollWait = (delay, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                fakeTimeProvider.Advance(delay);
+                return Task.CompletedTask;
+            };
+        }
         return SourceCodeUpdater.CreateWithDefaults(
             Stdout,
             Stderr,
@@ -94,7 +114,8 @@ internal sealed class UpdateTestFactory
             getLocalHostname: getLocalHostname,
             unitDir: unitDir,
             timeProvider: timeProvider,
-            managedUpdatesEnabled: managedUpdatesEnabled);
+            managedUpdatesEnabled: managedUpdatesEnabled,
+            pollWait: pollWait);
     }
 
     public static string HealthySystemInfoJson(string runningGitHash = "abc123", string runnerStatus = "active")

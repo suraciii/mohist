@@ -133,6 +133,7 @@ internal sealed class RunnerRefreshVerifier
     private readonly TimeSpan _runnerIdentityTimeout;
     private readonly TimeSpan _runnerIdentityPollInterval;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
 
     public RunnerRefreshVerifier(
         HttpClient http,
@@ -141,7 +142,8 @@ internal sealed class RunnerRefreshVerifier
         Func<string?>? getLocalHostname = null,
         TimeSpan? runnerIdentityTimeout = null,
         TimeSpan? runnerIdentityPollInterval = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         _http = http;
         _commandExecutor = commandExecutor;
@@ -150,7 +152,13 @@ internal sealed class RunnerRefreshVerifier
         _runnerIdentityTimeout = runnerIdentityTimeout ?? TimeSpan.FromSeconds(30);
         _runnerIdentityPollInterval = runnerIdentityPollInterval ?? DefaultRunnerIdentityPollInterval;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _pollWait = pollWait
+            ?? ((delay, cancellationToken) => Task.Delay(delay, _timeProvider, cancellationToken));
     }
+
+    internal TimeProvider TimeProvider => _timeProvider;
+    internal Func<TimeSpan, CancellationToken, Task> PollWait => _pollWait;
+    internal string? LocalHostname => _getLocalHostname();
 
     public void WriteSkippedSummary(string reason, TextWriter output, TextWriter error)
     {
@@ -223,7 +231,7 @@ internal sealed class RunnerRefreshVerifier
                 break;
             try
             {
-                await Task.Delay(_runnerIdentityPollInterval, _timeProvider, cts.Token);
+                await _pollWait(_runnerIdentityPollInterval, cts.Token);
             }
             catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {
@@ -291,7 +299,7 @@ internal sealed class RunnerRefreshVerifier
             }
             try
             {
-                await Task.Delay(_runnerIdentityPollInterval, _timeProvider, cts.Token);
+                await _pollWait(_runnerIdentityPollInterval, cts.Token);
             }
             catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {

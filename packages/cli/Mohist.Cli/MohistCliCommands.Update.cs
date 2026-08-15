@@ -127,6 +127,7 @@ internal partial class SourceCodeUpdater
     private readonly RunnerRefreshVerifier _runnerRefreshVerifier;
     private readonly UpdateOutcomeReporter _outcomeReporter;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
     private readonly bool _managedUpdatesEnabled;
 
     public SourceCodeUpdater(
@@ -139,7 +140,8 @@ internal partial class SourceCodeUpdater
         UpdateOutcomeReporter outcomeReporter,
         TimeSpan? serverReadyTimeout = null,
         TimeProvider? timeProvider = null,
-        bool managedUpdatesEnabled = true)
+        bool managedUpdatesEnabled = true,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         _out = output;
         _err = error;
@@ -150,6 +152,8 @@ internal partial class SourceCodeUpdater
         _outcomeReporter = outcomeReporter;
         _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _pollWait = pollWait
+            ?? ((delay, cancellationToken) => Task.Delay(delay, _timeProvider, cancellationToken));
         _managedUpdatesEnabled = managedUpdatesEnabled;
     }
 
@@ -171,7 +175,8 @@ internal partial class SourceCodeUpdater
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
         TimeProvider? timeProvider = null,
-        bool managedUpdatesEnabled = true)
+        bool managedUpdatesEnabled = true,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         var fs = fileSystem ?? RealFileSystem.Instance;
         var env = environment ?? SystemEnvironmentVariableProvider.Instance;
@@ -190,8 +195,9 @@ internal partial class SourceCodeUpdater
             getUserHome,
             timeProvider,
             runnerIdentityTimeout,
-            runnerIdentityPollInterval);
-        var readinessProbe = new ServiceReadinessProbe(httpClient, output, timeProvider);
+            runnerIdentityPollInterval,
+            pollWait);
+        var readinessProbe = new ServiceReadinessProbe(httpClient, output, timeProvider, pollWait);
         var runnerRefreshVerifier = new RunnerRefreshVerifier(
             httpClient,
             commandExecutor,
@@ -199,7 +205,8 @@ internal partial class SourceCodeUpdater
             getLocalHostname: getLocalHostname ?? (() => Environment.MachineName),
             runnerIdentityTimeout: runnerIdentityTimeout,
             runnerIdentityPollInterval: runnerIdentityPollInterval,
-            timeProvider: timeProvider);
+            timeProvider: timeProvider,
+            pollWait: pollWait);
         var outcomeReporter = new UpdateOutcomeReporter(httpClient, output);
         return new SourceCodeUpdater(
             output,
@@ -211,7 +218,8 @@ internal partial class SourceCodeUpdater
             outcomeReporter,
             serverReadyTimeout,
             timeProvider,
-            managedUpdatesEnabled);
+            managedUpdatesEnabled,
+            pollWait);
     }
 
     internal RuntimeConsistencyValidator Validator => _validator;

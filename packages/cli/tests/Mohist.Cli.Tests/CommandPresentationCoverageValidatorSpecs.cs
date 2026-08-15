@@ -25,7 +25,7 @@ public sealed class CommandPresentationCoverageValidatorSpecs
     [Fact]
     public void MissingRootPresentationAndClassification_ReportsCompletePath()
     {
-        var root = new RootCommand();
+        var root = new CliRootCommand("test");
         root.Subcommands.Add(new Command("catalog", "registration description"));
 
         var diagnostics = CommandPresentationCoverageValidator.Validate(root);
@@ -40,7 +40,7 @@ public sealed class CommandPresentationCoverageValidatorSpecs
     [Fact]
     public void MissingRootClassification_ReportsClassificationWithoutUsingDescription()
     {
-        var root = new RootCommand();
+        var root = new CliRootCommand("test");
         var command = new Command("catalog", "registration description");
         root.Subcommands.Add(command);
         CommandPresentationCatalog.Attach(command, new CommandPresentation(null, "Catalog commands"));
@@ -56,7 +56,7 @@ public sealed class CommandPresentationCoverageValidatorSpecs
     [Fact]
     public void MissingDescendants_ReportsAllPathsAtArbitraryDepthInStableOrder()
     {
-        var root = new RootCommand();
+        var root = new CliRootCommand("test");
         var covered = new Command("covered", "registration description");
         var group = new Command("group", "registration description");
         var deep = new Command("deep", "registration description");
@@ -89,7 +89,7 @@ public sealed class CommandPresentationCoverageValidatorSpecs
     [Fact]
     public void EmptyOrWhitespaceSummary_IsNotCoverage()
     {
-        var root = new RootCommand();
+        var root = new CliRootCommand("test");
         var rootCommand = new Command("root-area", "registration description");
         var descendant = new Command("descendant", "registration description");
         rootCommand.Subcommands.Add(descendant);
@@ -107,7 +107,7 @@ public sealed class CommandPresentationCoverageValidatorSpecs
     [Fact]
     public void HiddenNodesAreExcludedButVisibleDescendantsAreStillTraversed()
     {
-        var root = new RootCommand();
+        var root = new CliRootCommand("test");
         var hidden = new Command("hidden", "hidden registration description") { Hidden = true };
         var hiddenChild = new Command("hidden-child", "hidden descendant registration description");
         var visible = new Command("visible", "visible registration description");
@@ -125,7 +125,7 @@ public sealed class CommandPresentationCoverageValidatorSpecs
     [Fact]
     public void DiagnosticsAreOrderedByCompleteInvocationPath()
     {
-        var root = new RootCommand();
+        var root = new CliRootCommand("test");
         var zulu = new Command("zulu");
         var alpha = new Command("alpha");
         root.Subcommands.Add(zulu);

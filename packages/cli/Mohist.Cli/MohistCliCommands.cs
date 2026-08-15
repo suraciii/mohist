@@ -9,7 +9,7 @@ internal static class MohistCliCommands
 {
     public static RootCommand Build(MohistCliApi api, IServiceProvider provider)
     {
-        var root = new RootCommand("Mohist CLI");
+        var root = new CliRootCommand("Mohist CLI");
 
         root.Subcommands.Add(InfoCommands.Build(provider));
         root.Subcommands.Add(AuthCommands.Build(api));
@@ -70,7 +70,7 @@ internal static class MohistCliCommands
 
     private static Option<string?> CreateJsonOption(string? defaultValue = null)
     {
-        var option = new Option<string?>("--json")
+        var option = new CliJsonOption("--json")
         {
             Description = "Return selected fields, or list available fields when no value is supplied",
             Arity = ArgumentArity.ZeroOrOne,
@@ -88,7 +88,7 @@ internal static class MohistCliCommands
         return option;
     }
 
-    private static Option<string?> CreateJsonOption() => new("--json")
+    private static Option<string?> CreateJsonOption() => new CliJsonOption("--json")
     {
         Description = "Return selected fields, or list available fields when no value is supplied",
         Arity = ArgumentArity.ZeroOrOne,
@@ -173,7 +173,7 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null, Func<TimeSpan, CancellationToken, Task>? pollWait = null)
+    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null, Func<TimeSpan, CancellationToken, Task>? pollWait = null, Func<string?>? getLocalHostname = null)
     {
         OutputOptionState.Explicit = false;
         if (IsDirectSlackCredentialArgument(args))
@@ -199,54 +199,23 @@ internal static class MohistCliCommands
             BaseAddress = http.BaseAddress,
             Timeout = http.Timeout,
         };
-        var terminal = terminalOverride ?? new CliTerminal(standardInput is null || standardInput == Console.In
-            ? !Console.IsInputRedirected
-            : standardInput != TextReader.Null);
-        var cliEnvironment = new EnvironmentVariableAdapter(environment);
-        var api = new MohistCliApi(
-            http,
-            output,
-            error,
-            fileSystem,
-            commandExecutor,
-            standardInput,
-            effectiveUserHome,
-            terminal: terminal,
-            cliEnvironment: cliEnvironment,
-            timeProvider: timeProvider,
-            pollWait: pollWait,
-            cancellationToken: cancellationToken);
-        var services = new ServiceCollection();
-        services.AddSingleton(api);
-        services.AddSingleton(api.ResponseReader);
-        services.AddSingleton(output);
-        services.AddSingleton(error);
-        services.AddSingleton<IFileSystem>(fileSystem);
-        services.AddSingleton<ICommandExecutor>(commandExecutor);
-        services.AddSingleton<IEnvironmentVariableProvider>(environment);
-        services.AddSingleton(http);
-        // Production callers leave installer/updater null and the default
-        // SystemdServiceInstaller / WindowsScheduledTaskInstaller and a default
-        // SourceCodeUpdater are constructed. Tests inject fakes so install/update
-        // specs never touch real systemd/Task Scheduler/source rebuilds
-        // (design/testing.md constraint 1).
-        services.AddSingleton<IServiceInstaller>(installer ?? BuildDefaultInstaller(output, error, fileSystem, commandExecutor));
-        if (updater is not null)
-            services.AddSingleton(updater);
-        else
-            services.AddSingleton<SourceCodeUpdater>();
-        services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), commandExecutor, fileSystem, environment));
-        services.AddSingleton(new RuntimeConsistencyValidator(http, commandExecutor, fileSystem, environment, output));
-        services.AddSingleton(new ServiceReadinessProbe(http, output));
-        services.AddSingleton(new RunnerRefreshVerifier(http, commandExecutor, fileSystem));
-        services.AddSingleton(new UpdateOutcomeReporter(http, output));
-        services.AddSingleton<SkillAssetService>();
-        services.AddSingleton<SkillInstallService>();
-        services.AddSingleton<InfoVerboseCollector>();
-        services.AddSingleton<InfoCollector>();
-        services.AddSingleton<InfoRenderer>();
-        var provider = services.BuildServiceProvider();
-        var root = Build(api, provider);
+        var composition = CliComposition.Create(new CliCompositionOptions(
+            Http: http,
+            Output: output,
+            Error: error,
+            FileSystem: fileSystem,
+            CommandExecutor: commandExecutor,
+            Environment: environment,
+            StandardInput: standardInput,
+            Installer: installer,
+            Updater: updater,
+            GetUserHome: effectiveUserHome,
+            GetLocalHostname: getLocalHostname,
+            CancellationToken: cancellationToken,
+            Terminal: terminalOverride,
+            TimeProvider: timeProvider,
+            PollWait: pollWait));
+        var root = composition.Root;
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
         var parseResult = CommandLineParser.Parse(root, args, parseConfig);
@@ -328,20 +297,6 @@ internal static class MohistCliCommands
     private static bool IsJsonFieldList(string value) =>
         value.Split(',', StringSplitOptions.RemoveEmptyEntries)
             .All(part => part.Length > 0 && part.All(char.IsAsciiLetterOrDigit));
-
-    private sealed class EnvironmentVariableAdapter : ICliEnvironment
-    {
-        private readonly IEnvironmentVariableProvider _provider;
-
-        public EnvironmentVariableAdapter(IEnvironmentVariableProvider provider) => _provider = provider;
-
-        public string? Get(string name) => _provider.GetEnvironmentVariable(name);
-    }
-
-    private static IServiceInstaller BuildDefaultInstaller(TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor)
-        => OperatingSystem.IsWindows()
-            ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor)
-            : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor);
 
     internal static SourceCodeUpdater ResolveSourceCodeUpdater(IServiceProvider provider)
     {

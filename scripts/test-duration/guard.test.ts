@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { mock, test } from 'node:test'
 
 import {
@@ -12,16 +13,23 @@ import {
   runProcessWithDeadline,
   writeExecutionProvenance,
 } from './guard.js'
+import { parseSuiteConfig } from './config.js'
 import { formatEvaluation, formatSummary, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
-import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import type {
+  CurrentExecutionIdentity,
+  ExecutionLedgerExpectation,
+  TrackConfig,
+  TrackEvaluation,
+  TrackRun,
+} from './types.js'
 
 const fastCaseUid = '1'.repeat(64)
 
 function fastManifest() {
-  return manifestFromDiscovery(JSON.stringify([
-    { ID: fastCaseUid, DisplayName: 'Ns.Cli.Fast', Class: 'Ns.Cli', Method: 'Fast' },
-  ]))
+  return manifestFromDiscovery(
+    JSON.stringify([{ ID: fastCaseUid, DisplayName: 'Ns.Cli.Fast', Class: 'Ns.Cli', Method: 'Fast' }]),
+  )
 }
 
 function captureStderr(): { calls: () => string; restore: () => void } {
@@ -33,7 +41,11 @@ function captureStderr(): { calls: () => string; restore: () => void } {
 }
 
 test('parseArgs: focused with both arguments resolves the request', () => {
-  const args = parseArgs(['focused', 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj', 'Mohist.Cli.Tests.Skills.SkillsContentTests'])
+  const args = parseArgs([
+    'focused',
+    'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj',
+    'Mohist.Cli.Tests.Skills.SkillsContentTests',
+  ])
   assert.equal(args.mode, 'focused')
   assert.equal(args.focused?.csproj, 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj')
   assert.equal(args.focused?.className, 'Mohist.Cli.Tests.Skills.SkillsContentTests')
@@ -51,40 +63,76 @@ test('commandFor appends dotnet apphost arguments after the default report argum
     enforce: false,
   }
   const command = commandFor(track)
-  assert.deepEqual(command.args.slice(-6), ['-noColor', '-noLogo', '-trx', `${process.cwd()}/reports/unit.trx`, '-parallel', 'none'])
+  assert.deepEqual(command.args.slice(-6), [
+    '-noColor',
+    '-noLogo',
+    '-trx',
+    `${process.cwd()}/reports/unit.trx`,
+    '-parallel',
+    'none',
+  ])
 })
 
 test('parallelism provenance records every effective xUnit default and explicit override', () => {
   const track: TrackConfig = {
-    id: 'cli', kind: 'dotnet-apphost', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
+    id: 'cli',
+    kind: 'dotnet-apphost',
+    report: 'reports/cli.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
   }
   assert.equal(parallelismFor(track), DEFAULT_XUNIT_PARALLELISM)
   assert.equal(
-    parallelismFor({ ...track, apphostArgs: ['-parallel', 'none', '-parallelAlgorithm', 'aggressive', '-maxThreads', '2'] }),
+    parallelismFor({
+      ...track,
+      apphostArgs: ['-parallel', 'none', '-parallelAlgorithm', 'aggressive', '-maxThreads', '2'],
+    }),
     'xunit-v3:parallel=none;parallelAlgorithm=aggressive;maxThreads=2',
   )
-  assert.throws(() => parallelismFor({ ...track, apphostArgs: ['-parallel', 'collections', '-parallel', 'none'] }), /duplicate xUnit option/)
+  assert.throws(
+    () => parallelismFor({ ...track, apphostArgs: ['-parallel', 'collections', '-parallel', 'none'] }),
+    /duplicate xUnit option/,
+  )
   assert.throws(() => parallelismFor({ ...track, apphostArgs: ['-maxThreads'] }), /requires a value/)
+})
+
+test('checked-in CLI duration track keeps cold composition concurrency at four workers', () => {
+  const config = parseSuiteConfig(readFileSync(new URL('../../test-duration.config.jsonc', import.meta.url), 'utf8'))
+  const cliTrack = config.tracks.find((track) => track.id === 'cli')
+
+  assert.ok(cliTrack)
+  assert.deepEqual(cliTrack.apphostArgs, [
+    '-preEnumerateTheories',
+    '-parallel',
+    'collections',
+    '-parallelAlgorithm',
+    'conservative',
+    '-maxThreads',
+    '4',
+  ])
+  assert.equal(parallelismFor(cliTrack), 'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=4')
 })
 
 test('execution provenance writer creates its parent and writes through a fake artifact store', () => {
   const manifest = fastManifest()
   const calls: string[] = []
-  writeExecutionProvenance('/virtual/reports/cli.execution-provenance.json', {
-    runId: 'run-1',
-    manifest,
-    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
-    assemblySha256: 'a'.repeat(64),
-    sourceSha256: 'b'.repeat(64),
-    parallelism: DEFAULT_XUNIT_PARALLELISM,
-  }, {
-    ensureDirectory: (path) => calls.push(`mkdir:${path}`),
-    writeText: (path, content) => calls.push(`write:${path}:${JSON.parse(content).runId}`),
-  })
-  assert.deepEqual(calls, [
-    'mkdir:/virtual/reports',
-    'write:/virtual/reports/cli.execution-provenance.json:run-1',
-  ])
+  writeExecutionProvenance(
+    '/virtual/reports/cli.execution-provenance.json',
+    {
+      runId: 'run-1',
+      manifest,
+      assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+      assemblySha256: 'a'.repeat(64),
+      sourceSha256: 'b'.repeat(64),
+      parallelism: DEFAULT_XUNIT_PARALLELISM,
+    },
+    {
+      ensureDirectory: (path) => calls.push(`mkdir:${path}`),
+      writeText: (path, content) => calls.push(`write:${path}:${JSON.parse(content).runId}`),
+    },
+  )
+  assert.deepEqual(calls, ['mkdir:/virtual/reports', 'write:/virtual/reports/cli.execution-provenance.json:run-1'])
 })
 
 test('createTimeout can be cancelled so completed tracks do not retain deadline timers', () => {
@@ -108,12 +156,16 @@ test('createTimeout can be cancelled so completed tracks do not retain deadline 
 
 test('compiled discovery timeout uses the existing deadline path without reporting cleanup proof', async () => {
   let expire!: (reason: 'track') => void
-  const timeout = new Promise<'track'>((resolvePromise) => { expire = resolvePromise })
+  const timeout = new Promise<'track'>((resolvePromise) => {
+    expire = resolvePromise
+  })
   let killed = false
   const running = runProcessWithDeadline({
     child: { pid: 42, done: new Promise<{ exitCode: number | null; stdout: string }>(() => undefined) },
     timeout,
-    kill: async () => { killed = true },
+    kill: async () => {
+      killed = true
+    },
     now: () => 100,
   })
 
@@ -151,38 +203,62 @@ test('--check evaluates authoritative saved provenance and ledger without an in-
     rules: [{ id: 'unit', absoluteMs: 50 }],
   }
   const artifacts = new Map<string, string>([
-    [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
+    [
+      track.report,
+      '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>',
+    ],
     [track.executionProvenance!, serializeExecutionProvenance(expected)],
-    [track.executionLedger!, JSON.stringify({
-      schemaVersion: 2,
-      runId: expected.runId,
-      manifestHash: manifest.hash,
-      manifestCount: 1,
+    [
+      track.executionLedger!,
+      JSON.stringify({
+        schemaVersion: 2,
+        runId: expected.runId,
+        manifestHash: manifest.hash,
+        manifestCount: 1,
+        assemblyPath: expected.assemblyPath,
+        assemblySha256: expected.assemblySha256,
+        sourceSha256: expected.sourceSha256,
+        xunitVersion: '3.2.2.0',
+        mtpVersion: '1.9.1.0',
+        parallelism: expected.parallelism,
+        durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
+        durationUnit: 'seconds',
+        cases: [
+          {
+            uid: 'fast',
+            testCaseUid: fastCaseUid,
+            name: 'Ns.Cli.Fast',
+            className: 'Ns.Cli',
+            collectionName: 'Ns.Cli collection',
+            outcome: 'passed',
+            executionTimeSeconds: 0.01,
+            startTime: '2026-08-11T00:00:00Z',
+            finishTime: '2026-08-11T00:00:01Z',
+          },
+        ],
+      }),
+    ],
+  ])
+
+  const result = evaluateTrackArtifacts(
+    track,
+    {
+      readText: (path) => {
+        const value = artifacts.get(path)
+        if (value === undefined) throw new Error(`missing ${path}`)
+        return value
+      },
+    },
+    undefined,
+    new Date('2026-08-11T00:00:00Z'),
+    {
+      manifest,
       assemblyPath: expected.assemblyPath,
       assemblySha256: expected.assemblySha256,
       sourceSha256: expected.sourceSha256,
-      xunitVersion: '3.2.2.0',
-      mtpVersion: '1.9.1.0',
       parallelism: expected.parallelism,
-      durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
-      durationUnit: 'seconds',
-      cases: [{ uid: 'fast', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli', collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T00:00:00Z', finishTime: '2026-08-11T00:00:01Z' }],
-    })],
-  ])
-
-  const result = evaluateTrackArtifacts(track, {
-    readText: (path) => {
-      const value = artifacts.get(path)
-      if (value === undefined) throw new Error(`missing ${path}`)
-      return value
     },
-  }, undefined, new Date('2026-08-11T00:00:00Z'), {
-    manifest,
-    assemblyPath: expected.assemblyPath,
-    assemblySha256: expected.assemblySha256,
-    sourceSha256: expected.sourceSha256,
-    parallelism: expected.parallelism,
-  })
+  )
 
   assert.equal(result.total, 1)
   assert.equal(result.passed, true)
@@ -229,35 +305,59 @@ function savedExecutionFixture(): {
     expected,
     current,
     artifacts: new Map([
-      [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
+      [
+        track.report,
+        '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>',
+      ],
       [track.executionProvenance!, serializeExecutionProvenance(expected)],
-      [track.executionLedger!, JSON.stringify({
-        schemaVersion: 2,
-        runId: expected.runId,
-        manifestHash: manifest.hash,
-        manifestCount: 1,
-        assemblyPath: expected.assemblyPath,
-        assemblySha256: expected.assemblySha256,
-        sourceSha256: expected.sourceSha256,
-        xunitVersion: '3.2.2.0',
-        mtpVersion: '1.9.1.0',
-        parallelism: expected.parallelism,
-        durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
-        durationUnit: 'seconds',
-        cases: [{ uid: 'fast', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli', collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01, startTime: '2026-08-11T00:00:00Z', finishTime: '2026-08-11T00:00:01Z' }],
-      })],
+      [
+        track.executionLedger!,
+        JSON.stringify({
+          schemaVersion: 2,
+          runId: expected.runId,
+          manifestHash: manifest.hash,
+          manifestCount: 1,
+          assemblyPath: expected.assemblyPath,
+          assemblySha256: expected.assemblySha256,
+          sourceSha256: expected.sourceSha256,
+          xunitVersion: '3.2.2.0',
+          mtpVersion: '1.9.1.0',
+          parallelism: expected.parallelism,
+          durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
+          durationUnit: 'seconds',
+          cases: [
+            {
+              uid: 'fast',
+              testCaseUid: fastCaseUid,
+              name: 'Ns.Cli.Fast',
+              className: 'Ns.Cli',
+              collectionName: 'Ns.Cli collection',
+              outcome: 'passed',
+              executionTimeSeconds: 0.01,
+              startTime: '2026-08-11T00:00:00Z',
+              finishTime: '2026-08-11T00:00:01Z',
+            },
+          ],
+        }),
+      ],
     ]),
   }
 }
 
 function evaluateSavedFixture(fixture: ReturnType<typeof savedExecutionFixture>): TrackEvaluation {
-  return evaluateTrackArtifacts(fixture.track, {
-    readText: (path) => {
-      const value = fixture.artifacts.get(path)
-      if (value === undefined) throw new Error(`missing ${path}`)
-      return value
+  return evaluateTrackArtifacts(
+    fixture.track,
+    {
+      readText: (path) => {
+        const value = fixture.artifacts.get(path)
+        if (value === undefined) throw new Error(`missing ${path}`)
+        return value
+      },
     },
-  }, undefined, new Date('2026-08-11T00:00:00Z'), fixture.current)
+    undefined,
+    new Date('2026-08-11T00:00:00Z'),
+    fixture.current,
+  )
 }
 
 test('--check rejects an empty TRX with Total=0', () => {
@@ -273,7 +373,10 @@ test('--check rejects an empty TRX with Total=0', () => {
 
 test('--check rejects a TRX-ledger outcome mismatch', () => {
   const fixture = savedExecutionFixture()
-  fixture.artifacts.set(fixture.track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Failed" duration="00:00:00.9000000"/></Results></TestRun>')
+  fixture.artifacts.set(
+    fixture.track.report,
+    '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Failed" duration="00:00:00.9000000"/></Results></TestRun>',
+  )
 
   const result = evaluateSavedFixture(fixture)
 
