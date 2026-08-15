@@ -1,4 +1,4 @@
-import type { AllowlistEntry, BudgetRule, SuiteConfig, TrackConfig } from './types.js'
+import type { AllowlistEntry, BudgetRule, CanonicalGateConfig, SuiteConfig, TrackConfig } from './types.js'
 
 export function stripJsonc(text: string): string {
   let out = ''
@@ -60,6 +60,7 @@ export function validateConfig(config: SuiteConfig): string[] {
     ids.add(track.id)
     errors.push(...validateTrack(track))
   }
+  if (config.canonical !== undefined) errors.push(...validateCanonical(config.canonical, config.tracks))
   return errors
 }
 
@@ -96,6 +97,15 @@ function validateTrack(track: TrackConfig): string[] {
     errors.push(`${prefix}: apphostArgs must contain only strings`)
   }
   if (track.deadlineMs <= 0) errors.push(`${prefix}: deadlineMs must be positive`)
+  if (track.partitions !== undefined && (!Number.isInteger(track.partitions) || track.partitions < 2)) {
+    errors.push(`${prefix}: partitions must be an integer greater than one`)
+  }
+  if (track.partitions !== undefined && track.kind !== 'dotnet-apphost') {
+    errors.push(`${prefix}: partitions require kind dotnet-apphost`)
+  }
+  if (track.partitions !== undefined && !track.report.includes('{partition}')) {
+    errors.push(`${prefix}: partitioned reports must include {partition}`)
+  }
   if (track.kind !== 'report-only' && !track.run && !track.csproj && !track.apphost) {
     errors.push(`${prefix}: needs a run command, csproj, or apphost`)
   }
@@ -103,6 +113,9 @@ function validateTrack(track: TrackConfig): string[] {
     errors.push(`${prefix}: unknown reportFormat "${track.reportFormat}"`)
   }
   if (track.enforce) {
+    if (track.status === 'baseline-pending') {
+      errors.push(`${prefix}: enforce=true cannot use status baseline-pending`)
+    }
     const rules = track.rules ?? []
     if (rules.length === 0) {
       errors.push(`${prefix}: enforce=true requires at least one rule`)
@@ -114,6 +127,61 @@ function validateTrack(track: TrackConfig): string[] {
       }
     }
     for (const rule of rules) errors.push(...validateRule(rule, prefix))
+  } else {
+    if (track.status !== 'baseline-pending') {
+      errors.push(`${prefix}: enforce=false requires status baseline-pending`)
+    }
+    if (!track.reason?.trim()) {
+      errors.push(`${prefix}: enforce=false requires a non-empty baseline-pending reason`)
+    }
+    if ((track.rules?.length ?? 0) > 0) {
+      errors.push(`${prefix}: enforce=false must not carry unenforced rules`)
+    }
+  }
+  return errors
+}
+
+function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackConfig[]): string[] {
+  const errors: string[] = []
+  if (!Number.isInteger(config.maxConcurrentLanes) || config.maxConcurrentLanes <= 0) {
+    errors.push('canonical.maxConcurrentLanes must be a positive integer')
+  }
+  if (config.resourceLimits === null || typeof config.resourceLimits !== 'object' || Array.isArray(config.resourceLimits)) {
+    errors.push('canonical.resourceLimits must be an object')
+    return errors
+  }
+  for (const [resource, limit] of Object.entries(config.resourceLimits)) {
+    if (!Number.isInteger(limit) || limit <= 0) {
+      errors.push(`canonical.resourceLimits.${resource} must be a positive integer`)
+    }
+  }
+  if (config.durationMeasurementTracks !== undefined) {
+    if (!Array.isArray(config.durationMeasurementTracks) || config.durationMeasurementTracks.length === 0) {
+      errors.push('canonical.durationMeasurementTracks must be a non-empty array of track ids')
+      return errors
+    }
+    if (config.resourceLimits['duration-measurement'] === undefined) {
+      errors.push('canonical.durationMeasurementTracks requires canonical.resourceLimits.duration-measurement')
+    }
+    const knownTracks = new Map(tracks.map((track) => [track.id, track]))
+    const seen = new Set<string>()
+    for (const trackId of config.durationMeasurementTracks) {
+      if (typeof trackId !== 'string' || !trackId) {
+        errors.push('canonical.durationMeasurementTracks must contain only non-empty track ids')
+        continue
+      }
+      if (seen.has(trackId)) {
+        errors.push(`canonical.durationMeasurementTracks contains duplicate track id: ${trackId}`)
+        continue
+      }
+      seen.add(trackId)
+      const track = knownTracks.get(trackId)
+      if (!track) {
+        errors.push(`canonical.durationMeasurementTracks references unknown track: ${trackId}`)
+      } else if (track.partitions !== undefined) {
+        errors.push(`canonical.durationMeasurementTracks cannot include partitioned track: ${trackId}`)
+      }
+    }
   }
   return errors
 }
@@ -123,7 +191,10 @@ function validateRule(rule: BudgetRule, prefix: string): string[] {
   const rp = `${prefix}: rule "${rule.id}"`
   if (!rule.id) errors.push(`${rp}: missing id`)
   if (rule.absoluteMs <= 0) errors.push(`${rp}: absoluteMs must be positive`)
-  if (rule.percentile !== undefined && (rule.percentileMs === undefined || rule.percentileMs < 0)) {
+  if (
+    rule.percentile !== undefined &&
+    (rule.percentileMs === undefined || rule.percentileMs < 0)
+  ) {
     errors.push(`${rp}: percentile set without a valid percentileMs`)
   }
   for (const entry of rule.allowlist ?? []) {
