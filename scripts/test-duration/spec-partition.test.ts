@@ -53,7 +53,7 @@ test('Spec partition planning balances whole classes by discovered case count', 
 })
 
 test('Spec partition execution fixes the aggregate inner concurrency and keeps whole-class filters', () => {
-  assert.deepEqual(partitionExecutionArguments('/evidence/spec.trx', ['Ns.Alpha', 'Ns.Beta'], 2), [
+  assert.deepEqual(partitionExecutionArguments('/evidence/spec.trx', ['Ns.Alpha', 'Ns.Beta'], 1), [
     '-noColor',
     '-noLogo',
     '-noAutoReporters',
@@ -64,7 +64,7 @@ test('Spec partition execution fixes the aggregate inner concurrency and keeps w
     '-parallelAlgorithm',
     'conservative',
     '-maxThreads',
-    '2',
+    '1',
     '-class',
     'Ns.Alpha',
     '-class',

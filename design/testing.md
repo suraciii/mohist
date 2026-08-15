@@ -263,7 +263,7 @@ dependencies and all claimed resources are available, and an already-aborted
 schedule admits none. Node duration commands place reporter arguments on their
 terminal `vitest run` invocation, and execute TypeScript boundary checks through
 `node --import tsx` rather than the `tsx` CLI IPC server. Each lane owns its
-`TMPDIR`, `TEMP`, `TMP`, HOME, and runtime IPC directory. The two concurrent
+`TMPDIR`, `TEMP`, `TMP`, HOME, and runtime IPC directory. The four concurrent
 Server Spec lanes additionally own their main SQLite path, OTel SQLite path, and
 logical OTLP endpoint scope; unit lanes retain their product-default configuration
 so their default-value assertions remain meaningful. The Spec lanes use a
@@ -285,8 +285,8 @@ member depends on the previous member's terminal lane. A partitioned member
 uses its coverage lane as the phase barrier. The optional
 `canonical.durationIsolationTrack` is admitted
 after that prefix and gates other Vitest lanes. The current measurement set is
-the CLI track followed by Server Spec: two partition apphosts each run two
-xUnit collections at a time, so aggregate Spec execution concurrency is four.
+the CLI track followed by Server Spec: four partition apphosts each run one
+xUnit collection at a time, so aggregate Spec execution concurrency is four.
 Server Unit, Server Arch, Workflow, and Node throughput lanes start after Spec
 coverage completes; Runner remains the isolated Node track. This preserves
 parallel partitions without changing duration thresholds. The phase is applied
@@ -327,7 +327,7 @@ empty, failed, skipped, or not-run report is a failure, not a green omission.
 
 CI invokes `npm run verify` once in one job after one dependency install. That
 job runs the same canonical scheduler, fresh build, resources, duration
-measurement prefix, two Spec partitions, coverage lane, report parser, and
+measurement prefix, four Spec partitions, coverage lane, report parser, and
 failure semantics as local execution. CI uploads that one external diagnostic
 run directory after success or failure; it does not reconstruct a gate by
 downloading reports from separately built jobs. The CI machine boundary supplies

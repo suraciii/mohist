@@ -633,8 +633,8 @@ test('planTracks gives every Server Spec partition its own report, temp, and end
     apphost: 'bin/spec',
     report: 'reports/server-spec/partition-{partition}.trx',
     reportFormat: 'trx',
-    partitions: 2,
-    partitionMaxThreads: 2,
+    partitions: 4,
+    partitionMaxThreads: 1,
     deadlineMs: 1000,
     enforce: true,
     rules: [{ id: 'spec', absoluteMs: 5000 }],
@@ -642,18 +642,23 @@ test('planTracks gives every Server Spec partition its own report, temp, and end
   const planned = planTracks([spec], '/evidence')
   assert.deepEqual(
     planned.map((lane) => lane.lane.id),
-    ['server-spec-0', 'server-spec-1', 'server-spec-coverage'],
+    ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3', 'server-spec-coverage'],
   )
   assert.deepEqual(
-    planned.slice(0, 2).map((lane) => lane.reportPath),
-    ['/evidence/reports/server-spec/partition-0.trx', '/evidence/reports/server-spec/partition-1.trx'],
+    planned.slice(0, 4).map((lane) => lane.reportPath),
+    [
+      '/evidence/reports/server-spec/partition-0.trx',
+      '/evidence/reports/server-spec/partition-1.trx',
+      '/evidence/reports/server-spec/partition-2.trx',
+      '/evidence/reports/server-spec/partition-3.trx',
+    ],
   )
   assert.deepEqual(planned[1].lane.resources?.slice(-2), ['spec-report-1', 'spec-temp-1'])
-  assert.equal(planned[0].executionTrack?.partitionMaxThreads, 2)
-  assert.deepEqual(planned[2].lane.dependsOn, ['server-spec-0', 'server-spec-1'])
+  assert.equal(planned[0].executionTrack?.partitionMaxThreads, 1)
+  assert.deepEqual(planned[4].lane.dependsOn, ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3'])
   assert.deepEqual(
     planned.map((lane) => lane.sandboxOrdinal),
-    [0, 1, 2],
+    [0, 1, 2, 3, 4],
   )
 })
 
@@ -700,8 +705,8 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     apphost: 'bin/spec',
     report: 'reports/spec-{partition}.trx',
     reportFormat: 'trx',
-    partitions: 2,
-    partitionMaxThreads: 2,
+    partitions: 4,
+    partitionMaxThreads: 1,
     deadlineMs: 1000,
     enforce: false,
   }
@@ -716,9 +721,17 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
   assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['cli'])
-  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, ['server-spec-0', 'server-spec-1', 'cli'])
+  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, [
+    'server-spec-0',
+    'server-spec-1',
+    'server-spec-2',
+    'server-spec-3',
+    'cli',
+  ])
   assert.ok(!byId.get('server-spec-0')?.resources?.includes('duration-measurement'))
   assert.ok(!byId.get('server-spec-1')?.resources?.includes('duration-measurement'))
+  assert.ok(!byId.get('server-spec-2')?.resources?.includes('duration-measurement'))
+  assert.ok(!byId.get('server-spec-3')?.resources?.includes('duration-measurement'))
 
   const focused = planTracks([unit], '/evidence', ['cli', 'server-spec'], 'runner')
   assert.deepEqual(focused[0].lane.dependsOn, undefined)
