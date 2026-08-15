@@ -58,10 +58,12 @@ public class AgentGrain : Grain, IAgentGrain
             ProjectId = projectId,
             Name = data.Name,
             Avatar = data.Avatar,
+            Purpose = data.Purpose,
             Description = data.Description ?? string.Empty,
             Instructions = data.Instructions,
             AgentConfig = Clone(data.AgentConfig),
             Skills = data.Skills?.ToArray() ?? [],
+            Permissions = data.Permissions?.ToArray() ?? [],
             AllowedSubagentAgentIds = await ValidateAllowedSubagentsAsync(projectId, agentId, data.AllowedSubagentAgentIds),
             MaxConcurrentRuns = data.MaxConcurrentRuns,
             Status = AgentStatus.Active,
@@ -90,10 +92,12 @@ public class AgentGrain : Grain, IAgentGrain
 
         if (data.Fields.Contains(nameof(data.Name))) _agent.Name = data.Name!;
         if (data.Fields.Contains(nameof(data.Avatar))) _agent.Avatar = data.Avatar;
+        if (data.Fields.Contains(nameof(data.Purpose))) _agent.Purpose = data.Purpose;
         if (data.Fields.Contains(nameof(data.Description))) _agent.Description = data.Description ?? string.Empty;
         if (data.Fields.Contains(nameof(data.Instructions))) _agent.Instructions = data.Instructions ?? string.Empty;
         if (data.Fields.Contains(nameof(data.AgentConfig))) _agent.AgentConfig = Clone(data.AgentConfig);
         if (data.Fields.Contains(nameof(data.Skills))) _agent.Skills = data.Skills?.ToArray() ?? [];
+        if (data.Fields.Contains(nameof(data.Permissions))) _agent.Permissions = data.Permissions?.ToArray() ?? [];
         if (data.Fields.Contains(nameof(data.AllowedSubagentAgentIds)))
             _agent.AllowedSubagentAgentIds = await ValidateAllowedSubagentsAsync(_agent.ProjectId, _agent.Id, data.AllowedSubagentAgentIds);
         if (data.Fields.Contains(nameof(data.MaxConcurrentRuns))) _agent.MaxConcurrentRuns = data.MaxConcurrentRuns;

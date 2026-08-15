@@ -448,8 +448,13 @@ export function AgentDetailPage({
                 </Badge>
               </div>
               <p data-testid="agent-detail-purpose" className="mt-0.5 text-xs text-muted-foreground">
-                {agent.description?.trim() || 'No purpose set'}
+                {agent.purpose?.trim() || 'No purpose set'}
               </p>
+              {agent.description.trim() && (
+                <p data-testid="agent-detail-description" className="mt-0.5 text-xs text-muted-foreground">
+                  {agent.description}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground mt-0.5">
                 {model ? `Model · ${model}` : 'Model · Default'}
                 {variant && ` · ${variant}`}
@@ -562,8 +567,8 @@ export function AgentDetailPage({
                   data-testid="agent-detail-edit-timing"
                   className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground"
                 >
-                  Instructions, Runtime, Model, Variant, and Skills edits apply only to Jobs created after saving.
-                  Executions already in progress keep the configuration from launch.
+                  Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills edits apply only to Jobs
+                  created after saving. Executions already in progress keep the configuration from launch.
                 </p>
               </div>
             </div>
@@ -580,6 +585,23 @@ export function AgentDetailPage({
                 </div>
               ) : (
                 <span className="text-xs text-muted-foreground/50 italic">No skills configured</span>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground mb-3">Declared permissions</h3>
+              {agent.permissions.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5" data-testid="agent-detail-permissions">
+                  {agent.permissions.map((permission) => (
+                    <Badge key={permission} variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                      {permission}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <span data-testid="agent-detail-permissions" className="text-xs text-muted-foreground/50 italic">
+                  No permissions declared
+                </span>
               )}
             </div>
 

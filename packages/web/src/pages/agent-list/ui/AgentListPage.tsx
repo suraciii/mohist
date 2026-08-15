@@ -103,7 +103,7 @@ function AgentRow({
               )}
             </div>
             <p data-testid={`agent-purpose-${agent.id}`} className="mt-2 text-xs text-muted-foreground">
-              {agent.description?.trim() || 'No purpose set'}
+              {agent.purpose?.trim() || 'No purpose set'}
             </p>
           </div>
 

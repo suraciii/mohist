@@ -39,7 +39,8 @@ public static class BuiltInAgentCatalog
             MaxConcurrentRuns: null,
             Status: Domain.AgentStatus.Active,
             CreatedAt: string.Empty,
-            UpdatedAt: string.Empty);
+            UpdatedAt: string.Empty,
+            Permissions: []);
     }
 
     private static System.Text.Json.JsonElement AgentConfig(BuiltInAgentDefinition definition)

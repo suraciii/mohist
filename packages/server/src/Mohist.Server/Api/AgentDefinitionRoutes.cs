@@ -30,6 +30,9 @@ public static class AgentDefinitionRoutes
             var agentConfigError = AgentConfigSchema.Validate(req.AgentConfig);
             if (agentConfigError is not null)
                 return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
+            var permissionsError = AgentPermissionVocabulary.Validate(req.Raw);
+            if (permissionsError is not null)
+                return ApiResults.BadRequest(permissionsError, "invalid_agent_permissions");
 
             var projectId = context.GetResolvedProject().Id;
             var agentId = $"agent_{Guid.NewGuid():N}";
@@ -46,7 +49,9 @@ public static class AgentDefinitionRoutes
                     req.Skills,
                     req.MaxConcurrentRuns,
                     req.AllowedSubagentAgentIds,
-                    req.Avatar));
+                    req.Avatar,
+                    Purpose: req.Purpose,
+                    Permissions: req.Permissions));
                 return Results.Json(new ApiResponse<AgentInfo>(true, created), statusCode: 201);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -97,6 +102,9 @@ public static class AgentDefinitionRoutes
                 if (agentConfigError is not null)
                     return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
             }
+            var permissionsError = AgentPermissionVocabulary.Validate(req.Raw);
+            if (permissionsError is not null)
+                return ApiResults.BadRequest(permissionsError, "invalid_agent_permissions");
 
             var maxConcurrentRunsError = ValidateMaxConcurrentRuns(req.Raw);
             if (maxConcurrentRunsError is not null)
@@ -118,7 +126,9 @@ public static class AgentDefinitionRoutes
                     req.MaxConcurrentRuns,
                     req.Fields,
                     req.AllowedSubagentAgentIds,
-                    req.Avatar));
+                    req.Avatar,
+                    Purpose: req.Purpose,
+                    Permissions: req.Permissions));
                 return updated is null ? ApiResults.NotFound($"Agent {id} not found") : ApiResults.Ok(updated);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -191,8 +201,10 @@ public sealed record AgentCreateRequest(
     string Name,
     string Instructions,
     string? Description = null,
+    string? Purpose = null,
     JsonElement? AgentConfig = null,
     IReadOnlyList<string>? Skills = null,
+    IReadOnlyList<string>? Permissions = null,
     int? MaxConcurrentRuns = null,
     IReadOnlyList<string>? AllowedSubagentAgentIds = null,
     string? Avatar = null,
@@ -205,8 +217,10 @@ public sealed record AgentCreateRequest(
             AgentDefinitionRequestBinding.GetString(raw, "name") ?? string.Empty,
             AgentDefinitionRequestBinding.GetString(raw, "instructions") ?? string.Empty,
             AgentDefinitionRequestBinding.GetString(raw, "description"),
+            AgentDefinitionRequestBinding.GetString(raw, "purpose"),
             AgentDefinitionRequestBinding.GetElement(raw, "agentConfig"),
             AgentDefinitionRequestBinding.GetStringList(raw, "skills"),
+            AgentDefinitionRequestBinding.GetPermissionList(raw),
             AgentDefinitionRequestBinding.GetInt(raw, "maxConcurrentRuns"),
             AgentDefinitionRequestBinding.GetStringList(raw, "allowedSubagentAgentIds"),
             AgentDefinitionRequestBinding.GetString(raw, "avatar"),
@@ -217,9 +231,11 @@ public sealed record AgentCreateRequest(
 public sealed record AgentUpdateRequest(
     string? Name,
     string? Description,
+    string? Purpose,
     string? Instructions,
     JsonElement? AgentConfig,
     IReadOnlyList<string>? Skills,
+    IReadOnlyList<string>? Permissions,
     int? MaxConcurrentRuns,
     IReadOnlyList<string>? AllowedSubagentAgentIds,
     IReadOnlySet<string> Fields,
@@ -232,9 +248,11 @@ public sealed record AgentUpdateRequest(
         return new AgentUpdateRequest(
             AgentDefinitionRequestBinding.GetString(raw, "name"),
             AgentDefinitionRequestBinding.GetString(raw, "description"),
+            AgentDefinitionRequestBinding.GetString(raw, "purpose"),
             AgentDefinitionRequestBinding.GetString(raw, "instructions"),
             AgentDefinitionRequestBinding.GetElement(raw, "agentConfig"),
             AgentDefinitionRequestBinding.GetStringList(raw, "skills"),
+            AgentDefinitionRequestBinding.GetPermissionList(raw),
             AgentDefinitionRequestBinding.GetInt(raw, "maxConcurrentRuns"),
             AgentDefinitionRequestBinding.GetStringList(raw, "allowedSubagentAgentIds"),
             GetFields(raw),
@@ -249,9 +267,11 @@ public sealed record AgentUpdateRequest(
         if (raw.TryGetProperty("name", out _)) fields.Add(nameof(Name));
         if (raw.TryGetProperty("avatar", out _)) fields.Add(nameof(Avatar));
         if (raw.TryGetProperty("description", out _)) fields.Add(nameof(Description));
+        if (raw.TryGetProperty("purpose", out _)) fields.Add(nameof(Purpose));
         if (raw.TryGetProperty("instructions", out _)) fields.Add(nameof(Instructions));
         if (raw.TryGetProperty("agentConfig", out _)) fields.Add(nameof(AgentConfig));
         if (raw.TryGetProperty("skills", out _)) fields.Add(nameof(Skills));
+        if (raw.TryGetProperty("permissions", out _)) fields.Add(nameof(Permissions));
         if (raw.TryGetProperty("maxConcurrentRuns", out _)) fields.Add(nameof(MaxConcurrentRuns));
         if (raw.TryGetProperty("allowedSubagentAgentIds", out _)) fields.Add(nameof(AllowedSubagentAgentIds));
         return fields;
@@ -274,6 +294,13 @@ internal static class AgentDefinitionRequestBinding
     public static IReadOnlyList<string>? GetStringList(JsonElement raw, string property) =>
         raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray().Select(item => item.GetString() ?? string.Empty).ToArray()
+            : null;
+
+    // Permission validation happens in the route handler, so binding must preserve
+    // malformed elements long enough for that boundary to return its API error.
+    public static IReadOnlyList<string>? GetPermissionList(JsonElement raw) =>
+        raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("permissions", out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() ?? string.Empty : string.Empty).ToArray()
             : null;
 
     public static int? GetInt(JsonElement raw, string property) =>

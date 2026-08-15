@@ -1,0 +1,22 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver the current-master #560 purpose and permission declaration slice.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Persist and project Agent purpose and declared permissions",
+      "spec": "specs/agent-task-profile/spec.md",
+      "type": "WRITE",
+      "dependsOn": [],
+      "passes": false
+    },
+    {
+      "id": "T-002",
+      "title": "Author and render the task declaration in CLI and Web",
+      "spec": "specs/agent-task-profile/spec.md",
+      "type": "WRITE",
+      "dependsOn": ["T-001"],
+      "passes": false
+    }
+  ]
+}
