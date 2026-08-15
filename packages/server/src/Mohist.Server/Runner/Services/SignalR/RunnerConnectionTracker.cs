@@ -14,10 +14,17 @@ public class RunnerConnectionTracker : ISingletonService, IAgentSessionConnectio
 
     public string Register(string runnerId, string connectionId)
     {
-        var generation = $"{_processEpoch}:{Interlocked.Increment(ref _nextConnectionGeneration)}";
-        _connections[runnerId] = new RunnerConnectionLease(connectionId, generation);
-        return generation;
+        var lease = _connections.AddOrUpdate(
+            runnerId,
+            _ => NewLease(connectionId),
+            (_, current) => string.Equals(current.ConnectionId, connectionId, StringComparison.Ordinal)
+                ? current
+                : NewLease(connectionId));
+        return lease.Generation;
     }
+
+    private RunnerConnectionLease NewLease(string connectionId) =>
+        new(connectionId, $"{_processEpoch}:{Interlocked.Increment(ref _nextConnectionGeneration)}");
 
     public void Unregister(string runnerId, string? connectionId = null)
     {
