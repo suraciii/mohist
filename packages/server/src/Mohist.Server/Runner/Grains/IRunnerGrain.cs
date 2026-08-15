@@ -20,6 +20,14 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<RunnerPollAdmission> TryBeginPollAsync();
     /// <summary>Releases the poll round admitted by <see cref="TryBeginPollAsync"/>.</summary>
     Task EndPollAsync();
+    /// <summary>
+    /// Records an ephemeral readiness observation for the current runner
+    /// connection. The snapshot is only an admission fence; it never settles
+    /// or replays work.
+    /// </summary>
+    Task<RunnerRuntimeReadinessSnapshot> ObserveRuntimeReadinessAsync(
+        string? connectionGeneration,
+        List<RuntimeReadinessWitness> witnesses);
     /// <summary>Atomically rejects new poll and work claims until cancelled.</summary>
     Task BeginDrainAsync();
     /// <summary>
@@ -241,9 +249,43 @@ public static class WorkDispatchOwnerKinds
 [GenerateSerializer]
 public sealed record RunnerPollRequest(
     [property: Id(0)] List<string> InFlight,
-    [property: Id(1)] List<string> AwaitingAck)
+    [property: Id(1)] List<string> AwaitingAck,
+    [property: Id(2)] List<RuntimeReadinessWitness>? RuntimeReadiness = null,
+    [property: Id(3)] string? ConnectionId = null,
+    [property: Id(4)] string? ConnectionGeneration = null,
+    [property: Id(5)] bool? AdmissionReady = null)
 {
     public RunnerPollRequest() : this([], []) { }
+}
+
+[GenerateSerializer]
+public sealed record RuntimeReadinessWitness(
+    [property: Id(0)] string Runtime,
+    [property: Id(1)] bool Ready,
+    [property: Id(2)] long? Generation = null);
+
+[GenerateSerializer]
+public sealed record RunnerRuntimeReadinessSnapshot(
+    [property: Id(0)] string? ConnectionGeneration,
+    [property: Id(1)] List<RuntimeReadinessWitness> Witnesses)
+{
+    public static RunnerRuntimeReadinessSnapshot Empty { get; } = new(null, []);
+
+    public bool Allows(IReadOnlyList<string>? requiredRuntimes)
+    {
+        if (requiredRuntimes is null)
+            return false;
+        if (requiredRuntimes.Count == 0)
+            return true;
+
+        if (Witnesses.Count == 0)
+            return ConnectionGeneration is null;
+
+        return requiredRuntimes.All(runtime => Witnesses.Any(witness =>
+            witness.Ready
+            && witness.Generation is > 0
+            && string.Equals(witness.Runtime, runtime, StringComparison.OrdinalIgnoreCase)));
+    }
 }
 
 [GenerateSerializer]

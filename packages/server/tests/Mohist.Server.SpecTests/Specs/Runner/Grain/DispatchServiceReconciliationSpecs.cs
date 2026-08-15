@@ -27,6 +27,71 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     private static string WorkKey(string workflowRunId, string workId) =>
         $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}:{workId}";
 
+    [Fact]
+    public async Task RuntimeReadinessFence_RejectsFreshClaimsButRedeliversHeldWork()
+    {
+        await ClearBacklogAsync();
+        var workflowId = $"runtime-readiness-{Guid.NewGuid():N}";
+        var projectId = TestProjectId(workflowId);
+        var runnerId = $"runtime-readiness-runner-{Guid.NewGuid():N}";
+        _workflowId = workflowId;
+        _runnerId = runnerId;
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            projectId,
+            ConnectionGeneration: "connection-current"));
+
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(
+            workflowId,
+            SingleStage(tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")], checks: []),
+            projectId);
+        await workflow.StartAsync(TestInput(projectId));
+
+        var staleConnection = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest(
+                [],
+                [],
+                [new RuntimeReadinessWitness("pi", true, 1)],
+                ConnectionGeneration: "connection-stale",
+                AdmissionReady: true));
+        Assert.Empty(staleConnection.Dispatches);
+
+        var unhealthy = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest(
+                [],
+                [],
+                [new RuntimeReadinessWitness("pi", false, 1)],
+                ConnectionGeneration: "connection-current",
+                AdmissionReady: true));
+        Assert.Empty(unhealthy.Dispatches);
+
+        var first = Assert.Single((await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest(
+                [],
+                [],
+                [new RuntimeReadinessWitness("pi", true, 1)],
+                ConnectionGeneration: "connection-current",
+                AdmissionReady: true))).Dispatches);
+
+        var redelivery = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest(
+                [],
+                [],
+                [new RuntimeReadinessWitness("pi", false, 1)],
+                ConnectionGeneration: "connection-current",
+                AdmissionReady: true));
+        Assert.Equal(first, Assert.Single(redelivery.Dispatches));
+    }
+
     private async Task<(string RunnerId, string[] WorkflowIds)> StartReadyWorkflowsAsync(
         string prefix,
         int count,
