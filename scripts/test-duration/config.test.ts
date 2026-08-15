@@ -369,12 +369,12 @@ test('checked-in Server Spec topology bounds fixture startup within the canonica
   const config = parseSuiteConfig(readFileSync(new URL('../../test-duration.config.jsonc', import.meta.url), 'utf8'))
   const serverSpec = config.tracks.find((track) => track.id === 'server-spec')
   assert.ok(serverSpec)
-  assert.equal(serverSpec.partitions, 2)
+  assert.equal(serverSpec.partitions, 1)
   assert.equal(serverSpec.partitionMaxThreads, 1)
-  assert.equal(config.canonical?.partitionExecutionCapacity, 2)
+  assert.equal(config.canonical?.partitionExecutionCapacity, 1)
   assert.equal(
     Math.min(serverSpec.partitions!, config.canonical!.resourceLimits['server-spec']) * serverSpec.partitionMaxThreads!,
-    2,
+    1,
   )
   assert.deepEqual(validateConfig(config), [])
 })
@@ -508,7 +508,7 @@ test('validateConfig rejects invalid canonical limits and non-apphost partitioni
           run: ['npm', 'test'],
           report: 'reports/spec.json',
           reportFormat: 'vitest',
-          partitions: 1,
+          partitions: 0,
           partitionMaxThreads: 0,
           deadlineMs: 100,
           enforce: false,
@@ -519,7 +519,7 @@ test('validateConfig rejects invalid canonical limits and non-apphost partitioni
   const errors = validateConfig(config)
   assert.ok(errors.some((error) => error.includes('canonical.maxConcurrentLanes')))
   assert.ok(errors.some((error) => error.includes('canonical.resourceLimits.host')))
-  assert.ok(errors.some((error) => error.includes('partitions must be an integer greater than one')))
+  assert.ok(errors.some((error) => error.includes('partitions must be a positive integer')))
   assert.ok(errors.some((error) => error.includes('positive integer partitionMaxThreads')))
   assert.ok(errors.some((error) => error.includes('partitions require kind dotnet-apphost')))
   assert.ok(errors.some((error) => error.includes('partitioned reports must include {partition}')))

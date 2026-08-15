@@ -271,8 +271,8 @@ dependencies and all claimed resources are available, and an already-aborted
 schedule admits none. Node duration commands place reporter arguments on their
 terminal `vitest run` invocation, and execute TypeScript boundary checks through
 `node --import tsx` rather than the `tsx` CLI IPC server. Each lane owns its
-`TMPDIR`, `TEMP`, `TMP`, HOME, and runtime IPC directory. The four concurrent
-Server Spec lanes additionally own their main SQLite path, OTel SQLite path, and
+`TMPDIR`, `TEMP`, `TMP`, HOME, and runtime IPC directory. The isolated Server
+Spec lane additionally owns its main SQLite path, OTel SQLite path, and
 logical OTLP endpoint scope; unit lanes retain their product-default configuration
 so their default-value assertions remain meaningful. The Spec lanes use a
 Node-hosted deterministic partition executor on every platform. Each owns a
@@ -293,12 +293,11 @@ member depends on the previous member's terminal lane. A partitioned member
 uses its coverage lane as the phase barrier. The optional
 `canonical.durationIsolationTrack` is admitted
 after that prefix and gates other Vitest lanes. The current measurement set is
-the CLI track followed by Server Spec: two isolated partition apphosts each run
-one xUnit collection at a time, so fixture startup is bounded to two concurrent
-processes while retaining parallel Spec execution.
+the CLI track followed by Server Spec: one isolated partition apphost runs one
+xUnit collection at a time, so fixture startup is bounded to one process.
 Server Unit, Server Arch, Workflow, and Node throughput lanes start after Spec
 coverage completes; Runner remains the isolated Node track. This preserves
-parallel partitions without changing duration thresholds. The phase is applied
+parallel downstream lanes without changing duration thresholds. The phase is applied
 only when the complete configured set is selected, so focused `--track`
 execution has no hidden prerequisite work.
 

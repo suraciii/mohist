@@ -100,8 +100,8 @@ function validateTrack(track: TrackConfig): string[] {
     errors.push(`${prefix}: apphostArgs must contain only strings`)
   }
   if (track.deadlineMs <= 0) errors.push(`${prefix}: deadlineMs must be positive`)
-  if (track.partitions !== undefined && (!Number.isInteger(track.partitions) || track.partitions < 2)) {
-    errors.push(`${prefix}: partitions must be an integer greater than one`)
+  if (track.partitions !== undefined && (!Number.isInteger(track.partitions) || track.partitions < 1)) {
+    errors.push(`${prefix}: partitions must be a positive integer`)
   }
   if (
     track.partitions !== undefined &&
