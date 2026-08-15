@@ -14,7 +14,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     public RunnerFailureSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task RunnerUnregistersWithInFlightWork_FailsActiveWorkflowWork()
+    public async Task RunnerUnregistersWithInFlightWork_RecordsRecoverableInterruption()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
         var runnerId = _runnerId!;
@@ -23,15 +23,16 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
 
-        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
         Assert.Equal(runnerId, await workflow.GetAssignedWorkerIdAsync());
-        Assert.Null(await workflow.GetCurrentWorkIdAsync());
+        Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
 
         var run = await LoadRunAsync(work.WorkflowRunId);
         var task = run.Stages.Single().Tasks.Single();
-        Assert.Equal(TaskRunStatus.Failed, task.Status);
-        Assert.NotNull(task.FinishedAt);
-        Assert.Equal("runner-lost", run.Failure?.Message);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.NotNull(task.Interruption);
+        Assert.Equal("runner-lost", task.Interruption!.ReasonCode);
+        Assert.Null(run.Failure);
     }
 
     [Fact]
@@ -63,12 +64,17 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
         var firstStatus = await workflow.GetRunStatusAsync();
-        Assert.Equal("Failed", firstStatus);
+        Assert.Equal("Running", firstStatus);
 
         var run = await LoadRunAsync(work.WorkflowRunId);
         var task = run.Stages.Single().Tasks.Single();
-        Assert.Equal(TaskRunStatus.Failed, task.Status);
-        Assert.Equal("runner-lost", run.Failure?.Message);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal("runner-lost", task.Interruption?.ReasonCode);
+
+        await runner.UnregisterAsync();
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+        var second = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal("runner-lost", second.Stages.Single().Tasks.Single().Interruption?.ReasonCode);
     }
 
     [Fact]

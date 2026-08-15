@@ -123,6 +123,7 @@ public static class WorkflowRunLineage
             TaskStarted v => v.Stage,
             TaskCompleted v => v.Stage,
             TaskFailed v => v.Stage,
+            TaskInterrupted v => v.Stage,
             TaskCancelled v => v.Stage,
             AgentTaskResultUnconfirmed v => v.Stage,
             TaskBlocked v => v.Stage,
@@ -131,6 +132,7 @@ public static class WorkflowRunLineage
             CheckPassed v => v.Stage,
             CheckFailed v => v.Stage,
             CheckPending v => v.Stage,
+            ChecksInterrupted v => v.Stage,
             _ => null,
         };
     }
@@ -146,6 +148,7 @@ public static class WorkflowRunLineage
         TaskStarted or
         TaskCompleted or
         TaskFailed or
+        TaskInterrupted or
         TaskCancelled or
         AgentTaskResultUnconfirmed or
         TaskBlocked or
@@ -153,7 +156,8 @@ public static class WorkflowRunLineage
         WorkflowRunBlocked or
         CheckPassed or
         CheckFailed or
-        CheckPending => true,
+        CheckPending or
+        ChecksInterrupted => true,
         _ => false,
     };
 }

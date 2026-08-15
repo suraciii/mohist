@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- WorkflowRun is persisted as JSON through WorkflowRunStore; additive nullable properties on TaskRun and StageRun survive activation without a schema migration.
+- Runner presence closeout enumerates running workflow assignments and first calls ObserveAgentRunnerDisconnectedAsync. Only a stale response falls through to ordinary-work interruption recording, preserving AgentResultSettlement arbitration.
+- Workflow reminder reconciliation follows the existing AgentResultSettlement pattern: owner grain registers a durable Orleans reminder from the persisted absolute deadline and re-runs the check on activation.
+- Workflow status remains Running and TaskRunStatus remains Running while WorkInterruption is present; no Interrupted enum is introduced.
+
+## T-001 Working Notes
+
+- The workspace contained an uncommitted partial T-001 implementation when work began, including WorkInterruption, interruption events, closeout wiring, and focused specs. Existing changes were preserved and completed in place.
+- Directly constructed WorkflowGrain contract tests have no Orleans reminder registry. Runner-loss reconciliation must not attempt reminder removal during activation when no persisted interruption exists; cleanup is requested only after a report clears a known interruption.
+- Successful completion of the single-task fixture advances the workflow to Ready, not Completed; the terminal-report acceptance is about identity/report acceptance and interruption clearing.
+- Full SpecTests build requires `-p:SkipWebBuild=true` in this environment because the web workspace dependencies do not provide `tsc`.
+- Final verification passed: 3,923 server SpecTests, server UnitTests, and server ArchTests; the focused runner/workflow set passed independently before the full run.

@@ -24,7 +24,7 @@ namespace Mohist.Server.Runner.Grains;
 /// <list type="bullet">
 ///   <item><description>presence: lastSeen — poll IS the heartbeat (online/offline).</description></item>
 ///   <item><description>slots: capacity configuration (control-plane owned).</description></item>
-///   <item><description>closeout: on presence loss, fail workflow work while retaining active AgentJob ledgers for reconnect redelivery.</description></item>
+///   <item><description>closeout: on presence loss, record recoverable workflow interruptions while retaining active AgentJob ledgers for reconnect redelivery.</description></item>
 /// </list>
 /// No work-completion wall clock — work liveness is the runner process's
 /// poll report; the only server-side timer is presence expiry.
@@ -849,7 +849,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
                 var observation = await workflow.ObserveAgentRunnerDisconnectedAsync(workerId);
                 if (observation == ReportAck.Stale)
-                    await workflow.FailActiveWorkAsync(workerId, "runner-lost");
+                    await workflow.InterruptActiveWorkAsync(workerId, "runner-lost");
             }
             catch (Exception ex)
             {

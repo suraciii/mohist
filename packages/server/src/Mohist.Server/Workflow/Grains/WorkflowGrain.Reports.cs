@@ -244,6 +244,7 @@ public partial class WorkflowGrain
             .SingleOrDefault(candidate => string.Equals(candidate.Id, activeWork.TaskRunId, StringComparison.Ordinal));
         if (task is null) return ReportAck.Stale;
         var hadAgentResultSettlement = task.AgentResultSettlement is not null;
+        var hadRunnerLossInterruption = task.Interruption is not null;
 
         _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
             GrainKey, activeWork.WorkId, report.Status, report.Detail ?? "(none)");
@@ -270,6 +271,7 @@ public partial class WorkflowGrain
         }
 
         effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
+        _run.ClearWorkInterruption(activeWork.WorkId, workerId);
 
         var events = await _workLifecycle.ApplyTaskReportAsync(
             _run,
@@ -282,6 +284,8 @@ public partial class WorkflowGrain
             await ReconcileAgentResultSettlementAsync();
         else
             await DeleteSnapshotBestEffortAsync(activeWork.WorkId);
+        if (hadRunnerLossInterruption)
+            await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
     }
 
@@ -339,10 +343,14 @@ public partial class WorkflowGrain
         _log.LogInformation("run {run} received check report for stage {Stage}: {Count} results",
             GrainKey, report.Stage, report.Results.Count);
 
+        var hadRunnerLossInterruption = _run.CurrentStage().Interruption is not null;
+        _run.ClearWorkInterruption(workId, workerId);
         var events = await _workLifecycle.ApplyCheckReportAsync(_run, report);
         _workLifecycle.RequeueRunningChecks(_run);
 
         await CommitAsync(events);
+        if (hadRunnerLossInterruption)
+            await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
     }
 

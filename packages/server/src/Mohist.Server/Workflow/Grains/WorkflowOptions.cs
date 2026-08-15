@@ -13,4 +13,11 @@ public sealed class WorkflowOptions
     public const string SectionName = "Mohist:Workflow";
 
     public TimeSpan AgentResultSettlementTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How long ordinary workflow work may remain recoverably interrupted
+    /// after its runner loses presence before the workflow fails closed.
+    /// This must remain longer than the runner's two-minute presence timeout.
+    /// </summary>
+    public TimeSpan RunnerLossRecoveryTimeout { get; set; } = TimeSpan.FromMinutes(15);
 }
