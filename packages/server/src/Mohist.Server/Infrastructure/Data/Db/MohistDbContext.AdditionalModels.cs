@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Data.Project;
 
@@ -15,6 +16,12 @@ public partial class MohistDbContext
         modelBuilder.Entity<CredentialRow>(entity =>
         {
             entity.Property(e => e.DirectApiProjectGrantKind).HasMaxLength(32);
+        });
+
+        modelBuilder.Entity<AgentJobRow>(entity =>
+        {
+            entity.Property(e => e.DirectApiProjectionJson);
+            entity.Property(e => e.DirectApiProjectionRevision);
         });
 
         modelBuilder.Entity<CredentialProjectGrantRow>(entity =>

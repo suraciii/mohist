@@ -117,6 +117,7 @@ public static class MohistServiceRegistration
         services.AddScoped<ISessionTreeStopTargetAdapter>(sp =>
             sp.GetRequiredService<SessionTreeStopTargetAdapter>());
         services.AddScoped<AgentLaunchObservationAssembler>();
+        services.AddScoped<DirectApiAgentJobReadStore>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
         services.AddSingleton<IWorkflowAgentHandoffPreflight>(sp =>
