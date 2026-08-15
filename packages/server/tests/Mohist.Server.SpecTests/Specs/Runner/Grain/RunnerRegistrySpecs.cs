@@ -135,7 +135,7 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         var secondRunner = Grains.GetGrain<IRunnerGrain>(secondRunnerId);
         var firstCatalogs = new Dictionary<string, RuntimeCatalogEntry>
         {
-            ["opencode"] = new(["openai/opencode-a"], new Dictionary<string, string[]>
+            ["opencode"] = new(["openai/opencode-a", "openai/bare"], new Dictionary<string, string[]>
             {
                 ["openai/opencode-a"] = ["low"],
             }),
@@ -169,12 +169,16 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
             Assert.DoesNotContain("openai/opencode-a", piModels);
             Assert.DoesNotContain("openai/opencode-b", piModels);
             Assert.Contains("openai/opencode-a", opencodeModels);
+            Assert.Contains("openai/bare", opencodeModels);
             Assert.Contains("openai/opencode-b", opencodeModels);
             Assert.DoesNotContain("anthropic/pi-a", opencodeModels);
             Assert.DoesNotContain("openai/pi-b", opencodeModels);
             var piVariants = await registry.ListCoderModelVariantsByRuntimeAsync("pi");
             Assert.Equal(["medium"], piVariants["anthropic/pi-a"]);
             Assert.Equal(["low", "high"], piVariants["openai/pi-b"]);
+            var opencodeVariants = await registry.ListCoderModelVariantsByRuntimeAsync("opencode");
+            Assert.Equal(["low"], opencodeVariants["openai/opencode-a"]);
+            Assert.False(opencodeVariants.ContainsKey("openai/bare"));
         }
         finally
         {

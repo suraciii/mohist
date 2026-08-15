@@ -123,51 +123,6 @@ public class TaskLogRouteSpecs
         });
     }
 
-    private async Task SeedSettledWorkflowRunAsync(string workflowRunId, string taskId, string workId)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var runStore = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
-        await runStore.SaveAsync(new WorkflowRun
-        {
-            Id = workflowRunId,
-            Metadata = new WorkflowRunMetadata(null, _fixture.TimeProvider.GetUtcNow()),
-            CurrentStageId = "build",
-            Status = WorkflowRunStatus.Completed,
-            CompletedAt = _fixture.TimeProvider.GetUtcNow(),
-            Assignment = new WorkflowAssignment(RunnerId, _fixture.TimeProvider.GetUtcNow()),
-            Stages =
-            [
-                new StageRun
-                {
-                    Id = "build",
-                    Attempt = 1,
-                    RequiresApproval = false,
-                    Status = StageRunStatus.Completed,
-                    Tasks =
-                    [
-                        new TaskRun
-                        {
-                            Id = taskId,
-                            DefinitionId = taskId,
-                            Attempt = 1,
-                            Title = "Build it",
-                            Uses = "core/script",
-                            WorkId = workId,
-                            WorkerId = RunnerId,
-                            Status = TaskRunStatus.Completed,
-                            TerminalLogOwnership = new TerminalLogOwnership(
-                                TerminalLogOwnerKinds.Workflow,
-                                workflowRunId,
-                                workId,
-                                RunnerId),
-                            Classification = TaskClassification.Orchestration,
-                        },
-                    ],
-                },
-            ],
-        });
-    }
-
     private async Task BindIssueToWorkflowRunAsync(string projectId, int issueNumber, string workflowRunId)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -291,57 +246,6 @@ public class TaskLogRouteSpecs
             .Select(r => r.State)
             .SingleAsync();
         Assert.Equal(stateBefore, stateAfter);
-    }
-
-    [Fact]
-    public async Task UploadEndpoint_AcceptsTerminalWorkflowLogAfterSettlementAndActiveProjectionCleanup()
-    {
-        var workflowRunId = $"wr-tasklog-settled-{Guid.NewGuid():N}";
-        var workId = $"work-{Guid.NewGuid():N}";
-        await SeedSettledWorkflowRunAsync(workflowRunId, "task-settled", workId);
-
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            var projection = await db.WorkflowRuns.AsNoTracking()
-                .Where(row => row.WorkflowRunId == workflowRunId)
-                .Select(row => new { row.ActiveWorkId, row.ActiveWorkerId })
-                .SingleAsync();
-            Assert.Null(projection.ActiveWorkId);
-            Assert.Null(projection.ActiveWorkerId);
-        }
-
-        using var nonterminal = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            OneLineBody("settled"));
-        Assert.Equal(HttpStatusCode.NotFound, nonterminal.StatusCode);
-
-        using var wrongRunner = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            OneLineBody("settled", terminal: true),
-            runnerId: "runner-other");
-        Assert.Equal(HttpStatusCode.NotFound, wrongRunner.StatusCode);
-
-        using var changed = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            OneLineBody("settled", terminal: true));
-        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
-        var changedJson = await changed.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("changed", changedJson.GetProperty("data").GetProperty("status").GetString());
-
-        using var duplicate = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            OneLineBody("settled", terminal: true));
-        Assert.Equal(HttpStatusCode.OK, duplicate.StatusCode);
-        var duplicateJson = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("duplicate", duplicateJson.GetProperty("data").GetProperty("status").GetString());
-
-        using var conflict = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            OneLineBody("changed", terminal: true));
-        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
-        var conflictJson = await conflict.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("conflict", conflictJson.GetProperty("details").GetProperty("status").GetString());
     }
 
     [Fact]

@@ -16,15 +16,17 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Api;
 
 /// <summary>
-/// Specs for issue-413 T-002 — the project-scoped NDJSON live event
-/// tail endpoint (<c>GET /api/projects/{projectRef}/events/tail</c>).
-/// Covers match filter, strict project isolation, unprojected
-/// suppression, 400-with-location on invalid match, one-line-per-event
-/// NDJSON shape, cancellation/release on disconnect, envelope-only
-/// matching (payloads never influence the filter), and best-effort
-/// no-replay semantics. Driven through the <see cref="IEventTailSource"/>
-/// fake — the durable event dispatcher and a wall clock are not
-/// touched.
+/// Wire contract for the project-scoped NDJSON live event tail
+/// endpoint (<c>GET /api/projects/{projectRef}/events/tail</c>):
+/// one happy-path delivery, 400-with-location on invalid match,
+/// NDJSON content type and one-line-per-event shape, envelope field
+/// projection without payload, cancellation/release on disconnect,
+/// and 404 for unknown projects. Selection semantics (match
+/// filtering, strict project isolation, unprojected suppression,
+/// envelope-only matching, no-replay) are owned by
+/// <c>EventTailSourceTests</c> at the <see cref="IEventTailSource"/>
+/// boundary. Driven through the in-memory fake — the durable event
+/// dispatcher and a wall clock are not touched.
 /// </summary>
 [Collection("IntegrationApi")]
 public class ProjectEventTailApiSpecs
@@ -63,110 +65,6 @@ public class ProjectEventTailApiSpecs
         Assert.Equal("1", envelopes[1].Extensions["issue"]);
         Assert.False(envelopes[0].HasPayload);
         Assert.False(envelopes[1].HasPayload);
-    }
-
-    [Fact]
-    public async Task WithMatch_DeliversOnlyMatchingEnvelopesAndSuppressesNonMatches()
-    {
-        var project = await CreateProjectAsync("tail-match");
-
-        await using var session = new TailSession(
-            Source,
-            project.Id,
-            match: "event.type == \"com.mohist.issue.completed\"");
-        await session.OpenAsync();
-
-        Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
-        Publish(project.Id, "com.mohist.issue.completed", new Dictionary<string, string> { ["issue"] = "1" });
-        Publish(project.Id, "com.mohist.issue.completed", new Dictionary<string, string> { ["issue"] = "2" });
-        Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "2" });
-
-        var envelopes = await session.WaitForLinesAsync(expected: 1);
-
-        Assert.Single(envelopes);
-        Assert.Equal("com.mohist.issue.completed", envelopes[0].Type);
-        Assert.Equal("1", envelopes[0].Extensions["issue"]);
-    }
-
-    [Fact]
-    public async Task StrictIsolation_NeverDeliversOtherProjectEvents()
-    {
-        var projectP = await CreateProjectAsync("tail-isolation-p");
-        var projectQ = await CreateProjectAsync("tail-isolation-q");
-
-        await using var session = new TailSession(Source, projectP.Id, match: null);
-        await session.OpenAsync();
-
-        Publish(projectQ.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
-        Publish(projectP.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
-        Publish(projectQ.Id, "com.mohist.issue.completed", new Dictionary<string, string> { ["issue"] = "1" });
-
-        var envelopes = await session.WaitForLinesAsync(expected: 1);
-
-        Assert.Single(envelopes);
-        Assert.Equal(projectP.Id, envelopes[0].Extensions["projectid"]);
-    }
-
-    [Fact]
-    public async Task StrictIsolation_NeverDeliversUnprojectedEvents()
-    {
-        var project = await CreateProjectAsync("tail-unprojected");
-
-        await using var session = new TailSession(Source, project.Id, match: null);
-        await session.OpenAsync();
-
-        Source.Publish(new CloudEvent(
-            id: Guid.NewGuid().ToString(),
-            source: new Uri("/mohist/projects/p", UriKind.Relative),
-            type: "com.mohist.orphan",
-            time: FixedTime,
-            data: null,
-            subject: null,
-            extensions: new Dictionary<string, string>()));
-        Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
-
-        var envelopes = await session.WaitForLinesAsync(expected: 1);
-
-        Assert.Single(envelopes);
-        Assert.Equal("com.mohist.issue.created", envelopes[0].Type);
-    }
-
-    [Fact]
-    public async Task Match_DoesNotConsultPayload()
-    {
-        var project = await CreateProjectAsync("tail-payload-isolation");
-
-        await using var session = new TailSession(
-            Source,
-            project.Id,
-            match: "event.type == \"com.mohist.issue.completed\"");
-        await session.OpenAsync();
-
-        var payloadOnlyWouldMatch = JsonSerializer.SerializeToElement(new
-        {
-            type = "com.mohist.issue.completed",
-            status = "ok",
-        });
-        Source.Publish(new CloudEvent(
-            id: Guid.NewGuid().ToString(),
-            source: new Uri($"/mohist/projects/{project.Id}/issues/1", UriKind.Relative),
-            type: "com.mohist.issue.created",
-            time: FixedTime,
-            data: payloadOnlyWouldMatch,
-            subject: "1",
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectid"] = project.Id,
-                ["issue"] = "1",
-            }));
-
-        Publish(project.Id, "com.mohist.issue.completed", new Dictionary<string, string> { ["issue"] = "1" });
-
-        var envelopes = await session.WaitForLinesAsync(expected: 1);
-
-        Assert.Single(envelopes);
-        Assert.Equal("com.mohist.issue.completed", envelopes[0].Type);
-        Assert.False(envelopes[0].HasPayload);
     }
 
     [Fact]
@@ -261,25 +159,6 @@ public class ProjectEventTailApiSpecs
         await session.CancelAsync();
 
         Assert.Equal(0, Source.ActiveSubscriptionCount);
-    }
-
-    [Fact]
-    public async Task EventsBeforeSubscription_AreNotReplayed()
-    {
-        var project = await CreateProjectAsync("tail-no-replay");
-
-        Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
-        Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "2" });
-
-        await using var session = new TailSession(Source, project.Id, match: null);
-        await session.OpenAsync();
-
-        Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "3" });
-
-        var envelopes = await session.WaitForLinesAsync(expected: 1);
-
-        Assert.Single(envelopes);
-        Assert.Equal("3", envelopes[0].Extensions["issue"]);
     }
 
     [Fact]
