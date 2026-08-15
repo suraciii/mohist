@@ -126,6 +126,48 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             entry.Envelope.Type == EventCatalog.ReverseDns.TaskFailed);
     }
 
+    [Theory]
+    [InlineData(AgentExecutionObservationKind.Idle)]
+    [InlineData(AgentExecutionObservationKind.Completed)]
+    [InlineData(AgentExecutionObservationKind.TargetMissing)]
+    public async Task PhysicalObservation_DoesNotSettleOrReplaceTheOriginalAttempt(
+        AgentExecutionObservationKind kind)
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var initial = await LoadRunAsync(_workflowId!);
+        var original = Assert.Single(initial.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            original.Id,
+            work.WorkId,
+            runnerId,
+            "session-physical-observation",
+            "turn-physical-observation",
+            "pi",
+            "runtime-physical-observation");
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
+            new AgentExecutionObservation(binding, kind, $"physical-{kind.ToString().ToLowerInvariant()}")));
+
+        var unresolved = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(unresolved.CurrentStage().Tasks);
+        var settlement = Assert.IsType<AgentResultSettlement>(task.AgentResultSettlement);
+        Assert.Equal(original.Id, task.Id);
+        Assert.Equal(work.WorkId, task.WorkId);
+        Assert.Equal(runnerId, task.WorkerId);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(AgentResultSettlementState.Unknown, settlement.State);
+        Assert.Equal(kind, settlement.LastObservation);
+        Assert.Null(task.Output);
+        Assert.Null(unresolved.NextWork());
+        Assert.DoesNotContain(await EventStore.ListAsync(_workflowId!), entry =>
+            entry.Envelope.Type is EventCatalog.ReverseDns.TaskCompleted
+                or EventCatalog.ReverseDns.TaskFailed);
+    }
+
     [Fact]
     public async Task RecoveredCompletedResultReport_SettlesBlockedAttemptWithOriginalIdentity()
     {
