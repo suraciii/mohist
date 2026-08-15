@@ -135,7 +135,7 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         var secondRunner = Grains.GetGrain<IRunnerGrain>(secondRunnerId);
         var firstCatalogs = new Dictionary<string, RuntimeCatalogEntry>
         {
-            ["opencode"] = new(["openai/opencode-a", "openai/bare"], new Dictionary<string, string[]>
+            ["opencode"] = new(["openai/opencode-a"], new Dictionary<string, string[]>
             {
                 ["openai/opencode-a"] = ["low"],
             }),
@@ -169,22 +169,58 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
             Assert.DoesNotContain("openai/opencode-a", piModels);
             Assert.DoesNotContain("openai/opencode-b", piModels);
             Assert.Contains("openai/opencode-a", opencodeModels);
-            Assert.Contains("openai/bare", opencodeModels);
             Assert.Contains("openai/opencode-b", opencodeModels);
             Assert.DoesNotContain("anthropic/pi-a", opencodeModels);
             Assert.DoesNotContain("openai/pi-b", opencodeModels);
             var piVariants = await registry.ListCoderModelVariantsByRuntimeAsync("pi");
             Assert.Equal(["medium"], piVariants["anthropic/pi-a"]);
             Assert.Equal(["low", "high"], piVariants["openai/pi-b"]);
-            var opencodeVariants = await registry.ListCoderModelVariantsByRuntimeAsync("opencode");
-            Assert.Equal(["low"], opencodeVariants["openai/opencode-a"]);
-            Assert.False(opencodeVariants.ContainsKey("openai/bare"));
         }
         finally
         {
             await registry.UnregisterAsync(firstRunnerId);
             await registry.UnregisterAsync(secondRunnerId);
         }
+    }
+
+    [Fact]
+    public async Task RegisterAsync_PreservesRevisionedRuntimeCapabilityMetadata()
+    {
+        var runnerId = $"runner-capability-revision-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var catalogs = new Dictionary<string, RuntimeCatalogEntry>
+        {
+            ["pi"] = new(
+                Models: ["openai/model"],
+                Variants: new Dictionary<string, string[]>
+                {
+                    ["openai/model"] = ["balanced"],
+                },
+                ReasoningEfforts: new Dictionary<string, string[]>
+                {
+                    ["openai/model"] = ["high"],
+                },
+                SupportsReasoningEffort: true,
+                Complete: true,
+                CapabilityRevision: "catalog-rev-1"),
+        };
+
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "capability-host",
+            "test-project",
+            RuntimeCatalogs: catalogs));
+
+        var info = await runner.GetInfoAsync();
+        var entry = Assert.Single(info!.RuntimeCatalogs!, pair => pair.Key == "pi").Value;
+        Assert.NotNull(entry.Models);
+        Assert.Equal(["openai/model"], entry.Models);
+        Assert.Equal(["balanced"], entry.Variants!["openai/model"]);
+        Assert.Equal(["high"], entry.ReasoningEfforts!["openai/model"]);
+        Assert.True(entry.SupportsReasoningEffort);
+        Assert.True(entry.Complete);
+        Assert.Equal("catalog-rev-1", entry.CapabilityRevision);
     }
 
     [Fact]

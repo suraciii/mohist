@@ -378,6 +378,10 @@ export interface RunnerOptions {
 export interface RuntimeCatalogEntry {
   models: string[]
   variants: Record<string, string[]>
+  reasoningEfforts?: Record<string, string[]>
+  supportsReasoningEffort?: boolean
+  complete?: boolean
+  capabilityRevision?: string | null
 }
 
 export interface RunnerRegistration {

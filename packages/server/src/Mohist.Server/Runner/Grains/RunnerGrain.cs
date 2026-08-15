@@ -474,7 +474,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
-    public async Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId)
+    public async Task<ClaimResult?> TryClaimAgentJobAsync(
+        string agentJobId,
+        string? projectId,
+        CapabilityClaimExpectation? expectation = null)
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -487,6 +490,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return null;
             }
 
+            if (expectation is not null
+                && (!string.Equals(expectation.OwnerId, agentJobId, StringComparison.Ordinal)
+                    || !RunnerCapabilityGate.Matches(_info, _readinessConnectionGeneration, _runtimeReadiness, expectation)))
+                return null;
+
             var activeWorkflowCount = await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
             var activeAgentJobCount = (await _agentJobStore.ListRunningForRunnerAsync(RunnerId))
                 .Select(record => record.JobKey)
@@ -495,7 +503,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (activeWorkflowCount + activeAgentJobCount >= MaxWorkflowSlots)
                 return null;
 
-            return await GrainFactory.GetGrain<IAgentJobGrain>(agentJobId).ClaimNextAsync(RunnerId);
+            var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
+            return expectation is null
+                ? await job.ClaimNextAsync(RunnerId)
+                : await job.ClaimNextAsync(RunnerId, expectation);
         }
         catch (AgentJobLedgerConflictException)
         {
@@ -858,7 +869,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         var retained = info is null
             ? null
-            : info with { ActionCatalog = CloneActionCatalog(info.ActionCatalog) };
+            : info with
+            {
+                ActionCatalog = CloneActionCatalog(info.ActionCatalog),
+                RuntimeCatalogs = CloneRuntimeCatalogs(info.RuntimeCatalogs),
+            };
         _info = retained;
         var state = _state.State ??= new RunnerState();
         state.LastKnownInfo = retained;
@@ -923,6 +938,30 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 action.Capabilities is null ? null : [.. action.Capabilities])).ToArray(),
             catalog.Tombstones.Select(tombstone => new ActionCatalogTombstone(tombstone.Name, tombstone.Guidance)).ToArray());
     }
+
+    private static Dictionary<string, RuntimeCatalogEntry>? CloneRuntimeCatalogs(
+        Dictionary<string, RuntimeCatalogEntry>? catalogs)
+    {
+        if (catalogs is null)
+            return null;
+
+        return catalogs.ToDictionary(
+            entry => entry.Key,
+            entry => new RuntimeCatalogEntry(
+                entry.Value.Models is null ? null : [.. entry.Value.Models],
+                CloneMap(entry.Value.Variants),
+                CloneMap(entry.Value.ReasoningEfforts),
+                entry.Value.SupportsReasoningEffort,
+                entry.Value.Complete,
+                entry.Value.CapabilityRevision),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string[]>? CloneMap(Dictionary<string, string[]>? values) =>
+        values?.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value is null ? Array.Empty<string>() : [.. entry.Value],
+            StringComparer.OrdinalIgnoreCase);
 
     private static System.Text.Json.JsonElement? CloneDefault(System.Text.Json.JsonElement? value)
     {

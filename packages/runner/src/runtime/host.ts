@@ -2,6 +2,7 @@ import type { RunnerOptions, RunnerRegistration, RuntimeReadinessWitness } from 
 import { ServerConnection } from '../server/connection.js'
 import { RunnerSignalRClient } from '../server/runner-signalr.js'
 import { reportAndRequireDurableAck } from './work-report.js'
+import { buildRegistrationState } from './registration-state.js'
 import { ActionRegistry, createDefaultRegistry } from '../actions/registry.js'
 import '../core/prompt-registry.js'
 import { WorkspaceManager } from './workspace.js'
@@ -861,25 +862,9 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
-    const piCatalog = this.piRuntime?.catalog()
-    return {
-      capabilities: [],
-      actionCatalog: this.actions.catalog(),
-      projectId: this.options.projectId,
-      connectionId: this.signalR.getConnectionId(),
-      ...(piCatalog
-        ? {
-            runtimeCatalogs: {
-              pi: {
-                models: piCatalog.models.map((model) => `${model.provider}/${model.id}`),
-                variants: Object.fromEntries(
-                  piCatalog.models.map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]),
-                ),
-              },
-            },
-          }
-        : {}),
-    }
+    return buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
+      this.signalR.getConnectionId(),
+    )
   }
 
   private async connectRunner(signal: AbortSignal) {
