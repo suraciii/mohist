@@ -191,6 +191,58 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
+    public async Task Observation_DuringRunnerLoss_ProjectsRecoveringReasonAndDeadline_ThenSettles()
+    {
+        var projectId = await CreateProjectAsync("obs-recovering");
+        var runnerId = $"obs-recovering-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "obs-recovering-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "recover this launch" });
+            var launchData = (await launch.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            var jobId = launchData.GetProperty("jobId").GetString()!;
+            var sessionId = launchData.GetProperty("sessionId").GetString()!;
+            var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            var claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
+            var deadline = _fixture.TimeProvider.GetUtcNow().AddMinutes(5);
+
+            await job.MarkUnknownAsync(AgentJobFailureReasons.RunnerLost, deadline);
+
+            var observation = await ReadObservationAsync(projectId, jobId);
+            Assert.NotNull(observation);
+            var data = observation!.Value.GetProperty("data");
+            Assert.Equal("recovering", data.GetProperty("jobStatus").GetString());
+            Assert.Equal(AgentJobFailureReasons.RunnerLost, data.GetProperty("jobFailureReason").GetString());
+            Assert.True(
+                data.TryGetProperty("recoveryDeadlineAt", out var recoveryDeadline),
+                data.GetRawText());
+            Assert.Equal(deadline, recoveryDeadline.GetDateTimeOffset());
+
+            var report = await job.ReportResultAsync(
+                runnerId,
+                claim.WorkId,
+                new WorkResult("completed", "recovered"));
+            Assert.True(report.Accepted);
+            var settled = await ReadObservationAsync(projectId, jobId);
+            Assert.NotNull(settled);
+            var settledData = settled!.Value.GetProperty("data");
+            Assert.Equal("completed", settledData.GetProperty("jobStatus").GetString());
+            Assert.True(
+                !settledData.TryGetProperty("recoveryDeadlineAt", out var settledDeadline)
+                || settledDeadline.ValueKind == JsonValueKind.Null);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task Observation_RepeatedReads_DoNotCreateAdditionalInputsOrTurns()
     {
         var projectId = await CreateProjectAsync("obs-repeat");

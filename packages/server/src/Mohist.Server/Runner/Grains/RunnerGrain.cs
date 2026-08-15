@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -54,6 +55,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly RunnerDefinitionStore _definitions;
     private readonly IAgentJobStore _agentJobStore;
+    private readonly AgentJobOptions _agentJobOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
 
@@ -65,6 +67,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         WorkflowRunQuerier workflowRuns,
         RunnerDefinitionStore definitions,
         IAgentJobStore agentJobStore,
+        IOptions<AgentJobOptions> agentJobOptions,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
         [PersistentState("runner")] IPersistentState<RunnerState> state,
@@ -73,6 +76,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _workflowRuns = workflowRuns;
         _definitions = definitions;
         _agentJobStore = agentJobStore;
+        _agentJobOptions = agentJobOptions.Value;
+        ValidateRunnerLossRecoveryTimeout(_agentJobOptions.RunnerLossRecoveryTimeout);
         _log = log;
         _timeProvider = timeProvider;
         _state = state;
@@ -859,10 +864,30 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             }
         }
 
-        // An AgentJob's running ledger is the durable recovery record. Keep
-        // it intact so the same work identity is redelivered after this
-        // runner reconnects; its normal timeout remains the final
-        // fail-closed outcome when no runner returns.
+        var recoveryDeadlineAt = _timeProvider.GetUtcNow()
+            + _agentJobOptions.RunnerLossRecoveryTimeout;
+        foreach (var record in await _agentJobStore.ListRunningForRunnerAsync(workerId))
+        {
+            try
+            {
+                await GrainFactory.GetGrain<IAgentJobGrain>(record.JobKey)
+                    .MarkUnknownAsync(AgentJobFailureReasons.RunnerLost, recoveryDeadlineAt);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "runner {runner} failed to enter AgentJob {job} recovery projection",
+                    RunnerId,
+                    record.JobKey);
+            }
+        }
+    }
+
+    private static void ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.FromMinutes(2))
+            throw new InvalidOperationException(
+                "AgentJob RunnerLossRecoveryTimeout must be longer than the two-minute runner presence timeout.");
     }
 
     private void SetRunnerInfo(RunnerInfo? info)

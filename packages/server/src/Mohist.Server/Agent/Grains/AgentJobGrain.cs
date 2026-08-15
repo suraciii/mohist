@@ -63,6 +63,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
+    private readonly TimeSpan _runnerLossRecoveryTimeout;
     private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _jobTimeoutTimer;
@@ -89,6 +90,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _backgroundTasks = backgroundTasks;
         _grains = grains;
         _dispatchObserver = dispatchObserver;
+        _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(_options.RunnerLossRecoveryTimeout);
     }
 
     public override async Task OnActivateAsync(CancellationToken ct)
@@ -149,6 +151,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 await EnsureRecoveryReminderAsync();
                 await PersistAsync();
             }
+            else if (IsRecovering)
+            {
+                await EnsureRecoveryReminderAsync();
+            }
             return;
         }
 
@@ -172,6 +178,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private bool IsTerminal => State.Status is AgentJobStatus.Completed
         or AgentJobStatus.Failed
         or AgentJobStatus.Cancelled;
+
+    private bool IsRecovering => State.Status == AgentJobStatus.Unknown
+        && State.RecoveryDeadlineAt is { } deadline
+        && deadline > _timeProvider.GetUtcNow();
 
     private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
 
@@ -221,7 +231,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             ExecutionDefinitionFrom(State.Input),
             AgentSessionId: State.Input?.AgentSessionId ?? State.RoutedPlan?.SessionId,
             InitialInputId: State.Input?.InitialInputId,
-            InitialTurnId: State.Input?.InitialTurnId));
+            InitialTurnId: State.Input?.InitialTurnId,
+            RecoveryDeadlineAt: State.RecoveryDeadlineAt,
+            IsRecovering: IsRecovering));
 
     public Task<AgentJobTerminalResult> GetTerminalResultAsync()
     {
@@ -766,22 +778,39 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
     public Task MarkUnknownAsync(string reason) => EnterUnknownStateAsync(reason);
 
-    internal async Task EnterUnknownStateAsync(string reason)
+    public Task MarkUnknownAsync(string reason, DateTimeOffset recoveryDeadlineAt) =>
+        EnterUnknownStateAsync(reason, recoveryDeadlineAt);
+
+    internal async Task EnterUnknownStateAsync(
+        string reason,
+        DateTimeOffset? recoveryDeadlineAt = null)
     {
         if (IsTerminal)
             return;
 
         if (State.Status == AgentJobStatus.Unknown)
         {
+            var changed = false;
+            if (recoveryDeadlineAt is { } deadline
+                && State.RecoveryDeadlineAt is null)
+            {
+                State.RecoveryDeadlineAt = deadline;
+                State.FailureReason = reason;
+                changed = true;
+            }
+
             if (EnsureUnknownInitialTurnDelivery(State.FailureReason ?? reason))
-                await PersistAsync();
+                changed = true;
             await EnsureRecoveryReminderAsync();
+            if (changed)
+                await PersistAsync();
             return;
         }
 
         var previousStatus = State.Status;
         State.Status = AgentJobStatus.Unknown;
         State.FailureReason = reason;
+        State.RecoveryDeadlineAt = recoveryDeadlineAt;
         State.RunningSince = null;
         State.TerminalResult = null;
         State.TerminalAt = null;
@@ -796,8 +825,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
 
         _log.LogInformation(
-            "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
-            Key, previousStatus, reason);
+            "AgentJob {Id} unknown: previous={Previous}, reason={Reason}, recoveryDeadlineAt={RecoveryDeadlineAt}",
+            Key, previousStatus, reason, recoveryDeadlineAt);
     }
 
     private bool EnsureUnknownInitialTurnDelivery(string reason)
@@ -1425,11 +1454,40 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal || State.RunnerId is null)
             return;
 
+        var runnerLost = await IsRunnerAwayAsync();
+        var reason = runnerLost
+            ? AgentJobFailureReasons.RunnerLost
+            : $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}";
+        DateTimeOffset? recoveryDeadlineAt = runnerLost
+            ? _timeProvider.GetUtcNow() + _runnerLossRecoveryTimeout
+            : null;
+
         _log.LogWarning(
-            "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown",
-            Key, _options.JobTimeout);
-        await EnterUnknownStateAsync(
-            $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}");
+            "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
+            Key, _options.JobTimeout, reason);
+        await EnterUnknownStateAsync(reason, recoveryDeadlineAt);
+    }
+
+    private async Task<bool> IsRunnerAwayAsync()
+    {
+        if (string.IsNullOrWhiteSpace(State.RunnerId))
+            return false;
+
+        try
+        {
+            var runtime = await GrainFactory
+                .GetGrain<IRunnerGrain>(State.RunnerId)
+                .GetRuntimeStateAsync();
+            return runtime.Status != RunnerStatus.Online;
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex,
+                "AgentJob {Id} could not read runner {Runner} during report-timeout reconciliation; treating it as lost",
+                Key,
+                State.RunnerId);
+            return true;
+        }
     }
 
     private async Task EvaluatePendingAsync()
@@ -1496,6 +1554,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
         State.Status = terminalStatus;
         State.FailureReason = failureReason;
+        State.RecoveryDeadlineAt = null;
         State.RunningSince = null;
         State.TerminalAt = _timeProvider.GetUtcNow();
         State.TerminalResult = new AgentJobTerminalResult(
@@ -1834,6 +1893,85 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             sessionLaunchPrompt);
     }
 
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
+            return;
+
+        await HydrateAsync();
+
+        if (IsTerminal)
+        {
+            await TryReleaseConcurrencyPermitAsync();
+            if (State.PendingSessionClose is not null)
+                await DeliverTerminalToSessionAsync(State.PendingSessionClose);
+            if (State.PendingFailureEvent is not null)
+                await EmitFailureEventAsync(State.PendingFailureEvent);
+            if (State.PendingTerminalDeliveryEvent is not null)
+                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingSubagentTerminalEvent is not null)
+                await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
+            if (State.PendingSessionClose is null
+                && State.PendingFailureEvent is null
+                && State.PendingTerminalDeliveryEvent is null
+                && State.PendingSubagentTerminalEvent is null
+                && !State.ConcurrencyReleasePending)
+            {
+                await UnregisterSelfAsync(reminderName);
+                return;
+            }
+            return;
+        }
+
+        if (State.Input is null && State.RoutedPlan is null)
+        {
+            await UnregisterSelfAsync(reminderName);
+            return;
+        }
+
+        if (State.RoutedPlan is not null && State.Input is null && !State.RunnerAccepted)
+        {
+            await AdvancePreparedLaunchAsync();
+            return;
+        }
+
+        if (State.Status == AgentJobStatus.Unknown)
+        {
+            if (State.RecoveryDeadlineAt is { } deadline
+                && _timeProvider.GetUtcNow() >= deadline)
+            {
+                var reason = State.FailureReason ?? AgentJobFailureReasons.RunnerLost;
+                await EnterTerminalStateAsync(
+                    AgentJobStatus.Failed,
+                    exitCode: 1,
+                    failureReason: reason,
+                    failureCategory: reason,
+                    pendingReason: reason,
+                    message: reason,
+                    output: null,
+                    artifactUploadIds: null,
+                    terminalExitCode: 1);
+                return;
+            }
+
+            if (State.PendingInitialTurnTerminalDelivery is { } pending)
+                await DeliverInitialTurnTerminalAsync(pending);
+            if (State.PendingInitialTurnTerminalDelivery is null
+                && State.RecoveryDeadlineAt is null)
+                await UnregisterSelfAsync(reminderName);
+            return;
+        }
+
+        if (State.Status == AgentJobStatus.Pending)
+        {
+            await EvaluatePendingAsync();
+            return;
+        }
+
+        // Non-terminal, non-prepared state: no recoverable obligation.
+        await UnregisterSelfAsync(reminderName);
+    }
+
     private async Task UnregisterSelfAsync(string reminderName)
     {
         try
@@ -1983,6 +2121,14 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key));
         return $"agent-work-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
+    }
+
+    private static TimeSpan ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.FromMinutes(2))
+            throw new InvalidOperationException(
+                "AgentJob RunnerLossRecoveryTimeout must be longer than the two-minute runner presence timeout.");
+        return timeout;
     }
 
     private void DisposeJobTimeoutTimer()

@@ -12,3 +12,13 @@
 - Successful completion of the single-task fixture advances the workflow to Ready, not Completed; the terminal-report acceptance is about identity/report acceptance and interruption clearing.
 - Full SpecTests build requires `-p:SkipWebBuild=true` in this environment because the web workspace dependencies do not provide `tsc`.
 - Final verification passed: 3,923 server SpecTests, server UnitTests, and server ArchTests; the focused runner/workflow set passed independently before the full run.
+
+## T-002 Working Notes
+
+- AgentJob recovery stays on persisted `AgentJobStatus.Unknown`: `AgentJobState.RecoveryDeadlineAt` is additive JSON state, and `AgentJobRuntimeSnapshot.IsRecovering` is a clock-derived read projection. No new enum value was introduced.
+- `IAgentJobGrain.MarkUnknownAsync(string, DateTimeOffset)` is an overload with a default interface implementation, preserving existing Unknown callers and lightweight test doubles. Runner closeout calls it for each persisted Running AgentJob with `runner-lost` and one absolute deadline.
+- The `agent-job-recovery` reminder keeps running for deadline-bearing Unknown jobs, re-reads the persisted absolute deadline after activation, and transitions an overdue job to terminal Failed with the recorded reason. Terminal reports clear the deadline before persisting.
+- Report timeout checks runner presence: an offline/unreadable assigned runner records the same `runner-lost` recovering reason and deadline; an online runner retains the existing bare `report-timeout` Unknown behavior.
+- AgentJob detail/list and launch-observation server projections expose `recovering`, reason, and future deadline while the durable status remains Unknown. CLI field catalogs intentionally omit the new detail fields until the later T-004 status-surface slice.
+- T-003 redelivery remains separate: T-002 tests settle the original work identity with a direct authoritative report after recovery; DispatchService does not yet include recovering Unknown AgentJobs in reconnect redelivery.
+- Verification: focused Agent/Runner specs 64/64, assembler unit specs 4/4, full SpecTests 3,928/3,928, UnitTests 2,666/2,666, and ArchTests exit 0. Use `-p:SkipWebBuild=true` because this environment has no `tsc` for the web workspace.

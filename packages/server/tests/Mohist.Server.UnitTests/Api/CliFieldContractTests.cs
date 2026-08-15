@@ -130,6 +130,9 @@ public sealed class CliFieldContractTests
         new(MohistCliApi.TableShape.SessionScheduleCreate, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
         new(MohistCliApi.TableShape.SessionScheduleList, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
         new(MohistCliApi.TableShape.SessionScheduleCancel, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
+        new(MohistCliApi.TableShape.AgentJobList, "failureReason", DeviationKind.Omit, "agent-job recovery presentation is added by the status-surface task"),
+        new(MohistCliApi.TableShape.AgentJobList, "recoveryDeadlineAt", DeviationKind.Omit, "agent-job recovery presentation is added by the status-surface task"),
+        new(MohistCliApi.TableShape.AgentJobView, "recoveryDeadlineAt", DeviationKind.Omit, "agent-job recovery presentation is added by the status-surface task"),
     ];
 
     [Fact]

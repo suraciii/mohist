@@ -36,7 +36,8 @@ public sealed record AgentLaunchObservationDto(
     string? TurnId,
     string TurnStatus,
     AgentTurnResultDto? TurnResult,
-    string ObservationUrl);
+    string ObservationUrl,
+    DateTimeOffset? RecoveryDeadlineAt = null);
 
 public sealed record AgentTurnResultDto(
     string? Message,
@@ -95,10 +96,9 @@ public sealed class AgentLaunchObservationAssembler
         }
         else if (status == AgentJobStatus.Unknown)
         {
-            // Unknown is nonterminal and
-            // non-dispatchable. Surface the recorded failureReason so
-            // the observation can describe why Server cannot confirm
-            // the first execution.
+            // Unknown is nonterminal and non-dispatchable. A future
+            // runner-loss deadline projects it as recovering while the
+            // recorded reason remains visible to the caller.
             jobFailureReason = snapshot.FailureReason;
         }
 
@@ -139,7 +139,7 @@ public sealed class AgentLaunchObservationAssembler
 
         return new AgentLaunchObservationDto(
             JobId: jobId,
-            JobStatus: ToJobStatusString(status),
+            JobStatus: ToJobStatusString(status, snapshot.IsRecovering),
             JobMessage: jobMessage,
             JobOutput: jobOutput,
             JobArtifactUploadIds: jobArtifactUploadIds,
@@ -154,10 +154,14 @@ public sealed class AgentLaunchObservationAssembler
             TurnId: initialLaunch?.Turn?.Id ?? snapshot.InitialTurnId,
             TurnStatus: turnStatus,
             TurnResult: turnResult,
-            ObservationUrl: observationUrl);
+            ObservationUrl: observationUrl,
+            RecoveryDeadlineAt: snapshot.IsRecovering ? snapshot.RecoveryDeadlineAt : null);
     }
 
-    private static string ToJobStatusString(AgentJobStatus status) => status switch
+    internal static string ToJobStatusString(AgentJobStatus status, bool isRecovering = false) =>
+        isRecovering && status == AgentJobStatus.Unknown
+            ? "recovering"
+            : status switch
     {
         AgentJobStatus.Pending => "pending",
         AgentJobStatus.Running => "running",
