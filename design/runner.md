@@ -222,6 +222,13 @@ advisory. Lowering capacity constrains subsequent claims without cancelling
 running work. Unregister ordered before a claim rejects the claim; unregister
 ordered after a claim closes it out. The process enforces no capacity rule.
 
+Poll admission is an ephemeral, token-fenced lease. `BeginPoll` returns an
+opaque token; only `EndPoll` carrying that exact token can release the round.
+Dispatch always releases the token in `finally`, including request cancellation
+and core failures. A canceled poll stops creating further offers. A durable
+claim that completed before cancellation remains Running and is redelivered by
+the next poll under the ordinary at-least-once contract.
+
 The AgentJob admission capacity check is a precheck. Runner selection filters
 out live Runners already at capacity; when all are full, it rejects
 synchronously so the caller sees backpressure immediately. Passing the

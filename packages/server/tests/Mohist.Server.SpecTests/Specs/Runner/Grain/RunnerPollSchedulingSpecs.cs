@@ -79,10 +79,44 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         var poll = await runner.TryBeginPollAsync();
         Assert.True(poll.Admitted);
         Assert.Equal(2, poll.Slots);
-        await runner.EndPollAsync();
+        await runner.EndPollAsync(poll.AdmissionToken);
         Assert.NotNull(await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true));
         Assert.NotNull(await runner.TryClaimAgentJobAsync(jobId, projectId));
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task RegisterAsync_ReleasesStaleAdmission_AndOldTokenCannotReleaseNewerPoll()
+    {
+        await ClearBacklogAsync();
+        var projectId = $"runner-poll-token-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"runner-poll-token-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var first = await runner.TryBeginPollAsync();
+        Assert.True(first.Admitted);
+        Assert.NotEqual(Guid.Empty, first.AdmissionToken);
+
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            projectId));
+
+        var second = await runner.TryBeginPollAsync();
+        Assert.True(second.Admitted);
+        Assert.NotEqual(first.AdmissionToken, second.AdmissionToken);
+
+        await runner.EndPollAsync(first.AdmissionToken);
+
+        Assert.False((await runner.TryBeginPollAsync()).Admitted);
+
+        await runner.EndPollAsync(second.AdmissionToken);
+        var third = await runner.TryBeginPollAsync();
+        Assert.True(third.Admitted);
+        await runner.EndPollAsync(third.AdmissionToken);
     }
 
     [Fact]

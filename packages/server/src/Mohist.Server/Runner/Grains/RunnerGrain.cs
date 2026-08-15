@@ -38,7 +38,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly IPersistentState<RunnerState> _state;
     private readonly IPersistentState<LegacyRunnerRegistrationState> _legacyState;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
-    private bool _pollAdmitted;
+    private Guid? _pollAdmissionToken;
     private bool _draining;
     private DateTimeOffset _lastPresenceAt;
     private IDisposable? _presenceTimer;
@@ -147,6 +147,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
+            _pollAdmissionToken = null;
             SetRunnerInfo(InfoForRegister(info));
             _status = RunnerStatus.Online;
             // A successful registration is the reconnect boundary for an
@@ -176,6 +177,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         try
         {
             _log.LogInformation("Runner {Id} unregistered", RunnerId);
+            _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
             SetRunnerInfo(null);
             await PersistAsync();
@@ -248,11 +250,12 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_draining || _pollAdmitted)
+            if (_draining || _pollAdmissionToken is not null)
                 return new RunnerPollAdmission(false, 0);
 
-            _pollAdmitted = true;
-            return new RunnerPollAdmission(true, MaxWorkflowSlots);
+            var admissionToken = Guid.NewGuid();
+            _pollAdmissionToken = admissionToken;
+            return new RunnerPollAdmission(true, MaxWorkflowSlots, admissionToken);
         }
         finally
         {
@@ -260,12 +263,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
-    public async Task EndPollAsync()
+    public async Task EndPollAsync(Guid admissionToken)
     {
         await _lifecycleGate.WaitAsync();
         try
         {
-            _pollAdmitted = false;
+            if (admissionToken != Guid.Empty && _pollAdmissionToken == admissionToken)
+                _pollAdmissionToken = null;
         }
         finally
         {
@@ -741,6 +745,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return;
             }
 
+            _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             await registry.UnregisterAsync(RunnerId);
