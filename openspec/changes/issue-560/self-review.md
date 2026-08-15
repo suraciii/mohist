@@ -1,151 +1,250 @@
-# Self-Review: issue-560 (round 3 — disposition verification)
+# Self-Review: issue-560
 
-Re-review. Round 1 (full sweep) failed the plan on MF-1 (AC3 — model
-recommendations — uncovered) and MF-2 (replay fingerprint could not cover
-model/variant hints; spec/tasks contradicted the design). Round 2 verified
-both fixed and PASSed (commit `b3a94f964`). Nothing has changed since: the
-working tree is clean and HEAD *is* the round-2 review commit, so the
-artifacts are byte-identical to what round 2 passed. This round therefore
-(1) independently re-verifies round 2's load-bearing evidence rather than
-trusting its prose, (2) re-runs the mechanical checks, and (3) probes for
-pre-existing problems missed in rounds 1–2. Judged against the issue body
-re-read first (User Voice, Product Shape, Domain Model, six acceptance
-criteria, Non-Goals).
+First review (full sweep). Reviewed against the issue body (User Voice, Product
+Shape, Domain Model, six acceptance criteria, Non-Goals) read before the
+artifacts, and against the current codebase (`packages/server`,
+`packages/web`, `packages/cli`, `docs/`).
+
+Artifacts reviewed: `proposal.md`, `design.md`, `tasks.json`, and all four
+capability specs under `specs/` (21 requirements, each with scenarios; spec
+format, task-graph validity, and every task/notes spec anchor verified
+programmatically — all resolve).
 
 ## Verdict
 
-PASS. No must-fix finding is open or newly discovered; every claim round 2
-rested on verifies against the code and artifacts. The plan is ready to
-build.
+FAIL. Two must-fix problems: one acceptance-criterion coverage gap and one
+internal contradiction between the spec/tasks and the design's replay
+mechanism. Everything else about the plan is strong and build-ready.
 
-## Disposition verification
+## Must-Fix Findings
 
-### Round-1 must-fixes (fixed in round 2) — fix evidence re-verified independently
+### MF-1 — AC3 (model recommendations) is not addressed, covered, or scoped out
 
-**MF-1 (AC3 coverage).** The artifacts contain what round 2 reported, and
-the surfaces it cited are real:
+Issue acceptance criterion 3: 「模型选择按任务用途给出可理解的推荐，并保留查看完整选项的入口」
+(model selection gives understandable recommendations by task purpose, with an
+entry to view the full options).
 
-- `proposal.md` carries the scope-honesty bullet (labeled Project default
-  as the recommendation; catalog-backed selection and the full-options
-  entry as the commitments; task-keyed recommendation engine out of scope
-  because the catalog carries no per-purpose metadata).
-- Web spec requirement
-  `#inline-execution-configuration-when-no-project-default-exists` (anchor
-  intact) specifies catalog-backed selection ("not a free-form model
-  field") plus the labeled-recommendation and adjust-via-hints scenarios
-  (3 scenarios). Code verified: `packages/web/src/shared/ui/ModelSelect.tsx`
-  and `useAvailableModelIds`/`useModelVariants`
-  (`packages/web/src/entities/settings/api/queries.ts:150,161`) exist and
-  feed the definition editor today — reuse is real.
-- CLI spec exit-behavior requirement names `mo agent model list`. Code
-  verified: `MohistCliCommands.AgentModel.cs:17-18` registers `model list`
-  ("List available coder model IDs for the runtime … use with --model").
-- T-004 criterion 4 pins the catalog-backed inline path and the
-  adjust-the-recommendation path with composer tests for both.
+- No artifact addresses it. `proposal.md` (Why / What Changes / Capabilities),
+  all four specs, and all five tasks contain no model-recommendation behavior,
+  no task-purpose model guidance, and no full-options entry on the task-first
+  path. The inline composer controls are specified as free-form
+  `provider/model` input (web spec `#inline-execution-configuration-when-no-project-default-exists`;
+  T-004 note: "free-form is acceptable here"; design Open Question defers
+  "model suggestions" composition to #556's rollout).
+- The deferral has no committed owner for this criterion: #556 is a sibling
+  backlog issue about CLI launch-time execution-config *preview*, not
+  task-purpose model *recommendations* in creation, and no child issue of 560
+  exists (`children: []`).
+- The capability is cheap to cover or to scope: the Web definition editor
+  already has a catalog-backed `ModelSelect` (`packages/web/src/widgets/agent-profile-editor/ui/AgentProfileEditor.tsx:235`)
+  and `mo agent model list` exists (`packages/cli/Mohist.Cli/MohistCliCommands.AgentModel.cs`),
+  so the task-first inline input could reuse the catalog (full-options entry)
+  and surface the Project default as the labeled recommendation — or the
+  proposal must explicitly de-scope AC3 with a named owner. As written, the
+  plan silently narrows an explicit acceptance criterion of this issue:
+  building the plan perfectly still leaves AC3 unchecked. That is incomplete
+  relative to the issue's acceptance criteria.
 
-**MF-2 (replay fingerprint vs model/variant hints).** The mechanism's
-load-bearing code facts all check out:
+### MF-2 — Replay conflict detection cannot cover `model`/`variant` hints; spec, tasks, and design contradict each other
 
-- `AgentLaunchCoordinatorRequest` occupies Orleans Ids 0–14 exactly
-  (`AgentLaunchCoordinatorTypes.cs:147-191`, Prompt … TargetId), so the
-  design's `Model` (Id 15) / `Variant` (Id 16) are genuinely next-free
-  append-only ids.
-- `AgentLaunchCoordinatorCodec.Fingerprint`'s canonical string folds
-  exactly the fields D2 enumerates (prompt, AgentRef, Runtime,
-  WorkspaceName/Path, Issue/Epic/Repo/Title, Origin, TargetId,
-  attachments, connection-origin) joined with `\u001f` — the length-
-  prefixed hint block is the right disambiguation, and invariant (b)
-  (no-hint requests hash byte-identically to today's form) is
-  implementable by contributing nothing when both hints are null.
-- The grain stores `RequestFingerprint` at plan creation and recomputes
-  and ordinal-compares on both the create-conflict path and resume
-  (`AgentLaunchCoordinatorGrain.cs:100-102,192-194`) — confirming round
-  2's point that the cross-deploy byte-identity invariant is mandatory,
-  not optional, since definition-first/connection/mention/routed/spawn
-  launches set no hints.
-- `IAgentLauncher.ResumeIdempotentAsync` (`AgentLauncher.cs:474`) and
-  `LaunchIdempotentAsync` (`:153`) exist as the composition points.
-- Cross-artifact consistency holds: spec conflicting-replay scenario
-  enumerates added/changed/removed `runtime`/`model`/`variant` → 409;
-  T-002 criterion 6 pins the fingerprint inputs, the hint-conflict
-  matrix, and the byte-identity invariant; D11 adds codec unit tests for
-  both invariants.
+- Spec `specs/agent-task-launch/spec.md#idempotent-replay-follows-the-launch-convergence-rules`
+  requires: a replay under the same key "with a different request fingerprint —
+  a changed prompt, context, attachments, `name`, or execution hints — SHALL be
+  rejected 409 `launch_idempotency_conflict`", and its scenario "A conflicting
+  replay is rejected" pins "a different prompt **or different execution hints**"
+  → 409. Task T-002's acceptance criterion repeats it: "a changed
+  prompt/context/attachments/name/**hints** under the same key → 409".
+- Design D2 cannot deliver this. It folds only `AgentRef` = name hint and
+  `Runtime` = runtime hint into the coordinator request ("never the derived
+  Agent id or name"). `AgentLaunchCoordinatorRequest`
+  (`Agent/Grains/AgentLaunchCoordinatorTypes.cs:147`) has no model/variant
+  fields, and `AgentLaunchCoordinatorCodec.Fingerprint`
+  (`AgentLaunchCoordinatorTypes.cs:290–322`) hashes only Prompt, AgentRef,
+  Runtime, workspace/issue/epic/repo, Title, Origin, TargetId, attachments, and
+  connection-origin fields. A replay with a changed `model` or `variant` hint
+  produces an identical fingerprint, so `ResumeIdempotentAsync` returns the
+  *original* outcome (silently ignoring the corrected hint) instead of 409.
+- Consequence: T-002's acceptance criterion is unsatisfiable as designed, and
+  the plan's own replay contract ("Replaying the same caller idempotency key
+  returns the original outcome, following the existing launch convergence
+  rules", proposal) diverges from the definition-first convergence rule, where
+  every caller-visible request field that changes the outcome participates in
+  the fingerprint. A user retrying after fixing a mistyped `--model` would get
+  the old model with no error.
+- Fix direction (pick one, in the artifacts): extend the fingerprint inputs
+  append-only with the full caller-visible hint set (name/runtime/model/
+  variant — e.g., a caller-hints payload on the coordinator request, folded
+  like `StartupContext` is deliberately *not*), or narrow the spec scenario and
+  T-002 criterion to the fields the fingerprint actually folds. The design must
+  state the mechanism and the replay spec tests must pin it.
 
-### Round-2 observations — no action required
+## Dimension Verdicts (full sweep)
 
-O-1..O-8 were below the must-fix bar by construction; the disposition
-(no action) holds. O-7 re-confirmed: `design.md:434` glosses the pre-minted
-id space as `agent_{16-hex}` while `StableToken`
-(`Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()`) emits 32
-hex characters (16 bytes); the stated *conclusion* — externally
-indistinguishable from `agent_{Guid:N}` — is correct, only the gloss
-miscounts. O-8 (D11 sentence splice around the codec-test insertion)
-re-confirmed as cosmetic.
+### Coverage — FAIL (MF-1; details below)
 
-## Regression checks
+Adversarial mapping of every issue acceptance criterion to plan coverage:
 
-No regressions are possible from changes: `git status` is clean and the
-last commit touching the artifacts is the round-2 review itself
-(`b3a94f964`), so the plan is unchanged since round 2's PASS. Mechanical
-checks re-run and pass:
+- **AC1** (task-language configure/view purpose, description, instructions,
+  permissions, collaborators, concurrency): **partially covered, no issue.**
+  Purpose/description/instructions are covered by task-first derivation
+  (`agent-creation-defaults` requirements 1–2) plus refinement-after-launch.
+  Permissions (`AllowedSubagentAgentIds`… see AC-note below), collaborators
+  (`AllowedSubagentAgentIds`), and concurrency intent (`MaxConcurrentRuns`)
+  are configurable/viewable today only through the existing definition editor
+  (`AgentDetailPage.tsx`, profile editor), which the plan deliberately keeps as
+  the deliberate-configuration path. The 「用任务语言」 framing for those three
+  facets is not covered, but the existing surfaces satisfy 配置和查看 and the
+  plan's derive-then-refine philosophy is the issue's own core idea. Recorded
+  as Observation O-1 (disposition should be stated explicitly), not must-fix.
+- **AC2** (list/detail distinguish not-configured / unknown / executable /
+  insufficiently-executable): **covered.** `AgentListPage` and
+  `AgentDetailPage` already render Ready / Needs setup / Unknown distinctly
+  (incl. the `execution-config-failure` insufficient-executability path in
+  `AgentReadinessService`), and the plan's readiness changes
+  (`agent-creation-defaults#readiness-rules-…`) preserve and sharpen exactly
+  these distinctions. No regression.
+- **AC3** (model recommendations + full-options entry): **not covered —
+  MF-1.**
+- **AC4** (pre-launch display of repository/workspace/Issue/Epic context and
+  permission scope): **mostly covered, no must-fix.** The composer already
+  displays repo/workspace/Issue/Epic context as chips pre-launch
+  (`AgentSessionComposerPage.tsx:35–52, 457`), and the plan foregrounds them
+  (task-first reorder). The 「权限范围／预计影响范围」 tail has no defined
+  product meaning today (no per-launch permission surface exists in the
+  codebase or docs); the closest concept — workspace/repo binding — *is*
+  displayed. Recorded as Observation O-2.
+- **AC5** (explain when saved config takes effect for new Jobs): **covered.**
+  `AgentDetailPage.tsx:567` already states "Instructions, Runtime, Model,
+  Variant, and Skills edits apply only to Jobs created after saving…", and the
+  web spec's `#refinement-after-launch` requirement restates and tests the
+  semantics. No regression.
+- **AC6** (CLI/Web consistent identity and execution scope): **covered.** The
+  plan reuses `AgentSessionLaunchResponse` / `TableShape.AgentSessionLaunch`
+  verbatim and materializes the execution config so both surfaces read the
+  same self-describing definition.
+- **User Voice / Product Shape core** (task-first creation and launch; the
+  task comes first; two questions at most; no definition-first detour for a
+  one-off delegation): thoroughly covered by all four capabilities.
+- **Domain Model** (Definition = long-term identity; launch = per-execution
+  context; edits affect only later Jobs; launch context becomes fact of that
+  execution): covered — snapshot rules explicitly unchanged, launch context
+  bound through the canonical pipeline.
+- **Non-Goals**: respected. No new providers/runtimes (only `opencode`/`pi`),
+  no concurrency claim/release mechanism, Slack path untouched (design
+  Non-Goals).
 
-- Task graph: 5 tasks, unique ids, `dependsOn` acyclic and resolvable;
-  ordering unchanged (T-001 → T-002 → T-003; T-004 after T-001/T-002;
-  T-005 last and owns `npm run verify`).
-- Specs: 21 requirements, 49 scenarios, every requirement has scenarios;
-  every `specs/...#anchor` reference in tasks.json/design.md/proposal.md —
-  fully-qualified and anchor-only — resolves.
-- No stale scenario-slug references in any artifact (the old slugs appear
-  only in this review's own history, describing the renames).
+### Correctness — FAIL (MF-2; everything else checked, no issue)
 
-## Pre-existing-miss scan
+- Approach vs. each spec requirement: verified the launch-route composition
+  (D1) against `AgentSessionLaunchRoutes.cs` (closed field set via presence
+  binder, required `Idempotency-Key`, pre-minted session/input ids, resume-first
+  flow) — the orchestrator design composes correctly.
+- D2 deterministic Agent id: `agent_{StableToken}` is 32 hex chars
+  (`AgentLaunchCoordinatorTypes.cs:260–265`), the same shape as today's
+  `agent_{Guid:N}` (`AgentDefinitionRoutes.cs:35`) — externally
+  indistinguishable, and `AgentGrain.CreateAsync` is keyed by grain id, so
+  pre-minting/adoption is feasible. Checked, no issue.
+- D3 validation cascade and error codes reuse existing helpers verbatim;
+  determinable-before-create ordering is sound.
+- D4 naming: `EnsureNameAvailableAsync` checks reserved built-ins and
+  `GetByNameAsync` matches regardless of status (active+archived),
+  case-insensitive — the derivation probe design is consistent. Checked, no
+  issue.
+- D5 storage: `ProjectRow` already uses nullable JSON columns
+  (`LastRepositoryCommandJson`), so the additive migration matches
+  conventions. The Project read route (`ProjectRoutes.cs:100`) is the stated
+  read surface. Checked, no issue.
+- D6 single resolver at three sites prevents Readiness/launch divergence;
+  `runtime-invalid`/`model-reference-malformed` unmasked — matches
+  `AgentReadinessService.StructuralGaps` codes. Checked, no issue.
+- D7 crash-safe rollback: `BeginAbortAfterRejectionAsync`
+  (`AgentLaunchCoordinatorGrain.cs:374`) already has abort acks plus a
+  recovery reminder, so coordinator-owned archival with crash repair fits the
+  existing structure; 503-pending never archives is correctly specified.
+  Checked, no issue.
+- Adversarial failure cases I could not construct: orphaned Agent on any
+  determinable rejection (cascade runs pre-create), duplicate Agent on replay
+  (pre-minted id + adoption), name race (bounded re-disambiguation), default
+  flip mid-list (`MatchesCurrentDefinition` on resolved tuples). The one
+  failure case that *does* construct is MF-2.
 
-Probed the areas rounds 1–2 relied on without deep code checks:
+### Consistency with the current codebase — checked, no issue
 
-- **AC1/AC5's non-derived parts rest on real surfaces:** `AgentInfo`
-  carries `Skills`, `AllowedSubagentAgentIds`, and `MaxConcurrentRuns`
-  (concurrency intent); the web entity client and agent detail surfaces
-  read them; the definition editor already carries the save-effect note
-  ("Changes … apply only to Jobs created after saving. Executions already
-  in progress … keep the configuration from launch." —
-  `AgentProfileEditor.tsx:168`), which is AC5's commitment, preserved
-  untouched by the plan.
-- **AC2's state vocabulary is the codebase's:** `AgentReadinessConclusions`
-  defines Ready / Unknown / Needs setup (`AgentReadinessService.cs:8-12`);
-  the plan's Readiness work (default resolution, gap rules) operates on
-  this real set.
-- **D3/D7's reused machinery exists:** `EnsureNameAvailableAsync` /
-  `AgentNameConflictException` (AgentGrain), `IAgentGrain.ArchiveAsync`
-  (`IAgentGrain.cs:11`), and the definition-first route's closed field
-  set (`prompt`/`context`/`attachments`) with required `Idempotency-Key`
-  (`AgentSessionLaunchRoutes.cs:50-99`) — the design's "reuse verbatim"
-  claims are grounded.
-- Design Context's problem statement verified: the launch route accepts
-  only `prompt`/`context`/`attachments` today, so `model`/`variant` hints
-  are genuinely new caller-visible fields needing the fingerprint
-  extension MF-2 prescribed.
+Every named target exists and matches conventions: `Api/AgentSessionLaunchRoutes.cs`,
+`Agent/Services/AgentLauncher.cs` (`LaunchIdempotentAsync(AgentInfo, …)`,
+`EnsureLaunchableAsync`), `Agent/Grains/AgentLaunchCoordinatorGrain.cs`,
+`AgentReadinessService`, `IAgentGrain.CreateAsync/ArchiveAsync`,
+`AgentConfigSchema`, `InteractionWorkspaceProvisioner`, `ProjectRow`/`IProjectGrain`,
+Web `AgentSessionComposerPage` (route `agent-sessions/new` in
+`AppContent.tsx:76`), `useLaunchAgentSession` in `entities/agent`,
+`AgentListPage` empty state, CLI `MohistCliCommands.Agent.cs` (no `start`
+subcommand conflict; `BodyInputResolver`, `ResolveTypedAgentConfig`,
+`TableShape.AgentSessionLaunch`, `X-Mohist-Launch-Origin` all present), and
+all four docs files including `docs/agent-sessions.md` sections "Configure an
+Agent" and "Launch Entry Points". Tasks format matches `issue-505`/`issue-589`
+precedent; specs use correct `### Requirement` / `#### Scenario` structure
+with zero missing scenarios.
 
-No problem meeting the must-fix bar was found. Nothing new to justify a
-round-1/2 miss.
+### Task breakdown — checked, no issue
+
+T-001→T-005: ids unique, dependencies acyclic and sensible (resolver before
+route before rollback; web after server; CLI last because it owns the full
+`npm run verify` gate). Each task has behavior-specific, verifiable acceptance
+criteria, per-slice test gates (`test:fast`, web typecheck+tests,
+`test:fast:cli`, `docs:check`), outputs, and doc ownership
+(`agent-sessions.md` T-001/T-002, `agent-api.md` T-002, `web-ui.md` T-004,
+`cli-reference.md`/`getting-started.md` T-005). All 21 spec anchors referenced
+by tasks/notes resolve. Migration/rollback ordering (server-additive first,
+web/CLI after) is correct. The only breakdown-level problem is that T-002's
+criterion is unsatisfiable per MF-2.
 
 ## Observations (do not affect the verdict)
 
-- **O-9 (AC1 "permissions" vocabulary):** the issue's AC1 lists 权限
-  (permissions) among configurable/viewable Agent aspects; the domain has
-  no dedicated per-Agent permission field — the launch-context/workspace
-  binding plays the permission-scope role per the issue's own Domain
-  Model, and the plan binds that scope per-launch (context validation +
-  materialized snapshot). Rounds 1–2 read AC1 this way; recorded here so
-  the disposition is explicit.
-- O-1..O-8 from earlier rounds remain valid and unchanged.
+- **O-1 (AC1 tail):** 权限／协作者／并发意图 have no task-language surface in
+  this plan; they remain definition-editor concepts. Defensible under
+  derive-then-refine, but the plan should state this disposition explicitly so
+  AC1's completion is not silently narrowed (same discipline MF-1 demands for
+  AC3).
+- **O-2 (AC4 tail):** 「权限范围和预计影响范围」 pre-launch confirmation has no
+  defined product meaning today; the plan shows context and workspace/repo
+  binding only. Worth an explicit interpretation in the proposal.
+- **O-3 (spawn-hint coupling):** design D2 reuses `AgentRef` as the name-hint
+  carrier; `BuildStartup` embeds `request.AgentRef` into the
+  `mo agent spawn <agent-ref> …` hint string (`AgentLauncher.cs:743`), so a
+  task-first launch (AgentRef = name hint or empty) produces a startup payload
+  that differs from a definition-first launch of the same Agent at that one
+  string — in tension with the "indistinguishable session metadata and source
+  labels" requirement and T-002's equivalence spec. The equivalence tests will
+  surface it; the design should pin the expected behavior (e.g., rebuild the
+  startup with the created Agent's id, or document the exclusion).
+- **O-4 (no first-class default-config surface):** the Project default is
+  writable only via `PUT/PATCH /api/projects/{ref}/default-execution-config`;
+  no Web settings UI or CLI command is planned to set it, yet the
+  `execution_config_unresolvable` repair guidance tells users to "configure
+  the Project default". The inline-hint path avoids the dead end, but a
+  first-class configuration surface (or an explicit follow-up owner) would
+  make the repair actionable for non-API users.
+- **O-5 (determinable-rejection replay boundary):** the spec's replay
+  requirement says replay "SHALL return the original outcome … or the original
+  recorded rejection", while determinable pre-plan rejections (name conflict,
+  unresolvable config) are re-evaluated on replay and can flip if state
+  changed. The design documents this correctly as the definition-first
+  convergence boundary; the spec wording could mislead a builder into thinking
+  determinable rejections must be durably recorded. A clarifying sentence in
+  the spec would help.
+- **O-6 (verification scope):** plan-only review — no implementation or test
+  suite was run; static checks performed: tasks.json JSON validity, task-graph
+  acyclicity, spec-anchor resolution, requirement/scenario structure, and
+  source-level verification of every design claim cited above.
 
 ## Summary
 
-Round 3 verified rather than re-swept: round 1's two must-fixes are fixed
-with evidence that survives independent re-checking against the code
-(request Orleans Ids 0–14, ordinal fingerprint compare on resume,
-`ModelSelect`/model-catalog hooks, `mo agent model list`), the artifacts
-are unchanged since round 2's PASS, all mechanical checks pass, and the
-pre-existing-miss probes found nothing at the must-fix bar.
+The plan's core — one task-first request composing the unchanged canonical
+launch, deterministic derivation, Project default with one precedence rule,
+orphan-free rejection with coordinator-owned rollback, task-first composer and
+CLI — is well designed and verified against the codebase. It fails on one
+explicit issue acceptance criterion it neither covers nor scopes (AC3, MF-1),
+and on one replay-contract contradiction between its own spec/tasks and design
+(MF-2). Both are bounded fixes to the artifacts.
 
-<promise>PASS</promise>
+<promise>FAIL</promise>
