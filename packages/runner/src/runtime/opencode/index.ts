@@ -44,6 +44,7 @@ export {
   errorKindFor,
   normalizeAbortUnconfirmed,
   normalizeDeadlineExceeded,
+  normalizeGenerationDrainTimeout,
   normalizeInterrupted,
   normalizeInvalidInput,
   normalizeIncompatibleRuntime,

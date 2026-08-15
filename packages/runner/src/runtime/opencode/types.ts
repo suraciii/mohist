@@ -213,6 +213,7 @@ export type RuntimeErrorKind =
   | "deadline-exceeded"
   | "interrupted"
   | "turn-failed"
+  | "generation-drain-timeout"
 
 export interface RuntimeError {
   readonly kind: RuntimeErrorKind

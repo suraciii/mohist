@@ -1,5 +1,6 @@
 import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task-log.js'
 import { resolve } from 'node:path'
+import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
 import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
 import { createPiProjector } from './projector.js'
@@ -46,6 +47,7 @@ export interface PiRuntimeDeps {
   readonly providerErrorPolicy?: PiProviderErrorPolicy
   readonly clock?: PiClock
   readonly masker?: CredentialMasker
+  readonly runtimeShutdownTimeoutMs?: number
 }
 
 const defaultClock: PiClock = {
@@ -57,6 +59,7 @@ const CANCEL_CONFIRMATION_TIMEOUT_MS = 5_000
 
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
+  private readonly runtimeShutdownTimeoutMs: number
   private readonly sessions = new Map<string, PiSdkSession>()
   private readonly sessionMutexes = new Map<string, Promise<unknown>>()
   private readonly state: {
@@ -69,6 +72,7 @@ export class PiRuntime {
 
   constructor(deps: PiRuntimeDeps) {
     this.deps = deps
+    this.runtimeShutdownTimeoutMs = boundedTimeoutMs(deps.runtimeShutdownTimeoutMs, 30_000)
   }
 
   private withSessionLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
@@ -708,12 +712,16 @@ export class PiRuntime {
   }
 
   async shutdown(): Promise<void> {
-    for (const session of this.sessions.values()) session.dispose()
+    for (const session of this.sessions.values()) {
+      try { session.dispose() } catch { /* best effort */ }
+    }
     this.sessions.clear()
     this.sessionMutexes.clear()
-    await this.state.services?.close()
+    const services = this.state.services
     this.state.services = null
     this.state.ready = false
+    this.state.catalog = null
+    await boundedWait(() => services?.close(), this.runtimeShutdownTimeoutMs)
   }
 
   private async attemptStart(): Promise<PiResult<PiReadyState>> {
@@ -741,7 +749,7 @@ export class PiRuntime {
           `Pi model catalog unavailable: ${this.mask(message(cause))}`,
         )
         this.state.services = null
-        await services.close().catch(() => undefined)
+        await boundedWait(() => services.close(), this.runtimeShutdownTimeoutMs)
         return this.unavailable()
       }
       this.state.ready = true

@@ -421,6 +421,8 @@ export class RunnerHost {
     this.openCodeRuntime = factory({
       directory: process.cwd(),
       ...(this.options.runtimeIdleGraceMs !== undefined ? { idleGraceMs: this.options.runtimeIdleGraceMs } : {}),
+      ...(this.options.quarantineDrainTimeoutMs !== undefined ? { quarantineDrainTimeoutMs: this.options.quarantineDrainTimeoutMs } : {}),
+      ...(this.options.runtimeShutdownTimeoutMs !== undefined ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs } : {}),
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const startResult = await this.openCodeRuntime.start(signal)
@@ -432,6 +434,7 @@ export class RunnerHost {
     this.syncOpenCodeWorkOwners()
     this.piRuntime = getPiRuntimeFactory()({
       agentDir: this.options.runnerRoot,
+      ...(this.options.runtimeShutdownTimeoutMs !== undefined ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs } : {}),
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const piStart = await this.piRuntime.start()

@@ -60,12 +60,14 @@ interface BuildArgs {
   abortHangs?: boolean
   statusHangs?: boolean
   rebuildDelayMs?: number
+  quarantineDrainTimeoutMs?: number
 }
 
 interface BuildResult {
   deps: OpenCodeRuntimeDeps
   client: FakeClientHandles
   server: OpencodeServerHandle
+  subscription: FakeSubscription
   serverFactory: ReturnType<typeof vi.fn>
 }
 
@@ -141,8 +143,9 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     eventSubscriptionFactory: () => subscription,
     ...(args.policy ? { providerErrorPolicy: args.policy } : {}),
     ...(args.rebuildDelayMs !== undefined ? { rebuildDelayMs: args.rebuildDelayMs } : {}),
+    ...(args.quarantineDrainTimeoutMs !== undefined ? { quarantineDrainTimeoutMs: args.quarantineDrainTimeoutMs } : {}),
   }
-  return { deps, client, server, serverFactory }
+  return { deps, client, server, subscription, serverFactory }
 }
 
 afterEach(() => {
@@ -611,6 +614,106 @@ describe("OpenCodeRuntime.runTurn — deadline abort", () => {
       expect(recovered.ok).toBe(true)
       expect(client.sessionPrompt).toHaveBeenCalledTimes(2)
     } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("force-releases a wedged generation and serves work from its replacement", async () => {
+    vi.useFakeTimers()
+    let runtime: OpenCodeRuntime | null = null
+    try {
+      const { deps, client, subscription, serverFactory } = buildRuntime({ quarantineDrainTimeoutMs: 25 })
+      client.sessionPrompt.mockImplementationOnce(() => new Promise<never>(() => {}))
+      runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+
+      const wedged = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "wedged turn",
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(0)
+      subscription.emit({ type: "server.disconnected", payload: {} })
+      await vi.advanceTimersByTimeAsync(24)
+      expect(serverFactory).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(1)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(serverFactory).toHaveBeenCalledTimes(2)
+      expect(runtime.ready()).toBe(true)
+      await expect(wedged).resolves.toMatchObject({ ok: false, error: { kind: "generation-drain-timeout" } })
+
+      const replacement = await runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projB" },
+        prompt: "replacement turn",
+      }, new AbortController().signal)
+      expect(replacement.ok).toBe(true)
+    } finally {
+      await runtime?.shutdown()
+      vi.useRealTimers()
+    }
+  })
+
+  it("preserves a sibling result that completed before forced generation release", async () => {
+    vi.useFakeTimers()
+    let runtime: OpenCodeRuntime | null = null
+    try {
+      const { deps, client, subscription, serverFactory } = buildRuntime({ quarantineDrainTimeoutMs: 25 })
+      const siblingPrompt = deferred<unknown>()
+      client.sessionPrompt
+        .mockImplementationOnce(() => new Promise<never>(() => {}))
+        .mockImplementationOnce(() => siblingPrompt.promise)
+      runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+
+      const wedged = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "wedged turn",
+      }, new AbortController().signal)
+      const sibling = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projB" },
+        prompt: "completed sibling",
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(0)
+      subscription.emit({ type: "server.disconnected", payload: {} })
+
+      siblingPrompt.resolve({ data: { parts: [{ type: "text", text: "sibling done" }] } })
+      await expect(sibling).resolves.toMatchObject({ ok: true })
+      await vi.advanceTimersByTimeAsync(25)
+      await vi.advanceTimersByTimeAsync(0)
+
+      await expect(wedged).resolves.toMatchObject({ ok: false, error: { kind: "generation-drain-timeout" } })
+      expect(serverFactory).toHaveBeenCalledTimes(2)
+      expect(runtime.ready()).toBe(true)
+    } finally {
+      await runtime?.shutdown()
+      vi.useRealTimers()
+    }
+  })
+
+  it("releases a quarantined generation as soon as its turns finish", async () => {
+    vi.useFakeTimers()
+    let runtime: OpenCodeRuntime | null = null
+    try {
+      const { deps, client, subscription, serverFactory } = buildRuntime({ quarantineDrainTimeoutMs: 60_000 })
+      const prompt = deferred<unknown>()
+      client.sessionPrompt.mockImplementationOnce(() => prompt.promise)
+      runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+
+      const turn = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "finishes during drain",
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(0)
+      subscription.emit({ type: "server.disconnected", payload: {} })
+      prompt.resolve({ data: { parts: [{ type: "text", text: "done" }] } })
+      await expect(turn).resolves.toMatchObject({ ok: true })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(serverFactory).toHaveBeenCalledTimes(2)
+      expect(runtime.ready()).toBe(true)
+    } finally {
+      await runtime?.shutdown()
       vi.useRealTimers()
     }
   })

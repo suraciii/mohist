@@ -365,6 +365,12 @@ export interface RunnerOptions {
   /** Idle grace before an unowned shared Agent runtime is terminated. */
   runtimeIdleGraceMs?: number
 
+  /** Maximum time a quarantined OpenCode generation may drain. */
+  quarantineDrainTimeoutMs?: number
+
+  /** Maximum time runtime shutdown waits before abandoning cleanup. */
+  runtimeShutdownTimeoutMs?: number
+
   /**
    * Optional override for the incremental task-log flush interval in
    * milliseconds. Defaults to {@link TASK_LOG_FLUSH_INTERVAL_MS}

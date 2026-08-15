@@ -39,8 +39,18 @@ import type {
   RuntimeTurnResult,
   RuntimeOwnershipSnapshot,
 } from "./types.js"
-import { errorKindFor, hasUnconfirmedCleanup, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
-import type { OpencodeServerHandle } from "./server-process.js"
+import {
+  errorKindFor,
+  hasUnconfirmedCleanup,
+  normalizeGenerationDrainTimeout,
+  normalizeInvalidInput,
+  normalizeMissingSession,
+  normalizeTurnFailed,
+  normalizeUnavailableRuntime,
+} from "./errors.js"
+import type { OpencodeServerFactory, OpencodeServerHandle } from "./server-process.js"
+import { DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS } from "./server-process.js"
+import { boundedTimeoutMs, boundedWait } from "../bounded-wait.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
 import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
 import { abortAndConfirmSession, runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
@@ -52,10 +62,12 @@ import {
 
 export interface OpenCodeRuntimeDeps {
   readonly directory: string
-  readonly serverFactory?: (directory: string, signal: AbortSignal) => Promise<OpencodeServerHandle>
+  readonly serverFactory?: OpencodeServerFactory
   readonly eventSubscriptionFactory?: (client: OpencodeClient) => RuntimeEventSubscription
   readonly rebuildDelayMs?: number
   readonly idleGraceMs?: number
+  readonly quarantineDrainTimeoutMs?: number
+  readonly runtimeShutdownTimeoutMs?: number
   readonly clock?: RuntimeClock
   /**
    * Optional override for the provider-error failure policy. Defaults
@@ -99,10 +111,17 @@ interface RuntimeGeneration {
   readonly events: RuntimeEventSubscription
   readonly drained: Promise<void>
   readonly resolveDrained: () => void
-  activeTurns: number
+  readonly activeTurns: Set<ActiveGenerationTurn>
   quarantined: boolean
   closed: boolean
   drainResolved: boolean
+}
+
+interface ActiveGenerationTurn {
+  readonly abortController: AbortController
+  readonly forced: Promise<void>
+  readonly resolveForced: () => void
+  forcedFailure: boolean
 }
 
 export class OpenCodeRuntime {
@@ -115,11 +134,15 @@ export class OpenCodeRuntime {
   private nextGenerationId = 1
   private readonly clock: RuntimeClock
   private readonly idleGraceMs: number
+  private readonly quarantineDrainTimeoutMs: number
+  private readonly runtimeShutdownTimeoutMs: number
 
   constructor(deps: OpenCodeRuntimeDeps) {
     this.deps = deps
     this.clock = deps.clock ?? defaultRuntimeClock
     this.idleGraceMs = Math.max(0, Math.floor(deps.idleGraceMs ?? DEFAULT_IDLE_GRACE_MS))
+    this.quarantineDrainTimeoutMs = boundedTimeoutMs(deps.quarantineDrainTimeoutMs, 60_000)
+    this.runtimeShutdownTimeoutMs = boundedTimeoutMs(deps.runtimeShutdownTimeoutMs, DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS)
     this.state = {
       ready: false,
       diagnostic: null,
@@ -368,6 +391,16 @@ export class OpenCodeRuntime {
       }])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
+    let resolveForced!: () => void
+    const forced = new Promise<void>((resolve) => { resolveForced = resolve })
+    const activeTurn: ActiveGenerationTurn = {
+      abortController: new AbortController(),
+      forced,
+      resolveForced,
+      forcedFailure: false,
+    }
+    generation.activeTurns.add(activeTurn)
+    const combined = combineAbortSignals(signal, activeTurn.abortController.signal)
     try {
       return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
         const server = generation.server
@@ -379,7 +412,26 @@ export class OpenCodeRuntime {
           markDirectoryUsed: lease.markUsed,
           trackPendingOperation: lease.trackPending,
         }
-        const result = await runTurn(request, deps, signal, observer)
+        const turnOutcome = await Promise.race([
+          runTurn(request, deps, combined.signal, observer).then(
+            (result) => ({ kind: "result" as const, result }),
+            (cause) => ({ kind: "error" as const, cause }),
+          ),
+          activeTurn.forced.then(() => ({ kind: "forced" as const })),
+        ])
+        if (turnOutcome.kind === "forced") {
+          const error = normalizeGenerationDrainTimeout(this.quarantineDrainTimeoutMs)
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        if (turnOutcome.kind === "error") throw turnOutcome.cause
+        const result = turnOutcome.result
+        if (activeTurn.forcedFailure) {
+          const error = normalizeGenerationDrainTimeout(
+            this.quarantineDrainTimeoutMs,
+            result.ok ? [] : result.diagnostics,
+          )
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
         if (!result.ok && hasUnconfirmedCleanup(result.error.diagnostics)) {
           this.triggerRebuild(server, {
             severity: "error",
@@ -392,6 +444,8 @@ export class OpenCodeRuntime {
         return result
       })
     } finally {
+      combined.dispose()
+      generation.activeTurns.delete(activeTurn)
       inFlight.end(sessionKey)
       this.releaseGeneration(generation)
     }
@@ -540,8 +594,13 @@ export class OpenCodeRuntime {
     if (options.clearDiagnostic ?? true) {
       this.state.diagnostic = null
     }
-    if (server) await (server.terminateTree?.() ?? server.close()).catch(() => {})
-    if (events) await events.close().catch(() => {})
+    await boundedWait(
+      () => Promise.allSettled([
+        ...(server ? [server.terminateTree?.() ?? server.close()] : []),
+        ...(events ? [events.close()] : []),
+      ]),
+      this.runtimeShutdownTimeoutMs,
+    )
   }
 
   private readyState(): RuntimeReadyState {
@@ -579,7 +638,9 @@ export class OpenCodeRuntime {
     }
     let server: OpencodeServerHandle
     try {
-      server = await serverFactory(this.deps.directory, signal)
+      server = await serverFactory(this.deps.directory, signal, {
+        shutdownTimeoutMs: this.runtimeShutdownTimeoutMs,
+      })
     } catch (cause) {
       const diagnostic = toDiagnostic(cause, "server-spawn-failed", "Failed to start OpenCode server")
       this.state.diagnostic = diagnostic
@@ -599,7 +660,7 @@ export class OpenCodeRuntime {
         }
         this.state.diagnostic = diagnostic
         diagnostics.push(diagnostic)
-        await (server.terminateTree?.() ?? server.close()).catch(() => {})
+        await boundedWait(() => server.terminateTree?.() ?? server.close(), this.runtimeShutdownTimeoutMs)
         this.state.server = null
         const error = normalizeUnavailableRuntime(diagnostics)
         return { ok: false, error, diagnostics }
@@ -608,7 +669,7 @@ export class OpenCodeRuntime {
       const diagnostic = toDiagnostic(cause, "health-failed", "OpenCode health check failed")
       this.state.diagnostic = diagnostic
       diagnostics.push(diagnostic)
-      await (server.terminateTree?.() ?? server.close()).catch(() => {})
+      await boundedWait(() => server.terminateTree?.() ?? server.close(), this.runtimeShutdownTimeoutMs)
       this.state.server = null
       const error = normalizeUnavailableRuntime(diagnostics)
       return { ok: false, error, diagnostics }
@@ -654,7 +715,7 @@ export class OpenCodeRuntime {
       code: "server-exit",
       message: "OpenCode server exited; rebuilding runtime",
     }
-    if (generation.activeTurns === 0) {
+    if (generation.activeTurns.size === 0) {
       this.resolveGenerationDrain(generation)
     }
     const rebuild = this.scheduleRebuild(generation)
@@ -672,7 +733,8 @@ export class OpenCodeRuntime {
   private scheduleRebuild(generation: RuntimeGeneration): Promise<RuntimeResult<RuntimeReadyState>> {
     const delay = this.deps.rebuildDelayMs ?? 0
     return (async () => {
-      await generation.drained
+      const drained = await this.waitForGenerationDrain(generation)
+      if (!drained) this.forceReleaseGeneration(generation)
       if (delay > 0) {
         await new Promise<void>((resolve) => {
           const timer = this.clock.setTimeout(resolve, delay)
@@ -694,14 +756,36 @@ export class OpenCodeRuntime {
     if (!this.state.ready || !generation || generation.quarantined || this.state.server !== generation.server || this.state.events !== generation.events) {
       return null
     }
-    generation.activeTurns += 1
     return generation
   }
 
   private releaseGeneration(generation: RuntimeGeneration): void {
-    generation.activeTurns -= 1
-    if (generation.activeTurns !== 0 || !generation.quarantined || generation.closed) return
+    if (generation.activeTurns.size !== 0 || !generation.quarantined || generation.closed) return
     if (this.state.generation === generation) this.directoryInstances.resetGeneration()
+    this.resolveGenerationDrain(generation)
+  }
+
+  private async waitForGenerationDrain(generation: RuntimeGeneration): Promise<boolean> {
+    if (generation.drainResolved) return true
+    let timer: unknown
+    const timeout = new Promise<boolean>((resolve) => {
+      timer = this.clock.setTimeout(() => resolve(false), this.quarantineDrainTimeoutMs)
+    })
+    try {
+      return await Promise.race([generation.drained.then(() => true), timeout])
+    } finally {
+      if (timer !== undefined) this.clock.clearTimeout(timer)
+    }
+  }
+
+  private forceReleaseGeneration(generation: RuntimeGeneration): void {
+    if (generation.drainResolved) return
+    generation.closed = true
+    for (const activeTurn of generation.activeTurns) {
+      activeTurn.forcedFailure = true
+      activeTurn.resolveForced()
+      try { activeTurn.abortController.abort(new Error("generation-drain-timeout")) } catch { /* best effort */ }
+    }
     this.resolveGenerationDrain(generation)
   }
 
@@ -765,7 +849,7 @@ function newRuntimeGeneration(id: number, server: OpencodeServerHandle, events: 
     events,
     drained,
     resolveDrained,
-    activeTurns: 0,
+    activeTurns: new Set(),
     quarantined: false,
     closed: false,
     drainResolved: false,
@@ -793,6 +877,24 @@ function toRawError(cause: unknown): { message: string; status?: number; code?: 
 function errorMessage(cause: unknown, fallback: string): string {
   if (cause instanceof Error) return cause.message || fallback
   return String(cause) || fallback
+}
+
+function combineAbortSignals(parent: AbortSignal, forced: AbortSignal): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController()
+  const abort = () => controller.abort(parent.aborted ? parent.reason : forced.reason)
+  if (parent.aborted || forced.aborted) {
+    abort()
+    return { signal: controller.signal, dispose: () => {} }
+  }
+  parent.addEventListener("abort", abort, { once: true })
+  forced.addEventListener("abort", abort, { once: true })
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      parent.removeEventListener("abort", abort)
+      forced.removeEventListener("abort", abort)
+    },
+  }
 }
 
 type FollowupValidationOk = {

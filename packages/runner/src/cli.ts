@@ -42,6 +42,8 @@ try {
     cleanupConvergenceIntervalMs: positiveNumberEnv("CLEANUP_CONVERGENCE_INTERVAL_MS") ?? 5 * 60_000,
     cleanupLoopIntervalMs: positiveNumberEnv("CLEANUP_LOOP_INTERVAL_MS") ?? 2 * 60_000,
     runtimeIdleGraceMs: positiveNumberEnv("RUNTIME_IDLE_GRACE_MS") ?? 5 * 60_000,
+    quarantineDrainTimeoutMs: positiveNumberEnv("QUARANTINE_DRAIN_TIMEOUT_MS") ?? 60_000,
+    runtimeShutdownTimeoutMs: positiveNumberEnv("RUNTIME_SHUTDOWN_TIMEOUT_MS") ?? 30_000,
     credential: credential ?? undefined,
   }).run(controller.signal)
 } finally {

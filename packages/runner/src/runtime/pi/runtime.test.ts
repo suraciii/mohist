@@ -103,8 +103,39 @@ describe('PiRuntime inspectTurn', () => {
   })
 })
 
+describe('PiRuntime shutdown', () => {
+  it('abandons a non-terminating services.close at the configured deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const close = vi.fn(() => new Promise<void>(() => {}))
+      const runtime = new PiRuntime({
+        agentDir: '/agent',
+        runtimeShutdownTimeoutMs: 25,
+        sdkFactory: {
+          create: async () => ({
+            catalog: async () => [],
+            createSession: async () => { throw new Error('not used') },
+            openSession: async () => { throw new Error('not used') },
+            model: () => undefined,
+            close,
+          }),
+        },
+      })
+      await runtime.start()
+      const shutdown = runtime.shutdown()
+      await vi.advanceTimersByTimeAsync(25)
+      await expect(shutdown).resolves.toBeUndefined()
+      expect(close).toHaveBeenCalledOnce()
+      expect(runtime.ready()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('PiRuntime followup', () => {
   it('applies the requested model and variant before accepting an idle follow-up', async () => {
+
     const setModel = vi.fn(async () => undefined)
     const setThinkingLevel = vi.fn()
     const prompt = vi.fn(async (_text: string, options?: { preflight?: (accepted: boolean) => void }) => {

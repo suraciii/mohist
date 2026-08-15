@@ -50,13 +50,53 @@ vi.mock("@opencode-ai/sdk/v2", () => ({
   createOpencodeClient: sdkMocks.createOpencodeClient,
 }))
 
-import { createOpenCodeFetch, createSpawnedOpencodeServer } from "../src/runtime/opencode/server-process.js"
+import { createOpenCodeFetch, createSpawnedOpencodeServer, terminateOpencodeTree } from "../src/runtime/opencode/server-process.js"
 
 function it(name: string, body: () => Promise<void>): void {
   vitestIt(name, async () => await sdkTestStorage.run({ mocks: createSdkMocks() }, body))
 }
 
 describe("createOpenCodeFetch", () => {
+  it("bounds a hanging dispatcher close and destroys it after the deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      const close = vi.fn(() => new Promise<void>(() => {}))
+      const destroy = vi.fn()
+      const serverClose = vi.fn()
+      const pending = terminateOpencodeTree(
+        { close: serverClose },
+        { close, destroy } as unknown as Dispatcher,
+        25,
+      )
+      await vi.advanceTimersByTimeAsync(24)
+      expect(destroy).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(pending).resolves.toBeUndefined()
+      expect(serverClose).toHaveBeenCalledOnce()
+      expect(close).toHaveBeenCalledOnce()
+      expect(destroy).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("best-effort SIGKILLs a process tree when graceful close does not finish", async () => {
+    vi.useFakeTimers()
+    try {
+      const kill = vi.fn()
+      const pending = terminateOpencodeTree(
+        { close: () => new Promise<void>(() => {}), process: { kill } },
+        { close: () => new Promise<void>(() => {}), destroy: vi.fn() } as unknown as Dispatcher,
+        25,
+      )
+      await vi.advanceTimersByTimeAsync(25)
+      await expect(pending).resolves.toBeUndefined()
+      expect(kill).toHaveBeenCalledWith("SIGKILL")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("uses the dedicated dispatcher without changing the global fetch", async () => {
     const dispatcher = {} as Dispatcher
     const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }))

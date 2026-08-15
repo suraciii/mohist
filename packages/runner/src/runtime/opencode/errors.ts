@@ -99,6 +99,22 @@ export function normalizeInterrupted(diagnostics: readonly RuntimeDiagnostic[] =
   }
 }
 
+export function normalizeGenerationDrainTimeout(timeoutMs: number, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
+  return {
+    kind: "generation-drain-timeout",
+    message: `OpenCode runtime generation was forcibly released after the ${timeoutMs}ms drain deadline`,
+    diagnostics: [
+      ...diagnostics,
+      {
+        severity: "error",
+        code: "generation-drain-timeout",
+        message: "The active turn was failed because its quarantined runtime generation did not drain in time",
+        details: { timeoutMs },
+      },
+    ],
+  }
+}
+
 export function normalizeDeadlineExceeded(deadlineMs: number, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   const seconds = deadlineMs / 1000
   return {

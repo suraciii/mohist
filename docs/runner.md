@@ -177,6 +177,23 @@ task's `uses` value selects an execution-backend Action such as
 `mohist/opencode` or `mohist/pi`. Action Input supplies model options. See
 [Action Contracts](actions/README.md).
 
+Runtime replacement and shutdown are bounded by host-local settings:
+
+- `QUARANTINE_DRAIN_TIMEOUT_MS` controls how long a quarantined OpenCode
+  generation may drain before active turns fail with
+  `generation-drain-timeout`; the default is 60 seconds.
+- `RUNTIME_SHUTDOWN_TIMEOUT_MS` controls graceful OpenCode dispatcher/process
+  teardown and Pi service shutdown; the default is 30 seconds. On expiry the
+  runner abandons the wait, destroys the transport, and proceeds with the
+  replacement or shutdown. OpenCode termination sends the graceful stop first
+  and uses a best-effort process-group `SIGKILL` when a process handle is
+  available.
+
+Both settings are millisecond values and should be set in the service manager
+configuration. A forced generation release only fails turns still active at
+the deadline; results already waiting for acknowledgement remain journaled and
+are reported under their original work identities.
+
 ## Self-hosting
 
 For a long-running Runner managed as a service instead of foreground
