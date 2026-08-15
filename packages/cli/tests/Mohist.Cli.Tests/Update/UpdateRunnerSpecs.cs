@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Cli;
 using Mohist.Cli.Tests.Support;
@@ -8,25 +9,66 @@ namespace Mohist.Cli.Tests.Update;
 
 public class UpdateRunnerSpecs
 {
+    private static string ReadUpdateInterruptId(HttpRequestMessage request)
+    {
+        var body = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+        using var document = JsonDocument.Parse(body ?? throw new InvalidOperationException(
+            "update interrupt request body is required"));
+        var updateInterruptId = document.RootElement.GetProperty("updateInterruptId").GetString();
+        Assert.True(Guid.TryParse(updateInterruptId, out _));
+        return updateInterruptId!;
+    }
+
+    private static HttpResponseMessage InterruptResponse(
+        HttpRequestMessage request,
+        string runnerId,
+        string[] interruptedWorkIds)
+    {
+        var updateInterruptId = ReadUpdateInterruptId(request);
+        return RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = new
+            {
+                runnerId,
+                status = "interrupted",
+                updateInterruptId,
+                interruptedWorkIds,
+                interruptedWorkCount = interruptedWorkIds.Length,
+            },
+        });
+    }
+
+    private static HttpResponseMessage CancelResponse(string runnerId, string updateInterruptId) =>
+        RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = new
+            {
+                runnerId,
+                updateInterruptId,
+                status = "cancelled",
+            },
+        });
+
     private static RecordingHttpHandler CreateIdentityThenNoReconnectHandler(string hash)
     {
         var identityRequests = 0;
+        string? updateInterruptId = null;
         return new RecordingHttpHandler((request, _) =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
             {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        runnerId = "runner-1",
-                        status = "interrupted",
-                        interruptedWorkIds = Array.Empty<string>(),
-                        interruptedWorkCount = 0,
-                    },
-                }));
+                updateInterruptId = ReadUpdateInterruptId(request);
+                return Task.FromResult(InterruptResponse(request, "runner-1", []));
+            }
+
+            if (request.Method == HttpMethod.Post
+                && updateInterruptId is not null
+                && path == $"/api/runner/runner-1/update-interrupt/{updateInterruptId}/cancel")
+            {
+                return Task.FromResult(CancelResponse("runner-1", updateInterruptId));
             }
 
             if (request.Method == HttpMethod.Get && path == "/api/runner/identity"
@@ -68,17 +110,7 @@ public class UpdateRunnerSpecs
 
             if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
             {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        runnerId = "runner-1",
-                        status = "interrupted",
-                        interruptedWorkIds = new[] { "job-1", "job-2" },
-                        interruptedWorkCount = 2,
-                    },
-                }));
+                return Task.FromResult(InterruptResponse(request, "runner-1", ["job-1", "job-2"]));
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
@@ -98,6 +130,63 @@ public class UpdateRunnerSpecs
         Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
         Assert.Contains("status=interrupted runnerId=runner-1 interruptedWorkCount=2", f.Stdout.ToString());
         Assert.DoesNotContain("activeWorks", string.Join('\n', handler.Requests.Select(request => request.RequestUri!.PathAndQuery)));
+    }
+
+    [Fact]
+    public async Task UpdateRunner_WhenRestartFails_ReleasesConfirmedInterrupt()
+    {
+        var f = new UpdateTestFactory();
+        var installer = new FakeServiceInstaller { RunnerInstalled = true, RestartRunnerResult = 17 };
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
+        string? updateInterruptId = null;
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == "/api/runner/identity")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", "test-host", hash, "online"),
+                        System.Text.Encoding.UTF8,
+                        "application/json"),
+                });
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
+            {
+                updateInterruptId = ReadUpdateInterruptId(request);
+                return Task.FromResult(InterruptResponse(request, "runner-1", []));
+            }
+
+            if (request.Method == HttpMethod.Post
+                && updateInterruptId is not null
+                && path == $"/api/runner/runner-1/update-interrupt/{updateInterruptId}/cancel")
+            {
+                return Task.FromResult(CancelResponse("runner-1", updateInterruptId));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var updater = f.BuildUpdater(
+            handler,
+            unitDir: UpdateTestFactory.UnitDir,
+            getLocalHostname: () => "test-host",
+            serviceInstaller: installer);
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(17, exitCode);
+        Assert.NotNull(updateInterruptId);
+        Assert.Equal(
+            [
+                (HttpMethod.Get, "/api/runner/identity"),
+                (HttpMethod.Post, "/api/runner/runner-1/update-interrupt"),
+                (HttpMethod.Post, $"/api/runner/runner-1/update-interrupt/{updateInterruptId}/cancel"),
+            ],
+            handler.Requests.Select(request => (request.Method, request.RequestUri!.AbsolutePath)));
+        Assert.Contains("Runner update interrupt rollback: status=cancelled runnerId=runner-1.", f.Stdout.ToString());
     }
 
     [Fact]
@@ -265,6 +354,9 @@ public class UpdateRunnerSpecs
         Assert.Equal(1, exitCode);
         Assert.Contains("runner-not-reconnected", f.Stderr.ToString());
         Assert.Contains("status=unconfirmed", f.Stderr.ToString());
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Post
+            && request.RequestUri!.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -295,5 +387,8 @@ public class UpdateRunnerSpecs
         Assert.Equal(1, exitCode);
         Assert.Contains("runner-not-reconnected", actual);
         Assert.Contains("status=unconfirmed", actual);
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Post
+            && request.RequestUri!.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal));
     }
 }

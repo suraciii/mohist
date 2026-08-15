@@ -10,6 +10,7 @@ namespace Mohist.Cli.Tests.Support;
 internal sealed class FakeServiceInstaller : IServiceInstaller
 {
     public bool RunnerInstalled { get; set; }
+    public int RestartRunnerResult { get; set; }
     public List<string> Calls { get; } = new();
     public List<ServiceInstallOptions> InstallServerCalls { get; } = new();
     public List<ServiceInstallOptions> InstallRunnerCalls { get; } = new();
@@ -87,7 +88,7 @@ internal sealed class FakeServiceInstaller : IServiceInstaller
     public Task<int> RestartRunnerAsync(ServiceCommandOptions options)
     {
         Calls.Add(nameof(RestartRunnerAsync));
-        return Task.FromResult(0);
+        return Task.FromResult(RestartRunnerResult);
     }
 
     public Task<int> StatusRunnerAsync(ServiceCommandOptions options)

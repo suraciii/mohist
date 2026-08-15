@@ -276,10 +276,30 @@ internal sealed class SequenceHttpHandler : HttpMessageHandler
         {
             Requests++;
             var runnerId = path["/api/runner/".Length..].Replace("/update-interrupt", "", StringComparison.Ordinal);
+            var updateInterruptId = ReadUpdateInterruptId(request, cancellationToken);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    $"{{\"success\":true,\"data\":{{\"runnerId\":\"{runnerId}\",\"status\":\"interrupted\",\"interruptedWorkIds\":[],\"interruptedWorkCount\":0}}}}",
+                    $"{{\"success\":true,\"data\":{{\"runnerId\":\"{runnerId}\",\"status\":\"interrupted\",\"updateInterruptId\":\"{updateInterruptId}\",\"interruptedWorkIds\":[],\"interruptedWorkCount\":0}}}}",
+                    System.Text.Encoding.UTF8,
+                    "application/json"),
+            });
+        }
+
+        if (request.Method == HttpMethod.Post
+            && path.StartsWith("/api/runner/", StringComparison.Ordinal)
+            && path.Contains("/update-interrupt/", StringComparison.Ordinal)
+            && path.EndsWith("/cancel", StringComparison.Ordinal))
+        {
+            Requests++;
+            var route = path["/api/runner/".Length..];
+            var separator = route.IndexOf("/update-interrupt/", StringComparison.Ordinal);
+            var runnerId = route[..separator];
+            var updateInterruptId = route[(separator + "/update-interrupt/".Length)..^"/cancel".Length];
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $"{{\"success\":true,\"data\":{{\"runnerId\":\"{runnerId}\",\"updateInterruptId\":\"{updateInterruptId}\",\"status\":\"cancelled\"}}}}",
                     System.Text.Encoding.UTF8,
                     "application/json"),
             });
@@ -344,6 +364,19 @@ internal sealed class SequenceHttpHandler : HttpMessageHandler
         }
 
         return Task.FromResult(message);
+    }
+
+    private static string ReadUpdateInterruptId(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var body = request.Content?.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
+        using var document = JsonDocument.Parse(body ?? throw new InvalidOperationException(
+            "update interrupt request body is required"));
+        var updateInterruptId = document.RootElement.TryGetProperty("updateInterruptId", out var value)
+            ? value.GetString()
+            : null;
+        if (!Guid.TryParse(updateInterruptId, out var parsed))
+            throw new InvalidOperationException("update interrupt request must contain a UUID id");
+        return parsed.ToString("N");
     }
 
     private static ResponseSpec?[] ExpandStatusResponses(HttpStatusCode?[] statuses)
