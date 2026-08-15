@@ -8,10 +8,12 @@ public class Agent
     public string ProjectId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Avatar { get; set; }
+    public string? Purpose { get; set; }
     public string Description { get; set; } = string.Empty;
     public string Instructions { get; set; } = string.Empty;
     public JsonElement? AgentConfig { get; set; }
     public IReadOnlyList<string> Skills { get; set; } = [];
+    public IReadOnlyList<string> Permissions { get; set; } = [];
     public IReadOnlyList<string> AllowedSubagentAgentIds { get; set; } = [];
     public int? MaxConcurrentRuns { get; set; }
     public string Status { get; set; } = AgentStatus.Active;
