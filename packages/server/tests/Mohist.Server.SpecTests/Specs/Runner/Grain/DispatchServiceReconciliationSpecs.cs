@@ -390,6 +390,38 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
+    public async Task PollAsync_CancelledAfterInfoRead_ReleasesAdmission()
+    {
+        var (runnerId, _) = await StartReadyWorkflowsAsync(
+            $"poll-cancel-{Guid.NewGuid():N}", count: 1, slots: 1);
+        _fixture.DispatchPollObserver.Reset();
+        _fixture.DispatchPollObserver.BlockAfterRunnerInfo();
+        using var cancellation = new CancellationTokenSource();
+
+        try
+        {
+            var poll = Dispatch.PollAsync(
+                runnerId,
+                new RunnerPollRequest([], []),
+                cancellation.Token);
+            await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
+
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => poll);
+
+            var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+            var next = await runner.TryBeginPollAsync();
+            Assert.True(next.Admitted);
+            await runner.EndPollAsync(next.AdmissionToken);
+        }
+        finally
+        {
+            _fixture.DispatchPollObserver.ReleaseAfterRunnerInfo();
+        }
+    }
+
+    [Fact]
     public async Task PollAsync_CapacityReducedAfterInfoRead_ClaimsAtMostNewCapacity()
     {
         var (runnerId, workflowIds) = await StartReadyWorkflowsAsync(

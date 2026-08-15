@@ -18,8 +18,11 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatRepairAsync(RunnerInfo info);
     /// <summary>Atomically admits one poll round and captures its capacity.</summary>
     Task<RunnerPollAdmission> TryBeginPollAsync();
-    /// <summary>Releases the poll round admitted by <see cref="TryBeginPollAsync"/>.</summary>
-    Task EndPollAsync();
+    /// <summary>
+    /// Releases the matching poll round admitted by <see cref="TryBeginPollAsync"/>.
+    /// A release from an older round cannot release a newer admission.
+    /// </summary>
+    Task EndPollAsync(Guid admissionToken);
     /// <summary>
     /// Records an ephemeral readiness observation for the current runner
     /// connection. The snapshot is only an admission fence; it never settles
@@ -295,7 +298,12 @@ public sealed record RunnerPollAdmission(
     /// Capacity observed when the poll starts. It is informational only;
     /// each fresh workflow claim rechecks live capacity.
     /// </summary>
-    [property: Id(1)] int Slots);
+    [property: Id(1)] int Slots,
+    /// <summary>
+    /// Opaque token for the admitted poll. Rejected admissions use
+    /// <see cref="Guid.Empty"/>.
+    /// </summary>
+    [property: Id(2)] Guid AdmissionToken = default);
 
 /// <summary>
 /// The dispatches rendered for this poll: redeliveries (desired − reported) plus
