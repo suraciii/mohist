@@ -19,8 +19,10 @@ namespace Mohist.Server.SpecTests.Specs.Telemetry;
 /// </summary>
 public sealed class OtlpRoutesHostFixture : IAsyncLifetime
 {
-    public const int OtlpPort = 14318;
-    public const int DisabledOtlpPort = 14319;
+    // These are logical TestServer listener identities, not OS ports.
+    // TestServer and the in-memory exporter never bind them.
+    public const int OtlpPort = 0;
+    public const int DisabledOtlpPort = 1;
 
     private SqliteConnection _keeper = null!;
     private TestClusterPortAllocator? _portAllocator;

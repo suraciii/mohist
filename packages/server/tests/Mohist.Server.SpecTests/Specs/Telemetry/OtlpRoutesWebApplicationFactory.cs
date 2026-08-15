@@ -21,7 +21,10 @@ using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
 using Orleans.Configuration;
+using Orleans.TestingHost;
 using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
@@ -44,6 +47,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly int _siloPort;
     private readonly int _gatewayPort;
     private readonly bool? _otelEnabled;
+    private readonly TestClusterPortAllocator? _portAllocator;
 
     public int OtlpPort { get; }
     public FakeTimeProvider TimeProvider { get; private set; } = null!;
@@ -52,7 +56,9 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         string connectionString,
         string runnerRoot,
         string systemUpdateStatePath,
-        int otlpPort = 4318,
+        // TestServer does not bind a socket. Port 0 is therefore a logical
+        // listener identity used only by the isolation middleware/header.
+        int otlpPort = 0,
         int? siloPort = null,
         int? gatewayPort = null,
         bool? otelEnabled = null)
@@ -61,8 +67,17 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         OtlpPort = otlpPort;
-        _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
-        _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
+        if (siloPort is null || gatewayPort is null)
+        {
+            if (siloPort is not null || gatewayPort is not null)
+                throw new ArgumentException("Test silo and gateway ports must be supplied together.");
+
+            _portAllocator = new TestClusterPortAllocator();
+            (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
+        }
+
+        _siloPort = siloPort.Value;
+        _gatewayPort = gatewayPort.Value;
         _otelEnabled = otelEnabled;
         (_otelDb, _otelKeeper) = InMemoryOtelDb.Create();
     }
@@ -72,7 +87,14 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Keep the HTTP side in TestServer. If a caller accidentally causes a
+        // real host path, port 0 delegates selection to the OS instead of
+        // touching the production 3456 listener.
+        builder.UseTestServer();
+        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://127.0.0.1:0");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
+        builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:0");
+        builder.UseSetting("Mohist:Otel:Endpoint", "http://127.0.0.1:0/otel");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
@@ -81,7 +103,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         if (_otelEnabled is { } otelEnabled)
             builder.UseSetting("Mohist:Otel:Enabled", otelEnabled ? "true" : "false");
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
-        builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:3456");
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
@@ -90,6 +111,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             var values = new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
+                ["Mohist:ServerUrl"] = "http://127.0.0.1:0",
+                ["Mohist:Otel:Endpoint"] = "http://127.0.0.1:0/otel",
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
@@ -141,6 +164,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<TimeProvider>();
             TimeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero));
             services.AddSingleton<TimeProvider>(TimeProvider);
+            services.PostConfigure<OtlpExporterOptions>("tracing", ConfigureInMemoryOtlpExporter);
+            services.PostConfigure<OtlpExporterOptions>("metrics", ConfigureInMemoryOtlpExporter);
             services.AddSingleton<OtlpRequestBodyReadProbe>();
             services.AddSingleton<IStartupFilter, OtlpRequestBodyProbeStartupFilter>();
         });
@@ -151,6 +176,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         if (disposing)
         {
             _otelKeeper.Dispose();
+            _portAllocator?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -183,8 +209,10 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     /// </summary>
     public HttpClient CreateMainApiClient()
     {
-        var client = base.CreateDefaultClient(new LocalPortHandler(3456));
-        client.DefaultRequestHeaders.Host = "localhost:3456";
+        // Port 1 is a logical non-OTLP identity only; TestServer never binds
+        // it and the request is routed entirely in-process.
+        var client = base.CreateDefaultClient(new LocalPortHandler(1));
+        client.DefaultRequestHeaders.Host = "localhost:1";
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         return client;
     }
@@ -203,6 +231,12 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             request.Headers.TryAddWithoutValidation("X-Mohist-Test-Local-Port", _localPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
             return base.SendAsync(request, cancellationToken);
         }
+    }
+
+    private static void ConfigureInMemoryOtlpExporter(OtlpExporterOptions options)
+    {
+        options.ExportProcessorType = ExportProcessorType.Simple;
+        options.HttpClientFactory = () => new HttpClient(new InMemoryOtlpExporterHandler());
     }
 
     public Task EnsureSchemaAsync() => Task.CompletedTask;
