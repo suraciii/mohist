@@ -62,6 +62,46 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
     }
 
     [Fact]
+    public async Task UpdateInterruptedWorkWithoutReceipt_BlocksAtTheSettlementDeadline()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var run = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+            new AgentExecutionBinding(
+                task.Id,
+                work.WorkId,
+                runnerId,
+                "session-deadline",
+                "turn-deadline",
+                "opencode",
+                "runtime-deadline")));
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            $"runner-update:{Guid.NewGuid():N}"));
+
+        var marked = await LoadRunAsync(_workflowId!);
+        var settlement = Assert.Single(marked.CurrentStage().Tasks).AgentResultSettlement!;
+        var deadline = Assert.IsType<DateTimeOffset>(settlement.DeadlineAt);
+        Assert.True(marked.HasUnresolvedAgentResult());
+
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        var blocked = await LoadRunAsync(_workflowId!);
+        var blockedTask = Assert.Single(blocked.CurrentStage().Tasks);
+        Assert.Equal(AgentResultSettlementState.Blocked, blockedTask.AgentResultSettlement!.State);
+        Assert.True(blocked.HasBlockedAgentResult());
+        Assert.Equal(TaskRunStatus.Running, blockedTask.Status);
+    }
+
+    [Fact]
     public async Task BeginUpdateInterrupt_PreservesActiveWorkAndClosesAdmissionIdempotently()
     {
         await ClearBacklogAsync();

@@ -75,6 +75,11 @@ public sealed class AgentJobState
     /// </summary>
     [Id(40)] public List<AppliedRuntimeRecoveryReceipt> AppliedRecoveryReceipts { get; set; } = [];
     [Id(41)] public string? RecoveryTerminalReason { get; set; }
+    /// <summary>
+    /// Bounded arbitration deadline after which a RecoverablyInterrupted job
+    /// without a confirmed receipt transitions to a terminal Interrupted state.
+    /// </summary>
+    [Id(42)] public DateTimeOffset? UpdateInterruptionDeadlineAt { get; set; }
 }
 
 

@@ -216,7 +216,10 @@ public static partial class WorkflowRunExtensions
         public bool HasUnresolvedAgentResult() =>
             run.Stages.SelectMany(stage => stage.Tasks)
                 .Any(task => task.Status == TaskRunStatus.Running
-                    && task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
+                    && task.AgentResultSettlement?.State is
+                        AgentResultSettlementState.RecoverablyInterrupted
+                        or AgentResultSettlementState.Unknown
+                        or AgentResultSettlementState.Blocked);
 
         public bool HasBlockedAgentResult() =>
             run.Stages.SelectMany(stage => stage.Tasks)
@@ -266,7 +269,10 @@ public static partial class WorkflowRunExtensions
             run.Stages
                 .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentResultSettlementTask(stage.Id, task)))
                 .SingleOrDefault(candidate => candidate.Task.Status == TaskRunStatus.Running
-                    && candidate.Task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
+                    && candidate.Task.AgentResultSettlement?.State is
+                        AgentResultSettlementState.RecoverablyInterrupted
+                        or AgentResultSettlementState.Unknown
+                        or AgentResultSettlementState.Blocked);
 
         public WorkflowAgentResultSettlementTask? FindCancelledAgentResultSettlementTask() =>
             run.Stages
@@ -284,7 +290,9 @@ public static partial class WorkflowRunExtensions
             string taskRunId,
             string workId,
             string runnerId,
-            string updateOperationId)
+            string updateOperationId,
+            DateTimeOffset now,
+            TimeSpan settlementTimeout)
         {
             if (string.IsNullOrWhiteSpace(taskRunId)
                 || string.IsNullOrWhiteSpace(workId)
@@ -309,10 +317,13 @@ public static partial class WorkflowRunExtensions
                     : AgentExecutionUpdate.Rejected;
             }
 
+            if (settlementTimeout <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(settlementTimeout));
+
             settlement.State = AgentResultSettlementState.RecoverablyInterrupted;
             settlement.UpdateOperationId = updateOperationId;
-            settlement.FirstUnknownAt = null;
-            settlement.DeadlineAt = null;
+            settlement.FirstUnknownAt = now;
+            settlement.DeadlineAt = now + settlementTimeout;
             settlement.LastObservation = AgentExecutionObservationKind.Stopped;
             settlement.ReasonCode = "update-interrupted";
             settlement.Message = "Agent execution was interrupted by a Runner update.";
@@ -476,7 +487,7 @@ public static partial class WorkflowRunExtensions
             var unresolved = run.FindUnresolvedAgentResultSettlementTask();
             var settlement = unresolved?.Task.AgentResultSettlement;
             if (unresolved is null
-                || settlement?.State != AgentResultSettlementState.Unknown
+                || settlement?.State is not (AgentResultSettlementState.RecoverablyInterrupted or AgentResultSettlementState.Unknown)
                 || settlement.DeadlineAt is not { } deadline
                 || deadline > now)
             {

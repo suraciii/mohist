@@ -108,6 +108,7 @@ describe('WorkResultJournal', () => {
       const restarted = new WorkResultJournal('/runner')
       await restarted.load()
       expect(await restarted.begin(work)).toBe('started')
+      expect(restarted.started()).toEqual([{ work, state: 'started' }])
       expect(restarted.completed()).toEqual([])
       expect(restarted.started()).toEqual([{ work, state: 'started' }])
       await expect(restarted.acknowledge(work)).rejects.toThrow('unfinished work')

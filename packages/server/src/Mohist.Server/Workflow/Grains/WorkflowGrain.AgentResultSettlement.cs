@@ -60,7 +60,7 @@ public partial class WorkflowGrain
             return;
         }
 
-        if (settlement.State == AgentResultSettlementState.Unknown)
+        if (settlement.State is AgentResultSettlementState.RecoverablyInterrupted or AgentResultSettlementState.Unknown)
         {
             if (EnsureSettlementDeadline(settlement))
                 await CommitAsync([]);

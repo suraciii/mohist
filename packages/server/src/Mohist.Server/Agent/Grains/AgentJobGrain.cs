@@ -160,6 +160,27 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
+        if (State.Status == AgentJobStatus.RecoverablyInterrupted)
+        {
+            if (EnsureUpdateInterruptionDeadline())
+                await PersistAsync();
+            if (UpdateInterruptionDeadlineExceeded())
+            {
+                await EnterRecoveryTerminalStateAsync("agent-result-unconfirmed");
+                return;
+            }
+
+            if (State.PendingUpdateInterruptionEvent is { } pending)
+                await EmitUpdateInterruptionEventAsync(pending);
+            // Keep the reminder armed until the receipt deadline even after
+            // the interruption event has been durably delivered.
+            if (State.PendingUpdateInterruptionEvent is null
+                && State.UpdateInterruptionDeadlineAt is null)
+                await UnregisterSelfAsync(RecoveryReminderName);
+
+            return;
+        }
+
         if (State.Status == AgentJobStatus.Pending)
             await EvaluatePendingAsync();
     }
@@ -234,7 +255,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             RecoveryDeadlineAt: State.RecoveryDeadlineAt,
             IsRecovering: IsRecovering,
             RecoveryGeneration: State.RecoveryGeneration,
-            OriginalWorkId: State.RecoveryAttempts.FirstOrDefault()?.WorkId));
+            OriginalWorkId: State.RecoveryAttempts.FirstOrDefault()?.WorkId,
+            UpdateInterruptionDeadlineAt: State.UpdateInterruptionDeadlineAt));
 
     private bool MatchesRecoveryReceiptBinding(RuntimeRecoveryReceipt receipt)
     {
@@ -1119,6 +1141,39 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             terminalExitCode: null);
     }
 
+    internal async Task EnterUnknownStateAsync(string reason)
+    {
+        if (IsTerminal)
+            return;
+
+        if (State.Status == AgentJobStatus.Unknown)
+        {
+            if (EnsureUnknownInitialTurnDelivery(State.FailureReason ?? reason))
+                await PersistAsync();
+            await EnsureRecoveryReminderAsync();
+            return;
+        }
+
+        var previousStatus = State.Status;
+        State.Status = AgentJobStatus.Unknown;
+        State.FailureReason = reason;
+        State.RunningSince = null;
+        State.TerminalResult = null;
+        State.TerminalAt = null;
+
+        DisposeJobTimeoutTimer();
+
+        EnsureUnknownInitialTurnDelivery(reason);
+        StageTerminalDeliveryEvent(AgentJobStatus.Unknown, reason, null, reason, "unknown", null, null);
+        await EnsureRecoveryReminderAsync();
+        await PersistAsync();
+        if (State.PendingTerminalDeliveryEvent is not null)
+            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+
+        _log.LogInformation(
+            "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
+            Key, previousStatus, reason);
+    }
 
     private bool EnsureUnknownInitialTurnDelivery(string reason)
     {
@@ -1975,6 +2030,26 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 AgentId: agentId),
             extensions);
     }
+
+    private TimeSpan ResolveUpdateInterruptionTimeout() =>
+        _options.UpdateInterruptionTimeout > TimeSpan.Zero
+            ? _options.UpdateInterruptionTimeout
+            : TimeSpan.FromMinutes(5);
+
+    private bool EnsureUpdateInterruptionDeadline()
+    {
+        if (State.Status != AgentJobStatus.RecoverablyInterrupted
+            || State.UpdateInterruptionDeadlineAt is not null)
+            return false;
+
+        State.UpdateInterruptionDeadlineAt = _timeProvider.GetUtcNow() + ResolveUpdateInterruptionTimeout();
+        return true;
+    }
+
+    private bool UpdateInterruptionDeadlineExceeded() =>
+        State.Status == AgentJobStatus.RecoverablyInterrupted
+        && State.UpdateInterruptionDeadlineAt is { } deadline
+        && deadline <= _timeProvider.GetUtcNow();
 
     private async Task EnsureRecoveryReminderAsync()
     {

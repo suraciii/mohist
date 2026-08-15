@@ -776,8 +776,15 @@ export class RunnerHost {
     connectionId: string | null
     admissionReady: boolean
   } {
+    const durableStarted = this.workResultJournal.ready()
+      ? this.workResultJournal.started().map((entry) => workKey(entry.work))
+      : []
     return {
-      inFlight: [...this.inFlight.keys()],
+      // A started journal entry survives a Runner restart without an
+      // execution promise. Report it as held so Server reconciliation does
+      // not keep redelivering an identity that the journal will refuse to
+      // execute.
+      inFlight: [...new Set([...this.inFlight.keys(), ...durableStarted])],
       awaitingAck: [...this.awaitingAck.keys()],
       runtimeReadiness: this.runtimeReadiness(),
       connectionId: this.signalR.getConnectionId(),

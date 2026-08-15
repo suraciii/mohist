@@ -130,6 +130,27 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
     }
 
     [Fact]
+    public async Task MissingReceiptReachesExplicitInterruptedTerminalStateAtItsDeadline()
+    {
+        var setup = await CreateRunningJobAsync("receipt-deadline");
+        await FenceAsync(setup);
+
+        var marked = await setup.Job.GetRuntimeSnapshotAsync();
+        var deadline = Assert.IsType<DateTimeOffset>(marked.UpdateInterruptionDeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await setup.Job.ReceiveReminder("agent-job-recovery", default);
+
+        Assert.Equal(AgentJobStatus.Interrupted, await setup.Job.GetStatusAsync());
+        var terminal = await setup.Job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Interrupted, terminal.Status);
+        Assert.Equal("agent-result-unconfirmed", terminal.Message);
+        Assert.Null(terminal.FailureReason);
+        var final = await setup.Job.GetRuntimeSnapshotAsync();
+        Assert.Equal(setup.WorkId, final.CurrentWorkId);
+        Assert.Null(final.UpdateInterruptionDeadlineAt);
+    }
+
+    [Fact]
     public async Task CannotContinueUsesExplicitInterruptedTerminalStateAndPreservesIdentity()
     {
         var setup = await CreateRunningJobAsync("terminal");

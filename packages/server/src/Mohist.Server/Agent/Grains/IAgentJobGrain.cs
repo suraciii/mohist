@@ -287,7 +287,12 @@ public sealed record AgentJobRuntimeSnapshot(
     /// The work identity of the original attempt, preserved for arbitration
     /// after an update interruption allocated a replacement.
     /// </summary>
-    [property: Id(15)] string? OriginalWorkId = null);
+    [property: Id(15)] string? OriginalWorkId = null,
+    /// <summary>
+    /// Bounded arbitration deadline for an update-interrupted job awaiting a
+    /// confirmed receipt. Expiry is explicit Interrupted terminal state.
+    /// </summary>
+    [property: Id(16)] DateTimeOffset? UpdateInterruptionDeadlineAt = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending

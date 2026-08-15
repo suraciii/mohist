@@ -235,3 +235,37 @@ Channel decision (grounded in live source):
   `Mohist.Server.SpecTests` suite passed 3932/3932, Runner vitest passed
   1647/1647, and `npm run test:fast` passed all configured typecheck, Server
   unit/architecture/workflow/CLI, Runner, and Web checks.
+
+## T-006 Implementation Notes
+
+- A Runner restart can retain a `started` journal fence without an in-memory
+  execution promise. `WorkResultJournal.started()` now exposes those entries,
+  and `RunnerHost.pollReport()` includes their work keys in `inFlight`, so
+  Server reconciliation suppresses redelivery while the journal continues to
+  refuse physical replay. Completed/interrupted journal entries keep their
+  existing awaiting-ack replay path.
+- Update-interrupted Workflow settlements are unresolved for dispatch and
+  reconciliation purposes before a receipt arrives. They receive the normal
+  injectable settlement deadline and reminder; a missing receipt reaches the
+  existing `agent-result-unconfirmed` blocked projection instead of remaining
+  recoverably interrupted indefinitely. The original attempt remains fenced.
+- AgentJob update fences now persist an `UpdateInterruptionDeadlineAt`, retain
+  the recovery reminder after interruption-event delivery, and enter the
+  explicit `Interrupted` terminal state with `agent-result-unconfirmed` when
+  the receipt deadline expires. Receipt arbitration clears the deadline before
+  allocating the replacement, so normal recovery is unchanged.
+- Added deterministic Server coverage for active work -> interruption ->
+  receipt -> reconnect poll replacement delivery, original-work suppression,
+  held replacement suppression, Workflow no-receipt deadline blocking, and
+  AgentJob no-receipt terminal arbitration. Added Runner journal coverage for
+  reloaded started fences.
+- T-006 focused verification: Runner typecheck and focused vitest suites pass;
+  the affected Server classes (`DispatchServiceReconciliationSpecs`,
+  `RunnerUpdateInterruptSpecs`, `AgentJobRecoveryReceiptSpecs`,
+  `RunnerPollRecoveryStateApiSpecs`, and `MixedOwnerDispatchSpecs`) pass.
+  The initial broad baseline retained the known flaky
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  timing failure; it is unrelated to T-006.
+- Final verification: full `Mohist.Server.SpecTests` passed 3935/3935;
+  `npm run test:fast` passed all configured typechecks, Server unit/
+  architecture/workflow/CLI suites, Runner 1647/1647, and Web 4724/4724.

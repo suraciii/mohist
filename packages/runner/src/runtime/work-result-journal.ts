@@ -233,6 +233,7 @@ export class WorkResultJournal {
     })
   }
 
+
   async interrupt(work: DispatchWorkItem, receipt: RuntimeRecoveryReceipt): Promise<void> {
     await this.mutate(async () => {
       const key = workKey(work)

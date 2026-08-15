@@ -22,13 +22,21 @@ public partial class WorkflowGrain
         string taskRunId,
         string workId,
         string runnerId,
-        string updateOperationId)
+        string updateOperationId,
+        DateTimeOffset? interruptedAt = null,
+        TimeSpan? settlementTimeout = null)
     {
         RejectIfRunReloadRequired();
         if (_run is null)
             return ReportAck.Stale;
 
-        var update = _run.MarkUpdateInterrupted(taskRunId, workId, runnerId, updateOperationId);
+        var update = _run.MarkUpdateInterrupted(
+            taskRunId,
+            workId,
+            runnerId,
+            updateOperationId,
+            interruptedAt ?? Now(),
+            settlementTimeout ?? _agentResultSettlementTimeout);
         if (update == AgentExecutionUpdate.Rejected)
             return ReportAck.Stale;
         if (update == AgentExecutionUpdate.Updated)
@@ -40,9 +48,12 @@ public partial class WorkflowGrain
                 taskRunId,
                 workId,
                 updateOperationId)]);
-            await RemoveAgentResultSettlementReminderAsync();
         }
 
+        // A receipt can arrive at any time before this deadline. If it does
+        // not, the existing settlement reminder converts the fenced work to
+        // the explicit agent-result-unconfirmed blocked state.
+        await ReconcileAgentResultSettlementAsync();
         return ReportAck.Accepted;
     }
 
