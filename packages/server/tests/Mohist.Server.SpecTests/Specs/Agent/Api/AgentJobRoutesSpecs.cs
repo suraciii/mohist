@@ -472,7 +472,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
         var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-http-poll-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-http-poll-{Guid.NewGuid():N}";
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
 
         try
         {
@@ -510,6 +510,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
         }
         finally
         {
+            await CleanupLaunchedAgentJobAsync(runnerId, jobKey);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }

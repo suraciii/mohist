@@ -79,6 +79,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var runnerId = $"launch-201-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "reviewer");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        string? jobId = null;
 
         try
         {
@@ -97,7 +98,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             // The launch surfaces BOTH the AgentJob identity and the
             // AgentSession identity; jobId is the grain key minted by
             // the launcher, no id translation.
-            var jobId = data.GetProperty("jobId").GetString();
+            jobId = data.GetProperty("jobId").GetString();
             Assert.False(string.IsNullOrWhiteSpace(jobId));
             Assert.StartsWith("agent-job-launch-", jobId!, StringComparison.Ordinal);
             Assert.Equal(agent.Id, data.GetProperty("agentId").GetString());
@@ -138,6 +139,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         }
         finally
         {
+            await CleanupLaunchedAgentJobAsync(runnerId, jobId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -146,14 +148,10 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     public async Task Launch_GenericSession_IsReadableByProductMetadataAndTranscriptRoutes()
     {
         var projectId = await CreateProjectAsync("launch-read-session");
-        var runnerId = $"launch-read-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "readable-agent");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
-            projectId,
-            runnerId,
-            "launch-read");
-        ClaimResult? claim = null;
+        var workspaceName = "launch-read";
+        await CreateWorkspaceAsync(projectId, workspaceName);
+        string? jobId = null;
 
         try
         {
@@ -170,8 +168,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var launchData = launchPayload.GetProperty("data");
             var sessionId = launchData.GetProperty("sessionId").GetString()!;
-            var jobId = launchData.GetProperty("jobId").GetString()!;
-            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
+            jobId = launchData.GetProperty("jobId").GetString()!;
 
             var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-launch-read"));
@@ -203,9 +200,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         }
         finally
         {
-            if (claim is not null)
-                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            await CleanupLaunchedAgentJobAsync(null, jobId);
         }
     }
 
@@ -219,6 +214,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var epicNumber = await CreateEpicAsync(projectId, "Context epic");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
         await CreateWorkspaceAsync(projectId, "pay");
+        string? jobId = null;
 
         try
         {
@@ -239,6 +235,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var data = payload.GetProperty("data");
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            jobId = payload.GetProperty("data").GetProperty("jobId").GetString();
             Assert.Equal("pay", data.GetProperty("workspaceId").GetString());
 
             var query = await GetAgentSessionQueryAsync();
@@ -264,6 +261,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         }
         finally
         {
+            await CleanupLaunchedAgentJobAsync(runnerId, jobId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
