@@ -108,6 +108,12 @@ flutter around 50ms is tolerated as long as p95 holds; the per-test absolute
 cap catches real slow tests regardless of population. The whole suite runs
 under a five-minute hard deadline.
 
+The CLI duration track runs xUnit collections with the conservative scheduler
+and at most four workers. This keeps independent tests parallel while bounding
+concurrent cold command-tree construction and runtime initialization cost. The
+checked-in configuration test owns this capacity; raising it requires repeated
+same-input evidence that both population and single-test budgets remain stable.
+
 Tracks without a seeded baseline run deadline-governed only
 (`enforce: false`, `status: baseline-pending`): explicit governance status, not
 a silent warning. Baselines expand incrementally.
@@ -209,7 +215,7 @@ packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
 
 | Dependency | server | runner | web | cli |
 |---|---|---|---|---|
-| time | FakeTimeProvider | vi.useFakeTimers | same as runner | seam missing |
+| time | FakeTimeProvider | vi.useFakeTimers | same as runner | FakeTimeProvider + injected poll wait |
 | HTTP | WebApplicationFactory + TestServer | vi.stubGlobal('fetch') | MSW | RecordingHttpHandler |
 | SignalR | RecordingRunnerHubContext | vi.mock('@microsoft/signalr') | config alias -> tests/support/signalr-fake.ts | n/a |
 | notification | n/a | n/a | config alias -> tests/support/sonner-fake.ts | n/a |

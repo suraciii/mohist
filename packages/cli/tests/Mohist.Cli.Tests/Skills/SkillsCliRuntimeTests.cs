@@ -1,6 +1,8 @@
 using Mohist.Cli.Tests.Compatibility;
-using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
+using CliCompositionTestFactory = Mohist.Cli.Tests.Support.CliCompositionTestFactory;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
 
@@ -13,7 +15,7 @@ public sealed class SkillsCliRuntimeTests
     {
         var files = new FakeFileSystem();
         var environment = new MockEnvironmentVariableProvider();
-        var (exitCode, _, stderr) = await InvokeSkillsAsync(files, environment, "skill", "--help");
+        var (exitCode, _, stderr) = await InvokeSkillsAsync(files, environment, null, "skill", "--help");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stderr:\n{stderr}");
         Assert.DoesNotContain("Unable to resolve service for type 'System.IO.TextWriter'", stderr);
@@ -24,7 +26,7 @@ public sealed class SkillsCliRuntimeTests
     {
         var files = new FakeFileSystem();
         var environment = new MockEnvironmentVariableProvider();
-        var overrideRoot = Path.Combine("/tmp", $"mohist-cli-runtime-{Guid.NewGuid():N}");
+        var overrideRoot = "/mohist-tests/cli-runtime/assets";
         files.AddDirectory(overrideRoot);
         files.AddFile(
             Path.Combine(overrideRoot, "mohist", "SKILL.md"),
@@ -33,8 +35,10 @@ public sealed class SkillsCliRuntimeTests
             Path.Combine(overrideRoot, "mohist-explore", "SKILL.md"),
             $"---\nname: mohist-explore\ndescription: {DescriptionFor("mohist-explore")}\n---\n\n# explore\n");
         environment[SkillAssetRootResolver.OverrideEnvironmentVariable] = overrideRoot;
-
-        var (exitCode, stdout, stderr) = await InvokeSkillsAsync(files, environment, "skill", "view", "mohist");
+        var (exitCode, stdout, stderr) = await InvokeThroughProgramAdapterAsync(
+            files,
+            environment,
+            "skill", "view", "mohist");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Contains("name: mohist", stdout);
@@ -42,14 +46,93 @@ public sealed class SkillsCliRuntimeTests
         Assert.Equal(string.Empty, stderr);
     }
 
+    [Fact]
+    public async Task TestComposition_InjectsDeterministicAmbientCapabilitiesThroughTheGraph()
+    {
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider();
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var assets = CreateHelpOnlyAssets(files, environment);
+        var commands = new NoopCommandExecutor();
+        using var http = RejectingHttpMessageHandler.CreateClient();
+        var composition = CliCompositionTestFactory.Create(
+            files,
+            environment,
+            assets,
+            output,
+            error,
+            http,
+            commands);
+
+        Assert.IsType<FakeTimeProvider>(composition.Api.TimeProvider);
+        Assert.Same(files, composition.Api.FileSystem);
+        Assert.Same(files, composition.Services.GetRequiredService<IFileSystem>());
+        Assert.Same(environment, composition.Services.GetRequiredService<IEnvironmentVariableProvider>());
+        Assert.Same(commands, composition.Api.CommandExecutor);
+        Assert.Same(commands, composition.Services.GetRequiredService<ICommandExecutor>());
+        Assert.Same(http, composition.Api.Http);
+        Assert.Same(http, composition.Services.GetRequiredService<HttpClient>());
+        Assert.Same(assets, composition.Services.GetRequiredService<SkillAssetService>());
+        Assert.IsType<Mohist.Cli.Tests.Support.FakeServiceInstaller>(
+            composition.Services.GetRequiredService<IServiceInstaller>());
+        Assert.IsType<Mohist.Cli.Tests.Support.FakeSourceCodeUpdater>(
+            composition.Services.GetRequiredService<SourceCodeUpdater>());
+        Assert.Equal("/mohist-tests/user", composition.Api.GetUserHome());
+        Assert.Same(TextReader.Null, composition.Api.StandardInput);
+        Assert.Same(
+            composition.Api.TimeProvider,
+            composition.Services.GetRequiredService<RuntimeConsistencyValidator>().TimeProvider);
+        Assert.Same(
+            composition.Api.TimeProvider,
+            composition.Services.GetRequiredService<ServiceReadinessProbe>().TimeProvider);
+        Assert.Same(
+            composition.Api.PollWait,
+            composition.Services.GetRequiredService<ServiceReadinessProbe>().PollWait);
+        Assert.Same(
+            composition.Api.PollWait,
+            composition.Services.GetRequiredService<RuntimeConsistencyValidator>().PollWait);
+        Assert.Same(
+            composition.Api.TimeProvider,
+            composition.Services.GetRequiredService<RunnerRefreshVerifier>().TimeProvider);
+        Assert.Same(
+            composition.Api.PollWait,
+            composition.Services.GetRequiredService<RunnerRefreshVerifier>().PollWait);
+        Assert.Equal(
+            "mohist-test-host",
+            composition.Services.GetRequiredService<RunnerRefreshVerifier>().LocalHostname);
+        await composition.Api.PollWait(TimeSpan.FromDays(1), CancellationToken.None);
+    }
+
     private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeSkillsAsync(
+        FakeFileSystem files,
+        MockEnvironmentVariableProvider environment,
+        SkillAssetService? assets,
+        params string[] args)
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        assets ??= CreateHelpOnlyAssets(files, environment);
+        var composition = CliCompositionTestFactory.Create(files, environment, assets, stdout, stderr);
+
+        var exitCode = await composition.Root.Parse(args).InvokeAsync(new System.CommandLine.InvocationConfiguration
+        {
+            Output = stdout,
+            Error = stderr,
+        });
+
+        return (exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeThroughProgramAdapterAsync(
         FakeFileSystem files,
         MockEnvironmentVariableProvider environment,
         params string[] args)
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-
+        var timeProvider = new FakeTimeProvider(
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var exitCode = await MohistCliCommands.RunAsync(
             RejectingHttpMessageHandler.CreateClient(),
             args,
@@ -57,9 +140,35 @@ public sealed class SkillsCliRuntimeTests
             stderr,
             files,
             new NoopCommandExecutor(),
-            environment);
-
+            environment,
+            standardInput: TextReader.Null,
+            installer: new Mohist.Cli.Tests.Support.FakeServiceInstaller(),
+            updater: new Mohist.Cli.Tests.Support.FakeSourceCodeUpdater(),
+            getUserHome: () => "/mohist-tests/user",
+            timeProvider: timeProvider,
+            pollWait: (delay, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                timeProvider.Advance(delay);
+                return Task.CompletedTask;
+            },
+            getLocalHostname: () => "mohist-test-host");
         return (exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private static SkillAssetService CreateHelpOnlyAssets(
+        FakeFileSystem files,
+        MockEnvironmentVariableProvider environment)
+    {
+        var root = "/mohist-tests/cli-runtime/help-assets";
+        files.AddDirectory(root);
+        var resolver = new SkillAssetRootResolver(
+            files,
+            environment,
+            getOverrideAssetRoot: () => root,
+            getManagedAssetRoot: null,
+            getUserHome: () => "/mohist-tests/user");
+        return new SkillAssetService(files, environment, resolver);
     }
 
     private static string DescriptionFor(string name) => name switch

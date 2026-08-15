@@ -2,9 +2,9 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using EnvironmentAbstractions.TestHelpers;
-using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
 using Mohist.Cli.Tests.Compatibility;
+using CliCompositionTestFactory = Mohist.Cli.Tests.Support.CliCompositionTestFactory;
 using Xunit;
 
 namespace Mohist.Cli.Tests.CliInfo;
@@ -582,40 +582,14 @@ public class InfoCommandRegistrationTests
     [Fact]
     public void InfoCommand_IsRegistered_AsTopLevelCommand()
     {
-        var services = new ServiceCollection();
-        var api = new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor());
-        services.AddSingleton(api);
-        services.AddSingleton(TextWriter.Null);
-        services.AddSingleton<IFileSystem>(new FakeFileSystem());
-        services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
-        services.AddSingleton<IEnvironmentVariableProvider>(new MockEnvironmentVariableProvider());
-        services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, new FakeFileSystem(), sp.GetRequiredService<ICommandExecutor>()));
-        services.AddSingleton(RejectingHttpMessageHandler.CreateClient());
-        services.AddSingleton<RuntimeConsistencyValidator>(sp => new RuntimeConsistencyValidator(
-            sp.GetRequiredService<HttpClient>(),
-            sp.GetRequiredService<ICommandExecutor>(),
-            sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IEnvironmentVariableProvider>(),
-            TextWriter.Null));
-        services.AddSingleton<ServiceReadinessProbe>(sp => new ServiceReadinessProbe(
-            sp.GetRequiredService<HttpClient>(),
-            TextWriter.Null));
-        services.AddSingleton<RunnerRefreshVerifier>(sp => new RunnerRefreshVerifier(
-            sp.GetRequiredService<HttpClient>(),
-            sp.GetRequiredService<ICommandExecutor>(),
-            sp.GetRequiredService<IFileSystem>()));
-        services.AddSingleton<UpdateOperations>(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IEnvironmentVariableProvider>()));
-        services.AddSingleton<UpdateOutcomeReporter>(sp => new UpdateOutcomeReporter(sp.GetRequiredService<HttpClient>(), TextWriter.Null));
-        services.AddSingleton<SourceCodeUpdater>();
-        services.AddSingleton<SkillAssetService>();
-        services.AddSingleton<SkillInstallService>();
-        services.AddSingleton<InfoVerboseCollector>();
-        services.AddSingleton<InfoCollector>();
-        services.AddSingleton<InfoRenderer>();
-        services.AddSingleton<InfoRenderer>();
-        var provider = services.BuildServiceProvider();
-
-        var root = MohistCliCommands.Build(api, provider);
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider();
+        var root = CliCompositionTestFactory.Create(
+            files,
+            environment,
+            CreateSkillAssets(files, environment),
+            TextWriter.Null,
+            TextWriter.Null).Root;
 
         Assert.Contains(root.Subcommands, c => c.Name == "info");
     }
@@ -623,40 +597,14 @@ public class InfoCommandRegistrationTests
     [Fact]
     public void InfoCommand_Help_DescribesEnvironmentOverview()
     {
-        var services = new ServiceCollection();
-        var api = new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor());
-        services.AddSingleton(api);
-        services.AddSingleton(TextWriter.Null);
-        services.AddSingleton<IFileSystem>(new FakeFileSystem());
-        services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
-        services.AddSingleton<IEnvironmentVariableProvider>(new MockEnvironmentVariableProvider());
-        services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, new FakeFileSystem(), sp.GetRequiredService<ICommandExecutor>()));
-        services.AddSingleton(RejectingHttpMessageHandler.CreateClient());
-        services.AddSingleton<RuntimeConsistencyValidator>(sp => new RuntimeConsistencyValidator(
-            sp.GetRequiredService<HttpClient>(),
-            sp.GetRequiredService<ICommandExecutor>(),
-            sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IEnvironmentVariableProvider>(),
-            TextWriter.Null));
-        services.AddSingleton<ServiceReadinessProbe>(sp => new ServiceReadinessProbe(
-            sp.GetRequiredService<HttpClient>(),
-            TextWriter.Null));
-        services.AddSingleton<RunnerRefreshVerifier>(sp => new RunnerRefreshVerifier(
-            sp.GetRequiredService<HttpClient>(),
-            sp.GetRequiredService<ICommandExecutor>(),
-            sp.GetRequiredService<IFileSystem>()));
-        services.AddSingleton<UpdateOperations>(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IEnvironmentVariableProvider>()));
-        services.AddSingleton<UpdateOutcomeReporter>(sp => new UpdateOutcomeReporter(sp.GetRequiredService<HttpClient>(), TextWriter.Null));
-        services.AddSingleton<SourceCodeUpdater>();
-        services.AddSingleton<SkillAssetService>();
-        services.AddSingleton<SkillInstallService>();
-        services.AddSingleton<InfoVerboseCollector>();
-        services.AddSingleton<InfoCollector>();
-        services.AddSingleton<InfoRenderer>();
-        services.AddSingleton<InfoRenderer>();
-        var provider = services.BuildServiceProvider();
-
-        var root = MohistCliCommands.Build(api, provider);
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider();
+        var root = CliCompositionTestFactory.Create(
+            files,
+            environment,
+            CreateSkillAssets(files, environment),
+            TextWriter.Null,
+            TextWriter.Null).Root;
         var help = RenderHelp(root, ["info", "--help"]);
 
         Assert.Contains("environment", help, StringComparison.OrdinalIgnoreCase);
@@ -668,6 +616,21 @@ public class InfoCommandRegistrationTests
         var config = new System.CommandLine.InvocationConfiguration { Output = writer, Error = writer };
         root.Parse(args).Invoke(config);
         return writer.ToString();
+    }
+
+    private static SkillAssetService CreateSkillAssets(
+        FakeFileSystem files,
+        MockEnvironmentVariableProvider environment)
+    {
+        var root = "/mohist-tests/info/assets";
+        files.AddDirectory(root);
+        var resolver = new SkillAssetRootResolver(
+            files,
+            environment,
+            getOverrideAssetRoot: () => root,
+            getManagedAssetRoot: null,
+            getUserHome: () => "/mohist-tests/user");
+        return new SkillAssetService(files, environment, resolver);
     }
 
     private sealed class NoopCommandExecutor : ICommandExecutor

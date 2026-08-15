@@ -168,7 +168,7 @@ internal partial class SourceCodeUpdater
 
                 try
                 {
-                    await Task.Delay(RunnerActivePollInterval, _timeProvider, activeCts.Token);
+                    await _pollWait(RunnerActivePollInterval, activeCts.Token);
                 }
                 catch (OperationCanceledException)
                 {

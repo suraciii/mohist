@@ -186,13 +186,14 @@ public sealed class CliProgressiveHelpSpecs
     [Fact]
     public void Renderers_RequireExplicitPresentationAndDoNotUseRegistrationFallback()
     {
-        var root = new System.CommandLine.RootCommand();
+        var root = new CliRootCommand("test");
         root.Subcommands.Add(new System.CommandLine.Command("uncovered", "registration fallback"));
         Assert.Throws<InvalidOperationException>(() =>
             CommandHelpRenderer.RenderRoot(new StringWriter(), root));
 
         var group = new System.CommandLine.Command("group");
         group.Subcommands.Add(new System.CommandLine.Command("uncovered", "registration fallback"));
+        root.Subcommands.Add(group);
         CommandPresentationCatalog.Attach(group, new CommandPresentation(CommandCapability.Work, "A covered group"));
         Assert.Throws<InvalidOperationException>(() =>
             CommandHelpRenderer.RenderGroup(new StringWriter(), group, ["group"]));
@@ -205,11 +206,13 @@ public sealed class CliProgressiveHelpSpecs
     [Fact]
     public void GroupHelp_OmitsHiddenChildren()
     {
+        var root = new CliRootCommand("test");
         var group = new System.CommandLine.Command("group");
         var visible = new System.CommandLine.Command("visible");
         var hidden = new System.CommandLine.Command("hidden") { Hidden = true };
         group.Subcommands.Add(visible);
         group.Subcommands.Add(hidden);
+        root.Subcommands.Add(group);
         CommandPresentationCatalog.Attach(group, new CommandPresentation(CommandCapability.Work, "A covered group"));
         CommandPresentationCatalog.Attach(visible, new CommandPresentation(CommandCapability.Work, "A visible child"));
 
