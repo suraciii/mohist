@@ -7,8 +7,10 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
 using Orleans;
 using Orleans.Core.Internal;
 using Orleans.TestingHost;
@@ -40,7 +42,12 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-replay-{Guid.NewGuid():N}";
         var agentId = $"agent_replay_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        var canonicalAgentId = $"canonical-agent-{Guid.NewGuid():N}";
+        _fixture.Preflight.Set(
+            projectId,
+            agentId,
+            Definition(AgentConfigSchema.PiRuntime),
+            canonicalAgentId);
         var command = Command(projectId, agentId, "keep the original definition");
         var handoff = Handoff(command);
 
@@ -62,6 +69,8 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Equal(prepared.Invocation, replay.Invocation);
         Assert.NotNull(plan);
         Assert.Equal(AgentConfigSchema.PiRuntime, plan!.ExecutionDefinition!.Runtime);
+        Assert.Equal(canonicalAgentId, plan.AgentId);
+        AssertCompletionSnapshot(command.Completion!, plan.Command.Completion!);
         Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
         await AssertNoParticipantsAsync(projectId, prepared.Invocation);
     }
@@ -89,6 +98,77 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Equal(prepared.Invocation, plan.Invocation);
         Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
         await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_CompletionSnapshotCanonicalizesMapsAndRejectsChangedEffects()
+    {
+        var projectId = $"workflow-handoff-completion-{Guid.NewGuid():N}";
+        var agentId = $"agent_completion_{Guid.NewGuid():N}";
+        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        var command = Command(projectId, agentId, "freeze completion effects");
+        var handoff = Handoff(command);
+
+        var prepared = await handoff.PrepareAsync(command);
+        var reordered = command with
+        {
+            Completion = command.Completion! with
+            {
+                ExpectJson = "{\"files\":[{\"path\":\"review.md\",\"markers\":[\"approved\"]}],\"markers\":[{\"path\":\"review.md\",\"contains\":\"approved\"}]}",
+            },
+        };
+        var replay = await handoff.PrepareAsync(reordered);
+        var changed = command with
+        {
+            Completion = command.Completion! with
+            {
+                SetVars = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["result"] = "changed",
+                },
+            },
+        };
+
+        var error = await Assert.ThrowsAsync<WorkflowAgentHandoffConflictException>(
+            () => handoff.PrepareAsync(changed));
+        var plan = await handoff.GetPlanAsync();
+
+        Assert.Equal(
+            WorkflowAgentHandoffCodec.Fingerprint(command),
+            WorkflowAgentHandoffCodec.Fingerprint(reordered));
+        Assert.True(replay.AlreadyPersisted);
+        Assert.Equal(prepared.Invocation, replay.Invocation);
+        Assert.Equal(WorkflowAgentHandoffCodec.Fingerprint(command), error.ExistingFingerprint);
+        Assert.NotNull(plan);
+        AssertCompletionSnapshot(command.Completion!, plan!.Command.Completion!);
+        Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
+        await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_IncompleteCompletionSnapshot_PersistsRejectionBeforePreflight()
+    {
+        var projectId = $"workflow-handoff-invalid-completion-{Guid.NewGuid():N}";
+        var agentId = $"agent_invalid_completion_{Guid.NewGuid():N}";
+        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        var command = Command(projectId, agentId, "do not resolve incomplete completion") with
+        {
+            Completion = Command(projectId, agentId, "unused").Completion! with { Stage = "" },
+        };
+        var handoff = Handoff(command);
+
+        var rejected = await handoff.PrepareAsync(command);
+        var plan = await handoff.GetPlanAsync();
+
+        Assert.Equal(WorkflowAgentHandoffDisposition.Rejected, rejected.Disposition);
+        Assert.Equal("invalid_completion_snapshot", rejected.Rejection!.Code);
+        Assert.Null(rejected.Invocation);
+        Assert.NotNull(plan);
+        Assert.Null(plan!.Invocation);
+        Assert.Null(plan.ExecutionDefinition);
+        Assert.Null(plan.AgentId);
+        Assert.Equal(0, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Empty(await ListEligibleAgentJobsAsync(projectId));
     }
 
     [Fact]
@@ -168,6 +248,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, replay.Disposition);
         Assert.True(replay.AlreadyPersisted);
         Assert.NotNull(plan!.AcceptedAt);
+        AssertCompletionSnapshot(command.Completion!, plan.Command.Completion!);
         await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
     }
 
@@ -262,16 +343,36 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     private static WorkflowAgentHandoffCommand Command(
         string projectId,
         string agentId,
-        string prompt) =>
-        new(
-            CommandId: $"workflow-work-{Guid.NewGuid():N}",
+        string prompt)
+    {
+        var commandId = $"workflow-work-{Guid.NewGuid():N}";
+        return new(
+            CommandId: commandId,
             ProjectId: projectId,
             WorkflowRunId: $"workflow-run-{Guid.NewGuid():N}",
             TaskRunId: $"task-run-{Guid.NewGuid():N}",
             AgentRef: agentId,
             Prompt: prompt,
             Session: "workflow-session",
-            TimeoutMilliseconds: 60_000);
+            TimeoutMilliseconds: 60_000,
+            Completion: Completion(commandId));
+    }
+
+    private static WorkflowAgentHandoffCompletionSnapshot Completion(string commandId) =>
+        new(
+            WorkId: commandId,
+            Stage: "build",
+            Workspace: new WorkflowAgentHandoffWorkspace(
+                Name: "issue-559",
+                Identity: null),
+            ExpectJson: "{\"markers\":[{\"path\":\"review.md\",\"contains\":\"approved\"}],\"files\":[{\"path\":\"review.md\",\"markers\":[\"approved\"]}]}",
+            Artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]),
+            SetVars: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["result"] = "${{ tasks.build.output }}",
+            },
+            Recovery: new RecoveryDefinition(Budget: 2, Handlers: []),
+            RecoveryRemaining: 2);
 
     private static AgentExecutionDefinition Definition(string runtime) =>
         new(
@@ -280,6 +381,20 @@ public sealed class WorkflowAgentHandoffGrainSpecs
             Model: "model-test",
             Variant: "high",
             Skills: []);
+
+    private static void AssertCompletionSnapshot(
+        WorkflowAgentHandoffCompletionSnapshot expected,
+        WorkflowAgentHandoffCompletionSnapshot actual)
+    {
+        Assert.Equal(expected.WorkId, actual.WorkId);
+        Assert.Equal(expected.Stage, actual.Stage);
+        Assert.Equal(expected.Workspace, actual.Workspace);
+        Assert.Equal(expected.ExpectJson, actual.ExpectJson);
+        Assert.Equal(expected.Artifacts!.Files.Select(file => file.Path), actual.Artifacts!.Files.Select(file => file.Path));
+        Assert.Equal(expected.SetVars!["result"], actual.SetVars!["result"]);
+        Assert.Equal(expected.Recovery!.Budget, actual.Recovery!.Budget);
+        Assert.Equal(expected.RecoveryRemaining, actual.RecoveryRemaining);
+    }
 
     private async Task AssertNoParticipantsAsync(string projectId, WorkflowAgentInvocation invocation)
     {
@@ -350,7 +465,7 @@ public sealed class WorkflowAgentHandoffGrainFixture : IAsyncLifetime
 public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPreflight
 {
     private readonly object _gate = new();
-    private readonly Dictionary<(string ProjectId, string AgentRef), AgentExecutionDefinition> _definitions = [];
+    private readonly Dictionary<(string ProjectId, string AgentRef), WorkflowAgentHandoffAgent> _definitions = [];
     private readonly Dictionary<(string ProjectId, string AgentRef), int> _resolveCounts = [];
 
     public void Reset()
@@ -362,10 +477,16 @@ public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPr
         }
     }
 
-    public void Set(string projectId, string agentRef, AgentExecutionDefinition definition)
+    public void Set(
+        string projectId,
+        string agentRef,
+        AgentExecutionDefinition definition,
+        string? canonicalAgentId = null)
     {
         lock (_gate)
-            _definitions[(projectId, agentRef)] = definition;
+            _definitions[(projectId, agentRef)] = new(
+                canonicalAgentId ?? agentRef,
+                definition);
     }
 
     public int ResolveCount(string projectId, string agentRef)
@@ -374,13 +495,13 @@ public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPr
             return _resolveCounts.GetValueOrDefault((projectId, agentRef));
     }
 
-    public Task<AgentExecutionDefinition?> ResolveAgentAsync(string projectId, string agentRef)
+    public Task<WorkflowAgentHandoffAgent?> ResolveAgentAsync(string projectId, string agentRef)
     {
         lock (_gate)
         {
             var key = (projectId, agentRef);
             _resolveCounts[key] = _resolveCounts.GetValueOrDefault(key) + 1;
-            return Task.FromResult<AgentExecutionDefinition?>(
+            return Task.FromResult<WorkflowAgentHandoffAgent?>(
                 _definitions.GetValueOrDefault(key));
         }
     }

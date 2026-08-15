@@ -48,23 +48,23 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
         }
 
         var rejection = Validate(command);
-        AgentExecutionDefinition? definition = null;
+        WorkflowAgentHandoffAgent? agent = null;
         WorkflowAgentInvocation? invocation = null;
         if (rejection is null)
         {
-            definition = await _preflight.ResolveAgentAsync(command.ProjectId, command.AgentRef);
-            if (definition is null)
+            agent = await _preflight.ResolveAgentAsync(command.ProjectId, command.AgentRef);
+            if (agent is null)
             {
                 rejection = new WorkflowAgentHandoffRejection(
                     "agent_not_found",
                     $"Workflow Agent handoff references Agent '{command.AgentRef}' which does not exist or is archived.");
             }
-            else if (string.IsNullOrWhiteSpace(definition.Runtime))
+            else if (string.IsNullOrWhiteSpace(agent.ExecutionDefinition.Runtime))
             {
                 rejection = new WorkflowAgentHandoffRejection(
                     "agent_runtime_unavailable",
                     $"Workflow Agent handoff references Agent '{command.AgentRef}' without a usable runtime.");
-                definition = null;
+                agent = null;
             }
             else
             {
@@ -79,9 +79,10 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
                 ? WorkflowAgentHandoffDisposition.Prepared
                 : WorkflowAgentHandoffDisposition.Rejected,
             Invocation: invocation,
-            ExecutionDefinition: definition,
+            ExecutionDefinition: agent?.ExecutionDefinition,
             PreparedAt: _timeProvider.GetUtcNow(),
-            Rejection: rejection);
+            Rejection: rejection,
+            AgentId: agent?.AgentId);
         _state.State.Plan = plan;
         await _state.WriteStateAsync();
         return Result(plan, alreadyPersisted: false);
@@ -173,6 +174,27 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             return new WorkflowAgentHandoffRejection(
                 "invalid_agent_input",
                 "Workflow Agent handoff timeout must be positive when supplied.");
+        }
+        if (command.Completion is null
+            || string.IsNullOrWhiteSpace(command.Completion.WorkId)
+            || string.IsNullOrWhiteSpace(command.Completion.Stage))
+        {
+            return new WorkflowAgentHandoffRejection(
+                "invalid_completion_snapshot",
+                "Workflow Agent handoff requires a work id and stage in its completion snapshot.");
+        }
+        if (command.Completion.ExpectJson is { } expectJson)
+        {
+            try
+            {
+                using var _ = System.Text.Json.JsonDocument.Parse(expectJson);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return new WorkflowAgentHandoffRejection(
+                    "invalid_completion_snapshot",
+                    "Workflow Agent handoff completion expect must be valid rendered JSON when supplied.");
+            }
         }
         return null;
     }
