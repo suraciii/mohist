@@ -25,7 +25,7 @@ test('Spec partition planning sorts discovery and assigns a deterministic disjoi
 })
 
 test('Spec partition execution fixes the aggregate inner concurrency and keeps whole-class filters', () => {
-  assert.deepEqual(partitionExecutionArguments('/evidence/spec.trx', ['Ns.Alpha', 'Ns.Beta'], 1), [
+  assert.deepEqual(partitionExecutionArguments('/evidence/spec.trx', ['Ns.Alpha', 'Ns.Beta'], 2), [
     '-noColor',
     '-noLogo',
     '-noAutoReporters',
@@ -36,7 +36,7 @@ test('Spec partition execution fixes the aggregate inner concurrency and keeps w
     '-parallelAlgorithm',
     'conservative',
     '-maxThreads',
-    '1',
+    '2',
     '-class',
     'Ns.Alpha',
     '-class',

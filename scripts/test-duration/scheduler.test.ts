@@ -203,8 +203,8 @@ test('scheduler waits for all partition dependencies before admitting the covera
   )
 })
 
-test('scheduler completes the bounded four-way Spec phase before throughput fan-out', async () => {
-  const specIds = ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3'] as const
+test('scheduler completes the bounded Spec phase before throughput fan-out', async () => {
+  const specIds = ['server-spec-0', 'server-spec-1'] as const
   const starts = startSignals('cli', ...specIds, 'server-spec-coverage', 'server-unit', 'runner')
   const cli = deferred<boolean>()
   const specs = specIds.map(() => deferred<boolean>())
@@ -240,10 +240,10 @@ test('scheduler completes the bounded four-way Spec phase before throughput fan-
   cli.resolve(true)
   await Promise.all(specIds.map((id) => starts.waitFor(id)))
   assert.deepEqual(starts.started, ['cli', ...specIds])
-  specs.slice(0, 3).forEach((spec) => spec.resolve(true))
+  specs[0].resolve(true)
   await Promise.resolve()
   assert.deepEqual(starts.started, ['cli', ...specIds])
-  specs[3].resolve(true)
+  specs[1].resolve(true)
   await starts.waitFor('server-spec-coverage')
   assert.deepEqual(starts.started, ['cli', ...specIds, 'server-spec-coverage'])
   coverage.resolve(true)
@@ -255,7 +255,7 @@ test('scheduler completes the bounded four-way Spec phase before throughput fan-
   const result = await pending
   assert.deepEqual(
     result.lanes.map((lane) => lane.state),
-    Array.from({ length: 8 }, () => 'passed'),
+    Array.from({ length: 6 }, () => 'passed'),
   )
 })
 

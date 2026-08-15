@@ -443,16 +443,15 @@ test('lane sandbox gives every lane distinct temporary resources and isolates se
   assert.equal(serverSpec.environment.MOHIST_DB_PATH, serverSpec.databasePath)
   assert.equal(serverSpec.environment.MOHIST_OTEL_DB_PATH, serverSpec.otelDatabasePath)
   assert.equal(serverSpec.environment.MOHIST__Otel__DbPath, serverSpec.otelDatabasePath)
-  assert.equal(serverSpec.environment.MOHIST__Otel__BindHost, '127.0.0.1')
-  assert.equal(serverSpec.environment.MOHIST__Otel__Port, String(serverSpec.otelPort))
-  assert.equal(serverSpec.environment.MOHIST__Otel__Endpoint, `http://127.0.0.1:${serverSpec.otelPort}/otel`)
-  assert.equal(serverSpec.environment.OTEL_EXPORTER_OTLP_ENDPOINT, `http://127.0.0.1:${serverSpec.otelPort}`)
+  assert.equal(serverSpec.environment.MOHIST__Otel__BindHost, 'localhost')
+  assert.equal(serverSpec.environment.MOHIST__Otel__Port, '0')
+  assert.equal(serverSpec.environment.MOHIST__Otel__Endpoint, 'http://localhost/otel')
+  assert.equal(serverSpec.environment.OTEL_EXPORTER_OTLP_ENDPOINT, 'http://localhost')
   assert.notEqual(web.tempDir, runner.tempDir)
   assert.notEqual(web.ipcDir, runner.ipcDir)
   assert.notEqual(web.homeDir, runner.homeDir)
   assert.notEqual(web.databasePath, serverSpec.databasePath)
   assert.notEqual(web.otelDatabasePath, serverSpec.otelDatabasePath)
-  assert.notEqual(web.otelPort, serverSpec.otelPort)
   assert.match(serverSpec.databasePath, /^\/evidence\/tmp\/server-spec-0\/mohist\/mohist\.db$/)
   assert.match(serverSpec.otelDatabasePath, /^\/evidence\/tmp\/server-spec-0\/mohist\/otel\.db$/)
   assert.match(web.homeDir, /^\/evidence\/tmp\/web\/home$/)
@@ -627,15 +626,15 @@ test('Spec partition lanes launch a Node-hosted executor instead of a shell scri
   assert.doesNotMatch(command.args.join(' '), /ci-spec-partition\.sh/)
 })
 
-test('planTracks gives every Server Spec partition its own report, temp, and port claim', () => {
+test('planTracks gives every Server Spec partition its own report, temp, and endpoint claim', () => {
   const spec: TrackConfig = {
     id: 'server-spec',
     kind: 'dotnet-apphost',
     apphost: 'bin/spec',
     report: 'reports/server-spec/partition-{partition}.trx',
     reportFormat: 'trx',
-    partitions: 4,
-    partitionMaxThreads: 1,
+    partitions: 2,
+    partitionMaxThreads: 2,
     deadlineMs: 1000,
     enforce: true,
     rules: [{ id: 'spec', absoluteMs: 5000 }],
@@ -643,26 +642,22 @@ test('planTracks gives every Server Spec partition its own report, temp, and por
   const planned = planTracks([spec], '/evidence')
   assert.deepEqual(
     planned.map((lane) => lane.lane.id),
-    ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3', 'server-spec-coverage'],
+    ['server-spec-0', 'server-spec-1', 'server-spec-coverage'],
   )
   assert.deepEqual(
-    planned.slice(0, 4).map((lane) => lane.reportPath),
-    [
-      '/evidence/reports/server-spec/partition-0.trx',
-      '/evidence/reports/server-spec/partition-1.trx',
-      '/evidence/reports/server-spec/partition-2.trx',
-      '/evidence/reports/server-spec/partition-3.trx',
-    ],
+    planned.slice(0, 2).map((lane) => lane.reportPath),
+    ['/evidence/reports/server-spec/partition-0.trx', '/evidence/reports/server-spec/partition-1.trx'],
   )
-  assert.deepEqual(planned[3].lane.resources?.slice(-3), ['spec-report-3', 'spec-temp-3', 'spec-port-3'])
-  assert.deepEqual(planned[4].lane.dependsOn, ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3'])
+  assert.deepEqual(planned[1].lane.resources?.slice(-2), ['spec-report-1', 'spec-temp-1'])
+  assert.equal(planned[0].executionTrack?.partitionMaxThreads, 2)
+  assert.deepEqual(planned[2].lane.dependsOn, ['server-spec-0', 'server-spec-1'])
   assert.deepEqual(
     planned.map((lane) => lane.sandboxOrdinal),
-    [0, 1, 2, 3, 4],
+    [0, 1, 2],
   )
 })
 
-test('planTracks isolates a four-way Spec duration phase before remaining fan-out', () => {
+test('planTracks isolates the bounded Spec duration phase before remaining fan-out', () => {
   const cli: TrackConfig = {
     id: 'cli',
     kind: 'dotnet-apphost',
@@ -706,7 +701,7 @@ test('planTracks isolates a four-way Spec duration phase before remaining fan-ou
     report: 'reports/spec-{partition}.trx',
     reportFormat: 'trx',
     partitions: 2,
-    partitionMaxThreads: 1,
+    partitionMaxThreads: 2,
     deadlineMs: 1000,
     enforce: false,
   }

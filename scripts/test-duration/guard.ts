@@ -410,11 +410,8 @@ export interface LaneSandbox {
   readonly homeDir: string
   readonly databasePath: string
   readonly otelDatabasePath: string
-  readonly otelPort: number
   readonly environment: NodeJS.ProcessEnv
 }
-
-const laneOtelPortStart = 43_000
 
 export function laneSandbox(
   artifactRoot: string,
@@ -429,14 +426,12 @@ export function laneSandbox(
   const homeDir = resolve(laneRoot, 'home')
   const databasePath = resolve(laneRoot, 'mohist', 'mohist.db')
   const otelDatabasePath = resolve(laneRoot, 'mohist', 'otel.db')
-  const otelPort = laneOtelPortStart + sandboxOrdinal
   return {
     tempDir,
     ipcDir,
     homeDir,
     databasePath,
     otelDatabasePath,
-    otelPort,
     environment: {
       ...inherited,
       TMPDIR: tempDir,
@@ -448,15 +443,16 @@ export function laneSandbox(
       MOHIST_TEST_LANE: laneId,
       ...(isolateServerRuntime
         ? {
-            // Only concurrent Spec lanes need isolated server-owned paths and
-            // ports. Unit lanes retain their product-default assertions.
+            // Only concurrent Spec lanes need isolated server-owned paths.
+            // TestServer and the in-memory Orleans transport own the logical
+            // HTTP/OTel identities; no OS listener is opened by this lane.
             MOHIST_DB_PATH: databasePath,
             MOHIST_OTEL_DB_PATH: otelDatabasePath,
             MOHIST__Otel__DbPath: otelDatabasePath,
-            MOHIST__Otel__BindHost: '127.0.0.1',
-            MOHIST__Otel__Port: String(otelPort),
-            MOHIST__Otel__Endpoint: `http://127.0.0.1:${otelPort}/otel`,
-            OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${otelPort}`,
+            MOHIST__Otel__BindHost: 'localhost',
+            MOHIST__Otel__Port: '0',
+            MOHIST__Otel__Endpoint: 'http://localhost/otel',
+            OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost',
           }
         : {}),
     },
@@ -582,13 +578,7 @@ export function planTracks(
       planned.push({
         lane: {
           id,
-          resources: [
-            ...laneResources(track),
-            'server-spec',
-            `spec-report-${partition}`,
-            `spec-temp-${partition}`,
-            `spec-port-${partition}`,
-          ],
+          resources: [...laneResources(track), 'server-spec', `spec-report-${partition}`, `spec-temp-${partition}`],
         },
         policyTrack: track,
         executionTrack: { ...track, id, report },

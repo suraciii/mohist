@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import { parseSuiteConfig, stripJsonc, validateConfig } from './config.js'
@@ -278,8 +279,8 @@ test('validateConfig accepts bounded Server Spec partitions and rejects other pa
           apphost: 'bin/spec',
           report: 'reports/spec-{partition}.trx',
           reportFormat: 'trx',
-          partitions: 4,
-          partitionMaxThreads: 1,
+          partitions: 2,
+          partitionMaxThreads: 2,
           deadlineMs: 100,
           enforce: true,
           rules: [{ id: 'spec', absoluteMs: 5000 }],
@@ -362,6 +363,20 @@ test('validateConfig accepts bounded Server Spec partitions and rejects other pa
   assert.ok(
     validateConfig(serverSpecWithoutCanonical).some((error) => error.includes('canonical configuration is required')),
   )
+})
+
+test('checked-in Server Spec topology stays within the four-unit execution capacity', () => {
+  const config = parseSuiteConfig(readFileSync(new URL('../../test-duration.config.jsonc', import.meta.url), 'utf8'))
+  const serverSpec = config.tracks.find((track) => track.id === 'server-spec')
+  assert.ok(serverSpec)
+  assert.equal(serverSpec.partitions, 2)
+  assert.equal(serverSpec.partitionMaxThreads, 2)
+  assert.equal(config.canonical?.partitionExecutionCapacity, 4)
+  assert.equal(
+    Math.min(serverSpec.partitions!, config.canonical!.resourceLimits['server-spec']) * serverSpec.partitionMaxThreads!,
+    4,
+  )
+  assert.deepEqual(validateConfig(config), [])
 })
 
 test('validateConfig requires bounded partition concurrency and permits a partitioned duration phase', () => {
