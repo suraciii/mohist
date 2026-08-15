@@ -48,3 +48,33 @@ typed handoff transport and the Workflow finalizer are absent.
 - **WHEN** a Workflow task uses `mohist/agent`
 - **THEN** no unowned handoff work is dispatched to a Runner
 - **AND** the existing inline execution path remains authoritative
+
+### Requirement: Activation and terminal settlement form one dispatch contract
+
+An accepted handoff MAY gain dark, Server-side activation support, but the
+Workflow action SHALL NOT use that support until a typed AgentJob terminal
+delivery and a Workflow-owned finalizer are both available. Activation SHALL
+use only the frozen handoff plan and reserved identifiers. The terminal
+delivery SHALL carry the invocation, WorkflowRun, TaskRun, work, Job, Session,
+Input, and Turn identities, Agent terminal facts, and completion evaluation.
+The Workflow finalizer SHALL record idempotent effect receipts before applying
+the matching task outcome, expectation, artifacts, variables, recovery, or
+advancement.
+
+#### Scenario: Dark activation support has no production effect
+
+- **WHEN** activation participants exist but no typed terminal finalizer is registered
+- **THEN** no `mohist/agent` Workflow dispatch calls activation
+- **AND** an accepted handoff continues to create no Runner work
+
+#### Scenario: A typed terminal settles one task attempt
+
+- **WHEN** a workflow-originated AgentJob reaches a terminal state
+- **THEN** its stable terminal delivery identifies exactly one frozen invocation and task attempt
+- **AND** the Workflow finalizer applies each completion effect at most once
+
+#### Scenario: Terminal delivery replays after acknowledgement loss
+
+- **WHEN** a terminal delivery or finalizer acknowledgement is lost and later replayed
+- **THEN** the same invocation and terminal identity are retried
+- **AND** no replacement AgentJob, duplicate task outcome, duplicate artifact binding, or duplicate variable write is created
