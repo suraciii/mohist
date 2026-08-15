@@ -148,7 +148,7 @@ public static class AgentJobReadRoutes
 
         var status = await grain.GetStatusAsync();
         var isRecovering = status == AgentJobStatus.Unknown && snapshot.IsRecovering;
-        var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled;
+        var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled or AgentJobStatus.Interrupted;
         // Unknown is nonterminal; surface it without
         // the terminal-result fields. Callers consume it as a
         // nonterminal, non-dispatchable state — neither successful
@@ -197,6 +197,7 @@ public static class AgentJobReadRoutes
         AgentJobStatus.Cancelled => "cancelled",
         AgentJobStatus.Unknown => "unknown",
         AgentJobStatus.RecoverablyInterrupted => "recoverably-interrupted",
+        AgentJobStatus.Interrupted => "interrupted",
         _ => "unknown",
     };
 }

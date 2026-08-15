@@ -349,6 +349,7 @@ public class RunnerConfigFixture : IAsyncLifetime
 
     public CleanupPolicyOptions Policy { get; } = new();
     public HttpClient Client { get; private set; } = null!;
+    public IServiceProvider Services => _factory.Services;
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public IEventStore EventStore => _factory.Services.GetRequiredService<IEventStore>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));

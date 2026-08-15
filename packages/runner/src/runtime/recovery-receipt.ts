@@ -25,6 +25,8 @@ export interface RuntimeRecoveryReceipt {
   readonly recoveryGeneration: number
   readonly receiptId: string
   readonly payload: RuntimeRecoveryReceiptPayload
+  readonly ownerKind?: 'workflow' | 'agent-job'
+  readonly agentJobId?: string
 }
 
 export interface RuntimeRecoveryBinding {
@@ -122,13 +124,15 @@ function receiptIdentity(
   runnerId: string,
   receiptId: string,
 ): Omit<RuntimeRecoveryReceipt, 'payload'> | null {
+  const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
   const taskRunId = work.taskRunId?.trim()
+  const agentJobId = work.agentJobId?.trim()
   const agentSessionId = binding.agentSessionId.trim()
   const agentTurnId = binding.agentTurnId?.trim()
   const runtimeSessionId = binding.runtimeSessionId?.trim()
   if (
-    !work.workflowRunId.trim() ||
-    !taskRunId ||
+    (ownerKind === 'workflow' && (!work.workflowRunId.trim() || !taskRunId)) ||
+    (ownerKind === 'agent-job' && !agentJobId) ||
     !work.workId.trim() ||
     !runnerId.trim() ||
     !agentSessionId ||
@@ -140,8 +144,10 @@ function receiptIdentity(
     return null
   }
   return {
+    ownerKind,
+    ...(agentJobId ? { agentJobId } : {}),
     workflowRunId: work.workflowRunId,
-    taskRunId,
+    taskRunId: taskRunId ?? '',
     workId: work.workId,
     runnerId,
     agentSessionId,

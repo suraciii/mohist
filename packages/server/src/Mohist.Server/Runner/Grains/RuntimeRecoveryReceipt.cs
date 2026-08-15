@@ -22,13 +22,33 @@ public sealed record RuntimeRecoveryReceipt(
     [property: Id(7)] string RuntimeSessionId,
     [property: Id(8)] int RecoveryGeneration,
     [property: Id(9)] string ReceiptId,
-    [property: Id(10)] RuntimeRecoveryReceiptPayload? Payload)
+    [property: Id(10)] RuntimeRecoveryReceiptPayload? Payload,
+    /// <summary>
+    /// Owner discriminator for receipts that do not belong to a WorkflowRun.
+    /// Missing values retain the original workflow receipt contract.
+    /// </summary>
+    [property: Id(11)] string? OwnerKind = null,
+    [property: Id(12)] string? AgentJobId = null)
 {
     public IReadOnlyList<string> ValidateContract()
     {
         var errors = new List<string>();
-        Require(WorkflowRunId, nameof(WorkflowRunId));
-        Require(TaskRunId, nameof(TaskRunId));
+        var ownerKind = string.IsNullOrWhiteSpace(OwnerKind)
+            ? RuntimeRecoveryReceiptOwnerKinds.Workflow
+            : OwnerKind.Trim().ToLowerInvariant();
+        if (ownerKind is not (RuntimeRecoveryReceiptOwnerKinds.Workflow or RuntimeRecoveryReceiptOwnerKinds.AgentJob))
+            errors.Add("ownerKind must be 'workflow' or 'agent-job'");
+        if (ownerKind == RuntimeRecoveryReceiptOwnerKinds.Workflow)
+        {
+            Require(WorkflowRunId, nameof(WorkflowRunId));
+            Require(TaskRunId, nameof(TaskRunId));
+            if (!string.IsNullOrWhiteSpace(AgentJobId))
+                errors.Add("workflow receipts cannot carry agentJobId");
+        }
+        else if (ownerKind == RuntimeRecoveryReceiptOwnerKinds.AgentJob)
+        {
+            Require(AgentJobId, nameof(AgentJobId));
+        }
         Require(WorkId, nameof(WorkId));
         Require(RunnerId, nameof(RunnerId));
         Require(AgentSessionId, nameof(AgentSessionId));
@@ -101,6 +121,10 @@ public sealed record RuntimeRecoveryReceipt(
     {
         var canonical = new
         {
+            ownerKind = string.IsNullOrWhiteSpace(OwnerKind)
+                ? RuntimeRecoveryReceiptOwnerKinds.Workflow
+                : OwnerKind.Trim().ToLowerInvariant(),
+            agentJobId = AgentJobId,
             workflowRunId = WorkflowRunId,
             taskRunId = TaskRunId,
             workId = WorkId,
@@ -133,6 +157,12 @@ public sealed record RuntimeRecoveryReceiptPayload(
 {
     [JsonIgnore]
     public WorkResult? NormalizedTerminalResult => Result ?? TerminalResult;
+}
+
+public static class RuntimeRecoveryReceiptOwnerKinds
+{
+    public const string Workflow = "workflow";
+    public const string AgentJob = "agent-job";
 }
 
 public static class RuntimeRecoveryReceiptPayloadTypes

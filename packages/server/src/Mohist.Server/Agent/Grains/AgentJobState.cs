@@ -1,5 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Runner.Domain;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -55,7 +56,41 @@ public sealed class AgentJobState
     [Id(34)] public DateTimeOffset? RecoveryDeadlineAt { get; set; }
     [Id(35)] public PendingUpdateInterruptionEvent? PendingUpdateInterruptionEvent { get; set; }
     [Id(36)] public string? UpdateOperationId { get; set; }
+    /// <summary>
+    /// Monotonic replacement generation. Generation zero is the original
+    /// dispatch; every accepted update interruption allocates the next value.
+    /// </summary>
+    [Id(37)] public int RecoveryGeneration { get; set; }
+    /// <summary>
+    /// The work identity currently fenced by the latest update operation.
+    /// It remains recorded while a replacement is pending so reconciliation
+    /// can never mistake the old execution for the new one.
+    /// </summary>
+    [Id(38)] public string? InterruptedWorkId { get; set; }
+    [Id(39)] public List<AgentJobRecoveryAttempt> RecoveryAttempts { get; set; } = [];
+    /// <summary>
+    /// Durable receipt acknowledgement ledger. It is checked before current
+    /// lifecycle state so exact replay returns the original acknowledgement
+    /// even after a replacement or recovery-terminal transition.
+    /// </summary>
+    [Id(40)] public List<AppliedRuntimeRecoveryReceipt> AppliedRecoveryReceipts { get; set; } = [];
+    [Id(41)] public string? RecoveryTerminalReason { get; set; }
 }
+
+
+[GenerateSerializer]
+public sealed record AgentJobRecoveryAttempt(
+    [property: Id(0)] int RecoveryGeneration,
+    [property: Id(1)] string WorkId,
+    [property: Id(2)] string? RunnerId,
+    [property: Id(3)] string? AgentSessionId,
+    [property: Id(4)] string? InputId,
+    [property: Id(5)] string? TurnId,
+    [property: Id(6)] string? Runtime,
+    [property: Id(7)] string? RuntimeSessionId,
+    [property: Id(8)] AgentJobStatus Status,
+    [property: Id(9)] DateTimeOffset RecordedAt);
+
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalLogOwnership(

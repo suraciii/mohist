@@ -11,6 +11,11 @@ namespace Mohist.Server.Agent.Grains;
 public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 {
     Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result);
+    Task<RuntimeRecoveryReceiptAcknowledgement> ReceiveRecoveryReceiptAsync(RuntimeRecoveryReceipt receipt) =>
+        Task.FromResult(new RuntimeRecoveryReceiptAcknowledgement(
+            receipt?.ReceiptId ?? string.Empty,
+            RuntimeRecoveryReceiptAckStatuses.Stale,
+            "recovery-receipt-not-supported"));
     Task<AgentJobStatus> GetStatusAsync();
     Task<AgentJobCancelResult> CancelAsync() =>
         Task.FromResult(new AgentJobCancelResult(AgentJobCancelDisposition.AlreadyEnded, AgentJobStatus.Unknown));
@@ -272,7 +277,17 @@ public sealed record AgentJobRuntimeSnapshot(
     /// Read projection computed from the persisted deadline and the grain's
     /// injected clock. The wire status remains <see cref="AgentJobStatus.Unknown"/>.
     /// </summary>
-    [property: Id(13)] bool IsRecovering = false);
+    [property: Id(13)] bool IsRecovering = false,
+    /// <summary>
+    /// Monotonic replacement generation. Generation zero is the original
+    /// dispatch; every accepted update interruption allocates the next value.
+    /// </summary>
+    [property: Id(14)] int RecoveryGeneration = 0,
+    /// <summary>
+    /// The work identity of the original attempt, preserved for arbitration
+    /// after an update interruption allocated a replacement.
+    /// </summary>
+    [property: Id(15)] string? OriginalWorkId = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
@@ -392,6 +407,13 @@ public enum AgentJobStatus
     /// original outcome could not be classified after an ordinary loss.
     /// </summary>
     RecoverablyInterrupted,
+    /// <summary>
+    /// The update interruption was confirmed, but the job had no valid
+    /// durable launch snapshot from which a replacement could be created.
+    /// This is terminal recovery state, not a failed or completed task
+    /// verdict.
+    /// </summary>
+    Interrupted,
 }
 
 [GenerateSerializer]

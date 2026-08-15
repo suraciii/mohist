@@ -233,9 +233,9 @@ public static partial class RunnerRoutes
                     new { errors = contractErrors });
             }
 
-            // Workflow-owned receipts are arbitrated by the Workflow grain;
-            // the grain validates the path identity, frozen binding, and
-            // durable update fence before changing task state.
+            // The path identity is checked before owner routing. The
+            // acknowledgement is terminal for mismatch handling and does
+            // not disclose another Runner's receipt state.
             if (!string.Equals(receipt.RunnerId, runnerId, StringComparison.Ordinal))
             {
                 return Results.Ok(new RuntimeRecoveryReceiptAcknowledgement(
@@ -244,9 +244,33 @@ public static partial class RunnerRoutes
                     "runner-identity-mismatch"));
             }
 
-            var acknowledgement = await grains
-                .GetGrain<IWorkflowGrain>(receipt.WorkflowRunId)
-                .ReceiveRecoveryReceiptAsync(receipt);
+            var ownerKind = string.IsNullOrWhiteSpace(receipt.OwnerKind)
+                ? RuntimeRecoveryReceiptOwnerKinds.Workflow
+                : receipt.OwnerKind.Trim().ToLowerInvariant();
+            RuntimeRecoveryReceiptAcknowledgement acknowledgement;
+            if (ownerKind == RuntimeRecoveryReceiptOwnerKinds.AgentJob)
+            {
+                if (string.IsNullOrWhiteSpace(receipt.AgentJobId))
+                {
+                    return Results.Ok(new RuntimeRecoveryReceiptAcknowledgement(
+                        receipt.ReceiptId,
+                        RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                        "agent-job-identity-missing"));
+                }
+
+                acknowledgement = await grains
+                    .GetGrain<IAgentJobGrain>(receipt.AgentJobId)
+                    .ReceiveRecoveryReceiptAsync(receipt);
+            }
+            else
+            {
+                // Workflow-owned receipts are arbitrated by the Workflow
+                // grain; it validates the frozen binding and durable update
+                // fence before changing task state.
+                acknowledgement = await grains
+                    .GetGrain<IWorkflowGrain>(receipt.WorkflowRunId)
+                    .ReceiveRecoveryReceiptAsync(receipt);
+            }
 
             if (string.Equals(acknowledgement.Status, RuntimeRecoveryReceiptAckStatuses.Retryable, StringComparison.Ordinal))
             {

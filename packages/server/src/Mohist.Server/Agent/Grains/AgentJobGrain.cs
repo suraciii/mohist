@@ -179,7 +179,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         $"AgentJob '{Key}' state accessed before hydration");
     private bool IsTerminal => State.Status is AgentJobStatus.Completed
         or AgentJobStatus.Failed
-        or AgentJobStatus.Cancelled;
+        or AgentJobStatus.Cancelled
+        or AgentJobStatus.Interrupted;
 
     private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
 
@@ -231,7 +232,188 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             InitialInputId: State.Input?.InitialInputId,
             InitialTurnId: State.Input?.InitialTurnId,
             RecoveryDeadlineAt: State.RecoveryDeadlineAt,
-            IsRecovering: IsRecovering));
+            IsRecovering: IsRecovering,
+            RecoveryGeneration: State.RecoveryGeneration,
+            OriginalWorkId: State.RecoveryAttempts.FirstOrDefault()?.WorkId));
+
+    private bool MatchesRecoveryReceiptBinding(RuntimeRecoveryReceipt receipt)
+    {
+        var input = State.Input;
+        var expectedRuntime = input?.Runtime ?? AgentConfigSchema.OpenCodeRuntime;
+        return string.Equals(receipt.RunnerId, State.RunnerId, StringComparison.Ordinal)
+            && string.Equals(receipt.WorkId, State.WorkId, StringComparison.Ordinal)
+            && string.Equals(receipt.AgentSessionId, input?.AgentSessionId, StringComparison.Ordinal)
+            && string.Equals(receipt.AgentTurnId, input?.InitialTurnId, StringComparison.Ordinal)
+            && string.Equals(receipt.Runtime, expectedRuntime, StringComparison.Ordinal)
+            && string.Equals(receipt.RuntimeSessionId, State.RuntimeSessionId, StringComparison.Ordinal);
+    }
+
+    private bool CanContinueAfterUpdateInterruption() =>
+        State.LaunchVisibility == AgentLaunchVisibility.Visible
+        && State.Input is { } input
+        && !string.IsNullOrWhiteSpace(input.AgentId)
+        && (!string.IsNullOrWhiteSpace(input.Prompt)
+            || input.Attachments is { Count: > 0 });
+
+    private async Task AllocateRecoveryAttemptAsync(string interruptedWorkId)
+    {
+        State.RecoveryAttempts ??= [];
+        var input = State.Input
+            ?? throw new InvalidOperationException($"AgentJob '{Key}' has no input for recovery.");
+        var runnerId = State.RunnerId;
+        var runtimeSessionId = State.RuntimeSessionId;
+        var generation = State.RecoveryGeneration + 1;
+        var workId = RecoveryWorkId(interruptedWorkId, generation);
+        var inputId = $"recovery-input:{Key}:{generation}";
+        var turnId = $"recovery-turn:{workId}";
+        var now = _timeProvider.GetUtcNow();
+
+        // A normal Session-backed launch gets a fresh durable input/turn
+        // envelope. The prompt and execution configuration remain the
+        // original immutable AgentJob snapshot; only coordinator identities
+        // advance with the recovery generation.
+        if (!string.IsNullOrWhiteSpace(input.AgentSessionId)
+            && !string.IsNullOrWhiteSpace(input.Prompt))
+        {
+            var session = _grains.GetGrain<IAgentSessionGrain>(input.AgentSessionId);
+            if (!string.IsNullOrWhiteSpace(input.InitialTurnId))
+            {
+                // The Session coordinator will not queue a second turn
+                // while the old job turn is active. Cancelled here describes
+                // the physical turn's cooperative stop; it is not a failed
+                // or completed AgentJob verdict. The receipt and owner ledger
+                // remain the interruption authority.
+                await session.MarkTurnTerminalAsync(
+                    input.InitialTurnId,
+                    AgentTurnStatus.Cancelled,
+                    new AgentTurnResult(
+                        Message: "update-interrupted",
+                        FailureReason: "update-interrupted",
+                        FailureCategory: "update-interruption"));
+            }
+            await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+                inputId,
+                turnId,
+                input.Prompt,
+                "agent-job-recovery",
+                input.Attachments));
+        }
+
+        State.RecoveryAttempts.Add(new AgentJobRecoveryAttempt(
+            State.RecoveryGeneration,
+            interruptedWorkId,
+            runnerId,
+            input.AgentSessionId,
+            input.InitialInputId,
+            input.InitialTurnId,
+            input.Runtime,
+            runtimeSessionId,
+            AgentJobStatus.RecoverablyInterrupted,
+            now));
+        State.RecoveryAttempts.Add(new AgentJobRecoveryAttempt(
+            generation,
+            workId,
+            null,
+            input.AgentSessionId,
+            inputId,
+            turnId,
+            input.Runtime,
+            null,
+            AgentJobStatus.Pending,
+            now));
+
+        State.RecoveryGeneration = generation;
+        State.Input = input with { InitialInputId = inputId, InitialTurnId = turnId };
+        State.Status = AgentJobStatus.Pending;
+        State.RunnerId = null;
+        State.WorkId = null;
+        State.RunnerAccepted = false;
+        State.RuntimeSessionId = null;
+        State.RunningSince = null;
+        State.ReadySince = null;
+        State.WaitingReason = null;
+        State.InterruptedWorkId = interruptedWorkId;
+        State.TerminalResult = null;
+        State.TerminalAt = null;
+        DisposeJobTimeoutTimer();
+        await EnsureRecoveryReminderAsync();
+    }
+
+    private async Task ApplyRecoveryTerminalResultAsync(WorkResult result)
+    {
+        var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
+        var failureReason = isSuccess
+            ? null
+            : (string.IsNullOrWhiteSpace(result.Message) ? result.Status : result.Message);
+        var failureCategory = isSuccess
+            ? null
+            : FailureCategoryFromOutput(result.Output)
+                ?? FailureCategoryFromErrorCode(result.ErrorCode)
+                ?? FailureCategoryFromStatus(result.Status);
+
+        await EnterTerminalStateAsync(
+            isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed,
+            isSuccess ? 0 : (result.ExitCode ?? 1),
+            failureReason,
+            failureCategory,
+            failureReason,
+            result.Message,
+            result.Output?.ValueKind == JsonValueKind.Object || result.Output?.ValueKind == JsonValueKind.Array
+                ? result.Output.Value.GetRawText()
+                : null,
+            result.ArtifactUploadIds,
+            result.ExitCode);
+    }
+
+    private async Task EnterRecoveryTerminalStateAsync(string reason)
+    {
+        if (IsTerminal)
+            return;
+
+        State.Status = AgentJobStatus.Interrupted;
+        State.RecoveryTerminalReason = reason;
+        State.FailureReason = null;
+        State.RunningSince = null;
+        State.TerminalAt = _timeProvider.GetUtcNow();
+        State.TerminalResult = new AgentJobTerminalResult(
+            AgentJobStatus.Interrupted,
+            reason,
+            null,
+            null,
+            null,
+            null);
+        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Terminal;
+        State.ConcurrencyReleasePending = State.ConcurrencyPermitId is not null
+            || State.ConcurrencyPermitHeld
+            || State.ConcurrencyWaiterId is not null;
+        DisposeJobTimeoutTimer();
+        await EnsureRecoveryReminderAsync();
+        await PersistAsync();
+        await TryReleaseConcurrencyPermitAsync();
+        _terminalCompletion.TrySetResult(State.TerminalResult);
+    }
+
+    private async Task SettleUpdateOperationWorkAsync(RuntimeRecoveryReceipt receipt)
+    {
+        if (receipt.Payload?.UpdateOperationId is not { } operationId)
+            return;
+
+        await GrainFactory
+            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+            .MarkWorkAsync(
+                operationId,
+                WorkDispatchOwnerKinds.AgentJob,
+                Key,
+                receipt.WorkId,
+                taskRunId: null,
+                RunnerUpdateWorkStatus.Settled);
+    }
+
+    private static string RecoveryWorkId(string interruptedWorkId, int generation) =>
+        $"{interruptedWorkId}.recovery.{generation}";
 
     public Task<AgentJobTerminalResult> GetTerminalResultAsync()
     {
@@ -418,6 +600,162 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             result.ExitCode);
 
         return new AgentJobReportResult(true);
+    }
+
+    public async Task<RuntimeRecoveryReceiptAcknowledgement> ReceiveRecoveryReceiptAsync(
+        RuntimeRecoveryReceipt receipt)
+    {
+        await HydrateAsync();
+        State.AppliedRecoveryReceipts ??= [];
+        State.RecoveryAttempts ??= [];
+
+        if (receipt is null || receipt.ValidateContract().Count > 0)
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt?.ReceiptId ?? string.Empty,
+                RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                "invalid-recovery-receipt");
+
+        if (!string.Equals(
+                receipt.OwnerKind ?? RuntimeRecoveryReceiptOwnerKinds.Workflow,
+                RuntimeRecoveryReceiptOwnerKinds.AgentJob,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.AgentJobId, Key, StringComparison.Ordinal))
+        {
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt.ReceiptId,
+                RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                "job-identity-mismatch");
+        }
+
+        var requestFingerprint = receipt.RequestFingerprint();
+        var prior = State.AppliedRecoveryReceipts.FirstOrDefault(candidate =>
+            string.Equals(candidate.ReceiptId, receipt.ReceiptId, StringComparison.Ordinal));
+        if (prior is not null)
+        {
+            if (!string.Equals(prior.RequestFingerprint, requestFingerprint, StringComparison.Ordinal))
+            {
+                return new RuntimeRecoveryReceiptAcknowledgement(
+                    receipt.ReceiptId,
+                    RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                    "receipt-id-reused");
+            }
+
+            // A delivery can be acknowledged after the replacement was
+            // committed but before admission found a reconnected runner.
+            // Re-running admission here repairs that gap without allocating
+            // another identity: the pending state derives the same work id.
+            if (State.Status == AgentJobStatus.Pending
+                && string.IsNullOrWhiteSpace(State.RunnerId)
+                && string.Equals(prior.Reason, "replacement-created", StringComparison.Ordinal))
+            {
+                await TryAdmitAsync();
+            }
+            return new RuntimeRecoveryReceiptAcknowledgement(prior.ReceiptId, prior.Status, prior.Reason);
+        }
+
+        if (IsTerminal)
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt.ReceiptId,
+                RuntimeRecoveryReceiptAckStatuses.Stale,
+                "job-terminal");
+
+        if (!MatchesRecoveryReceiptBinding(receipt)
+            || receipt.RecoveryGeneration != State.RecoveryGeneration)
+        {
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt.ReceiptId,
+                RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                "binding-mismatch");
+        }
+
+        var payload = receipt.Payload!;
+        var payloadType = payload.Type.Trim().ToLowerInvariant();
+        if (payloadType == RuntimeRecoveryReceiptPayloadTypes.TerminalResult)
+        {
+            if (State.Status is not (AgentJobStatus.Running
+                or AgentJobStatus.Unknown
+                or AgentJobStatus.RecoverablyInterrupted))
+            {
+                return new RuntimeRecoveryReceiptAcknowledgement(
+                    receipt.ReceiptId,
+                    RuntimeRecoveryReceiptAckStatuses.Stale,
+                    "job-not-reportable");
+            }
+
+            var terminalResult = payload.NormalizedTerminalResult!;
+            if (!string.Equals(
+                    payload.Fingerprint,
+                    RuntimeRecoveryReceiptFingerprint.For(terminalResult),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return new RuntimeRecoveryReceiptAcknowledgement(
+                    receipt.ReceiptId,
+                    RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                    "result-fingerprint-mismatch");
+            }
+
+            await ApplyRecoveryTerminalResultAsync(terminalResult);
+            State.AppliedRecoveryReceipts.Add(new AppliedRuntimeRecoveryReceipt(
+                receipt.ReceiptId,
+                requestFingerprint,
+                RuntimeRecoveryReceiptAckStatuses.Accepted));
+            await PersistAsync();
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt.ReceiptId,
+                RuntimeRecoveryReceiptAckStatuses.Accepted);
+        }
+
+        if (State.Status != AgentJobStatus.RecoverablyInterrupted
+            || !string.Equals(State.UpdateOperationId, payload.UpdateOperationId, StringComparison.Ordinal))
+        {
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt.ReceiptId,
+                RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                "update-fence-mismatch");
+        }
+
+        var operation = await GrainFactory
+            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+            .GetAsync(payload.UpdateOperationId!);
+        var fencedWork = operation?.AffectedWorks.SingleOrDefault(work =>
+            string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
+            && string.Equals(work.OwnerId, Key, StringComparison.Ordinal)
+            && string.Equals(work.WorkId, receipt.WorkId, StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(work.TaskRunId));
+        if (fencedWork is null
+            || fencedWork.Status is not (RunnerUpdateWorkStatus.Marked or RunnerUpdateWorkStatus.Settled))
+        {
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt.ReceiptId,
+                RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                "update-fence-missing");
+        }
+
+        var canContinue = CanContinueAfterUpdateInterruption();
+        var reason = canContinue ? "replacement-created" : "cannot-continue";
+        if (canContinue)
+            await AllocateRecoveryAttemptAsync(receipt.WorkId);
+        else
+            await EnterRecoveryTerminalStateAsync("update-interrupted-cannot-continue");
+
+        State.AppliedRecoveryReceipts.Add(new AppliedRuntimeRecoveryReceipt(
+            receipt.ReceiptId,
+            requestFingerprint,
+            RuntimeRecoveryReceiptAckStatuses.Accepted,
+            reason));
+        await PersistAsync();
+        await SettleUpdateOperationWorkAsync(receipt);
+
+        // Admission is deliberately after the replacement commit and fence
+        // settlement. If no runner is online yet, the Pending owner row and
+        // recovery reminder remain the durable path to a later poll claim.
+        if (canContinue)
+            await TryAdmitAsync();
+
+        return new RuntimeRecoveryReceiptAcknowledgement(
+            receipt.ReceiptId,
+            RuntimeRecoveryReceiptAckStatuses.Accepted,
+            reason);
     }
 
     public async Task FailAsync(string reason, string? agentId = null)
@@ -780,6 +1118,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             artifactUploadIds: null,
             terminalExitCode: null);
     }
+
 
     private bool EnsureUnknownInitialTurnDelivery(string reason)
     {
@@ -1268,7 +1607,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         // call RunnerGrain.AssignAgentJobAsync and does not transition
         // the job to Running; the next poll claim does that.
         var now = _timeProvider.GetUtcNow();
-        var workId = StableWorkId(Key);
+        var workId = State.RecoveryGeneration > 0 && !string.IsNullOrWhiteSpace(State.InterruptedWorkId)
+            ? RecoveryWorkId(State.InterruptedWorkId!, State.RecoveryGeneration)
+            : StableWorkId(Key);
         var dispatch = await BuildDispatchAsync(workId);
 
         State.RunnerId = runnerId;
@@ -1276,6 +1617,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         State.ReadySince = now;
         State.RunnerAccepted = false;
         State.RunningSince = null;
+        UpdateRecoveryAttempt(workId, runnerId, AgentJobStatus.Pending);
 
         var record = new AgentJobLedgerRecord(
             JobKey: Key,
@@ -1367,6 +1709,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 Key);
         }
     }
+
 
     private static WorkDispatch? DeserializeDispatch(string? json)
     {
@@ -1964,9 +2307,32 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     /// <summary>
     /// The dispatch snapshot is owned by the row. Subsequent saves
     /// (terminal transition, session close, etc.) must not clobber it
-    /// with null.
+    /// with null. A recovery generation is different: while its fresh
+    /// identity is still waiting for a Runner, retaining the old snapshot
+    /// would leave a misleading copy of the fenced dispatch in the owner
+    /// ledger. The replacement admission writes a new snapshot atomically.
     /// </summary>
-    private string? ResolveDispatchJsonForPersist() => _ledger?.DispatchJson;
+    private string? ResolveDispatchJsonForPersist() =>
+        State.Status == AgentJobStatus.Pending
+            && State.RecoveryGeneration > 0
+            && State.RunnerId is null
+            ? null
+            : _ledger?.DispatchJson;
+
+    private void UpdateRecoveryAttempt(string workId, string? runnerId, AgentJobStatus status)
+    {
+        var index = State.RecoveryAttempts.FindIndex(attempt =>
+            attempt.RecoveryGeneration == State.RecoveryGeneration
+            && string.Equals(attempt.WorkId, workId, StringComparison.Ordinal));
+        if (index < 0)
+            return;
+
+        State.RecoveryAttempts[index] = State.RecoveryAttempts[index] with
+        {
+            RunnerId = runnerId,
+            Status = status,
+        };
+    }
 
     private static string StableWorkId(string key)
     {

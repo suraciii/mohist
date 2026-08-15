@@ -194,3 +194,44 @@ Channel decision (grounded in live source):
   passed 2 tests; `RunnerPollRecoveryStateApiSpecs` passed 6 tests; and
   `npm run test:fast` passed all configured typecheck, Server, CLI, Runner
   (1647), and Web (4724) checks.
+
+## T-005 Implementation Notes
+
+- `/recovery-receipt` now routes receipts with `ownerKind=agent-job` and
+  `agentJobId` to `AgentJobGrain`; the existing workflow receipt wire shape
+  remains compatible when the owner discriminator is absent. Runner receipt
+  construction now emits the owner identity for AgentJob dispatches, whose
+  workflow/task ids are intentionally empty.
+- AgentJob arbitration validates the exact Runner/work/session/turn/runtime
+  binding and the durable update-operation inventory. Applied receipt ids and
+  request fingerprints are stored in the owner ledger before the terminal
+  acknowledgement is returned, so exact duplicates do not allocate again;
+  old work remains absent from the `running`/`pending` dispatch indexes after
+  replacement.
+- Recovery generation follows T-004: the old work is retained in
+  `RecoveryAttempts`, generation increments from zero, and the replacement
+  work id is `{interruptedWorkId}.recovery.{generation}`. The prompt and all
+  launch-time execution configuration are reused from the immutable
+  `AgentJobInput` snapshot. For a normal Session-backed job, a deterministic
+  fresh `recovery-input:{job}:{generation}` plus `recovery-turn:{work}` is
+  persisted before the new owner dispatch; the old physical turn is marked
+  Session-cancelled with update-interruption context so the Session can queue
+  the fresh turn. This resolves the input-envelope open question in favor of
+  fresh coordinator identities, while preserving the original prompt/input
+  content as-is.
+- Jobs with no valid executable launch snapshot enter explicit terminal
+  `AgentJobStatus.Interrupted` with an `AgentJobTerminalResult` carrying the
+  same status and no failure reason/result verdict. Durable Runner/work
+  identities remain available for audit. `Interrupted` is projected through
+  AgentJob read/status surfaces and counts as converged for test helpers.
+- Added `AgentJobRecoveryReceiptSpecs` covering route arbitration, fresh
+  dispatch, duplicate idempotence, no-fence/mismatch rejection, old-work
+  suppression, and cannot-continue terminal fallback. The first broad
+  baseline Server invocation ran 3928 tests with one pre-existing/flaky
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  timing failure; the focused pre-change regression classes passed 36/36.
+- Post-implementation verification: focused AgentJob recovery specs passed
+  4/4, the expanded related Server set passed 40/40, the full
+  `Mohist.Server.SpecTests` suite passed 3932/3932, Runner vitest passed
+  1647/1647, and `npm run test:fast` passed all configured typecheck, Server
+  unit/architecture/workflow/CLI, Runner, and Web checks.
