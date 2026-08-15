@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 
 namespace Mohist.Cli;
@@ -103,16 +104,18 @@ internal sealed record RunnerIdentityView(
 internal sealed record RunnerInterruptResult(
     string? RunnerId,
     string? Status,
+    string? UpdateInterruptId,
     IReadOnlyList<string> InterruptedWorkIds,
     int InterruptedWorkCount,
     string? Error)
 {
     public bool Succeeded => Error is null
         && string.Equals(Status, "interrupted", StringComparison.Ordinal)
-        && !string.IsNullOrWhiteSpace(RunnerId);
+        && !string.IsNullOrWhiteSpace(RunnerId)
+        && !string.IsNullOrWhiteSpace(UpdateInterruptId);
 
     public static RunnerInterruptResult Failed(string error) =>
-        new(null, null, Array.Empty<string>(), 0, error);
+        new(null, null, null, Array.Empty<string>(), 0, error);
 }
 
 /// <summary>
@@ -181,7 +184,12 @@ internal sealed class RunnerRefreshVerifier
         try
         {
             var path = $"/api/runner/{Uri.EscapeDataString(identity.RunnerId)}/update-interrupt";
-            using var response = await _http.PostAsync(path, content: null, cancellationToken);
+            var updateInterruptId = Guid.NewGuid().ToString("N");
+            using var content = new StringContent(
+                JsonSerializer.Serialize(new { updateInterruptId }),
+                Encoding.UTF8,
+                "application/json");
+            using var response = await _http.PostAsync(path, content, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 return RunnerInterruptResult.Failed(
@@ -193,7 +201,7 @@ internal sealed class RunnerRefreshVerifier
             var data = document.RootElement.TryGetProperty("data", out var envelopeData)
                 ? envelopeData
                 : document.RootElement;
-            return ReadRunnerInterruptResult(data, identity.RunnerId);
+            return ReadRunnerInterruptResult(data, identity.RunnerId, updateInterruptId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -202,6 +210,65 @@ internal sealed class RunnerRefreshVerifier
         catch (Exception ex)
         {
             return RunnerInterruptResult.Failed($"request failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Releases only the update fence this CLI invocation acquired. A failure
+    /// is returned to the caller so the original update failure remains
+    /// visible instead of being mistaken for a completed handoff.
+    /// </summary>
+    public async Task<string?> CancelRunnerUpdateInterruptAsync(
+        RunnerInterruptResult interruption,
+        CancellationToken cancellationToken = default)
+    {
+        if (!interruption.Succeeded
+            || string.IsNullOrWhiteSpace(interruption.RunnerId)
+            || string.IsNullOrWhiteSpace(interruption.UpdateInterruptId))
+        {
+            return "no confirmed update interrupt is available to cancel";
+        }
+
+        try
+        {
+            var path = $"/api/runner/{Uri.EscapeDataString(interruption.RunnerId)}/update-interrupt/"
+                + $"{Uri.EscapeDataString(interruption.UpdateInterruptId)}/cancel";
+            using var response = await _http.PostAsync(path, content: null, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return $"HTTP {(int)response.StatusCode} {response.ReasonPhrase ?? "request failed"}";
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(body);
+            var data = document.RootElement.TryGetProperty("data", out var envelopeData)
+                ? envelopeData
+                : document.RootElement;
+            if (data.ValueKind != JsonValueKind.Object)
+                return "response data is not an object";
+
+            var runnerId = ReadString(data, "runnerId");
+            var updateInterruptId = ReadString(data, "updateInterruptId");
+            var status = ReadString(data, "status");
+            if (!string.Equals(runnerId, interruption.RunnerId, StringComparison.Ordinal))
+                return "response runnerId does not match the confirmed update interrupt";
+            if (!string.Equals(updateInterruptId, interruption.UpdateInterruptId, StringComparison.Ordinal))
+                return "response updateInterruptId does not match the confirmed update interrupt";
+            if (string.Equals(status, "cancelled", StringComparison.Ordinal)
+                || string.Equals(status, "already-cancelled", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return $"response status was '{status ?? "<missing>"}', expected 'cancelled'";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return $"request failed: {ex.Message}";
         }
     }
 
@@ -424,7 +491,10 @@ internal sealed class RunnerRefreshVerifier
         }
     }
 
-    private static RunnerInterruptResult ReadRunnerInterruptResult(JsonElement data, string expectedRunnerId)
+    private static RunnerInterruptResult ReadRunnerInterruptResult(
+        JsonElement data,
+        string expectedRunnerId,
+        string expectedUpdateInterruptId)
     {
         if (data.ValueKind != JsonValueKind.Object)
             return RunnerInterruptResult.Failed("response data is not an object");
@@ -435,6 +505,13 @@ internal sealed class RunnerRefreshVerifier
             return RunnerInterruptResult.Failed("response runnerId does not match the identified runner");
         if (!string.Equals(status, "interrupted", StringComparison.Ordinal))
             return RunnerInterruptResult.Failed($"response status was '{status ?? "<missing>"}', expected 'interrupted'");
+
+        var updateInterruptId = ReadString(data, "updateInterruptId");
+        if (!string.Equals(updateInterruptId, expectedUpdateInterruptId, StringComparison.Ordinal))
+        {
+            return RunnerInterruptResult.Failed(
+                "response updateInterruptId does not match the requested update interrupt");
+        }
 
         if (!data.TryGetProperty("interruptedWorkIds", out var workIdsElement)
             || workIdsElement.ValueKind != JsonValueKind.Array)
@@ -459,7 +536,7 @@ internal sealed class RunnerRefreshVerifier
         if (count != workIds.Count)
             return RunnerInterruptResult.Failed("interruptedWorkCount does not match interruptedWorkIds");
 
-        return new RunnerInterruptResult(runnerId, status, workIds, count, null);
+        return new RunnerInterruptResult(runnerId, status, updateInterruptId, workIds, count, null);
     }
 
     private static string? ReadString(JsonElement data, string property)

@@ -15,10 +15,17 @@ unchanged when that precondition is not confirmed. If staging has already
 moved a candidate into a release and fails before active-pointer activation,
 remove only that transaction's exact staged release so a retry can rebuild it.
 
-This is the admission-fence phase. The subsequent runtime-recovery phase is
-specified in [`recovery.md`](recovery.md): it requires a durable,
-execution-bound receipt before an interrupted Agent attempt can be recovered.
-That phase is deliberately not satisfied by a Runner drain or reconnect.
+This is the admission-fence phase. Each confirmed fence has an opaque,
+caller-owned interruption id. If activation, restart, verification, or the
+update command itself fails after confirmation, the CLI releases only that
+same fence through the Runner API. The server persists the fence so a server
+restart cannot accidentally reopen admission, and a later update cannot be
+unfenced by an older CLI invocation.
+
+The subsequent runtime-recovery phase is specified in [`recovery.md`](recovery.md):
+it requires a durable, execution-bound receipt before an interrupted Agent
+attempt can be recovered. That phase is deliberately not satisfied by a
+Runner drain, cancellation rollback, or reconnect.
 
 ## Safety Boundary
 

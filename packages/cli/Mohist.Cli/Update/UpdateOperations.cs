@@ -173,20 +173,50 @@ internal sealed class UpdateOperations
             $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
         _out.WriteLine("Runner updated successfully.");
 
-        var restart = await _systemd.RestartRunnerAsync(new ServiceCommandOptions(false, null, 100, false));
-        if (restart != 0)
+        try
         {
-            _err.WriteLine("Warning: Failed to restart runner service. You may need to restart manually.");
-            return restart;
+            var restart = await _systemd.RestartRunnerAsync(new ServiceCommandOptions(false, null, 100, false));
+            if (restart != 0)
+            {
+                _err.WriteLine("Warning: Failed to restart runner service. You may need to restart manually.");
+                await ReleaseRunnerUpdateInterruptAsync(runnerRefreshVerifier, interruption);
+                return restart;
+            }
+
+            _out.WriteLine("Runner service restarted.");
+
+            var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(root);
+            outcome.WriteSummary(_out, _err);
+            if (outcome.ExitCode != 0)
+            {
+                _err.WriteLine("Runner update recovery: status=unconfirmed; refreshed runner identity was not confirmed.");
+                await ReleaseRunnerUpdateInterruptAsync(runnerRefreshVerifier, interruption);
+            }
+            return outcome.ExitCode;
+        }
+        catch
+        {
+            await ReleaseRunnerUpdateInterruptAsync(runnerRefreshVerifier, interruption);
+            throw;
+        }
+    }
+
+    private async Task ReleaseRunnerUpdateInterruptAsync(
+        RunnerRefreshVerifier runnerRefreshVerifier,
+        RunnerInterruptResult interruption)
+    {
+        var releaseError = await runnerRefreshVerifier.CancelRunnerUpdateInterruptAsync(
+            interruption,
+            CancellationToken.None);
+        if (releaseError is null)
+        {
+            _out.WriteLine(
+                $"Runner update interrupt rollback: status=cancelled runnerId={interruption.RunnerId}.");
+            return;
         }
 
-        _out.WriteLine("Runner service restarted.");
-
-        var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(root);
-        outcome.WriteSummary(_out, _err);
-        if (outcome.ExitCode != 0)
-            _err.WriteLine("Runner update recovery: status=unconfirmed; refreshed runner identity was not confirmed.");
-        return outcome.ExitCode;
+        _err.WriteLine(
+            $"Runner update interrupt rollback: status=unconfirmed ({releaseError}); runner admission may remain closed.");
     }
 
     public async Task<int> UpdateSlackAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)

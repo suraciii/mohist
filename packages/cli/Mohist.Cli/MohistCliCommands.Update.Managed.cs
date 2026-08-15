@@ -50,66 +50,92 @@ internal partial class SourceCodeUpdater
             return await FinalizeManagedFailureAsync(context, 1, postOutcome);
         }
 
+        RunnerInterruptResult? interruption = null;
         Func<CancellationToken, Task<string?>>? beforeActivation = IncludesManagedScope(scope, "runner")
-            ? ConfirmRunnerUpdateInterruptAsync
+            ? async token =>
+            {
+                var confirmed = await ConfirmRunnerUpdateInterruptAsync(token);
+                if (!confirmed.Succeeded)
+                {
+                    return $"runner update interrupt was not confirmed: {confirmed.Error ?? "invalid response"}; managed runner service was not restarted";
+                }
+
+                interruption = confirmed;
+                return null;
+            }
             : null;
-        var prepared = await _operations.PrepareManagedUpdateAsync(
-            repoRoot,
-            scope,
-            context.JobId,
-            resolvedCliPath,
-            beforeActivation,
-            cancellationToken);
-        if (prepared.Session is null)
-        {
-            context.RecordStage("Capturing immutable source", $"failed: {prepared.Error}");
-            context.UnavailableCapability = "Managed runtime candidate unavailable";
-            context.LastExitCode = 1;
-            _err.WriteLine($"Mohist update refused: {prepared.Error ?? "managed candidate could not be prepared"}.");
-            return await FinalizeManagedFailureAsync(context, 1, postOutcome);
-        }
 
-        context.ManagedSession = prepared.Session;
-        context.SourceContext = prepared.Session.Context;
-        context.SourceHead = prepared.Session.Context.Source.GitCommit;
-        context.ExpectedTargets = prepared.Session.Targets;
-        context.RecordStage("Activating managed runtime", "candidate activated; verifying runtime identities");
-
-        var verificationError = await VerifyManagedRuntimeAsync(prepared.Session, scope, cancellationToken);
-        if (verificationError is not null)
+        try
         {
-            context.UnavailableCapability = "Managed runtime identity mismatch";
-            var rollback = await _operations.RollbackManagedUpdateAsync(
-                prepared.Session,
-                verificationError,
+            var prepared = await _operations.PrepareManagedUpdateAsync(
+                repoRoot,
+                scope,
+                context.JobId,
+                resolvedCliPath,
+                beforeActivation,
                 cancellationToken);
-            if (rollback != 0)
-                context.UnavailableCapability = "Managed runtime recovery failed";
-            context.RecordStage("Activating managed runtime", $"failed: {verificationError}");
-            context.LastExitCode = 1;
-            return await FinalizeManagedFailureAsync(context, 1, postOutcome);
-        }
+            if (prepared.Session is null)
+            {
+                await RollbackRunnerUpdateInterruptAsync(interruption);
+                context.RecordStage("Capturing immutable source", $"failed: {prepared.Error}");
+                context.UnavailableCapability = "Managed runtime candidate unavailable";
+                context.LastExitCode = 1;
+                _err.WriteLine($"Mohist update refused: {prepared.Error ?? "managed candidate could not be prepared"}.");
+                return await FinalizeManagedFailureAsync(context, 1, postOutcome);
+            }
 
-        var committed = await _operations.CommitManagedUpdateAsync(prepared.Session, cancellationToken);
-        if (committed != 0)
+            context.ManagedSession = prepared.Session;
+            context.SourceContext = prepared.Session.Context;
+            context.SourceHead = prepared.Session.Context.Source.GitCommit;
+            context.ExpectedTargets = prepared.Session.Targets;
+            context.RecordStage("Activating managed runtime", "candidate activated; verifying runtime identities");
+
+            var verificationError = await VerifyManagedRuntimeAsync(prepared.Session, scope, cancellationToken);
+            if (verificationError is not null)
+            {
+                context.UnavailableCapability = "Managed runtime identity mismatch";
+                var rollback = await _operations.RollbackManagedUpdateAsync(
+                    prepared.Session,
+                    verificationError,
+                    cancellationToken);
+                if (rollback != 0)
+                    context.UnavailableCapability = "Managed runtime recovery failed";
+                await RollbackRunnerUpdateInterruptAsync(interruption);
+                context.RecordStage("Activating managed runtime", $"failed: {verificationError}");
+                context.LastExitCode = 1;
+                return await FinalizeManagedFailureAsync(context, 1, postOutcome);
+            }
+
+            var committed = await _operations.CommitManagedUpdateAsync(prepared.Session, cancellationToken);
+            if (committed != 0)
+            {
+                context.UnavailableCapability = "Managed runtime commit failed";
+                var rollback = await _operations.RollbackManagedUpdateAsync(
+                    prepared.Session,
+                    "active target commit failed",
+                    cancellationToken);
+                if (rollback != 0)
+                    context.UnavailableCapability = "Managed runtime recovery failed";
+                await RollbackRunnerUpdateInterruptAsync(interruption);
+                context.RecordStage("Committing managed runtime", "failed");
+                context.LastExitCode = 1;
+                return await FinalizeManagedFailureAsync(context, 1, postOutcome);
+            }
+
+            // The candidate Runner registered with the verified identity, so
+            // registration durably completed the handoff and owns fence clear.
+            interruption = null;
+            context.Outcome = UpdateOutcome.Ready;
+            context.RecordStage("Committing managed runtime", "server and runner confirmed the same release identity");
+            context.LastExitCode = 0;
+            _out.WriteLine($"Managed {scope} update committed for source {context.SourceHead}.");
+            return postOutcome ? await FinalizeAsync(context, 0) : 0;
+        }
+        catch
         {
-            context.UnavailableCapability = "Managed runtime commit failed";
-            var rollback = await _operations.RollbackManagedUpdateAsync(
-                prepared.Session,
-                "active target commit failed",
-                cancellationToken);
-            if (rollback != 0)
-                context.UnavailableCapability = "Managed runtime recovery failed";
-            context.RecordStage("Committing managed runtime", "failed");
-            context.LastExitCode = 1;
-            return await FinalizeManagedFailureAsync(context, 1, postOutcome);
+            await RollbackRunnerUpdateInterruptAsync(interruption);
+            throw;
         }
-
-        context.Outcome = UpdateOutcome.Ready;
-        context.RecordStage("Committing managed runtime", "server and runner confirmed the same release identity");
-        context.LastExitCode = 0;
-        _out.WriteLine($"Managed {scope} update committed for source {context.SourceHead}.");
-        return postOutcome ? await FinalizeAsync(context, 0) : 0;
     }
 
     private async Task<string?> VerifyManagedRuntimeAsync(
@@ -168,17 +194,34 @@ internal partial class SourceCodeUpdater
         return null;
     }
 
-    private async Task<string?> ConfirmRunnerUpdateInterruptAsync(CancellationToken cancellationToken)
+    private async Task<RunnerInterruptResult> ConfirmRunnerUpdateInterruptAsync(CancellationToken cancellationToken)
     {
         var interruption = await _runnerRefreshVerifier.InterruptRunnerAsync(cancellationToken);
-        if (!interruption.Succeeded)
+        if (interruption.Succeeded)
         {
-            return $"runner update interrupt was not confirmed: {interruption.Error ?? "invalid response"}; managed runner service was not restarted";
+            _out.WriteLine(
+                $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
+        }
+        return interruption;
+    }
+
+    private async Task RollbackRunnerUpdateInterruptAsync(RunnerInterruptResult? interruption)
+    {
+        if (interruption is not { Succeeded: true })
+            return;
+
+        var releaseError = await _runnerRefreshVerifier.CancelRunnerUpdateInterruptAsync(
+            interruption,
+            CancellationToken.None);
+        if (releaseError is null)
+        {
+            _out.WriteLine(
+                $"Runner update interrupt rollback: status=cancelled runnerId={interruption.RunnerId}.");
+            return;
         }
 
-        _out.WriteLine(
-            $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
-        return null;
+        _err.WriteLine(
+            $"Runner update interrupt rollback: status=unconfirmed ({releaseError}); runner admission may remain closed.");
     }
 
     private async Task<int> FinalizeManagedFailureAsync(
