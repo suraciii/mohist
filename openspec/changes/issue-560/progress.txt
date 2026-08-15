@@ -42,4 +42,15 @@ affordance; requirement anchor preserved, one scenario renamed), cli spec
 exit-behavior (+ `mo agent model list` entry), design.md D9 + D10 + resolved
 open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
 
-Observations O-1..O-6 require no action per the task instructions.
+## Status
+
+- MF-2: FIXED (commit "fold model/variant hints into the replay fingerprint").
+- MF-1: FIXED (this slice): cover AC3 via catalog-backed selection + labeled
+  Project-default recommendation + full-options entry (web), `mo agent
+  model list` guidance (CLI). Chose coverage over de-scope because every
+  piece already exists in the codebase.
+- Post-edit validation: tasks.json JSON valid; task graph acyclic; all 6
+  spec anchors referenced by tasks resolve; 21 requirements each with
+  scenarios; no stale references to renamed scenario slugs.
+- Observations O-1..O-6 require no action per the task instructions.
+- self-review.md untouched.
