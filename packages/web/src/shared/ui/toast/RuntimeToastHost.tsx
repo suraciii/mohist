@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlertTriangleIcon, CheckCircle2Icon, InfoIcon, WifiOffIcon, WifiIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
@@ -140,6 +140,17 @@ export function RuntimeToastHost({ children, onNotice }: RuntimeToastHostProps) 
   const onNoticeRef = useRef(onNotice)
   onNoticeRef.current = onNotice
 
+  const clearTimers = useCallback(() => {
+    for (const timer of timers.current.values()) {
+      clearTimeout(timer)
+    }
+    timers.current.clear()
+  }, [])
+
+  useEffect(() => {
+    return clearTimers
+  }, [clearTimers])
+
   const dismiss = useCallback((id: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== id))
     const timer = timers.current.get(id)
@@ -151,11 +162,8 @@ export function RuntimeToastHost({ children, onNotice }: RuntimeToastHostProps) 
 
   const clear = useCallback(() => {
     setToasts([])
-    for (const timer of timers.current.values()) {
-      clearTimeout(timer)
-    }
-    timers.current.clear()
-  }, [])
+    clearTimers()
+  }, [clearTimers])
 
   const push = useCallback((input: PushRuntimeToastInput): string => {
     const id = makeToastId()
@@ -226,10 +234,7 @@ function RuntimeToastViewport() {
               presentation.bgClass,
             )}
           >
-            <Icon
-              className={cn('mt-0.5 h-4 w-4 shrink-0', presentation.iconClass)}
-              aria-hidden="true"
-            />
+            <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', presentation.iconClass)} aria-hidden="true" />
             <div className="flex-1 min-w-0">
               <div
                 data-testid="runtime-toast-title"
@@ -238,10 +243,7 @@ function RuntimeToastViewport() {
                 {toast.title}
               </div>
               {toast.body && (
-                <div
-                  data-testid="runtime-toast-body"
-                  className={cn('mt-0.5 text-xs', presentation.bodyClass)}
-                >
+                <div data-testid="runtime-toast-body" className={cn('mt-0.5 text-xs', presentation.bodyClass)}>
                   {toast.body}
                 </div>
               )}
