@@ -70,6 +70,11 @@ internal static partial class AgentCommands
             ? null
             : "--skills must contain at least one non-empty skill name; omit it or use --clear-skills to clear existing skills";
 
+    private static string? ValidatePermissions(string? value) =>
+        value is null || ParsePermissions(value) is { Length: > 0 }
+            ? null
+            : "--permissions must contain at least one non-empty permission term";
+
     private static Option<string[]?> AllowedSubagentOption() => new("--allowed-subagent")
     {
         Description = "Allowed subagent stable agent id/ref. Repeat for multiple subagents.",

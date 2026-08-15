@@ -328,6 +328,9 @@ internal static partial class AgentCommands
                         var skillsError = ValidateSkills(skills);
                         if (skillsError is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, skillsError);
+                        var permissionsError = ValidatePermissions(permissions);
+                        if (permissionsError is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, permissionsError);
 
                         var instructionsResult = await BodyInputResolver.ResolveAsync(
                             instructions,
@@ -624,6 +627,9 @@ internal static partial class AgentCommands
                         var skillsError = ValidateSkills(skills);
                         if (skillsError is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, skillsError);
+                        var permissionsError = ValidatePermissions(permissions);
+                        if (permissionsError is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, permissionsError);
                         if (clearAgentConfig)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--clear-agent-config is retired; use --clear-runtime, --clear-model, and --clear-variant");
 

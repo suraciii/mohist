@@ -18,6 +18,23 @@ public static class AgentPermissionVocabulary
     private static readonly IReadOnlySet<string> AllowedTerms =
         new HashSet<string>(Terms, StringComparer.Ordinal);
 
+    public static IReadOnlyList<string>? ReadDeclared(JsonElement raw)
+    {
+        if (raw.ValueKind != JsonValueKind.Object
+            || !raw.TryGetProperty("permissions", out var permissions)
+            || permissions.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return permissions
+            .EnumerateArray()
+            .Select(permission => permission.ValueKind == JsonValueKind.String
+                ? permission.GetString() ?? string.Empty
+                : string.Empty)
+            .ToArray();
+    }
+
     public static string? Validate(JsonElement raw)
     {
         if (raw.ValueKind != JsonValueKind.Object

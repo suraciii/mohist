@@ -25,6 +25,8 @@ An omitted declaration and a cleared declaration both project as an empty
 list. An unknown, empty term, or non-string term rejects the complete create
 or patch before the Agent grain is called, so no partial profile is persisted.
 `purpose: null` and `permissions: []` are presence-tracked PATCH clears.
+The CLI rejects an explicitly empty `--permissions` value; only
+`--clear-permissions` can clear an existing declaration.
 
 This is a declaration and display slice. Existing launch admission and runtime
 execution stay unchanged: permissions are not yet a Runner tool policy, and

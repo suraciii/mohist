@@ -229,7 +229,7 @@ public sealed record AgentCreateRequest(
             AgentDefinitionRequestBinding.GetString(raw, "avatar"),
             raw,
             AgentDefinitionRequestBinding.GetString(raw, "purpose"),
-            AgentDefinitionRequestBinding.GetStringList(raw, "permissions"));
+            AgentPermissionVocabulary.ReadDeclared(raw));
     }
 }
 
@@ -262,7 +262,7 @@ public sealed record AgentUpdateRequest(
             raw,
             AgentDefinitionRequestBinding.GetString(raw, "avatar"),
             AgentDefinitionRequestBinding.GetString(raw, "purpose"),
-            AgentDefinitionRequestBinding.GetStringList(raw, "permissions"));
+            AgentPermissionVocabulary.ReadDeclared(raw));
     }
 
     private static IReadOnlySet<string> GetFields(JsonElement raw)

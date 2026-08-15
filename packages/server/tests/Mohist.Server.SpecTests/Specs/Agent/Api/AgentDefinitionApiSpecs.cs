@@ -157,32 +157,43 @@ public class AgentDefinitionApiSpecs
         Assert.Null(patched.MaxConcurrentRuns);
     }
 
-    [Fact]
-    public async Task CreateAndPatch_RejectUnknownPermissionsWithoutPersistingThem()
+    [Theory]
+    [InlineData("[\"shell:exec\"]", "shell:exec")]
+    [InlineData("[\"\"]", "non-empty")]
+    [InlineData("[42]", "non-empty")]
+    public async Task CreateAndPatch_RejectInvalidPermissionsWithoutPersistingThem(string permissionsJson, string expectedError)
     {
         var project = await CreateProjectAsync("agent-invalid-permissions");
-        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/agents", new
-        {
-            name = "invalid-permissions",
-            instructions = "instructions",
-            permissions = new[] { "shell:exec" },
-        });
+        using var createDocument = JsonDocument.Parse($$"""
+            {
+              "name": "invalid-permissions",
+              "instructions": "instructions",
+              "permissions": {{permissionsJson}}
+            }
+            """);
+        using var create = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/agents",
+            createDocument.RootElement);
         var createBody = await create.Content.ReadFromJsonAsync<JsonElement>();
         var agents = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{project.Id}/agents?all=true");
         var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("permission-target"));
 
+        using var patchDocument = JsonDocument.Parse($$"""
+            { "permissions": {{permissionsJson}} }
+            """);
         using var patch = await _client.PatchAsJsonAsync(
             $"/api/projects/{project.Id}/agents/{created.Id}",
-            new { permissions = new[] { "shell:exec" } });
+            patchDocument.RootElement);
         var patchBody = await patch.Content.ReadFromJsonAsync<JsonElement>();
         var shown = await _client.GetDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}");
 
         Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
         Assert.Equal("invalid_agent_permissions", createBody.GetProperty("code").GetString());
-        Assert.Contains("shell:exec", createBody.GetProperty("error").GetString());
+        Assert.Contains(expectedError, createBody.GetProperty("error").GetString());
         Assert.DoesNotContain(agents, agent => agent.Name == "invalid-permissions");
         Assert.Equal(HttpStatusCode.BadRequest, patch.StatusCode);
         Assert.Equal("invalid_agent_permissions", patchBody.GetProperty("code").GetString());
+        Assert.Contains(expectedError, patchBody.GetProperty("error").GetString());
         Assert.Equal(["repo:read", "issue:write"], shown.Permissions);
     }
 

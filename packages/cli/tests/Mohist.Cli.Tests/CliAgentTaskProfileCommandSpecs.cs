@@ -6,6 +6,44 @@ namespace Mohist.Cli.Tests;
 
 public partial class CliAgentCommandSpecs
 {
+    [Theory]
+    [InlineData("")]
+    [InlineData(" , ")]
+    public async Task AgentCreate_EmptyPermissionsFailsBeforeHttp(string permissions)
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "reviewer", "--instructions", "Review", "--permissions", permissions],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--permissions must contain at least one non-empty permission term", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" , ")]
+    public async Task AgentUpdate_EmptyPermissionsFailsBeforeHttp(string permissions)
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "edit", "reviewer", "--permissions", permissions],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--permissions must contain at least one non-empty permission term", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task AgentView_PrintsTaskProfileAndServerReadiness()
     {
