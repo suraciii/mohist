@@ -112,14 +112,18 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public sealed class RecordingSessionWorkPort : ISessionWorkPort
     {
         public List<SessionWorkflowExecutionBinding> ExecutionBindings { get; } = [];
+        public List<SessionWorkflowExecutionBinding> CleanupAuthorizations { get; } = [];
         public List<SessionWorkflowExecutionObservation> Observations { get; } = [];
         public bool BindingAccepted { get; set; } = true;
+        public bool CleanupAuthorized { get; set; } = true;
 
         public void Reset()
         {
             ExecutionBindings.Clear();
+            CleanupAuthorizations.Clear();
             Observations.Clear();
             BindingAccepted = true;
+            CleanupAuthorized = true;
         }
 
         public Task<bool> BindAgentExecutionAsync(
@@ -128,6 +132,14 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         {
             ExecutionBindings.Add(binding);
             return Task.FromResult(BindingAccepted);
+        }
+
+        public Task<bool> CanStartAgentCleanupAsync(
+            SessionWorkflowExecutionBinding binding,
+            CancellationToken cancellationToken = default)
+        {
+            CleanupAuthorizations.Add(binding);
+            return Task.FromResult(CleanupAuthorized);
         }
 
         public Task ObserveAgentExecutionAsync(

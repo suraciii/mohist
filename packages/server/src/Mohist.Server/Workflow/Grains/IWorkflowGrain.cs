@@ -30,6 +30,7 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
+    Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding);
     Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
     Task<ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);
     Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId);

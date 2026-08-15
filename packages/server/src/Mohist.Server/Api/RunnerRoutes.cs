@@ -19,7 +19,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
 
-public static class RunnerRoutes
+public static partial class RunnerRoutes
 {
     public static WebApplication MapRunnerRoutes(this WebApplication app)
     {
@@ -421,7 +421,7 @@ public static class RunnerRoutes
                 return ApiResults.Conflict(ex.Message, "agent_session_recovery_conflict");
             }
         });
-
+        MapWorkflowCleanupRoute(group);
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/runtime-events", async (
             string runnerId, string projectId, string workflowRunId, string sessionName,
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
