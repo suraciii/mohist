@@ -29,6 +29,17 @@ cannot do in one step what a Slack conversation can.
   missing Model/Variant stops being a structural Readiness gap; without one,
   the gap remains and entry points guide configuration inline instead of
   dead-ending in Agent settings.
+- Make model selection on the task-first path a recommendation, not a
+  puzzle: the Project default — the owner's choice of what tasks in this
+  Project run on — is presented as the labeled recommended execution
+  configuration, and every model choice keeps an entry to the full options:
+  the Web composer selects from the Project's model catalog through the same
+  catalog-backed selection the definition editor uses (never a free-form
+  model field), and the CLI's missing-configuration guidance points at
+  `mo agent model list`. The catalog carries no per-purpose model metadata,
+  so recommendations beyond the labeled Project default (a task-keyed model
+  classifier) are out of scope; the recommendation and the full-options
+  entry are the commitments.
 - A rejected task-first request must not leave a half-created Agent that the
   user must clean up. Replaying the same caller idempotency key returns the
   original outcome, following the existing launch convergence rules.
@@ -62,8 +73,10 @@ cannot do in one step what a Slack conversation can.
   definitions.
 - `web-agent-task-composer`: The task-first creation and startup experience
   in the Web UI: composer order and defaults, inline execution configuration
-  when no Project default exists, launch feedback and navigation into the
-  session, the refine-after-launch path, and the Agents empty state.
+  when no Project default exists — catalog-backed model selection with the
+  labeled Project-default recommendation and an entry to the full options —
+  launch feedback and navigation into the session, the refine-after-launch
+  path, and the Agents empty state.
 - `cli-agent-task-launch`: The task-first CLI surface: command arguments,
   identity and idempotency-key output, exit behavior, and JSON output shape.
 

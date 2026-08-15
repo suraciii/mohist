@@ -25,20 +25,33 @@ When the composer would create a new Agent and the Project has no default
 execution configuration, the composer SHALL collect the execution
 configuration inline — Runtime, Model, and optional Variant — before launch
 and submit it as the request's execution hints; it MUST NOT dead-end in the
-Agent settings page. When a Project default exists, the composer SHALL NOT
-ask about execution configuration and SHALL launch on the defaults. The
-inline controls apply only to the create-new path; a selected existing Agent
-keeps its own configuration.
+Agent settings page. Inline Model selection SHALL be catalog-backed: the
+choices SHALL come from the Project's available models for the selected
+Runtime, with their variants, through the same catalog-backed selection the
+definition editor uses — not a free-form model field. When a Project default
+exists, the composer SHALL NOT ask about execution configuration: it SHALL
+present the resolved default as the labeled recommended execution
+configuration for tasks in the Project, with an optional adjust affordance
+that opens the same catalog-backed selection; launching without adjusting
+SHALL submit no execution hints. The inline controls apply only to the
+create-new path; a selected existing Agent keeps its own configuration.
 
-#### Scenario: No default asks inline
+#### Scenario: No default asks inline from the catalog
 
 - **WHEN** the Project has no default execution configuration and the user launches a task without selecting an Agent
 - **THEN** the composer requires an inline Runtime and Model before launch and submits them as execution hints
+- **AND** the model choices come from the Project's model catalog for the selected Runtime, with their variants — not a free-form field
 
-#### Scenario: A default launches without questions
+#### Scenario: A default is presented as the labeled recommendation
 
 - **WHEN** the Project has a default execution configuration and the user launches a task without selecting an Agent
-- **THEN** the composer shows no execution-configuration fields and submits the task with no execution hints
+- **THEN** the composer presents the default as the labeled recommended execution configuration for tasks in the Project and asks no execution question
+- **AND** launching without adjusting submits the task with no execution hints
+
+#### Scenario: Adjusting the recommendation overrides via hints
+
+- **WHEN** the user opens the adjust affordance and picks a different model or variant
+- **THEN** the composer submits the adjusted values as the request's execution hints
 
 ### Requirement: Launch feedback navigates into the running session
 

@@ -338,11 +338,24 @@ task-first response unchanged.
   `entities/agent` posting to `/agent-tasks` with the caller-generated
   idempotency key; launch with a selected Agent → existing
   `useLaunchAgentSession` (definition-first, untouched behavior);
-- execution configuration UI is gated on the Project default read (D5): with
-  a default configured, no execution fields are shown and no hints are sent;
-  without one, the create-new path requires inline Runtime + Model
-  (Variant optional) and submits them as hints — it never dead-ends in Agent
-  settings. The inline controls apply only to the create-new path;
+- execution configuration UI is gated on the Project default read (D5) and
+  is recommendation-first: with a default configured, the composer presents
+  the resolved default as the labeled recommended execution configuration
+  for tasks in the Project — no required question, no hints sent — with an
+  optional adjust affordance that opens the catalog-backed selection and
+  submits the adjusted values as hints; without one, the create-new path
+  requires inline Runtime + Model (Variant optional) and submits them as
+  hints — it never dead-ends in Agent settings. Inline model selection is
+  catalog-backed everywhere it appears: the composer reuses the definition
+  editor's `ModelSelect` fed by `useAvailableModelIds`/`useModelVariants`
+  (choices from the Project's model catalog for the selected runtime, with
+  variants — the entry to the full options), never a free-form model field.
+  This covers the issue's model-selection criterion on the task-first path:
+  an understandable, purpose-labeled recommendation (the Project default —
+  the owner's choice of what tasks in this Project run on) plus a full-
+  options entry; the catalog carries no per-purpose model metadata, so a
+  purpose-keyed recommendation engine is explicitly out of scope. The inline
+  controls apply only to the create-new path;
 - success navigates to the returned `sessionUrl` (existing pattern, including
   the attachment-results interstitial); rejection preserves all composed
   state and surfaces actionable feedback — the launch-feedback taxonomy gains
@@ -379,8 +392,9 @@ request in table mode (same contract as `launch`), sends
 `TableShape.AgentSessionLaunch` in table mode and the raw Server response in
 JSON mode, exits 0 only for accepted launches (including replay), and renders
 `execution_config_unresolvable` naming both repairs (`--runtime/--model/
---variant` or configure the Project default), conflicts by cause, and pending
-convergence with retry-with-same-key guidance. No local state is created, so
+--variant` or configure the Project default) and pointing at
+`mo agent model list` as the entry to view the available models, conflicts
+by cause, and pending convergence with retry-with-same-key guidance. No local state is created, so
 no local cleanup is ever needed.
 
 **Alternatives rejected:** (a) making `mo agent launch`'s Agent argument
@@ -478,10 +492,11 @@ rollback is harmless.
 - Derived-name formatting details: separator for disambiguation ordinals
   (`Base 2` vs `Base-2`) and the precise sentence-boundary rule for very long
   or punctuation-only prompts.
-- Whether the inline composer execution-config controls should consume the
-  #556 execution-configuration *preview* endpoint for model suggestions, or
-  accept free-form `provider/model` input initially (composition deferred to
-  #556's rollout).
+- Whether the inline composer execution-config controls should additionally
+  consume the #556 execution-configuration *preview* endpoint once it rolls
+  out (optional enhancement; catalog-backed selection and the labeled
+  Project-default recommendation are committed here and do not depend on
+  #556).
 - API verb/shape for the Project default write surface (`PUT` vs `PATCH` on
   `/default-execution-config`, and whether clearing the default is allowed in
   v1 or replace-only) — settle against `docs/agent-api.md` conventions during
