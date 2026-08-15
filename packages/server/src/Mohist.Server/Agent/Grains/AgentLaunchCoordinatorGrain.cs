@@ -131,6 +131,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 Model: command.Model,
                 Variant: command.Variant,
                 Runtime: command.Runtime,
+                ReasoningEffort: command.ReasoningEffort,
                 Prompt: command.Prompt,
                 WorkspaceName: command.WorkspaceName,
                 WorkspacePath: command.WorkspacePath,
@@ -328,6 +329,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentInstructions: plan.AgentInstructions,
             AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
             Variant: plan.Variant,
+            ReasoningEffort: plan.ReasoningEffort,
             IssueNumber: plan.IssueNumber,
             EpicNumber: plan.EpicNumber,
             WorkflowRunId: null,
@@ -559,7 +561,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 plan.Model,
                 plan.Variant,
                 [],
-                plan.AllowedSubagents),
+                plan.AllowedSubagents,
+                plan.ReasoningEffort),
             AgentSessionStartup: plan.AgentSessionStartup,
             LaunchVisibility: plan.ParentSessionId is null
                 ? AgentLaunchVisibility.Visible
@@ -992,4 +995,5 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(34)] string? WorkspaceName = null,
     [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(36)] string? Origin = null,
-    [property: Id(37)] string? TargetId = null);
+    [property: Id(37)] string? TargetId = null,
+    [property: Id(38)] string? ReasoningEffort = null);

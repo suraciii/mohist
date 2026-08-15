@@ -44,6 +44,32 @@ public class AgentConfigSchemaTests
     }
 
     [Theory]
+    [InlineData("off")]
+    [InlineData("minimal")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("xhigh")]
+    [InlineData("max")]
+    public void Validate_CanonicalReasoningEffortAccepted(string effort)
+    {
+        var element = JsonDocument.Parse($$"""{"model":"openai/gpt-5.5","reasoningEffort":"{{effort}}"}""").RootElement;
+        Assert.Null(AgentConfigSchema.Validate(element));
+    }
+
+    [Theory]
+    [InlineData("highest")]
+    [InlineData(" High")]
+    public void Validate_NonCanonicalReasoningEffortIsRejected(string effort)
+    {
+        var element = JsonDocument.Parse($$"""{"reasoningEffort":"{{effort}}"}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.reasoningEffort", error);
+    }
+
+    [Theory]
     [InlineData("opencode")]
     [InlineData("pi")]
     public void Validate_RuntimeAccepted(string runtime)
@@ -124,16 +150,17 @@ public class AgentConfigSchemaTests
     }
 
     [Fact]
-    public void Project_StripsEverythingExceptModelAndVariant()
+    public void Project_StripsEverythingExceptExecutionConfiguration()
     {
         var element = JsonDocument.Parse("""
-            {"type":"opencode","model":"openai/gpt-5.5","variant":"high","livenessQuietThresholdMs":1200000,"probeTimeoutMs":30000}
+            {"type":"opencode","model":"openai/gpt-5.5","reasoningEffort":"high","variant":"balanced","livenessQuietThresholdMs":1200000,"probeTimeoutMs":30000}
             """).RootElement;
         var projected = AgentConfigSchema.Project(element);
         Assert.NotNull(projected);
-        Assert.Equal(2, projected!.Count);
+        Assert.Equal(3, projected!.Count);
         Assert.Equal("openai/gpt-5.5", projected["model"]?.ToString());
-        Assert.Equal("high", projected["variant"]?.ToString());
+        Assert.Equal("high", projected["reasoningEffort"]?.ToString());
+        Assert.Equal("balanced", projected["variant"]?.ToString());
     }
 
     [Fact]
@@ -229,5 +256,14 @@ public class AgentConfigSchemaTests
         };
         var filtered = AgentConfigSchema.Filter(input);
         Assert.Null(filtered);
+    }
+
+    [Fact]
+    public void ValidateIssue_ReasoningEffortIsRejectedBecauseIssuesCannotOverrideAgentExecutionTuple()
+    {
+        var error = AgentConfigSchema.ValidateIssue(JsonDocument.Parse("""{"reasoningEffort":"high"}""").RootElement);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.reasoningEffort", error);
     }
 }

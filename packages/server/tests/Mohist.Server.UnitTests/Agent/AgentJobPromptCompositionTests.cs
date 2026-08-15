@@ -14,6 +14,7 @@ public class AgentJobPromptCompositionTests
         Assert.Equal("hello world", with["prompt"].GetString());
         Assert.False(with.ContainsKey("instructions"));
         Assert.False(with.ContainsKey("model"));
+        Assert.False(with.ContainsKey("reasoningEffort"));
         Assert.False(with.ContainsKey("variant"));
     }
 
@@ -28,6 +29,7 @@ public class AgentJobPromptCompositionTests
         Assert.Equal("be terse", with["instructions"].GetString());
         Assert.Equal("do the task", with["prompt"].GetString());
         Assert.False(with.ContainsKey("model"));
+        Assert.False(with.ContainsKey("reasoningEffort"));
         Assert.False(with.ContainsKey("variant"));
     }
 
@@ -46,6 +48,21 @@ public class AgentJobPromptCompositionTests
     }
 
     [Fact]
+    public void LaunchAsync_WithReasoningEffort_EmitsIndependentFlatReasoningEffort()
+    {
+        var with = ComposeDispatchWith(new AgentJobInput(
+            Prompt: "do the task",
+            AgentId: "agent-1",
+            Model: "openai/gpt-5.5",
+            ReasoningEffort: "high",
+            Variant: "balanced"));
+
+        Assert.Equal("openai/gpt-5.5", with["model"].GetString());
+        Assert.Equal("high", with["reasoningEffort"].GetString());
+        Assert.Equal("balanced", with["variant"].GetString());
+    }
+
+    [Fact]
     public void LaunchAsync_DoesNotEmitAgentLaunchEnvelopeOrAgentField()
     {
         var with = ComposeDispatchWith(new AgentJobInput(
@@ -56,7 +73,7 @@ public class AgentJobPromptCompositionTests
         // The legacy `{ "agent-launch": { ... } }` envelope and the
         // `with.agent` field must NOT appear on the new dispatch
         // shape — the runner's AgentJobExecutor reads `with.prompt`
-        // / `with.instructions` / `with.model` / `with.variant`
+        // / `with.instructions` / `with.model` / `with.reasoningEffort` / `with.variant`
         // directly (design D2, #410 T-001 AC).
         Assert.False(with.ContainsKey("agent"));
         var promptKind = with["prompt"].ValueKind;
@@ -80,7 +97,7 @@ public class AgentJobPromptCompositionTests
 
     /// <summary>
     /// Mirrors <c>AgentJobGrain.BuildDispatch</c>'s `with` projection:
-    /// a flat <c>{ prompt, instructions?, model?, variant? }</c> shape.
+    /// a flat <c>{ prompt, instructions?, model?, reasoningEffort?, variant? }</c> shape.
     /// Test-local copy so the assertion lives next to the contract; if
     /// the grain projection diverges, the integration spec picks it up.
     /// </summary>
@@ -92,6 +109,8 @@ public class AgentJobPromptCompositionTests
             with["instructions"] = JsonDocument.Parse($"\"{input.AgentInstructions}\"").RootElement.Clone();
         if (!string.IsNullOrWhiteSpace(input.Model))
             with["model"] = JsonDocument.Parse($"\"{input.Model}\"").RootElement.Clone();
+        if (!string.IsNullOrWhiteSpace(input.ReasoningEffort))
+            with["reasoningEffort"] = JsonDocument.Parse($"\"{input.ReasoningEffort}\"").RootElement.Clone();
         if (!string.IsNullOrWhiteSpace(input.Variant))
             with["variant"] = JsonDocument.Parse($"\"{input.Variant}\"").RootElement.Clone();
         return with;

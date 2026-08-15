@@ -2,9 +2,9 @@ namespace Mohist.Server.Infrastructure;
 
 /// <summary>
 /// Agent-owned immutable execution definition produced by
-/// <see cref="IAgentExecutionSnapshotResolver"/>. Carries the five fields
+/// <see cref="IAgentExecutionSnapshotResolver"/>. Carries the six fields
 /// that determine how every launch and follow-up of this Agent is
-/// executed (Instructions, Runtime, Model, Variant, ordered Skills).
+/// executed (Instructions, Runtime, Model, ReasoningEffort, Variant, ordered Skills).
 /// Resolved once from the active Agent definition and stamped into the
 /// durable AgentJob / routed-plan / generic-AgentSession settings so
 /// subsequent Agent edits cannot alter in-flight or queued work.
@@ -13,8 +13,9 @@ namespace Mohist.Server.Infrastructure;
 /// <see cref="Runtime"/> defaults to <see cref="AgentConfigSchema.OpenCodeRuntime"/>
 /// when the Agent's config omits <c>runtime</c>; an out-of-set value falls
 /// back to the same default. <see cref="Skills"/> is the Agent's stored
-/// ordered list (possibly empty). <see cref="Model"/> and
-/// <see cref="Variant"/> are read from the Agent's validated config.
+/// ordered list (possibly empty). <see cref="Model"/>,
+/// <see cref="ReasoningEffort"/>, and <see cref="Variant"/> are read from
+/// the Agent's validated config.
 /// </para>
 /// </summary>
 [GenerateSerializer]
@@ -24,7 +25,13 @@ public sealed record AgentExecutionDefinition(
     [property: Id(2)] string? Model,
     [property: Id(3)] string? Variant,
     [property: Id(4)] IReadOnlyList<string> Skills,
-    [property: Id(5)] AllowedSubagentSnapshot[]? AllowedSubagents = null);
+    [property: Id(5)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
+    /// <summary>
+    /// Agent-owned reasoning effort captured with the execution definition.
+    /// Null is an explicit unset legacy/saved state and is never inferred from
+    /// <see cref="Variant"/>.
+    /// </summary>
+    [property: Id(6)] string? ReasoningEffort = null);
 
 [GenerateSerializer]
 public sealed record AllowedSubagentSnapshot(

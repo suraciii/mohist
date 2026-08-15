@@ -48,7 +48,7 @@ namespace Mohist.Server.Agent.Grains;
 /// restart, an activation loss, or a Session-persistence failure
 /// cannot lose the terminal fact.
 /// </summary>
-public sealed class AgentJobGrain : Grain, IAgentJobGrain
+public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 {
     internal const string RecoveryReminderName = "agent-job-recovery";
 
@@ -394,9 +394,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             var plan = State.RoutedPlan;
             State.Input = new AgentJobInput(
                 Prompt: plan?.Prompt ?? string.Empty,
+                Model: plan?.Model,
                 ProjectId: plan?.ProjectId,
+                Runtime: plan?.Runtime,
                 AgentId: resolvedAgentId,
                 AgentSessionId: plan?.SessionId,
+                Variant: plan?.Variant,
+                ReasoningEffort: plan?.ReasoningEffort,
                 IssueNumber: plan?.IssueNumber,
                 EpicNumber: plan?.EpicNumber,
                 WorkflowRunId: plan?.WorkflowRunId);
@@ -546,7 +550,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 plan.Model,
                 plan.Variant,
-                plan.Skills ?? [])));
+                plan.Skills ?? [],
+                ReasoningEffort: plan.ReasoningEffort)));
 
         if (plan.Disposition == RoutedLaunchDisposition.PreflightFailed)
         {
@@ -563,6 +568,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 AgentConfig: null,
                 AgentSessionId: plan.SessionId,
                 Variant: plan.Variant,
+                ReasoningEffort: plan.ReasoningEffort,
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
                 WorkflowRunId: plan.WorkflowRunId,
@@ -597,6 +603,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
                 AgentSessionId: plan.SessionId,
                 Variant: plan.Variant,
+                ReasoningEffort: plan.ReasoningEffort,
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
                 WorkflowRunId: plan.WorkflowRunId,
@@ -820,6 +827,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AgentConfig: command.AgentConfig,
             AgentSessionId: command.SessionId,
             Variant: command.Variant,
+            ReasoningEffort: command.ReasoningEffort,
             IssueNumber: command.IssueNumber,
             EpicNumber: command.EpicNumber,
             WorkflowRunId: command.WorkflowRunId,
@@ -853,6 +861,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
+        && string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)
         && string.Equals(left.WorkspaceName, right.WorkspaceName, StringComparison.Ordinal)
         && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
         && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
@@ -903,7 +912,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 input.Model,
                 input.Variant,
                 input.Skills ?? [],
-                input.AllowedSubagents);
+                input.AllowedSubagents,
+                input.ReasoningEffort);
 
     private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -916,6 +926,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)
         && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
         && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
+        && string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
         && Equals(left.StartupContext, right.StartupContext)
@@ -937,6 +948,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentInstructions));
         if (!string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentSessionId));
         if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
+        if (!string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ReasoningEffort));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
         if (!Equals(left.AllowedSubagents, right.AllowedSubagents)) fields.Add(nameof(AgentJobInput.AllowedSubagents));
@@ -1343,81 +1355,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 "AgentJob {Id} dispatch observer RunnerAccepted threw; claim remains authoritative",
                 Key);
         }
-    }
-
-    private async Task<WorkDispatch> BuildDispatchAsync(string workId)
-    {
-        var input = InputWithAgentConfig()!;
-        var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(input.WorkspaceName))
-            payload["workspace"] = JSON.SerializeToElement(new
-            {
-                name = input.WorkspaceName,
-                repositories = (input.WorkspaceRepositories is { Count: > 0 }
-                    ? input.WorkspaceRepositories
-                        .Select(r => (object)new { name = r.Name, gitUrl = r.GitUrl })
-                        .ToList()
-                    : []),
-            });
-        else if (!string.IsNullOrWhiteSpace(input.WorkspacePath))
-            payload["workspace"] = JSON.SerializeToElement(
-                new { path = input.WorkspacePath });
-
-        var variablesJson = payload.Count == 0
-            ? null
-            : JSON.Serialize(payload);
-
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        with["prompt"] = JSON.SerializeToElement(
-            AgentStartupContextComposer.ComposePrompt(input.Prompt, input.StartupContext));
-        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
-            with["instructions"] = JSON.SerializeToElement(input.AgentInstructions);
-        if (!string.IsNullOrWhiteSpace(input.Model))
-            with["model"] = JSON.SerializeToElement(input.Model);
-        if (!string.IsNullOrWhiteSpace(input.Variant))
-            with["variant"] = JSON.SerializeToElement(input.Variant);
-        if (!string.IsNullOrWhiteSpace(input.Runtime))
-            with["runtime"] = JSON.SerializeToElement(input.Runtime);
-        if (input.Skills is { Count: > 0 })
-            with["skills"] = JSON.SerializeToElement(input.Skills);
-        // Carry accepted attachment descriptors verbatim so the runner
-        // resolves content through the owning-input scoped route
-        // (without bytes on the wire). An empty/absent list means no
-        // attachments — neither the workspace materialization nor the
-        // manifest block is emitted.
-        if (input.Attachments is { Count: > 0 })
-            with["attachments"] = JSON.SerializeToElement(input.Attachments
-                .Select(descriptor => new
-                {
-                    id = descriptor.Id,
-                    name = descriptor.OriginalFileName,
-                    contentType = descriptor.ContentType,
-                    size = descriptor.Size,
-                })
-                .ToArray());
-        if (input.SlackExecutionContext is not null)
-            with["slackExecutionContext"] = JSON.SerializeToElement(input.SlackExecutionContext);
-        var withJson = JSON.Serialize(with);
-
-        return new WorkDispatch(
-            WorkflowRunId: string.Empty,
-            WorkId: workId,
-            Uses: null,
-            With: withJson,
-            Variables: variablesJson,
-            WorkType: "agent-job",
-            Stage: "agent",
-            Title: "Agent Job",
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: Key,
-            ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
-            AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId,
-            AgentId: input.AgentId,
-            InitialInputId: string.IsNullOrWhiteSpace(input.InitialInputId) ? null : input.InitialInputId,
-            InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId,
-            AgentDefinition: ExecutionDefinitionFrom(input),
-            PinnedRunnerId: input.PinnedRunnerId,
-            AgentSessionStartup: input.AgentSessionStartup);
     }
 
     private static WorkDispatch? DeserializeDispatch(string? json)

@@ -64,6 +64,18 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
+    public void ReasoningEffortWithoutModel_IsAConfirmedStructuralGap()
+    {
+        var result = AgentReadinessService.Evaluate(
+            Agent(config: "{\"reasoningEffort\":\"high\"}"),
+            null);
+
+        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Contains(result.Gaps, gap => gap.Code == "model-missing");
+        Assert.Contains(result.Gaps, gap => gap.Code == "reasoning-effort-without-model");
+    }
+
+    [Fact]
     public void ExecutionConfigurationFailure_RequiresSetup()
     {
         var result = AgentReadinessService.Evaluate(
@@ -78,6 +90,8 @@ public sealed class AgentReadinessServiceTests
     [Theory]
     [InlineData("incompatible-runtime")]
     [InlineData("runtime-invalid")]
+    [InlineData("unsupported-execution-configuration")]
+    [InlineData("incompatible-execution-configuration")]
     public void DeterministicRuntimeConfigurationFailure_RequiresSetup(string category)
     {
         var result = AgentReadinessService.Evaluate(
