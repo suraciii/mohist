@@ -87,9 +87,9 @@ public sealed class MohistDbFixture : IAsyncLifetime
                 ["Mohist:RunnerRoot"] = runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = artifactStorageRoot,
-                // This fixture never starts a web listener. Keep the value
-                // non-production and non-reserved; no socket is opened.
-                ["Mohist:ServerUrl"] = "http://127.0.0.1:0",
+                // This fixture never starts a web listener. Keep the value a
+                // logical TestServer identity; no socket is opened.
+                ["Mohist:ServerUrl"] = "http://testserver",
             })
             .Build();
 

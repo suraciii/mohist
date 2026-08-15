@@ -205,14 +205,14 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // WebApplicationFactory must never fall through to the production
-        // Kestrel listener. Keep any accidental real-host path on an OS-
-        // assigned port and route requests through TestServer instead.
+        // Kestrel listener. This is a logical TestServer URL; no socket is
+        // opened and requests stay inside the in-process handler.
         builder.UseTestServer();
-        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://127.0.0.1:0");
+        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://testserver");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
-        builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:0");
-        builder.UseSetting("Mohist:Otel:Endpoint", "http://127.0.0.1:0/otel");
+        builder.UseSetting("Mohist:ServerUrl", "http://testserver");
+        builder.UseSetting("Mohist:Otel:Endpoint", "http://testserver/otel");
         // OTel tracing remains enabled for this fixture, but its inbound
         // collector is intentionally disabled. TestServer and the in-memory
         // exporter cover the observable path without touching an OS port.
@@ -236,8 +236,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
-                ["Mohist:ServerUrl"] = "http://127.0.0.1:0",
-                ["Mohist:Otel:Endpoint"] = "http://127.0.0.1:0/otel",
+                ["Mohist:ServerUrl"] = "http://testserver",
+                ["Mohist:Otel:Endpoint"] = "http://testserver/otel",
                 ["Mohist:Otel:Port"] = "0",
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,

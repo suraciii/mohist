@@ -69,15 +69,14 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // Keep the HTTP side in TestServer. If a caller accidentally causes a
-        // real host path, port 0 delegates selection to the OS instead of
-        // touching the production 3456 listener.
+        // Keep the HTTP side in TestServer. This logical URL is never bound;
+        // the test client talks directly to the in-process request pipeline.
         builder.UseTestServer();
-        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://127.0.0.1:0");
+        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://testserver");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
-        builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:0");
-        builder.UseSetting("Mohist:Otel:Endpoint", "http://127.0.0.1:0/otel");
+        builder.UseSetting("Mohist:ServerUrl", "http://testserver");
+        builder.UseSetting("Mohist:Otel:Endpoint", "http://testserver/otel");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
@@ -92,8 +91,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             var values = new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
-                ["Mohist:ServerUrl"] = "http://127.0.0.1:0",
-                ["Mohist:Otel:Endpoint"] = "http://127.0.0.1:0/otel",
+                ["Mohist:ServerUrl"] = "http://testserver",
+                ["Mohist:Otel:Endpoint"] = "http://testserver/otel",
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
