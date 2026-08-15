@@ -38,11 +38,15 @@ public abstract class AgentJobGrainTestSupport
         string description)
         => await TestWait.ForAsync(probe, done, timeout, step, description);
 
-    protected async Task WaitForStatusAsync(IAgentJobGrain job, AgentJobStatus expected, TimeSpan timeout)
+    protected async Task WaitForStatusAsync(
+        IAgentJobGrain job,
+        AgentJobStatus expected,
+        TimeSpan timeout,
+        RunnerPollRequest? request = null)
     {
         if (expected == AgentJobStatus.Running)
         {
-            await WaitForRunningAsync(job);
+            await WaitForRunningAsync(job, request);
             return;
         }
 
@@ -59,10 +63,12 @@ public abstract class AgentJobGrainTestSupport
             () => job.CheckTimeoutsAsync());
     }
 
-    protected async Task WaitForRunningAsync(IAgentJobGrain job)
+    protected async Task WaitForRunningAsync(
+        IAgentJobGrain job,
+        RunnerPollRequest? request = null)
     {
         var runnerId = await WaitForAssignedRunnerAsync(job);
-        await PollRunnerAsync(runnerId);
+        await PollRunnerAsync(runnerId, request);
         await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
@@ -94,7 +100,7 @@ public abstract class AgentJobGrainTestSupport
         return snapshot.RunnerId!;
     }
 
-    private Task PollRunnerAsync(string runnerId)
+    private Task PollRunnerAsync(string runnerId, RunnerPollRequest? request = null)
     {
         var dispatch = _fixture.Cluster
             .GetSiloServiceProvider(null)
@@ -102,7 +108,7 @@ public abstract class AgentJobGrainTestSupport
             .CreateScope()
             .ServiceProvider
             .GetRequiredService<DispatchService>();
-        return dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        return dispatch.PollAsync(runnerId, request ?? new RunnerPollRequest([], []));
     }
 
     protected static async Task<T> WaitForAsync<T>(

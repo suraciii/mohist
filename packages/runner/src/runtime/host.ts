@@ -865,10 +865,7 @@ export class RunnerHost {
     const piCatalog = this.piRuntime?.catalog()
     const piModels = piCatalog?.models.map((model) => `${model.provider}/${model.id}`) ?? []
     const piReasoningEfforts = Object.fromEntries(
-      piCatalog?.models.map((model) => [
-        `${model.provider}/${model.id}`,
-        [...model.thinkingLevels],
-      ]) ?? [],
+      piCatalog?.models.map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]) ?? [],
     )
     const piCapabilityRevision = piCatalog
       ? createHash('sha256')
