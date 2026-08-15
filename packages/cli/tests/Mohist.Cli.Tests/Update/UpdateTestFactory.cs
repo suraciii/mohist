@@ -587,6 +587,7 @@ internal sealed class FakeFileSystem : IFileSystem
 
     public Func<string, bool>? FailNextDelete { get; set; }
     public Func<string, bool>? FailNextMoveTo { get; set; }
+    public Func<string, IDisposable?>? TryAcquireExclusiveLockOverride { get; set; }
 
     public string Cwd
     {
@@ -836,9 +837,30 @@ internal sealed class FakeFileSystem : IFileSystem
         return snapshot;
     }
 
+    public IEnumerable<string> EnumerateDirectories(string path, SearchOption searchOption)
+    {
+        var normalized = Normalize(path);
+        var prefix = normalized.EndsWith(Path.DirectorySeparatorChar)
+            ? normalized
+            : normalized + Path.DirectorySeparatorChar;
+        lock (_gate)
+        {
+            return _directories
+                .Where(directory =>
+                    directory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && (searchOption == SearchOption.AllDirectories
+                        || !directory[prefix.Length..].Contains(Path.DirectorySeparatorChar)))
+                .OrderBy(directory => directory, StringComparer.Ordinal)
+                .ToArray();
+        }
+    }
+
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(Read(path)));
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
+
+    public IDisposable? TryAcquireExclusiveLock(string path) =>
+        TryAcquireExclusiveLockOverride?.Invoke(path) ?? new NoopFileSystemLock();
 
     private void EnsureWritable(string path)
     {

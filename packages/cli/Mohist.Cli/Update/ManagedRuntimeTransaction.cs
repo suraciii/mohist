@@ -11,7 +11,8 @@ internal sealed record ManagedUpdateSession(
     string ReleaseRoot,
     string Scope,
     ManagedRuntimeSnapshot? SourceSnapshot,
-    ManagedCliLauncherState? CliLauncher);
+    ManagedCliLauncherState? CliLauncher,
+    IDisposable UpdateLock);
 
 /// <summary>
 /// Owns the source snapshot to installed release boundary. A service target is only changed after
@@ -29,6 +30,7 @@ internal sealed class ManagedRuntimeTransaction
     private readonly UpdateSourceResolver _sourceResolver;
     private readonly IManagedRuntimeActivator _activator;
     private readonly ManagedCliLauncher _cliLauncher;
+    private readonly ManagedRuntimeTransactionGarbageCollector _garbageCollector;
     private readonly string? _unitDir;
 
     public ManagedRuntimeTransaction(
@@ -49,6 +51,7 @@ internal sealed class ManagedRuntimeTransaction
         _sourceResolver = sourceResolver;
         _activator = activator;
         _cliLauncher = new ManagedCliLauncher(output, error, commands, files);
+        _garbageCollector = new ManagedRuntimeTransactionGarbageCollector(files, error);
         _unitDir = unitDir;
     }
 
@@ -70,12 +73,15 @@ internal sealed class ManagedRuntimeTransaction
             return (null, resolved.Error ?? "source identity could not be established");
 
         var context = resolved.Context;
-        var unchanged = await _sourceResolver.VerifyUnchangedAsync(context, cancellationToken);
-        if (unchanged is not null)
-            return (null, unchanged);
+        var updateLock = _files.TryAcquireExclusiveLock(
+            Path.Combine(context.RuntimeRoot, ".update.lock").Replace('\\', '/'));
+        if (updateLock is null)
+            return (null, "managed runtime update is already in progress; retry after it completes");
 
-        var previous = ReadVerifiedTargets(context.RuntimeRoot);
-        var generation = previous?.Generation is > 0 ? previous.Generation + 1 : 1;
+        var lockTransferred = false;
+        string? unchanged = null;
+        RuntimeTargetSet? previous = null;
+        var generation = 0L;
         var built = new Dictionary<string, BuiltRuntime>(StringComparer.Ordinal);
         RunnerLaunchIdentity? runnerLaunchIdentity = null;
         RuntimeTargetSet? activatedTargets = null;
@@ -87,6 +93,17 @@ internal sealed class ManagedRuntimeTransaction
 
         try
         {
+            unchanged = await _sourceResolver.VerifyUnchangedAsync(context, cancellationToken);
+            if (unchanged is not null)
+                return (null, unchanged);
+
+            // Collection is advisory. Pointer and state uncertainty causes a
+            // skip; the update retains all recovery evidence.
+            _garbageCollector.Collect(context.RuntimeRoot, context.TransactionId);
+
+            previous = ReadVerifiedTargets(context.RuntimeRoot);
+            generation = previous?.Generation is > 0 ? previous.Generation + 1 : 1;
+
             if (Includes(scope, "runner"))
             {
                 var launchIdentity = await _activator.ResolveRunnerLaunchIdentityAsync(_unitDir, cancellationToken);
@@ -248,7 +265,8 @@ internal sealed class ManagedRuntimeTransaction
             }
 
             _out.WriteLine($"Staged managed {scope} release {releaseId} from source {context.Source.GitCommit}.");
-            return (new ManagedUpdateSession(context, targets, previous, releaseRoot, scope, sourceSnapshot, cliLauncher), null);
+            lockTransferred = true;
+            return (new ManagedUpdateSession(context, targets, previous, releaseRoot, scope, sourceSnapshot, cliLauncher, updateLock), null);
         }
         catch (OperationCanceledException)
         {
@@ -285,6 +303,8 @@ internal sealed class ManagedRuntimeTransaction
         {
             if (!activePointerWritten && stagedReleaseRoot is not null)
                 DiscardStagedRelease(stagedReleaseRoot);
+            if (!lockTransferred)
+                updateLock.Dispose();
         }
     }
 
@@ -314,6 +334,7 @@ internal sealed class ManagedRuntimeTransaction
                 return launcherFinalized;
 
             ReclaimCommittedTransactionPayload(session);
+            session.UpdateLock.Dispose();
             return 0;
         }
         catch (Exception ex)
@@ -414,6 +435,10 @@ internal sealed class ManagedRuntimeTransaction
                 diagnostic);
             _err.WriteLine(diagnostic);
             return 1;
+        }
+        finally
+        {
+            session.UpdateLock.Dispose();
         }
     }
 
@@ -774,7 +799,7 @@ internal sealed class ManagedRuntimeTransaction
             {
                 if (!_files.DirectoryExists(payloadRoot) || _files.IsSymbolicLink(payloadRoot))
                     continue;
-                _files.DeleteDirectory(payloadRoot);
+                _files.DeleteDirectoryForCleanup(payloadRoot);
             }
             catch (Exception ex)
             {
