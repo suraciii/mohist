@@ -33,6 +33,16 @@ public sealed record AgentExecutionDefinition(
     /// </summary>
     [property: Id(6)] string? ReasoningEffort = null);
 
+/// <summary>
+/// Immutable Agent identity and execution definition resolved together at an
+/// execution boundary. Consumers retain both facts without consulting mutable
+/// Agent state again.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentExecutionIdentitySnapshot(
+    [property: Id(0)] string AgentId,
+    [property: Id(1)] AgentExecutionDefinition ExecutionDefinition);
+
 [GenerateSerializer]
 public sealed record AllowedSubagentSnapshot(
     [property: Id(0)] string AgentId,
@@ -66,4 +76,9 @@ public sealed record AgentSessionStartup(
 public interface IAgentExecutionSnapshotResolver
 {
     Task<AgentExecutionDefinition?> ResolveAsync(string projectId, string agentRef);
+}
+
+public interface IAgentExecutionIdentitySnapshotResolver
+{
+    Task<AgentExecutionIdentitySnapshot?> ResolveWithIdentityAsync(string projectId, string agentRef);
 }

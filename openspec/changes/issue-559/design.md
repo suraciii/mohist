@@ -27,8 +27,8 @@ One work attempt provides a stable command identity and rendered Agent input.
 The handoff grain derives a canonical fingerprint and persists the first
 result:
 
-- `Prepared`: the generic Agent definition was resolved once and frozen with
-  deterministic Job, Session, Input, and Turn identifiers.
+- `Prepared`: the canonical Agent identity and generic definition were resolved
+  once and frozen with deterministic Job, Session, Input, and Turn identifiers.
 - `Rejected`: a definite preflight failure was frozen. A replay cannot become
   prepared after mutable Agent configuration changes.
 - `Accepted`: the matching Workflow acceptance receipt was persisted.
@@ -36,6 +36,13 @@ result:
 The same command and fingerprint replay the persisted result. A changed
 fingerprint under the same command is a conflict and cannot alter the saved
 invocation. A mismatched grain key is rejected before preflight.
+
+The command also freezes its completion snapshot: exact Workflow run, task
+attempt, work, stage, workspace, and rendered `expect`, artifact, variable,
+and recovery declarations. Its canonical encoding sorts object keys while
+preserving array order, so equivalent rendered maps replay the original plan
+and changed completion effects conflict. This remains handoff data only; it
+does not evaluate or apply any Workflow effect.
 
 The preflight port is a singleton grain-safe adapter that opens a short-lived
 scope to resolve the generic Agent execution snapshot. It has no dependency on

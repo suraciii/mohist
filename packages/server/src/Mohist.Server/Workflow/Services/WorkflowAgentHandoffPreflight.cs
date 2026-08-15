@@ -11,16 +11,16 @@ namespace Mohist.Server.Workflow.Services;
 /// </summary>
 public interface IWorkflowAgentHandoffPreflight
 {
-    Task<AgentExecutionDefinition?> ResolveAgentAsync(string projectId, string agentRef);
+    Task<AgentExecutionIdentitySnapshot?> ResolveAgentAsync(string projectId, string agentRef);
 }
 
 public sealed class WorkflowAgentHandoffPreflight(
     IServiceScopeFactory scopeFactory) : IWorkflowAgentHandoffPreflight, ISingletonService
 {
-    public async Task<AgentExecutionDefinition?> ResolveAgentAsync(string projectId, string agentRef)
+    public async Task<AgentExecutionIdentitySnapshot?> ResolveAgentAsync(string projectId, string agentRef)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var snapshots = scope.ServiceProvider.GetRequiredService<IAgentExecutionSnapshotResolver>();
-        return await snapshots.ResolveAsync(projectId, agentRef);
+        var snapshots = scope.ServiceProvider.GetRequiredService<IAgentExecutionIdentitySnapshotResolver>();
+        return await snapshots.ResolveWithIdentityAsync(projectId, agentRef);
     }
 }
