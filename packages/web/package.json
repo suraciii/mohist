@@ -10,8 +10,9 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:ci": "npm run check:fsd && npm run check:test-boundaries && vitest run",
-    "check:fsd": "tsx ../../scripts/check-web-fsd-boundaries.ts",
-    "check:test-boundaries": "tsx ../../scripts/check-node-test-boundaries.ts --scope web",
+    "test:duration": "npm run check:fsd && npm run check:test-boundaries && vitest run",
+    "check:fsd": "node --import tsx ../../scripts/check-web-fsd-boundaries.ts",
+    "check:test-boundaries": "node --import tsx ../../scripts/check-node-test-boundaries.ts --scope web",
     "test:browser": "playwright test -c playwright.config.ts"
   },
   "dependencies": {

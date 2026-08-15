@@ -18,7 +18,9 @@
     "test:run": "vitest run",
     "test:ci": "npm run typecheck:tests && npm run check:test-boundaries && npm run test:run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "check:test-boundaries": "tsx ../../scripts/check-node-test-boundaries.ts --scope runner",
+    "test:duration": "npm run typecheck:tests && npm run check:test-boundaries && vitest run",
+    "test:duration:integration": "vitest run --config vitest.integration.config.ts",
+    "check:test-boundaries": "node --import tsx ../../scripts/check-node-test-boundaries.ts --scope runner",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },

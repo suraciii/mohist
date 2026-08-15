@@ -1,4 +1,4 @@
-export type TestOutcome = 'passed' | 'failed' | 'skipped' | 'other'
+export type TestOutcome = 'passed' | 'failed' | 'error' | 'skipped' | 'not-run' | 'other'
 
 export type ExecutionLedgerOutcome = 'passed' | 'failed' | 'skipped' | 'not-run'
 
@@ -120,6 +120,8 @@ export interface TrackConfig {
   readonly executionProvenance?: string
   readonly executionSourceRoots?: readonly string[]
   readonly reportFormat: ReportFormat
+  readonly partitions?: number
+  readonly partitionMaxThreads?: number
   readonly deadlineMs: number
   readonly enforce: boolean
   readonly status?: string
@@ -130,7 +132,26 @@ export interface TrackConfig {
 export interface SuiteConfig {
   readonly suiteDeadlineMs: number
   readonly killGraceMs?: number
+  readonly canonical?: CanonicalGateConfig
   readonly tracks: readonly TrackConfig[]
+}
+
+export interface CanonicalGateConfig {
+  readonly maxConcurrentLanes: number
+  readonly resourceLimits: Readonly<Record<string, number>>
+  readonly partitionExecutionCapacity?: number
+  readonly durationMeasurementTracks?: readonly string[]
+  readonly durationIsolationTrack?: string
+}
+
+export interface OutcomeCounts {
+  readonly total: number
+  readonly passed: number
+  readonly failed: number
+  readonly errors: number
+  readonly skipped: number
+  readonly notRun: number
+  readonly other: number
 }
 
 export interface AbsoluteViolation {
@@ -177,6 +198,7 @@ export interface TrackEvaluation {
   readonly reason?: string
   readonly reportError?: string
   readonly total: number
+  readonly outcomes: OutcomeCounts
   readonly failedTests: readonly string[]
   readonly rules: readonly RuleDiagnosis[]
   readonly passed: boolean
@@ -184,6 +206,10 @@ export interface TrackEvaluation {
 
 export interface TrackRun {
   readonly trackId: string
+  readonly policyTrackId?: string
+  readonly reportPath?: string
+  readonly cancelled?: boolean
+  readonly cancellationReason?: string
   readonly timedOut: boolean
   readonly timeoutReason?: 'track' | 'suite'
   readonly exitCode: number | null
@@ -191,8 +217,11 @@ export interface TrackRun {
   readonly deadlineMs: number
   readonly command: string
   readonly reportReady: boolean
+  readonly cleanupComplete: boolean
   readonly reportError?: string
   readonly executionLedgerReady?: boolean
   readonly executionLedgerError?: string
   readonly executionLedgerExpectation?: ExecutionLedgerExpectation
+  readonly stdoutPath?: string
+  readonly stderrPath?: string
 }
