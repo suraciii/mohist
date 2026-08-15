@@ -196,6 +196,7 @@ public static class AgentJobReadRoutes
         AgentJobStatus.Failed => "failed",
         AgentJobStatus.Cancelled => "cancelled",
         AgentJobStatus.Unknown => "unknown",
+        AgentJobStatus.RecoverablyInterrupted => "recoverably-interrupted",
         _ => "unknown",
     };
 }

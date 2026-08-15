@@ -31,6 +31,11 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<ReportAck> InterruptActiveWorkAsync(string workerId, string reason);
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
+    Task<ReportAck> MarkUpdateInterruptedAsync(
+        string taskRunId,
+        string workId,
+        string runnerId,
+        string updateOperationId) => Task.FromResult(ReportAck.Stale);
     Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding);
     Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
     Task<ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);

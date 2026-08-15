@@ -413,4 +413,6 @@ public sealed record RunnerActiveWorkItem(
     [property: Id(4)] string? Stage,
     [property: Id(5)] string? Title,
     [property: Id(6)] WorkIssueRef? Issue = null,
-    [property: Id(7)] DateTimeOffset? TakenAt = null);
+    [property: Id(7)] DateTimeOffset? TakenAt = null,
+    [property: Id(8)] string? TaskRunId = null,
+    [property: Id(9)] bool IsAgentWork = false);

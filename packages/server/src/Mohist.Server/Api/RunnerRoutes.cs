@@ -57,7 +57,6 @@ public static partial class RunnerRoutes
 
         group.MapPost("/heartbeat", HandleHeartbeatAsync);
         MapUpdateInterruptRoutes(group);
-
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
         {
             if (req is null || req.Slots <= 0)
@@ -963,6 +962,60 @@ public static partial class RunnerRoutes
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
     };
+
+    private static IReadOnlyList<RunnerUpdateWork> BuildUpdateOperationWorks(
+        IReadOnlyList<RunnerActiveWorkItem> activeWorks) =>
+        activeWorks
+            .Where(work =>
+                work.OwnerKind == WorkDispatchOwnerKinds.AgentJob
+                || (work.OwnerKind == WorkDispatchOwnerKinds.Workflow
+                    && work.IsAgentWork
+                    && string.Equals(work.WorkType, "task", StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(work.TaskRunId)))
+            .Select(work => new RunnerUpdateWork(
+                work.OwnerKind,
+                work.OwnerId,
+                work.WorkId,
+                work.TaskRunId,
+                work.WorkType))
+            .GroupBy(work => work.Key, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+
+    private static async Task<RunnerUpdateWorkStatus> MarkUpdateWorkAsync(
+        IGrainFactory grains,
+        RunnerUpdateOperation operation,
+        RunnerUpdateWork work)
+    {
+        if (work.OwnerKind == WorkDispatchOwnerKinds.Workflow
+            && !string.IsNullOrWhiteSpace(work.TaskRunId))
+        {
+            var ack = await grains.GetGrain<IWorkflowGrain>(work.OwnerId)
+                .MarkUpdateInterruptedAsync(
+                    work.TaskRunId,
+                    work.WorkId,
+                    operation.RunnerId,
+                    operation.OperationId);
+            return ack == ReportAck.Accepted
+                ? RunnerUpdateWorkStatus.Marked
+                : RunnerUpdateWorkStatus.AlreadyEnded;
+        }
+
+        if (work.OwnerKind == WorkDispatchOwnerKinds.AgentJob)
+        {
+            var marked = await grains.GetGrain<IAgentJobGrain>(work.OwnerId)
+                .MarkUpdateInterruptedAsync(
+                    operation.RunnerId,
+                    work.WorkId,
+                    operation.OperationId);
+            return marked
+                ? RunnerUpdateWorkStatus.Marked
+                : RunnerUpdateWorkStatus.AlreadyEnded;
+        }
+
+        throw new InvalidOperationException(
+            $"Update operation '{operation.OperationId}' contains unsupported owner kind '{work.OwnerKind}'.");
+    }
 }
 
 public record RunnerRegisterRequest(

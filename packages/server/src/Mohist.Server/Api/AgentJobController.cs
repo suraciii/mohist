@@ -218,6 +218,7 @@ public static class AgentJobController
         AgentJobStatus.Running => "running",
         AgentJobStatus.Pending => "pending",
         AgentJobStatus.Unknown => "unknown",
+        AgentJobStatus.RecoverablyInterrupted => "recoverably-interrupted",
         _ => "unknown",
     };
 }

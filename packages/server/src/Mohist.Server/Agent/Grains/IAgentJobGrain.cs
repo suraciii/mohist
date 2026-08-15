@@ -112,6 +112,10 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// never overwritten.
     /// </summary>
     Task MarkUnknownAsync(string reason) => Task.CompletedTask;
+    Task<bool> MarkUpdateInterruptedAsync(
+        string runnerId,
+        string workId,
+        string updateOperationId) => Task.FromResult(false);
 
     /// <summary>
     /// Enters the existing Unknown arbitration with a durable runner-loss
@@ -321,6 +325,14 @@ public sealed record PendingFailureEvent(
     [property: Id(2)] string? FailureCategory,
     [property: Id(3)] DateTimeOffset RecordedAt);
 
+[GenerateSerializer]
+public sealed record PendingUpdateInterruptionEvent(
+    [property: Id(0)] string EventId,
+    [property: Id(1)] string UpdateOperationId,
+    [property: Id(2)] string RunnerId,
+    [property: Id(3)] string WorkId,
+    [property: Id(4)] DateTimeOffset RecordedAt);
+
 public static class AgentJobSessionDeliveryIds
 {
     public static string TerminalDeliveryId(string jobKey) =>
@@ -331,6 +343,9 @@ public static class AgentJobSessionDeliveryIds
 
     public static string FailureEventId(string jobKey) =>
         $"agent-job:{jobKey}:failed";
+
+    public static string UpdateInterruptionEventId(string jobKey, string operationId) =>
+        $"agent-job:{jobKey}:update-interrupted:{operationId}";
 
     public static string TerminalDeliveryEventId(string jobKey) =>
         $"agent-job:{jobKey}:terminal-delivery";
@@ -371,6 +386,12 @@ public enum AgentJobStatus
     /// Runner evidence.
     /// </summary>
     Unknown,
+    /// <summary>
+    /// The Server confirmed that the active physical turn was interrupted by
+    /// a Runner update. This is distinct from Unknown, which means the
+    /// original outcome could not be classified after an ordinary loss.
+    /// </summary>
+    RecoverablyInterrupted,
 }
 
 [GenerateSerializer]

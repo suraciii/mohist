@@ -563,7 +563,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     Stage: stage.Id,
                     Title: task.Title,
                     Issue: issue,
-                    TakenAt: task.StartedAt));
+                    TakenAt: task.StartedAt,
+                    TaskRunId: task.Id,
+                    IsAgentWork: task.AgentResultSettlement is not null));
                 continue;
             }
             if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))

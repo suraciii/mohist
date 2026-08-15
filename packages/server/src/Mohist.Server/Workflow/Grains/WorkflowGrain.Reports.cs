@@ -16,6 +16,34 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public async Task<ReportAck> MarkUpdateInterruptedAsync(
+        string taskRunId,
+        string workId,
+        string runnerId,
+        string updateOperationId)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null)
+            return ReportAck.Stale;
+
+        var update = _run.MarkUpdateInterrupted(taskRunId, workId, runnerId, updateOperationId);
+        if (update == AgentExecutionUpdate.Rejected)
+            return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Updated)
+        {
+            var stage = _run.Stages.Single(stage => stage.Tasks.Any(task =>
+                string.Equals(task.Id, taskRunId, StringComparison.Ordinal)));
+            await CommitAsync([new AgentTaskUpdateInterrupted(
+                stage.Id,
+                taskRunId,
+                workId,
+                updateOperationId)]);
+            await RemoveAgentResultSettlementReminderAsync();
+        }
+
+        return ReportAck.Accepted;
+    }
+
     public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding)
     {
         RejectIfRunReloadRequired();

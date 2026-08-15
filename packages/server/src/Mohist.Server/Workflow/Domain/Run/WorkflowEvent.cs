@@ -20,6 +20,7 @@ public union WorkflowEvent(
     TaskFailed,
     TaskInterrupted,
     TaskCancelled,
+    AgentTaskUpdateInterrupted,
     AgentTaskResultUnconfirmed,
     TaskBlocked,
     StageBlocked,
@@ -63,6 +64,11 @@ public sealed record TaskInterrupted(
     string Reason,
     DateTimeOffset RecoveryDeadlineAt);
 public sealed record TaskCancelled(string Stage, string TaskId);
+public sealed record AgentTaskUpdateInterrupted(
+    string Stage,
+    string TaskId,
+    string WorkId,
+    string UpdateOperationId);
 public sealed record AgentTaskResultUnconfirmed(
     string Stage,
     string TaskId,

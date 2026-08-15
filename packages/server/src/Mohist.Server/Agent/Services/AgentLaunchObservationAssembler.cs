@@ -169,6 +169,7 @@ public sealed class AgentLaunchObservationAssembler
         AgentJobStatus.Failed => "failed",
         AgentJobStatus.Cancelled => "cancelled",
         AgentJobStatus.Unknown => "unknown",
+        AgentJobStatus.RecoverablyInterrupted => "recoverably-interrupted",
         _ => "unknown",
     };
 

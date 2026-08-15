@@ -1,6 +1,10 @@
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Workflow.Definition;
 using Orleans;
 using Xunit;
 
@@ -11,6 +15,51 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
 {
     public RunnerUpdateInterruptSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture)
         : base(fixture) { }
+
+    [Fact]
+    public async Task UpdateInterrupt_FencesActiveWorkflowAgentAndDisconnectDoesNotUnfenceIt()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var run = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        var operationId = $"runner-update:{Guid.NewGuid():N}";
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+            new AgentExecutionBinding(
+                task.Id,
+                work.WorkId,
+                runnerId,
+                "session-update",
+                "turn-update",
+                "opencode",
+                "runtime-update")));
+
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+
+        var marked = await LoadRunAsync(_workflowId!);
+        var settlement = Assert.Single(marked.CurrentStage().Tasks).AgentResultSettlement;
+        Assert.NotNull(settlement);
+        Assert.Equal(AgentResultSettlementState.RecoverablyInterrupted, settlement!.State);
+        Assert.Equal(operationId, settlement.UpdateOperationId);
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(
+            AgentResultSettlementState.RecoverablyInterrupted,
+            (await LoadRunAsync(_workflowId!)).CurrentStage().Tasks.Single().AgentResultSettlement!.State);
+        Assert.Contains(await EventStore.ListAsync(_workflowId!), entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.AgentTaskUpdateInterrupted);
+    }
 
     [Fact]
     public async Task BeginUpdateInterrupt_PreservesActiveWorkAndClosesAdmissionIdempotently()

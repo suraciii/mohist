@@ -53,6 +53,8 @@ public sealed class AgentJobState
     /// recovery decision after activation or a silo restart.
     /// </summary>
     [Id(34)] public DateTimeOffset? RecoveryDeadlineAt { get; set; }
+    [Id(35)] public PendingUpdateInterruptionEvent? PendingUpdateInterruptionEvent { get; set; }
+    [Id(36)] public string? UpdateOperationId { get; set; }
 }
 
 [GenerateSerializer]

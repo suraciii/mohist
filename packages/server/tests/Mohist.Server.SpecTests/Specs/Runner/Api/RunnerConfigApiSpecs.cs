@@ -9,6 +9,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Api;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -42,6 +43,77 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
     // and persists across the whole class.
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
     public ValueTask DisposeAsync() => new(_fixture.UnregisterRunnersAsync());
+
+    [Fact]
+    public async Task UpdateInterrupt_PersistsFenceMarksAgentJobAndExposesPendingOperation()
+    {
+        var projectId = $"runner-update-operation-{Guid.NewGuid():N}";
+        var runnerId = await _fixture.RegisterRunnerAsync(projectId, maxWorkflowSlots: 2);
+        var jobId = $"runner-update-operation-job-{Guid.NewGuid():N}";
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        await job.SubmitAsync(new AgentJobInput(
+            "run until the update fence",
+            WorkspacePath: "spec-workspace",
+            ProjectId: projectId,
+            AgentId: "agent-test",
+            PinnedRunnerId: runnerId));
+        var claim = await runner.TryClaimAgentJobAsync(jobId, projectId);
+        Assert.NotNull(claim);
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+
+        using var firstResponse = await _fixture.Client.PostAsync(
+            $"/api/runner/{runnerId}/update-interrupt",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        var first = await firstResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var firstData = first.GetProperty("data");
+        var operationId = firstData.GetProperty("operationId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(operationId));
+        Assert.Equal("interrupted", firstData.GetProperty("status").GetString());
+        var affected = Assert.Single(firstData.GetProperty("affectedWorks").EnumerateArray());
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, affected.GetProperty("ownerKind").GetString());
+        Assert.Equal(jobId, affected.GetProperty("ownerId").GetString());
+        Assert.Equal(claim!.WorkId, affected.GetProperty("workId").GetString());
+        Assert.Equal("marked", affected.GetProperty("status").GetString());
+        Assert.Equal(AgentJobStatus.RecoverablyInterrupted, await job.GetStatusAsync());
+        var interruptionEvent = Assert.Single(await _fixture.EventStore.ListAgentJobEventsAsync(jobId));
+        Assert.Equal(EventCatalog.ReverseDns.AgentJobUpdateInterrupted, interruptionEvent.Envelope.Type);
+        Assert.Equal(
+            operationId,
+            interruptionEvent.Envelope.Data!.Value.GetProperty("updateOperationId").GetString());
+
+        using var pendingResponse = await _fixture.Client.GetAsync(
+            $"/api/runner/{runnerId}/update-operation/pending");
+        Assert.Equal(HttpStatusCode.OK, pendingResponse.StatusCode);
+        var pending = await pendingResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var pendingOperation = pending.GetProperty("data").GetProperty("operation");
+        Assert.Equal(operationId, pendingOperation.GetProperty("operationId").GetString());
+        Assert.Equal(runnerId, pendingOperation.GetProperty("runnerId").GetString());
+        Assert.Single(pendingOperation.GetProperty("affectedWorks").EnumerateArray());
+
+        var statusBeforeRead = await job.GetStatusAsync();
+        using var repeatedResponse = await _fixture.Client.PostAsync(
+            $"/api/runner/{runnerId}/update-interrupt",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, repeatedResponse.StatusCode);
+        var repeated = await repeatedResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(operationId, repeated.GetProperty("data").GetProperty("operationId").GetString());
+        Assert.Equal(statusBeforeRead, await job.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task PendingUpdateOperation_WhenNoneExists_ReturnsExplicitEmptyResult()
+    {
+        var runnerId = $"runner-update-operation-empty-{Guid.NewGuid():N}";
+
+        using var response = await _fixture.Client.GetAsync(
+            $"/api/runner/{runnerId}/update-operation/pending");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("data").GetProperty("operation").ValueKind);
+    }
 
     [Fact]
     public async Task Config_ConfiguredPolicy_ProjectsAllFields()
@@ -278,6 +350,7 @@ public class RunnerConfigFixture : IAsyncLifetime
     public CleanupPolicyOptions Policy { get; } = new();
     public HttpClient Client { get; private set; } = null!;
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
+    public IEventStore EventStore => _factory.Services.GetRequiredService<IEventStore>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
     public async ValueTask InitializeAsync()

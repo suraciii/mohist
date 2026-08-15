@@ -74,3 +74,35 @@ Channel decision (grounded in live source):
 - No openspec CLI validator exists in the repo; spec format matches sibling
   changes (`### Requirement` / `#### Scenario` WHEN/THEN/AND).
 - self-review.md untouched.
+
+## T-001 Implementation Notes
+
+- `RunnerUpdateOperationGrain` is keyed by Runner identity and uses the
+  existing ADO.NET Orleans default storage. It keeps the latest operation
+  history, the stable operation id, injectable creation time, affected-work
+  inventory, and per-entry marking status. A pending operation is reused on
+  repeat requests; owner marking is retried before the response is returned.
+- `/update-interrupt` closes Runner admission first, persists or reuses the
+  operation, then calls the owning Workflow/AgentJob grain synchronously. A
+  pending retry can repair an operation even after the old Runner is offline.
+  `GET /update-operation/pending` is read-only and serializes `operation:null`
+  explicitly when no pending operation exists.
+- Runner snapshots now carry Workflow task-attempt identity and an
+  `IsAgentWork` flag. Ordinary workflow tasks and checks stay out of the
+  update inventory; active Agent tasks and AgentJobs are named with owner kind,
+  owner id, work id, and task attempt where applicable.
+- Workflow uses a new `RecoverablyInterrupted` settlement state and commits
+  `AgentTaskUpdateInterrupted` with the operation id. Late execution,
+  disconnect, and report paths cannot turn fenced work into `Unknown` or fail
+  it through runner-loss closeout.
+- AgentJob uses a separate `RecoverablyInterrupted` status, retains its
+  original Runner/work identity, and persists an idempotent pending
+  `AgentJobUpdateInterrupted` CloudEvent outbox obligation before confirmation.
+  Event-store failure leaves the operation retryable; duplicate event ids are
+  deduplicated by the existing AgentJob event store.
+- Server verification: focused update tests passed (3 tests), and the full
+  `Mohist.Server.SpecTests` suite passed (3923 tests, 0 failures).
+- `npm run test:fast` passed after installing the existing lockfile dependencies:
+  TypeScript checks, Server unit/architecture/workflow/CLI suites, Runner
+  vitest (1639 tests), and Web vitest (4724 tests). The install reported 16
+  existing npm audit findings; no dependency metadata changed.
