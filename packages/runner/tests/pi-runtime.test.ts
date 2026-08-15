@@ -125,6 +125,22 @@ describe("PiRuntime", () => {
     await expect(resultPromise).resolves.toMatchObject({ ok: true, value: { facts: { finalAssistantText: "answer", runtimeSessionId: "/virtual/sessions/one.jsonl" } } })
   })
 
+  it("maps Agent reasoningEffort to the Pi thinking level independently of variant", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    await runtime.createSession({ target: { runtime: "pi", runtimeSessionId: null, workDir: "/workspace" } })
+    const resultPromise = runtime.runTurn({
+      target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" },
+      prompt: "agent effort",
+      options: { reasoningEffort: "xhigh", variant: null },
+    }, new AbortController().signal)
+    await Promise.resolve()
+    expect(session.thinkingCalls).toEqual(["xhigh"])
+    session.complete("answer")
+    await expect(resultPromise).resolves.toMatchObject({ ok: true })
+  })
+
   it("restores the exact bound path and never replays after a late completion", async () => {
     const session = new FakeSession()
     let opened = ""

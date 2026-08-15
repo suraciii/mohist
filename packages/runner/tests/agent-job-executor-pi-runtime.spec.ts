@@ -464,7 +464,7 @@ describe("AgentJobExecutor drives PiRuntime end-to-end", () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
 
     const work = buildAgentJobWork({
-      with: { prompt: "execute on pi", runtime: "pi", model: "openai/gpt-5.5", variant: "high" },
+      with: { prompt: "execute on pi", runtime: "pi", model: "openai/gpt-5.5", reasoningEffort: "high" },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -475,7 +475,37 @@ describe("AgentJobExecutor drives PiRuntime end-to-end", () => {
     expect(request.target.runtime).toBe("pi")
     expect(request.target.workDir).toBe("/tmp/agent-job-ws")
     expect(request.options?.model).toBe("openai/gpt-5.5")
-    expect(request.options?.variant).toBe("high")
+    expect(request.options?.variant).toBeNull()
+    expect(request.options?.reasoningEffort).toBe("high")
+  })
+
+  it("rejects a Pi runtime-specific variant instead of treating it as reasoning effort", async () => {
+    const pi = makeFakePiRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+
+    const result = await executor.execute(buildAgentJobWork({
+      with: { prompt: "do not alias", runtime: "pi", variant: "high" },
+    }), new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.error?.code).toBe("incompatible-execution-configuration")
+    expect(pi.runTurnCalls).toHaveLength(0)
+  })
+
+  it("rejects reasoning effort without an explicit model before opening a Pi session", async () => {
+    const pi = makeFakePiRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+
+    const result = await executor.execute(buildAgentJobWork({
+      with: { prompt: "needs model", runtime: "pi", reasoningEffort: "high" },
+    }), new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.error?.code).toBe("incompatible-execution-configuration")
+    expect(pi.createSessionCalls).toHaveLength(0)
+    expect(pi.runTurnCalls).toHaveLength(0)
   })
 
   it("labels Pi session-creation failures with the Pi runtime", async () => {

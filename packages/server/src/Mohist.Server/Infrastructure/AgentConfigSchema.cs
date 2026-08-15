@@ -38,6 +38,7 @@ public static class AgentConfigSchema
     public static readonly IReadOnlySet<string> AllowedKeys = new HashSet<string>(StringComparer.Ordinal)
     {
         "model",
+        "reasoningEffort",
         "variant",
         "runtime",
     };
@@ -95,13 +96,13 @@ public static class AgentConfigSchema
                 return $"agentConfig.{property.Name} is not allowed; the agent config accepts only {string.Join(", ", AllowedKeys)}.";
             }
 
-            if (property.Name is "model" or "variant"
+            if (property.Name is "model" or "reasoningEffort" or "variant"
                 && property.Value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
             {
                 return $"agentConfig.{property.Name} must be a string or null.";
             }
 
-            if (property.Name is "model" or "variant"
+            if (property.Name is "model" or "reasoningEffort" or "variant"
                 && property.Value.ValueKind == JsonValueKind.String
                 && string.IsNullOrWhiteSpace(property.Value.GetString()))
             {
@@ -109,7 +110,7 @@ public static class AgentConfigSchema
             }
         }
 
-        return ValidateRuntime(agentConfig.Value);
+        return ValidateRuntime(agentConfig.Value) ?? ValidateReasoningEffort(agentConfig.Value);
     }
 
     /// <summary>
@@ -158,6 +159,22 @@ public static class AgentConfigSchema
     }
 
     /// <summary>
+    /// Reasoning effort is an Agent-owned execution input. It is deliberately
+    /// validated independently from the runtime-specific variant dimension;
+    /// capability admission decides whether a selected runtime can execute it.
+    /// </summary>
+    public static string? ValidateReasoningEffort(JsonElement agentConfig)
+    {
+        if (agentConfig.ValueKind != JsonValueKind.Object
+            || !agentConfig.TryGetProperty("reasoningEffort", out var effort)
+            || effort.ValueKind == JsonValueKind.Null)
+            return null;
+        if (effort.ValueKind != JsonValueKind.String || !ReasoningEfforts.Contains(effort.GetString()))
+            return $"agentConfig.reasoningEffort must be one of {string.Join(", ", ReasoningEfforts.All)}.";
+        return null;
+    }
+
+    /// <summary>
     /// Project the open-shape <c>agentConfig</c> body down to the
     /// converged whitelist. Returns <c>null</c> when the input is null,
     /// not a JSON object, or when no allowed keys survive the projection.
@@ -198,4 +215,29 @@ public static class AgentConfigSchema
         }
         return result;
     }
+}
+
+public static class ReasoningEfforts
+{
+    public const string Off = "off";
+    public const string Minimal = "minimal";
+    public const string Low = "low";
+    public const string Medium = "medium";
+    public const string High = "high";
+    public const string XHigh = "xhigh";
+    public const string Max = "max";
+
+    public static readonly IReadOnlyList<string> All =
+    [
+        Off,
+        Minimal,
+        Low,
+        Medium,
+        High,
+        XHigh,
+        Max,
+    ];
+
+    public static bool Contains(string? value) =>
+        value is not null && All.Contains(value, StringComparer.Ordinal);
 }

@@ -175,7 +175,8 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(20)] AgentSessionStartup? AgentSessionStartup = null,
     [property: Id(21)] AgentJobSpawnOrigin? SpawnOrigin = null,
     [property: Id(22)] string? WorkspacePath = null,
-    [property: Id(23)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
+    [property: Id(23)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
+    [property: Id(24)] string? ReasoningEffort = null);
 
 [GenerateSerializer]
 public sealed record AgentJobSpawnOrigin(
@@ -437,7 +438,8 @@ public sealed record RoutedAgentLaunchPlan(
     [property: Id(18)] string? Prompt = null,
     [property: Id(19)] string? Runtime = null,
     [property: Id(20)] IReadOnlyList<string>? Skills = null,
-    [property: Id(21)] string? WorkflowRunId = null);
+    [property: Id(21)] string? WorkflowRunId = null,
+    [property: Id(22)] string? ReasoningEffort = null);
 
 /// <summary>
 /// Whether the canonical routed-launch plan is executable or already
@@ -610,7 +612,8 @@ public sealed record AgentJobInput(
     [property: Id(19)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
     [property: Id(20)] string? PinnedRunnerId = null,
     [property: Id(21)] AgentSessionStartup? AgentSessionStartup = null,
-    [property: Id(22)] AgentJobSpawnOrigin? SpawnOrigin = null);
+    [property: Id(22)] AgentJobSpawnOrigin? SpawnOrigin = null,
+    [property: Id(25)] string? ReasoningEffort = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

@@ -257,6 +257,7 @@ internal static partial class AgentCommands
         agentConfigOpt.Hidden = true;
         var runtimeOpt = new Option<string?>("--runtime") { Description = "Execution runtime: opencode or pi" };
         var modelOpt = new Option<string?>("--model") { Description = "Model identifier, usually provider/model" };
+        var reasoningEffortOpt = new Option<string?>("--reasoning-effort") { Description = "Canonical reasoning effort for the selected model" };
         var variantOpt = new Option<string?>("--variant") { Description = "Runtime-specific model variant" };
         var avatarFileOpt = new Option<string?>("--avatar-file") { Description = "Read the avatar URL or data URI from a UTF-8 file" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names; include at least one non-empty name" };
@@ -272,6 +273,7 @@ internal static partial class AgentCommands
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(runtimeOpt);
         cmd.Options.Add(modelOpt);
+        cmd.Options.Add(reasoningEffortOpt);
         cmd.Options.Add(variantOpt);
         cmd.Options.Add(avatarFileOpt);
         cmd.Options.Add(skillsOpt);
@@ -288,6 +290,7 @@ internal static partial class AgentCommands
                     var agentConfig = ctx.GetValue(agentConfigOpt);
                     var runtime = ctx.GetValue(runtimeOpt);
                     var model = ctx.GetValue(modelOpt);
+                    var reasoningEffort = ctx.GetValue(reasoningEffortOpt);
                     var variant = ctx.GetValue(variantOpt);
                     var avatarFile = ctx.GetValue(avatarFileOpt);
                     var skills = ctx.GetValue(skillsOpt);
@@ -311,9 +314,11 @@ internal static partial class AgentCommands
                             agentConfig,
                             runtime,
                             model,
+                            reasoningEffort,
                             variant,
                             clearRuntime: false,
                             clearModel: false,
+                            clearReasoningEffort: false,
                             clearVariant: false);
                         if (config.Error is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, config.Error);
@@ -513,6 +518,7 @@ internal static partial class AgentCommands
         agentConfigOpt.Hidden = true;
         var runtimeOpt = new Option<string?>("--runtime") { Description = "Set runtime: opencode or pi; mutually exclusive with --clear-runtime" };
         var modelOpt = new Option<string?>("--model") { Description = "Set model (usually provider/model); mutually exclusive with --clear-model" };
+        var reasoningEffortOpt = new Option<string?>("--reasoning-effort") { Description = "Set canonical reasoning effort; mutually exclusive with --clear-reasoning-effort" };
         var variantOpt = new Option<string?>("--variant") { Description = "Set runtime-specific variant; mutually exclusive with --clear-variant" };
         var avatarFileOpt = new Option<string?>("--avatar-file") { Description = "Read avatar URL or data URI from UTF-8 file; mutually exclusive with --clear-avatar" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names; include at least one non-empty name; use --clear-skills to clear" };
@@ -523,6 +529,7 @@ internal static partial class AgentCommands
         clearAgentConfigOpt.Hidden = true;
         var clearRuntimeOpt = new Option<bool>("--clear-runtime") { Description = "Clear runtime; mutually exclusive with --runtime" };
         var clearModelOpt = new Option<bool>("--clear-model") { Description = "Clear model; mutually exclusive with --model" };
+        var clearReasoningEffortOpt = new Option<bool>("--clear-reasoning-effort") { Description = "Clear reasoning effort; mutually exclusive with --reasoning-effort" };
         var clearVariantOpt = new Option<bool>("--clear-variant") { Description = "Clear variant; mutually exclusive with --variant" };
         var clearAvatarOpt = new Option<bool>("--clear-avatar") { Description = "Clear avatar; mutually exclusive with --avatar-file" };
         var clearSkillsOpt = new Option<bool>("--clear-skills") { Description = "Clear skills; mutually exclusive with --skills" };
@@ -539,6 +546,7 @@ internal static partial class AgentCommands
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(runtimeOpt);
         cmd.Options.Add(modelOpt);
+        cmd.Options.Add(reasoningEffortOpt);
         cmd.Options.Add(variantOpt);
         cmd.Options.Add(avatarFileOpt);
         cmd.Options.Add(skillsOpt);
@@ -548,6 +556,7 @@ internal static partial class AgentCommands
         cmd.Options.Add(clearAgentConfigOpt);
         cmd.Options.Add(clearRuntimeOpt);
         cmd.Options.Add(clearModelOpt);
+        cmd.Options.Add(clearReasoningEffortOpt);
         cmd.Options.Add(clearVariantOpt);
         cmd.Options.Add(clearAvatarOpt);
         cmd.Options.Add(clearSkillsOpt);
@@ -565,6 +574,7 @@ internal static partial class AgentCommands
                     var agentConfig = ctx.GetValue(agentConfigOpt);
                     var runtime = ctx.GetValue(runtimeOpt);
                     var model = ctx.GetValue(modelOpt);
+                    var reasoningEffort = ctx.GetValue(reasoningEffortOpt);
                     var variant = ctx.GetValue(variantOpt);
                     var avatarFile = ctx.GetValue(avatarFileOpt);
                     var skills = ctx.GetValue(skillsOpt);
@@ -574,6 +584,7 @@ internal static partial class AgentCommands
                     var clearAgentConfig = ctx.GetValue(clearAgentConfigOpt);
                     var clearRuntime = ctx.GetValue(clearRuntimeOpt);
                     var clearModel = ctx.GetValue(clearModelOpt);
+                    var clearReasoningEffort = ctx.GetValue(clearReasoningEffortOpt);
                     var clearVariant = ctx.GetValue(clearVariantOpt);
                     var clearAvatar = ctx.GetValue(clearAvatarOpt);
                     var clearSkills = ctx.GetValue(clearSkillsOpt);
@@ -590,6 +601,7 @@ internal static partial class AgentCommands
                         var clearSetConflict = ValidateClearSetPair("--description", description is not null, "--clear-description", clearDescription)
                             ?? ValidateClearSetPair("--runtime", runtime is not null, "--clear-runtime", clearRuntime)
                             ?? ValidateClearSetPair("--model", model is not null, "--clear-model", clearModel)
+                            ?? ValidateClearSetPair("--reasoning-effort", reasoningEffort is not null, "--clear-reasoning-effort", clearReasoningEffort)
                             ?? ValidateClearSetPair("--variant", variant is not null, "--clear-variant", clearVariant)
                             ?? ValidateClearSetPair("--avatar-file", avatarFile is not null, "--clear-avatar", clearAvatar)
                             ?? ValidateClearSetPair("--skills", skills is not null, "--clear-skills", clearSkills)
@@ -603,7 +615,7 @@ internal static partial class AgentCommands
                         if (skillsError is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, skillsError);
                         if (clearAgentConfig)
-                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--clear-agent-config is retired; use --clear-runtime, --clear-model, and --clear-variant");
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--clear-agent-config is retired; use --clear-runtime, --clear-model, --clear-reasoning-effort, and --clear-variant");
 
                         BodyInputResolver.Result? instructionsResult = null;
                         if (instructions is not null || instructionsFile is not null)
@@ -620,7 +632,7 @@ internal static partial class AgentCommands
                         }
 
                         if (agentConfig is not null)
-                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--agent-config is retired; use --runtime, --model, and --variant");
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--agent-config is retired; use --runtime, --model, --reasoning-effort, and --variant");
 
                         var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                         if (resolveExit != 0) return resolveExit;
@@ -634,9 +646,11 @@ internal static partial class AgentCommands
                             agentConfig,
                             runtime,
                             model,
+                            reasoningEffort,
                             variant,
                             clearRuntime,
                             clearModel,
+                            clearReasoningEffort,
                             clearVariant);
                         if (config.Error is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, config.Error);
@@ -663,7 +677,7 @@ internal static partial class AgentCommands
                         AddIfProvided(body, "name", name, name is not null);
                         AddIfProvided(body, "description", clearDescription ? null : description, clearDescription || description is not null);
                         AddIfProvided(body, "instructions", resolvedInstructions, instructionsResult is BodyInputResolver.Result.Success);
-                        AddIfProvided(body, "agentConfig", config.Config, config.Config is not null || runtime is not null || model is not null || variant is not null || clearRuntime || clearModel || clearVariant);
+                        AddIfProvided(body, "agentConfig", config.Config, config.Config is not null || runtime is not null || model is not null || reasoningEffort is not null || variant is not null || clearRuntime || clearModel || clearReasoningEffort || clearVariant);
                         AddIfProvided(body, "avatar", clearAvatar ? null : avatarResult is BodyInputResolver.Result.Success avatarSuccess ? avatarSuccess.Body : null, clearAvatar || avatarResult is BodyInputResolver.Result.Success);
                         AddIfProvided(body, "skills", clearSkills ? null : JsonSerializer.SerializeToNode(ParseSkills(skills), JsonOptions), clearSkills || skills is not null);
                         AddIfProvided(body, "allowedSubagentAgentIds", clearAllowedSubagents ? null : JsonSerializer.SerializeToNode(allowedSubagentAgentIds, JsonOptions), clearAllowedSubagents || allowedSubagentAgentIds is not null);
@@ -691,30 +705,34 @@ internal static partial class AgentCommands
         string? legacy,
         string? runtime,
         string? model,
+        string? reasoningEffort,
         string? variant,
         bool clearRuntime,
         bool clearModel,
+        bool clearReasoningEffort,
         bool clearVariant)
     {
         if (legacy is not null)
-            return (null, "--agent-config is retired; use --runtime, --model, and --variant");
+            return (null, "--agent-config is retired; use --runtime, --model, --reasoning-effort, and --variant");
 
         if (runtime is not null && runtime is not ("opencode" or "pi"))
             return (null, $"--runtime '{runtime}' is invalid; use opencode or pi");
         if (model is not null && string.IsNullOrWhiteSpace(model))
             return (null, "--model must not be empty; use provider/model");
+        if (reasoningEffort is not null && string.IsNullOrWhiteSpace(reasoningEffort))
+            return (null, "--reasoning-effort must not be empty; use a canonical reasoning effort");
         if (variant is not null && string.IsNullOrWhiteSpace(variant))
             return (null, "--variant must not be empty; use the variant supported by the selected runtime");
 
-        var supplied = runtime is not null || model is not null || variant is not null
-            || clearRuntime || clearModel || clearVariant;
+        var supplied = runtime is not null || model is not null || reasoningEffort is not null || variant is not null
+            || clearRuntime || clearModel || clearReasoningEffort || clearVariant;
         if (!supplied)
             return (null, null);
 
         var config = new JsonObject();
         if (current is JsonObject existing)
         {
-            foreach (var key in new[] { "runtime", "model", "variant" })
+            foreach (var key in new[] { "runtime", "model", "reasoningEffort", "variant" })
             {
                 if (existing[key] is JsonNode value)
                     config[key] = value.DeepClone();
@@ -723,9 +741,11 @@ internal static partial class AgentCommands
 
         if (clearRuntime) config.Remove("runtime");
         if (clearModel) config.Remove("model");
+        if (clearReasoningEffort) config.Remove("reasoningEffort");
         if (clearVariant) config.Remove("variant");
         if (runtime is not null) config["runtime"] = runtime;
         if (model is not null) config["model"] = model;
+        if (reasoningEffort is not null) config["reasoningEffort"] = reasoningEffort;
         if (variant is not null) config["variant"] = variant;
 
         return (config.Count == 0 ? null : config, null);

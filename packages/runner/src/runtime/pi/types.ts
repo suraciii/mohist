@@ -69,6 +69,7 @@ export interface PiSessionResolveResult extends PiSessionResult {
 export interface PiTurnOptions {
   readonly model?: string | null
   readonly variant?: string | null
+  readonly reasoningEffort?: string | null
   readonly unknownKeys?: readonly string[]
   readonly skills?: readonly { readonly name: string; readonly instructions: string }[]
 }

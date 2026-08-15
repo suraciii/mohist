@@ -153,6 +153,7 @@ export class PiRuntime {
       if (!parsed) { unsubscribe(); return this.failure("invalid-input", "options.model must use provider/model syntax") }
       try { await session.setModel(this.state.services.model(parsed.provider, parsed.id)) } catch (cause) { unsubscribe(); return this.failure("turn-failed", "Pi rejected the selected model", [diagnostic("model-rejected", this.mask(message(cause)))]) }
     }
+    if (request.options?.reasoningEffort) session.setThinkingLevel(request.options.reasoningEffort)
     if (request.options?.variant) session.setThinkingLevel(request.options.variant)
     const clock = this.deps.clock ?? defaultClock
     const duration = request.durationMs ?? null
@@ -289,6 +290,7 @@ export class PiRuntime {
         ])
       }
     }
+    if (options?.reasoningEffort) session.setThinkingLevel(options.reasoningEffort)
     if (options?.variant) session.setThinkingLevel(options.variant)
     return null
   }
