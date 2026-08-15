@@ -15,6 +15,7 @@ export type PiErrorKind =
   | 'deadline-exceeded'
   | 'interrupted'
   | 'turn-failed'
+  | 'resource-containment'
   | 'conflict'
 
 export interface PiError {
@@ -79,6 +80,8 @@ export interface PiTurnRequest {
   readonly prompt: string
   readonly options?: PiTurnOptions | null
   readonly durationMs?: number | null
+  /** Per-work budget; expiry aborts and quarantines the shared Pi generation. */
+  readonly resourceBudgetMs?: number | null
 }
 
 export interface PiRuntimeEvent {

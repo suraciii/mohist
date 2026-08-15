@@ -18,6 +18,8 @@ import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from './bind
 import { resolveIssueFields, type IssueFields } from '../actions/issue-fields.js'
 import type { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
+import { minPositive, type ResolvedWorkResourceLimits } from './resource-containment.js'
+import type { CommandResourceLimits } from '../system/process.js'
 
 export interface ExecutorCapabilityDeps {
   readonly connection: ServerConnection
@@ -27,6 +29,7 @@ export interface ExecutorCapabilityDeps {
   readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null
   readonly runtimeEventRecordId: () => string
   readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
+  readonly workResourceLimits?: ResolvedWorkResourceLimits
 }
 
 export function renderWithDeferred(
@@ -50,13 +53,21 @@ export function buildActionHost(
     workDir,
     signal,
     log,
+    ...(deps.workResourceLimits ? { resourceLimits: commandResourceLimits(deps.workResourceLimits) } : {}),
     cleanupAttempt: cleanupAttempt ?? null,
     piRuntime: deps.piRuntime,
     skillResolver: deps.skillResolver,
     agentDefinition: work.agentDefinition,
     exec: async (command, args) => {
       const { runCommand } = await import('../system/process.js')
-      const result = await runCommand(command, args?.map(String) ?? [], workDir, signal)
+      const result = await runCommand(
+        command,
+        args?.map(String) ?? [],
+        workDir,
+        signal,
+        undefined,
+        deps.workResourceLimits ? { resourceLimits: commandResourceLimits(deps.workResourceLimits) } : undefined,
+      )
       return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }
     },
   }
@@ -74,6 +85,14 @@ export function buildActionHost(
   }
 
   return host
+}
+
+function commandResourceLimits(limits: ResolvedWorkResourceLimits): CommandResourceLimits {
+  return {
+    memoryMb: limits.memoryMb,
+    wallClockMs: limits.wallClockMs,
+    watchdogIntervalMs: limits.watchdogIntervalMs,
+  }
 }
 
 function buildAgentTurnCapability(
@@ -365,7 +384,7 @@ function buildAgentTurnCapability(
         )
       }
 
-      const deadlineMs = request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS
+      const deadlineMs = minPositive(request.deadlineMs, deps.workResourceLimits?.turnBudgetMs) ?? DEFAULT_TURN_DEADLINE_MS
       const modelOptions = modelName ? parseModelIdentifier(modelName) : null
       if (
         !freshRuntimeSessionRequired &&
@@ -453,6 +472,9 @@ function buildAgentTurnCapability(
           ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
           unknownKeys: undefined as readonly string[] | undefined,
         },
+        ...(deps.workResourceLimits?.turnBudgetMs !== undefined
+          ? { resourceBudgetMs: deps.workResourceLimits.turnBudgetMs }
+          : {}),
       }
 
       reporter = createWorkflowReporter(
@@ -548,6 +570,7 @@ async function runPiAgentTurn(
     runnerId: deps.connection.runnerId,
     cleanupAttempt,
     agentRecovery: work.agentRecovery ?? null,
+    workResourceLimits: deps.workResourceLimits,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
     preparedOptions: request.options,
   })

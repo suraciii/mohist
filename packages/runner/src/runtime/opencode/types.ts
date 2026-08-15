@@ -73,6 +73,8 @@ export interface RuntimeTurnRequest {
    * external signal for cancellation only.
    */
   readonly deadlineMs?: number | null
+  /** Per-work budget; expiry is a containment event that quarantines the generation. */
+  readonly resourceBudgetMs?: number | null
   readonly options?: RuntimeTurnOptions | null
   /**
    * Optional native file parts appended to the prompt body. The
@@ -213,6 +215,7 @@ export type RuntimeErrorKind =
   | "deadline-exceeded"
   | "interrupted"
   | "turn-failed"
+  | "resource-containment"
   | "generation-drain-timeout"
 
 export interface RuntimeError {

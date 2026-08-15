@@ -1,5 +1,5 @@
 import { errorMessage } from '../core/errors.js'
-import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { JsonObject, DispatchWorkItem, WorkItemResult, WorkResourceLimits } from '../core/types.js'
 import { isObject } from '../core/json.js'
 import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
@@ -32,6 +32,7 @@ export interface AgentJobExecutorOptions {
   readonly modelRetryInitialDelayMs?: number
   readonly modelRetryMaxDelayMs?: number
   readonly waitForModelRetry?: ModelRetryWaiter
+  readonly workResourceLimits?: WorkResourceLimits
 }
 
 /**

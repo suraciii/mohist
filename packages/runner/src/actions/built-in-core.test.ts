@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest"
-import { scriptFailureMessage } from "./built-in-core.js"
+import { processAction, scriptFailureMessage } from "./built-in-core.js"
+import { setPrlimitAvailabilityForTests } from "../system/process.js"
+import { FakeProcessSpawner } from "../../tests/support/fake-process.js"
+import { withTestRunnerResources } from "../../tests/support/test-resources.js"
+import { makeHost } from "../../tests/support/action-host-test.js"
+
+describe("core/resource containment", () => {
+  it("projects a contained process into the definite resource-containment action error", async () => {
+    const spawner = new FakeProcessSpawner()
+    setPrlimitAvailabilityForTests(true)
+    try {
+      await withTestRunnerResources(async () => {
+        const resultPromise = processAction({ command: "node", args: [] }, makeHost({
+          resourceLimits: { memoryMb: 8, wallClockMs: null },
+        }))
+        const child = spawner.children[0]!
+        child.emit("exit", 137, "SIGKILL")
+        child.close(137)
+        await expect(resultPromise).resolves.toMatchObject({ error: { code: "resource-containment" } })
+      }, { processSpawner: spawner.spawn, processKiller: () => true })
+    } finally {
+      setPrlimitAvailabilityForTests(undefined)
+    }
+  })
+})
 
 describe("core/script failure diagnostics", () => {
   it("includes stdout failures when stderr only contains a warning", () => {

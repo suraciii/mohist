@@ -50,6 +50,7 @@ export {
   normalizeIncompatibleRuntime,
   normalizeMissingSession,
   normalizePermissionRequired,
+  normalizeResourceContainment,
   normalizeTurnFailed,
   normalizeUnavailableRuntime,
 } from "./errors.js"

@@ -618,6 +618,33 @@ describe("OpenCodeRuntime.runTurn — deadline abort", () => {
     }
   })
 
+  it("quarantines a generation when a work turn exceeds its resource budget", async () => {
+    vi.useFakeTimers()
+    let runtime: OpenCodeRuntime | null = null
+    try {
+      const { deps, client, serverFactory } = buildRuntime({ quarantineDrainTimeoutMs: 25 })
+      client.sessionPrompt.mockImplementationOnce(() => new Promise<never>(() => {}))
+      runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+
+      const turn = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/resource" },
+        prompt: "over budget",
+        resourceBudgetMs: 10,
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(10)
+      await vi.advanceTimersByTimeAsync(0)
+
+      await expect(turn).resolves.toMatchObject({ ok: false, error: { kind: "resource-containment" } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(serverFactory).toHaveBeenCalledTimes(2)
+      expect(runtime.ready()).toBe(true)
+    } finally {
+      await runtime?.shutdown()
+      vi.useRealTimers()
+    }
+  })
+
   it("force-releases a wedged generation and serves work from its replacement", async () => {
     vi.useFakeTimers()
     let runtime: OpenCodeRuntime | null = null

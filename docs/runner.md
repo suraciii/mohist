@@ -172,6 +172,39 @@ the service manager. Configurable values include:
 Dispatch slots are control-plane state and are changed from the Runner detail
 page, not through Runner startup options.
 
+### Per-work containment
+
+The runner resolves the optional `workResourceLimits` configuration block at
+startup. The TypeScript shape is:
+
+```ts
+{
+  memoryMb?: number | null
+  wallClockMs?: number | null
+  watchdogIntervalMs?: number | null
+  turnBudgetMs?: number | null
+}
+```
+
+Omitted values use the defaults `memoryMb=1024`, `wallClockMs=3600000`,
+`watchdogIntervalMs=250`, and `turnBudgetMs=3600000`. Set a field to `null` to
+disable that bound. The `mohist-runner` process reads deployment overrides from
+`WORK_RESOURCE_MEMORY_MB`, `WORK_RESOURCE_WALL_CLOCK_MS`,
+`WORK_RESOURCE_WATCHDOG_INTERVAL_MS`, and `WORK_RESOURCE_TURN_BUDGET_MS`.
+
+Action subprocesses use Linux `prlimit` when util-linux is available, with
+aggregate RSS sampling and a wall-clock kill as a second line of defense. On
+macOS or minimal containers, RSS and wall-clock watchdog enforcement is used
+without `prlimit`; detection occurs on the next watchdog sample. A contained
+work is reported as a definite failure with reason `resource-containment`.
+Runtime-backed turns use `turnBudgetMs`; expiry aborts the turn, quarantines the
+runtime generation, and lets the runner recreate it. Completed results already
+waiting for acknowledgement remain journaled under their original identities.
+
+After `mo install runner`, set these variables in the managed Runner service
+environment before starting it, for example with `systemctl --user edit
+mohist-runner.service`, or export them when running `npm run dev:runner`.
+
 Runner does not select a global Runtime backend through `type`. A Workflow
 task's `uses` value selects an execution-backend Action such as
 `mohist/opencode` or `mohist/pi`. Action Input supplies model options. See

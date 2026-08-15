@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess, ChildProcessWithoutNullStreams, SpawnOptions } from "node:child_process"
+import { readFile } from "node:fs/promises"
 import { StringDecoder } from "node:string_decoder"
 import { assertExternalProcessAllowed, registerExternalProcess } from "./process-policy.js"
 import { createTimeoutSignal } from "./timeout-signal.js"
@@ -15,10 +16,21 @@ export interface CommandResult {
    * byte-identical to its pre-timeout shape.
    */
   status?: "timeout"
+  /** True when the command was killed by a per-work containment bound. */
+  resourceContainment?: true
   /**
    * The per-command timeout (ms) that fired. Absent on normal exit.
    */
   timeoutMs?: number
+}
+
+export interface CommandResourceLimits {
+  /** Aggregate process-tree memory bound in MiB. */
+  memoryMb?: number | null
+  /** Wall-clock bound for the command in milliseconds. */
+  wallClockMs?: number | null
+  /** Aggregate-RSS sampling interval in milliseconds. */
+  watchdogIntervalMs?: number | null
 }
 
 export type ProcessSpawner = (command: string, args: string[], options: SpawnOptions) => ChildProcessWithoutNullStreams
@@ -59,9 +71,57 @@ export interface CommandLineOptions {
   onLine?: (line: string) => void
   onClose?: (exitCode: number) => void
   timeoutMs?: number
+  /** Optional per-work containment bounds. Omitted means no containment machinery. */
+  resourceLimits?: CommandResourceLimits
 }
 
 const ABORT_FORCE_KILL_GRACE_MS = 5_000
+const RESOURCE_FORCE_KILL_GRACE_MS = 1_000
+
+let prlimitAvailability: boolean | undefined
+let processTreeRssReader: ProcessTreeRssReader = readProcessTreeRssBytes
+
+export type ProcessTreeRssReader = (pid: number) => Promise<number | null>
+
+/** Probe util-linux once per runner process. Non-Linux hosts use watchdog-only enforcement. */
+export async function probePrlimit(): Promise<boolean> {
+  if (prlimitAvailability !== undefined) return prlimitAvailability
+  if (process.platform !== "linux") {
+    prlimitAvailability = false
+    return false
+  }
+  const environment = currentRunnerResources()?.environment ?? process.env
+  if (environment.MOHIST_DISABLE_PRLIMIT === "1") {
+    prlimitAvailability = false
+    return false
+  }
+  try {
+    assertExternalProcessAllowed("system/process.probePrlimit")
+    const child = spawn("prlimit", ["--version"], { stdio: "ignore", shell: false })
+    registerExternalProcess(child)
+    prlimitAvailability = await new Promise<boolean>((resolve) => {
+      child.once("error", () => resolve(false))
+      child.once("close", (code) => resolve(code === 0))
+    })
+  } catch {
+    prlimitAvailability = false
+  }
+  return prlimitAvailability
+}
+
+/** Test seam for forcing Linux fallback behavior without changing the host. */
+export function setPrlimitAvailabilityForTests(value: boolean | undefined): void {
+  prlimitAvailability = value
+}
+
+/** Test seam for deterministic RSS watchdog tests. */
+export function setProcessTreeRssReaderForTests(reader: ProcessTreeRssReader | undefined): void {
+  processTreeRssReader = reader ?? readProcessTreeRssBytes
+}
+
+function isPrlimitAvailable(): boolean {
+  return prlimitAvailability === true
+}
 
 export async function ensureDir(path: string) {
   await currentRunnerFileSystem().ensureDir(path)
@@ -106,6 +166,13 @@ export async function runCommand(
   const timeoutMs = options?.timeoutMs
   const onLine = options?.onLine
   const onClose = options?.onClose
+  const resourceLimits = normalizeCommandResourceLimits(options?.resourceLimits)
+  const memoryBytes = resourceLimits.memoryMb === null ? null : resourceLimits.memoryMb * 1024 * 1024
+  const usePrlimit = memoryBytes !== null && memoryBytes !== undefined && isPrlimitAvailable()
+  const spawnCommand = usePrlimit ? "prlimit" : command
+  const spawnArgs = usePrlimit
+    ? [`--as=${memoryBytes}`, `--data=${memoryBytes}`, "--", command, ...args]
+    : args
   // Layer the per-command timer over the caller signal only when armed.
   // Omitted / non-positive ⇒ byte-identical behavior (no timer, no keys).
   const timeoutHandle = timeoutMs && timeoutMs > 0 ? createTimeoutSignal(signal, timeoutMs) : undefined
@@ -119,7 +186,7 @@ export async function runCommand(
     const scopedSpawner = currentRunnerResources()?.processSpawner
     if (!scopedSpawner) assertExternalProcessAllowed("system/process.runCommand")
     const processSpawner = scopedSpawner ?? realProcessSpawner
-    const child = processSpawner(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
+    const child = processSpawner(spawnCommand, spawnArgs, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
     if (!scopedSpawner) registerExternalProcess(child)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
@@ -132,15 +199,26 @@ export async function runCommand(
     const wasTimeout = () => timeoutHandle?.timedOut() === true
     let completed = false
     let directExitCode: number | null | undefined
+    let directExitSignal: NodeJS.Signals | null | undefined
+    let containmentTriggered = false
     let forceKillTimer: NodeJS.Timeout | undefined
     const onAbort = () => {
       killProcess(child)
       forceKillTimer = setTimeout(() => killProcess(child, "SIGKILL"), ABORT_FORCE_KILL_GRACE_MS)
       forceKillTimer.unref()
     }
+    const triggerContainment = () => {
+      if (completed || containmentTriggered) return
+      containmentTriggered = true
+      killProcess(child)
+      forceKillTimer = setTimeout(() => killProcess(child, "SIGKILL"), RESOURCE_FORCE_KILL_GRACE_MS)
+      forceKillTimer.unref()
+    }
+    const watchdog = startResourceWatchdog(child, resourceLimits, triggerContainment)
     const cleanup = () => {
       effectiveSignal.removeEventListener("abort", onAbort)
       timeoutHandle?.dispose()
+      watchdog.dispose()
     }
     const clearForceKillTimer = () => {
       if (forceKillTimer) clearTimeout(forceKillTimer)
@@ -174,6 +252,7 @@ export async function runCommand(
       completed = true
       const exitCode = code ?? 1
       const timedOut = wasTimeout()
+      const abnormalContainment = containmentTriggered || isResourceLimitExit(usePrlimit, exitCode, directExitSignal)
       cleanup()
       if (onLine) {
         emitLines(stdoutState.decoder.end(), stdoutState, onLine)
@@ -186,6 +265,7 @@ export async function runCommand(
       if (onClose) onClose(exitCode)
       const stdoutText = Buffer.concat(stdout).toString("utf8")
       const stderrText = Buffer.concat(stderr).toString("utf8")
+      const contained = abnormalContainment || isResourceLimitOutput(usePrlimit, stdoutText, stderrText)
       child.stdout.destroy?.()
       child.stderr.destroy?.()
       if (timedOut) {
@@ -203,10 +283,20 @@ export async function runCommand(
         })
         return
       }
+      if (contained) {
+        resolve({
+          exitCode,
+          stdout: stdoutText,
+          stderr: stderrText + "Command terminated by resource containment\n",
+          resourceContainment: true,
+        })
+        return
+      }
       resolve({ exitCode, stdout: stdoutText, stderr: stderrText })
     }
-    child.once("exit", (code) => {
+    child.once("exit", (code, signal) => {
       directExitCode = code
+      directExitSignal = signal
       // A descendant that inherited stdout/stderr can keep `close` from firing
       // after the direct child exits. It belongs to this command tree and must
       // not outlive the command or write into a later work item.
@@ -217,6 +307,105 @@ export async function runCommand(
       complete(directExitCode ?? code)
     })
   })
+}
+
+interface NormalizedCommandResourceLimits {
+  readonly memoryMb: number | null
+  readonly wallClockMs: number | null
+  readonly watchdogIntervalMs: number
+}
+
+function normalizeCommandResourceLimits(value: CommandResourceLimits | undefined): NormalizedCommandResourceLimits {
+  return {
+    memoryMb: positiveLimit(value?.memoryMb),
+    wallClockMs: positiveLimit(value?.wallClockMs),
+    watchdogIntervalMs: positiveLimit(value?.watchdogIntervalMs) ?? 250,
+  }
+}
+
+function positiveLimit(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null
+  return Number.isFinite(value) && value > 0 ? Math.max(1, Math.floor(value)) : null
+}
+
+function isResourceLimitExit(usePrlimit: boolean, exitCode: number, signal: NodeJS.Signals | null | undefined): boolean {
+  if (!usePrlimit) return false
+  return (signal !== null && signal !== undefined)
+    || exitCode === 133 || exitCode === 134 || exitCode === 137 || exitCode === 139
+}
+
+function isResourceLimitOutput(usePrlimit: boolean, stdout: string, stderr: string): boolean {
+  if (!usePrlimit) return false
+  return /out of memory|memoryerror|cannot allocate|allocation failed|array buffer allocation failed|trace\/breakpoint trap|fatal error|enomem/i.test(`${stdout}\n${stderr}`)
+}
+
+function startResourceWatchdog(
+  child: ChildProcess,
+  limits: NormalizedCommandResourceLimits,
+  onContainment: () => void,
+): { dispose: () => void } {
+  if (limits.memoryMb === null && limits.wallClockMs === null) return { dispose: () => {} }
+
+  let disposed = false
+  let checking = false
+  const interval = limits.memoryMb === null
+    ? undefined
+    : setInterval(() => {
+        if (disposed || checking || child.pid === undefined) return
+        checking = true
+        void processTreeRssReader(child.pid)
+          .then((rssBytes) => {
+            if (!disposed && rssBytes !== null && rssBytes > limits.memoryMb! * 1024 * 1024) onContainment()
+          })
+          .catch(() => undefined)
+          .finally(() => { checking = false })
+      }, limits.watchdogIntervalMs)
+  interval?.unref?.()
+
+  const wallClock = limits.wallClockMs === null
+    ? undefined
+    : setTimeout(onContainment, limits.wallClockMs)
+  wallClock?.unref?.()
+
+  return {
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      if (interval !== undefined) clearInterval(interval)
+      if (wallClock !== undefined) clearTimeout(wallClock)
+    },
+  }
+}
+
+/** Sum VmRSS for a process and its descendants on Linux. */
+export async function readProcessTreeRssBytes(pid: number): Promise<number | null> {
+  const pending = [pid]
+  const seen = new Set<number>()
+  let total = 0
+  let found = false
+  while (pending.length > 0) {
+    const current = pending.pop()!
+    if (seen.has(current)) continue
+    seen.add(current)
+    const [status, children] = await Promise.all([
+      readFile(`/proc/${current}/status`, "utf8").catch(() => null),
+      readFile(`/proc/${current}/task/${current}/children`, "utf8").catch(() => null),
+    ])
+    if (status !== null) {
+      const match = /^VmRSS:\s+(\\d+)\\s+kB$/m.exec(status)
+      if (match) {
+        total += Number(match[1]) * 1024
+        found = true
+      }
+    }
+    if (children !== null) {
+      for (const value of children.trim().split(/\\s+/)) {
+        const childPid = Number(value)
+        if (Number.isInteger(childPid) && childPid > 0) pending.push(childPid)
+      }
+    }
+  }
+  return found ? total : null
 }
 
 interface LineBufferState {

@@ -65,6 +65,7 @@ export type RunnerCommandRunner = (
   stdout: string
   stderr: string
   status?: "timeout"
+  resourceContainment?: true
   timeoutMs?: number
 }>
 

@@ -10,7 +10,17 @@ import { fail, succeed } from "./action-result.js"
 export async function processAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const command = stringInput(inputs, "command")
   if (!command) return fail("invalid-input", "Process action requires command")
-  const result = await runCommand(command, arrayInput(inputs, "args").map(String), host.workDir, host.signal, undefined, logLineOptions(host, "action:process"))
+  const result = await runCommand(
+    command,
+    arrayInput(inputs, "args").map(String),
+    host.workDir,
+    host.signal,
+    undefined,
+    commandOptions(host, "action:process"),
+  )
+  if (result.resourceContainment) {
+    return fail("resource-containment", "Process exceeded its per-work resource bound", { exitCode: result.exitCode })
+  }
   if (result.exitCode === 0) {
     const output: JsonObject = {
       stdout: result.stdout.trim(),
@@ -30,11 +40,15 @@ export async function scriptAction(inputs: JsonObject, host: ActionHost): Promis
   try {
     const timeoutMs = numberInput(inputs, "timeout")
     const result = await runCommand(shell, [file], host.workDir, host.signal, undefined, {
-      ...logLineOptions(host, "action:script"),
+      ...commandOptions(host, "action:script"),
       timeoutMs,
     })
     if (result.exitCode !== 0) {
-      return fail(result.status === "timeout" ? "timeout" : "script-failed", scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr), { exitCode: result.exitCode })
+      return fail(
+        result.resourceContainment ? "resource-containment" : result.status === "timeout" ? "timeout" : "script-failed",
+        result.resourceContainment ? "Script exceeded its per-work resource bound" : scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr),
+        { exitCode: result.exitCode },
+      )
     }
     const output: JsonObject = { kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }
     return succeed(output, { exitCode: result.exitCode })
@@ -104,6 +118,11 @@ function trim(value: string) {
   return value.length <= 20_000 ? value : value.slice(0, 20_000)
 }
 
-function logLineOptions(host: ActionHost, source: string): CommandLineOptions | undefined {
-  return host.log ? { onLine: (line) => host.log!.write(source, line) } : undefined
+function commandOptions(host: ActionHost, source: string): CommandLineOptions | undefined {
+  const onLine = host.log ? (line: string) => host.log!.write(source, line) : undefined
+  if (!onLine && !host.resourceLimits) return undefined
+  return {
+    ...(onLine ? { onLine } : {}),
+    ...(host.resourceLimits ? { resourceLimits: host.resourceLimits } : {}),
+  }
 }
