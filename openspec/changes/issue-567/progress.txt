@@ -319,3 +319,21 @@ Channel decision (grounded in live source):
   Server RunnerConfig API class passed 9/9. A default full Server spec run
   still showed the known unrelated AgentJob dispatch timing failure; the
   focused RunnerConfig class passes directly.
+
+## Fix-CI Verification Repair
+
+- The persisted `verify.1` output showed one deterministic Server unit failure
+  and one Server spec failure during the concurrent full solution run. The unit
+  failure was `CliFieldContractTests.MappedCatalogsMatchServerSerializationFields`:
+  T-007 had added `interruption` and `interruptionHistory` to
+  `AgentJobViewDto` and `UnifiedSessionSummaryDto`, but the CLI
+  `ResourceOutputCatalog` omitted them from `AgentJobView` and `SessionShow`.
+- Added both field pairs to `packages/cli/Mohist.Cli/ResourceOutput.cs`.
+  The contract test now passes directly. The reported
+  `AgentSessionLaunchRuntimeResolutionSpecs.Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode`
+  failure passed in isolation and did not recur in the full rerun, so no
+  unrelated race workaround was added.
+- Reverification passed: full `dotnet test Mohist.sln --nologo` (178 Workflow
+  Definition, 1855 CLI, 2667 Server Unit, 3936 Server Spec, 68 Arch), Web
+  typecheck and 4727 tests, Runner typecheck and 1647 tests. Verification
+  generated no Git-visible changes beyond the intended catalog edit.
