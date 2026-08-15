@@ -32,6 +32,30 @@ AgentSession, Input, Turn, or Runner work.
 - **THEN** the Server persists an accepted receipt
 - **AND** no Job, Session, or Runner claim exists
 
+### Requirement: Frozen completion snapshot
+
+The handoff command SHALL freeze the canonical Agent identity and the exact
+Workflow completion input: Workflow run, task attempt, work, stage, workspace,
+and rendered `expect`, artifact, variable, and recovery declarations. The
+snapshot SHALL participate in the request fingerprint. Object-key ordering
+alone SHALL NOT change that fingerprint, while a changed completion effect
+SHALL conflict with the persisted command.
+
+#### Scenario: Completion input is replayed after response loss
+
+- **WHEN** a matching handoff command is replayed after an activation loss
+- **THEN** the Server returns the persisted completion snapshot and canonical
+  Agent identity
+- **AND** it does not re-read mutable Agent configuration or materialize a
+  Job, Session, Input, Turn, or Runner work
+
+#### Scenario: Completion input changes under one command identity
+
+- **WHEN** a retry supplies a different rendered completion effect for a
+  persisted handoff command
+- **THEN** the Server rejects it as a fingerprint conflict
+- **AND** it retains the original invocation and completion snapshot
+
 ### Requirement: Generic Runtime Boundary
 
 The handoff preflight SHALL resolve the immutable generic Agent execution

@@ -120,6 +120,7 @@ public static class MohistServiceRegistration
         services.AddScoped<DirectApiAgentJobReadStore>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
+        services.AddScoped<IAgentExecutionIdentitySnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
         services.AddSingleton<IWorkflowAgentHandoffPreflight>(sp =>
             sp.GetRequiredService<WorkflowAgentHandoffPreflight>());
         services.AddScoped<ISlackManagerConversationProcessor>(sp =>

@@ -6,9 +6,15 @@ using Mohist.Server.Infrastructure.Hosting;
 namespace Mohist.Server.Agent.Services;
 
 public sealed class AgentExecutionSnapshotResolver(
-    AgentQuerier agents) : IAgentExecutionSnapshotResolver, IScopedService
+    AgentQuerier agents) : IAgentExecutionSnapshotResolver, IAgentExecutionIdentitySnapshotResolver, IScopedService
 {
     public async Task<AgentExecutionDefinition?> ResolveAsync(string projectId, string agentRef)
+    {
+        var snapshot = await ResolveWithIdentityAsync(projectId, agentRef);
+        return snapshot?.ExecutionDefinition;
+    }
+
+    public async Task<AgentExecutionIdentitySnapshot?> ResolveWithIdentityAsync(string projectId, string agentRef)
     {
         var agent = await AgentRefResolver.ResolveAsync(agents, projectId, agentRef);
         if (agent is null || agent.Status != AgentStatus.Active)
@@ -31,13 +37,15 @@ public sealed class AgentExecutionSnapshotResolver(
             }
         }
 
-        return new AgentExecutionDefinition(
-            Instructions: agent.Instructions,
-            Runtime: AgentLauncher.ResolveRuntime(config),
-            Model: AgentLauncher.ResolveModelAndVariant(config).Model,
-            Variant: AgentLauncher.ResolveModelAndVariant(config).Variant,
-            Skills: agent.Skills.ToArray(),
-            AllowedSubagents: allowedSubagents.ToArray(),
-            ReasoningEffort: AgentLauncher.ResolveReasoningEffort(config));
+        return new AgentExecutionIdentitySnapshot(
+            agent.Id,
+            new AgentExecutionDefinition(
+                Instructions: agent.Instructions,
+                Runtime: AgentLauncher.ResolveRuntime(config),
+                Model: AgentLauncher.ResolveModelAndVariant(config).Model,
+                Variant: AgentLauncher.ResolveModelAndVariant(config).Variant,
+                Skills: agent.Skills.ToArray(),
+                AllowedSubagents: allowedSubagents.ToArray(),
+                ReasoningEffort: AgentLauncher.ResolveReasoningEffort(config)));
     }
 }
