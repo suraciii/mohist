@@ -2388,6 +2388,8 @@
           "Mohist.Server.SpecTests.Support.GrainTestConfig.NoopSlackConnectionHealthBackpressurer",
           "Mohist.Server.SpecTests.Support.GrainTestConfig.NoopTranscriptEventPublisher",
           "Mohist.Server.SpecTests.Support.MigratedSqliteTemplate",
+          "Mohist.Server.SpecTests.Support.InProcessTestClusterBuilderExtensions",
+          "Mohist.Server.SpecTests.Support.LogicalTestClusterPortAllocator",
           "Mohist.Server.TestSupport.AgentSessionPersistenceTestProbe",
           "Mohist.Server.TestSupport.DispatchTestExtensions",
           "Mohist.Server.TestSupport.FakeRunnerWorkspaceClient",
@@ -2404,8 +2406,8 @@
           "Mohist.Server.TestSupport.WorkflowGrainTestHelpers",
           "TestTime"
         ],
-        "digest": "da9c1552fd115054d391d065cd331ed4a01ef4b9088a03a1c4f7caa2b0e1e47b",
-        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=f4e418aaef3fb566082916153e31a52da1030266d2f1f6fc147791976f1f7dc4 executable-closure-digest=da9c1552fd115054d391d065cd331ed4a01ef4b9088a03a1c4f7caa2b0e1e47b edges-digest=e01982e711f7637385e6ffad4ee0eac50c8e20a430cb66b16302e9508de59e1d move-contract-schema=1"
+        "digest": "925bbae144c1470d6800a3d96159bf5ba2e5b2b8fa69fa97e7607c054f0242b1",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b executable-closure-digest=925bbae144c1470d6800a3d96159bf5ba2e5b2b8fa69fa97e7607c054f0242b1 edges-digest=84393871f2806ab8005e4424896ac0f178c7839813cf9f771a036932414ad8ab move-contract-schema=1"
       },
       "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
       "moveContract": {
@@ -2421,7 +2423,7 @@
         "note": "Explicit closure review; no migration PR is created.",
         "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
         "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
-        "sourceContentDigest": "f4e418aaef3fb566082916153e31a52da1030266d2f1f6fc147791976f1f7dc4"
+        "sourceContentDigest": "9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b"
       },
       "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
       "executable": {
@@ -2429,8 +2431,8 @@
         "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
         "caseCount": 3,
         "caseIdentityDigest": "25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884",
-        "closureIdentityDigest": "da9c1552fd115054d391d065cd331ed4a01ef4b9088a03a1c4f7caa2b0e1e47b",
-        "sourceContentDigest": "f4e418aaef3fb566082916153e31a52da1030266d2f1f6fc147791976f1f7dc4"
+        "closureIdentityDigest": "925bbae144c1470d6800a3d96159bf5ba2e5b2b8fa69fa97e7607c054f0242b1",
+        "sourceContentDigest": "9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b"
       }
     },
     {
@@ -2554,6 +2556,59 @@
         "theoryMethods": 0,
         "inlineDataRows": 0,
         "mtpCases": 7
+      }
+    },
+    {
+      "id": "current-recording-background-task-launcher",
+      "kind": "current",
+      "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/RecordingBackgroundTaskLauncherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.RecordingBackgroundTaskLauncherTests"
+      },
+      "discovered": {
+        "factMethods": 9,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 9
+      },
+      "status": "REVIEW",
+      "closure": {
+        "classification": "static-light-fake-seam",
+        "symbols": [
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncher",
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncher.PokeWork",
+          "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs"
+        ],
+        "digest": "e868d138d08f54a105807398962defa4151af69cafcbc3cb9dbcf79ee6a051ff",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs case-digest=3efff962a7080862c43049184c27104e53a703b9ff7b89912c73352b81a7dc1e source-content-digest=4f310c12eda988e2584c152d0a83b9599ab12e01803b2590f13f1bf29a9c6bb2 executable-closure-digest=e868d138d08f54a105807398962defa4151af69cafcbc3cb9dbcf79ee6a051ff edges-digest=509a4ec7bfc6122e015248429deb373d726ba0f31d08c632c1393aca04111764"
+      },
+      "owner": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+      "history": {
+        "operation": "current-inventory",
+        "pr": "#423",
+        "commit": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+        "sourceContentDigest": "4f310c12eda988e2584c152d0a83b9599ab12e01803b2590f13f1bf29a9c6bb2",
+        "note": "Current compiled static-light spec introduced after the #423 classification baseline by #429; explicit REVIEW keeps the server-spec owner until a separate Unit migration is implemented."
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/RecordingBackgroundTaskLauncherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.RecordingBackgroundTaskLauncherSpecs",
+        "caseCount": 9,
+        "caseIdentityDigest": "3efff962a7080862c43049184c27104e53a703b9ff7b89912c73352b81a7dc1e",
+        "closureIdentityDigest": "e868d138d08f54a105807398962defa4151af69cafcbc3cb9dbcf79ee6a051ff",
+        "sourceContentDigest": "4f310c12eda988e2584c152d0a83b9599ab12e01803b2590f13f1bf29a9c6bb2"
       }
     }
   ]

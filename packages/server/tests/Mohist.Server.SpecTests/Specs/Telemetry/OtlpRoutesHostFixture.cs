@@ -3,7 +3,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Otel;
 using Mohist.Server.TestSupport;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
@@ -25,8 +24,6 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
     public const int DisabledOtlpPort = 1;
 
     private SqliteConnection _keeper = null!;
-    private TestClusterPortAllocator? _portAllocator;
-
     public OtlpRoutesWebApplicationFactory Factory { get; private set; } = null!;
     public OtlpRoutesWebApplicationFactory DisabledFactory { get; private set; } = null!;
 
@@ -36,26 +33,18 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
 
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-
         Factory = new OtlpRoutesWebApplicationFactory(
             connectionString,
             "/mohist-tests/otel/runner",
             "/mohist-tests/otel/system-update.json",
-            OtlpPort,
-            siloPort,
-            gatewayPort);
+            OtlpPort);
         await Factory.EnsureSchemaAsync();
 
-        var (disabledSiloPort, disabledGatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         DisabledFactory = new OtlpRoutesWebApplicationFactory(
             connectionString,
             "/mohist-tests/otel/runner",
             "/mohist-tests/otel/system-update.json",
             DisabledOtlpPort,
-            disabledSiloPort,
-            disabledGatewayPort,
             otelEnabled: false);
         await DisabledFactory.EnsureSchemaAsync();
 
@@ -92,7 +81,6 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
     {
         Factory?.Dispose();
         DisabledFactory?.Dispose();
-        _portAllocator?.Dispose();
         await _keeper.DisposeAsync();
     }
 }

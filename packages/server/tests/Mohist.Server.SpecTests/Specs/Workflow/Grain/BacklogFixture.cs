@@ -22,7 +22,7 @@ public class BacklogFixture : IAsyncLifetime
     {
         _database = TestSqliteDatabase.CreateMigrated();
 
-        var builder = new InProcessTestClusterBuilder();
+        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.Options.InitialSilosCount = 1;
         ConfigureCluster(builder, _database.ConnectionString);
         Cluster = builder.Build();

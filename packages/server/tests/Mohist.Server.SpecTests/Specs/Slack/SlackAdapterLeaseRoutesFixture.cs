@@ -11,7 +11,6 @@ using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
@@ -52,17 +51,13 @@ public sealed class SlackAdapterLeaseRoutesFactory : MohistWebApplicationFactory
         string connectionString,
         string runnerRoot,
         string systemUpdateStatePath,
-        FakeTimeProvider timeProvider,
-        int siloPort,
-        int gatewayPort)
+        FakeTimeProvider timeProvider)
         : base(
             connectionString,
             runnerRoot,
             systemUpdateStatePath,
             "/mohist-tests/slack-leases/logs",
-            timeProvider,
-            siloPort,
-            gatewayPort)
+            timeProvider)
     {
     }
 
@@ -84,7 +79,6 @@ public sealed class SlackAdapterLeaseRoutesFactory : MohistWebApplicationFactory
 public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
 {
     private SqliteConnection _keeper = null!;
-    private TestClusterPortAllocator? _portAllocator;
 
     public SlackAdapterLeaseRoutesFactory Factory { get; private set; } = null!;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 8, 5, 14, 0, 0, TimeSpan.Zero));
@@ -97,16 +91,11 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
 
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-
         Factory = new SlackAdapterLeaseRoutesFactory(
             connectionString,
             "/mohist-tests/slack-leases/runner",
             "/mohist-tests/slack-leases/system-update.json",
-            TimeProvider,
-            siloPort,
-            gatewayPort);
+            TimeProvider);
         await Factory.EnsureSchemaAsync();
         _ = Factory.Services;
     }
@@ -114,7 +103,6 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         Factory?.Dispose();
-        _portAllocator?.Dispose();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
     }

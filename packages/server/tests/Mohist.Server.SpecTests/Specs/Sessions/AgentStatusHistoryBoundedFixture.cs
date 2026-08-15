@@ -11,7 +11,6 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
@@ -30,22 +29,17 @@ public sealed class AgentStatusHistoryBoundedFixture : IAsyncLifetime
 {
     private readonly CountingWorkflowWebApplicationFactory _factory;
     private readonly string _connectionString;
-    private readonly TestClusterPortAllocator _portAllocator;
     private SqliteConnection _keeper = null!;
 
     public AgentStatusHistoryBoundedFixture()
     {
         _connectionString = $"Data Source=agent-status-bounded-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         _factory = new CountingWorkflowWebApplicationFactory(
             _connectionString,
             "/mohist-tests/agent-status-bounded/runner",
             "/mohist-tests/agent-status-bounded/system-update.json",
             "/mohist-tests/agent-status-bounded/logs",
-            TimeProvider,
-            siloPort,
-            gatewayPort);
+            TimeProvider);
     }
 
     public HttpClient Client { get; private set; } = null!;
@@ -68,7 +62,6 @@ public sealed class AgentStatusHistoryBoundedFixture : IAsyncLifetime
     {
         _factory.Dispose();
         if (_keeper is not null) await _keeper.DisposeAsync();
-        _portAllocator.Dispose();
     }
 
     private sealed class CountingWorkflowWebApplicationFactory : MohistWebApplicationFactory
@@ -80,10 +73,8 @@ public sealed class AgentStatusHistoryBoundedFixture : IAsyncLifetime
             string runnerRoot,
             string systemUpdateStatePath,
             string logsPath,
-            FakeTimeProvider timeProvider,
-            int siloPort,
-            int gatewayPort)
-            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider, siloPort, gatewayPort)
+            FakeTimeProvider timeProvider)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider)
         {
         }
 
