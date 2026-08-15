@@ -369,8 +369,8 @@ test('checked-in Server Spec topology stays within the four-unit execution capac
   const config = parseSuiteConfig(readFileSync(new URL('../../test-duration.config.jsonc', import.meta.url), 'utf8'))
   const serverSpec = config.tracks.find((track) => track.id === 'server-spec')
   assert.ok(serverSpec)
-  assert.equal(serverSpec.partitions, 4)
-  assert.equal(serverSpec.partitionMaxThreads, 1)
+  assert.equal(serverSpec.partitions, 2)
+  assert.equal(serverSpec.partitionMaxThreads, 2)
   assert.equal(config.canonical?.partitionExecutionCapacity, 4)
   assert.equal(
     Math.min(serverSpec.partitions!, config.canonical!.resourceLimits['server-spec']) * serverSpec.partitionMaxThreads!,
