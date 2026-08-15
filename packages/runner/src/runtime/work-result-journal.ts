@@ -330,7 +330,11 @@ function parseJournal(raw: string): WorkResultJournalFile | null {
 function isEntry(value: unknown): value is WorkResultJournalEntry {
   if (!isRecord(value) || !isWork(value.work)) return false
   if (value.state === 'started') return value.result === undefined && value.interruption === undefined
-  return value.state === 'completed' && isResult(value.result) && (value.interruption === undefined || isInterruption(value.interruption))
+  return (
+    value.state === 'completed' &&
+    isResult(value.result) &&
+    (value.interruption === undefined || isInterruption(value.interruption))
+  )
 }
 
 function isWork(value: unknown): value is DispatchWorkItem {

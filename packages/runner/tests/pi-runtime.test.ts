@@ -188,7 +188,9 @@ describe('PiRuntime', () => {
     await runtime.start()
 
     const resultPromise = runtime.reattachTurn(
-      { target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' } },
+      {
+        target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
+      },
       new AbortController().signal,
     )
     await Promise.resolve()
@@ -251,6 +253,7 @@ describe('PiRuntime', () => {
     await expect(resultPromise).resolves.toMatchObject({ ok: true })
   })
 
+
   it('aborts and quarantines the Pi runtime when a turn exceeds its resource budget', async () => {
     const session = new FakeSession()
     const clock = new FakeClock()
@@ -261,18 +264,23 @@ describe('PiRuntime', () => {
         createSession: async () => session,
         openSession: async () => session,
         model: () => ({}),
-        close: async () => { closed += 1 },
+        close: async () => {
+          closed += 1
+        },
       }),
     }
     const runtime = new PiRuntime({ agentDir: '/global', sdkFactory, clock })
     await runtime.start()
     await runtime.createSession({ target: { runtime: 'pi', runtimeSessionId: null, workDir: '/workspace' } })
 
-    const result = runtime.runTurn({
-      target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
-      prompt: 'over budget',
-      resourceBudgetMs: 100,
-    }, new AbortController().signal)
+    const result = runtime.runTurn(
+      {
+        target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
+        prompt: 'over budget',
+        resourceBudgetMs: 100,
+      },
+      new AbortController().signal,
+    )
     await Promise.resolve()
     clock.advance(100)
 

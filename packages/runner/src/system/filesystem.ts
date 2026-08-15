@@ -1,20 +1,37 @@
-import { constants } from "node:fs"
-import { mkdir, open, readdir, readFile, realpath, rename, rm, stat, lstat, symlink, writeFile, appendFile, cp } from "node:fs/promises"
-import { AsyncLocalStorage } from "node:async_hooks"
-import { existsSync } from "node:fs"
-import { dirname, join } from "node:path"
-import type { SpawnOptions, ChildProcessWithoutNullStreams } from "node:child_process"
-import type { GitOptions } from "../actions/git.js"
-import type { CommandLineOptions } from "./process.js"
-import type { RunnerLogger } from "./logger.js"
-import type { ExternalProcessPolicy } from "./process-policy.js"
-import type { PiRuntimeFactory } from "../runtime/pi/factory.js"
-import type { OpenCodeRuntimeFactory } from "../runtime/opencode/factory.js"
-import type { OpencodeLogFileSystem, OpencodeProviderErrorDiagnosticFinder } from "../runtime/opencode-log-diagnostics.js"
-import type { LockHolderProbe } from "../runtime/worktree-enforcement.js"
+import { constants } from 'node:fs'
+import {
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  lstat,
+  symlink,
+  writeFile,
+  appendFile,
+  cp,
+} from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import type { SpawnOptions, ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { GitOptions } from '../actions/git.js'
+import type { CommandLineOptions } from './process.js'
+import type { RunnerLogger } from './logger.js'
+import type { ExternalProcessPolicy } from './process-policy.js'
+import type { PiRuntimeFactory } from '../runtime/pi/factory.js'
+import type { OpenCodeRuntimeFactory } from '../runtime/opencode/factory.js'
+import type {
+  OpencodeLogFileSystem,
+  OpencodeProviderErrorDiagnosticFinder,
+} from '../runtime/opencode-log-diagnostics.js'
+import type { LockHolderProbe } from '../runtime/worktree-enforcement.js'
 
 export interface RunnerFileInfo {
-  kind: "file" | "directory" | "symlink"
+  kind: 'file' | 'directory' | 'symlink'
   size: number
   mtimeMs: number
   isFile(): boolean
@@ -40,7 +57,7 @@ export interface RunnerGitResult {
   stderr: string
   exitCode: number
   combinedOutput: string
-  status?: "timeout"
+  status?: 'timeout'
   timeoutMs?: number
 }
 
@@ -51,7 +68,11 @@ export type RunnerGitRunner = (
   options?: GitOptions,
 ) => Promise<RunnerGitResult>
 
-export type RunnerProcessSpawner = (command: string, args: string[], options: SpawnOptions) => ChildProcessWithoutNullStreams
+export type RunnerProcessSpawner = (
+  command: string,
+  args: string[],
+  options: SpawnOptions,
+) => ChildProcessWithoutNullStreams
 export type RunnerProcessKiller = (pid: number, signal?: NodeJS.Signals) => void
 export type RunnerCommandRunner = (
   command: string,
@@ -64,7 +85,7 @@ export type RunnerCommandRunner = (
   exitCode: number
   stdout: string
   stderr: string
-  status?: "timeout"
+  status?: 'timeout'
   resourceContainment?: true
   timeoutMs?: number
 }>
@@ -101,15 +122,21 @@ export interface RunnerFileSystem {
   symlink(target: string, path: string): Promise<void>
 }
 
-function nodeFileInfo(value: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean; size: number; mtimeMs: number }): RunnerFileInfo {
-  const kind = value.isSymbolicLink() ? "symlink" : value.isDirectory() ? "directory" : "file"
+function nodeFileInfo(value: {
+  isFile(): boolean
+  isDirectory(): boolean
+  isSymbolicLink(): boolean
+  size: number
+  mtimeMs: number
+}): RunnerFileInfo {
+  const kind = value.isSymbolicLink() ? 'symlink' : value.isDirectory() ? 'directory' : 'file'
   return {
     kind,
     size: value.size,
     mtimeMs: value.mtimeMs,
-    isFile: () => kind === "file",
-    isDirectory: () => kind === "directory",
-    isSymbolicLink: () => kind === "symlink",
+    isFile: () => kind === 'file',
+    isDirectory: () => kind === 'directory',
+    isSymbolicLink: () => kind === 'symlink',
   }
 }
 
@@ -123,8 +150,10 @@ export const nodeRunnerFileSystem: RunnerFileSystem = {
     }
   },
   exists: (path) => existsSync(path),
-  ensureDir: async (path) => { await mkdir(path, { recursive: true }) },
-  readText: async (path) => await readFile(path, "utf8"),
+  ensureDir: async (path) => {
+    await mkdir(path, { recursive: true })
+  },
+  readText: async (path) => await readFile(path, 'utf8'),
   readBinary: async (path) => new Uint8Array(await readFile(path)),
   writeText: async (path, content, options) => {
     await mkdir(dirname(path), { recursive: true })
@@ -154,11 +183,11 @@ export const nodeRunnerFileSystem: RunnerFileSystem = {
   },
   realpath: async (path) => await realpath(path),
   readTail: async (path, start, length) => {
-    const handle = await open(path, "r")
+    const handle = await open(path, 'r')
     try {
       const buffer = Buffer.alloc(length)
       await handle.read(buffer, 0, length, start)
-      return buffer.toString("utf8")
+      return buffer.toString('utf8')
     } finally {
       await handle.close()
     }
@@ -176,7 +205,7 @@ export interface RunnerResourceContext {
   readonly fileSystem?: RunnerFileSystem
   readonly runnerCredentialFileSystem?: {
     mkdirSync(path: string, options?: { recursive?: boolean }): void
-    readFileSync(path: string, encoding: "utf8"): string
+    readFileSync(path: string, encoding: 'utf8'): string
     writeFileSync(path: string, content: string, options?: { mode?: number }): void
   }
   readonly logger?: RunnerLogger
@@ -192,9 +221,21 @@ export interface RunnerResourceContext {
   readonly executorLockHolderProbe?: LockHolderProbe
   readonly worktreeClock?: () => number
   readonly commandRunner?: {
-    run(command: string, args: string[], cwd: string, signal: AbortSignal, env?: NodeJS.ProcessEnv, options?: unknown): Promise<unknown>
+    run(
+      command: string,
+      args: string[],
+      cwd: string,
+      signal: AbortSignal,
+      env?: NodeJS.ProcessEnv,
+      options?: unknown,
+    ): Promise<unknown>
   }
-  readonly issueFieldCommandRunner?: (command: string, args: string[], cwd: string, signal: AbortSignal) => Promise<{
+  readonly issueFieldCommandRunner?: (
+    command: string,
+    args: string[],
+    cwd: string,
+    signal: AbortSignal,
+  ) => Promise<{
     exitCode: number
     stdout: string
     stderr: string
@@ -207,11 +248,18 @@ export interface RunnerResourceContext {
   readonly transport?: { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> }
   readonly gitRunner?: RunnerGitRunner
   readonly deliveryGitRunner?: RunnerGitRunner
-  readonly signalRGitRunner?: (command: string, args: string[], cwd: string, signal: AbortSignal, env?: NodeJS.ProcessEnv, options?: CommandLineOptions) => Promise<{
+  readonly signalRGitRunner?: (
+    command: string,
+    args: string[],
+    cwd: string,
+    signal: AbortSignal,
+    env?: NodeJS.ProcessEnv,
+    options?: CommandLineOptions,
+  ) => Promise<{
     exitCode: number
     stdout: string
     stderr: string
-    status?: "timeout"
+    status?: 'timeout'
     timeoutMs?: number
   }>
   readonly signalRExistsChecker?: (path: string) => boolean
@@ -224,7 +272,10 @@ export interface RunnerResourceContext {
   readonly rebaseGitRunner?: RunnerGitRunner
   readonly rebaseExistsChecker?: (path: string) => boolean
   readonly pushGitRunner?: RunnerGitRunner
-  readonly cleanupAgentAction?: (host: import("../actions/host.js").ActionHost, withInput: import("../core/types.js").JsonObject) => Promise<import("../core/types.js").ActionResult>
+  readonly cleanupAgentAction?: (
+    host: import('../actions/host.js').ActionHost,
+    withInput: import('../core/types.js').JsonObject,
+  ) => Promise<import('../core/types.js').ActionResult>
 }
 
 const resourceStorage = new AsyncLocalStorage<RunnerResourceContext>()
@@ -237,11 +288,20 @@ export function currentRunnerFileSystem(): RunnerFileSystem {
   return resourceStorage.getStore()?.fileSystem ?? nodeRunnerFileSystem
 }
 
-export async function withRunnerResources<T>(resources: RunnerResourceContext, operation: () => Promise<T>): Promise<T> {
+export async function withRunnerResources<T>(
+  resources: RunnerResourceContext,
+  operation: () => Promise<T>,
+): Promise<T> {
   return await resourceStorage.run(resources, operation)
 }
 
-export function createNodeFileInfo(value: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean; size: number; mtimeMs: number }): RunnerFileInfo {
+export function createNodeFileInfo(value: {
+  isFile(): boolean
+  isDirectory(): boolean
+  isSymbolicLink(): boolean
+  size: number
+  mtimeMs: number
+}): RunnerFileInfo {
   return nodeFileInfo(value)
 }
 

@@ -257,9 +257,14 @@ export async function reattachTurn(
     return { ok: false, error, diagnostics: error.diagnostics }
   }
   try {
-    const messages = await (deps.client.session as unknown as {
-      messages: (parameters: { sessionID: string; limit?: number }, options?: { throwOnError?: boolean }) => Promise<unknown>
-    }).messages({ sessionID: sessionId, limit: 100 }, { throwOnError: true })
+    const messages = await (
+      deps.client.session as unknown as {
+        messages: (
+          parameters: { sessionID: string; limit?: number },
+          options?: { throwOnError?: boolean },
+        ) => Promise<unknown>
+      }
+    ).messages({ sessionID: sessionId, limit: 100 }, { throwOnError: true })
     const finalAssistantText = extractReattachedAssistantText(messages)
     return {
       ok: true,
@@ -270,7 +275,9 @@ export async function reattachTurn(
       diagnostics: [],
     }
   } catch (cause) {
-    const error = normalizeTurnFailed({ message: errorMessage(cause, 'Failed to read the reattached Runtime Session result') })
+    const error = normalizeTurnFailed({
+      message: errorMessage(cause, 'Failed to read the reattached Runtime Session result'),
+    })
     return { ok: false, error, diagnostics: error.diagnostics }
   }
 }
@@ -387,7 +394,9 @@ function textFromParts(parts: unknown): string | null {
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 function normalizeDeadline(value: number | null | undefined): number | undefined {

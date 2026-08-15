@@ -107,16 +107,23 @@ function makeData(): SessionDataSourceResult {
 function makeComponents(): Partial<SessionDetailShellComponents> {
   return {
     SessionTranscriptLayout: ((props: any) => {
-      const values = props.viewMode === 'raw'
-        ? props.facts.map((value: TimelineFact) => value.sourceId)
-        : props.entries.map((value: TimelineItem) => value.sourceIds[0])
+      const values =
+        props.viewMode === 'raw'
+          ? props.facts.map((value: TimelineFact) => value.sourceId)
+          : props.entries.map((value: TimelineItem) => value.sourceIds[0])
       return (
         <div data-testid="timeline-fixture" data-view={props.viewMode}>
-          {values.map((value: string) => <div key={value} data-timeline-source-id={value}>{value}</div>)}
+          {values.map((value: string) => (
+            <div key={value} data-timeline-source-id={value}>
+              {value}
+            </div>
+          ))}
         </div>
       )
     }) as SessionDetailShellComponents['SessionTranscriptLayout'],
-    SessionFollowupComposer: (() => <div data-testid="followup-fixture" />) as SessionDetailShellComponents['SessionFollowupComposer'],
+    SessionFollowupComposer: (() => (
+      <div data-testid="followup-fixture" />
+    )) as SessionDetailShellComponents['SessionFollowupComposer'],
   }
 }
 

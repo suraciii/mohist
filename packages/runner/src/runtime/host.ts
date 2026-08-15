@@ -22,8 +22,6 @@ import {
   probeRuntimeBinding,
   reattachRuntimeTurn,
   resolvePersistedWorkBinding,
-  type RecoverableRuntime,
-  type RuntimeTurnRecoveryResult,
 } from './binding-recovery.js'
 import { CleanupLoop, DefaultCleanupRunner } from './cleanup-loop.js'
 import { WorkExecutor } from './executor.js'
@@ -33,26 +31,14 @@ import { createHostCleanup } from './host-cleanup.js'
 import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
 import { AWAITING_ACK_RETRY_INTERVAL_MS, boundedSignal, delay, POLL_TIMEOUT_MS, raceInterval } from './host-timing.js'
 import { TerminalTaskLogDeliveryStoreImpl, type TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
-import {
-  getOpenCodeRuntimeFactory,
-  type OpenCodeRuntime,
-  type RuntimeResult,
-  type RuntimeTurnResult,
-} from './opencode/index.js'
-import {
-  getPiRuntimeFactory,
-  parseProviderErrorPolicy,
-  type PiResult,
-  type PiRuntime,
-  type PiTurnResult,
-} from './pi/index.js'
+import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
+import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
 import { SessionCommandJournal } from './session-command-journal.js'
 import { FollowupOperationJournal } from './followup-operation-journal.js'
 import { CancelOperationJournal } from './cancel-operation-journal.js'
 import { WorkResultJournal, workKey as journalWorkKey } from './work-result-journal.js'
 import { RecoveredStartedWork } from './recovered-started-work.js'
 import { runnerRestartedResult } from './work-report.js'
-import { projectPiTurnToWorkItemResult, projectTurnToWorkItemResult } from './agent-job-turn.js'
 import { loadBuildInfo } from './build-info.js'
 import type { DispatchWorkItem } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
@@ -63,6 +49,16 @@ import { runnerLogger } from '../system/logger.js'
 import { probePrlimit } from '../system/process.js'
 import { normalizeWorkResourceLimits, type ResolvedWorkResourceLimits } from './resource-containment.js'
 import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
+import {
+  boundedSignal,
+  delay,
+  projectReattachedRuntimeResult,
+  raceInterval,
+  runtimeForKind,
+  runtimeKindForWork,
+  type RuntimeKind,
+  usesOpenCode,
+} from './host-helpers.js'
 
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
@@ -111,70 +107,6 @@ interface AwaitingAckEntry {
  * `workKey` convention.
  */
 const workKey = journalWorkKey
-
-function usesOpenCode(work: DispatchWorkItem): boolean {
-  return runtimeKindForWork(work) === 'opencode'
-}
-
-type RuntimeKind = 'opencode' | 'pi'
-
-function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {
-  const declared = typeof work.with?.runtime === 'string' ? work.with.runtime : work.agentDefinition?.runtime
-  const candidate = (declared ?? work.uses ?? '').trim().toLowerCase()
-  if (candidate === 'opencode' || candidate === 'mohist/opencode') return 'opencode'
-  if (candidate === 'pi' || candidate === 'mohist/pi') return 'pi'
-  return null
-}
-
-function runtimeForKind(
-  kind: RuntimeKind,
-  openCodeRuntime: OpenCodeRuntime | null,
-  piRuntime: PiRuntime | null,
-): RecoverableRuntime | null {
-  if (kind === 'opencode') return openCodeRuntime ? { kind, runtime: openCodeRuntime } : null
-  return piRuntime ? { kind, runtime: piRuntime } : null
-}
-
-function projectReattachedRuntimeResult(
-  work: DispatchWorkItem,
-  runtimeKind: RuntimeKind,
-  adopted: RuntimeTurnRecoveryResult,
-): WorkItemResult {
-  const model = stringProperty(work.with, 'model') ?? work.agentDefinition?.model ?? null
-  const variant = stringProperty(work.with, 'variant') ?? work.agentDefinition?.variant ?? null
-  if (work.ownerKind === 'agent-job') {
-    return runtimeKind === 'opencode'
-      ? projectTurnToWorkItemResult(adopted as RuntimeResult<RuntimeTurnResult>, runtimeKind, model, variant)
-      : projectPiTurnToWorkItemResult(adopted as PiResult<PiTurnResult>, runtimeKind, model, variant)
-  }
-  if (!adopted.ok) {
-    return {
-      status: 'failed',
-      message: adopted.error.message,
-      error: { code: adopted.error.kind, message: adopted.error.message },
-      exitCode: 1,
-    }
-  }
-  return {
-    status: 'completed',
-    message: 'Agent turn completed after runner restart',
-    output: {
-      kind: runtimeKind,
-      status: 'success',
-      runtimeSessionId: adopted.value.facts.runtimeSessionId,
-      model,
-      variant,
-      text: adopted.value.facts.finalAssistantText,
-      diagnostics: adopted.value.diagnostics.map((diagnostic) => ({ code: diagnostic.code, message: diagnostic.message })),
-    },
-    exitCode: 0,
-  }
-}
-
-function stringProperty(value: Record<string, unknown> | null | undefined, key: string): string | null {
-  const candidate = value?.[key]
-  return typeof candidate === 'string' ? candidate : null
-}
 
 /**
  * True when the dispatch is an unresolved-agent recovery probe: the
@@ -504,8 +436,12 @@ export class RunnerHost {
     this.openCodeRuntime = factory({
       directory: process.cwd(),
       ...(this.options.runtimeIdleGraceMs !== undefined ? { idleGraceMs: this.options.runtimeIdleGraceMs } : {}),
-      ...(this.options.quarantineDrainTimeoutMs !== undefined ? { quarantineDrainTimeoutMs: this.options.quarantineDrainTimeoutMs } : {}),
-      ...(this.options.runtimeShutdownTimeoutMs !== undefined ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs } : {}),
+      ...(this.options.quarantineDrainTimeoutMs !== undefined
+        ? { quarantineDrainTimeoutMs: this.options.quarantineDrainTimeoutMs }
+        : {}),
+      ...(this.options.runtimeShutdownTimeoutMs !== undefined
+        ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
+        : {}),
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const startResult = await this.openCodeRuntime.start(signal)
@@ -517,7 +453,9 @@ export class RunnerHost {
     this.syncOpenCodeWorkOwners()
     this.piRuntime = getPiRuntimeFactory()({
       agentDir: this.options.runnerRoot,
-      ...(this.options.runtimeShutdownTimeoutMs !== undefined ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs } : {}),
+      ...(this.options.runtimeShutdownTimeoutMs !== undefined
+        ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
+        : {}),
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const piStart = await this.piRuntime.start()
@@ -823,11 +761,7 @@ export class RunnerHost {
    * and the next delivery may retry the probe. No branch in this method can
    * call the normal executor for a fenced work item.
    */
-  private async reconcileStartedDispatch(
-    work: DispatchWorkItem,
-    signal: AbortSignal,
-    key: string,
-  ): Promise<void> {
+  private async reconcileStartedDispatch(work: DispatchWorkItem, signal: AbortSignal, key: string): Promise<void> {
     let result: WorkItemResult | null
     let interruption: ReturnType<typeof runnerRestartedResult>['interruption'] | undefined
     try {
@@ -852,7 +786,10 @@ export class RunnerHost {
   private async reconcileStartedWork(
     work: DispatchWorkItem,
     signal: AbortSignal,
-  ): Promise<{ result: WorkItemResult; interruption?: ReturnType<typeof runnerRestartedResult>['interruption'] } | null> {
+  ): Promise<{
+    result: WorkItemResult
+    interruption?: ReturnType<typeof runnerRestartedResult>['interruption']
+  } | null> {
     if (signal.aborted) return null
     const runtimeKind = runtimeKindForWork(work)
     if (!runtimeKind) return runnerRestartedResult(work)

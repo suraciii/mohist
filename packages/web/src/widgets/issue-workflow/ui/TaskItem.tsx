@@ -210,11 +210,11 @@ export function TaskItem({
   const hasArtifacts = artifactSummaries.length > 0
   const isDeliveryTask = isDeliveryFailureTask(task)
   const taskReason =
-    task.error?.message
-    ?? (typeof task.reason === 'string' ? task.reason : null)
-    ?? settlement?.message
-    ?? task.interruption?.reasonCode
-    ?? null
+    task.error?.message ??
+    (typeof task.reason === 'string' ? task.reason : null) ??
+    settlement?.message ??
+    task.interruption?.reasonCode ??
+    null
   const deliveryFailure = isFailed && isDeliveryTask ? getDeliveryFailureGuidance(task.error?.code) : null
   const resolvedTaskLogHook = taskLogHook ?? useDefaultTaskLogData
   const taskLogResult = resolvedTaskLogHook({
@@ -226,7 +226,14 @@ export function TaskItem({
   })
   const hasLogs = task.taskId.trim().length > 0 && (isRunning || (taskLogResult.data?.lines.length ?? 0) > 0)
   const canExpand =
-    hasLogs || hasArtifacts || hasRequiredFiles || isFailed || isBlocked || isRecoverableInterrupted || hasOutput || deliveryFailure != null
+    hasLogs ||
+    hasArtifacts ||
+    hasRequiredFiles ||
+    isFailed ||
+    isBlocked ||
+    isRecoverableInterrupted ||
+    hasOutput ||
+    deliveryFailure != null
 
   let icon: React.ReactNode
   if (task.status === 'completed') {

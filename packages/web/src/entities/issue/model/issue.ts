@@ -169,7 +169,21 @@ export interface Issue {
   muted?: IssueWatchEntry[] | null
 }
 
-export interface IssueListItem extends Pick<Issue, 'number' | 'title' | 'status' | 'health' | 'projectId' | 'labels' | 'createdAt' | 'updatedAt' | 'isDraft' | 'canStart' | 'blocker'> {
+export interface IssueListItem
+  extends Pick<
+    Issue,
+    | 'number'
+    | 'title'
+    | 'status'
+    | 'health'
+    | 'projectId'
+    | 'labels'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'isDraft'
+    | 'canStart'
+    | 'blocker'
+  > {
   projectName?: string
   priority?: string | null
   risk?: string | null

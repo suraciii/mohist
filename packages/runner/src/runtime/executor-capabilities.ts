@@ -384,7 +384,8 @@ function buildAgentTurnCapability(
         )
       }
 
-      const deadlineMs = minPositive(request.deadlineMs, deps.workResourceLimits?.turnBudgetMs) ?? DEFAULT_TURN_DEADLINE_MS
+      const deadlineMs =
+        minPositive(request.deadlineMs, deps.workResourceLimits?.turnBudgetMs) ?? DEFAULT_TURN_DEADLINE_MS
       const modelOptions = modelName ? parseModelIdentifier(modelName) : null
       if (
         !freshRuntimeSessionRequired &&

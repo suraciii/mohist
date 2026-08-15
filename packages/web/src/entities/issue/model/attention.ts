@@ -8,10 +8,7 @@ export type IssueAttentionItem = {
 }
 
 function isIntegrateFailure(issue: Issue): boolean {
-  return (
-    issue.workflowStage === WorkflowStage.Integrate
-    && issue.health === IssueHealth.Blocked
-  )
+  return issue.workflowStage === WorkflowStage.Integrate && issue.health === IssueHealth.Blocked
 }
 
 function classifyIssueAttention(issue: Issue): IssueAttentionItem | null {

@@ -1,4 +1,13 @@
-import { ActivityIcon, CheckCircle2Icon, CircleDashedIcon, ClockIcon, HourglassIcon, PauseCircleIcon, PlayCircleIcon, XCircleIcon } from 'lucide-react'
+import {
+  ActivityIcon,
+  CheckCircle2Icon,
+  CircleDashedIcon,
+  ClockIcon,
+  HourglassIcon,
+  PauseCircleIcon,
+  PlayCircleIcon,
+  XCircleIcon,
+} from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import type { WorkflowRunStatus } from '../../../entities/issue'
 
@@ -145,9 +154,7 @@ function isKnownRunStatus(value: string): value is WorkflowRunStatus {
 export function WorkflowRunStatusPill({ status, className }: WorkflowRunStatusPillProps) {
   if (!status) return null
 
-  const presentation = status && isKnownRunStatus(status)
-    ? PRESENTATION_BY_STATUS[status]
-    : UNKNOWN_PRESENTATION
+  const presentation = status && isKnownRunStatus(status) ? PRESENTATION_BY_STATUS[status] : UNKNOWN_PRESENTATION
   const Icon = presentation.icon
   const dataStatus = status && isKnownRunStatus(status) ? status : 'unknown'
 

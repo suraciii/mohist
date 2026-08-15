@@ -8,7 +8,17 @@ export function CheckItem({ check, attemptLabel }: { check: StageCheckState; att
   const isRecoverableInterrupted = check.status === 'recoverable-interrupted'
   const isFailed = check.status === 'failed' || check.status === 'error'
   const isHealthCheck = isScriptHealthCheck(check)
-  const healthOutput = check.output as { command?: string; duration?: number; summary?: string; logExcerpt?: string; enabled?: boolean; exitCode?: number; timedOut?: boolean } | undefined
+  const healthOutput = check.output as
+    | {
+        command?: string
+        duration?: number
+        summary?: string
+        logExcerpt?: string
+        enabled?: boolean
+        exitCode?: number
+        timedOut?: boolean
+      }
+    | undefined
 
   let icon: React.ReactNode
   if (check.status === 'completed' || check.status === 'passed') {
@@ -47,18 +57,27 @@ export function CheckItem({ check, attemptLabel }: { check: StageCheckState; att
         </span>
       )}
       {originLabel && (
-        <span className="text-[11px] text-muted-foreground flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
+        <span className="text-[11px] text-muted-foreground flex-shrink-0 font-mono" title={originTitle}>
+          {originLabel}
+        </span>
       )}
       {isHealthCheck && healthOutput && (
         <>
           {healthOutput.command && (
-            <span className="text-xs text-muted-foreground flex-shrink-0 font-mono truncate max-w-32" title={healthOutput.command}>{healthOutput.command}</span>
+            <span
+              className="text-xs text-muted-foreground flex-shrink-0 font-mono truncate max-w-32"
+              title={healthOutput.command}
+            >
+              {healthOutput.command}
+            </span>
           )}
           {healthOutput.duration != null && (
             <span className="text-xs text-muted-foreground flex-shrink-0">{formatDuration(healthOutput.duration)}</span>
           )}
           {isFailed && healthOutput.summary && (
-            <span className="text-xs text-danger flex-shrink-0 truncate max-w-48" title={healthOutput.summary}>{healthOutput.summary}</span>
+            <span className="text-xs text-danger flex-shrink-0 truncate max-w-48" title={healthOutput.summary}>
+              {healthOutput.summary}
+            </span>
           )}
         </>
       )}

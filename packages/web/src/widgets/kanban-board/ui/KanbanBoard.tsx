@@ -55,11 +55,7 @@ function PriorityChips({
 }) {
   return (
     <div className="flex items-center gap-1">
-      {showLabel && (
-        <span className="text-[11px] text-muted-foreground font-medium mr-1">
-          Priority:
-        </span>
-      )}
+      {showLabel && <span className="text-[11px] text-muted-foreground font-medium mr-1">Priority:</span>}
       {ALL_PRIORITIES.map((p) => {
         const style = getPriorityStyle(p)
         const isActive = active.includes(p)
@@ -98,13 +94,7 @@ function PriorityChips({
   )
 }
 
-function LabelTrigger({
-  selectedCount,
-  onClick,
-}: {
-  selectedCount: number
-  onClick: () => void
-}) {
+function LabelTrigger({ selectedCount, onClick }: { selectedCount: number; onClick: () => void }) {
   if (selectedCount > 0) {
     return (
       <Button
@@ -116,9 +106,7 @@ function LabelTrigger({
         className="h-7 rounded-full px-2.5 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-100"
       >
         <span>Labels:</span>
-        <span className="ml-1 rounded-full bg-blue-600 text-white px-1.5 text-[10px]">
-          {selectedCount}
-        </span>
+        <span className="ml-1 rounded-full bg-blue-600 text-white px-1.5 text-[10px]">{selectedCount}</span>
       </Button>
     )
   }
@@ -146,16 +134,8 @@ function SortToggle({
 }) {
   return (
     <div className="flex items-center gap-0.5 ml-auto">
-      {showLabel && (
-        <span className="text-[11px] text-muted-foreground/70 font-medium mr-1">
-          Sort:
-        </span>
-      )}
-      {!showLabel && (
-        <span className="text-[11px] text-muted-foreground/70 font-medium mr-1">
-          Sort
-        </span>
-      )}
+      {showLabel && <span className="text-[11px] text-muted-foreground/70 font-medium mr-1">Sort:</span>}
+      {!showLabel && <span className="text-[11px] text-muted-foreground/70 font-medium mr-1">Sort</span>}
       {SORT_OPTIONS.map((opt) => (
         <Button
           key={opt.value}
@@ -195,11 +175,7 @@ function RepositoryFilter({
   const hasUnknown = !!selected && !repositories.includes(selected)
   return (
     <div className="flex items-center gap-1">
-      {showLabel && (
-        <span className="text-[11px] text-muted-foreground font-medium mr-1">
-          Repository:
-        </span>
-      )}
+      {showLabel && <span className="text-[11px] text-muted-foreground font-medium mr-1">Repository:</span>}
       <select
         aria-label="Repository"
         data-testid={dataTestId}
@@ -208,9 +184,7 @@ function RepositoryFilter({
         value={value}
         onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
         className={`h-7 rounded-md border border-input bg-background px-2 text-xs font-medium ${
-          value
-            ? 'text-blue-700 ring-1 ring-blue-200'
-            : 'text-muted-foreground'
+          value ? 'text-blue-700 ring-1 ring-blue-200' : 'text-muted-foreground'
         }`}
       >
         <option value="">All repositories</option>
@@ -219,9 +193,7 @@ function RepositoryFilter({
             {name}
           </option>
         ))}
-        {hasUnknown && selected && (
-          <option value={selected}>{`${selected} (unknown)`}</option>
-        )}
+        {hasUnknown && selected && <option value={selected}>{`${selected} (unknown)`}</option>}
       </select>
       {value && (
         <Button
@@ -268,9 +240,7 @@ function FilterBar({
   const togglePriority = useCallback(
     (p: string) => {
       const has = state.priorities.includes(p)
-      const next = has
-        ? state.priorities.filter((x) => x !== p)
-        : [...state.priorities, p]
+      const next = has ? state.priorities.filter((x) => x !== p) : [...state.priorities, p]
       onChange({ ...state, priorities: next })
     },
     [state, onChange],
@@ -296,14 +266,7 @@ function FilterBar({
 
   const labelPopover = (
     <Popover>
-      <PopoverTrigger
-        render={
-          <LabelTrigger
-            selectedCount={state.labels.length}
-            onClick={() => undefined}
-          />
-        }
-      />
+      <PopoverTrigger render={<LabelTrigger selectedCount={state.labels.length} onClick={() => undefined} />} />
       <PopoverContent className="origin-top-right w-72 p-0" align="start">
         <div className="p-2 border-b">
           <Input
@@ -317,9 +280,7 @@ function FilterBar({
         </div>
         <div className="max-h-64 overflow-y-auto p-2">
           {filteredLabels.length === 0 ? (
-            <div className="py-4 text-center text-xs text-muted-foreground/70">
-              No labels found
-            </div>
+            <div className="py-4 text-center text-xs text-muted-foreground/70">No labels found</div>
           ) : (
             <div className="flex flex-wrap gap-1">
               {filteredLabels.map((pair) => {
@@ -372,11 +333,7 @@ function FilterBar({
           onClear={() => onChange({ ...state, priorities: [] })}
         />
         {allLabels.length > 0 && labelPopover}
-        <RepositoryFilter
-          repositories={repositories}
-          selected={state.repository}
-          onChange={setRepository}
-        />
+        <RepositoryFilter repositories={repositories} selected={state.repository} onChange={setRepository} />
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
           <Input
@@ -427,10 +384,7 @@ function FilterBar({
         </div>
 
         {mobileFiltersOpen && (
-          <div
-            data-testid="mobile-filter-panel"
-            className="space-y-2 rounded-md border bg-muted p-2"
-          >
+          <div data-testid="mobile-filter-panel" className="space-y-2 rounded-md border bg-muted p-2">
             <div className="flex flex-wrap items-center gap-1.5">
               <PriorityChips
                 active={state.priorities}
@@ -445,9 +399,7 @@ function FilterBar({
                 <Button
                   variant="link"
                   size="xs"
-                  onClick={() =>
-                    onChange({ ...state, priorities: [], labels: [] })
-                  }
+                  onClick={() => onChange({ ...state, priorities: [], labels: [] })}
                   className="h-auto p-0 text-muted-foreground/70"
                 >
                   Clear filters
@@ -473,19 +425,12 @@ function FilterBar({
   )
 }
 
-function NeedsAttentionSummary({
-  items,
-}: {
-  items: AttentionItem[]
-}) {
+function NeedsAttentionSummary({ items }: { items: AttentionItem[] }) {
   const toProjectPath = useProjectPath()
   const issueItems = items.filter(isIssueAttentionItem)
-  const summaryFamily = issueItems.some((item) => attentionFamily(item) === 'danger')
-    ? 'danger'
-    : 'warning'
-  const summaryContainer = summaryFamily === 'danger'
-    ? 'bg-danger-subtle border-danger-border'
-    : 'bg-warning-subtle border-warning-border'
+  const summaryFamily = issueItems.some((item) => attentionFamily(item) === 'danger') ? 'danger' : 'warning'
+  const summaryContainer =
+    summaryFamily === 'danger' ? 'bg-danger-subtle border-danger-border' : 'bg-warning-subtle border-warning-border'
   const summaryDot = summaryFamily === 'danger' ? 'bg-danger' : 'bg-warning'
 
   if (issueItems.length === 0) return null
@@ -499,15 +444,13 @@ function NeedsAttentionSummary({
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${summaryDot}`} />
       <div className="px-4 sm:px-6 py-2.5 flex items-start gap-3">
         <div className="flex items-center gap-1.5 pt-0.5">
-          <span className={`inline-flex items-center justify-center size-5 rounded-full ${summaryDot} text-warning-foreground`}>
+          <span
+            className={`inline-flex items-center justify-center size-5 rounded-full ${summaryDot} text-warning-foreground`}
+          >
             <AlertTriangleIcon className="size-3" />
           </span>
-          <span className="text-xs font-semibold uppercase tracking-wide">
-            Needs attention
-          </span>
-          <span className="text-xs font-medium opacity-80">
-            ({issueItems.length})
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-wide">Needs attention</span>
+          <span className="text-xs font-medium opacity-80">({issueItems.length})</span>
         </div>
         <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
           {issueItems.slice(0, 6).map((item) => {
@@ -522,22 +465,16 @@ function NeedsAttentionSummary({
                 data-family={family}
                 className={`inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow border ${border} transition-shadow`}
               >
-                <span className={`font-mono font-semibold ${text}`}>
-                  #{item.issueNumber}
-                </span>
+                <span className={`font-mono font-semibold ${text}`}>#{item.issueNumber}</span>
                 <span className="font-medium text-foreground">{item.label}</span>
                 {item.detail && (
-                  <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
-                    {item.detail}
-                  </span>
+                  <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">{item.detail}</span>
                 )}
               </a>
             )
           })}
           {issueItems.length > 6 && (
-            <span className="text-xs self-center font-medium">
-              +{issueItems.length - 6} more
-            </span>
+            <span className="text-xs self-center font-medium">+{issueItems.length - 6} more</span>
           )}
         </div>
       </div>
@@ -574,19 +511,15 @@ function getSearchParams(): string {
   return typeof window !== 'undefined' ? window.location.search : ''
 }
 
-export function KanbanBoard({
-  issues,
-  agentStatus,
-  archivedCount = 0,
-  runnerSummaryHook = useRunnerSummary,
-}: Props) {
+export function KanbanBoard({ issues, agentStatus, archivedCount = 0, runnerSummaryHook = useRunnerSummary }: Props) {
   const { projectId, projects } = useProject()
   const project = projects?.find((candidate) => candidate.id === projectId)
   const allLabels = useMemo(() => deriveLabelPairsFromIssues(issues), [issues])
   const repositoryOptions = useMemo(
-    () => project?.repositories.length
-      ? project.repositories.map((repository) => repository.name).sort((a, b) => a.localeCompare(b))
-      : deriveRepositoryOptions(issues),
+    () =>
+      project?.repositories.length
+        ? project.repositories.map((repository) => repository.name).sort((a, b) => a.localeCompare(b))
+        : deriveRepositoryOptions(issues),
     [issues, project],
   )
 
@@ -603,10 +536,7 @@ export function KanbanBoard({
     return () => window.removeEventListener('popstate', handler)
   }, [])
 
-  const filteredColumns = useMemo(
-    () => deriveBoardColumns(allColumns, localState),
-    [allColumns, localState],
-  )
+  const filteredColumns = useMemo(() => deriveBoardColumns(allColumns, localState), [allColumns, localState])
 
   // Mobile tab badge counts and the in-list Show/Hide cancelled link read
   // from `allColumns` (pre-filter, pre-toggle). The badge answers "how many
@@ -614,10 +544,7 @@ export function KanbanBoard({
   // must stay stable when the user toggles `showCancelled` or applies a
   // board query filter. The list body below still iterates `displayedColumns`
   // so the toggle actually hides the cards in the mobile list.
-  const { cancelledCount } = useMemo(
-    () => getCancelledColumnCount(allColumns),
-    [allColumns],
-  )
+  const { cancelledCount } = useMemo(() => getCancelledColumnCount(allColumns), [allColumns])
 
   const updateState = useCallback((newState: BoardQueryState) => {
     setLocalState(newState)
@@ -655,10 +582,7 @@ export function KanbanBoard({
     return selectedColumn
   }, [selectedColumn, selectedStage, showCancelled])
 
-  const attentionItems = useMemo(
-    () => deriveAttentionItems(issues, agentStatus),
-    [issues, agentStatus],
-  )
+  const attentionItems = useMemo(() => deriveAttentionItems(issues, agentStatus), [issues, agentStatus])
 
   return (
     <div data-testid="kanban-board-root" className="flex flex-col min-w-0 h-[calc(100vh-3rem)]">
@@ -686,15 +610,9 @@ export function KanbanBoard({
                 data-testid={`mobile-stage-tab-${col.key}`}
                 data-active={active}
                 className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap snap-start transition-colors min-h-[44px] border-b-2 rounded-none ${
-                  active
-                    ? `${colors.labelClass}`
-                    : 'text-muted-foreground border-transparent hover:text-foreground/80'
+                  active ? `${colors.labelClass}` : 'text-muted-foreground border-transparent hover:text-foreground/80'
                 }`}
-                style={
-                  active
-                    ? { borderBottomColor: colors.accent, color: colors.accent }
-                    : undefined
-                }
+                style={active ? { borderBottomColor: colors.accent, color: colors.accent } : undefined}
               >
                 <span
                   className="inline-block h-2 w-2 rounded-full"
@@ -721,9 +639,7 @@ export function KanbanBoard({
               data-testid="mobile-cancelled-toggle"
               onClick={() => setShowCancelled((value) => !value)}
             >
-              {showCancelled
-                ? 'Hide cancelled'
-                : `Show cancelled (${cancelledCount})`}
+              {showCancelled ? 'Hide cancelled' : `Show cancelled (${cancelledCount})`}
             </Button>
           </div>
         )}
@@ -763,12 +679,8 @@ export function KanbanBoard({
                     className="inline-block h-2 w-2 rounded-full shrink-0"
                     style={{ backgroundColor: colors.accent }}
                   />
-                  <h2 className={`text-xs font-semibold uppercase tracking-wide ${colors.labelClass}`}>
-                    {col.label}
-                  </h2>
-                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                    {col.issues.length}
-                  </span>
+                  <h2 className={`text-xs font-semibold uppercase tracking-wide ${colors.labelClass}`}>{col.label}</h2>
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">{col.issues.length}</span>
                 </div>
                 <div className="flex-1 flex items-center justify-center p-2">
                   <Button

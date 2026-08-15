@@ -403,7 +403,9 @@ export function SessionDetailShell({
             >
               <div className="font-semibold">Recovering</div>
               {launchObservation.jobFailureReason && <div>Reason: {launchObservation.jobFailureReason}</div>}
-              {launchObservation.recoveryDeadlineAt && <div>Recovery deadline: {launchObservation.recoveryDeadlineAt}</div>}
+              {launchObservation.recoveryDeadlineAt && (
+                <div>Recovery deadline: {launchObservation.recoveryDeadlineAt}</div>
+              )}
             </div>
           )}
           {recoveryBarContent && (

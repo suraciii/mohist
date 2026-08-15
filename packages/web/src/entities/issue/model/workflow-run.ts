@@ -1,4 +1,10 @@
-import type { WorkItemOrigin, StageApprovalState, WorkflowTaskCause, WorkflowFailureDetails, WorkInterruption } from './stage-state'
+import type {
+  WorkItemOrigin,
+  StageApprovalState,
+  WorkflowTaskCause,
+  WorkflowFailureDetails,
+  WorkInterruption,
+} from './stage-state'
 
 /**
  * Tracks the wire status of a WorkflowRun as emitted by
@@ -39,7 +45,14 @@ export function isTerminalWorkflowRunStatus(status: WorkflowRunStatus | string |
   return status === 'stopped' || status === 'completed'
 }
 
-export type WorkflowTaskStatus = 'pending' | 'running' | 'recoverable-interrupted' | 'completed' | 'failed' | 'skipped' | 'blocked'
+export type WorkflowTaskStatus =
+  | 'pending'
+  | 'running'
+  | 'recoverable-interrupted'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
 export type WorkflowCheckStatus = 'pending' | 'running' | 'recoverable-interrupted' | 'passed' | 'failed' | 'error'
 
 /**

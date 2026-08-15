@@ -69,6 +69,7 @@ export interface IssueDetailPageProps {
 
 type DecisionSummary =
   | 'running'
+  | 'recoverable-interrupted'
   | 'queued'
   | 'approval-required'
   | 'blocked'
@@ -79,7 +80,16 @@ type DecisionSummary =
   | 'terminal-no-action'
 
 function decisionSummaryFromRuntime(
-  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled' | undefined,
+  summary:
+    | 'running'
+    | 'recoverable-interrupted'
+    | 'queued'
+    | 'approval-required'
+    | 'blocked'
+    | 'failed'
+    | 'done'
+    | 'cancelled'
+    | undefined,
 ): DecisionSummary {
   if (!summary) return 'terminal-no-action'
   return summary

@@ -15,11 +15,11 @@
  * factory seam, so unit tests never trigger a real spawn.
  */
 
-import { createOpencodeClient, createOpencodeServer } from "@opencode-ai/sdk/v2"
-import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import { Agent } from "undici"
-import type { Dispatcher } from "undici"
-import { boundedTimeoutMs, boundedWait } from "../bounded-wait.js"
+import { createOpencodeClient, createOpencodeServer } from '@opencode-ai/sdk/v2'
+import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import { Agent } from 'undici'
+import type { Dispatcher } from 'undici'
+import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 
 export const DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS = 30_000
 
@@ -80,17 +80,18 @@ export const createSpawnedOpencodeServer: OpencodeServerFactory = async (directo
 
 export async function terminateOpencodeTree(
   server: { close(): void | Promise<void>; readonly process?: OpencodeProcessControl; readonly pid?: number },
-  dispatcher: Pick<Dispatcher, "close" | "destroy">,
+  dispatcher: Pick<Dispatcher, 'close' | 'destroy'>,
   timeoutMs = DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS,
 ): Promise<void> {
   // The SDK's close() sends SIGTERM to the OpenCode process. Keep its wait
   // and the undici close in one bounded operation because either can be held
   // by an in-flight request.
   const completed = await boundedWait(
-    () => Promise.allSettled([
-      Promise.resolve().then(() => server.close()),
-      Promise.resolve().then(() => dispatcher.close()),
-    ]),
+    () =>
+      Promise.allSettled([
+        Promise.resolve().then(() => server.close()),
+        Promise.resolve().then(() => dispatcher.close()),
+      ]),
     boundedTimeoutMs(timeoutMs, DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS),
   )
   if (completed) return
@@ -98,7 +99,11 @@ export async function terminateOpencodeTree(
   // Abandon graceful cleanup. Destroying the dispatcher prevents future
   // callers from reusing the dead generation; killing the process group is
   // best-effort because the pinned SDK does not expose its ChildProcess.
-  try { dispatcher.destroy() } catch { /* best effort */ }
+  try {
+    dispatcher.destroy()
+  } catch {
+    /* best effort */
+  }
   forceKillProcessTree(server)
 }
 
@@ -106,10 +111,20 @@ function forceKillProcessTree(server: { readonly process?: OpencodeProcessContro
   const processControl = server.process
   const pid = processControl?.pid ?? server.pid
   if (pid !== undefined && Number.isInteger(pid) && pid > 0) {
-    try { globalThis.process.kill(-pid, "SIGKILL") } catch {
-      try { globalThis.process.kill(pid, "SIGKILL") } catch { /* best effort */ }
+    try {
+      globalThis.process.kill(-pid, 'SIGKILL')
+    } catch {
+      try {
+        globalThis.process.kill(pid, 'SIGKILL')
+      } catch {
+        /* best effort */
+      }
     }
     return
   }
-  try { processControl?.kill?.("SIGKILL") } catch { /* best effort */ }
+  try {
+    processControl?.kill?.('SIGKILL')
+  } catch {
+    /* best effort */
+  }
 }

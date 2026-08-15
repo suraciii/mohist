@@ -114,8 +114,12 @@ describe('PiRuntime shutdown', () => {
         sdkFactory: {
           create: async () => ({
             catalog: async () => [],
-            createSession: async () => { throw new Error('not used') },
-            openSession: async () => { throw new Error('not used') },
+            createSession: async () => {
+              throw new Error('not used')
+            },
+            openSession: async () => {
+              throw new Error('not used')
+            },
             model: () => undefined,
             close,
           }),

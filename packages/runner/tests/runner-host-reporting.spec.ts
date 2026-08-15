@@ -530,7 +530,11 @@ describe('RunnerHost', () => {
       await vi.advanceTimersByTimeAsync(0)
       expect(report).toHaveBeenCalledWith(
         expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({ status: 'failed', message: 'runner-restarted', error: { code: 'runner-restarted', message: 'runner-restarted' } }),
+        expect.objectContaining({
+          status: 'failed',
+          message: 'runner-restarted',
+          error: { code: 'runner-restarted', message: 'runner-restarted' },
+        }),
         expect.any(AbortSignal),
       )
       expect(blockingAction).not.toHaveBeenCalled()
@@ -690,7 +694,12 @@ describe('RunnerHost', () => {
     const run = host.run(controller.signal)
     try {
       await reported.promise
-      expect(getWorkflowAgentSession).toHaveBeenCalledWith('project-1', 'wr-restarted-live', 'work-restarted-live', expect.any(AbortSignal))
+      expect(getWorkflowAgentSession).toHaveBeenCalledWith(
+        'project-1',
+        'wr-restarted-live',
+        'work-restarted-live',
+        expect.any(AbortSignal),
+      )
       expect(resolveSession).toHaveBeenCalledTimes(1)
       expect(reattachTurn).toHaveBeenCalledTimes(1)
       expect(blockingAction).not.toHaveBeenCalled()

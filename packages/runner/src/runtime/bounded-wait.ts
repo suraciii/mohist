@@ -3,10 +3,7 @@
  * caller forever. The operation is deliberately abandoned after the bound;
  * its outcome is observed so a late rejection cannot become unhandled.
  */
-export async function boundedWait(
-  operation: () => void | PromiseLike<unknown>,
-  timeoutMs: number,
-): Promise<boolean> {
+export async function boundedWait(operation: () => void | PromiseLike<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const pending = Promise.resolve()
     .then(operation)

@@ -2,8 +2,22 @@ import type { WorkflowStage } from './issue'
 import type { WorkflowArtifactSummary, WorkflowTaskRequiredFile } from './artifact'
 import type { BaseDriftInfo } from './drift'
 
-export type StageTaskStatus = 'pending' | 'running' | 'recoverable-interrupted' | 'completed' | 'failed' | 'skipped' | 'blocked'
-export type StageCheckStatus = 'pending' | 'running' | 'recoverable-interrupted' | 'completed' | 'passed' | 'failed' | 'error'
+export type StageTaskStatus =
+  | 'pending'
+  | 'running'
+  | 'recoverable-interrupted'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
+export type StageCheckStatus =
+  | 'pending'
+  | 'running'
+  | 'recoverable-interrupted'
+  | 'completed'
+  | 'passed'
+  | 'failed'
+  | 'error'
 
 /**
  * Tracks the wire status of a workflow stage as emitted by

@@ -115,7 +115,9 @@ describe('TaskItem', () => {
     const disclosure = screen.getByRole('button', { name: /Canonical workflow task title/ })
     expect(disclosure).toHaveTextContent('recoverable-interrupted')
     fireEvent.click(disclosure)
-    await act(async () => { await Promise.resolve() })
+    await act(async () => {
+      await Promise.resolve()
+    })
 
     const interruption = screen.getByTestId('workflow-task-recoverable-interruption')
     expect(interruption).toHaveTextContent('runner-lost')

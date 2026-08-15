@@ -233,22 +233,24 @@ export class PiRuntime {
     if (request.options?.variant) session.setThinkingLevel(request.options.variant)
     const clock = this.deps.clock ?? defaultClock
     const duration = request.durationMs ?? null
-    const resourceBudgetMs = request.resourceBudgetMs !== undefined && request.resourceBudgetMs !== null && request.resourceBudgetMs > 0
-      ? request.resourceBudgetMs
-      : null
+    const resourceBudgetMs =
+      request.resourceBudgetMs !== undefined && request.resourceBudgetMs !== null && request.resourceBudgetMs > 0
+        ? request.resourceBudgetMs
+        : null
     let resourceContainmentTriggered = false
-    const resourceBudget = resourceBudgetMs === null
-      ? null
-      : clock.setTimeout(() => {
-          resourceContainmentTriggered = true
-          fixAndAbort(
-            this.finishFailure(
-              'resource-containment',
-              `Pi turn exceeded its per-work resource budget of ${resourceBudgetMs}ms`,
-              diagnostics,
-            ),
-          )
-        }, resourceBudgetMs)
+    const resourceBudget =
+      resourceBudgetMs === null
+        ? null
+        : clock.setTimeout(() => {
+            resourceContainmentTriggered = true
+            fixAndAbort(
+              this.finishFailure(
+                'resource-containment',
+                `Pi turn exceeded its per-work resource budget of ${resourceBudgetMs}ms`,
+                diagnostics,
+              ),
+            )
+          }, resourceBudgetMs)
     const deadline =
       duration !== null && duration >= 0
         ? clock.setTimeout(() => {
@@ -355,12 +357,12 @@ export class PiRuntime {
   ): Promise<PiResult<PiTurnResult>> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     const runtimeSessionId = request.target.runtimeSessionId
-    if (!runtimeSessionId) return this.failure("missing-session", "Pi turn requires a bound Session")
+    if (!runtimeSessionId) return this.failure('missing-session', 'Pi turn requires a bound Session')
     const path = normalizedPath(runtimeSessionId)
-    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     const session = await this.resolveFollowupSession(path, request.target.workDir)
     if (!session.ok) return session.failure
-    if (signal.aborted) return this.finishFailure("interrupted", "Reattached Pi turn wait was interrupted")
+    if (signal.aborted) return this.finishFailure('interrupted', 'Reattached Pi turn wait was interrupted')
 
     const result = await new Promise<PiResult<PiTurnResult>>((resolve) => {
       let settled = false
@@ -371,24 +373,31 @@ export class PiRuntime {
         settled = true
         if (timer) clearInterval(timer)
         unsubscribe()
-        signal.removeEventListener("abort", onAbort)
+        signal.removeEventListener('abort', onAbort)
         resolve(value)
       }
       const check = () => {
         if (!session.value.isStreaming) {
           finish({
             ok: true,
-            value: { facts: { finalAssistantText: finalText(session.value.messages), runtimeSessionId: path, workDir: request.target.workDir }, diagnostics: [] },
+            value: {
+              facts: {
+                finalAssistantText: finalText(session.value.messages),
+                runtimeSessionId: path,
+                workDir: request.target.workDir,
+              },
+              diagnostics: [],
+            },
             diagnostics: [],
           })
         }
       }
-      const onAbort = () => finish(this.finishFailure("interrupted", "Reattached Pi turn wait was interrupted"))
+      const onAbort = () => finish(this.finishFailure('interrupted', 'Reattached Pi turn wait was interrupted'))
       if (signal.aborted) {
         onAbort()
         return
       }
-      signal.addEventListener("abort", onAbort, { once: true })
+      signal.addEventListener('abort', onAbort, { once: true })
       unsubscribe = session.value.subscribe(() => {
         // Existing runtime events were produced while the prior runner was
         // attached. Adoption only waits for terminal state; it does not
@@ -792,7 +801,11 @@ export class PiRuntime {
 
   async shutdown(): Promise<void> {
     for (const session of this.sessions.values()) {
-      try { session.dispose() } catch { /* best effort */ }
+      try {
+        session.dispose()
+      } catch {
+        /* best effort */
+      }
     }
     this.sessions.clear()
     this.sessionMutexes.clear()

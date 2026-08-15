@@ -61,9 +61,21 @@ describe('WorkflowRunStatusPill', () => {
   })
 
   it('uses visually distinct color treatments for pending, ready, and running', () => {
-    const { container: pendingContainer } = render(<><WorkflowRunStatusPill status="pending" /></>)
-    const { container: readyContainer } = render(<><WorkflowRunStatusPill status="ready" /></>)
-    const { container: runningContainer } = render(<><WorkflowRunStatusPill status="running" /></>)
+    const { container: pendingContainer } = render(
+      <>
+        <WorkflowRunStatusPill status="pending" />
+      </>,
+    )
+    const { container: readyContainer } = render(
+      <>
+        <WorkflowRunStatusPill status="ready" />
+      </>,
+    )
+    const { container: runningContainer } = render(
+      <>
+        <WorkflowRunStatusPill status="running" />
+      </>,
+    )
 
     const pendingPill = pendingContainer.querySelector('[data-testid="workflow-run-status-pending"]') as HTMLElement
     const readyPill = readyContainer.querySelector('[data-testid="workflow-run-status-ready"]') as HTMLElement

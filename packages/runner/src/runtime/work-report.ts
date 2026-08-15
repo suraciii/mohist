@@ -31,7 +31,7 @@ export function runnerRestartedResult(work: DispatchWorkItem): {
   interruption: WorkInterruptionFact
 } {
   const ownerKind = (work.ownerKind ?? 'workflow').trim().toLowerCase() || 'workflow'
-  const ownerId = ownerKind === 'agent-job' ? work.agentJobId ?? '' : work.workflowRunId
+  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
   const interruption: WorkInterruptionFact = {
     reason: RUNNER_RESTARTED_REASON,
     ownerKind,

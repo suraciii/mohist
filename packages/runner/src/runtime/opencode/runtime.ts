@@ -17,7 +17,7 @@
  * contained inside this module.
  */
 
-import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type {
   RuntimeCancelFacts,
   RuntimeCancelRequest,
@@ -39,7 +39,7 @@ import type {
   RuntimeTurnRequest,
   RuntimeTurnResult,
   RuntimeOwnershipSnapshot,
-} from "./types.js"
+} from './types.js'
 import {
   errorKindFor,
   hasUnconfirmedCleanup,
@@ -49,25 +49,36 @@ import {
   normalizeMissingSession,
   normalizeTurnFailed,
   normalizeUnavailableRuntime,
-} from "./errors.js"
-import type { OpencodeServerFactory, OpencodeServerHandle } from "./server-process.js"
-import { DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS } from "./server-process.js"
-import { boundedTimeoutMs, boundedWait } from "../bounded-wait.js"
-import { createTimeoutSignal } from "../../system/timeout-signal.js"
-import type { RuntimeEventSubscription } from "./event-subscription.js"
-import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
+} from './errors.js'
+import type { OpencodeServerFactory, OpencodeServerHandle } from './server-process.js'
+import { DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS } from './server-process.js'
+import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
+import { createTimeoutSignal } from '../../system/timeout-signal.js'
+import type { RuntimeEventSubscription } from './event-subscription.js'
+import type { WorkspaceRemovalFenceResult } from '../workspace-removal-fence.js'
 import {
   abortAndConfirmSession,
   runTurn,
   reattachTurn as waitForReattachedTurn,
   bindTurnInFlightTracker,
   type TurnExecutionDeps,
-} from "./turn.js"
+} from './turn.js'
 import {
   OpenCodeDirectoryInstances,
   type DirectoryReclaimResult,
   type DirectoryReleaseResult,
-} from "./directory-instance.js"
+} from './directory-instance.js'
+import {
+  combineAbortSignals,
+  errorMessage,
+  newRuntimeGeneration,
+  positiveDuration,
+  toDiagnostic,
+  toRawError,
+  validateFollowupInput,
+  type ActiveGenerationTurn,
+  type RuntimeGeneration,
+} from './runtime-helpers.js'
 
 export interface OpenCodeRuntimeDeps {
   readonly directory: string
@@ -114,25 +125,6 @@ interface InternalState {
   activeOperations: number
 }
 
-interface RuntimeGeneration {
-  readonly id: number
-  readonly server: OpencodeServerHandle
-  readonly events: RuntimeEventSubscription
-  readonly drained: Promise<void>
-  readonly resolveDrained: () => void
-  readonly activeTurns: Set<ActiveGenerationTurn>
-  quarantined: boolean
-  closed: boolean
-  drainResolved: boolean
-}
-
-interface ActiveGenerationTurn {
-  readonly abortController: AbortController
-  readonly forced: Promise<void>
-  readonly resolveForced: () => void
-  forcedFailure: boolean
-}
-
 export class OpenCodeRuntime {
   private readonly deps: OpenCodeRuntimeDeps
   private readonly state: InternalState
@@ -177,7 +169,7 @@ export class OpenCodeRuntime {
   }
 
   async withRemovalFence<T>(directory: string, callback: () => Promise<T>): Promise<WorkspaceRemovalFenceResult<T>> {
-    if (!this.state.ready || !this.state.server) return { kind: "failed" }
+    if (!this.state.ready || !this.state.server) return { kind: 'failed' }
     return await this.withRuntimeOperation(() => this.directoryInstances.withRemovalFence(directory, callback))
   }
 
@@ -235,9 +227,7 @@ export class OpenCodeRuntime {
    * The result is
    * already a Mohist-owned shape (no SDK DTO leaks).
    */
-  async resolveSession(
-    request: RuntimeSessionResolveRequest,
-  ): Promise<RuntimeResult<RuntimeSessionResolveResult>> {
+  async resolveSession(request: RuntimeSessionResolveRequest): Promise<RuntimeResult<RuntimeSessionResolveResult>> {
     if (!this.state.server || !this.state.ready) {
       const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
@@ -247,101 +237,115 @@ export class OpenCodeRuntime {
       return { ok: false, error, diagnostics: error.diagnostics }
     }
     const runtimeSessionId = request.target.runtimeSessionId
-    return await this.withRuntimeOperation(() => this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
-      const server = this.state.server
-      if (!server || !this.state.ready) {
-        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-      lease.markUsed()
-      let sessionData: { id: string }
-      try {
-        const resolved = await server.client.session.get({
-          sessionID: runtimeSessionId,
-          directory: request.target.workDir,
-        }, { throwOnError: true })
-        const data = resolved.data
-        if (!data || typeof data !== "object" || data.id !== request.target.runtimeSessionId) {
-          const error = normalizeTurnFailed({ message: "OpenCode session.get returned a malformed or mismatched Session" })
+    return await this.withRuntimeOperation(() =>
+      this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+        const server = this.state.server
+        if (!server || !this.state.ready) {
+          const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
           return { ok: false, error, diagnostics: error.diagnostics }
         }
-        sessionData = data
-      } catch (cause) {
-        if ((cause as { status?: number } | undefined)?.status === 404) {
-          const error = normalizeMissingSession()
+        lease.markUsed()
+        let sessionData: { id: string }
+        try {
+          const resolved = await server.client.session.get(
+            {
+              sessionID: runtimeSessionId,
+              directory: request.target.workDir,
+            },
+            { throwOnError: true },
+          )
+          const data = resolved.data
+          if (!data || typeof data !== 'object' || data.id !== request.target.runtimeSessionId) {
+            const error = normalizeTurnFailed({
+              message: 'OpenCode session.get returned a malformed or mismatched Session',
+            })
+            return { ok: false, error, diagnostics: error.diagnostics }
+          }
+          sessionData = data
+        } catch (cause) {
+          if ((cause as { status?: number } | undefined)?.status === 404) {
+            const error = normalizeMissingSession()
+            return { ok: false, error, diagnostics: error.diagnostics }
+          }
+          const error = normalizeTurnFailed({
+            message: errorMessage(cause, 'Failed to resolve persisted Runtime Session'),
+          })
           return { ok: false, error, diagnostics: error.diagnostics }
         }
-        const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-      try {
-        const statusResponse = await server.client.session.status(
-          { directory: request.target.workDir },
-          { throwOnError: true },
-        )
-        const statuses = statusResponse.data
-        if (!statuses || typeof statuses !== "object") {
-          const error = normalizeTurnFailed({ message: "session.status returned no status map" })
+        try {
+          const statusResponse = await server.client.session.status(
+            { directory: request.target.workDir },
+            { throwOnError: true },
+          )
+          const statuses = statusResponse.data
+          if (!statuses || typeof statuses !== 'object') {
+            const error = normalizeTurnFailed({ message: 'session.status returned no status map' })
+            return { ok: false, error, diagnostics: error.diagnostics }
+          }
+          const status = statuses[runtimeSessionId]
+          return {
+            ok: true,
+            value: {
+              runtimeSessionId: sessionData.id,
+              workDir: request.target.workDir,
+              activeTurn: status !== undefined && status.type !== 'idle',
+            },
+            diagnostics: [],
+          }
+        } catch (cause) {
+          const error = normalizeTurnFailed({
+            message: errorMessage(cause, 'Failed to read Runtime Session active-turn status'),
+          })
           return { ok: false, error, diagnostics: error.diagnostics }
         }
-        const status = statuses[runtimeSessionId]
-        return {
-          ok: true,
-          value: {
-            runtimeSessionId: sessionData.id,
-            workDir: request.target.workDir,
-            activeTurn: status !== undefined && status.type !== "idle",
-          },
-          diagnostics: [],
-        }
-      } catch (cause) {
-        const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to read Runtime Session active-turn status") })
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-    }))
+      }),
+    )
   }
 
-  async createSession(
-    request: RuntimeSessionCreateRequest,
-  ): Promise<RuntimeResult<RuntimeSessionCreateResult>> {
+  async createSession(request: RuntimeSessionCreateRequest): Promise<RuntimeResult<RuntimeSessionCreateResult>> {
     if (!this.state.server || !this.state.ready) {
       const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    return await this.withRuntimeOperation(() => this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
-      const server = this.state.server
-      if (!server || !this.state.ready) {
-        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-      lease.markUsed()
-      try {
-        const created = await server.client.session.create({
-          directory: request.target.workDir,
-          ...(request.model ? { model: { providerID: request.model.providerID, id: request.model.modelID } } : {}),
-        }, { throwOnError: true })
-        const data = created?.data as { id?: string } | undefined
-        if (!data || typeof data.id !== "string") {
-          const error = normalizeTurnFailed({ message: "session.create returned no id" })
+    return await this.withRuntimeOperation(() =>
+      this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+        const server = this.state.server
+        if (!server || !this.state.ready) {
+          const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
           return { ok: false, error, diagnostics: error.diagnostics }
         }
-        const result: RuntimeSessionCreateResult = {
-          runtimeSessionId: data.id,
-          workDir: request.target.workDir,
+        lease.markUsed()
+        try {
+          const created = await server.client.session.create(
+            {
+              directory: request.target.workDir,
+              ...(request.model ? { model: { providerID: request.model.providerID, id: request.model.modelID } } : {}),
+            },
+            { throwOnError: true },
+          )
+          const data = created?.data as { id?: string } | undefined
+          if (!data || typeof data.id !== 'string') {
+            const error = normalizeTurnFailed({ message: 'session.create returned no id' })
+            return { ok: false, error, diagnostics: error.diagnostics }
+          }
+          const result: RuntimeSessionCreateResult = {
+            runtimeSessionId: data.id,
+            workDir: request.target.workDir,
+          }
+          return { ok: true, value: result, diagnostics: [] }
+        } catch (cause) {
+          const raw = toRawError(cause)
+          const kind = errorKindFor(raw)
+          const error =
+            kind === 'unavailable-runtime'
+              ? normalizeUnavailableRuntime()
+              : kind === 'turn-failed'
+                ? normalizeTurnFailed(raw)
+                : normalizeTurnFailed(raw)
+          return { ok: false, error, diagnostics: error.diagnostics }
         }
-        return { ok: true, value: result, diagnostics: [] }
-      } catch (cause) {
-        const raw = toRawError(cause)
-        const kind = errorKindFor(raw)
-        const error =
-          kind === "unavailable-runtime"
-            ? normalizeUnavailableRuntime()
-            : kind === "turn-failed"
-              ? normalizeTurnFailed(raw)
-              : normalizeTurnFailed(raw)
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-    }))
+      }),
+    )
   }
 
   /**
@@ -406,15 +410,19 @@ export class OpenCodeRuntime {
     const sessionKey = request.target.runtimeSessionId ?? `${request.target.workDir}::pending`
     if (!inFlight.start(sessionKey)) {
       this.releaseGeneration(generation)
-      const error = normalizeUnavailableRuntime([{
-        severity: "error",
-        code: "in-flight",
-        message: "Another work prompt is already running for this AgentSession",
-      }])
+      const error = normalizeUnavailableRuntime([
+        {
+          severity: 'error',
+          code: 'in-flight',
+          message: 'Another work prompt is already running for this AgentSession',
+        },
+      ])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
     let resolveForced!: () => void
-    const forced = new Promise<void>((resolve) => { resolveForced = resolve })
+    const forced = new Promise<void>((resolve) => {
+      resolveForced = resolve
+    })
     const activeTurn: ActiveGenerationTurn = {
       abortController: new AbortController(),
       forced,
@@ -434,14 +442,14 @@ export class OpenCodeRuntime {
         }
         const adopted = await Promise.race([
           waitForReattachedTurn(
-            { target: request.target, prompt: "", options: null },
+            { target: request.target, prompt: '', options: null },
             deps,
             combined.signal,
             observer,
-          ).then((result) => ({ kind: "result" as const, result })),
-          activeTurn.forced.then(() => ({ kind: "forced" as const })),
+          ).then((result) => ({ kind: 'result' as const, result })),
+          activeTurn.forced.then(() => ({ kind: 'forced' as const })),
         ])
-        if (adopted.kind === "forced") {
+        if (adopted.kind === 'forced') {
           const error = normalizeGenerationDrainTimeout(this.quarantineDrainTimeoutMs)
           return { ok: false, error, diagnostics: error.diagnostics }
         }
@@ -473,15 +481,19 @@ export class OpenCodeRuntime {
     const sessionKey = request.target.runtimeSessionId ?? `${request.target.workDir}::pending`
     if (!inFlight.start(sessionKey)) {
       this.releaseGeneration(generation)
-      const error = normalizeUnavailableRuntime([{
-        severity: "error",
-        code: "in-flight",
-        message: "Another work prompt is already running for this AgentSession",
-      }])
+      const error = normalizeUnavailableRuntime([
+        {
+          severity: 'error',
+          code: 'in-flight',
+          message: 'Another work prompt is already running for this AgentSession',
+        },
+      ])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
     let resolveForced!: () => void
-    const forced = new Promise<void>((resolve) => { resolveForced = resolve })
+    const forced = new Promise<void>((resolve) => {
+      resolveForced = resolve
+    })
     const activeTurn: ActiveGenerationTurn = {
       abortController: new AbortController(),
       forced,
@@ -505,22 +517,22 @@ export class OpenCodeRuntime {
         }
         const turnOutcome = await Promise.race([
           runTurn(request, deps, combined.signal, observer).then(
-            (result) => ({ kind: "result" as const, result }),
-            (cause) => ({ kind: "error" as const, cause }),
+            (result) => ({ kind: 'result' as const, result }),
+            (cause) => ({ kind: 'error' as const, cause }),
           ),
-          activeTurn.forced.then(() => ({ kind: "forced" as const })),
+          activeTurn.forced.then(() => ({ kind: 'forced' as const })),
         ])
-        if (turnOutcome.kind === "forced") {
+        if (turnOutcome.kind === 'forced') {
           const error = normalizeGenerationDrainTimeout(this.quarantineDrainTimeoutMs)
           return { ok: false, error, diagnostics: error.diagnostics }
         }
-        if (turnOutcome.kind === "error") throw turnOutcome.cause
+        if (turnOutcome.kind === 'error') throw turnOutcome.cause
         const result = turnOutcome.result
         if (budget?.timedOut()) {
           this.triggerRebuild(server, {
-            severity: "error",
-            code: "resource-containment",
-            message: "OpenCode turn exceeded its per-work resource budget; quarantining the runtime generation",
+            severity: 'error',
+            code: 'resource-containment',
+            message: 'OpenCode turn exceeded its per-work resource budget; quarantining the runtime generation',
           })
           const error = normalizeResourceContainment(budgetMs!)
           return { ok: false, error, diagnostics: error.diagnostics }
@@ -534,11 +546,15 @@ export class OpenCodeRuntime {
         }
         if (!result.ok && hasUnconfirmedCleanup(result.error.diagnostics)) {
           this.triggerRebuild(server, {
-            severity: "error",
-            code: "cleanup-unconfirmed",
-            message: "OpenCode turn cleanup did not reach a confirmed terminal state; invalidating the runtime generation before reuse",
+            severity: 'error',
+            code: 'cleanup-unconfirmed',
+            message:
+              'OpenCode turn cleanup did not reach a confirmed terminal state; invalidating the runtime generation before reuse',
           })
-        } else if (!result.ok && result.error.diagnostics.some((diagnostic) => diagnostic.code === "opencode-transport-failed")) {
+        } else if (
+          !result.ok &&
+          result.error.diagnostics.some((diagnostic) => diagnostic.code === 'opencode-transport-failed')
+        ) {
           this.triggerRebuild(server)
         }
         return result
@@ -569,32 +585,38 @@ export class OpenCodeRuntime {
     }
 
     const validation = validateFollowupInput(request, diagnostics)
-    if (validation.kind === "failure") {
+    if (validation.kind === 'failure') {
       return { ok: false, error: validation.error, diagnostics: [...diagnostics, ...validation.error.diagnostics] }
     }
     const { model, variant } = validation.value
 
     if (!request.target.runtimeSessionId) {
       const error = normalizeInvalidInput(
-        "Follow-up requires a current OpenCode Runtime Session binding; pass the persisted runtimeSessionId from the AgentSession binding",
-        [{
-          severity: "error",
-          code: "missing-binding",
-          message: "Reset the session to establish a fresh Runtime Session, then retry",
-        }],
+        'Follow-up requires a current OpenCode Runtime Session binding; pass the persisted runtimeSessionId from the AgentSession binding',
+        [
+          {
+            severity: 'error',
+            code: 'missing-binding',
+            message: 'Reset the session to establish a fresh Runtime Session, then retry',
+          },
+        ],
       )
       return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
     }
-    const result = await this.runTurn({
-      target: request.target,
-      prompt: request.prompt,
-      ...(request.fileParts ? { fileParts: request.fileParts } : {}),
-      options: {
-        ...(request.options ?? {}),
-        model,
-        variant,
+    const result = await this.runTurn(
+      {
+        target: request.target,
+        prompt: request.prompt,
+        ...(request.fileParts ? { fileParts: request.fileParts } : {}),
+        options: {
+          ...(request.options ?? {}),
+          model,
+          variant,
+        },
       },
-    }, new AbortController().signal, observer)
+      new AbortController().signal,
+      observer,
+    )
     if (!result.ok) return result
 
     const facts: RuntimeFollowupFacts = {
@@ -627,44 +649,48 @@ export class OpenCodeRuntime {
 
     if (!request.target.runtimeSessionId) {
       const error = normalizeInvalidInput(
-        "Cancel requires a current OpenCode Runtime Session binding; pass the persisted runtimeSessionId from the AgentSession binding",
-        [{
-          severity: "error",
-          code: "missing-binding",
-          message: "Reset the session to establish a fresh Runtime Session, then retry",
-        }],
+        'Cancel requires a current OpenCode Runtime Session binding; pass the persisted runtimeSessionId from the AgentSession binding',
+        [
+          {
+            severity: 'error',
+            code: 'missing-binding',
+            message: 'Reset the session to establish a fresh Runtime Session, then retry',
+          },
+        ],
       )
       return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
     }
     const runtimeSessionId = request.target.runtimeSessionId
 
-    return await this.withRuntimeOperation(() => this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
-      const server = this.state.server
-      if (!server || !this.state.ready) {
-        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-      lease.markUsed()
-      const confirmation = await abortAndConfirmSession(server.client, runtimeSessionId, request.target.workDir)
-      if (!confirmation.ok && confirmation.missingSession) {
-        const error = normalizeMissingSession()
-        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-      }
-      const confirmationDiagnostics = confirmation.ok
-        ? []
-        : [{ severity: "error" as const, code: confirmation.code, message: confirmation.message }]
-      const facts: RuntimeCancelFacts = {
-        runtimeSessionId,
-        workDir: request.target.workDir,
-        cancelled: true,
-        stopConfirmed: confirmation.ok,
-      }
-      return {
-        ok: true,
-        value: { facts, diagnostics: [...diagnostics, ...confirmationDiagnostics] },
-        diagnostics: [...diagnostics, ...confirmationDiagnostics],
-      }
-    }))
+    return await this.withRuntimeOperation(() =>
+      this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+        const server = this.state.server
+        if (!server || !this.state.ready) {
+          const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        lease.markUsed()
+        const confirmation = await abortAndConfirmSession(server.client, runtimeSessionId, request.target.workDir)
+        if (!confirmation.ok && confirmation.missingSession) {
+          const error = normalizeMissingSession()
+          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+        }
+        const confirmationDiagnostics = confirmation.ok
+          ? []
+          : [{ severity: 'error' as const, code: confirmation.code, message: confirmation.message }]
+        const facts: RuntimeCancelFacts = {
+          runtimeSessionId,
+          workDir: request.target.workDir,
+          cancelled: true,
+          stopConfirmed: confirmation.ok,
+        }
+        return {
+          ok: true,
+          value: { facts, diagnostics: [...diagnostics, ...confirmationDiagnostics] },
+          diagnostics: [...diagnostics, ...confirmationDiagnostics],
+        }
+      }),
+    )
   }
 
   private ensureInFlightTracker() {
@@ -696,10 +722,11 @@ export class OpenCodeRuntime {
       this.state.diagnostic = null
     }
     await boundedWait(
-      () => Promise.allSettled([
-        ...(server ? [server.terminateTree?.() ?? server.close()] : []),
-        ...(events ? [events.close()] : []),
-      ]),
+      () =>
+        Promise.allSettled([
+          ...(server ? [server.terminateTree?.() ?? server.close()] : []),
+          ...(events ? [events.close()] : []),
+        ]),
       this.runtimeShutdownTimeoutMs,
     )
   }
@@ -716,9 +743,9 @@ export class OpenCodeRuntime {
     const serverFactory = this.deps.serverFactory
     if (!serverFactory) {
       const diagnostic: RuntimeDiagnostic = {
-        severity: "error",
-        code: "server-spawn-failed",
-        message: "OpenCode server factory was not provided",
+        severity: 'error',
+        code: 'server-spawn-failed',
+        message: 'OpenCode server factory was not provided',
       }
       this.state.diagnostic = diagnostic
       diagnostics.push(diagnostic)
@@ -728,9 +755,9 @@ export class OpenCodeRuntime {
     const eventSubscriptionFactory = this.deps.eventSubscriptionFactory
     if (!eventSubscriptionFactory) {
       const diagnostic: RuntimeDiagnostic = {
-        severity: "error",
-        code: "server-spawn-failed",
-        message: "OpenCode event subscription factory was not provided",
+        severity: 'error',
+        code: 'server-spawn-failed',
+        message: 'OpenCode event subscription factory was not provided',
       }
       this.state.diagnostic = diagnostic
       diagnostics.push(diagnostic)
@@ -743,7 +770,7 @@ export class OpenCodeRuntime {
         shutdownTimeoutMs: this.runtimeShutdownTimeoutMs,
       })
     } catch (cause) {
-      const diagnostic = toDiagnostic(cause, "server-spawn-failed", "Failed to start OpenCode server")
+      const diagnostic = toDiagnostic(cause, 'server-spawn-failed', 'Failed to start OpenCode server')
       this.state.diagnostic = diagnostic
       diagnostics.push(diagnostic)
       const error = normalizeUnavailableRuntime(diagnostics)
@@ -755,9 +782,9 @@ export class OpenCodeRuntime {
       const health = await server.client.global.health()
       if (!health?.data) {
         const diagnostic: RuntimeDiagnostic = {
-          severity: "error",
-          code: "health-failed",
-          message: "OpenCode health check returned an empty body",
+          severity: 'error',
+          code: 'health-failed',
+          message: 'OpenCode health check returned an empty body',
         }
         this.state.diagnostic = diagnostic
         diagnostics.push(diagnostic)
@@ -767,7 +794,7 @@ export class OpenCodeRuntime {
         return { ok: false, error, diagnostics }
       }
     } catch (cause) {
-      const diagnostic = toDiagnostic(cause, "health-failed", "OpenCode health check failed")
+      const diagnostic = toDiagnostic(cause, 'health-failed', 'OpenCode health check failed')
       this.state.diagnostic = diagnostic
       diagnostics.push(diagnostic)
       await boundedWait(() => server.terminateTree?.() ?? server.close(), this.runtimeShutdownTimeoutMs)
@@ -790,7 +817,7 @@ export class OpenCodeRuntime {
 
   private watchExit(events: RuntimeEventSubscription, server: OpencodeServerHandle): void {
     const listener = (event: { type: string }) => {
-      if (event.type === "server.disconnected" || event.type === "server.heartbeat-failed") {
+      if (event.type === 'server.disconnected' || event.type === 'server.heartbeat-failed') {
         this.triggerRebuild(server)
       }
     }
@@ -812,9 +839,9 @@ export class OpenCodeRuntime {
     generation.quarantined = true
     this.state.ready = false
     this.state.diagnostic = diagnostic ?? {
-      severity: "error",
-      code: "server-exit",
-      message: "OpenCode server exited; rebuilding runtime",
+      severity: 'error',
+      code: 'server-exit',
+      message: 'OpenCode server exited; rebuilding runtime',
     }
     if (generation.activeTurns.size === 0) {
       this.resolveGenerationDrain(generation)
@@ -854,7 +881,13 @@ export class OpenCodeRuntime {
 
   private acquireReadyGeneration(): RuntimeGeneration | null {
     const generation = this.state.generation
-    if (!this.state.ready || !generation || generation.quarantined || this.state.server !== generation.server || this.state.events !== generation.events) {
+    if (
+      !this.state.ready ||
+      !generation ||
+      generation.quarantined ||
+      this.state.server !== generation.server ||
+      this.state.events !== generation.events
+    ) {
       return null
     }
     return generation
@@ -885,7 +918,11 @@ export class OpenCodeRuntime {
     for (const activeTurn of generation.activeTurns) {
       activeTurn.forcedFailure = true
       activeTurn.resolveForced()
-      try { activeTurn.abortController.abort(new Error("generation-drain-timeout")) } catch { /* best effort */ }
+      try {
+        activeTurn.abortController.abort(new Error('generation-drain-timeout'))
+      } catch {
+        /* best effort */
+      }
     }
     this.resolveGenerationDrain(generation)
   }
@@ -931,116 +968,17 @@ export class OpenCodeRuntime {
   }
 
   private async reclaimIfIdle(): Promise<void> {
-    if (!this.state.ready || !this.state.server || this.state.ownerIds.size > 0 || this.state.activeOperations > 0 || this.startInFlight || this.rebuildInFlight) {
+    if (
+      !this.state.ready ||
+      !this.state.server ||
+      this.state.ownerIds.size > 0 ||
+      this.state.activeOperations > 0 ||
+      this.startInFlight ||
+      this.rebuildInFlight
+    ) {
       this.reconcileIdleLifecycle()
       return
     }
     await this.shutdown({ clearDiagnostic: false })
   }
-}
-
-function newRuntimeGeneration(id: number, server: OpencodeServerHandle, events: RuntimeEventSubscription): RuntimeGeneration {
-  let resolveDrained!: () => void
-  const drained = new Promise<void>((resolve) => {
-    resolveDrained = resolve
-  })
-  return {
-    id,
-    server,
-    events,
-    drained,
-    resolveDrained,
-    activeTurns: new Set(),
-    quarantined: false,
-    closed: false,
-    drainResolved: false,
-  }
-}
-
-function toDiagnostic(cause: unknown, code: string, fallback: string): RuntimeDiagnostic {
-  if (cause instanceof Error) {
-    return { severity: "error", code, message: cause.message || fallback }
-  }
-  return { severity: "error", code, message: fallback, details: { cause: String(cause) } }
-}
-
-function toRawError(cause: unknown): { message: string; status?: number; code?: string; service?: string } {
-  if (cause instanceof Error) {
-    const message = cause.message || "OpenCode error"
-    const status = (cause as { status?: number }).status
-    const code = (cause as { code?: string }).code
-    const service = (cause as { service?: string }).service
-    return { message, ...(typeof status === "number" ? { status } : {}), ...(typeof code === "string" ? { code } : {}), ...(typeof service === "string" ? { service } : {}) }
-  }
-  return { message: String(cause) }
-}
-
-function errorMessage(cause: unknown, fallback: string): string {
-  if (cause instanceof Error) return cause.message || fallback
-  return String(cause) || fallback
-}
-
-function positiveDuration(value: number | null | undefined): number | undefined {
-  return value !== undefined && value !== null && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
-}
-
-function combineAbortSignals(parent: AbortSignal, forced: AbortSignal): { signal: AbortSignal; dispose: () => void } {
-  const controller = new AbortController()
-  const abort = () => controller.abort(parent.aborted ? parent.reason : forced.reason)
-  if (parent.aborted || forced.aborted) {
-    abort()
-    return { signal: controller.signal, dispose: () => {} }
-  }
-  parent.addEventListener("abort", abort, { once: true })
-  forced.addEventListener("abort", abort, { once: true })
-  return {
-    signal: controller.signal,
-    dispose: () => {
-      parent.removeEventListener("abort", abort)
-      forced.removeEventListener("abort", abort)
-    },
-  }
-}
-
-type FollowupValidationOk = {
-  kind: "ok"
-  value: { model: { providerID: string; modelID: string } | null; variant: string | null }
-}
-type FollowupValidationFailure = {
-  kind: "failure"
-  error: ReturnType<typeof normalizeInvalidInput>
-}
-type FollowupValidationResult = FollowupValidationOk | FollowupValidationFailure
-
-function validateFollowupInput(
-  request: RuntimeFollowupRequest,
-  diagnostics: RuntimeDiagnostic[],
-): FollowupValidationResult {
-  const options: RuntimeTurnOptions | undefined | null = request.options ?? undefined
-  if (options?.unknownKeys && options.unknownKeys.length > 0) {
-    diagnostics.push({
-      severity: "info",
-      code: "options-unknown-keys",
-      message: `Ignored unknown option keys: ${options.unknownKeys.join(", ")}`,
-      details: { keys: options.unknownKeys },
-    })
-  }
-  let model: { providerID: string; modelID: string } | null = null
-  if (options?.model !== undefined && options.model !== null) {
-    if (typeof options.model !== "object") {
-      return { kind: "failure", error: normalizeInvalidInput("options.model must be an object with providerID and modelID when present") }
-    }
-    model = options.model
-  }
-  let variant: string | null = null
-  if (options?.variant !== undefined && options.variant !== null) {
-    if (typeof options.variant !== "string") {
-      return { kind: "failure", error: normalizeInvalidInput("options.variant must be a string when present") }
-    }
-    variant = options.variant
-  }
-  if (!request.prompt || typeof request.prompt !== "string" || request.prompt.trim().length === 0) {
-    return { kind: "failure", error: normalizeInvalidInput("Follow-up prompt must be a non-empty string") }
-  }
-  return { kind: "ok", value: { model, variant } }
 }
