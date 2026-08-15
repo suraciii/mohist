@@ -72,11 +72,11 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         // Keep the HTTP side in TestServer. This logical URL is never bound;
         // the test client talks directly to the in-process request pipeline.
         builder.UseTestServer();
-        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://testserver");
+        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://localhost");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
-        builder.UseSetting("Mohist:ServerUrl", "http://testserver");
-        builder.UseSetting("Mohist:Otel:Endpoint", "http://testserver/otel");
+        builder.UseSetting("Mohist:ServerUrl", "http://localhost");
+        builder.UseSetting("Mohist:Otel:Endpoint", "http://localhost/otel");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
@@ -91,8 +91,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             var values = new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
-                ["Mohist:ServerUrl"] = "http://testserver",
-                ["Mohist:Otel:Endpoint"] = "http://testserver/otel",
+                ["Mohist:ServerUrl"] = "http://localhost",
+                ["Mohist:Otel:Endpoint"] = "http://localhost/otel",
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",

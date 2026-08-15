@@ -208,11 +208,11 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         // Kestrel listener. This is a logical TestServer URL; no socket is
         // opened and requests stay inside the in-process handler.
         builder.UseTestServer();
-        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://testserver");
+        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://localhost");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
-        builder.UseSetting("Mohist:ServerUrl", "http://testserver");
-        builder.UseSetting("Mohist:Otel:Endpoint", "http://testserver/otel");
+        builder.UseSetting("Mohist:ServerUrl", "http://localhost");
+        builder.UseSetting("Mohist:Otel:Endpoint", "http://localhost/otel");
         // OTel tracing remains enabled for this fixture, but its inbound
         // collector is intentionally disabled. TestServer and the in-memory
         // exporter cover the observable path without touching an OS port.
@@ -236,8 +236,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
-                ["Mohist:ServerUrl"] = "http://testserver",
-                ["Mohist:Otel:Endpoint"] = "http://testserver/otel",
+                ["Mohist:ServerUrl"] = "http://localhost",
+                ["Mohist:Otel:Endpoint"] = "http://localhost/otel",
                 ["Mohist:Otel:Port"] = "0",
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
