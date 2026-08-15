@@ -314,6 +314,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("DispatchJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DirectApiProjectionJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("DirectApiProjectionRevision")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("InitialInputId")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");

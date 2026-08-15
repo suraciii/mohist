@@ -55,15 +55,18 @@ operation. The selected Agent and canonical Session determine those facts.
 
 ## HTTP surface
 
-All routes are under /api/v1. Route IDs are canonical Mohist IDs, not display
-names. A command returns 200 OK once its durable keyed outcome is known; this
-does not mean that execution completed. The body state is authoritative.
+All planned routes are under /api/v1. Route IDs are canonical Mohist IDs, not
+display names. Only the Job read marked **current** below is mapped today. The
+remaining rows are target contracts and must remain unmapped until each has its
+own complete projection and admission implementation. A command returns 200 OK
+once its durable keyed outcome is known; this does not mean that execution
+completed. The body state is authoritative.
 
 | Method and route | Required scope | Request | Success response |
 |---|---|---|---|
 | POST /api/v1/projects/{projectId}/agents/{agentId}/launch | operator | Bearer PAT, Idempotency-Key, launch body | PublicExecutionRead for the unique launch mapping |
 | POST /api/v1/projects/{projectId}/agent-sessions/{sessionId}/inputs | operator | Bearer PAT, Idempotency-Key, follow-up body | PublicExecutionRead for the unique Input/Turn mapping or durable rejection |
-| GET /api/v1/projects/{projectId}/agent-jobs/{jobId} | readonly | Bearer PAT | PublicExecutionRead anchored to the public AgentJob projection |
+| GET /api/v1/projects/{projectId}/agent-jobs/{jobId} | readonly | Bearer PAT | **Current:** PublicJobRead anchored to one AgentJob revision; no Session/Input/Turn join |
 | GET /api/v1/projects/{projectId}/agent-inputs/{inputId} | readonly | Bearer PAT | PublicExecutionRead anchored to the Input |
 | GET /api/v1/projects/{projectId}/agent-turns/{turnId} | readonly | Bearer PAT | PublicExecutionRead anchored to the Turn |
 | GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events | readonly | Bearer PAT, optional after and limit | PublicEventPage |
@@ -233,10 +236,42 @@ and raw provider or Runner errors. A safe public reasonCode or error may state
 queue_full, context_reset, or stop_outcome_unknown; it cannot include the
 private cause detail.
 
-### Public AgentJob read
+### Current public Job read
 
-GET /api/v1/projects/{projectId}/agent-jobs/{jobId} returns the same strict
-PublicExecutionRead, anchored to the canonical Job's durable public projection.
+The current Job route is intentionally smaller than `PublicExecutionRead`. It
+is the first executable direct-API slice, not completion of launch, follow-up,
+stop, Session reads, or the Session event stream. The AgentJob writer commits
+this snapshot and its own durable ledger revision in one transaction. The route
+checks the current Job revision before returning the snapshot and answers
+`503 projection_lag` for a missing or stale checkpoint. It never falls back to
+canonical Job JSON.
+
+~~~json
+{
+  "projectId": "proj_123",
+  "agentId": "agent_123",
+  "jobId": "job_123",
+  "status": "queued",
+  "outcome": null,
+  "reasonCode": null,
+  "acceptedAt": "2026-08-09T10:15:30Z",
+  "startedAt": null,
+  "terminalAt": null,
+  "observedAt": "2026-08-09T10:15:31Z"
+}
+~~~
+
+All keys are present. `status` is `queued`, `running`, `terminal`, or
+`unknown`; terminal `outcome` is `completed`, `failed`, or `cancelled`; and
+`reasonCode` is a safe category only. This snapshot never contains output,
+error detail, Runner/runtime/session/workspace/prompt information, or any
+Input, Turn, transcript, provider, or execution-definition field.
+
+### Target public AgentJob execution read
+
+After a Session-aware projection exists, the Job route may evolve to return the
+same strict PublicExecutionRead, anchored to the canonical Job's durable public
+projection. That target is not supplied by the current Job-only route.
 It never returns AgentJobLaunchRead or another raw Job shape. A prepared Job
 whose Session is not yet accepted returns 200 with its jobId,
 status=accepted, jobStatus=preparing, and null sessionId/inputId/turnId. A

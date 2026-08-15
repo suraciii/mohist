@@ -69,4 +69,13 @@ public class AgentJobRow
     public string? InitialTurnId { get; set; }
     public string? PinnedRunnerId { get; set; }
     public string LaunchVisibility { get; set; } = "visible";
+
+    /// <summary>
+    /// Strict, allowlisted direct-API snapshot. It is committed in the same
+    /// transaction as the source ledger state and never aliases State.
+    /// </summary>
+    public string? DirectApiProjectionJson { get; set; }
+
+    /// <summary>AgentJob ledger revision covered by DirectApiProjectionJson.</summary>
+    public long? DirectApiProjectionRevision { get; set; }
 }

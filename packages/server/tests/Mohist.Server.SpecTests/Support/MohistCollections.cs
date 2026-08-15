@@ -40,6 +40,9 @@ public class SlackReplyAnchorIngressCollection : ICollectionFixture<MohistIntegr
 [CollectionDefinition("AgentLaunchObservationRoutes", DisableParallelization = true)]
 public class AgentLaunchObservationRoutesCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("DirectApiJobRead", DisableParallelization = true)]
+public class DirectApiJobReadCollection : ICollectionFixture<MohistIntegrationFixture>;
+
 [CollectionDefinition("PlatformIntegration")]
 public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 

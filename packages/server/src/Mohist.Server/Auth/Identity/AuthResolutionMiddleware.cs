@@ -52,15 +52,33 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
             return;
         }
 
+        var isDirectApi = path.StartsWithSegments("/api/v1", StringComparison.Ordinal);
         if (QueryCarriesToken(context.Request.Query)
-            || ResolveToken(context.Request) is not { } token)
+            || ResolveToken(context.Request, allowSessionCookie: !isDirectApi) is not { } token)
         {
             await RejectAsync(context);
             return;
         }
 
-        var principal = _fileCredentials.TryResolve(token)
-            ?? await ResolveFromStoreAsync(token, context, context.RequestAborted);
+        ExternalAgentCaller? externalAgentCaller = null;
+        MohistPrincipal? principal;
+        if (isDirectApi)
+        {
+            externalAgentCaller = await ResolveExternalAgentCallerAsync(token, context.RequestAborted);
+            principal = externalAgentCaller is null
+                ? null
+                : new MohistPrincipal(
+                    externalAgentCaller.PrincipalId,
+                    PrincipalKind.Agent,
+                    externalAgentCaller.PrincipalId,
+                    externalAgentCaller.Scopes);
+        }
+        else
+        {
+            principal = _fileCredentials.TryResolve(token)
+                ?? await ResolveFromStoreAsync(token, context, context.RequestAborted);
+        }
+
         if (principal is null)
         {
             await RejectAsync(context);
@@ -68,6 +86,8 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         }
 
         context.Items[MohistPrincipal.HttpContextItemKey] = principal;
+        if (externalAgentCaller is not null)
+            context.Items[ExternalAgentCaller.HttpContextItemKey] = externalAgentCaller;
         context.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.Name, principal.Id)],
             "mohist"));
@@ -221,6 +241,28 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         return ToPrincipal(credential);
     }
 
+    private async Task<ExternalAgentCaller?> ResolveExternalAgentCallerAsync(
+        string token,
+        CancellationToken ct)
+    {
+        if (!CredentialToken.TryParse(token, out _))
+            return null;
+
+        var credential = await _credentials.FindActiveAsync(CredentialToken.Hash(token), ct);
+        if (credential is not { Kind: CredentialKind.Pat })
+            return null;
+
+        var grant = credential.DirectApiProjectGrant is { IsValid: true } candidate
+            ? candidate
+            : null;
+
+        return new ExternalAgentCaller(
+            credential.Id,
+            credential.PrincipalId,
+            credential.Scopes,
+            grant);
+    }
+
     /// <summary>
     /// Integration credentials are narrowed to a project: resolves the
     /// request's project (route value or query) and records the
@@ -269,7 +311,7 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         return false;
     }
 
-    private static string? ResolveToken(HttpRequest request)
+    private static string? ResolveToken(HttpRequest request, bool allowSessionCookie)
     {
         if (request.Headers.TryGetValue(AuthorizationHeader, out var authorization))
         {
@@ -286,7 +328,8 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
             return token.Length == 0 || token.Contains(' ') ? null : token;
         }
 
-        return request.Cookies.TryGetValue(SessionCookieName, out var cookie)
+        return allowSessionCookie
+            && request.Cookies.TryGetValue(SessionCookieName, out var cookie)
             && !string.IsNullOrWhiteSpace(cookie)
             ? cookie
             : null;
