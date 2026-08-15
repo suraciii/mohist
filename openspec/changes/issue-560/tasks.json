@@ -1,0 +1,122 @@
+{
+  "project": "mohist-local",
+  "description": "Task-first Agent create-and-launch: one accepted request derives a complete Agent definition from the task and starts the first execution through the canonical launch pipeline, backed by a Project default execution configuration with one precedence rule, a task-first Web composer, and `mo agent start`.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Project default execution configuration and the single precedence rule",
+      "spec": "specs/agent-creation-defaults/spec.md#one-precedence-rule-resolves-every-execution-field",
+      "description": "Add the Project-scoped default execution configuration (Runtime, Model, optional Variant): a nullable `DefaultExecutionConfigJson` column on `ProjectRow` via EF migration, write/read surfaces on the Project grain and routes, and a scoped DB-backed reader. Implement one `ExecutionConfigResolver` (caller hint → Agent definition → Project default, runtime falling back to `opencode`, explicit malformed values never masked) and apply it at the two existing sites: `AgentReadinessService.StructuralGaps` (default resolves `model-missing`/`variant-without-model`; definition errors unaffected; `MatchesCurrentDefinition` compares the resolved tuple) and the definition-first launch resolution in `AgentLauncher`.",
+      "acceptanceCriteria": [
+        "An EF migration adds nullable `ProjectRow.DefaultExecutionConfigJson` with no rewrite or backfill; a deployment with no default configured shows zero behavior change.",
+        "`IProjectGrain.SetDefaultExecutionConfigAsync` validates via `AgentConfigSchema`, replaces any prior default on success, and rejects an invalid default (runtime outside opencode/pi or model without `provider/model`) leaving the previous default untouched.",
+        "`PUT/PATCH /api/projects/{projectRef}/default-execution-config` uses a closed field set, and `GET /api/projects/{projectRef}` returns `defaultExecutionConfig` (null when unset) so Web and CLI branch without a second endpoint.",
+        "`ExecutionConfigResolver` unit tests cover every precedence combination: hint over definition over default, definition over default, default filling a definition gap, runtime defaulting to `opencode`, and an explicitly malformed value never being masked by a lower-precedence source.",
+        "`ProjectDefaultExecutionConfigReader` performs one DB read per request scope (cached), not one read per Agent during list hydration; no Agent-domain grain calls `IProjectGrain` for this.",
+        "Readiness spec matrix passes: default resolves `model-missing` and `variant-without-model` to `Ready`/`Unknown`; without a default the gaps remain `Needs setup` with their repair; `runtime-invalid` and `model-reference-malformed` persist regardless of default; a default change does not flip a completed execution's conclusion.",
+        "Definition-first launch specs prove an Agent Readiness reports launchable dispatches with the model the default resolved, resolved once at launch.",
+        "Spec tests for storage (valid replace, invalid rejected, read surface), resolver unit tests, and readiness/launch specs pass; `npm run test:fast` passes.",
+        "`docs/agent-sessions.md` (Configure an Agent) documents the Project default and the readiness behavior change."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "EF migration, Project default write/read surfaces, scoped default reader, `ExecutionConfigResolver`, updated `AgentReadinessService` and `AgentLauncher` resolution, with passing server spec/unit tests and updated docs.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Also satisfies `specs/agent-creation-defaults/spec.md#one-project-default-execution-configuration` and `#readiness-rules-for-default-resolved-and-default-missing-definitions`. Do not auto-fill agent configs at edit time (rejected alternative in design D6). The task-first route (T-002) is the third resolver site and consumes this resolver unchanged."
+    },
+    {
+      "id": "T-002",
+      "title": "Task-first create-and-launch route with derived definitions and idempotent replay",
+      "spec": "specs/agent-task-launch/spec.md#one-accepted-request-creates-the-agent-definition-and-starts-the-first-execution",
+      "description": "Add `POST /api/projects/{projectRef}/agent-tasks` (`Api/AgentTaskRoutes.cs`) as an orchestrator over the unchanged canonical launch: validate the closed field set and hints, derive the definition via a new unit-testable `AgentTaskDefinitionFactory` (conflict-free name with deterministic disambiguation, baseline Instructions and description, materialized execution configuration), pre-mint the Agent id deterministically from the idempotency key with crash-window adoption, then delegate to `IAgentLauncher.LaunchIdempotentAsync` and project the standard `AgentSessionLaunchResponse`. Determinable rejections run before create; replay flows through `ResumeIdempotentAsync` with a caller-visible fingerprint.",
+      "acceptanceCriteria": [
+        "A task alone (non-empty prompt, execution configuration resolvable from hints or the Project default) creates exactly one Agent, AgentJob, AgentSession, SessionInput, and AgentTurn; hints (`name`, `runtime`, `model`, `variant`) override derivation while unspecified parts are still derived.",
+        "Rejections before create with the spec's error codes: missing `Idempotency-Key` → `idempotency_key_required`; undeclared top-level field → `unsupported_field` naming it; malformed runtime/model hint → validation error; no usable prompt or attachment → `input_required`; all attachments rejected → `input_unusable` with per-file results and unbind rollback; unknown context reference → same status/code as the definition-first route; conflicting caller `name` → 409 `AGENT_NAME_CONFLICT`; unresolvable execution configuration → `execution_config_unresolvable` naming both repairs.",
+        "`AgentTaskDefinitionFactory` is deterministic: name derivation (first sentence, ~60-char cap, Unicode-letter preserving) disambiguates `Base`, `Base 2`, … against active, archived, and reserved built-in names case-insensitively; attachment-only tasks derive `Task {short-token}`; baseline Instructions and description are non-empty and identical for identical requests; the materialized `agentConfig` passes `AgentConfigSchema.Validate`; a `CreateAsync` name race re-disambiguates with bounded retries.",
+        "The created Agent's Readiness is `Ready` or `Unknown` — never `Needs setup` from missing defaults — and stores the resolved execution configuration so it is self-describing in lists and immune to later default changes.",
+        "Replay returns the original outcome: original identities (including `agentId`/`agentName`) for accepted operations, the recorded rejection for rejected ones; a changed prompt/context/attachments/name/hints under the same key → 409 `launch_idempotency_conflict`; a still-converging plan → 503 `launch_setup_pending` carrying the key; a replay of a crashed attempt adopts the pre-minted Agent instead of creating a second one.",
+        "The coordinator fingerprint folds caller-visible inputs only (name hint as `AgentRef`, runtime hint, prompt/context/attachments/origin/targetId) so replay reconstructs it before any Agent exists; covered by replay spec tests pinning `AgentLaunchCoordinatorCodec.Fingerprint` inputs.",
+        "Coordinator-equivalence specs prove the resulting session metadata, source labels, launch-time definition snapshot, workspace/origin binding, and read surfaces are indistinguishable from a definition-first launch of the created Agent, and a later definition-first launch of that Agent shares the pipeline.",
+        "The 201 response reuses `AgentSessionLaunchResponse` verbatim with all identities, workspace, status, attachment results, and the four canonical URLs; `sessionUrl` addresses the created AgentSession page.",
+        "Server spec tests mirror the `AgentSessionLaunch*Specs` suites (route shape/validation, orphan-free determinable rejections, replay identity/conflict/pending/rejection/adoption) and factory unit tests cover name derivation, disambiguation, reserved names, attachment-only tasks, and determinism; `npm run test:fast` passes.",
+        "`docs/agent-sessions.md` (Launch Entry Points) and `docs/agent-api.md` document the route, its closed field set, and the replay contract."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`Api/AgentTaskRoutes.cs`, `AgentTaskDefinitionFactory`, deterministic Agent identity pre-minting/adoption, validation cascade, and replay wiring over the unchanged launcher, with passing server spec and unit tests plus updated docs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Also satisfies `#the-request-surface-is-closed-and-validated-before-creation`, `#definition-creation-composes-the-canonical-launch-path`, `#idempotent-replay-follows-the-launch-convergence-rules`, `#the-response-projects-every-participant-identity`, and the creation-derivation requirements of `specs/agent-creation-defaults/spec.md`. A key reused across both routes must surface as a 409 fingerprint conflict (same key space). Determinable rejection re-evaluation on replay matches the definition-first route's convergence boundary. Terminal-rejection rollback after creation is owned by T-003."
+    },
+    {
+      "id": "T-003",
+      "title": "Crash-safe rollback of the created definition on terminal launch rejection",
+      "spec": "specs/agent-task-launch/spec.md#a-rejected-request-leaves-no-orphan-agent",
+      "description": "Close the post-creation rejection window: the coordinator plan gains one append-only `DefinitionCreatedByLaunch` flag set by the task-first envelope, and `BeginAbortAfterRejectionAsync`'s abort completion — including the reminder-driven crash-recovery path — archives the created Agent via `IAgentGrain.ArchiveAsync` before recording the rejection. The route's synchronous path maps the same rejection to the response; 503 `launch_setup_pending` never archives.",
+      "acceptanceCriteria": [
+        "A composed launch that converges to a terminal rejection after the definition was created records the rejection under the idempotency key and leaves no active Agent from the request; replaying that key returns the recorded rejection and creates nothing.",
+        "The plan flag is append-only with Orleans id discipline; a route-process crash between coordinator abort completion and route observation is repaired by the reminder-driven abort path, which still archives the Agent and completes the plan.",
+        "Archival (not deletion) preserves the audit trail and attribution principal; the archived name continues to participate in derived-name disambiguation, and a caller-supplied retry against the archived name gets the actionable 409.",
+        "503 `launch_setup_pending` responses never trigger archival — the launch may still complete and the caller retries with the same key to the original outcome.",
+        "Definition-first launches are unaffected: plans without the flag never archive their Agent on rejection.",
+        "Spec tests cover terminal rejection after creation (archive + recorded rejection), the crash window via injected failure and reminder replay, 503 non-archival, replay of the recorded rejection, and a definition-first rejection regression; `npm run test:fast` passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Coordinator plan flag, archive-on-abort completion with crash recovery, route rejection mapping, and passing orphan-window spec tests.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Implements design D7. The coordinator — not the route — owns the archival so a route crash cannot strand an active Agent. Together with T-002's pre-create validation cascade this completes the orphan-free requirement."
+    },
+    {
+      "id": "T-004",
+      "title": "Task-first Web session composer and Agents empty state",
+      "spec": "specs/web-agent-task-composer/spec.md#the-composer-is-task-first",
+      "description": "Reorient `AgentSessionComposerPage` task-first: prompt, attachments, and context render first; Agent selection becomes optional with neutral state \"New Agent for this task\". Launching without a selection calls a new `startAgentTask` mutation in `entities/agent` posting to `/agent-tasks` with a caller-generated idempotency key; selecting an Agent keeps the untouched definition-first `useLaunchAgentSession`. Inline execution configuration (Runtime + Model, Variant optional) appears only on the create-new path and only when the Project read reports no `defaultExecutionConfig`; success navigates to the returned `sessionUrl`; the Agents empty state leads with the task composer.",
+      "acceptanceCriteria": [
+        "A task alone launches: with no Agent selected and a resolvable execution configuration, the composer submits the task-first request without requiring an Agent selection and lands the user in the running session identified by the returned Session/Job identities.",
+        "Selecting an existing Agent submits the definition-first launch for that Agent through the existing mutation, without overriding its execution definition (regression-covered).",
+        "Execution-configuration gating reads `defaultExecutionConfig` from the Project surface: with a default, no execution fields render and no hints are sent; without one, the create-new path requires inline Runtime and Model and submits them as hints — never dead-ending in Agent settings. The inline controls never apply to a selected existing Agent.",
+        "Rejection feedback is actionable and state-preserving: the launch-feedback taxonomy gains kinds for `execution_config_unresolvable` (naming both repairs) and pending convergence (retry with the same key) alongside the existing conflict and unavailable-server kinds; the entered prompt, attachments, and context references remain in the composer.",
+        "Refinement after launch: the launch result and session view expose a path to the created Agent's detail page where name, description, Instructions, and Skills remain editable through the existing definition editor, affecting only later AgentJobs.",
+        "The Agents list empty state's primary action routes to the task-first composer (`agent-sessions/new`) with the definition editor demoted to a secondary action.",
+        "Web tests extend the composer suite (task-only launch, inline gating on the default read, failure state preservation, empty-state routing, selected-agent regression) and `packages/web` typecheck and tests pass.",
+        "`docs/web-ui.md` documents the task-first composer and empty state."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Reordered composer with optional Agent selection, `startAgentTask` entity client, default-gated inline execution configuration, new launch-feedback kinds, refined empty state, with passing web tests and updated docs.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Also satisfies the remaining `web-agent-task-composer` requirements: `#inline-execution-configuration-when-no-project-default-exists`, `#launch-feedback-navigates-into-the-running-session`, `#refinement-after-launch`, `#the-agents-empty-state-starts-from-a-task`. Whether the inline model input consumes the #556 preview endpoint or free-form `provider/model` input is deferred to #556's rollout; free-form is acceptable here."
+    },
+    {
+      "id": "T-005",
+      "title": "CLI `mo agent start` and the task-first documentation pass",
+      "spec": "specs/cli-agent-task-launch/spec.md#one-command-creates-and-launches-from-a-task",
+      "description": "Add the task-first startup subcommand `mo agent start` to the `agent` group in `MohistCliCommands.Agent.cs`: no Agent argument; `--prompt`/`--prompt-file` (mutually exclusive via `BodyInputResolver`), `--attach`, `--name`, `--runtime` (opencode|pi), `--model` (`provider/model`), `--variant`, the same context flags as `mo agent launch`, `--project`, `--idempotency-key`, and standard output selection. It sends `X-Mohist-Launch-Origin: cli`, prints via `TableShape.AgentSessionLaunch` in table mode and the raw server response in JSON mode, and exits 0 only for accepted launches including replay. Complete the change's documentation (`docs/cli-reference.md`, `docs/getting-started.md`) and own the full repository verification gate.",
+      "acceptanceCriteria": [
+        "`mo agent start --prompt \"<task>\"` in a Project whose default resolves the execution configuration creates one Agent, launches it in the same step, and prints the resulting identities; execution-hint subsets compose with the Project default under the precedence rule.",
+        "Flag validation mirrors `mo agent create`/`mo agent launch`: runtime outside `opencode`/`pi` and `--prompt`/`--prompt-file` conflicts are usage failures before any request.",
+        "The idempotency-key contract matches `mo agent launch`: an omitted key is generated and printed before the request in table mode, and a retry with the printed key returns the original Agent, Job, Session, Input, and Turn identities without a second launch (spec-tested).",
+        "Table output lists agent id, agent name, job, session, input, turn, workspace, status, and the canonical session/transcript/job/observation URLs; JSON mode prints the raw server response unchanged.",
+        "Exit behavior: 0 only for accepted launches including idempotent replay; non-zero for every rejection with actionable errors — `execution_config_unresolvable` naming both repairs (`--runtime`/`--model`/`--variant` or configure the Project default), conflicts identified by cause, pending convergence instructing retry with the same key; no local state requires cleanup.",
+        "CLI tests mirror `CliAgentCommandSpecs`: flag matrix, key printing, table/JSON shapes, exit codes, and retry guidance; `npm run test:fast:cli` passes.",
+        "`docs/cli-reference.md` and `docs/getting-started.md` present task-first as the default first-run path alongside the unchanged definition-first commands; `npm run docs:check` passes.",
+        "The full `npm run verify` gate passes (docs, format, build, all tests) — this final coordinated slice owns it."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`mo agent start` subcommand with launch-contract output and exit behavior, completed user documentation, and a passing full `npm run verify` gate.",
+      "dependsOn": ["T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Also satisfies `#the-idempotency-key-contract-matches-mo-agent-launch`, `#output-prints-every-participant-identity`, and `#exit-behavior-is-decisive-and-actionable`. Keep JSON mode raw-server-response-only per the spec (`--output json:field` subsets are explicitly out of scope unless users ask). Depends on the full server surface (T-002/T-003) and the web slice (T-004) because it owns the final repository-wide verify gate."
+    }
+  ]
+}
