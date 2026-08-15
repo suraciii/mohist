@@ -1,0 +1,52 @@
+# issue-557 progress notes
+
+## Codebase Patterns
+
+- `AgentConfigSchema` (packages/server/src/Mohist.Server/Infrastructure/AgentConfigSchema.cs)
+  is the converged boundary for BOTH agent-config write surfaces:
+  `Validate`/`AllowedKeys` (Agent definition, includes `runtime`) and
+  `ValidateIssue`/`IssueAllowedKeys` (issue override, Agent-owned `runtime`
+  rejected with a dedicated message).
+- Write-side merge paths iterate `AgentConfigSchema.Filter`, which loops over
+  `IssueAllowedKeys` — adding a key to `IssueAllowedKeys` automatically flows
+  it into `IssueVariableBuilder`, `IssueWorkflowProfileStorageIntegrity`,
+  `ConfigService`, and `IssueQuerier` with zero extra wiring.
+- Error-message style: named-value errors list every accepted value
+  (see `ValidateRuntime`). `ValidateReasoningEffort` mirrors it, and uses the
+  ordered list (`CanonicalReasoningEffortsOrdered`) so the message is stable;
+  `AllowedKeys`-set messages still use set order (pre-existing).
+- `ValidateIssue` uses a literal `CanonicalIssueKeyOrder` string for its
+  "accepts only ..." message (HashSet iteration order is nondeterministic).
+- CLI (packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs): typed config keys
+  follow the `--flag` + `--clear-flag` pattern with `ValidateClearSetPair`
+  mutual exclusion; local value validation happens in
+  `ResolveTypedAgentConfig` (mirrors the server set; the CLI cannot reference
+  the Server assembly). `mo agent view` rendering lives in
+  `TableRenderer.Entities.cs` (`StringOf` renders missing keys as empty —
+  absent effort renders as nothing, no synthesis).
+- Tests: dotnet test with Microsoft.Testing.Platform ignores `--filter`
+  (MTP0001 warning) — a filtered run executes the full project. Full suites
+  are fast enough (unit ~8s, cli ~2s).
+
+## T-001 (canonical write surface + CLI)
+
+- Done: `CanonicalReasoningEfforts(ordered)` + `ValidateReasoningEffort` in
+  `AgentConfigSchema`; `reasoningEffort` in `AllowedKeys` +
+  `IssueAllowedKeys`; string-or-null/non-empty checks extended to the key in
+  `Validate`; `ValidateIssue` now also runs `ValidateReasoningEffort`.
+- Issue profile → `vars.agent` forwarding needed NO code: `Filter` picks the
+  key up via `IssueAllowedKeys` (covered by new IssueVariableBuilderTests).
+- CLI: `--reasoning-effort` on create+update, `--clear-reasoning-effort`
+  (update only, `ValidateClearSetPair`), local canonical-set validation before
+  any mutation request (update still does the GET resolve first — the current
+  config is needed to merge), view table row `reasoning effort:` beside
+  variant. Retired-flag hints ("--agent-config is retired; use ...") updated
+  to mention the effort flags.
+- Gotcha: the prior run left this task's diff uncommitted in the worktree;
+  verified it end-to-end (server unit 2692 pass, cli 1858 pass, arch 68 pass,
+  wf-definition 178 pass) before committing.
+- Format gate (`scripts/check-format.ts`) needs `npm ci` (biome/csharpier
+  absent in this environment); skipped, C# follows csharpier conventions of
+  the surrounding file.
+- Web editor effort control is T-008, snapshot freezing T-002 — nothing here
+  touches runner/launch paths.
