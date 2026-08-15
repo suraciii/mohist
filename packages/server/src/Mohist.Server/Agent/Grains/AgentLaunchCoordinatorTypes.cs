@@ -126,7 +126,8 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(47)] string? WorkspacePath = null,
     [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(49)] string? Origin = null,
-    [property: Id(50)] string? TargetId = null);
+    [property: Id(50)] string? TargetId = null,
+    [property: Id(51)] string? ReasoningEffort = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The

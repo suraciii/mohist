@@ -1,4 +1,4 @@
-export type PiDiagnosticSeverity = "info" | "warning" | "error"
+export type PiDiagnosticSeverity = 'info' | 'warning' | 'error'
 
 export interface PiDiagnostic {
   readonly severity: PiDiagnosticSeverity
@@ -8,14 +8,14 @@ export interface PiDiagnostic {
 }
 
 export type PiErrorKind =
-  | "invalid-input"
-  | "unavailable-runtime"
-  | "missing-session"
-  | "incompatible-runtime"
-  | "deadline-exceeded"
-  | "interrupted"
-  | "turn-failed"
-  | "conflict"
+  | 'invalid-input'
+  | 'unavailable-runtime'
+  | 'missing-session'
+  | 'incompatible-runtime'
+  | 'deadline-exceeded'
+  | 'interrupted'
+  | 'turn-failed'
+  | 'conflict'
 
 export interface PiError {
   readonly kind: PiErrorKind
@@ -44,7 +44,7 @@ export interface PiReadyState {
 }
 
 export interface PiSessionTarget {
-  readonly runtime: "pi"
+  readonly runtime: 'pi'
   readonly runtimeSessionId: string | null
   readonly workDir: string
 }
@@ -69,6 +69,7 @@ export interface PiSessionResolveResult extends PiSessionResult {
 export interface PiTurnOptions {
   readonly model?: string | null
   readonly variant?: string | null
+  readonly reasoningEffort?: string | null
   readonly unknownKeys?: readonly string[]
   readonly skills?: readonly { readonly name: string; readonly instructions: string }[]
 }

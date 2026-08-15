@@ -75,6 +75,7 @@ public sealed class AgentReadinessService : IScopedService
             gaps.Add(new("instructions-missing", "Instructions are missing.", "Add instructions in Agent settings."));
 
         var (model, variant) = AgentLauncher.ResolveModelAndVariant(agent.AgentConfig);
+        var reasoningEffort = AgentLauncher.ResolveReasoningEffort(agent.AgentConfig);
         if (agent.AgentConfig is null
             || agent.AgentConfig.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
@@ -100,6 +101,8 @@ public sealed class AgentReadinessService : IScopedService
             gaps.Add(new("model-reference-malformed", "The model reference must use provider/model format.", "Set a valid model in Agent settings."));
         if (!string.IsNullOrWhiteSpace(variant) && string.IsNullOrWhiteSpace(model))
             gaps.Add(new("variant-without-model", "A variant is set without a model.", "Set a model or remove the variant in Agent settings."));
+        if (!string.IsNullOrWhiteSpace(reasoningEffort) && string.IsNullOrWhiteSpace(model))
+            gaps.Add(new("reasoning-effort-without-model", "A reasoning effort is set without a model.", "Set a model or remove the reasoning effort in Agent settings."));
         if (agent.AgentConfig is { ValueKind: JsonValueKind.Object } config && AgentConfigSchema.ValidateRuntime(config) is not null)
             gaps.Add(new("runtime-invalid", "The configured runtime is not supported.", "Choose opencode or pi in Agent settings."));
         return gaps;
@@ -112,6 +115,7 @@ public sealed class AgentReadinessService : IScopedService
             && string.Equals(AgentLauncher.ResolveRuntime(agent.AgentConfig), input.Runtime ?? AgentConfigSchema.OpenCodeRuntime, StringComparison.Ordinal)
             && string.Equals(current.Model, input.Model, StringComparison.Ordinal)
             && string.Equals(current.Variant, input.Variant, StringComparison.Ordinal)
+            && string.Equals(AgentLauncher.ResolveReasoningEffort(agent.AgentConfig), input.ReasoningEffort, StringComparison.Ordinal)
             && agent.Skills.SequenceEqual(input.Skills ?? [], StringComparer.Ordinal);
     }
 
@@ -128,7 +132,9 @@ public sealed class AgentReadinessService : IScopedService
             || value.Contains("model not found") || value.Contains("model-not-found")
             || value.Contains("model-rejected") || value.Contains("preflight-rejected")
             || value.Contains("runtime-invalid") || value.Contains("invalid-runtime")
-            || value.Contains("incompatible-runtime") || value.Contains("runtime-rejected");
+            || value.Contains("incompatible-runtime") || value.Contains("runtime-rejected")
+            || value.Contains("unsupported-execution-configuration")
+            || value.Contains("incompatible-execution-configuration");
     }
 
     private static string DescribeConfigurationFailure(string? category) =>

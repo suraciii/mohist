@@ -37,6 +37,33 @@ public class AgentDefinitionApiSpecs
     }
 
     [Fact]
+    public async Task Create_PersistsCanonicalReasoningEffortWithIndependentVariant()
+    {
+        var project = await CreateProjectAsync("agent-create-reasoning-effort");
+
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", new
+        {
+            name = "reasoning-reviewer",
+            description = "agent description",
+            instructions = "review the change",
+            agentConfig = new
+            {
+                runtime = "pi",
+                model = "openai/gpt-5.5",
+                reasoningEffort = "high",
+                variant = "balanced",
+            },
+            skills = Array.Empty<string>(),
+            maxConcurrentRuns = 1,
+        });
+
+        Assert.Equal("pi", created.AgentConfig!.Value.GetProperty("runtime").GetString());
+        Assert.Equal("openai/gpt-5.5", created.AgentConfig!.Value.GetProperty("model").GetString());
+        Assert.Equal("high", created.AgentConfig!.Value.GetProperty("reasoningEffort").GetString());
+        Assert.Equal("balanced", created.AgentConfig!.Value.GetProperty("variant").GetString());
+    }
+
+    [Fact]
     public async Task Create_RequiresResolvedProjectAndRejectsDuplicateName()
     {
         var project = await CreateProjectAsync("agent-create-conflict");

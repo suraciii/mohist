@@ -21,4 +21,28 @@ public sealed class AgentLauncherResolveRuntimeTests
         Assert.Equal("opencode", AgentLauncher.ResolveRuntime(JsonDocument.Parse("{\"runtime\":\"mystery\"}").RootElement));
         Assert.Equal("opencode", AgentLauncher.ResolveRuntime(JsonDocument.Parse("{\"runtime\":42}").RootElement));
     }
+
+    [Fact]
+    public void ResolveExecutionDefinition_PreservesReasoningEffortIndependentlyFromVariant()
+    {
+        var agent = new AgentInfo(
+            Id: "agent-1",
+            ProjectId: "project-1",
+            Name: "Reviewer",
+            Description: string.Empty,
+            Instructions: "Review the change",
+            AgentConfig: JsonDocument.Parse("{\"runtime\":\"pi\",\"model\":\"openai/gpt-5.5\",\"reasoningEffort\":\"high\",\"variant\":\"balanced\"}").RootElement,
+            Skills: [],
+            MaxConcurrentRuns: null,
+            Status: "active",
+            CreatedAt: "2026-08-15T00:00:00Z",
+            UpdatedAt: "2026-08-15T00:00:00Z");
+
+        var definition = AgentLauncher.ResolveExecutionDefinition(agent);
+
+        Assert.Equal("pi", definition.Runtime);
+        Assert.Equal("openai/gpt-5.5", definition.Model);
+        Assert.Equal("high", definition.ReasoningEffort);
+        Assert.Equal("balanced", definition.Variant);
+    }
 }

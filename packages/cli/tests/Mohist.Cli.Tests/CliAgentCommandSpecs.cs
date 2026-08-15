@@ -17,7 +17,7 @@ public sealed class NotifyCommandConfigPathCollectionDefinition
 }
 
 [Collection("NotifyCommandConfigPath")]
-public class CliAgentCommandSpecs
+public partial class CliAgentCommandSpecs
 {
     private const string ManagedPresetRoot = "/mohist-tests/user/.mohist/cli/presets";
 
@@ -637,6 +637,7 @@ public class CliAgentCommandSpecs
             Assert.Contains("--runtime", text, StringComparison.Ordinal);
             Assert.Contains("opencode", text, StringComparison.Ordinal);
             Assert.Contains("--model", text, StringComparison.Ordinal);
+            Assert.Contains("--reasoning-effort", text, StringComparison.Ordinal);
             Assert.Contains("--variant", text, StringComparison.Ordinal);
             Assert.Contains("--avatar-file", text, StringComparison.Ordinal);
             Assert.Contains("--skills", text, StringComparison.Ordinal);
@@ -686,7 +687,6 @@ public class CliAgentCommandSpecs
         Assert.Equal("fsd", body["skills"]?[1]?.GetValue<string>());
         Assert.Equal(2, body["maxConcurrentRuns"]?.GetValue<int>());
     }
-
     [Theory]
     [InlineData("")]
     [InlineData(" , ")]
@@ -706,7 +706,6 @@ public class CliAgentCommandSpecs
         Assert.Contains("--clear-skills", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
-
     [Fact]
     public async Task AgentCreate_ReadsAvatarFileIntoStableProfileField()
     {
@@ -761,7 +760,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("--agent-config is retired", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("use --runtime, --model, and --variant", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("use --runtime, --model, --reasoning-effort, and --variant", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -1399,7 +1398,7 @@ public class CliAgentCommandSpecs
         })));
 
         var exitCode = await RunAsync(handler,
-            ["agent", "edit", "reviewer", "--clear-description", "--clear-runtime", "--clear-model", "--clear-variant", "--clear-skills", "--clear-max-concurrent-runs"],
+            ["agent", "edit", "reviewer", "--clear-description", "--clear-runtime", "--clear-model", "--clear-reasoning-effort", "--clear-variant", "--clear-skills", "--clear-max-concurrent-runs"],
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
@@ -1417,6 +1416,7 @@ public class CliAgentCommandSpecs
     [Theory]
     [InlineData("--description", "new description", "--clear-description")]
     [InlineData("--model", "zhipu/glm", "--clear-model")]
+    [InlineData("--reasoning-effort", "high", "--clear-reasoning-effort")]
     [InlineData("--skills", "mohist", "--clear-skills")]
     [InlineData("--max-concurrent-runs", "3", "--clear-max-concurrent-runs")]
     public async Task AgentUpdate_ClearFlagsRejectMatchingSetFlags(string setFlag, string setValue, string clearFlag)
@@ -1615,7 +1615,7 @@ public class CliAgentCommandSpecs
         description = "desc",
         instructions = "prompt",
         avatar = "https://example.test/avatar.svg",
-        agentConfig = new { runtime = "opencode", model = "openai/gpt-5.5", variant = "high" },
+        agentConfig = new { runtime = "opencode", model = "openai/gpt-5.5", reasoningEffort = "high", variant = "high" },
         skills = new[] { "mohist" },
         maxConcurrentRuns = 2,
         status,

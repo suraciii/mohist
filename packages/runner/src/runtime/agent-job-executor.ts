@@ -41,7 +41,7 @@ export interface AgentJobExecutorOptions {
  * selected runtime — `PiRuntime` or `OpenCodeRuntime` — directly. No
  * `mohist/opencode` Action contract or removed Action. The AgentJob
  * payload lives in `work.with` as a flat
- * `{ prompt, instructions?, model?, variant?, runtime }` shape —
+ * `{ prompt, instructions?, model?, reasoningEffort?, variant?, runtime }` shape —
  * composed at launch time from the resolved Agent snapshot and
  * stable for the lifetime of the in-flight request. `runtime` is
  * snapshotted onto the AgentJob by the server so the executor
@@ -102,6 +102,7 @@ export class AgentJobExecutor {
     const runtimeName = readRuntime(payload)
     const modelInput = readOptionalString(payload, 'model')
     const variant = readOptionalString(payload, 'variant')
+    const reasoningEffort = readOptionalString(payload, 'reasoningEffort')
     const model = parseModel(modelInput)
     if (modelInput && model.kind === 'failure') {
       return failureResult('invalid-input', `AgentJob ${model.message}`)
@@ -182,9 +183,17 @@ export class AgentJobExecutor {
         model,
         modelInput,
         variant,
+        reasoningEffort,
         workDir,
         binding,
         skills,
+      )
+    }
+    if (reasoningEffort) {
+      return failureResult(
+        'unsupported-execution-configuration',
+        'AgentJob reasoningEffort is unsupported by the selected opencode runtime',
+        'opencode',
       )
     }
     return executeOpenCodeTurn(

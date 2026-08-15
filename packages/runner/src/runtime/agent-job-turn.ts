@@ -186,10 +186,25 @@ export async function executePiTurn(
   model: ParsedModel,
   modelInput: string | null,
   variant: string | null,
+  reasoningEffort: string | null,
   workDir: string,
   binding: BindingResolution,
   skills: readonly ResolvedSkill[],
 ): Promise<WorkItemResult> {
+  if (variant) {
+    return failureResult(
+      'incompatible-execution-configuration',
+      'AgentJob Pi variant is unsupported; configure reasoningEffort for the Pi thinking level',
+      'pi',
+    )
+  }
+  if (reasoningEffort && model.kind !== 'ok') {
+    return failureResult(
+      'incompatible-execution-configuration',
+      'AgentJob reasoningEffort requires an explicit provider/model selection',
+      'pi',
+    )
+  }
   const runtime = resolveAccessor(deps.runtimes.pi)
   if (!runtime) {
     return failureResult(
@@ -260,7 +275,8 @@ export async function executePiTurn(
     prompt: composed,
     options: {
       model: model.kind === 'ok' ? `${model.value.providerID}/${model.value.modelID}` : null,
-      variant: variant ?? null,
+      variant: null,
+      reasoningEffort,
       ...(skills.length > 0 ? { skills } : {}),
       unknownKeys: collectUnknownKeys(payload),
     },
@@ -365,6 +381,7 @@ function collectUnknownKeys(payload: JsonObject | null): readonly string[] | und
     'prompt',
     'instructions',
     'model',
+    'reasoningEffort',
     'variant',
     'runtime',
     'skills',

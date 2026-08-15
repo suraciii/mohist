@@ -30,7 +30,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         var sessionId = $"agent-session-{Guid.NewGuid():N}";
 
         var instructions = "Always respond in formal English; refuse non-code tasks.";
-        var configElement = JsonDocument.Parse("{\"type\":\"opencode\",\"model\":\"openai/gpt-5.5\",\"variant\":\"high\"}").RootElement.Clone();
+        var configElement = JsonDocument.Parse("{\"type\":\"opencode\",\"model\":\"openai/gpt-5.5\",\"reasoningEffort\":\"high\",\"variant\":\"balanced\"}").RootElement.Clone();
 
         var input = new AgentJobInput(
             Prompt: "summarize the diff",
@@ -41,7 +41,8 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
             AgentInstructions: instructions,
             AgentConfig: configElement,
             AgentSessionId: sessionId,
-            Variant: "high");
+            Variant: "balanced",
+            ReasoningEffort: "high");
 
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
@@ -64,7 +65,8 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         Assert.Equal("summarize the diff", with.GetProperty("prompt").GetString());
         Assert.Equal(instructions, with.GetProperty("instructions").GetString());
         Assert.Equal("openai/gpt-5.5", with.GetProperty("model").GetString());
-        Assert.Equal("high", with.GetProperty("variant").GetString());
+        Assert.Equal("high", with.GetProperty("reasoningEffort").GetString());
+        Assert.Equal("balanced", with.GetProperty("variant").GetString());
         Assert.False(with.TryGetProperty("agent", out _));
         Assert.False(with.TryGetProperty("agent-launch", out _));
     }
