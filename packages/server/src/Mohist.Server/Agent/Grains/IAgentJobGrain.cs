@@ -26,6 +26,10 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// </summary>
     Task<ClaimResult?> ClaimNextAsync(string runnerId);
 
+    Task<ClaimResult?> ClaimNextAsync(
+        string runnerId,
+        CapabilityClaimExpectation expectation) => ClaimNextAsync(runnerId);
+
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);
     Task SubmitAsync(AgentJobInput input);

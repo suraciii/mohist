@@ -237,7 +237,12 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             ? Task.FromResult(State.TerminalResult!)
             : _terminalCompletion.Task;
 
-    public async Task<ClaimResult?> ClaimNextAsync(string runnerId)
+    public Task<ClaimResult?> ClaimNextAsync(string runnerId) =>
+        ClaimNextAsync(runnerId, null);
+
+    public async Task<ClaimResult?> ClaimNextAsync(
+        string runnerId,
+        CapabilityClaimExpectation? expectation = null)
     {
         await HydrateAsync();
 
@@ -255,7 +260,32 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (string.IsNullOrWhiteSpace(State.WorkId))
             return null;
 
-        var record = await _jobStore.ClaimAsync(Key, runnerId, _timeProvider.GetUtcNow());
+        var pendingDispatch = DeserializeDispatch(_ledger?.DispatchJson);
+        if (pendingDispatch is null)
+            throw new AgentJobLedgerReconstructionException(
+                $"AgentJob '{Key}' claim has no parseable dispatch snapshot");
+
+        if (State.Input?.ReasoningEffort is not null && expectation is null)
+            return null;
+
+        if (expectation is not null
+            && !MatchesCapabilityExpectation(expectation, pendingDispatch, runnerId))
+        {
+            return null;
+        }
+
+        var claimDispatch = expectation is null
+            ? pendingDispatch
+            : pendingDispatch with { CapabilityClaim = expectation };
+
+        var record = expectation is null
+            ? await _jobStore.ClaimAsync(Key, runnerId, _timeProvider.GetUtcNow())
+            : await _jobStore.ClaimAsync(
+                Key,
+                runnerId,
+                _timeProvider.GetUtcNow(),
+                expectation.WorkId,
+                JsonSerializer.Serialize(claimDispatch, JSON.Options));
         _hydrated = false;
         await HydrateAsync();
         var dispatch = DeserializeDispatch(record.DispatchJson)
@@ -1369,6 +1399,29 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         {
             return null;
         }
+    }
+
+    private bool MatchesCapabilityExpectation(
+        CapabilityClaimExpectation expectation,
+        WorkDispatch dispatch,
+        string runnerId)
+    {
+        if (!string.Equals(expectation.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
+            || !string.Equals(expectation.OwnerId, Key, StringComparison.Ordinal)
+            || !string.Equals(expectation.WorkId, State.WorkId, StringComparison.Ordinal)
+            || !string.Equals(expectation.WorkId, dispatch.WorkId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var definition = dispatch.AgentDefinition;
+        return definition is not null
+            && string.Equals(definition.Runtime, expectation.Runtime, StringComparison.Ordinal)
+            && string.Equals(definition.Model, expectation.Model, StringComparison.Ordinal)
+            && string.Equals(definition.ReasoningEffort, expectation.ReasoningEffort, StringComparison.Ordinal)
+            && string.Equals(definition.Variant, expectation.Variant, StringComparison.Ordinal)
+            && (expectation.CapabilityRevision is null || expectation.CapabilityRevision.Length > 0)
+            && !string.IsNullOrWhiteSpace(runnerId);
     }
 
     private void ArmJobTimeout()

@@ -944,7 +944,13 @@ public static partial class RunnerRoutes
                 .Where(model => model.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            normalized[entry.Key.Trim()] = new RuntimeCatalogEntry(models, NormalizeCoderModelVariants(entry.Value.Variants));
+            normalized[entry.Key.Trim()] = new RuntimeCatalogEntry(
+                models,
+                NormalizeCoderModelVariants(entry.Value.Variants),
+                NormalizeCoderModelVariants(entry.Value.ReasoningEfforts),
+                entry.Value.SupportsReasoningEffort,
+                entry.Value.Complete,
+                NormalizeIdentity(entry.Value.CapabilityRevision));
         }
 
         return normalized.Count == 0 ? null : normalized;

@@ -474,7 +474,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
-    public async Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId)
+    public async Task<ClaimResult?> TryClaimAgentJobAsync(
+        string agentJobId,
+        string? projectId,
+        CapabilityClaimExpectation? expectation = null)
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -487,6 +490,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return null;
             }
 
+            if (expectation is not null
+                && (!string.Equals(expectation.OwnerId, agentJobId, StringComparison.Ordinal)
+                    || !CapabilityClaimMatchesUnderGate(expectation)))
+                return null;
+
             var activeWorkflowCount = await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
             var activeAgentJobCount = (await _agentJobStore.ListRunningForRunnerAsync(RunnerId))
                 .Select(record => record.JobKey)
@@ -495,7 +503,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (activeWorkflowCount + activeAgentJobCount >= MaxWorkflowSlots)
                 return null;
 
-            return await GrainFactory.GetGrain<IAgentJobGrain>(agentJobId).ClaimNextAsync(RunnerId);
+            var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
+            return expectation is null
+                ? await job.ClaimNextAsync(RunnerId)
+                : await job.ClaimNextAsync(RunnerId, expectation);
         }
         catch (AgentJobLedgerConflictException)
         {
@@ -519,6 +530,85 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
         return await BuildRuntimeStateAsync();
+    }
+
+    private bool CapabilityClaimMatchesUnderGate(CapabilityClaimExpectation expectation)
+    {
+        if (_info is null
+            || !string.Equals(expectation.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(expectation.OwnerId)
+            || string.IsNullOrWhiteSpace(expectation.WorkId))
+            return false;
+
+        if (expectation.ConnectionGeneration is not null
+            && !string.Equals(_info.ConnectionGeneration, expectation.ConnectionGeneration, StringComparison.Ordinal))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(expectation.Runtime))
+            return false;
+
+        var catalog = RuntimeCatalogFor(_info, expectation.Runtime);
+        var requiresCapabilityRevision = !string.IsNullOrWhiteSpace(expectation.ReasoningEffort);
+        if (requiresCapabilityRevision
+            && (catalog?.SupportsReasoningEffort != true
+                || catalog.Complete != true
+                || string.IsNullOrWhiteSpace(catalog.CapabilityRevision)
+                || !string.Equals(catalog.CapabilityRevision, expectation.CapabilityRevision, StringComparison.Ordinal)))
+            return false;
+
+        if (expectation.CapabilityRevision is not null
+            && !string.Equals(catalog?.CapabilityRevision, expectation.CapabilityRevision, StringComparison.Ordinal))
+            return false;
+
+        if (catalog is not null && !Contains(catalog.Models, expectation.Model))
+            return false;
+        if (expectation.Variant is not null
+            && !Contains(catalog?.Variants, expectation.Model, expectation.Variant))
+            return false;
+        if (expectation.ReasoningEffort is not null
+            && !Contains(catalog?.ReasoningEfforts, expectation.Model, expectation.ReasoningEffort))
+            return false;
+
+        if (expectation.ReasoningEffort is null)
+            return true;
+
+        if (expectation.RuntimeGeneration is not > 0
+            || string.IsNullOrWhiteSpace(expectation.ConnectionGeneration)
+            || !string.Equals(_readinessConnectionGeneration, expectation.ConnectionGeneration, StringComparison.Ordinal))
+            return false;
+
+        return _runtimeReadiness.TryGetValue(expectation.Runtime, out var witness)
+            && witness.Ready
+            && witness.Generation == expectation.RuntimeGeneration;
+    }
+
+    private static RuntimeCatalogEntry? RuntimeCatalogFor(RunnerInfo info, string runtime)
+    {
+        if (info.RuntimeCatalogs is null)
+            return null;
+
+        foreach (var entry in info.RuntimeCatalogs)
+        {
+            if (string.Equals(entry.Key, runtime, StringComparison.OrdinalIgnoreCase))
+                return entry.Value;
+        }
+
+        return null;
+    }
+
+    private static bool Contains(string[]? values, string? expected) =>
+        expected is null || (values?.Any(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase)) ?? false);
+
+    private static bool Contains(
+        Dictionary<string, string[]>? values,
+        string? model,
+        string expected)
+    {
+        if (model is null || values is null)
+            return false;
+
+        return values.TryGetValue(model, out var supported)
+            && supported.Any(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<RunnerRuntimeState> BuildRuntimeStateAsync()
@@ -858,7 +948,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         var retained = info is null
             ? null
-            : info with { ActionCatalog = CloneActionCatalog(info.ActionCatalog) };
+            : info with
+            {
+                ActionCatalog = CloneActionCatalog(info.ActionCatalog),
+                RuntimeCatalogs = CloneRuntimeCatalogs(info.RuntimeCatalogs),
+            };
         _info = retained;
         var state = _state.State ??= new RunnerState();
         state.LastKnownInfo = retained;
@@ -923,6 +1017,30 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 action.Capabilities is null ? null : [.. action.Capabilities])).ToArray(),
             catalog.Tombstones.Select(tombstone => new ActionCatalogTombstone(tombstone.Name, tombstone.Guidance)).ToArray());
     }
+
+    private static Dictionary<string, RuntimeCatalogEntry>? CloneRuntimeCatalogs(
+        Dictionary<string, RuntimeCatalogEntry>? catalogs)
+    {
+        if (catalogs is null)
+            return null;
+
+        return catalogs.ToDictionary(
+            entry => entry.Key,
+            entry => new RuntimeCatalogEntry(
+                entry.Value.Models is null ? null : [.. entry.Value.Models],
+                CloneMap(entry.Value.Variants),
+                CloneMap(entry.Value.ReasoningEfforts),
+                entry.Value.SupportsReasoningEffort,
+                entry.Value.Complete,
+                entry.Value.CapabilityRevision),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string[]>? CloneMap(Dictionary<string, string[]>? values) =>
+        values?.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value is null ? Array.Empty<string>() : [.. entry.Value],
+            StringComparer.OrdinalIgnoreCase);
 
     private static System.Text.Json.JsonElement? CloneDefault(System.Text.Json.JsonElement? value)
     {

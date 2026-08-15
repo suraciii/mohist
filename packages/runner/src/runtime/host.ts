@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { RunnerOptions, RunnerRegistration, RuntimeReadinessWitness } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { RunnerSignalRClient } from '../server/runner-signalr.js'
@@ -862,6 +863,18 @@ export class RunnerHost {
 
   private registrationState(): RunnerRegistration {
     const piCatalog = this.piRuntime?.catalog()
+    const piModels = piCatalog?.models.map((model) => `${model.provider}/${model.id}`) ?? []
+    const piReasoningEfforts = Object.fromEntries(
+      piCatalog?.models.map((model) => [
+        `${model.provider}/${model.id}`,
+        [...model.thinkingLevels],
+      ]) ?? [],
+    )
+    const piCapabilityRevision = piCatalog
+      ? createHash('sha256')
+          .update(JSON.stringify({ models: piModels, reasoningEfforts: piReasoningEfforts }))
+          .digest('hex')
+      : null
     return {
       capabilities: [],
       actionCatalog: this.actions.catalog(),
@@ -871,10 +884,12 @@ export class RunnerHost {
         ? {
             runtimeCatalogs: {
               pi: {
-                models: piCatalog.models.map((model) => `${model.provider}/${model.id}`),
-                variants: Object.fromEntries(
-                  piCatalog.models.map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]),
-                ),
+                models: piModels,
+                variants: {},
+                reasoningEfforts: piReasoningEfforts,
+                supportsReasoningEffort: true,
+                complete: true,
+                capabilityRevision: piCapabilityRevision,
               },
             },
           }

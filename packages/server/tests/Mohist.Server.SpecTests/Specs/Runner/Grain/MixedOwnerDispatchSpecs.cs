@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
@@ -54,6 +55,74 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, dispatch.OwnerKind);
         Assert.Equal(jobId, dispatch.AgentJobId);
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task ConditionalAgentJobClaim_RejectsStaleCapabilityRevisionAndLeavesJobPending()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"agent-capability-fence-project-{Guid.NewGuid():N}";
+        var runnerId = $"agent-capability-fence-runner-{Guid.NewGuid():N}";
+        var jobId = $"agent-capability-fence-job-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "capability-fence-host",
+            projectId,
+            ConnectionGeneration: "connection-1",
+            RuntimeCatalogs: new Dictionary<string, RuntimeCatalogEntry>
+            {
+                ["pi"] = new(
+                    Models: ["openai/model"],
+                    Variants: new Dictionary<string, string[]>
+                    {
+                        ["openai/model"] = ["balanced"],
+                    },
+                    ReasoningEfforts: new Dictionary<string, string[]>
+                    {
+                        ["openai/model"] = ["high"],
+                    },
+                    SupportsReasoningEffort: true,
+                    Complete: true,
+                    CapabilityRevision: "catalog-rev-1"),
+            }));
+        await runner.ObserveRuntimeReadinessAsync(
+            "connection-1",
+            [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]);
+
+        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.SubmitAsync(new AgentJobInput(
+            Prompt: "reject stale capability",
+            Model: "openai/model",
+            WorkspacePath: "/tmp/agent-capability-fence",
+            ProjectId: projectId,
+            Runtime: "pi",
+            AgentId: "agent-test",
+            AgentConfig: JsonDocument.Parse(
+                "{\"type\":\"pi\",\"model\":\"openai/model\",\"reasoningEffort\":\"high\",\"variant\":\"balanced\"}").RootElement.Clone(),
+            Variant: "balanced",
+            ReasoningEffort: "high"));
+
+        var pending = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Pending, pending.Status);
+        Assert.Equal(runnerId, pending.RunnerId);
+        Assert.False(string.IsNullOrWhiteSpace(pending.CurrentWorkId));
+
+        var expectation = new CapabilityClaimExpectation(
+            WorkDispatchOwnerKinds.AgentJob,
+            jobId,
+            pending.CurrentWorkId!,
+            Runtime: "pi",
+            Model: "openai/model",
+            ReasoningEffort: "high",
+            Variant: "balanced",
+            CapabilityRevision: "catalog-rev-stale",
+            RuntimeGeneration: 1,
+            ConnectionGeneration: "connection-1");
+
+        Assert.Null(await runner.TryClaimAgentJobAsync(jobId, projectId, expectation));
+        Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
     }
 
     [Fact]
