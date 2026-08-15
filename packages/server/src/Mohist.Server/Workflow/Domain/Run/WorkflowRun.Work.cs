@@ -333,11 +333,22 @@ public static partial class WorkflowRunExtensions
                 return AgentExecutionUpdate.Rejected;
             }
 
-            if (!MatchesAttempt(settlement, binding) || !MatchesBoundFields(settlement, binding))
+            if (!MatchesAttempt(settlement, binding))
                 return AgentExecutionUpdate.Rejected;
 
             if (HasFullExecutionBinding(settlement))
-                return AgentExecutionUpdate.Unchanged;
+            {
+                return MatchesBoundFields(settlement, binding)
+                    ? AgentExecutionUpdate.Unchanged
+                    : AgentExecutionUpdate.Rejected;
+            }
+
+            // A replacement turn is allocated before the Runner creates its
+            // physical Session turn. The first complete binding is allowed to
+            // replace that logical placeholder; subsequent bindings remain
+            // immutable and must match it exactly.
+            if (settlement.RecoveryGeneration == 0 && !MatchesBoundFields(settlement, binding))
+                return AgentExecutionUpdate.Rejected;
 
             settlement.AgentSessionId = binding.AgentSessionId;
             settlement.AgentTurnId = binding.AgentTurnId;
@@ -490,9 +501,9 @@ public static partial class WorkflowRunExtensions
 
             var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
             if (current is null) return null;
-            var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             if (task is not null)
-                return new WorkflowPendingWork(task.Id, WorkItemTypes.Task, current.Id, task.Title);
+                return new WorkflowPendingWork(task.WorkId ?? task.Id, WorkItemTypes.Task, current.Id, task.Title);
 
             if (current.Checks.Count > 0 && current.Checks.Any(c => c.Status != StageCheckStatus.Passed))
                 return new WorkflowPendingWork("checks", WorkItemTypes.Checks, current.Id, "Checks");
@@ -524,7 +535,7 @@ public static partial class WorkflowRunExtensions
                 throw new InvalidOperationException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
 
             var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0
@@ -574,7 +585,7 @@ public static partial class WorkflowRunExtensions
                 throw new InvalidOperationException("agent_result_unresolved");
             var current = run.CurrentStage();
             var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0

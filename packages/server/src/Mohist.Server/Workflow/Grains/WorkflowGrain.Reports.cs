@@ -281,9 +281,27 @@ public partial class WorkflowGrain
             string.Equals(candidate.ReceiptId, receipt.ReceiptId, StringComparison.Ordinal));
         if (prior is not null)
         {
-            return string.Equals(prior.RequestFingerprint, requestFingerprint, StringComparison.Ordinal)
-                ? new RuntimeRecoveryReceiptAcknowledgement(prior.ReceiptId, prior.Status, prior.Reason)
-                : new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "receipt-id-reused");
+            if (!string.Equals(prior.RequestFingerprint, requestFingerprint, StringComparison.Ordinal))
+            {
+                return new RuntimeRecoveryReceiptAcknowledgement(
+                    receipt.ReceiptId,
+                    RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                    "receipt-id-reused");
+            }
+
+            // The Workflow commit is authoritative. Repair the operation
+            // ledger on an acknowledgement replay in case the process failed
+            // after committing the replacement but before marking the fence
+            // entry settled.
+            if (receipt.Payload?.Type.Trim().Equals(
+                    RuntimeRecoveryReceiptPayloadTypes.UpdateInterrupted,
+                    StringComparison.OrdinalIgnoreCase) == true
+                && receipt.Payload.UpdateOperationId is { } replayOperationId)
+            {
+                await SettleUpdateOperationWorkAsync(receipt, replayOperationId);
+            }
+
+            return new RuntimeRecoveryReceiptAcknowledgement(prior.ReceiptId, prior.Status, prior.Reason);
         }
 
         if (!string.Equals(receipt.WorkflowRunId, GrainKey, StringComparison.Ordinal))
@@ -328,12 +346,34 @@ public partial class WorkflowGrain
                 return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "update-fence-missing");
             }
 
-            // T-004 owns replacement allocation. Retaining this receipt is
-            // intentional: the Runner must replay it until arbitration exists.
+            var recoveryGeneration = settlement.RecoveryGeneration + 1;
+            var replacement = _workLifecycle.AllocateRecoveryAttempt(
+                _run,
+                task,
+                recoveryGeneration,
+                Now());
+
+            // The replacement task, new work identity, and receipt ledger are
+            // persisted together. Nothing below this commit can be observed
+            // as an acknowledgement by the Runner.
+            _run.AppliedRecoveryReceipts.Add(new AppliedRuntimeRecoveryReceipt(
+                receipt.ReceiptId,
+                requestFingerprint,
+                RuntimeRecoveryReceiptAckStatuses.Accepted,
+                "replacement-created"));
+            await CommitAsync([]);
+            await SettleUpdateOperationWorkAsync(receipt, payload.UpdateOperationId!);
+            _log.LogInformation(
+                "run {run} recovered interrupted task {task}: generation={generation} work={work} turn={turn}",
+                GrainKey,
+                replacement.InterruptedTaskRunId,
+                replacement.RecoveryGeneration,
+                replacement.WorkId,
+                replacement.AgentTurnId);
             return new RuntimeRecoveryReceiptAcknowledgement(
                 receipt.ReceiptId,
-                RuntimeRecoveryReceiptAckStatuses.Retryable,
-                "replacement-arbitration-pending");
+                RuntimeRecoveryReceiptAckStatuses.Accepted,
+                "replacement-created");
         }
 
         if (settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
@@ -525,6 +565,21 @@ public partial class WorkflowGrain
         if (hadRunnerLossInterruption)
             await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
+    }
+
+    private async Task SettleUpdateOperationWorkAsync(
+        RuntimeRecoveryReceipt receipt,
+        string updateOperationId)
+    {
+        await GrainFactory
+            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+            .MarkWorkAsync(
+                updateOperationId,
+                WorkDispatchOwnerKinds.Workflow,
+                GrainKey,
+                receipt.WorkId,
+                receipt.TaskRunId,
+                RunnerUpdateWorkStatus.Settled);
     }
 
     private static bool MatchesReceiptBinding(

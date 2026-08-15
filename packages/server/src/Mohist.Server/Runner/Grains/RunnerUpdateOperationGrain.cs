@@ -97,13 +97,17 @@ public sealed class RunnerUpdateOperationGrain(
         if (duplicate is not null)
             return duplicate;
 
+        var affectedWorks = candidate.AffectedWorks
+            .Where(IsValidWork)
+            .GroupBy(work => work.Key, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
         var normalized = candidate with
         {
-            AffectedWorks = candidate.AffectedWorks
-                .Where(IsValidWork)
-                .GroupBy(work => work.Key, StringComparer.Ordinal)
-                .Select(group => group.First())
-                .ToArray(),
+            AffectedWorks = affectedWorks,
+            Status = affectedWorks.Length == 0
+                ? RunnerUpdateOperationStatus.Settled
+                : candidate.Status,
         };
         state.State.Operations.Add(normalized);
         await state.WriteStateAsync();
@@ -136,13 +140,19 @@ public sealed class RunnerUpdateOperationGrain(
         var works = operation.AffectedWorks.ToArray();
         var currentStatus = works[workIndex].Status;
         var nextStatus = MoreComplete(currentStatus, status);
-        if (nextStatus == currentStatus)
+        var canSettle = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+            && operation.Status != RunnerUpdateOperationStatus.Settled;
+        if (nextStatus == currentStatus && !canSettle)
             return operation;
 
-        works[workIndex] = works[workIndex] with { Status = nextStatus };
+        if (nextStatus != currentStatus)
+            works[workIndex] = works[workIndex] with { Status = nextStatus };
         var nextOperation = operation with
         {
             AffectedWorks = works,
+            Status = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+                ? RunnerUpdateOperationStatus.Settled
+                : operation.Status,
         };
         state.State.Operations[index] = nextOperation;
         await state.WriteStateAsync();

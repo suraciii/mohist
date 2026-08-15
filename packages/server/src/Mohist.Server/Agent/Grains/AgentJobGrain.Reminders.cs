@@ -57,6 +57,15 @@ public sealed partial class AgentJobGrain
             return;
         }
 
+        if (State.Status == AgentJobStatus.RecoverablyInterrupted)
+        {
+            if (State.PendingUpdateInterruptionEvent is { } pending)
+                await EmitUpdateInterruptionEventAsync(pending);
+            if (State.PendingUpdateInterruptionEvent is null)
+                await UnregisterSelfAsync(reminderName);
+            return;
+        }
+
         if (State.Status == AgentJobStatus.Pending)
         {
             await EvaluatePendingAsync();

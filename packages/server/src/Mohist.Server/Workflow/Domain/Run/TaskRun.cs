@@ -16,7 +16,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 /// (e.g. a <c>WorkflowRun</c> may be <c>Running</c> while no <c>TaskRun</c>
 /// is <c>Running</c>).
 /// </summary>
-public enum TaskRunStatus { Pending, Running, Completed, Failed, Cancelled }
+public enum TaskRunStatus { Pending, Running, Completed, Failed, Cancelled, Interrupted }
 
 public sealed class TaskRun
 {
@@ -35,6 +35,14 @@ public sealed class TaskRun
     public TerminalLogOwnership? TerminalLogOwnership { get; set; }
     public AgentResultSettlement? AgentResultSettlement { get; set; }
     public WorkInterruption? Interruption { get; set; }
+
+    /// <summary>
+    /// Recovery generation for a replacement attempt. The original attempt is
+    /// generation zero; interrupted history remains immutable while the next
+    /// attempt receives the incremented generation.
+    /// </summary>
+    public int RecoveryGeneration { get; set; }
+
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
     public Dictionary<string, string>? SetVars { get; init; }
@@ -197,6 +205,49 @@ public static class TaskRunExtensions
         {
             if (input.Recovery is null)
                 throw new InvalidOperationException("A continuation task requires a recovery declaration");
+        }
+
+        internal static TaskRun MakeRecoveryAttempt(
+            TaskRun interrupted,
+            IEnumerable<TaskRun> existing,
+            int stageAttempt,
+            int recoveryGeneration,
+            string workId,
+            string agentTurnId,
+            IEnumerable<TaskRun> occupiedTaskRuns)
+        {
+            if (interrupted.AgentResultSettlement is not { } originalSettlement)
+                throw new InvalidOperationException("A recovery attempt requires an Agent result settlement");
+            if (recoveryGeneration <= originalSettlement.RecoveryGeneration)
+                throw new InvalidOperationException("A recovery attempt must advance the recovery generation");
+            if (string.IsNullOrWhiteSpace(workId) || string.IsNullOrWhiteSpace(agentTurnId))
+                throw new ArgumentException("A recovery attempt requires new work and turn identities");
+
+            var task = MakeTask(
+                existing,
+                interrupted.ToDefinition(),
+                stageAttempt,
+                recoveryRemaining: interrupted.RecoveryRemaining,
+                occupiedTaskRuns,
+                interrupted.CausedByFeedbackId,
+                interrupted.CausedByFailedTaskId);
+            task.WorkId = workId;
+            task.RecoveryGeneration = recoveryGeneration;
+            task.AgentResultSettlement = new AgentResultSettlement
+            {
+                State = AgentResultSettlementState.AwaitingResult,
+                TaskRunId = task.Id,
+                WorkId = workId,
+                RunnerId = originalSettlement.RunnerId,
+                RecoveryGeneration = recoveryGeneration,
+                // The session will confirm the physical turn when the
+                // replacement dispatch is accepted. Keep a durable logical
+                // turn allocation now so the replacement is distinct even
+                // before the Runner binds it.
+                AgentTurnId = agentTurnId,
+                Runtime = originalSettlement.Runtime
+            };
+            return task;
         }
 
         private static TaskRun MakeTask(

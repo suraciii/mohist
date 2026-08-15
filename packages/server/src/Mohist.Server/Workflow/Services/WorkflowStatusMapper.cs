@@ -44,6 +44,7 @@ public static class WorkflowStatusMapper
         TaskRunStatus.Completed => "completed",
         TaskRunStatus.Failed => "failed",
         TaskRunStatus.Cancelled => "cancelled",
+        TaskRunStatus.Interrupted => "interrupted",
         _ => throw new SwitchExpressionException($"No wire mapping for TaskRunStatus value {status}"),
     };
 
@@ -215,6 +216,7 @@ public static class WorkflowStatusMapper
                 AgentResultSettlementState.AwaitingResult => "awaiting-result",
                 AgentResultSettlementState.Unknown => "unknown",
                 AgentResultSettlementState.Blocked => "blocked",
+                AgentResultSettlementState.RecoverablyInterrupted => "interrupted",
                 _ => throw new SwitchExpressionException($"No settlement view mapping for {settlement.State}"),
             },
             Reason: blocked ? AgentResultUnconfirmedReason : settlement.ReasonCode,

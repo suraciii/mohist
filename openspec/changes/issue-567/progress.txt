@@ -162,3 +162,35 @@ Channel decision (grounded in live source):
   Runner vitest suite passes (153 files, 1647 tests). The pending-operation
   handoff retries timed-out or failed queries within its fixed budget, while a
   successful empty response ends the handoff without creating update context.
+
+## T-004 Implementation Notes
+
+- Workflow interruption arbitration now commits an immutable `Interrupted`
+  TaskRun history entry beside one pending replacement attempt. The
+  replacement receives `RecoveryGeneration + 1`, a deterministic new work
+  delivery identity, and a distinct logical AgentTurn identity; the first
+  complete physical Session binding may replace that placeholder, after which
+  the binding is frozen normally.
+- `WorkflowWorkLifecycle` owns replacement work allocation and claim handling.
+  Preallocated recovery work ids are translated and claimed as normal
+  dispatches, while the old work id remains in history and is never returned
+  by active-work reconciliation. The replacement makes the run `Ready` and
+  is the only pending task eligible for dispatch.
+- A matching interruption receipt is recorded in the Workflow receipt ledger,
+  committed with the task replacement, and only then marks the Runner update
+  operation work `Settled` and returns an accepted terminal acknowledgement.
+  Acknowledgement replay returns the stored acknowledgement and repairs a
+  partially updated operation ledger without allocating another attempt.
+- Late reports, observations, and receipts using the original TaskRun/work/
+  turn binding are stale after replacement; the original settlement object is
+  not mutated. Replacement settlement cleanup leaves `HasUnresolvedAgentResult`
+  false after the new result is accepted.
+- Added Server spec coverage for fence/no-fence and mismatch rejection,
+  replacement creation, commit-before-ack observable ordering, duplicate
+  idempotence, frozen original binding, stale old-turn ingress, one eligible
+  replacement dispatch, and replacement settlement.
+- Verification: `Mohist.Server.SpecTests` passed 3928 tests; focused
+  `AgentResultSettlementSpecs` passed 11 tests; `RunnerUpdateInterruptSpecs`
+  passed 2 tests; `RunnerPollRecoveryStateApiSpecs` passed 6 tests; and
+  `npm run test:fast` passed all configured typecheck, Server, CLI, Runner
+  (1647), and Web (4724) checks.
