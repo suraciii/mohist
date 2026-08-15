@@ -59,8 +59,9 @@ vocabulary.
   an explicit configuration failure — never a silent drop.
 - Treat effort as part of Agent Readiness (definition matching and gaps), and
   surface it as its own control in the Web model pickers (driven by
-  `reasoningEfforts`, not the variant map) and in execution evidence
-  (session model facts record the applied effort).
+  `reasoningEfforts`, not the variant map), in the Web Agent list rows and the
+  detail config card (stored effort beside model, true variant still separate),
+  and in execution evidence (session model facts record the applied effort).
 
 ## Capabilities
 
@@ -90,7 +91,8 @@ vocabulary.
   follow-up handler types.
 - **Web** (`packages/web/`): Agent profile editor, model selectors and
   variant/effort chips (`ModelSelect`, `model-option-list`, settings
-  queries), readiness display.
+  queries), Agent list rows and detail config card (effort display beside
+  model/variant via the shared agent-config reader), readiness display.
 - **CLI** (`packages/cli/`): `mo agent` create/update/view options and table
   renderer.
 - **Docs**: `design/runtimes/pi.md`, `design/runtimes/opencode.md`, user

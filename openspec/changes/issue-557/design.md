@@ -265,6 +265,13 @@ variant and a level, and still loses information.
   metadata queries); `model-variants.ts`/`ModelOptionList` keep serving true
   variants only. No `reasoningEfforts` / `supportsReasoningEffort=false` →
   the control renders nothing and saves no effort for that selection.
+  The Web display surfaces show the stored effort beside model with the
+  variant still separate: the shared reader `readAgentModelAndVariant`
+  (used by the list and detail pages) also returns `reasoningEffort`, the
+  Agent list rows (`AgentListPage`) render it beside model/variant, and the
+  Agent detail Agent Config card (`AgentDetailPage`) gains a Reasoning-effort
+  row with the edit-timing note naming Reasoning Effort among the
+  future-jobs-only keys; an absent effort renders nothing on either surface.
 - **CLI** (`MohistCliCommands.Agent.cs`): `--reasoning-effort` (validated
   locally against the canonical set before the request) on create/update;
   mutually exclusive `--clear-reasoning-effort` on update (same
@@ -287,6 +294,9 @@ variant and a level, and still loses information.
   variant never touches it), opencode adapter (explicit effort →
   `unsupported_execution_configuration`), executor payload plumbing,
   session-target/follow-up options, stale-snapshot rejection.
+- Web unit tests: effort control (catalog-driven options, no-support
+  rendering) and the list-row/detail-card display of a stored effort
+  (present, absent, beside a true variant) via the extended shared reader.
 - Spec/system tests covering the two specs' scenarios end-to-end (pending on
   absent catalog; explicit rejection recorded with the tuple; evidence).
 

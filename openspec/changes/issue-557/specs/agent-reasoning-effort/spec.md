@@ -117,6 +117,38 @@ per-model `reasoningEfforts` — never by the `variants` map.
 - **THEN** it MUST offer no effort values
 - **AND** it MUST NOT save an effort for that selection
 
+### Requirement: Web agent surfaces display the stored effort
+
+The Web Agent list rows and the Agent detail configuration card SHALL display
+the stored `reasoningEffort` beside the model, with the true variant still
+shown separately. An absent effort MUST NOT be displayed or synthesized on
+either surface.
+
+#### Scenario: List rows show the effort beside model
+
+- **GIVEN** an Agent whose config carries model `m`, effort `high`, and a true
+  variant `balanced`
+- **WHEN** the Agent list renders the Agent's row
+- **THEN** the row MUST display `high` beside `m`
+- **AND** `balanced` MUST still be displayed as its own value
+
+#### Scenario: Detail config card shows the effort
+
+- **GIVEN** an Agent whose config carries model `m`, effort `high`, and a true
+  variant `balanced`
+- **WHEN** the Agent detail page renders the Agent Config card
+- **THEN** the card MUST display the effort `high` beside the Model entry
+- **AND** the Variant entry MUST still display `balanced` separately
+- **AND** the card's edit-timing note MUST name the reasoning effort among the
+  configuration keys whose edits apply only to Jobs created after saving
+
+#### Scenario: Absent effort displays as nothing
+
+- **GIVEN** an Agent whose config carries no `reasoningEffort`
+- **WHEN** the list row and the detail config card render
+- **THEN** neither surface may display an effort value
+- **AND** no default effort value may be synthesized
+
 ### Requirement: Every launch path freezes the effort in the execution snapshot
 
 Every durable execution snapshot — `AgentJobInput`, `RoutedAgentLaunchPlan`,

@@ -153,14 +153,15 @@
       "id": "T-008",
       "title": "Web effort control and readiness display; runtime docs; end-to-end spec verification",
       "spec": "specs/agent-reasoning-effort/spec.md#web-exposes-effort-as-its-own-control",
-      "description": "Give `AgentProfileEditor` a reasoning-effort control separate from the variant control, driven by the selected runtime/model's catalog `reasoningEfforts` (via the T-003 settings/runner model-metadata queries) — never by the `variants` map; `model-variants.ts`/`ModelOptionList` keep serving true variants only. A selection with no `reasoningEfforts` or `supportsReasoningEffort=false` renders no effort options and saves no effort for that selection; readiness display surfaces effort gaps from T-007. Update `design/runtimes/pi.md` (effort maps to a thinking level, variant no longer does), `design/runtimes/opencode.md` (effort-unsupported contract), and the Agent-configuration user docs. Own the final cross-slice verification of both capability specs' scenarios.",
+      "description": "Give `AgentProfileEditor` a reasoning-effort control separate from the variant control, driven by the selected runtime/model's catalog `reasoningEfforts` (via the T-003 settings/runner model-metadata queries) — never by the `variants` map; `model-variants.ts`/`ModelOptionList` keep serving true variants only. A selection with no `reasoningEfforts` or `supportsReasoningEffort=false` renders no effort options and saves no effort for that selection; readiness display surfaces effort gaps from T-007. Extend the shared agent-config reader (`readAgentModelAndVariant` → also returns `reasoningEffort`) so the Web Agent list rows (`AgentListPage`) render the stored effort beside model with the variant still shown separately, and the Agent detail page's Agent Config card (`AgentDetailPage`) gains a Reasoning-effort entry with the edit-timing note naming Reasoning Effort; an Agent without an effort displays no effort value on either surface. Update `design/runtimes/pi.md` (effort maps to a thinking level, variant no longer does), `design/runtimes/opencode.md` (effort-unsupported contract), and the Agent-configuration user docs. Own the final cross-slice verification of both capability specs' scenarios.",
       "acceptanceCriteria": [
         "The effort control offers exactly the selected model's catalog `reasoningEfforts` and offers nothing from the `variants` map; selecting effort `high` saves `agentConfig.reasoningEffort: high` and leaves any `variant` value unchanged.",
         "For a selection reporting no `reasoningEfforts` or `supportsReasoningEffort=false`, the control renders no effort values and cannot save an effort for that selection.",
+        "The Web Agent list rows render a stored reasoning effort beside model with the true variant still shown separately, and the Agent detail Agent Config card displays a Reasoning-effort entry beside Model with the edit-timing note naming Reasoning Effort among the future-jobs-only keys — via the shared reader extended to return `reasoningEffort`; an Agent without an effort displays no effort value on either surface.",
         "The Web readiness display surfaces effort setup gaps (effort-without-model, execution-configuration failures) with actionable guidance.",
         "`design/runtimes/pi.md`, `design/runtimes/opencode.md`, and the Agent-configuration user docs describe the effort vocabulary, the removed Pi variant semantics, and the re-entry path for saved thinking-level variants.",
         "Spec/system tests cover both capability specs' scenarios end-to-end: pending on absent catalog, explicit rejection recorded with the frozen tuple, snapshot immutability, Pi effort application with recorded evidence, OpenCode explicit failure, and no-migration behavior.",
-        "Web unit tests cover the effort control's catalog-driven options and no-support rendering; `npm run test:fast` and the full `npm run verify` gate pass."
+        "Web unit tests cover the effort control's catalog-driven options, no-support rendering, and the list-row/detail-card display of a stored effort (present, absent, beside a true variant); `npm run test:fast` and the full `npm run verify` gate pass."
       ],
       "priority": 6,
       "mode": "AFK",
@@ -168,7 +169,7 @@
       "output": "Catalog-driven Web effort control and readiness surfacing, updated runtime/user docs, end-to-end spec verification, and a passing full repository verification gate.",
       "dependsOn": ["T-001", "T-003", "T-007"],
       "passes": false,
-      "notes": "Design D8 (Web + docs) and D9 (spec/system coverage); this final coordinated slice owns `npm run verify`. The issue-level override UI stays Agent-profile-only in this change (per-launch UX is issue 556); the issue write surface itself already accepts the key from T-001."
+      "notes": "Design D8 (Web + docs) and D9 (spec/system coverage), also satisfying 'Web agent surfaces display the stored effort'; this final coordinated slice owns `npm run verify`. The issue-level override UI stays Agent-profile-only in this change (per-launch UX is issue 556); the issue write surface itself already accepts the key from T-001."
     }
   ]
 }
