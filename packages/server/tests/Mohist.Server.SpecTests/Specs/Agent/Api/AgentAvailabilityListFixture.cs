@@ -7,7 +7,6 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
@@ -56,7 +55,6 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
 {
     private SqliteConnection _keeper = null!;
     private AvailabilityWebApplicationFactory _factory = null!;
-    private TestClusterPortAllocator? _portAllocator;
     private readonly CountingRunnerStatusSource _runnerStatus = new(Array.Empty<RunnerStatusView>());
 
     public HttpClient Client { get; private set; } = null!;
@@ -71,15 +69,11 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
 
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         _factory = new AvailabilityWebApplicationFactory(
             connectionString,
             $"/mohist-tests/availability-list/runner-{dbName}",
             $"/mohist-tests/availability-list/system-update-{dbName}.json",
             TimeProvider,
-            siloPort,
-            gatewayPort,
             _runnerStatus);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
@@ -91,7 +85,6 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
         Client?.Dispose();
         _factory?.Dispose();
         if (_keeper is not null) await _keeper.DisposeAsync();
-        _portAllocator?.Dispose();
     }
 
     public void SetOnlineRunners(IReadOnlyList<RunnerStatusView> runners)
@@ -109,10 +102,8 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
             string runnerRoot,
             string systemUpdateStatePath,
             FakeTimeProvider timeProvider,
-            int siloPort,
-            int gatewayPort,
             CountingRunnerStatusSource runnerStatus)
-            : base(connectionString, runnerRoot, systemUpdateStatePath, timeProvider, siloPort, gatewayPort)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, timeProvider)
         {
             _runnerStatus = runnerStatus;
         }

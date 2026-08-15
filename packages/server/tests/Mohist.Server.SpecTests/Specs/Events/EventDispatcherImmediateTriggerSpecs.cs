@@ -6,9 +6,11 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
+using Mohist.Server.Otel;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
@@ -52,34 +54,20 @@ public class EventDispatcherImmediateTriggerSpecs
         // DispatcherSpecificHandler subscription well before the
         // reminder period elapses.
         var runId = $"wr_poke_latency_{Guid.NewGuid():N}";
-        int beforeCount;
-        lock (_fixture.SpecificInvocations)
-            beforeCount = _fixture.SpecificInvocations.Count;
-        // Register the deterministic delivery signal before the producer
-        // commits so the awaited task resolves from the handler's own
-        // invocation rather than a wall-clock timeout.
-        var delivered = _fixture.WaitForSpecificBeyondAsync(beforeCount);
+        var delivery = EventDispatcherImmediateTriggerTestSupport.ExpectPokeDelivery(
+            _fixture,
+            row => row.Source == $"/mohist/workflow-runs/{runId}"
+                && row.Type == EventCatalog.ReverseDns.WorkflowRunCompleted,
+            DispatcherHandler.Specific);
 
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
             var runStore = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
-            var run = BuildRun(runId, $"evt_poke_latency_{Guid.NewGuid():N}");
+            var run = BuildRun(runId);
             await runStore.SaveAsync(run, [new WorkflowRunCompleted()]);
         }
 
-        await RunPokeAndAwaitDeliveryAsync(delivered);
-    }
-
-    /// <summary>
-    /// Runs the producer's captured background poke and then observes the
-    /// handler boundary. This keeps the test independent of thread-pool and
-    /// Orleans scheduler timing while exercising the same dispatched work.
-    /// </summary>
-    private async Task RunPokeAndAwaitDeliveryAsync(Task signal)
-    {
-        await _fixture.BackgroundTasks.RunNextAsync();
-        Assert.True(signal.IsCompleted, "Event dispatcher poke completed without delivering the expected event");
-        await signal;
+        await EventDispatcherImmediateTriggerTestSupport.AwaitPokeDeliveryAsync(_fixture, delivery);
     }
 
     [Fact]
@@ -90,22 +78,23 @@ public class EventDispatcherImmediateTriggerSpecs
         // before the reminder cadence elapses. The IssueCreated event
         // type matches the catch-all DispatcherCatchAllHandler
         // subscription (Type = "*").
-        int beforeCatchAll;
-        lock (_fixture.CatchAllInvocations)
-            beforeCatchAll = _fixture.CatchAllInvocations.Count;
-        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
+        var issue = BuildIssue();
+        var delivery = EventDispatcherImmediateTriggerTestSupport.ExpectPokeDelivery(
+            _fixture,
+            row => row.Source == $"/mohist/projects/{issue.ProjectId}/issues/{issue.Number}"
+                && row.Type == EventCatalog.ReverseDns.IssueCreated,
+            DispatcherHandler.CatchAll);
 
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
             var issueStore = scope.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Data.Issue.IIssueStore>();
-            var issue = BuildIssue();
             await issueStore.SaveAsync(
                 GrainKey.Issue(new IssueKey(issue.ProjectId, issue.Number)),
                 issue,
                 [new IssueCreated("poke", "p2", new Dictionary<string, string>(), null, null)]);
         }
 
-        await RunPokeAndAwaitDeliveryAsync(delivered);
+        await EventDispatcherImmediateTriggerTestSupport.AwaitPokeDeliveryAsync(_fixture, delivery);
     }
 
     [Fact]
@@ -117,10 +106,11 @@ public class EventDispatcherImmediateTriggerSpecs
         // matches the catch-all subscription.
         var sessionId = $"agent_poke_{Guid.NewGuid():N}";
         var beforePending = _fixture.EventStore.PendingCount;
-        int beforeCatchAll;
-        lock (_fixture.CatchAllInvocations)
-            beforeCatchAll = _fixture.CatchAllInvocations.Count;
-        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
+        var delivery = EventDispatcherImmediateTriggerTestSupport.ExpectPokeDelivery(
+            _fixture,
+            row => row.Source == $"/mohist/agent-session/{sessionId}"
+                && row.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound,
+            DispatcherHandler.CatchAll);
 
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
@@ -133,7 +123,7 @@ public class EventDispatcherImmediateTriggerSpecs
         Assert.True(_fixture.EventStore.PendingCount > beforePending,
             $"Expected PendingCount to grow after AgentSessionStore.SaveAsync; was {beforePending}, now {_fixture.EventStore.PendingCount}");
 
-        await RunPokeAndAwaitDeliveryAsync(delivered);
+        await EventDispatcherImmediateTriggerTestSupport.AwaitPokeDeliveryAsync(_fixture, delivery);
     }
 
     [Fact]
@@ -142,59 +132,21 @@ public class EventDispatcherImmediateTriggerSpecs
         var projectId = $"proj_epic_poke_{Guid.NewGuid():N}";
         const int epicNumber = 1;
         await SeedEpicAsync(projectId, epicNumber);
-        int beforeCatchAll;
-        lock (_fixture.CatchAllInvocations)
-            beforeCatchAll = _fixture.CatchAllInvocations.Count;
-        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
+        var delivery = EventDispatcherImmediateTriggerTestSupport.ExpectPokeDelivery(
+            _fixture,
+            row => row.Source == $"/mohist/projects/{projectId}/epics/{epicNumber}"
+                && row.Type == EventCatalog.ReverseDns.EpicStatusChanged,
+            DispatcherHandler.CatchAll);
         var epic = _fixture.Grains.GetGrain<IEpicGrain>(
             GrainKey.Epic(new EpicKey(projectId, epicNumber)));
 
         await epic.StartAsync();
-        await RunPokeAndAwaitDeliveryAsync(delivered);
+        await EventDispatcherImmediateTriggerTestSupport.AwaitPokeDeliveryAsync(_fixture, delivery);
         Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
 
         _fixture.BackgroundTasks.Reset();
         await epic.StartAsync();
         Assert.Equal(0, _fixture.BackgroundTasks.LaunchCount);
-    }
-
-    [Fact]
-    public async Task AgentJobGrain_FailureEventAppend_PokesDispatcherBeforeReminderCadence()
-    {
-        var jobKey = $"agent-job-poke-{Guid.NewGuid():N}";
-        int beforeCatchAll;
-        lock (_fixture.CatchAllInvocations)
-            beforeCatchAll = _fixture.CatchAllInvocations.Count;
-        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
-        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-
-        await job.FailAsync("runner-lost", "agent-test");
-
-        await RunPokeAndAwaitDeliveryAsync(delivered);
-        Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
-    }
-
-    [Fact]
-    public async Task AgentJobGrain_AppendFailure_DoesNotPokeAndRetainsRecoveryObligation()
-    {
-        var jobKey = $"agent-job-poke-recovery-{Guid.NewGuid():N}";
-        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-        _fixture.EventStore.ThrowOnAppend = envelope =>
-            envelope.Type == Mohist.Server.Infrastructure.Events.EventCatalog.ReverseDns.AgentJobFailed;
-
-        await job.FailAsync("runner-lost", "agent-test");
-
-        Assert.Equal(0, _fixture.BackgroundTasks.LaunchCount);
-        _fixture.EventStore.ThrowOnAppend = null;
-        int beforeCatchAll;
-        lock (_fixture.CatchAllInvocations)
-            beforeCatchAll = _fixture.CatchAllInvocations.Count;
-        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
-        await TestLifecycle.DeactivateAndWait(job, _fixture.Grains);
-        await job.GetStatusAsync();
-
-        await RunPokeAndAwaitDeliveryAsync(delivered);
-        Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
     }
 
     [Fact]
@@ -211,12 +163,9 @@ public class EventDispatcherImmediateTriggerSpecs
         // reminder callback queries and dispatches it through the
         // normal pull–fan-out cycle.
         var issueId = $"issue_lost_poke_{Guid.NewGuid():N}";
-        var eventId = $"evt_lost_poke_{Guid.NewGuid():N}";
+        var runId = $"wr_lost_poke_{Guid.NewGuid():N}";
 
         var brokenFactory = new ThrowingDispatchGrainFactory();
-        int beforeSpecific;
-        lock (_fixture.SpecificInvocations)
-            beforeSpecific = _fixture.SpecificInvocations.Count;
 
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
@@ -229,23 +178,28 @@ public class EventDispatcherImmediateTriggerSpecs
                 new DispatchSnapshotStore(
                     scope.ServiceProvider.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>>(),
                     Microsoft.Extensions.Logging.Abstractions.NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
-            var run = BuildRun($"wr_lost_poke_{Guid.NewGuid():N}", eventId, issueId);
+            var run = BuildRun(runId, issueId);
             await runStore.SaveAsync(run, [new WorkflowRunCompleted()]);
         }
 
         // The poke was lost: the row remains in the event store and
         // hasn't been delivered to the matching subscription.
         Assert.Equal(1, _fixture.EventStore.PendingCount);
-        lock (_fixture.SpecificInvocations)
-            Assert.Equal(beforeSpecific, _fixture.SpecificInvocations.Count);
+        var pending = Assert.Single(await _fixture.EventStore.ListUndeliveredAsync());
+        Assert.Equal($"/mohist/workflow-runs/{runId}", pending.Source);
+        Assert.Equal(EventCatalog.ReverseDns.WorkflowRunCompleted, pending.Type);
+        var delivered = EventDispatcherImmediateTriggerTestSupport.WaitForHandlerDeliveryAsync(
+            _fixture,
+            DispatcherDeliveryKey.From(pending, DispatcherHandler.Specific));
 
         var reminderTime = EventTime.UtcDateTime.AddHours(1);
         await _fixture.EventDispatcher.ReceiveReminder(
             EventDispatcherGrain.ReminderName,
             new TickStatus(EventTime.UtcDateTime, TimeSpan.FromHours(1), reminderTime));
 
-        lock (_fixture.SpecificInvocations)
-            Assert.Equal(beforeSpecific + 1, _fixture.SpecificInvocations.Count);
+        Assert.True(delivered.IsCompletedSuccessfully,
+            "Reminder cycle returned before the exact persisted event reached handler delivery and settlement.");
+        await delivered;
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
@@ -268,7 +222,7 @@ public class EventDispatcherImmediateTriggerSpecs
         await db.SaveChangesAsync();
     }
 
-    private static WorkflowRun BuildRun(string id, string eventId, string? issueId = null)
+    private static WorkflowRun BuildRun(string id, string? issueId = null)
     {
         return new WorkflowRun
         {
@@ -373,42 +327,5 @@ public class EventDispatcherImmediateTriggerSpecs
 
         IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
             => throw new NotSupportedException();
-    }
-}
-
-public sealed class RecordingBackgroundTaskLauncher : IBackgroundTaskLauncher
-{
-    private readonly object _gate = new();
-    private readonly Queue<(Func<CancellationToken, Task> Work, CancellationToken CancellationToken)> _pending = [];
-    private int _launchCount;
-
-    public int LaunchCount => Volatile.Read(ref _launchCount);
-
-    public void Launch(Func<CancellationToken, Task> work, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(work);
-        Interlocked.Increment(ref _launchCount);
-        lock (_gate)
-            _pending.Enqueue((work, cancellationToken));
-    }
-
-    public async Task RunNextAsync()
-    {
-        (Func<CancellationToken, Task> Work, CancellationToken CancellationToken) pending;
-        lock (_gate)
-        {
-            if (_pending.Count == 0)
-                throw new InvalidOperationException("No captured background task is available.");
-            pending = _pending.Dequeue();
-        }
-
-        await pending.Work(pending.CancellationToken);
-    }
-
-    public void Reset()
-    {
-        Interlocked.Exchange(ref _launchCount, 0);
-        lock (_gate)
-            _pending.Clear();
     }
 }

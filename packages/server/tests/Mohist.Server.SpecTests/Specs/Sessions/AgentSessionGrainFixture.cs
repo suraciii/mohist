@@ -59,7 +59,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         _database = TestSqliteDatabase.CreateMigrated();
         ConnectionString = _database.ConnectionString;
 
-        var builder = new InProcessTestClusterBuilder();
+        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.UseInMemoryReminderService();

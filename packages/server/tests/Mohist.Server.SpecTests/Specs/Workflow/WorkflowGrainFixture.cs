@@ -52,7 +52,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
 
         MigratedSqliteTemplate.CopyTo(_keeper);
 
-        var builder = new InProcessTestClusterBuilder();
+        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {

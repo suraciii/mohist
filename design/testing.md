@@ -73,7 +73,10 @@ Any order, any parallelism, 1000 reruns = same result.
 
 - Timestamps: fixed constants (`2026-01-01T00:00:00Z`).
 - No array/Object.keys/scheduling order dependencies.
-- Parallel silos: random ports (TestClusterPortAllocator). Never hardcoded 11111/30000.
+- WebApplicationFactory and InProcessTestCluster fixtures use Orleans in-memory
+  transport and never bind host ports. Tests which explicitly exercise the
+  production TCP transport may allocate isolated ports with
+  TestClusterPortAllocator; never hardcode 11111/30000 for those tests.
 - Restore stubs: vitest auto-restore; fake timers close in afterEach.
 - Never `it.skip` to hide flaky tests. Fix or delete.
 
@@ -168,7 +171,10 @@ paths read storage or call other components.
 xUnit collection = scheduling unit; classes inside a collection run serially, so wall time = the longest class chain.
 
 - Parallel by default. `DisableParallelization` only for true process-global state (today `OtelTracing` for shared `Microsoft.AspNetCore` ActivitySource, and `Dispatcher` for shared instrumentation capture). Cluster-scoped state (`RunnerRegistryKeys.Global`, `ForceActivationCollection`, fixture `FakeTimeProvider`) is per-fixture, never a reason to serialize.
-- Ports: WebApplicationFactory fixtures must allocate via TestClusterPortAllocator. InProcessTestCluster is in-memory transport — no ports, safe anywhere.
+- Ports: WebApplicationFactory fixtures use TestServer plus Orleans in-memory
+  transport, so they do not allocate host ports. InProcessTestCluster is also
+  in-memory transport. A test may allocate ports only when its subject is the
+  production TCP transport itself.
 - Collections express shared fixture lifetime and isolation needs only — never speed or cost. No custom test orderer: it was measured to sit within run-to-run noise. No runtime traits either; the track is expressed by naming + directory alone.
 - `maxParallelThreads` is a memory bound, not a speed knob. Every concurrent collection lights up its own silo + WebApplicationFactory (~59 MB) on top of a ~1150 MB fixed floor, and there are more collections than any machine should hold at once. Cap it in `xunit.runner.json`; leave it alone for wall time, which is flat across settings.
 - Schema: tests never run `Migrate()` / `EnsureCreated()` from empty — clone via `MigratedSqliteTemplate.CopyTo` / `CopyTo(target)` / `CopyModelSchemaTo`. Sole exception: DatabaseInitializationSpecs (its subject is the chain itself).

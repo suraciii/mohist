@@ -8,7 +8,6 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
@@ -32,17 +31,13 @@ public sealed class SlackControlPlaneRoutesFactory : MohistWebApplicationFactory
         string connectionString,
         string runnerRoot,
         string systemUpdateStatePath,
-        FakeTimeProvider timeProvider,
-        int siloPort,
-        int gatewayPort)
+        FakeTimeProvider timeProvider)
         : base(
             connectionString,
             runnerRoot,
             systemUpdateStatePath,
             "/mohist-tests/slack-control-plane/logs",
-            timeProvider,
-            siloPort,
-            gatewayPort)
+            timeProvider)
     {
     }
 
@@ -71,7 +66,6 @@ public sealed class SlackControlPlaneRoutesFactory : MohistWebApplicationFactory
 public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
 {
     private SqliteConnection _keeper = null!;
-    private TestClusterPortAllocator? _portAllocator;
 
     public SlackControlPlaneRoutesFactory Factory { get; private set; } = null!;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 8, 5, 14, 0, 0, TimeSpan.Zero));
@@ -86,16 +80,11 @@ public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
 
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-
         Factory = new SlackControlPlaneRoutesFactory(
             connectionString,
             "/mohist-tests/slack-control-plane/runner",
             "/mohist-tests/slack-control-plane/system-update.json",
-            TimeProvider,
-            siloPort,
-            gatewayPort);
+            TimeProvider);
         await Factory.EnsureSchemaAsync();
         _ = Factory.Services;
     }
@@ -103,7 +92,6 @@ public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         Factory?.Dispose();
-        _portAllocator?.Dispose();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
     }

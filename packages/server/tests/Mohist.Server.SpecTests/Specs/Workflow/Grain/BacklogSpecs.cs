@@ -21,6 +21,7 @@ using Orleans.TestingHost;
 using Xunit;
 using Mohist.Server.SpecTests.Specs.Issue.Profile;
 using Mohist.Server.SpecTests.Specs.Workflow;
+using Mohist.Server.SpecTests.Support;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
@@ -61,7 +62,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     private async Task ResetClusterAsync()
     {
         var oldCluster = _fixture.Cluster;
-        var builder = new InProcessTestClusterBuilder();
+        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.Options.InitialSilosCount = 1;
         BacklogFixture.ConfigureCluster(builder, _fixture.ConnectionString);
         var newCluster = builder.Build();

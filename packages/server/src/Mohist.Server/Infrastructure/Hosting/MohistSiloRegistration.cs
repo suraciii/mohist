@@ -4,19 +4,24 @@ using Mohist.Server.Events.Grains;
 using Mohist.Server.Otel;
 using Orleans.Configuration;
 using Orleans.Hosting;
+using System.Reflection;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
 public static class MohistSiloRegistration
 {
+    private const string InMemoryTransportSetting = "Mohist:Testing:InMemoryOrleansTransport";
+
     public static ISiloBuilder ConfigureMohistSilo(this ISiloBuilder silo, IConfiguration configuration)
     {
-        // Default to the well-known localhost clustering ports, but allow tests to
-        // override them (via TestClusterPortAllocator) so multiple silos can coexist
-        // in one process without fighting over 11111 / 30000.
+        // Production uses the well-known localhost endpoint identities. The
+        // test host keeps these identities but replaces the socket transport
+        // with Orleans.TestingHost's in-memory transport below.
         var siloPort = configuration.GetValue<int?>("Mohist:Silo:SiloPort") ?? EndpointOptions.DEFAULT_SILO_PORT;
         var gatewayPort = configuration.GetValue<int?>("Mohist:Silo:GatewayPort") ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
         silo.UseLocalhostClustering(siloPort, gatewayPort);
+        if (configuration.GetValue<bool>(InMemoryTransportSetting))
+            UseTestingHostInMemoryTransport(silo);
         silo.AddActivityPropagation();
         silo.AddIncomingGrainCallFilter<RequestWorkIncomingGrainCallFilter>();
         silo.AddOutgoingGrainCallFilter<RequestWorkOutgoingGrainCallFilter>();
@@ -56,5 +61,45 @@ public static class MohistSiloRegistration
             configuration.GetSection(EventDispatcherOptions.SectionName));
 
         return silo;
+    }
+
+    private static void UseTestingHostInMemoryTransport(ISiloBuilder silo)
+    {
+        // Microsoft.Orleans.TestingHost is a test-only dependency and must not
+        // be referenced by the production project. The test host opts in via
+        // configuration; resolve its transport adapter only in that process.
+        var testingHost = AppDomain.CurrentDomain.GetAssemblies()
+            .FirstOrDefault(assembly => string.Equals(
+                assembly.GetName().Name,
+                "Orleans.TestingHost",
+                StringComparison.Ordinal))
+            ?? LoadTestingHostAssembly();
+        var hubType = testingHost.GetType(
+            "Orleans.TestingHost.InMemoryTransport.InMemoryTransportConnectionHub",
+            throwOnError: true)!;
+        var hub = Activator.CreateInstance(hubType)
+            ?? throw new InvalidOperationException("Could not create the Orleans in-memory transport hub.");
+        var extensionsType = testingHost.GetType(
+            "Orleans.TestingHost.InMemoryTransport.InMemoryTransportExtensions",
+            throwOnError: true)!;
+        var useTransport = extensionsType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Single(method => method.Name == "UseInMemoryConnectionTransport"
+                && method.GetParameters().Length == 2
+                && method.GetParameters()[0].ParameterType == typeof(ISiloBuilder));
+        useTransport.Invoke(null, [silo, hub]);
+    }
+
+    private static Assembly LoadTestingHostAssembly()
+    {
+        try
+        {
+            return Assembly.Load("Orleans.TestingHost");
+        }
+        catch (FileNotFoundException exception)
+        {
+            throw new InvalidOperationException(
+                $"{InMemoryTransportSetting} requires Microsoft.Orleans.TestingHost.",
+                exception);
+        }
     }
 }

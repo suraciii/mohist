@@ -111,7 +111,7 @@ public sealed class AgentSessionFollowupConcurrencyFixture : IAsyncLifetime
     {
         _database = TestSqliteDatabase.CreateMigrated();
 
-        var builder = new InProcessTestClusterBuilder();
+        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.UseInMemoryReminderService();

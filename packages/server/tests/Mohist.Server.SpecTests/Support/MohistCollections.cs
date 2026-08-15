@@ -21,9 +21,8 @@ public class SlackLeaseRoutesCollection : ICollectionFixture<SlackAdapterLeaseRo
 public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControlPlaneRoutesFixture>;
 
 // Parallel integration collections. Each shares one MohistIntegrationFixture
-// (one silo + one web host) whose silo/gateway ports are allocated via
-// TestClusterPortAllocator, so the collections run concurrently without
-// colliding on the well-known 11111 / 30000 ports. Within a collection the
+// (one in-memory silo + one TestServer web host), so the collections run
+// concurrently without opening host ports. Within a collection the
 // classes still run serially (xUnit semantics), so max parallelism equals the
 // number of these collections. Cluster-scoped state that looks global
 // (RunnerRegistryKeys.Global, IManagementGrain.ForceActivationCollection,
@@ -87,7 +86,7 @@ public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFix
 public class RunnerEnrollmentCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
-// + silo, TestClusterPortAllocator-assigned ports). Tests reset the otel
+// + in-memory silo). Tests reset the otel
 // tables and collector status via OtlpRoutesHostFixture.ResetOtelStateAsync
 // instead of paying a per-test host start.
 [CollectionDefinition("IntegrationTelemetry")]

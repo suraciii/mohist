@@ -1,7 +1,6 @@
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
@@ -170,8 +169,9 @@ public class DispatcherGrainSpecs
     public async Task HostedActivation_FirstReminderDeliversWithoutPulse()
     {
         var eventId = $"evt_hosted_reminder_{Guid.NewGuid():N}";
-        var delivered = _fixture.WaitForSpecificInvocationAsync(eventId);
-        await PublishWorkflowCompletedAsync(eventId, "issue_hosted_reminder");
+        const string issueId = "issue_hosted_reminder";
+        await PublishWorkflowCompletedAsync(eventId, issueId);
+        var delivered = await RegisterWorkflowRunDeliveryAsync(eventId, issueId);
 
         await AwaitSignalAsync(delivered, "hosted dispatcher reminder delivery");
 
@@ -187,8 +187,8 @@ public class DispatcherGrainSpecs
         var initialSilo = initialContext.Address.SiloAddress
             ?? throw new InvalidOperationException("Dispatcher activation has no silo address");
 
-        var beforeTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_before");
         await PublishWorkflowCompletedAsync("evt_reminder_before", "issue_reminder_before");
+        var beforeTick = await RegisterWorkflowRunDeliveryAsync("evt_reminder_before", "issue_reminder_before");
         await AwaitSignalAsync(beforeTick, "dispatcher reminder delivery before silo loss");
         Assert.Contains("evt_reminder_before", _fixture.SpecificInvocations);
 
@@ -201,8 +201,8 @@ public class DispatcherGrainSpecs
             await _fixture.Cluster.WaitForLivenessToStabilizeAsync(didKill: true);
             await AwaitSignalAsync(reminderReloaded, "persisted reminder reload after silo loss");
 
-            var afterTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_after");
             await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
+            var afterTick = await RegisterWorkflowRunDeliveryAsync("evt_reminder_after", "issue_reminder_after");
             await AwaitSignalAsync(afterTick, "dispatcher reminder delivery after silo loss");
 
             Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
@@ -213,6 +213,18 @@ public class DispatcherGrainSpecs
             await _fixture.Cluster.StartAdditionalSiloAsync();
             await _fixture.Cluster.WaitForLivenessToStabilizeAsync();
         }
+    }
+
+    private async Task<Task> RegisterWorkflowRunDeliveryAsync(string eventId, string issueId)
+    {
+        var pending = Assert.Single(
+            await _fixture.EventStore.ListUndeliveredAsync(),
+            row => row.Source == $"/mohist/issues/{issueId}"
+                && row.Type == EventCatalog.ReverseDns.WorkflowRunCompleted
+                && row.EventId == eventId);
+        return EventDispatcherImmediateTriggerTestSupport.WaitForHandlerDeliveryAsync(
+            _fixture,
+            DispatcherDeliveryKey.From(pending, DispatcherHandler.Specific));
     }
 
     [Fact]
@@ -341,20 +353,17 @@ public class DispatcherGrainSpecs
             time: EventTime,
             data: null));
 
-    private Task AwaitSignalAsync(Task signal, string description) =>
-        TestWait.ForAsync(
-            () => signal.IsCompleted,
-            timeout: TimeSpan.FromSeconds(5),
-            step: TimeSpan.FromMilliseconds(100),
-            description,
-            advance: AdvanceClusterTurnAsync);
-
-    private async Task AdvanceClusterTurnAsync()
+    private async Task AwaitSignalAsync(Task signal, string description)
     {
         _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-        await _fixture.Grains
-            .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
-            .ListRunnerIdsAsync();
+        try
+        {
+            await signal;
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"Failed while awaiting {description}.", error);
+        }
     }
 }
 
