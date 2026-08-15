@@ -130,7 +130,11 @@ export function validateSummary(summary: XunitSummary): readonly string[] {
   return reasons
 }
 
-export function validateResult(result: CommandResult): { readonly ok: boolean; readonly summary?: XunitSummary; readonly reasons: readonly string[] } {
+export function validateResult(result: CommandResult): {
+  readonly ok: boolean
+  readonly summary?: XunitSummary
+  readonly reasons: readonly string[]
+} {
   const reasons: string[] = []
   if (result.spawnError) reasons.push(`spawn error: ${result.spawnError}`)
   if (result.exitCode !== 0) reasons.push(`exit code: ${result.exitCode ?? 'null'}`)
@@ -195,7 +199,10 @@ function formatRecord(record: GateRecord): string {
 
 function writeEvidence(outputDir: string, records: readonly GateRecord[], failure?: string): void {
   mkdirSync(outputDir, { recursive: true })
-  writeFileSync(resolve(outputDir, 'gate-summary.json'), JSON.stringify({ rounds: gateRounds, records, failure }, null, 2) + '\n')
+  writeFileSync(
+    resolve(outputDir, 'gate-summary.json'),
+    JSON.stringify({ rounds: gateRounds, records, failure }, null, 2) + '\n',
+  )
   const lines = records.map(formatRecord)
   if (failure) lines.push(`GATE FAIL: ${failure}`)
   else if (records.length > 0) lines.push(`GATE PASS: ${records.length} invocations`)
@@ -238,7 +245,7 @@ export const spawnExecutor: CommandExecutor = (command, apphost, focusedArgs) =>
 
   const result = new Promise<CommandResult>((resolveResult) => {
     let spawnError: string | undefined
-    child.once('error', error => {
+    child.once('error', (error) => {
       spawnError = error.message
     })
     child.once('close', (exitCode, signal) => {
@@ -271,10 +278,14 @@ function apphostFor(className: string): { apphost: string; args: readonly string
   })
 }
 
-function commandFor(outputDir: string, target: typeof targets[number], mode: GateCommand['mode'], round: number): GateCommand {
-  const prefix = mode === 'single'
-    ? `single-${String(round).padStart(2, '0')}`
-    : `parallel-${String(round).padStart(2, '0')}`
+function commandFor(
+  outputDir: string,
+  target: (typeof targets)[number],
+  mode: GateCommand['mode'],
+  round: number,
+): GateCommand {
+  const prefix =
+    mode === 'single' ? `single-${String(round).padStart(2, '0')}` : `parallel-${String(round).padStart(2, '0')}`
   const base = resolve(outputDir, prefix, target.id)
   return {
     target: target.id,
@@ -289,7 +300,7 @@ function commandFor(outputDir: string, target: typeof targets[number], mode: Gat
 
 async function runSingle(
   outputDir: string,
-  target: typeof targets[number],
+  target: (typeof targets)[number],
   round: number,
   executor: CommandExecutor,
 ): Promise<GateRecord> {
@@ -304,33 +315,33 @@ export async function runParallelFailFast<T, V, R>(
   isSuccess: (result: R) => boolean,
   readResult: (command: T, result: V) => R,
 ): Promise<readonly R[]> {
-  const running = commands.map(command => executor(command))
-  const first = await Promise.race(running.map((process, index) => process.result.then(result => ({ index, result }))))
+  const running = commands.map((command) => executor(command))
+  const first = await Promise.race(
+    running.map((process, index) => process.result.then((result) => ({ index, result }))),
+  )
   const firstResult = readResult(commands[first.index], first.result)
   if (!isSuccess(firstResult)) {
     running.forEach((process, index) => {
       if (index !== first.index) process.kill()
     })
   }
-  const results = await Promise.all(running.map(process => process.result))
+  const results = await Promise.all(running.map((process) => process.result))
   return results.map((result, index) => readResult(commands[index], result))
 }
 
-async function runParallel(
-  outputDir: string,
-  round: number,
-  executor: CommandExecutor,
-): Promise<GateRecord[]> {
-  const commands = targets.map(target => ({ command: commandFor(outputDir, target, 'parallel', round), target }))
-  return [...await runParallelFailFast<typeof commands[number], CommandResult, GateRecord>(
-    commands,
-    command => {
-      const focused = apphostFor(command.target.className)
-      return executor(command.command, focused.apphost, focused.args)
-    },
-    record => record.ok,
-    (command, result) => recordFor(command.command, result as CommandResult),
-  )]
+async function runParallel(outputDir: string, round: number, executor: CommandExecutor): Promise<GateRecord[]> {
+  const commands = targets.map((target) => ({ command: commandFor(outputDir, target, 'parallel', round), target }))
+  return [
+    ...(await runParallelFailFast<(typeof commands)[number], CommandResult, GateRecord>(
+      commands,
+      (command) => {
+        const focused = apphostFor(command.target.className)
+        return executor(command.command, focused.apphost, focused.args)
+      },
+      (record) => record.ok,
+      (command, result) => recordFor(command.command, result as CommandResult),
+    )),
+  ]
 }
 
 export interface GateOptions {
@@ -368,7 +379,7 @@ export async function runGate(options: GateOptions = {}): Promise<number> {
       records.push(record)
       console.log(formatRecord(record))
     }
-    const failed = roundRecords.find(record => !record.ok)
+    const failed = roundRecords.find((record) => !record.ok)
     if (failed) {
       failure = `${failed.mode} ${failed.target} round ${failed.round}: ${failed.reasons.join('; ')}`
       writeEvidence(outputDir, records, failure)
@@ -383,8 +394,11 @@ export async function runGate(options: GateOptions = {}): Promise<number> {
 
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (isMain) {
-  void runGate().then(code => process.exit(code), error => {
-    console.error(`agent-job-ci-gate: fatal: ${(error as Error).message}`)
-    process.exit(1)
-  })
+  void runGate().then(
+    (code) => process.exit(code),
+    (error) => {
+      console.error(`agent-job-ci-gate: fatal: ${(error as Error).message}`)
+      process.exit(1)
+    },
+  )
 }

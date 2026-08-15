@@ -84,14 +84,16 @@ test('runParallelFailFast kills the other command on the first failed result', a
       }
       controls.push(control)
       return {
-        result: new Promise<{ ok: boolean }>(resolve => { resolveResult = resolve }),
+        result: new Promise<{ ok: boolean }>((resolve) => {
+          resolveResult = resolve
+        }),
         kill: () => {
           control.killed = true
           control.resolve({ ok: false })
         },
       }
     },
-    result => result.ok,
+    (result) => result.ok,
     (_command, result) => result,
   )
 

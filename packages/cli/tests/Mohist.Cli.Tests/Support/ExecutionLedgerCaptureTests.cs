@@ -22,6 +22,15 @@ public sealed class ExecutionLedgerCaptureTests
         new Dictionary<string, IReadOnlyCollection<string>>();
 
     [Fact]
+    public void Reporter_HasAnExplicitNativeCliSwitch()
+    {
+        var reporter = new ExecutionLedgerReporter();
+
+        Assert.Equal("mohist-ledger", reporter.RunnerSwitch);
+        Assert.True(reporter.CanBeEnvironmentallyEnabled);
+    }
+
+    [Fact]
     public async Task Reporter_UsesNativeExecutionTimeExcludingQueueDelay_AndReclaimsTerminalMetadata()
     {
         var queuedAt = new DateTimeOffset(2026, 8, 11, 6, 0, 0, TimeSpan.Zero);
