@@ -162,10 +162,14 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => expect(screen.getByTestId('launch-attachment-results')).toBeInTheDocument())
     expect(state.launchCalls[0].body).toMatchObject({ attachments: ['att-ok', 'att-bad'] })
     expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
-    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
+    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent(
+      'Archive files are not supported.',
+    )
 
     fireEvent.click(screen.getByTestId('open-launched-session'))
-    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'))
+    await waitFor(() =>
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'),
+    )
     expect(screen.getByTestId('current-path')).not.toHaveTextContent('/Test/Test/sessions/')
   })
 
@@ -278,15 +282,17 @@ describe('AgentSessionComposerPage', () => {
 
   it('surfaces capacity back-pressure with a next action', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    state.availabilityData = [{
-      agentId: 'agent-1',
-      canStartNow: false,
-      waitingReason: 'concurrency-limit',
-      activeRuns: 1,
-      maxConcurrentRuns: 1,
-      capacity: { usedSlots: 1, totalSlots: 2 },
-      queuedCount: 1,
-    }]
+    state.availabilityData = [
+      {
+        agentId: 'agent-1',
+        canStartNow: false,
+        waitingReason: 'concurrency-limit',
+        activeRuns: 1,
+        maxConcurrentRuns: 1,
+        capacity: { usedSlots: 1, totalSlots: 2 },
+        queuedCount: 1,
+      },
+    ]
     renderPage(['/agent-sessions/new?agent=agent-1'])
 
     const feedback = await screen.findByTestId('agent-availability-feedback')
@@ -337,72 +343,106 @@ describe('AgentSessionComposerPage', () => {
     expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
   })
 
-  /* ── Readiness gating (server-conclusion driven, client does not synthesize) ── */
+  /* ── Executability gating (server-projection driven, client does not synthesize) ── */
 
-  it('blocks the launch button and lists gaps when Readiness is Needs setup', async () => {
+  it('blocks the launch button and lists gaps when executability is not-configured', async () => {
     state.agentsData = [
       makeAgent('agent-1', {
-        readiness: {
-          conclusion: 'Needs setup',
+        executability: {
+          state: 'not-configured',
           gaps: [
-            { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
+            {
+              code: 'instructions-missing',
+              message: 'Instructions are missing.',
+              nextAction: 'Add instructions in Agent settings.',
+              fixEntryPoint: { label: 'Agent settings', path: '/agents/agent-1', command: 'mo agent edit agent-1' },
+            },
           ],
-          setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
+          pendingLaunchNote: null,
         },
       }),
     ]
     renderPage(['/agent-sessions/new?agent=agent-1'])
-    const banner = await screen.findByTestId('agent-readiness-needs-setup')
-    expect(banner).toHaveTextContent(/needs setup/i)
-    expect(screen.getByTestId('agent-readiness-gap-instructions-missing')).toHaveTextContent(/Instructions are missing/i)
+    const banner = await screen.findByTestId('agent-executability-not-configured')
+    expect(banner).toHaveTextContent(/not-configured/i)
+    expect(screen.getByTestId('agent-executability-gap-instructions-missing')).toHaveTextContent(
+      /Instructions are missing/i,
+    )
     const button = screen.getByTestId('launch-button')
     expect(button).toBeDisabled()
   })
 
-  it('marks the launch button as Ready when Readiness is Ready (no client synthesis)', async () => {
+  it('blocks the launch button when executability is not-executable', async () => {
     state.agentsData = [
       makeAgent('agent-1', {
-        readiness: { conclusion: 'Ready', gaps: [], setup: null },
+        executability: {
+          state: 'not-executable',
+          gaps: [
+            {
+              code: 'execution-config-failure',
+              message: 'The configured model could not be used by the runtime.',
+              nextAction: 'Update the Agent execution settings and run it again.',
+              fixEntryPoint: { label: 'Agent settings', path: '/agents/agent-1', command: 'mo agent edit agent-1' },
+            },
+          ],
+          pendingLaunchNote: null,
+        },
       }),
     ]
     renderPage(['/agent-sessions/new?agent=agent-1'])
-    await screen.findByTestId('agent-readiness-ready')
-    const textarea = screen.getByTestId('prompt-textarea')
-    fireEvent.change(textarea, { target: { value: 'Hello' } })
-    expect(screen.getByTestId('launch-button')).not.toBeDisabled()
+
+    await screen.findByTestId('agent-executability-not-executable')
+    expect(screen.getByTestId('launch-button')).toBeDisabled()
   })
 
-  it('keeps Unknown launchable and shows a will-wait-for-validation hint', async () => {
-    state.agentsData = [makeAgent('agent-1', { readiness: { conclusion: 'Unknown', gaps: [], setup: null } })]
+  it('marks the launch button executable when the server says executable', async () => {
+    state.agentsData = [
+      makeAgent('agent-1', {
+        executability: { state: 'executable', gaps: [], pendingLaunchNote: null },
+      }),
+    ]
     renderPage(['/agent-sessions/new?agent=agent-1'])
-    const hint = await screen.findByTestId('agent-readiness-unknown-hint')
-    expect(hint).toHaveTextContent(/Readiness: Unknown/i)
-    expect(hint).toHaveTextContent(/wait/i)
+    await screen.findByTestId('agent-executability-executable')
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     expect(screen.getByTestId('launch-button')).not.toBeDisabled()
   })
 
-  it('surfaces 409 agent_needs_setup gaps as an error banner', async () => {
-    state.agentsData = [makeAgent('agent-1', {
-      readiness: {
-        conclusion: 'Unknown',
-        gaps: [
-          { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
-        ],
-        setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
-      },
-    })]
+  it('keeps unknown launchable and shows the server pending-launch note', async () => {
+    state.agentsData = [
+      makeAgent('agent-1', {
+        executability: {
+          state: 'unknown',
+          gaps: [],
+          pendingLaunchNote:
+            'No matching execution evidence exists. This launch is accepted and awaits Runner verification.',
+        },
+      }),
+    ]
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const hint = await screen.findByTestId('agent-executability-unknown-note')
+    expect(hint).toHaveTextContent(/awaits runner verification/i)
+    const textarea = screen.getByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Hello' } })
+    expect(screen.getByTestId('launch-button')).not.toBeDisabled()
+  })
+
+  it('surfaces 409 agent_not_configured as an error banner', async () => {
+    state.agentsData = [
+      makeAgent('agent-1', {
+        executability: { state: 'unknown', gaps: [], pendingLaunchNote: 'Awaiting Runner verification.' },
+      }),
+    ]
     state.launchError = {
-      error: 'This Agent needs setup before it can accept new work.',
-      code: 'agent_needs_setup',
+      error: 'This Agent is not-configured and cannot accept new work.',
+      code: 'agent_not_configured',
     }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
     await waitFor(() => {
-      expect(screen.getByTestId('error-needs-setup')).toBeInTheDocument()
+      expect(screen.getByTestId('error-agent-not-configured')).toBeInTheDocument()
     })
   })
 })

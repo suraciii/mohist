@@ -57,9 +57,9 @@ public class SlackConnectionRoutesNewTaskMarkerTests
 
     [Theory]
     [InlineData(false, null, "Starting a new task. Task accepted and queued for execution.")]
-    [InlineData(false, "Agent readiness is unknown; the task is accepted and awaiting Runner verification.",
-        "Starting a new task. Agent readiness is unknown; the task is accepted and awaiting Runner verification.")]
-    [InlineData(true, "Agent readiness is unknown; the task is accepted and awaiting Runner verification.",
+    [InlineData(false, "Agent executability is unknown; the task is accepted and awaiting Runner verification.",
+        "Starting a new task. Agent executability is unknown; the task is accepted and awaiting Runner verification.")]
+    [InlineData(true, "Agent executability is unknown; the task is accepted and awaiting Runner verification.",
         "This new task was already accepted; execution is being resumed.")]
     [InlineData(true, "", "This new task was already accepted; execution is being resumed.")]
     public void BuildNewTaskAck_PrefixesTheStartingANewTaskSignalAndDistinguishesRedeliveries(

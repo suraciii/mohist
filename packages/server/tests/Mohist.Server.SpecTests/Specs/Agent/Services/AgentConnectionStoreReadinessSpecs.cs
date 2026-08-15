@@ -26,9 +26,9 @@ public sealed partial class AgentConnectionStoreSpecs
         Assert.Equal(AgentReadinessKind.Ready, displayed!.AgentReadiness);
         Assert.NotNull(agent);
         Assert.Equal(AgentReadinessKind.Ready, AgentReadinessDeriver.Derive(agent!.AgentConfig));
-        var subscriptionReadiness = AgentReadinessService.Evaluate(agent, null);
-        Assert.Equal(AgentReadinessConclusions.Unknown, subscriptionReadiness.Conclusion);
-        Assert.NotEqual(AgentReadinessConclusions.NeedsSetup, subscriptionReadiness.Conclusion);
+        var executability = AgentReadinessService.Evaluate(agent, null);
+        Assert.Equal(AgentExecutabilityStates.Unknown, executability.State);
+        Assert.NotEqual(AgentExecutabilityStates.NotConfigured, executability.State);
         Assert.Equal("opencode", AgentLauncher.ResolveRuntime(agent!.AgentConfig));
     }
 

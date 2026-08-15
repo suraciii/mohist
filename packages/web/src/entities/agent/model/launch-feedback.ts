@@ -1,9 +1,10 @@
-import type { AgentReadinessResult } from '../api/client'
+import type { AgentExecutabilityResult } from '../api/client'
 
 export type AgentLaunchFeedbackKind =
   | 'back-pressure'
   | 'runner-offline'
-  | 'needs-setup'
+  | 'not-configured'
+  | 'not-executable'
   | 'execution-unavailable'
 
 export interface AgentLaunchFeedback {
@@ -54,37 +55,46 @@ type LaunchErrorLike = {
 
 export function getAgentLaunchErrorFeedback(
   error: unknown,
-  readiness?: AgentReadinessResult | null,
+  executability?: AgentExecutabilityResult | null,
 ): AgentLaunchFeedback | null {
   const candidate = error as LaunchErrorLike | null
   const code = typeof candidate?.code === 'string' ? candidate.code.toLowerCase() : ''
   const message = typeof candidate?.message === 'string' ? candidate.message.toLowerCase() : ''
 
-  if (code === 'agent_needs_setup' || readiness?.conclusion === 'Needs setup') {
+  if (code === 'agent_not_configured' || executability?.state === 'not-configured') {
     return {
-      kind: 'needs-setup',
-      title: 'Configuration needs setup',
-      message: 'The server has not accepted this Agent\'s execution definition.',
+      kind: 'not-configured',
+      title: 'Agent is not configured',
+      message: "The server has not accepted this Agent's execution definition.",
       nextAction: 'Fix the listed gaps in Agent settings, then retry the launch.',
     }
   }
 
+  if (code === 'agent_not_executable' || executability?.state === 'not-executable') {
+    return {
+      kind: 'not-executable',
+      title: 'Agent is not executable',
+      message: 'The current execution configuration was rejected by the runtime.',
+      nextAction: 'Update the Agent execution settings, then retry the launch.',
+    }
+  }
+
   if (
-    code === 'no_available_runner'
-    || code === 'no-online-runner'
-    || message.includes('no available runner')
-    || message.includes('no runner is online')
+    code === 'no_available_runner' ||
+    code === 'no-online-runner' ||
+    message.includes('no available runner') ||
+    message.includes('no runner is online')
   ) {
     return getAgentAvailabilityFeedback('no-online-runner')
   }
 
   if (
-    code === 'capacity-full'
-    || code === 'concurrency-limit'
-    || code === 'dispatch-pending'
-    || message.includes('capacity full')
-    || message.includes('concurrency limit')
-    || message.includes('dispatch pending')
+    code === 'capacity-full' ||
+    code === 'concurrency-limit' ||
+    code === 'dispatch-pending' ||
+    message.includes('capacity full') ||
+    message.includes('concurrency limit') ||
+    message.includes('dispatch pending')
   ) {
     return getAgentAvailabilityFeedback(
       code === 'concurrency-limit'
@@ -96,14 +106,14 @@ export function getAgentLaunchErrorFeedback(
   }
 
   if (
-    code === 'external_agent_unavailable'
-    || code === 'runtime-unavailable'
-    || code === 'execution-unavailable'
-    || message.includes('external agent unavailable')
-    || message.includes('external agent is unavailable')
-    || message.includes('runtime unavailable')
-    || message.includes('execution unavailable')
-    || (message.includes('backend') && message.includes('unavailable'))
+    code === 'external_agent_unavailable' ||
+    code === 'runtime-unavailable' ||
+    code === 'execution-unavailable' ||
+    message.includes('external agent unavailable') ||
+    message.includes('external agent is unavailable') ||
+    message.includes('runtime unavailable') ||
+    message.includes('execution unavailable') ||
+    (message.includes('backend') && message.includes('unavailable'))
   ) {
     return {
       kind: 'execution-unavailable',

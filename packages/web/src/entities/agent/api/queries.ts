@@ -197,12 +197,9 @@ export function useAgentSessions({ agentRef }: { agentRef: string }) {
   return useQuery<AgentSessionListItemDto[]>(agentSessionsQueryOptions(projectId, agentRef))
 }
 
-/* ── Per-agent server-side status (Readiness/Availability/waiting) ── */
+/* ── Per-agent server-side status (Executability/Availability/waiting) ── */
 
-export function agentDetailStatusQueryOptions(
-  projectId: string | null | undefined,
-  agentRef: string,
-) {
+export function agentDetailStatusQueryOptions(projectId: string | null | undefined, agentRef: string) {
   return {
     queryKey: ['agents', projectId, agentRef, 'status'],
     queryFn: () => getAgentDetailStatus(projectId!, agentRef),

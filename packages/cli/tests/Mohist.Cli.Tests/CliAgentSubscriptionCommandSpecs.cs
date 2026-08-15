@@ -116,7 +116,7 @@ public sealed class CliAgentSubscriptionCommandSpecs
             if (path.EndsWith("/subscriptions", StringComparison.Ordinal))
             {
                 object data = request.Method == HttpMethod.Get
-                    ? new { subscriptions = Array.Empty<object>(), state = "empty", agentStatus = "active", readiness = "Ready", connection = "no_connection" }
+                    ? new { subscriptions = Array.Empty<object>(), state = "empty", agentStatus = "active", executability = "executable", connection = "no_connection" }
                     : new { id = "rule_1", projectId = "proj_test", agentId = "agent_1", name = "fallback", match = "event.type == \"x\"", responsePrompt = "inspect", @continue = false, position = 1, status = "active", createdAt = "2026-08-09T00:00:00Z", updatedAt = "2026-08-09T00:00:00Z" };
                 return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data }, request.Method == HttpMethod.Post ? System.Net.HttpStatusCode.Created : System.Net.HttpStatusCode.OK));
             }

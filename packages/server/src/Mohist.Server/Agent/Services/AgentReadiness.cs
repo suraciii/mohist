@@ -46,16 +46,20 @@ public static class AgentReadinessDeriver
 
 public sealed record AgentConnectionDispatchDecision(bool Accepted, string Kind, string? Reason)
 {
-    public static AgentConnectionDispatchDecision For(string readiness) => readiness switch
+    public static AgentConnectionDispatchDecision For(string executability) => executability switch
     {
-        AgentReadinessKind.NeedsSetup => new(
+        AgentExecutabilityStates.NotConfigured => new(
             false,
-            "rejected",
-            "Agent setup is incomplete: configure a model before dispatching a task (runtime defaults to opencode)."),
-        AgentReadinessKind.Unknown => new(
+            "agent_not_configured",
+            "Agent setup is incomplete. Fix the Agent definition before dispatching a task."),
+        AgentExecutabilityStates.NotExecutable => new(
+            false,
+            "agent_not_executable",
+            "The current Agent definition was rejected by its execution configuration. Update it before dispatching a task."),
+        AgentExecutabilityStates.Unknown => new(
             true,
             "accepted",
-            "Agent readiness is unknown; the task is accepted and awaiting Runner verification."),
+            "Agent executability is unknown; the task is accepted and awaiting Runner verification."),
         _ => new(true, "accepted", null),
     };
 }

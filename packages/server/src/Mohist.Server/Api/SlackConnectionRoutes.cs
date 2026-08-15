@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
@@ -22,7 +21,7 @@ using Mohist.Server.Workspace.Services;
 
 namespace Mohist.Server.Api;
 
-public static class SlackConnectionRoutes
+public static partial class SlackConnectionRoutes
 {
     private const string SlackAppCreationReference = "https://api.slack.com/apps?new_app=1";
     private static readonly Regex SlackMentionToken = new(
@@ -1289,8 +1288,7 @@ public static class SlackConnectionRoutes
         if (agent is null)
             return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
 
-        var dispatchDecision = AgentConnectionDispatchDecision.For(
-            AgentReadinessDeriver.Derive(agent.AgentConfig));
+        var dispatchDecision = await ResolveInboundDispatchDecisionAsync(req.Services, projectId, agent, ct);
         if (!dispatchDecision.Accepted)
         {
             await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
@@ -1893,8 +1891,7 @@ public static class SlackConnectionRoutes
         if (agent is null)
             return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
 
-        var dispatchDecision = AgentConnectionDispatchDecision.For(
-            AgentReadinessDeriver.Derive(agent.AgentConfig));
+        var dispatchDecision = await ResolveInboundDispatchDecisionAsync(req.Services, projectId, agent, ct);
         if (!dispatchDecision.Accepted)
         {
             await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,

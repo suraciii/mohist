@@ -1,0 +1,22 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver the independent #560 Agent executability vertical slice.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Publish four-state Server executability and enforce it at every launch boundary",
+      "spec": "specs/agent-executability-status/spec.md",
+      "type": "WRITE",
+      "dependsOn": [],
+      "passes": false
+    },
+    {
+      "id": "T-002",
+      "title": "Render Server executability separately from Availability in CLI and Web",
+      "spec": "specs/agent-executability-status/spec.md",
+      "type": "WRITE",
+      "dependsOn": ["T-001"],
+      "passes": false
+    }
+  ]
+}

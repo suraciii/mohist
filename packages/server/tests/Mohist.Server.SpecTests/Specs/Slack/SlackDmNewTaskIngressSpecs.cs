@@ -341,6 +341,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
                 ProjectId = projectId,
                 Name = "Mohist Agent",
                 Status = AgentStatus.Active,
+                Instructions = "Handle Slack requests.",
                 AgentConfig = JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" }),
             }, JSON.Options),
         });

@@ -32,13 +32,13 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var data = await ReadDataAsync(response);
         Assert.Equal("no_connection", data.GetProperty("state").GetString());
-        Assert.Equal("Unknown", data.GetProperty("readiness").GetString());
+        Assert.Equal(AgentExecutabilityStates.Unknown, data.GetProperty("executability").GetString());
         Assert.Equal("no_connection", data.GetProperty("connection").GetString());
         Assert.Empty(data.GetProperty("subscriptions").EnumerateArray());
     }
 
     [Fact]
-    public async Task List_UnconfiguredAgentPreservesNeedsSetupState()
+    public async Task List_NotConfiguredAgentPreservesBlockedState()
     {
         var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-unconfigured", configured: false);
 
@@ -47,14 +47,14 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var data = await ReadDataAsync(response);
         Assert.Equal("unconfigured", data.GetProperty("state").GetString());
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, data.GetProperty("readiness").GetString());
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, data.GetProperty("executability").GetString());
         Assert.Empty(data.GetProperty("subscriptions").EnumerateArray());
     }
 
     [Theory]
     [InlineData("runtime-unavailable")]
     [InlineData("unavailable-runtime")]
-    public async Task List_RuntimeUnavailablePreservesUnknownInsteadOfUnconfigured(string failureCategory)
+    public async Task List_RuntimeUnavailablePreservesUnknownInsteadOfNotConfigured(string failureCategory)
     {
         var (projectId, agentId) = await CreateProjectAndAgentAsync("sub-readiness");
         await SeedFailedExecutionAsync(projectId, agentId, failureCategory);
@@ -63,13 +63,13 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var data = await ReadDataAsync(response);
-        Assert.Equal(AgentReadinessConclusions.Unknown, data.GetProperty("readiness").GetString());
+        Assert.Equal(AgentExecutabilityStates.Unknown, data.GetProperty("executability").GetString());
         Assert.Equal("no_connection", data.GetProperty("state").GetString());
         Assert.NotEqual("unconfigured", data.GetProperty("state").GetString());
     }
 
     [Fact]
-    public async Task List_InvalidInputPreservesUnknownInsteadOfUnconfigured()
+    public async Task List_InvalidInputPreservesUnknownInsteadOfNotConfigured()
     {
         var (projectId, agentId) = await CreateProjectAndAgentAsync("sub-invalid");
         await SeedFailedExecutionAsync(projectId, agentId, "invalid-input");
@@ -78,9 +78,24 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var data = await ReadDataAsync(response);
-        Assert.Equal(AgentReadinessConclusions.Unknown, data.GetProperty("readiness").GetString());
+        Assert.Equal(AgentExecutabilityStates.Unknown, data.GetProperty("executability").GetString());
         Assert.Equal("no_connection", data.GetProperty("state").GetString());
         Assert.NotEqual("unconfigured", data.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task List_ConfigurationFailureReportsNotExecutableSeparatelyFromConnectionState()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("sub-not-executable");
+        await SeedFailedExecutionAsync(projectId, agentId, "unauthorized");
+
+        using var response = await Client.GetAsync(Path(projectId, agentId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("not_executable", data.GetProperty("state").GetString());
+        Assert.Equal(AgentExecutabilityStates.NotExecutable, data.GetProperty("executability").GetString());
+        Assert.Equal("no_connection", data.GetProperty("connection").GetString());
     }
 
     [Fact]

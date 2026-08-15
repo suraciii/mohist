@@ -10,15 +10,19 @@ import {
 } from '../../../entities/agent'
 import type {
   AgentAvailabilitySummaryEntry,
+  AgentExecutabilityResult,
   AgentInfo,
-  AgentReadinessResult,
   AgentSessionLaunchContext,
 } from '../../../entities/agent'
 import { extractAttachmentIds } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
-import { AttachmentResults, type AttachmentResultAccepted, type AttachmentResultRejected } from '../../../shared/ui/attachment-results'
+import {
+  AttachmentResults,
+  type AttachmentResultAccepted,
+  type AttachmentResultRejected,
+} from '../../../shared/ui/attachment-results'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
@@ -87,11 +91,7 @@ function AgentSelector({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button
-            variant="outline"
-            data-testid="agent-selector-trigger"
-            className="w-full justify-between"
-          >
+          <Button variant="outline" data-testid="agent-selector-trigger" className="w-full justify-between">
             {selectedAgent ? (
               <span className="truncate">{selectedAgent.name}</span>
             ) : (
@@ -116,9 +116,7 @@ function AgentSelector({
         </div>
         <div className="max-h-64 overflow-y-auto border-t">
           {filtered.length === 0 && (
-            <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-              No agents found
-            </div>
+            <div className="px-3 py-4 text-center text-sm text-muted-foreground">No agents found</div>
           )}
           {filtered.map((agent) => {
             const isSelected = agent.id === selectedRef
@@ -210,10 +208,7 @@ export function AgentSessionComposerPage({
 
   const { agents, agentsLoading, availability, availabilityLoading, launchMutation } = dataHook()
 
-  const launchableAgents = useMemo(
-    () => agents?.filter((a) => a.status !== 'archived') ?? [],
-    [agents],
-  )
+  const launchableAgents = useMemo(() => agents?.filter((a) => a.status !== 'archived') ?? [], [agents])
 
   const [selectedAgentRef, setSelectedAgentRef] = useState(() => searchParams.get('agent') || '')
   const [contextRefs, setContextRefs] = useState<ContextRef[]>(() => {
@@ -247,21 +242,21 @@ export function AgentSessionComposerPage({
     [availability, selectedAgentRef],
   )
   const isArchived = selectedAgent?.status === 'archived'
-  const selectedReadiness: AgentReadinessResult | null | undefined = selectedAgent?.readiness
-  const readinessConclusion = selectedReadiness?.conclusion ?? 'Unknown'
-  const isNeedsSetup = readinessConclusion === 'Needs setup'
-  const isUnknownReadiness = readinessConclusion === 'Unknown'
-  const launchBlockedByReadiness = isNeedsSetup
+  const selectedExecutability: AgentExecutabilityResult | null | undefined = selectedAgent?.executability
+  const executabilityState = selectedExecutability?.state ?? 'unknown'
+  const launchBlockedByExecutability =
+    executabilityState === 'not-configured' || executabilityState === 'not-executable'
 
   const promptEmpty = !prompt.trim()
   const attachmentIds = useMemo(() => extractAttachmentIds(prompt), [prompt])
   const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
 
-  const canLaunch = (!promptEmpty || attachmentIds.length > 0)
-    && !!selectedAgentRef
-    && !isArchived
-    && !launchBlockedByReadiness
-    && !launchMutation.isPending
+  const canLaunch =
+    (!promptEmpty || attachmentIds.length > 0) &&
+    !!selectedAgentRef &&
+    !isArchived &&
+    !launchBlockedByExecutability &&
+    !launchMutation.isPending
 
   const removeRef = useCallback((index: number) => {
     setContextRefs((prev) => prev.filter((_, i) => i !== index))
@@ -276,8 +271,7 @@ export function AgentSessionComposerPage({
       if ((ref.type === 'issue' || ref.type === 'epic') && Number.isInteger(number) && number > 0) {
         if (ref.type === 'issue') context.issueNumber = number
         else context.epicNumber = number
-      }
-      else if (ref.type === 'repository') context.repository = ref.value
+      } else if (ref.type === 'repository') context.repository = ref.value
       else if (ref.type === 'workspace') context.workspacePath = ref.value
     }
     const hasContext = Object.keys(context).length > 0
@@ -288,12 +282,13 @@ export function AgentSessionComposerPage({
         prompt: prompt.trim(),
         context: hasContext ? context : null,
         attachments: attachmentIds,
-        idempotencyKey: launchKeyRef.current ??= crypto.randomUUID(),
+        idempotencyKey: (launchKeyRef.current ??= crypto.randomUUID()),
       },
       {
         onSuccess: (data) => {
           const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-          const sessionPath = data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
+          const sessionPath =
+            data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
           const accepted = data.attachments ?? []
           const rejected = data.rejectedAttachments ?? []
           launchKeyRef.current = null
@@ -305,41 +300,60 @@ export function AgentSessionComposerPage({
         },
       },
     )
-  }, [attachmentIds, canLaunch, selectedAgent, selectedAgentRef, contextRefs, prompt, launchMutation, navigate, toProjectPath])
+  }, [
+    attachmentIds,
+    canLaunch,
+    selectedAgent,
+    selectedAgentRef,
+    contextRefs,
+    prompt,
+    launchMutation,
+    navigate,
+    toProjectPath,
+  ])
 
   const launchError = launchMutation.error
-  const launchFeedback = getAgentLaunchErrorFeedback(launchError, selectedReadiness)
-  const isNeedsSetupError = launchFeedback?.kind === 'needs-setup'
-  const launchErrorData = launchError && 'data' in launchError
-    ? (launchError as {
-      data?: {
-        gaps?: Array<{ code?: string; message?: string; action?: string }>
-        setup?: { label?: string; path?: string } | null
-      }
-    }).data
+  const launchFeedback = getAgentLaunchErrorFeedback(launchError, selectedExecutability)
+  const isExecutabilityError = launchFeedback?.kind === 'not-configured' || launchFeedback?.kind === 'not-executable'
+  const launchErrorData =
+    launchError && 'data' in launchError
+      ? (
+          launchError as {
+            data?: {
+              gaps?: Array<{
+                code?: string
+                message?: string
+                nextAction?: string
+                fixEntryPoint?: { label?: string; path?: string; command?: string }
+              }>
+            }
+          }
+        ).data
+      : undefined
+  const gapsFromError = isExecutabilityError
+    ? ((launchError && 'data' in launchError ? launchErrorData?.gaps : undefined) ?? selectedExecutability?.gaps)
     : undefined
-  const gapsFromError = isNeedsSetupError
-    ? (launchError && 'data' in launchError
-      ? launchErrorData?.gaps
-      : undefined) ?? selectedReadiness?.gaps
-    : undefined
-  const setupFromError = isNeedsSetupError && launchErrorData?.setup?.label && launchErrorData.setup.path
-    ? launchErrorData.setup
-    : selectedReadiness?.setup
 
-  const availabilityFeedback = selectedAvailability && !selectedAvailability.canStartNow
-    ? getAgentAvailabilityFeedback(selectedAvailability.waitingReason)
-    : undefined
+  const availabilityFeedback =
+    selectedAvailability && !selectedAvailability.canStartNow
+      ? getAgentAvailabilityFeedback(selectedAvailability.waitingReason)
+      : undefined
   const availabilityFeedbackLoading = !selectedAvailability && availabilityLoading
-  const launchErrorTestId = launchFeedback?.kind === 'runner-offline'
-    ? 'error-no-runner'
-    : launchFeedback?.kind === 'execution-unavailable' && launchError && 'code' in launchError && (launchError as { code?: string }).code === 'EXTERNAL_AGENT_UNAVAILABLE'
-      ? 'error-external-agent'
-      : launchFeedback?.kind === 'needs-setup'
-        ? 'error-needs-setup'
-        : launchFeedback?.kind === 'back-pressure'
-          ? 'error-back-pressure'
-          : 'error-execution-unavailable'
+  const launchErrorTestId =
+    launchFeedback?.kind === 'runner-offline'
+      ? 'error-no-runner'
+      : launchFeedback?.kind === 'execution-unavailable' &&
+          launchError &&
+          'code' in launchError &&
+          (launchError as { code?: string }).code === 'EXTERNAL_AGENT_UNAVAILABLE'
+        ? 'error-external-agent'
+        : launchFeedback?.kind === 'not-configured'
+          ? 'error-agent-not-configured'
+          : launchFeedback?.kind === 'not-executable'
+            ? 'error-agent-not-executable'
+            : launchFeedback?.kind === 'back-pressure'
+              ? 'error-back-pressure'
+              : 'error-execution-unavailable'
 
   return (
     <div data-testid="agent-session-composer-page" className="flex-1 overflow-y-auto bg-background">
@@ -355,27 +369,34 @@ export function AgentSessionComposerPage({
           <div
             data-testid={launchErrorTestId}
             data-feedback-kind={launchFeedback.kind}
-            className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm ${launchFeedback.kind === 'needs-setup' ? 'border-red-200 bg-red-50 text-red-800' : launchFeedback.kind === 'execution-unavailable' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
+            className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm ${launchFeedback.kind === 'not-configured' || launchFeedback.kind === 'not-executable' || launchFeedback.kind === 'execution-unavailable' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
           >
             <div className="flex items-start gap-2">
               <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
               <span className="font-medium">{launchFeedback.title}</span>
             </div>
-            <p className="ml-6 text-xs">{launchFeedback.message} {launchFeedback.nextAction}</p>
-            {isNeedsSetupError && gapsFromError && gapsFromError.length > 0 && (
+            <p className="ml-6 text-xs">
+              {launchFeedback.message} {launchFeedback.nextAction}
+            </p>
+            {isExecutabilityError && gapsFromError && gapsFromError.length > 0 && (
               <ul className="ml-6 list-disc space-y-0.5">
                 {gapsFromError.map((gap) => (
-                  <li key={`${gap.code ?? gap.message}-${gap.action}`} className="text-xs">
+                  <li key={`${gap.code ?? gap.message}-${gap.nextAction}`} className="text-xs">
                     <span className="font-medium">{gap.message}</span>
-                    {gap.action && <span> — {gap.action}</span>}
+                    {gap.nextAction && <span> - {gap.nextAction}</span>}
+                    {gap.fixEntryPoint?.label && gap.fixEntryPoint.path && (
+                      <span>
+                        {' '}
+                        Fix in{' '}
+                        <a className="font-semibold underline" href={toProjectPath(gap.fixEntryPoint.path)}>
+                          {gap.fixEntryPoint.label}
+                        </a>
+                        .
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
-            )}
-            {isNeedsSetupError && setupFromError && (
-              <p className="ml-6 text-xs">
-                Fix in <a className="font-semibold underline" href={toProjectPath(setupFromError.path)}>{setupFromError.label}</a>.
-              </p>
             )}
           </div>
         )}
@@ -388,7 +409,10 @@ export function AgentSessionComposerPage({
           >
             <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
             {availabilityFeedback ? (
-              <span><strong>{availabilityFeedback.title}:</strong> {availabilityFeedback.message} {availabilityFeedback.nextAction}</span>
+              <span>
+                <strong>{availabilityFeedback.title}:</strong> {availabilityFeedback.message}{' '}
+                {availabilityFeedback.nextAction}
+              </span>
             ) : (
               <span>Availability is still loading. The server will re-check it when you launch.</span>
             )}
@@ -408,45 +432,45 @@ export function AgentSessionComposerPage({
               This agent is archived and cannot be used to launch new sessions.
             </p>
           )}
-          {selectedAgent && readinessConclusion === 'Ready' && (
-            <p data-testid="agent-readiness-ready" className="text-xs text-emerald-700">
-              Readiness: Ready — the server confirms this Agent can execute.
+          {selectedAgent && executabilityState === 'executable' && (
+            <p data-testid="agent-executability-executable" className="text-xs text-emerald-700">
+              Executability: executable - the server confirms this Agent can execute.
             </p>
           )}
-          {selectedAgent && isNeedsSetup && (
+          {selectedAgent && launchBlockedByExecutability && (
             <div
-              data-testid="agent-readiness-needs-setup"
+              data-testid={`agent-executability-${executabilityState}`}
               className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 space-y-1"
             >
               <p className="font-medium">
-                Readiness: Needs setup — launch is blocked until the gaps below are fixed.
+                Executability: {executabilityState} - launch is blocked until the gaps below are fixed.
               </p>
-              {selectedReadiness?.gaps?.length ? (
+              {selectedExecutability?.gaps?.length ? (
                 <ul className="space-y-1">
-                  {selectedReadiness.gaps.map((gap) => (
-                    <li key={gap.code} data-testid={`agent-readiness-gap-${gap.code}`}>
+                  {selectedExecutability.gaps.map((gap) => (
+                    <li key={gap.code} data-testid={`agent-executability-gap-${gap.code}`}>
                       <p className="font-medium">{gap.message}</p>
-                      <p className="text-red-700/80">{gap.action}</p>
+                      <p className="text-red-700/80">{gap.nextAction}</p>
+                      <p className="text-red-700/80">
+                        Fix in{' '}
+                        <a className="font-semibold underline" href={toProjectPath(gap.fixEntryPoint.path)}>
+                          {gap.fixEntryPoint.label}
+                        </a>{' '}
+                        ({gap.fixEntryPoint.command}).
+                      </p>
                     </li>
                   ))}
                 </ul>
               ) : null}
-              {selectedReadiness?.setup && (
-                <p className="text-red-700/80">
-                  Fix in <a className="font-semibold underline" href={toProjectPath(selectedReadiness.setup.path)}>{selectedReadiness.setup.label}</a>.
-                </p>
-              )}
             </div>
           )}
-          {selectedAgent && isUnknownReadiness && (
+          {selectedAgent && executabilityState === 'unknown' && selectedExecutability?.pendingLaunchNote && (
             <p
-              data-testid="agent-readiness-unknown-hint"
+              data-testid="agent-executability-unknown-note"
               className="flex items-start gap-1.5 text-xs text-amber-700"
             >
               <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
-              <span>
-                Readiness: Unknown — launch will proceed and will wait for the server to validate execution.
-              </span>
+              <span>{selectedExecutability.pendingLaunchNote}</span>
             </p>
           )}
         </div>
@@ -486,10 +510,7 @@ export function AgentSessionComposerPage({
               <p className="text-sm font-medium text-foreground">Attachments submitted</p>
               <p className="text-xs text-muted-foreground">The Agent received only the files marked accepted.</p>
             </div>
-            <AttachmentResults
-              accepted={launchAttachmentResult.accepted}
-              rejected={launchAttachmentResult.rejected}
-            />
+            <AttachmentResults accepted={launchAttachmentResult.accepted} rejected={launchAttachmentResult.rejected} />
             <Button
               type="button"
               data-testid="open-launched-session"
@@ -501,17 +522,14 @@ export function AgentSessionComposerPage({
         )}
 
         <div className="flex items-center justify-end gap-3">
-          <Button
-            variant="outline"
-            onClick={() => navigate(toProjectPath('/agents'))}
-          >
+          <Button variant="outline" onClick={() => navigate(toProjectPath('/agents'))}>
             Cancel
           </Button>
           <Button
             data-testid="launch-button"
             onClick={handleLaunch}
             disabled={!canLaunch}
-            title={launchBlockedByReadiness ? 'Readiness is Needs setup — fix the gaps first.' : undefined}
+            title={launchBlockedByExecutability ? 'Executability is blocked - fix the gaps first.' : undefined}
           >
             {launchMutation.isPending ? 'Launching...' : 'Launch Session'}
           </Button>

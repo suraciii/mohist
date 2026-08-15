@@ -421,7 +421,7 @@ internal static partial class AgentCommands
 
     private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("view", "Show agent details (Server-authoritative Readiness, Availability, and waiting work)");
+        var cmd = new Command("view", "Show agent details (Server-authoritative Executability, Availability, and waiting work)");
         var nameOrIdArg = NameOrIdArg();
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(AgentDescriptor);
@@ -866,9 +866,9 @@ internal static partial class AgentCommands
                     await using var stream = await response.Content.ReadAsStreamAsync();
                     var node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
                     if (node is JsonObject envelope
-                        && string.Equals(envelope["code"]?.GetValue<string>(), "agent_needs_setup", StringComparison.Ordinal))
+                        && envelope["code"]?.GetValue<string>() is "agent_not_configured" or "agent_not_executable")
                     {
-                        await RenderNeedsSetupAsync(api, envelope);
+                        await RenderExecutabilityRejectedAsync(api, envelope);
                         return MohistCliApi.FailureExitCode(response);
                     }
                 }
@@ -946,38 +946,6 @@ internal static partial class AgentCommands
         }
 
         return cmd;
-    }
-
-    private static async Task RenderNeedsSetupAsync(MohistCliApi api, JsonObject envelope)
-    {
-        var error = envelope["error"]?.GetValue<string>()
-            ?? "This Agent needs setup before it can accept new work.";
-        api.Error.WriteLine($"{error} (code=agent_needs_setup)");
-        if (envelope["details"] is JsonObject details
-            && details["gaps"] is JsonArray gaps
-            && gaps.Count > 0)
-        {
-            api.Error.WriteLine("gaps:");
-            foreach (var gapNode in gaps.OfType<JsonObject>())
-            {
-                var message = gapNode["message"]?.GetValue<string>() ?? "";
-                var action = gapNode["action"]?.GetValue<string>() ?? "";
-                var first = !string.IsNullOrWhiteSpace(message) ? message : "(missing message)";
-                var line = $"  - {first}";
-                if (!string.IsNullOrWhiteSpace(action))
-                    line += $" — {action}";
-                api.Error.WriteLine(line);
-            }
-        }
-        if (envelope["details"] is JsonObject setupDetails
-            && setupDetails["setup"] is JsonObject setup)
-        {
-            var label = setup["label"]?.GetValue<string>() ?? "";
-            var path = setup["path"]?.GetValue<string>() ?? "";
-            if (!string.IsNullOrWhiteSpace(label) || !string.IsNullOrWhiteSpace(path))
-                api.Error.WriteLine($"Fix in: {label} ({path})");
-        }
-        await Task.CompletedTask;
     }
 
     private static object? BuildLaunchContext(int? issue, string? epic, string? repository, string? workspace)

@@ -242,6 +242,7 @@ public sealed class InteractionWorkspaceSpecs
                 ProjectId = projectId,
                 Name = $"Mohist Agent {agentNameSuffix}",
                 Status = AgentStatus.Active,
+                Instructions = "Handle workspace interactions.",
                 AgentConfig = JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" }),
             }, JSON.Options),
         });

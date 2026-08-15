@@ -952,51 +952,6 @@ public partial class CliAgentCommandSpecs
     }
 
     [Fact]
-    public async Task AgentLaunch_NeedsSetupConflictPrintsGapsAndSetupEntry()
-    {
-        var handler = new RecordingHttpHandler((_, _) =>
-            Task.FromResult(RecordingHttpHandler.Json(new
-            {
-                success = false,
-                error = "This Agent needs setup before it can accept new work.",
-                code = "agent_needs_setup",
-                details = new
-                {
-                    conclusion = "Needs setup",
-                    gaps = new[]
-                    {
-                        new
-                        {
-                            code = "instructions-missing",
-                            message = "Instructions are missing.",
-                            action = "Add instructions in Agent settings.",
-                        },
-                    },
-                    setup = new { label = "Agent settings", path = "/agents/agent_x/settings" },
-                },
-            }, HttpStatusCode.Conflict)));
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = await RunAsync(
-            handler,
-            ["agent", "launch", "reviewer", "--prompt", "Inspect"],
-            output: output,
-            error: error,
-            fileSystem: FileSystemWithProject());
-
-        Assert.NotEqual(0, exitCode);
-        var errorText = error.ToString();
-        Assert.Contains("needs setup", errorText, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("agent_needs_setup", errorText, StringComparison.Ordinal);
-        Assert.Contains("Instructions are missing", errorText, StringComparison.Ordinal);
-        Assert.Contains("Add instructions in Agent settings", errorText, StringComparison.Ordinal);
-        Assert.Contains("Agent settings", errorText, StringComparison.Ordinal);
-        Assert.Contains("/agents/agent_x/settings", errorText, StringComparison.Ordinal);
-        Assert.Single(handler.Requests);
-    }
-
-    [Fact]
     public async Task AgentLaunch_SelectedJsonDoesNotPrintGeneratedIdempotencyKey()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
@@ -1202,7 +1157,7 @@ public partial class CliAgentCommandSpecs
     }
 
     [Fact]
-    public async Task AgentView_PrintsServerReadinessConclusionAndGapsForNeedsSetup()
+    public async Task AgentView_PrintsServerExecutabilityAndGapsForNotConfigured()
     {
         var handler = new RecordingHttpHandler((request, _) =>
         {
@@ -1225,14 +1180,20 @@ public partial class CliAgentCommandSpecs
                         maxConcurrentRuns = 2,
                         createdAt = "2026-06-18T01:00:00Z",
                         updatedAt = "2026-06-18T01:00:00Z",
-                        readiness = new
+                        executability = new
                         {
-                            conclusion = "Needs setup",
+                            state = "not-configured",
                             gaps = new[]
                             {
-                                new { code = "instructions-missing", message = "Instructions are missing.", action = "Add instructions in Agent settings." },
+                                new
+                                {
+                                    code = "instructions-missing",
+                                    message = "Instructions are missing.",
+                                    nextAction = "Add instructions in Agent settings.",
+                                    fixEntryPoint = new { label = "Agent settings", path = "/agents/agent_123", command = "mo agent edit agent_123" },
+                                },
                             },
-                            setup = new { label = "Agent settings", path = "/agents/agent_123/settings" },
+                            pendingLaunchNote = (string?)null,
                         },
                     },
                 }));
@@ -1244,10 +1205,10 @@ public partial class CliAgentCommandSpecs
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
-        Assert.Contains("readiness:           Needs setup", text, StringComparison.Ordinal);
+        Assert.Contains("executability:       not-configured", text, StringComparison.Ordinal);
         Assert.Contains("Instructions are missing", text, StringComparison.Ordinal);
         Assert.Contains("Add instructions in Agent settings", text, StringComparison.Ordinal);
-        Assert.Contains("readiness setup:     Agent settings (/agents/agent_123/settings)", text, StringComparison.Ordinal);
+        Assert.Contains("mo agent edit agent_123", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1274,7 +1235,7 @@ public partial class CliAgentCommandSpecs
                         maxConcurrentRuns = 2,
                         createdAt = "2026-06-18T01:00:00Z",
                         updatedAt = "2026-06-18T01:00:00Z",
-                        readiness = new { conclusion = "Ready", gaps = Array.Empty<object>(), setup = (object?)null },
+                        executability = new { state = "executable", gaps = Array.Empty<object>(), pendingLaunchNote = (object?)null },
                     },
                 }));
             if (path.EndsWith("/agents/agent_123/status", StringComparison.Ordinal))
@@ -1327,7 +1288,7 @@ public partial class CliAgentCommandSpecs
         Assert.Contains("job-waiting-1", text, StringComparison.Ordinal);
         Assert.Contains("runner slots are full", text, StringComparison.Ordinal);
         Assert.Contains("agent is at its concurrency limit", text, StringComparison.Ordinal);
-        Assert.Contains("readiness:           Ready", text, StringComparison.Ordinal);
+        Assert.Contains("executability:       executable", text, StringComparison.Ordinal);
     }
 
     [Fact]

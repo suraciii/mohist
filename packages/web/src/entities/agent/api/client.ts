@@ -4,21 +4,25 @@ import type { AgentActivity, AgentSessionInfo, AgentStatus } from '../model/type
 type AgentRuntime = 'opencode' | 'pi'
 const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'opencode'
 
-export interface AgentReadinessGap {
-  code: string
-  message: string
-  action: string
-}
+export type AgentExecutabilityState = 'not-configured' | 'not-executable' | 'unknown' | 'executable'
 
-export interface AgentReadinessSetup {
+export interface AgentExecutabilityFixEntryPoint {
   label: string
   path: string
+  command: string
 }
 
-export interface AgentReadinessResult {
-  conclusion: 'Ready' | 'Needs setup' | 'Unknown'
-  gaps: AgentReadinessGap[]
-  setup: AgentReadinessSetup | null
+export interface AgentExecutabilityGap {
+  code: string
+  message: string
+  nextAction: string
+  fixEntryPoint: AgentExecutabilityFixEntryPoint
+}
+
+export interface AgentExecutabilityResult {
+  state: AgentExecutabilityState
+  gaps: AgentExecutabilityGap[]
+  pendingLaunchNote: string | null
 }
 
 export interface AgentInfo {
@@ -33,7 +37,7 @@ export interface AgentInfo {
   status: string
   createdAt: string
   updatedAt: string
-  readiness?: AgentReadinessResult | null
+  executability?: AgentExecutabilityResult | null
 }
 
 export interface AgentCreateRequest {
@@ -97,9 +101,7 @@ export function getAgentStatus(projectId?: string | null) {
 }
 
 export function getAgentDetailStatus(projectId: string, agentRef: string) {
-  return request<AgentStatusDetailResponse>(
-    projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/status`),
-  )
+  return request<AgentStatusDetailResponse>(projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/status`))
 }
 
 export function getAgentSessions(params?: { status?: string; limit?: number; projectId?: string | null }) {
@@ -159,14 +161,16 @@ export function unarchiveAgent(projectId: string, id: string) {
   })
 }
 
-export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): { model: string | null; variant: string | null; runtime: AgentRuntime } {
+export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): {
+  model: string | null
+  variant: string | null
+  runtime: AgentRuntime
+} {
   const config = agent?.agentConfig
   if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
   const rawModel = typeof config.model === 'string' ? config.model : null
   const model = rawModel && rawModel.trim() ? rawModel : null
-  const runtime = config.runtime === 'opencode' || config.runtime === 'pi'
-    ? config.runtime
-    : DEFAULT_AGENT_RUNTIME
+  const runtime = config.runtime === 'opencode' || config.runtime === 'pi' ? config.runtime : DEFAULT_AGENT_RUNTIME
   if (!model) return { model: null, variant: null, runtime }
   const rawVariant = typeof config.variant === 'string' ? config.variant : null
   return {

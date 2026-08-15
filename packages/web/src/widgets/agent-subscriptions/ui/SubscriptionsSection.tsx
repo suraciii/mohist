@@ -71,6 +71,7 @@ function stateLabel(data: AgentSubscriptionListDto | undefined): string {
   if (!data) return ''
   if (data.state === 'empty') return 'No subscriptions configured'
   if (data.state === 'unconfigured') return 'Agent needs setup'
+  if (data.state === 'not_executable') return 'Agent execution settings were rejected'
   if (data.state === 'unavailable') return 'Subscription service unavailable'
   if (data.state === 'no_connection') return 'No connection installed'
   return 'Subscriptions configured'
@@ -136,10 +137,7 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
         responsePrompt,
         continue: continueAfterMatch,
       }
-      updateMutation.mutate(
-        { subscriptionId: editing.id, data },
-        { onSuccess: () => setDialogOpen(false) },
-      )
+      updateMutation.mutate({ subscriptionId: editing.id, data }, { onSuccess: () => setDialogOpen(false) })
       return
     }
 
@@ -153,16 +151,18 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
         continue: continueAfterMatch,
         idempotencyKey,
       },
-      { onSuccess: () => { setPendingCreateKey(null); setDialogOpen(false) } },
+      {
+        onSuccess: () => {
+          setPendingCreateKey(null)
+          setDialogOpen(false)
+        },
+      },
     )
   }
 
   function confirmDelete() {
     if (!pendingDeleteId) return
-    deleteMutation.mutate(
-      { subscriptionId: pendingDeleteId },
-      { onSuccess: () => setPendingDeleteId(null) },
-    )
+    deleteMutation.mutate({ subscriptionId: pendingDeleteId }, { onSuccess: () => setPendingDeleteId(null) })
   }
 
   const isSaving = createMutation.isPending || updateMutation.isPending
@@ -175,7 +175,7 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
           <h3 className="text-sm font-medium text-foreground">Subscriptions</h3>
           {data && (
             <p className="mt-1 text-xs text-muted-foreground" data-testid="agent-subscriptions-state">
-              {stateLabel(data)} · {data.connection}
+              {stateLabel(data)} · Executability: {data.executability} · {data.connection}
             </p>
           )}
         </div>
@@ -193,7 +193,10 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
       </div>
 
       {isArchived && (
-        <div data-testid="agent-subscriptions-archived-notice" className="mb-3 rounded-md border border-border bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+        <div
+          data-testid="agent-subscriptions-archived-notice"
+          className="mb-3 rounded-md border border-border bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
+        >
           Archived agents keep their subscriptions for inspection, but cannot create or update them.
         </div>
       )}
@@ -223,12 +226,20 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-foreground">{subscription.name}</span>
-                    <Badge variant={subscription.status === 'active' ? 'secondary' : 'outline'}>{subscription.status}</Badge>
+                    <Badge variant={subscription.status === 'active' ? 'secondary' : 'outline'}>
+                      {subscription.status}
+                    </Badge>
                   </div>
-                  <div className="mt-1 break-words text-[11px] font-mono text-muted-foreground" data-testid={`agent-subscription-row-${subscription.id}-match`}>
+                  <div
+                    className="mt-1 break-words text-[11px] font-mono text-muted-foreground"
+                    data-testid={`agent-subscription-row-${subscription.id}-match`}
+                  >
                     {subscription.match}
                   </div>
-                  <div className="mt-1 text-xs italic text-muted-foreground" data-testid={`agent-subscription-row-${subscription.id}-prompt-preview`}>
+                  <div
+                    className="mt-1 text-xs italic text-muted-foreground"
+                    data-testid={`agent-subscription-row-${subscription.id}-prompt-preview`}
+                  >
                     {previewResponsePrompt(subscription.responsePrompt) || 'No response prompt'}
                   </div>
                 </div>
@@ -261,34 +272,72 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
         </ul>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => {
-        if (isSaving) return
-        if (!open) setPendingCreateKey(null)
-        setDialogOpen(open)
-      }}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (isSaving) return
+          if (!open) setPendingCreateKey(null)
+          setDialogOpen(open)
+        }}
+      >
         <DialogContent className="sm:max-w-lg" data-testid="agent-subscriptions-edit-dialog">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Subscription' : 'Create Subscription'}</DialogTitle>
-            <DialogDescription>Configure the event expression and response prompt used by this Agent.</DialogDescription>
+            <DialogDescription>
+              Configure the event expression and response prompt used by this Agent.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="subscription-name">Name *</Label>
-              <Input id="subscription-name" value={name} onChange={(event) => setName(event.target.value)} data-testid="subscription-create-name" />
-              {formErrors.name && <p data-testid="subscription-create-name-error" className="text-xs text-red-500">{formErrors.name}</p>}
+              <Input
+                id="subscription-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                data-testid="subscription-create-name"
+              />
+              {formErrors.name && (
+                <p data-testid="subscription-create-name-error" className="text-xs text-red-500">
+                  {formErrors.name}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="subscription-match">Match expression *</Label>
-              <Input id="subscription-match" value={match} onChange={(event) => setMatch(event.target.value)} placeholder={'event.type == "com.example.event"'} data-testid="subscription-create-match" />
-              {formErrors.match && <p data-testid="subscription-create-match-error" className="text-xs text-red-500">{formErrors.match}</p>}
+              <Input
+                id="subscription-match"
+                value={match}
+                onChange={(event) => setMatch(event.target.value)}
+                placeholder={'event.type == "com.example.event"'}
+                data-testid="subscription-create-match"
+              />
+              {formErrors.match && (
+                <p data-testid="subscription-create-match-error" className="text-xs text-red-500">
+                  {formErrors.match}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="subscription-response-prompt">Response prompt *</Label>
-              <Textarea id="subscription-response-prompt" value={responsePrompt} onChange={(event) => setResponsePrompt(event.target.value)} data-testid="subscription-create-response-prompt" />
-              {formErrors.responsePrompt && <p data-testid="subscription-create-response-prompt-error" className="text-xs text-red-500">{formErrors.responsePrompt}</p>}
+              <Textarea
+                id="subscription-response-prompt"
+                value={responsePrompt}
+                onChange={(event) => setResponsePrompt(event.target.value)}
+                data-testid="subscription-create-response-prompt"
+              />
+              {formErrors.responsePrompt && (
+                <p data-testid="subscription-create-response-prompt-error" className="text-xs text-red-500">
+                  {formErrors.responsePrompt}
+                </p>
+              )}
             </div>
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input type="checkbox" checked={continueAfterMatch} onChange={(event) => setContinueAfterMatch(event.target.checked)} data-testid="subscription-create-continue" />
+              <input
+                type="checkbox"
+                checked={continueAfterMatch}
+                onChange={(event) => setContinueAfterMatch(event.target.checked)}
+                data-testid="subscription-create-continue"
+              />
               Continue evaluating later rules
             </label>
             {pendingCreateKey && !editing && (
@@ -297,7 +346,9 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
               </p>
             )}
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>Cancel</Button>
+              <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>
+                Cancel
+              </Button>
               <Button onClick={save} disabled={isSaving} data-testid="subscription-create-submit">
                 {isSaving && <Loader2Icon className="animate-spin" />}
                 {editing ? 'Save' : 'Create'}
@@ -307,15 +358,34 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
         </DialogContent>
       </Dialog>
 
-      <Dialog open={pendingDeleteId !== null} onOpenChange={(open) => { if (!open && !isDeleting) setPendingDeleteId(null) }}>
+      <Dialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setPendingDeleteId(null)
+        }}
+      >
         <DialogContent data-testid="agent-subscription-delete-confirm-dialog">
           <DialogHeader>
             <DialogTitle>Delete subscription?</DialogTitle>
             <DialogDescription>This removes the routing rule. The action is permanent.</DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setPendingDeleteId(null)} disabled={isDeleting} data-testid="agent-subscription-delete-cancel">Cancel</Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={isDeleting} data-testid="agent-subscription-delete-confirm">Delete</Button>
+            <Button
+              variant="outline"
+              onClick={() => setPendingDeleteId(null)}
+              disabled={isDeleting}
+              data-testid="agent-subscription-delete-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              data-testid="agent-subscription-delete-confirm"
+            >
+              Delete
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -43,7 +43,7 @@ public static class AgentSubscriptionRoutes
                 subscriptions,
                 DeriveState(agent, subscriptions, connectionRows),
                 agent.Status,
-                agent.Readiness?.Conclusion ?? AgentReadinessConclusions.Unknown,
+                agent.Executability?.State ?? AgentExecutabilityStates.Unknown,
                 DeriveConnectionState(connectionRows)));
         });
 
@@ -194,8 +194,11 @@ public static class AgentSubscriptionRoutes
 
     private static string DeriveState(AgentInfo agent, IReadOnlyList<AgentSubscriptionDto> subscriptions, IReadOnlyList<AgentConnection> connections)
     {
-        if (agent.Readiness?.Conclusion == AgentReadinessConclusions.NeedsSetup)
+        var executability = agent.Executability?.State ?? AgentExecutabilityStates.Unknown;
+        if (executability == AgentExecutabilityStates.NotConfigured)
             return "unconfigured";
+        if (executability == AgentExecutabilityStates.NotExecutable)
+            return "not_executable";
         if (connections.Count == 0)
             return "no_connection";
         if (DeriveConnectionState(connections) != "connected")
@@ -245,7 +248,7 @@ public sealed record AgentSubscriptionListDto(
     IReadOnlyList<AgentSubscriptionDto> Subscriptions,
     string State,
     string AgentStatus,
-    string Readiness,
+    string Executability,
     string Connection);
 
 public sealed record AgentSubscriptionCreateRequest(

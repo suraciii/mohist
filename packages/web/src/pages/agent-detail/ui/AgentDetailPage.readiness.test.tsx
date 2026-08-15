@@ -55,21 +55,31 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
 
 function renderPage() {
   return render(
-    <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-      id: 'proj-1', name: 'Test',
-      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-      repositories: [],
-    }]}>
+    <ProjectProvider
+      initialProjectId="proj-1"
+      initialProjects={[
+        {
+          id: 'proj-1',
+          name: 'Test',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          repositories: [],
+        },
+      ]}
+    >
       <MemoryRouter initialEntries={['/test/agents/agent-1']}>
         <Routes>
-          <Route path="/:projectName/agents/:agentId" element={<AgentDetailPage components={components} dataHook={dataHook} />} />
+          <Route
+            path="/:projectName/agents/:agentId"
+            element={<AgentDetailPage components={components} dataHook={dataHook} />}
+          />
         </Routes>
       </MemoryRouter>
     </ProjectProvider>,
   )
 }
 
-describe('AgentDetailPage readiness and availability', () => {
+describe('AgentDetailPage executability and availability', () => {
   beforeEach(() => {
     state.agent = makeAgent()
     state.detailStatus = undefined
@@ -80,36 +90,49 @@ describe('AgentDetailPage readiness and availability', () => {
     vi.clearAllMocks()
   })
 
-  it('renders Needs setup with the server-provided actionable entry', () => {
+  it('renders not-configured with the server-provided actionable entry', () => {
     state.agent = makeAgent({
-      readiness: {
-        conclusion: 'Needs setup',
-        gaps: [{ code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' }],
-        setup: { label: 'Agent settings', path: '/agents/agent-1' },
+      executability: {
+        state: 'not-configured',
+        gaps: [
+          {
+            code: 'instructions-missing',
+            message: 'Instructions are missing.',
+            nextAction: 'Add instructions in Agent settings.',
+            fixEntryPoint: { label: 'Agent settings', path: '/agents/agent-1', command: 'mo agent edit agent-1' },
+          },
+        ],
+        pendingLaunchNote: null,
       },
     })
     renderPage()
 
-    expect(screen.getByTestId('agent-detail-readiness')).toHaveAttribute('data-conclusion', 'Needs setup')
-    expect(screen.getByTestId('agent-detail-readiness-gap-instructions-missing')).toHaveTextContent(/Instructions are missing/i)
-    expect(screen.getByTestId('agent-detail-readiness-setup').querySelector('a')).toHaveAttribute('href', '/Test/agents/agent-1')
+    expect(screen.getByTestId('agent-detail-executability')).toHaveAttribute('data-state', 'not-configured')
+    expect(screen.getByTestId('agent-detail-executability-gap-instructions-missing')).toHaveTextContent(
+      /Instructions are missing/i,
+    )
+    expect(
+      screen.getByTestId('agent-detail-executability-gap-instructions-missing').querySelector('a'),
+    ).toHaveAttribute('href', '/Test/agents/agent-1')
     expect(screen.getByTestId('agent-detail-new-session')).toBeDisabled()
   })
 
-  it('renders Ready without synthesizing another readiness verdict', () => {
-    state.agent = makeAgent({ readiness: { conclusion: 'Ready', gaps: [], setup: null } })
+  it('renders executable without synthesizing another verdict', () => {
+    state.agent = makeAgent({ executability: { state: 'executable', gaps: [], pendingLaunchNote: null } })
     renderPage()
 
-    expect(screen.getByTestId('agent-detail-readiness')).toHaveAttribute('data-conclusion', 'Ready')
-    expect(screen.queryByTestId('agent-detail-readiness-gaps')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-detail-executability')).toHaveAttribute('data-state', 'executable')
+    expect(screen.queryByTestId('agent-detail-executability-gaps')).not.toBeInTheDocument()
   })
 
-  it('keeps Unknown launchable', () => {
-    state.agent = makeAgent({ readiness: { conclusion: 'Unknown', gaps: [], setup: null } })
+  it('keeps unknown launchable', () => {
+    state.agent = makeAgent({
+      executability: { state: 'unknown', gaps: [], pendingLaunchNote: 'Awaiting Runner verification.' },
+    })
     renderPage()
 
-    expect(screen.getByTestId('agent-detail-readiness')).toHaveAttribute('data-conclusion', 'Unknown')
-    expect(screen.getByTestId('agent-detail-unknown-launch-hint')).toHaveTextContent(/wait/i)
+    expect(screen.getByTestId('agent-detail-executability')).toHaveAttribute('data-state', 'unknown')
+    expect(screen.getByTestId('agent-detail-executability-pending-note')).toHaveTextContent(/awaiting runner/i)
     expect(screen.getByTestId('agent-detail-new-session')).not.toBeDisabled()
   })
 
@@ -127,8 +150,18 @@ describe('AgentDetailPage readiness and availability', () => {
       },
       waitingWork: [
         { jobId: 'job-1', status: 'waiting', waitingReason: 'capacity-full', submittedAt: '2026-07-29T00:00:00.000Z' },
-        { jobId: 'job-2', status: 'waiting', waitingReason: 'concurrency-limit', submittedAt: '2026-07-29T00:00:00.000Z' },
-        { jobId: 'job-3', status: 'waiting', waitingReason: 'dispatch-pending', submittedAt: '2026-07-29T00:00:00.000Z' },
+        {
+          jobId: 'job-2',
+          status: 'waiting',
+          waitingReason: 'concurrency-limit',
+          submittedAt: '2026-07-29T00:00:00.000Z',
+        },
+        {
+          jobId: 'job-3',
+          status: 'waiting',
+          waitingReason: 'dispatch-pending',
+          submittedAt: '2026-07-29T00:00:00.000Z',
+        },
       ],
     }
     renderPage()
@@ -136,10 +169,19 @@ describe('AgentDetailPage readiness and availability', () => {
     const card = screen.getByTestId('agent-detail-availability')
     expect(card).toHaveAttribute('data-state', 'waiting')
     expect(card).toHaveAttribute('data-waiting-reason', 'capacity-full')
-    expect(screen.getByTestId('agent-detail-availability-feedback')).toHaveAttribute('data-feedback-kind', 'back-pressure')
+    expect(screen.getByTestId('agent-detail-availability-feedback')).toHaveAttribute(
+      'data-feedback-kind',
+      'back-pressure',
+    )
     expect(screen.getByTestId('agent-detail-availability-feedback')).toHaveTextContent(/wait for a runner slot/i)
-    expect(screen.getByTestId('agent-detail-waiting-work-job-1')).toHaveAttribute('data-waiting-reason', 'capacity-full')
-    expect(screen.getByTestId('agent-detail-waiting-work-job-2')).toHaveAttribute('data-waiting-reason', 'concurrency-limit')
+    expect(screen.getByTestId('agent-detail-waiting-work-job-1')).toHaveAttribute(
+      'data-waiting-reason',
+      'capacity-full',
+    )
+    expect(screen.getByTestId('agent-detail-waiting-work-job-2')).toHaveAttribute(
+      'data-waiting-reason',
+      'concurrency-limit',
+    )
     expect(screen.getByTestId('agent-detail-waiting-work-job-3')).toHaveTextContent('Waiting for dispatch')
   })
 
@@ -180,7 +222,7 @@ describe('AgentDetailPage readiness and availability', () => {
     }
     renderPage()
 
-    expect(screen.getByTestId('agent-detail-readiness-conclusion')).toHaveTextContent('Unknown')
+    expect(screen.getByTestId('agent-detail-executability-state')).toHaveTextContent('unknown')
     const feedback = screen.getByTestId('agent-detail-availability-feedback')
     expect(feedback).toHaveAttribute('data-feedback-kind', 'runner-offline')
     expect(feedback).toHaveTextContent(/connect a runner/i)

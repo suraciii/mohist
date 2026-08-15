@@ -99,7 +99,7 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         using var listResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents");
         var listPayload = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
         var listedAgent = Assert.Single(listPayload.GetProperty("data").EnumerateArray());
-        Assert.Equal("Ready", listedAgent.GetProperty("readiness").GetProperty("conclusion").GetString());
+        Assert.Equal(AgentExecutabilityStates.Executable, listedAgent.GetProperty("executability").GetProperty("state").GetString());
     }
 
     [Fact]

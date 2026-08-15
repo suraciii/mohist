@@ -235,6 +235,7 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
                 ProjectId = projectId,
                 Name = "Install Agent",
                 Status = agentStatus,
+                Instructions = "Handle Slack setup.",
                 AgentConfig = JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" }),
             }, JSON.Options),
         });

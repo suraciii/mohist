@@ -171,11 +171,15 @@ public sealed class AgentSpawnAdmissionService(
         if (string.Equals(target.Status, AgentStatus.Archived, StringComparison.Ordinal))
             return await RejectAsync(fence, "target_agent_archived");
 
-        var targetReadiness = await readiness.GetAsync(projectId, target, ct);
-        if (targetReadiness.Conclusion == AgentReadinessConclusions.NeedsSetup)
-            return await RejectAsync(fence, "agent_needs_setup");
-        if (targetReadiness.Conclusion == AgentReadinessConclusions.Unknown)
-            throw new AgentSpawnValidationPendingException("target_agent_readiness_unknown");
+        var targetExecutability = await readiness.GetAsync(projectId, target, ct);
+        if (AgentExecutabilityStates.IsBlocked(targetExecutability.State))
+        {
+            return await RejectAsync(
+                fence,
+                targetExecutability.State == AgentExecutabilityStates.NotConfigured
+                    ? "agent_not_configured"
+                    : "agent_not_executable");
+        }
 
         var targetDefinition = await snapshots.ResolveAsync(projectId, target.Id)
             ?? throw new AgentSpawnPreplanRejectedException("target_agent_definition_unavailable");
