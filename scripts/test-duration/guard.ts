@@ -1,6 +1,16 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  createWriteStream,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, resolve, basename, isAbsolute, join, relative, sep } from 'node:path'
 import { finished } from 'node:stream/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -38,7 +48,15 @@ import { nativeProcessTreeOps, terminateProcessTree, type ProcessTreeOps } from 
 import { scheduleLanes, type LaneSpec, type RunningLane } from './scheduler.js'
 import { resolveSpawnCommand } from './spawn-command.js'
 import { nativeCalendarSource, nativeTimeSource } from './time.js'
-import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, SuiteConfig, TestCase, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import type {
+  CurrentExecutionIdentity,
+  ExecutionLedgerExpectation,
+  SuiteConfig,
+  TestCase,
+  TrackConfig,
+  TrackEvaluation,
+  TrackRun,
+} from './types.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -75,9 +93,12 @@ function apphostFor(track: TrackConfig): string {
   const csprojDir = dirname(csprojAbs)
   const xml = readCsproj(track.csproj)
   // MSBuild defaults AssemblyName to the project file name when omitted.
-  const assemblyName =
-    track.apphost ? undefined : parseAssemblyName(xml) ?? basename(csprojAbs).replace(/\.csproj$/, '')
-  return resolveApphostExecutable(resolve(csprojDir, resolveApphostPath({ csprojXml: xml, projectDir: csprojDir, assemblyName })))
+  const assemblyName = track.apphost
+    ? undefined
+    : (parseAssemblyName(xml) ?? basename(csprojAbs).replace(/\.csproj$/, ''))
+  return resolveApphostExecutable(
+    resolve(csprojDir, resolveApphostPath({ csprojXml: xml, projectDir: csprojDir, assemblyName })),
+  )
 }
 
 function resolveApphostExecutable(path: string): string {
@@ -111,8 +132,9 @@ function sourceFiles(root: string): readonly string[] {
 }
 
 function sha256Sources(roots: readonly string[]): string {
-  const files = [...new Set(roots.flatMap(sourceFiles))]
-    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+  const files = [...new Set(roots.flatMap(sourceFiles))].sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  )
   if (files.length === 0) throw new Error('execution source roots contain no files')
 
   const hash = createHash('sha256')
@@ -130,7 +152,7 @@ function assemblyPathFor(apphost: string): string {
 }
 
 function optionValue(args: readonly string[], option: string, fallback: string): string {
-  const indexes = args.flatMap((value, index) => value === option ? [index] : [])
+  const indexes = args.flatMap((value, index) => (value === option ? [index] : []))
   if (indexes.length > 1) throw new Error(`duplicate xUnit option ${option}`)
   if (indexes.length === 0) return fallback
   const value = args[indexes[0] + 1]
@@ -157,14 +179,19 @@ function executionLedgerPlan(track: TrackConfig): {
   const projectDir = dirname(csprojAbs)
   const xml = readCsproj(track.csproj)
   const assemblyName = parseAssemblyName(xml) ?? basename(csprojAbs).replace(/\.csproj$/, '')
-  const apphost = resolveApphostExecutable(resolve(projectDir, resolveApphostPath({ csprojXml: xml, projectDir, assemblyName })))
+  const apphost = resolveApphostExecutable(
+    resolve(projectDir, resolveApphostPath({ csprojXml: xml, projectDir, assemblyName })),
+  )
   return {
     assemblyPath: assemblyPathFor(apphost),
     discovery: resolveDiscoveryCommand({ csprojXml: xml, projectDir, assemblyName }),
   }
 }
 
-export function commandFor(track: TrackConfig, reportRoot: string = repoRoot): { command: string; args: readonly string[] } {
+export function commandFor(
+  track: TrackConfig,
+  reportRoot: string = repoRoot,
+): { command: string; args: readonly string[] } {
   if (track.kind === 'dotnet-apphost') {
     const apphost = apphostFor(track)
     const reporterArgs = track.executionLedger
@@ -172,7 +199,14 @@ export function commandFor(track: TrackConfig, reportRoot: string = repoRoot): {
       : ['-noAutoReporters']
     return {
       command: apphost,
-      args: ['-noColor', '-noLogo', ...reporterArgs, '-trx', resolve(reportRoot, track.report), ...(track.apphostArgs ?? [])],
+      args: [
+        '-noColor',
+        '-noLogo',
+        ...reporterArgs,
+        '-trx',
+        resolve(reportRoot, track.report),
+        ...(track.apphostArgs ?? []),
+      ],
     }
   }
   if (track.kind === 'dotnet-vstest') {
@@ -182,10 +216,14 @@ export function commandFor(track: TrackConfig, reportRoot: string = repoRoot): {
     return {
       command: 'dotnet',
       args: [
-        'test', resolve(repoRoot, track.csproj),
-        '--no-build', '--no-restore',
-        '--logger', `trx;LogFileName=${logName}`,
-        '--results-directory', reportDir,
+        'test',
+        resolve(repoRoot, track.csproj),
+        '--no-build',
+        '--no-restore',
+        '--logger',
+        `trx;LogFileName=${logName}`,
+        '--results-directory',
+        reportDir,
       ],
     }
   }
@@ -308,8 +346,12 @@ function spawnChild(
       await Promise.allSettled([finished(stdout), finished(stderr)])
       resolvePromise({ exitCode: code, stdout: stdoutText })
     }
-    child.once('error', () => { void settle(1) })
-    child.once('close', (code) => { void settle(code) })
+    child.once('error', () => {
+      void settle(1)
+    })
+    child.once('close', (code) => {
+      void settle(code)
+    })
   })
   return { done, pid: child.pid ?? -1 }
 }
@@ -320,11 +362,13 @@ export async function runProcessWithDeadline<TimeoutReason>(input: {
   readonly kill: () => Promise<void>
   readonly now: () => number
   readonly hardDeadlineAt?: number
-}): Promise<Awaited<SpawnedChild['done']> & {
-  readonly status: 'passed' | 'failed' | 'timeout'
-  readonly elapsedMs: number
-  readonly timeoutReason?: TimeoutReason
-}> {
+}): Promise<
+  Awaited<SpawnedChild['done']> & {
+    readonly status: 'passed' | 'failed' | 'timeout'
+    readonly elapsedMs: number
+    readonly timeoutReason?: TimeoutReason
+  }
+> {
   const outcome = await runWithDeadline({
     start: () => input.child.done,
     kill: input.kill,
@@ -420,8 +464,14 @@ export function laneSandbox(
 }
 
 export function isLaneSuccessful(run: TrackRun): boolean {
-  return !run.cancelled && !run.timedOut && run.exitCode === 0 && run.reportReady &&
-    run.executionLedgerReady !== false && run.cleanupComplete
+  return (
+    !run.cancelled &&
+    !run.timedOut &&
+    run.exitCode === 0 &&
+    run.reportReady &&
+    run.executionLedgerReady !== false &&
+    run.cleanupComplete
+  )
 }
 
 interface PlannedLane {
@@ -481,23 +531,24 @@ function applyDurationMeasurementPhase(
   }
 
   const finalMeasurementLaneIds = measurementGroups.at(-1)!.terminalLaneIds
-  const isolationLaneId = durationIsolationTrack === undefined
-    ? undefined
-    : planned.find((plan) => plan.policyTrack?.id === durationIsolationTrack)?.lane.id
+  const isolationLaneId =
+    durationIsolationTrack === undefined
+      ? undefined
+      : planned.find((plan) => plan.policyTrack?.id === durationIsolationTrack)?.lane.id
   return planned.map((plan) => {
-    const measurementIndex = measurementGroups.findIndex((group) =>
-      group.executionLaneIds.includes(plan.lane.id) || group.terminalLaneIds.includes(plan.lane.id),
+    const measurementIndex = measurementGroups.findIndex(
+      (group) => group.executionLaneIds.includes(plan.lane.id) || group.terminalLaneIds.includes(plan.lane.id),
     )
     if (measurementIndex >= 0) {
       const predecessor = measurementIndex === 0 ? [] : measurementGroups[measurementIndex - 1].terminalLaneIds
-      const resources = measurementGroups[measurementIndex].executionLaneIds.length === 1
-        ? ['duration-measurement']
-        : []
+      const resources =
+        measurementGroups[measurementIndex].executionLaneIds.length === 1 ? ['duration-measurement'] : []
       return withLaneConstraints(plan, predecessor, resources)
     }
-    const dependencies = isolationLaneId !== undefined && plan.lane.id !== isolationLaneId && plan.policyTrack?.kind === 'vitest'
-      ? [isolationLaneId]
-      : finalMeasurementLaneIds
+    const dependencies =
+      isolationLaneId !== undefined && plan.lane.id !== isolationLaneId && plan.policyTrack?.kind === 'vitest'
+        ? [isolationLaneId]
+        : finalMeasurementLaneIds
     const resources = plan.lane.id === isolationLaneId ? ['duration-measurement'] : []
     return withLaneConstraints(plan, dependencies, resources)
   })
@@ -531,7 +582,13 @@ export function planTracks(
       planned.push({
         lane: {
           id,
-          resources: [...laneResources(track), 'server-spec', `spec-report-${partition}`, `spec-temp-${partition}`, `spec-port-${partition}`],
+          resources: [
+            ...laneResources(track),
+            'server-spec',
+            `spec-report-${partition}`,
+            `spec-temp-${partition}`,
+            `spec-port-${partition}`,
+          ],
         },
         policyTrack: track,
         executionTrack: { ...track, id, report },
@@ -620,7 +677,10 @@ async function killTree(
   return terminateProcessTree(child, hardDeadlineAt, graceMs, processTreeOps)
 }
 
-export function specPartitionCommand(args: readonly string[]): { readonly command: string; readonly args: readonly string[] } {
+export function specPartitionCommand(args: readonly string[]): {
+  readonly command: string
+  readonly args: readonly string[]
+} {
   return {
     command: process.execPath,
     args: ['--import', 'tsx', resolve(repoRoot, 'scripts/test-duration/spec-partition.ts'), ...args],
@@ -644,20 +704,23 @@ function startLane(
   let cancellationRequested = false
   let cancellation: Promise<void> | undefined
   let resolveLaneCancellation!: () => void
-  const laneCancellation = new Promise<void>((resolvePromise) => { resolveLaneCancellation = resolvePromise })
+  const laneCancellation = new Promise<void>((resolvePromise) => {
+    resolveLaneCancellation = resolvePromise
+  })
   const cancel = () => {
     if (!cancellationRequested) {
       cancellationRequested = true
       resolveLaneCancellation()
     }
-    cancellation ??= currentChild === undefined
-      ? Promise.resolve()
-      : killTree(
-          currentChild,
-          graceMs,
-          cancellationDeadlineAt(),
-          { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
-        ).then((completed) => { cleanupComplete = cleanupComplete && completed })
+    cancellation ??=
+      currentChild === undefined
+        ? Promise.resolve()
+        : killTree(currentChild, graceMs, cancellationDeadlineAt(), {
+            ...(runtime.processTreeOps ?? nativeProcessTreeOps),
+            now: runtime.now,
+          }).then((completed) => {
+            cleanupComplete = cleanupComplete && completed
+          })
     return cancellation
   }
 
@@ -674,7 +737,13 @@ function startLane(
     stageEvidence: RawEvidence,
   ) => {
     if (cancellationRequested) {
-      return { status: 'timeout' as const, exitCode: null, elapsedMs: runtime.now() - laneStartedAt, timeoutReason: 'suite' as const, stdout: '' }
+      return {
+        status: 'timeout' as const,
+        exitCode: null,
+        elapsedMs: runtime.now() - laneStartedAt,
+        timeoutReason: 'suite' as const,
+        stdout: '',
+      }
     }
     const child = spawnChild(command, args, environment, stageEvidence)
     currentChild = child
@@ -682,24 +751,20 @@ function startLane(
       child,
       timeout: deadline,
       kill: async () => {
-        const completed = await killTree(
-          child,
-          graceMs,
-          cancellationDeadlineAt(),
-          { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
-        )
+        const completed = await killTree(child, graceMs, cancellationDeadlineAt(), {
+          ...(runtime.processTreeOps ?? nativeProcessTreeOps),
+          now: runtime.now,
+        })
         cleanupComplete = cleanupComplete && completed
       },
       now: runtime.now,
       hardDeadlineAt: deadlines.hardDeadlineAt,
     })
     if (stageResult.status !== 'timeout') {
-      const completed = await killTree(
-        child,
-        graceMs,
-        cancellationDeadlineAt(),
-        { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
-      )
+      const completed = await killTree(child, graceMs, cancellationDeadlineAt(), {
+        ...(runtime.processTreeOps ?? nativeProcessTreeOps),
+        now: runtime.now,
+      })
       cleanupComplete = cleanupComplete && completed
     }
     if (currentChild === child) currentChild = undefined
@@ -738,38 +803,43 @@ function startLane(
         }
         ledgerPath = resolve(artifactRoot, executionTrack.executionLedger)
         provenancePath = resolve(artifactRoot, executionTrack.executionProvenance)
-        const artifactPaths = [plan.reportPath, ledgerPath, provenancePath]
-          .filter((path): path is string => path !== undefined)
+        const artifactPaths = [plan.reportPath, ledgerPath, provenancePath].filter(
+          (path): path is string => path !== undefined,
+        )
         if (new Set(artifactPaths).size !== artifactPaths.length) {
           throw new Error('TRX report, execution ledger, and execution provenance paths must differ')
         }
         prepareReportTarget(ledgerPath)
         prepareReportTarget(provenancePath)
         const ledgerPlan = executionLedgerPlan(executionTrack)
-        const currentIdentity = await readCurrentExecutionIdentity({
-          assemblyPath: ledgerPlan.assemblyPath,
-          sourceRoots: executionTrack.executionSourceRoots,
-          parallelism: parallelismFor(executionTrack),
-        }, {
-          readAssemblySha256: sha256File,
-          readSourceSha256: sha256Sources,
-          readDiscovery: async () => {
-            const discoveryEvidence = evidenceFor(artifactRoot, `${plan.lane.id}.discovery`)
-            const discovery = await runStage(
-              ledgerPlan.discovery.apphost,
-              ledgerPlan.discovery.args,
-              sandbox.environment,
-              discoveryEvidence,
-            )
-            if (discovery.status !== 'passed') {
-              const reason = discovery.status === 'timeout'
-                ? 'compiled discovery exceeded the track or suite deadline'
-                : `compiled discovery failed with exit ${discovery.exitCode}`
-              throw new Error(reason)
-            }
-            return discovery.stdout
+        const currentIdentity = await readCurrentExecutionIdentity(
+          {
+            assemblyPath: ledgerPlan.assemblyPath,
+            sourceRoots: executionTrack.executionSourceRoots,
+            parallelism: parallelismFor(executionTrack),
           },
-        })
+          {
+            readAssemblySha256: sha256File,
+            readSourceSha256: sha256Sources,
+            readDiscovery: async () => {
+              const discoveryEvidence = evidenceFor(artifactRoot, `${plan.lane.id}.discovery`)
+              const discovery = await runStage(
+                ledgerPlan.discovery.apphost,
+                ledgerPlan.discovery.args,
+                sandbox.environment,
+                discoveryEvidence,
+              )
+              if (discovery.status !== 'passed') {
+                const reason =
+                  discovery.status === 'timeout'
+                    ? 'compiled discovery exceeded the track or suite deadline'
+                    : `compiled discovery failed with exit ${discovery.exitCode}`
+                throw new Error(reason)
+              }
+              return discovery.stdout
+            },
+          },
+        )
         ledgerExpectation = {
           runId: createExecutionRunId({ now: runtime.now }, randomUUID),
           ...currentIdentity,
@@ -792,17 +862,12 @@ function startLane(
           plan.reportPath!,
         ]))
       } else if (executionTrack) {
-        ({ command, args } = commandFor(executionTrack, artifactRoot))
+        ;({ command, args } = commandFor(executionTrack, artifactRoot))
       } else {
         ;({ command, args } = specPartitionCommand(['verify', resolve(artifactRoot, 'manifests', 'server-spec')]))
       }
 
-      const outcome = await runStage(
-        command,
-        args,
-        { ...sandbox.environment, ...executionEnvironment },
-        evidence,
-      )
+      const outcome = await runStage(command, args, { ...sandbox.environment, ...executionEnvironment }, evidence)
       let reportReady = false
       try {
         reportReady = plan.reportPath ? reportFileReady(plan.reportPath) : outcome.status === 'passed'
@@ -886,14 +951,19 @@ export function evaluateTrackArtifacts(
   currentIdentity?: CurrentExecutionIdentity,
 ): TrackEvaluation {
   if (run?.cancelled) {
-    const state = run.reportReady ? 'report is ignored after cancellation' : run.reportError ?? 'report was not produced'
+    const state = run.reportReady
+      ? 'report is ignored after cancellation'
+      : (run.reportError ?? 'report was not produced')
     return failedEvaluation(track, `lane ${run.trackId} was cancelled ${run.cancellationReason ?? ''}; ${state}`)
   }
   if (run && !run.reportReady) {
     return failedEvaluation(track, run.reportError ?? `report ${track.report} was not refreshed`)
   }
   if (track.executionLedger && run && !run.executionLedgerReady) {
-    return failedEvaluation(track, run.executionLedgerError ?? `execution ledger ${track.executionLedger} was not refreshed`)
+    return failedEvaluation(
+      track,
+      run.executionLedgerError ?? `execution ledger ${track.executionLedger} was not refreshed`,
+    )
   }
   try {
     const trxCases = parseReport(track.reportFormat, artifacts.readText(track.report))
@@ -905,7 +975,8 @@ export function evaluateTrackArtifacts(
           return failedEvaluation(track, 'saved execution provenance does not match the current run')
         }
       } else {
-        if (!currentIdentity) return failedEvaluation(track, 'current execution identity was not captured for saved evidence')
+        if (!currentIdentity)
+          return failedEvaluation(track, 'current execution identity was not captured for saved evidence')
         const identityErrors = validateCurrentExecutionIdentity(expected, currentIdentity)
         if (identityErrors.length > 0) {
           return failedEvaluation(track, `saved execution provenance is stale: ${identityErrors.join('; ')}`)
@@ -938,19 +1009,25 @@ function evaluateFromPlans(
     }
     const plan = plans[0]
     const run = runsByLane.get(plan.lane.id)
-    return evaluateTrackArtifacts(track, {
-      readText: (path) => readFileSync(
-        path === track.report ? plan.reportPath! : resolve(artifactRoot, path),
-        'utf8',
-      ),
-    }, run, calendarNowFor(runtime)(), currentIdentity)
+    return evaluateTrackArtifacts(
+      track,
+      {
+        readText: (path) =>
+          readFileSync(path === track.report ? plan.reportPath! : resolve(artifactRoot, path), 'utf8'),
+      },
+      run,
+      calendarNowFor(runtime)(),
+      currentIdentity,
+    )
   }
   const cases = []
   for (const plan of plans) {
     if (!plan.reportPath) continue
     const run = runsByLane.get(plan.lane.id)
     if (run?.cancelled) {
-      const state = run.reportReady ? 'report is ignored after cancellation' : run.reportError ?? 'report was not produced'
+      const state = run.reportReady
+        ? 'report is ignored after cancellation'
+        : (run.reportError ?? 'report was not produced')
       return failedEvaluation(track, `lane ${plan.lane.id} was cancelled ${run.cancellationReason ?? ''}; ${state}`)
     }
     if (run && !run.reportReady) {
@@ -977,51 +1054,54 @@ async function readSavedTrackIdentity(
     throw new Error(`track "${track.id}" requires executionSourceRoots for execution ledger evidence`)
   }
   const plan = executionLedgerPlan(track)
-  return readCurrentExecutionIdentity({
-    assemblyPath: plan.assemblyPath,
-    sourceRoots: track.executionSourceRoots,
-    parallelism: parallelismFor(track),
-  }, {
-    readAssemblySha256: sha256File,
-    readSourceSha256: sha256Sources,
-    readDiscovery: async () => {
-      const evidence = evidenceFor(artifactRoot, `${track.id}.check-discovery`)
-      const child = spawnChild(plan.discovery.apphost, plan.discovery.args, process.env, evidence)
-      const remaining = Math.max(0, deadlines.executionDeadlineAt - runtime.now())
-      const timer = createTimeout(Math.min(track.deadlineMs, remaining), runtime.timeoutScheduler)
-      try {
-        const result = await runProcessWithDeadline({
-          child,
-          timeout: timer.promise.then(() => 'suite' as const),
-          kill: async () => {
-            await killTree(
-              child,
-              graceMs,
-              cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
-              { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
-            )
-          },
-          now: runtime.now,
-          hardDeadlineAt: deadlines.hardDeadlineAt,
-        })
-        if (result.status !== 'passed') {
-          throw new Error(result.status === 'timeout'
-            ? 'compiled discovery exceeded the suite deadline'
-            : `compiled discovery failed with exit ${result.exitCode}`)
-        }
-        const cleanupComplete = await killTree(
-          child,
-          graceMs,
-          cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
-          { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
-        )
-        if (!cleanupComplete) throw new Error('compiled discovery process tree did not reach a terminal state')
-        return result.stdout
-      } finally {
-        timer.cancel()
-      }
+  return readCurrentExecutionIdentity(
+    {
+      assemblyPath: plan.assemblyPath,
+      sourceRoots: track.executionSourceRoots,
+      parallelism: parallelismFor(track),
     },
-  })
+    {
+      readAssemblySha256: sha256File,
+      readSourceSha256: sha256Sources,
+      readDiscovery: async () => {
+        const evidence = evidenceFor(artifactRoot, `${track.id}.check-discovery`)
+        const child = spawnChild(plan.discovery.apphost, plan.discovery.args, process.env, evidence)
+        const remaining = Math.max(0, deadlines.executionDeadlineAt - runtime.now())
+        const timer = createTimeout(Math.min(track.deadlineMs, remaining), runtime.timeoutScheduler)
+        try {
+          const result = await runProcessWithDeadline({
+            child,
+            timeout: timer.promise.then(() => 'suite' as const),
+            kill: async () => {
+              await killTree(child, graceMs, cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs), {
+                ...(runtime.processTreeOps ?? nativeProcessTreeOps),
+                now: runtime.now,
+              })
+            },
+            now: runtime.now,
+            hardDeadlineAt: deadlines.hardDeadlineAt,
+          })
+          if (result.status !== 'passed') {
+            throw new Error(
+              result.status === 'timeout'
+                ? 'compiled discovery exceeded the suite deadline'
+                : `compiled discovery failed with exit ${result.exitCode}`,
+            )
+          }
+          const cleanupComplete = await killTree(
+            child,
+            graceMs,
+            cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
+            { ...(runtime.processTreeOps ?? nativeProcessTreeOps), now: runtime.now },
+          )
+          if (!cleanupComplete) throw new Error('compiled discovery process tree did not reach a terminal state')
+          return result.stdout
+        } finally {
+          timer.cancel()
+        }
+      },
+    },
+  )
 }
 
 function focusedFlow(csprojPath: string, className: string): number {
@@ -1030,7 +1110,10 @@ function focusedFlow(csprojPath: string, className: string): number {
     const assemblyName = parseAssemblyName(xml) ?? basename(csprojPath).replace(/\.csproj$/, '')
     const cmd = resolveFocusedCommand({ csprojXml: xml, className, projectDir: dirname(csprojPath), assemblyName })
     const list = execFileSync(cmd.apphost, cmd.verify as string[], { cwd: repoRoot, encoding: 'utf8' })
-    const classes = list.split('\n').map((line) => line.trim()).filter(Boolean)
+    const classes = list
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
     if (!classes.includes(className)) {
       const suggestion = classes.find((c) => c.endsWith(`.${className}`) || c.includes(className))
       process.stderr.write(
@@ -1089,7 +1172,8 @@ export function parseArgs(argv: readonly string[]): Args {
     else if (arg === '--suite-deadline-ms') suiteDeadlineMs = Number(argv[++i])
     else if (arg.startsWith('--suite-deadline-ms=')) suiteDeadlineMs = Number(arg.slice('--suite-deadline-ms='.length))
     else if (arg === '--suite-deadline-at-ms') suiteDeadlineAtMs = Number(argv[++i])
-    else if (arg.startsWith('--suite-deadline-at-ms=')) suiteDeadlineAtMs = Number(arg.slice('--suite-deadline-at-ms='.length))
+    else if (arg.startsWith('--suite-deadline-at-ms='))
+      suiteDeadlineAtMs = Number(arg.slice('--suite-deadline-at-ms='.length))
     else if (arg === '--require-build-stamp') requireBuildStamp = true
     else if (arg === 'focused') {
       mode = 'focused'
@@ -1242,9 +1326,8 @@ export async function main(
       return 2
     }
   }
-  const canonicalRun = mode === 'run' && suppliedRunRoot !== undefined
-    ? readCanonicalRunMetadata(suppliedRunRoot)
-    : undefined
+  const canonicalRun =
+    mode === 'run' && suppliedRunRoot !== undefined ? readCanonicalRunMetadata(suppliedRunRoot) : undefined
   if (runRootArg !== undefined && canonicalRun === undefined) {
     process.stderr.write(`canonical run metadata is missing or invalid: ${resolve(suppliedRunRoot!, 'run.json')}\n`)
     return 1
@@ -1261,9 +1344,14 @@ export async function main(
     return 1
   }
   const configuredDeadlineAt = suiteStart + config.suiteDeadlineMs
-  const deadlines = requestedDeadlineAtMs === undefined
-    ? suiteDeadlines(suiteStart, Math.min(config.suiteDeadlineMs, requestedDeadlineMs ?? config.suiteDeadlineMs), graceMs)
-    : suiteDeadlinesAt(Math.min(configuredDeadlineAt, requestedDeadlineAtMs), graceMs)
+  const deadlines =
+    requestedDeadlineAtMs === undefined
+      ? suiteDeadlines(
+          suiteStart,
+          Math.min(config.suiteDeadlineMs, requestedDeadlineMs ?? config.suiteDeadlineMs),
+          graceMs,
+        )
+      : suiteDeadlinesAt(Math.min(configuredDeadlineAt, requestedDeadlineAtMs), graceMs)
   const suiteDeadlineMs = Math.max(0, deadlines.hardDeadlineAt - suiteStart)
 
   let artifactRoot: string
@@ -1277,9 +1365,8 @@ export async function main(
     }
   } else {
     try {
-      const artifactParent = artifactRootArg === undefined
-        ? undefined
-        : externalAbsolutePath(artifactRootArg, '--artifact-root')
+      const artifactParent =
+        artifactRootArg === undefined ? undefined : externalAbsolutePath(artifactRootArg, '--artifact-root')
       const runId = `${suiteStart}-${process.pid}`
       artifactRoot = createUniqueArtifactRoot(runId, repoRoot, artifactParent)
       writeFileSync(
@@ -1311,25 +1398,29 @@ export async function main(
     plansByPolicy.set(plan.policyTrack.id, existing)
   }
 
-  if (mode === 'run' && !writeJsonEvidence(artifactRoot, 'plan.json', {
-    sourceRevision: canonicalRun?.sourceRevision,
-    suiteStart,
-    hardDeadlineAt: deadlines.hardDeadlineAt,
-    executionDeadlineAt: deadlines.executionDeadlineAt,
-    selectedTracks: selected.map((track) => track.id),
-    lanes: planned.map((plan) => ({
-      id: plan.lane.id,
-      policyTrackId: plan.policyTrack?.id,
-      dependsOn: plan.lane.dependsOn ?? [],
-      resources: plan.lane.resources ?? [],
-      reportPath: plan.reportPath,
-      partition: plan.partition,
-      partitionMaxThreads: plan.executionTrack?.partitionMaxThreads,
-      sandboxOrdinal: plan.sandboxOrdinal,
-      deadlineMs: plan.deadlineMs,
-    })),
-    partitionExecutionCapacity: config.canonical?.partitionExecutionCapacity,
-  })) return 1
+  if (
+    mode === 'run' &&
+    !writeJsonEvidence(artifactRoot, 'plan.json', {
+      sourceRevision: canonicalRun?.sourceRevision,
+      suiteStart,
+      hardDeadlineAt: deadlines.hardDeadlineAt,
+      executionDeadlineAt: deadlines.executionDeadlineAt,
+      selectedTracks: selected.map((track) => track.id),
+      lanes: planned.map((plan) => ({
+        id: plan.lane.id,
+        policyTrackId: plan.policyTrack?.id,
+        dependsOn: plan.lane.dependsOn ?? [],
+        resources: plan.lane.resources ?? [],
+        reportPath: plan.reportPath,
+        partition: plan.partition,
+        partitionMaxThreads: plan.executionTrack?.partitionMaxThreads,
+        sandboxOrdinal: plan.sandboxOrdinal,
+        deadlineMs: plan.deadlineMs,
+      })),
+      partitionExecutionCapacity: config.canonical?.partitionExecutionCapacity,
+    })
+  )
+    return 1
 
   const runs: TrackRun[] = []
   const evaluations: TrackEvaluation[] = []
@@ -1341,17 +1432,15 @@ export async function main(
     let schedulerFailureLaneId: string | undefined
     const suiteAbort = new AbortController()
     let resolveSuiteDeadline!: () => void
-    const suiteDeadline = new Promise<void>((resolvePromise) => { resolveSuiteDeadline = resolvePromise })
+    const suiteDeadline = new Promise<void>((resolvePromise) => {
+      resolveSuiteDeadline = resolvePromise
+    })
     const expireSuite = (reason: 'deadline' | 'external') => {
       if (suiteExpired) return
       suiteExpired = true
       suiteAbortReason = reason
       if (reason === 'external') {
-        externalCleanupDeadline = externalAbortCleanupDeadlineAt(
-          runtime.now(),
-          deadlines.hardDeadlineAt,
-          graceMs,
-        )
+        externalCleanupDeadline = externalAbortCleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs)
       }
       suiteAbort.abort()
       resolveSuiteDeadline()
@@ -1361,9 +1450,10 @@ export async function main(
     if (externalAbort?.aborted) abortFromCanonical()
     else externalAbort?.addEventListener('abort', abortFromCanonical, { once: true })
     const executionNow = runtime.now()
-    const executionTimer = executionNow >= deadlines.executionDeadlineAt
-      ? undefined
-      : createTimeout(Math.max(0, deadlines.executionDeadlineAt - executionNow), runtime.timeoutScheduler)
+    const executionTimer =
+      executionNow >= deadlines.executionDeadlineAt
+        ? undefined
+        : createTimeout(Math.max(0, deadlines.executionDeadlineAt - executionNow), runtime.timeoutScheduler)
     if (executionTimer === undefined) expireSuite('deadline')
     else void executionTimer.promise.then(() => expireSuite('deadline'))
     try {
@@ -1377,39 +1467,46 @@ export async function main(
       }
       const scheduled = await scheduleLanes(
         planned.map((plan) => plan.lane),
-        (lane) => startLane(
-          lanesById.get(lane.id)!,
-          graceMs,
-          suiteDeadline,
-          deadlines,
-          artifactRoot,
-          runtime,
-          () => externalCleanupDeadline
-            ?? cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
-        ),
+        (lane) =>
+          startLane(
+            lanesById.get(lane.id)!,
+            graceMs,
+            suiteDeadline,
+            deadlines,
+            artifactRoot,
+            runtime,
+            () => externalCleanupDeadline ?? cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
+          ),
         isLaneSuccessful,
         { resourceLimits, abort: suiteAbort.signal },
       )
       schedulerFailureLaneId = scheduled.failureLaneId
       for (const scheduledLane of scheduled.lanes) {
         const plan = lanesById.get(scheduledLane.lane.id)!
-        const result = scheduledLane.result
-          ?? (scheduledLane.state === 'failed'
-            ? failedRun(plan, 'scheduler', 'lane execution rejected before producing a report', evidenceFor(artifactRoot, plan.lane.id))
+        const result =
+          scheduledLane.result ??
+          (scheduledLane.state === 'failed'
+            ? failedRun(
+                plan,
+                'scheduler',
+                'lane execution rejected before producing a report',
+                evidenceFor(artifactRoot, plan.lane.id),
+              )
             : cancelledRun(plan, suiteExpired, artifactRoot, scheduled.failureLaneId))
-        const run = scheduledLane.state === 'cancelled' && !result.cancelled
-          ? {
-              ...result,
-              cancelled: true,
-              cancellationReason: suiteExpired
-                ? suiteAbortReason === 'external'
-                  ? 'after the canonical process received an external termination signal'
-                  : 'after the suite deadline expired'
-                : scheduled.failureLaneId
-                  ? `after ${scheduled.failureLaneId} failed`
-                  : 'after the scheduler aborted',
-            }
-          : result
+        const run =
+          scheduledLane.state === 'cancelled' && !result.cancelled
+            ? {
+                ...result,
+                cancelled: true,
+                cancellationReason: suiteExpired
+                  ? suiteAbortReason === 'external'
+                    ? 'after the canonical process received an external termination signal'
+                    : 'after the suite deadline expired'
+                  : scheduled.failureLaneId
+                    ? `after ${scheduled.failureLaneId} failed`
+                    : 'after the scheduler aborted',
+              }
+            : result
         runs.push(run)
         if (run.timeoutReason === 'track') console.error(`  ${run.trackId}: exceeded ${run.deadlineMs}ms deadline`)
       }
@@ -1442,14 +1539,19 @@ export async function main(
           artifactRoot,
         )
         const afterEvaluationFailure = reportEvaluationFailureReason(
-          runtime.now(), deadlines, suiteAbortReason === 'external')
+          runtime.now(),
+          deadlines,
+          suiteAbortReason === 'external',
+        )
         if (afterEvaluationFailure !== undefined) {
           evaluations.push(failedEvaluation(track, afterEvaluationFailure.replace('before', 'during')))
         } else {
           evaluations.push(evaluation)
         }
       } catch (error) {
-        evaluations.push(failedEvaluation(track, `could not evaluate report ${track.report}: ${(error as Error).message}`))
+        evaluations.push(
+          failedEvaluation(track, `could not evaluate report ${track.report}: ${(error as Error).message}`),
+        )
       }
     }
 
@@ -1476,13 +1578,14 @@ export async function main(
       suiteElapsedMs: suiteElapsed,
       suiteDeadlineBreached,
       passed: !runFailed && !budgetFailed,
-      firstFailure: schedulerFailureLaneId !== undefined
-        ? { kind: 'lane', laneId: schedulerFailureLaneId }
-        : firstFailedRun !== undefined
-          ? { kind: 'lane', laneId: firstFailedRun.trackId, error: firstFailedRun.reportError }
-          : firstFailedEvaluation !== undefined
-            ? { kind: 'report', trackId: firstFailedEvaluation.trackId, error: firstFailedEvaluation.reportError }
-            : undefined,
+      firstFailure:
+        schedulerFailureLaneId !== undefined
+          ? { kind: 'lane', laneId: schedulerFailureLaneId }
+          : firstFailedRun !== undefined
+            ? { kind: 'lane', laneId: firstFailedRun.trackId, error: firstFailedRun.reportError }
+            : firstFailedEvaluation !== undefined
+              ? { kind: 'report', trackId: firstFailedEvaluation.trackId, error: firstFailedEvaluation.reportError }
+              : undefined,
       summary,
       runs,
       evaluations,
@@ -1495,29 +1598,17 @@ export async function main(
     let currentIdentity: CurrentExecutionIdentity | undefined
     if (track.executionLedger) {
       try {
-        currentIdentity = await readSavedTrackIdentity(
-          track,
-          artifactRoot,
-          graceMs,
-          deadlines,
-          runtime,
-        )
+        currentIdentity = await readSavedTrackIdentity(track, artifactRoot, graceMs, deadlines, runtime)
       } catch (error) {
-        evaluations.push(failedEvaluation(
-          track,
-          `could not validate current execution identity: ${(error as Error).message}`,
-        ))
+        evaluations.push(
+          failedEvaluation(track, `could not validate current execution identity: ${(error as Error).message}`),
+        )
         continue
       }
     }
-    evaluations.push(evaluateFromPlans(
-      track,
-      plansByPolicy.get(track.id) ?? [],
-      new Map(),
-      runtime,
-      artifactRoot,
-      currentIdentity,
-    ))
+    evaluations.push(
+      evaluateFromPlans(track, plansByPolicy.get(track.id) ?? [], new Map(), runtime, artifactRoot, currentIdentity),
+    )
   }
   console.log('budget:')
   for (const evaluation of evaluations) {
@@ -1533,8 +1624,11 @@ export async function main(
 
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (isMain) {
-  void main().then((code) => process.exit(code), (error) => {
-    console.error(`test-duration: fatal guard error: ${(error as Error).message}`)
-    process.exit(1)
-  })
+  void main().then(
+    (code) => process.exit(code),
+    (error) => {
+      console.error(`test-duration: fatal guard error: ${(error as Error).message}`)
+      process.exit(1)
+    },
+  )
 }

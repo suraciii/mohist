@@ -14,19 +14,11 @@ const finalizationReserveMs = 1_000
 
 // GNU timeout gives the canonical process ten seconds after TERM before KILL.
 // Keep the child TERM/KILL window and final status flush inside that envelope.
-export function externalAbortCleanupDeadlineAt(
-  now: number,
-  hardDeadlineAt: number,
-  killGraceMs: number,
-): number {
+export function externalAbortCleanupDeadlineAt(now: number, hardDeadlineAt: number, killGraceMs: number): number {
   return Math.min(hardDeadlineAt, now + killGraceMs + finalizationReserveMs)
 }
 
-export function suiteDeadlines(
-  startedAt: number,
-  suiteDeadlineMs: number,
-  killGraceMs: number,
-): SuiteDeadlines {
+export function suiteDeadlines(startedAt: number, suiteDeadlineMs: number, killGraceMs: number): SuiteDeadlines {
   const reservedMs = killGraceMs * 2 + finalizationReserveMs
   if (!Number.isFinite(startedAt) || !Number.isFinite(suiteDeadlineMs) || !Number.isFinite(killGraceMs)) {
     throw new Error('suite deadline inputs must be finite')

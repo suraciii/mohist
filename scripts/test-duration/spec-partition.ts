@@ -29,8 +29,17 @@ export function partitionExecutionArguments(
     throw new Error('partition-max-threads must be a positive integer')
   }
   return [
-    '-noColor', '-noLogo', '-noAutoReporters', '-trx', reportPath,
-    '-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', String(maxThreads),
+    '-noColor',
+    '-noLogo',
+    '-noAutoReporters',
+    '-trx',
+    reportPath,
+    '-parallel',
+    'collections',
+    '-parallelAlgorithm',
+    'conservative',
+    '-maxThreads',
+    String(maxThreads),
     ...selectedClasses.flatMap((className) => ['-class', className]),
   ]
 }
@@ -66,14 +75,18 @@ export function planPartitionClasses(
   }
   const classes = [...rawClasses].sort(compareText)
   for (let index = 1; index < classes.length; index++) {
-    if (classes[index] === classes[index - 1]) throw new Error(`class discovery returned duplicate classes: ${classes[index]}`)
+    if (classes[index] === classes[index - 1])
+      throw new Error(`class discovery returned duplicate classes: ${classes[index]}`)
   }
   const selectedClasses = classes.filter((_, index) => index % partitionCount === partitionIndex)
   if (selectedClasses.length === 0) throw new Error(`partition ${partitionIndex} has no classes`)
   return { index: partitionIndex, count: partitionCount, allClasses: classes, selectedClasses }
 }
 
-export function verifyPartitionArtifacts(artifacts: readonly PartitionArtifact[]): { readonly classes: number; readonly partitions: number } {
+export function verifyPartitionArtifacts(artifacts: readonly PartitionArtifact[]): {
+  readonly classes: number
+  readonly partitions: number
+} {
   if (artifacts.length === 0) throw new Error('no partition artifacts were downloaded')
   const first = artifacts[0]
   if (first.count !== artifacts.length) {
@@ -163,7 +176,10 @@ function loadArtifacts(directory: string): PartitionArtifact[] {
     })
 }
 
-async function runCommand(command: string, args: readonly string[]): Promise<{ readonly exitCode: number | null; readonly output: string }> {
+async function runCommand(
+  command: string,
+  args: readonly string[],
+): Promise<{ readonly exitCode: number | null; readonly output: string }> {
   const child = spawn(command, args as string[], {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -195,14 +211,17 @@ async function runPartition(
   if (discovery.exitCode !== 0) throw new Error('xUnit class discovery failed')
   const plan = planPartitionClasses(discovery.output, partitionIndex, partitionCount)
   writePlan(manifestDirectory, plan)
-  console.log(`Spec partition ${plan.index + 1}/${plan.count}: ${plan.selectedClasses.length} of ${plan.allClasses.length} classes`)
+  console.log(
+    `Spec partition ${plan.index + 1}/${plan.count}: ${plan.selectedClasses.length} of ${plan.allClasses.length} classes`,
+  )
   mkdirSync(dirname(reportPath), { recursive: true })
   const execution = await runCommand(
     apphost,
     partitionExecutionArguments(reportPath, plan.selectedClasses, partitionMaxThreads),
   )
   writeFileSync(resolve(manifestDirectory, 'spec.log'), execution.output)
-  if (execution.exitCode !== 0) throw new Error(`xUnit partition exited ${execution.exitCode ?? 'without an exit code'}`)
+  if (execution.exitCode !== 0)
+    throw new Error(`xUnit partition exited ${execution.exitCode ?? 'without an exit code'}`)
   if (!existsSync(reportPath) || statSync(reportPath).size === 0) {
     throw new Error(`xUnit did not write a TRX report: ${reportPath}`)
   }
@@ -237,8 +256,11 @@ async function main(argv: readonly string[] = process.argv.slice(2)): Promise<nu
 
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (isMain) {
-  void main().then((code) => process.exit(code), (error) => {
-    process.stderr.write(`spec-partition: fatal error: ${(error as Error).message}\n`)
-    process.exit(1)
-  })
+  void main().then(
+    (code) => process.exit(code),
+    (error) => {
+      process.stderr.write(`spec-partition: fatal error: ${(error as Error).message}\n`)
+      process.exit(1)
+    },
+  )
 }

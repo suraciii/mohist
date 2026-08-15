@@ -29,10 +29,9 @@ export function isInsideDirectory(candidate: string, directory: string): boolean
   const resolvedCandidate = resolve(candidate)
   const resolvedDirectory = resolve(directory)
   const pathFromDirectory = relative(resolvedDirectory, resolvedCandidate)
-  return pathFromDirectory === '' || (
-    pathFromDirectory !== '..'
-    && !pathFromDirectory.startsWith(`..${sep}`)
-    && !isAbsolute(pathFromDirectory)
+  return (
+    pathFromDirectory === '' ||
+    (pathFromDirectory !== '..' && !pathFromDirectory.startsWith(`..${sep}`) && !isAbsolute(pathFromDirectory))
   )
 }
 
@@ -53,7 +52,7 @@ function parseObject(content: string): Record<string, unknown> | undefined {
   try {
     const parsed = JSON.parse(content)
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
+      ? (parsed as Record<string, unknown>)
       : undefined
   } catch {
     return undefined
@@ -63,18 +62,18 @@ function parseObject(content: string): Record<string, unknown> | undefined {
 export function parseCanonicalRunMetadata(content: string): CanonicalRunMetadata | undefined {
   const parsed = parseObject(content)
   if (
-    !parsed
-    || typeof parsed.runId !== 'string'
-    || !parsed.runId
-    || typeof parsed.startedAt !== 'number'
-    || !Number.isFinite(parsed.startedAt)
-    || typeof parsed.suiteDeadlineMs !== 'number'
-    || !Number.isFinite(parsed.suiteDeadlineMs)
-    || (parsed.sourceRevision !== undefined && typeof parsed.sourceRevision !== 'string')
-  ) return undefined
-  const sourceRevision = typeof parsed.sourceRevision === 'string' && parsed.sourceRevision
-    ? parsed.sourceRevision
-    : undefined
+    !parsed ||
+    typeof parsed.runId !== 'string' ||
+    !parsed.runId ||
+    typeof parsed.startedAt !== 'number' ||
+    !Number.isFinite(parsed.startedAt) ||
+    typeof parsed.suiteDeadlineMs !== 'number' ||
+    !Number.isFinite(parsed.suiteDeadlineMs) ||
+    (parsed.sourceRevision !== undefined && typeof parsed.sourceRevision !== 'string')
+  )
+    return undefined
+  const sourceRevision =
+    typeof parsed.sourceRevision === 'string' && parsed.sourceRevision ? parsed.sourceRevision : undefined
   return {
     runId: parsed.runId,
     startedAt: parsed.startedAt,
@@ -86,16 +85,16 @@ export function parseCanonicalRunMetadata(content: string): CanonicalRunMetadata
 export function parseBuildStamp(content: string): BuildStamp | undefined {
   const parsed = parseObject(content)
   if (
-    !parsed
-    || typeof parsed.runId !== 'string'
-    || !parsed.runId
-    || typeof parsed.builtAt !== 'number'
-    || !Number.isFinite(parsed.builtAt)
-    || (parsed.sourceRevision !== undefined && typeof parsed.sourceRevision !== 'string')
-  ) return undefined
-  const sourceRevision = typeof parsed.sourceRevision === 'string' && parsed.sourceRevision
-    ? parsed.sourceRevision
-    : undefined
+    !parsed ||
+    typeof parsed.runId !== 'string' ||
+    !parsed.runId ||
+    typeof parsed.builtAt !== 'number' ||
+    !Number.isFinite(parsed.builtAt) ||
+    (parsed.sourceRevision !== undefined && typeof parsed.sourceRevision !== 'string')
+  )
+    return undefined
+  const sourceRevision =
+    typeof parsed.sourceRevision === 'string' && parsed.sourceRevision ? parsed.sourceRevision : undefined
   return {
     runId: parsed.runId,
     builtAt: parsed.builtAt,
@@ -106,8 +105,10 @@ export function parseBuildStamp(content: string): BuildStamp | undefined {
 export function buildStampMatchesRun(runJson: string, stampJson: string): boolean {
   const run = parseCanonicalRunMetadata(runJson)
   const stamp = parseBuildStamp(stampJson)
-  return run !== undefined
-    && stamp !== undefined
-    && run.runId === stamp.runId
-    && (run.sourceRevision === undefined || run.sourceRevision === stamp.sourceRevision)
+  return (
+    run !== undefined &&
+    stamp !== undefined &&
+    run.runId === stamp.runId &&
+    (run.sourceRevision === undefined || run.sourceRevision === stamp.sourceRevision)
+  )
 }

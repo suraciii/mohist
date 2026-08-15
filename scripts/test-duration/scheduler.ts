@@ -107,16 +107,17 @@ export async function scheduleLanes<T>(
   let aborted = false
   let failureLaneId: string | undefined
   let removeAbortListener = () => {}
-  const abortEvent = options.abort === undefined
-    ? undefined
-    : new Promise<{ readonly kind: 'abort' }>((resolveAbort) => {
-        const onAbort = () => resolveAbort({ kind: 'abort' })
-        if (options.abort!.aborted) onAbort()
-        else {
-          options.abort!.addEventListener('abort', onAbort, { once: true })
-          removeAbortListener = () => options.abort!.removeEventListener('abort', onAbort)
-        }
-      })
+  const abortEvent =
+    options.abort === undefined
+      ? undefined
+      : new Promise<{ readonly kind: 'abort' }>((resolveAbort) => {
+          const onAbort = () => resolveAbort({ kind: 'abort' })
+          if (options.abort!.aborted) onAbort()
+          else {
+            options.abort!.addEventListener('abort', onAbort, { once: true })
+            removeAbortListener = () => options.abort!.removeEventListener('abort', onAbort)
+          }
+        })
 
   const stop = (failure?: string, wasAborted = false) => {
     if (stopping) return
@@ -133,7 +134,10 @@ export async function scheduleLanes<T>(
       cancellationPromises.push(
         Promise.resolve()
           .then(() => activeLane.running.cancel())
-          .then(() => undefined, () => undefined),
+          .then(
+            () => undefined,
+            () => undefined,
+          ),
       )
     }
   }
@@ -143,34 +147,34 @@ export async function scheduleLanes<T>(
     while (pending.size > 0 || active.size > 0) {
       if (!stopping && options.abort?.aborted) stop(undefined, true)
       if (!stopping) {
-      let admitted = true
-      while (admitted) {
-        if (options.abort?.aborted) {
-          stop(undefined, true)
-          break
-        }
-        admitted = false
-        for (const lane of lanes) {
+        let admitted = true
+        while (admitted) {
           if (options.abort?.aborted) {
             stop(undefined, true)
             break
           }
-          if (!pending.has(lane.id)) continue
-          if (!(lane.dependsOn ?? []).every((dependency) => completed.get(dependency)?.state === 'passed')) continue
-          if (!resourcesAvailable(lane, used, limits)) continue
-          pending.delete(lane.id)
-          claim(lane, used)
-          try {
-            active.set(lane.id, { lane, running: start(lane), cancelRequested: false })
-          } catch {
-            release(lane, used)
-            completed.set(lane.id, { lane, state: 'failed' })
-            stop(lane.id)
+          admitted = false
+          for (const lane of lanes) {
+            if (options.abort?.aborted) {
+              stop(undefined, true)
+              break
+            }
+            if (!pending.has(lane.id)) continue
+            if (!(lane.dependsOn ?? []).every((dependency) => completed.get(dependency)?.state === 'passed')) continue
+            if (!resourcesAvailable(lane, used, limits)) continue
+            pending.delete(lane.id)
+            claim(lane, used)
+            try {
+              active.set(lane.id, { lane, running: start(lane), cancelRequested: false })
+            } catch {
+              release(lane, used)
+              completed.set(lane.id, { lane, state: 'failed' })
+              stop(lane.id)
+            }
+            admitted = true
+            break
           }
-          admitted = true
-          break
         }
-      }
       }
 
       if (active.size === 0) {
@@ -186,11 +190,7 @@ export async function scheduleLanes<T>(
           () => ({ kind: 'rejection' as const, id }),
         ),
       )
-      const event = await Promise.race(
-        abortEvent && !stopping
-          ? [...completions, abortEvent]
-          : completions,
-      )
+      const event = await Promise.race(abortEvent && !stopping ? [...completions, abortEvent] : completions)
 
       if (event.kind === 'abort') {
         stop(undefined, true)

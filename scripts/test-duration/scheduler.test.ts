@@ -45,7 +45,11 @@ test('scheduler admits only resource-compatible lanes and releases a completed c
   const first = deferred<boolean>()
   const node = deferred<boolean>()
   const second = deferred<boolean>()
-  const deferredById = new Map([['first', first], ['node', node], ['second', second]])
+  const deferredById = new Map([
+    ['first', first],
+    ['node', node],
+    ['second', second],
+  ])
 
   const pending = scheduleLanes(
     [
@@ -70,7 +74,10 @@ test('scheduler admits only resource-compatible lanes and releases a completed c
   second.resolve(true)
 
   const result = await pending
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['passed', 'passed', 'passed'])
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['passed', 'passed', 'passed'],
+  )
 })
 
 test('scheduler cancels active lanes and does not admit queued lanes after the first failure', async () => {
@@ -78,7 +85,10 @@ test('scheduler cancels active lanes and does not admit queued lanes after the f
   const cancelled: string[] = []
   const first = deferred<boolean>()
   const second = deferred<boolean>()
-  const deferredById = new Map([['first', first], ['second', second]])
+  const deferredById = new Map([
+    ['first', first],
+    ['second', second],
+  ])
 
   const pending = scheduleLanes(
     [
@@ -108,7 +118,10 @@ test('scheduler cancels active lanes and does not admit queued lanes after the f
   assert.deepEqual(starts.started, ['first', 'second'])
   assert.deepEqual(cancelled, ['second'])
   assert.equal(result.failureLaneId, 'first')
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['failed', 'cancelled', 'cancelled'])
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['failed', 'cancelled', 'cancelled'],
+  )
 })
 
 test('scheduler turns a rejected lane into a failure and converges active cancellation', async () => {
@@ -138,7 +151,10 @@ test('scheduler turns a rejected lane into a failure and converges active cancel
 
   assert.equal(result.failureLaneId, 'rejected')
   assert.deepEqual(cancelled, ['active'])
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['failed', 'cancelled'])
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['failed', 'cancelled'],
+  )
 })
 
 test('scheduler waits for all partition dependencies before admitting the coverage lane', async () => {
@@ -147,7 +163,11 @@ test('scheduler waits for all partition dependencies before admitting the covera
   const second = deferred<boolean>()
   const coverage = deferred<boolean>()
   const firstCompletionObserved = deferred<void>()
-  const deferredById = new Map([['spec-0', first], ['spec-1', second], ['spec-coverage', coverage]])
+  const deferredById = new Map([
+    ['spec-0', first],
+    ['spec-1', second],
+    ['spec-coverage', coverage],
+  ])
 
   const pending = scheduleLanes(
     [
@@ -177,7 +197,10 @@ test('scheduler waits for all partition dependencies before admitting the covera
   coverage.resolve(true)
 
   const result = await pending
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['passed', 'passed', 'passed'])
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['passed', 'passed', 'passed'],
+  )
 })
 
 test('scheduler completes the bounded four-way Spec phase before throughput fan-out', async () => {
@@ -230,7 +253,10 @@ test('scheduler completes the bounded four-way Spec phase before throughput fan-
   runner.resolve(true)
 
   const result = await pending
-  assert.deepEqual(result.lanes.map((lane) => lane.state), Array.from({ length: 8 }, () => 'passed'))
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    Array.from({ length: 8 }, () => 'passed'),
+  )
 })
 
 test('scheduler admits no lane when the abort signal was already fulfilled', async () => {
@@ -250,7 +276,10 @@ test('scheduler admits no lane when the abort signal was already fulfilled', asy
 
   assert.deepEqual(started, [])
   assert.equal(result.aborted, true)
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['cancelled'])
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['cancelled'],
+  )
 })
 
 test('scheduler waits for every active lane cancellation to converge after an external abort', async () => {
@@ -287,7 +316,9 @@ test('scheduler waits for every active lane cancellation to converge after an ex
   await cleanupStarted.promise
 
   let settled = false
-  void pending.then(() => { settled = true })
+  void pending.then(() => {
+    settled = true
+  })
   await Promise.resolve()
   assert.equal(settled, false)
   assert.equal(cancelCalls, 1)
@@ -296,7 +327,10 @@ test('scheduler waits for every active lane cancellation to converge after an ex
   cleanup.resolve(undefined)
   const result = await pending
   assert.equal(result.aborted, true)
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['cancelled', 'cancelled'])
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['cancelled', 'cancelled'],
+  )
 })
 
 test('scheduler records cancellation callbacks that throw without losing the final lane report', async () => {
@@ -306,7 +340,9 @@ test('scheduler records cancellation callbacks that throw without losing the fin
     [{ id: 'active', resources: ['host'] }],
     () => ({
       result: started.promise.then(() => true),
-      cancel: () => { throw new Error('cancel seam failed') },
+      cancel: () => {
+        throw new Error('cancel seam failed')
+      },
     }),
     (value) => value,
     { resourceLimits: { host: 1 }, abort: abort.signal },
@@ -318,5 +354,8 @@ test('scheduler records cancellation callbacks that throw without losing the fin
   const result = await resultPromise
 
   assert.equal(result.aborted, true)
-  assert.deepEqual(result.lanes.map((lane) => lane.state), ['cancelled'])
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['cancelled'],
+  )
 })

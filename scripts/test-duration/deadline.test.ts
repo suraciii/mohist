@@ -113,7 +113,9 @@ test('runWithDeadline reports only the deadline outcome after bounded best-effor
   let cleanupCalls = 0
   const outcome = await runWithDeadline({
     start: () => new Promise<{ exitCode: number | null }>(() => undefined),
-    kill: async () => { cleanupCalls += 1 },
+    kill: async () => {
+      cleanupCalls += 1
+    },
     timeout,
     now: () => 100,
   })
@@ -132,7 +134,9 @@ test('runWithDeadline reports only the deadline outcome after bounded best-effor
 test('runWithDeadline treats a child completion at the hard cutoff as timeout and converges it', async () => {
   const harness = makeHarness()
   let startRelease!: (result: { exitCode: number | null }) => void
-  const startPromise = new Promise<{ exitCode: number | null }>((resolvePromise) => { startRelease = resolvePromise })
+  const startPromise = new Promise<{ exitCode: number | null }>((resolvePromise) => {
+    startRelease = resolvePromise
+  })
   const pending = runWithDeadline({
     ...deps(harness, startPromise, new Promise<void>(() => {})),
     hardDeadlineAt: 1_200,

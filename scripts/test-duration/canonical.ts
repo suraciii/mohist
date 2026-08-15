@@ -4,10 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { finished } from 'node:stream/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import {
-  createArtifactRoot as createUniqueArtifactRoot,
-  type ArtifactDirectoryOps,
-} from './artifacts.js'
+import { createArtifactRoot as createUniqueArtifactRoot, type ArtifactDirectoryOps } from './artifacts.js'
 import { externalAbortCleanupDeadlineAt, suiteDeadlines, type SuiteDeadlines } from './deadline.js'
 import { main as runDurationGate, type GuardRuntime, type TimeoutScheduler } from './guard.js'
 import { nativeProcessTreeOps, terminateProcessTree } from './process-tree.js'
@@ -98,7 +95,10 @@ async function settleOutputBefore(
   const timeout = createTimeout(hardDeadlineAt, now, timeoutScheduler)
   try {
     const settled = await Promise.race([
-      output.then(() => true, () => true),
+      output.then(
+        () => true,
+        () => true,
+      ),
       timeout.promise.then(() => false),
     ])
     return settled && now() < hardDeadlineAt
@@ -207,9 +207,10 @@ async function runPhase(
     aborted.dispose()
   }
 
-  const cleanupDeadlineAt = outcome.kind === 'abort'
-    ? externalAbortCleanupDeadlineAt(now(), deadlines.hardDeadlineAt, killGraceMs)
-    : deadlines.hardDeadlineAt
+  const cleanupDeadlineAt =
+    outcome.kind === 'abort'
+      ? externalAbortCleanupDeadlineAt(now(), deadlines.hardDeadlineAt, killGraceMs)
+      : deadlines.hardDeadlineAt
   const cleanupComplete = await terminateProcessTree(
     { pid: child.pid ?? -1, done: exited },
     cleanupDeadlineAt,
@@ -299,11 +300,29 @@ export async function main(
       JSON.stringify({ runId, startedAt, suiteDeadlineMs, sourceRevision }, null, 2) + '\n',
     )
 
-    const docs = await runtime.runPhase('docs', 'npm', ['run', 'docs:check'], artifactRoot, deadlines, runtime.now, abortSignal, runtime.timeoutScheduler)
+    const docs = await runtime.runPhase(
+      'docs',
+      'npm',
+      ['run', 'docs:check'],
+      artifactRoot,
+      deadlines,
+      runtime.now,
+      abortSignal,
+      runtime.timeoutScheduler,
+    )
     if (docs.timedOut || docs.cancelled || docs.cleanupComplete === false || docs.exitCode !== 0) return 1
     if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
 
-    const build = await runtime.runPhase('build', 'npm', ['run', 'build'], artifactRoot, deadlines, runtime.now, abortSignal, runtime.timeoutScheduler)
+    const build = await runtime.runPhase(
+      'build',
+      'npm',
+      ['run', 'build'],
+      artifactRoot,
+      deadlines,
+      runtime.now,
+      abortSignal,
+      runtime.timeoutScheduler,
+    )
     if (build.timedOut || build.cancelled || build.cleanupComplete === false || build.exitCode !== 0) return 1
     if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
     assertMatchingCleanSource(source, runtime.sourceIdentity())
@@ -312,17 +331,29 @@ export async function main(
       resolve(artifactRoot, 'build-stamp.json'),
       JSON.stringify({ runId, builtAt: runtime.now(), sourceRevision }, null, 2) + '\n',
     )
-    const boundary = await runtime.runPhase('script-boundaries', 'npm', ['run', 'archtest'], artifactRoot, deadlines, runtime.now, abortSignal, runtime.timeoutScheduler)
-    if (boundary.timedOut || boundary.cancelled || boundary.cleanupComplete === false || boundary.exitCode !== 0) return 1
+    const boundary = await runtime.runPhase(
+      'script-boundaries',
+      'npm',
+      ['run', 'archtest'],
+      artifactRoot,
+      deadlines,
+      runtime.now,
+      abortSignal,
+      runtime.timeoutScheduler,
+    )
+    if (boundary.timedOut || boundary.cancelled || boundary.cleanupComplete === false || boundary.exitCode !== 0)
+      return 1
     if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
     assertMatchingCleanSource(source, runtime.sourceIdentity())
 
     const durationCode = await runtime.runDurationGate(
       [
         '--all',
-        '--run-root', artifactRoot,
+        '--run-root',
+        artifactRoot,
         '--require-build-stamp',
-        '--suite-deadline-at-ms', String(deadlines.hardDeadlineAt),
+        '--suite-deadline-at-ms',
+        String(deadlines.hardDeadlineAt),
       ],
       { now: runtime.now, abortSignal, timeoutScheduler: runtime.timeoutScheduler },
     )
@@ -348,8 +379,11 @@ export async function main(
 
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (isMain) {
-  void main().then((code) => process.exit(code), (error) => {
-    console.error(`canonical-gate: fatal error: ${(error as Error).message}`)
-    process.exit(1)
-  })
+  void main().then(
+    (code) => process.exit(code),
+    (error) => {
+      console.error(`canonical-gate: fatal error: ${(error as Error).message}`)
+      process.exit(1)
+    },
+  )
 }

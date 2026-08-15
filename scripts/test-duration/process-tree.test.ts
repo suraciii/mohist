@@ -10,7 +10,9 @@ interface Deferred<T> {
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
   return { promise, resolve }
 }
 
@@ -27,9 +29,16 @@ function manualClock(initialNow = 0): {
     createTimeout: (delayMs) => {
       const id = nextId++
       let resolvePromise!: () => void
-      const promise = new Promise<void>((resolve) => { resolvePromise = resolve })
+      const promise = new Promise<void>((resolve) => {
+        resolvePromise = resolve
+      })
       timers.set(id, { dueAt: now + delayMs, resolve: resolvePromise })
-      return { promise, cancel: () => { timers.delete(id) } }
+      return {
+        promise,
+        cancel: () => {
+          timers.delete(id)
+        },
+      }
     },
     advanceTo: (nextNow) => {
       now = nextNow
@@ -57,7 +66,12 @@ test('Windows tree cancellation invokes taskkill /T and waits for the launched t
     isProcessGroupAlive: () => assert.fail('Windows must not inspect a POSIX process group'),
     startTaskkill: (pid) => {
       taskkillPids.push(pid)
-      return { done: taskkillDone.promise, cancel: () => { taskkillCancelled = true } }
+      return {
+        done: taskkillDone.promise,
+        cancel: () => {
+          taskkillCancelled = true
+        },
+      }
     },
   }
 
@@ -81,7 +95,12 @@ test('Windows taskkill cleanup is bounded by the supplied absolute deadline', as
     createTimeout: clock.createTimeout,
     signalProcessGroup: () => assert.fail('Windows must not use a POSIX process group'),
     isProcessGroupAlive: () => assert.fail('Windows must not inspect a POSIX process group'),
-    startTaskkill: () => ({ done: taskkillDone.promise, cancel: () => { cancelled = true } }),
+    startTaskkill: () => ({
+      done: taskkillDone.promise,
+      cancel: () => {
+        cancelled = true
+      },
+    }),
   }
 
   const terminating = terminateProcessTree({ pid: 78, done: deferred<void>().promise }, 20, 5, ops)
@@ -181,7 +200,9 @@ test('POSIX cleanup fails when the process group remains after KILL', async () =
     platform: 'linux',
     now: clock.now,
     createTimeout: clock.createTimeout,
-    signalProcessGroup: (pid, signal) => { signals.push(`${pid}:${signal}`) },
+    signalProcessGroup: (pid, signal) => {
+      signals.push(`${pid}:${signal}`)
+    },
     isProcessGroupAlive: () => true,
     startTaskkill: () => assert.fail('POSIX must not start taskkill'),
   }

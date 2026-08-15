@@ -22,14 +22,20 @@ import {
 } from './guard.js'
 import { formatEvaluation, formatSummary, formatTrackRun, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
-import type { CurrentExecutionIdentity, ExecutionLedgerExpectation, TrackConfig, TrackEvaluation, TrackRun } from './types.js'
+import type {
+  CurrentExecutionIdentity,
+  ExecutionLedgerExpectation,
+  TrackConfig,
+  TrackEvaluation,
+  TrackRun,
+} from './types.js'
 
 const fastCaseUid = '1'.repeat(64)
 
 function fastManifest() {
-  return manifestFromDiscovery(JSON.stringify([
-    { ID: fastCaseUid, DisplayName: 'Ns.Cli.Fast', Class: 'Ns.Cli', Method: 'Fast' },
-  ]))
+  return manifestFromDiscovery(
+    JSON.stringify([{ ID: fastCaseUid, DisplayName: 'Ns.Cli.Fast', Class: 'Ns.Cli', Method: 'Fast' }]),
+  )
 }
 
 function captureStderr(): { calls: () => string; restore: () => void } {
@@ -41,7 +47,11 @@ function captureStderr(): { calls: () => string; restore: () => void } {
 }
 
 test('parseArgs: focused with both arguments resolves the request', () => {
-  const args = parseArgs(['focused', 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj', 'Mohist.Cli.Tests.Skills.SkillsContentTests'])
+  const args = parseArgs([
+    'focused',
+    'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj',
+    'Mohist.Cli.Tests.Skills.SkillsContentTests',
+  ])
   assert.equal(args.mode, 'focused')
   assert.equal(args.focused?.csproj, 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj')
   assert.equal(args.focused?.className, 'Mohist.Cli.Tests.Skills.SkillsContentTests')
@@ -59,7 +69,15 @@ test('commandFor appends dotnet apphost arguments after the default report argum
     enforce: false,
   }
   const command = commandFor(track)
-  assert.deepEqual(command.args.slice(-7), ['-noColor', '-noLogo', '-noAutoReporters', '-trx', `${process.cwd()}/reports/unit.trx`, '-parallel', 'none'])
+  assert.deepEqual(command.args.slice(-7), [
+    '-noColor',
+    '-noLogo',
+    '-noAutoReporters',
+    '-trx',
+    `${process.cwd()}/reports/unit.trx`,
+    '-parallel',
+    'none',
+  ])
 })
 
 test('commandFor explicitly selects the execution-ledger reporter without environmental auto-reporters', () => {
@@ -79,40 +97,57 @@ test('commandFor explicitly selects the execution-ledger reporter without enviro
   const command = commandFor(track, '/evidence')
 
   assert.deepEqual(command.args.slice(0, 7), [
-    '-noColor', '-noLogo', '-noAutoReporters', '-reporter', 'mohist-ledger',
-    '-trx', '/evidence/reports/cli.trx',
+    '-noColor',
+    '-noLogo',
+    '-noAutoReporters',
+    '-reporter',
+    'mohist-ledger',
+    '-trx',
+    '/evidence/reports/cli.trx',
   ])
 })
 
 test('parallelism provenance records every effective xUnit override', () => {
   const track: TrackConfig = {
-    id: 'cli', kind: 'dotnet-apphost', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
+    id: 'cli',
+    kind: 'dotnet-apphost',
+    report: 'reports/cli.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
   }
   assert.equal(parallelismFor(track), DEFAULT_XUNIT_PARALLELISM)
   assert.equal(
-    parallelismFor({ ...track, apphostArgs: ['-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', '8'] }),
+    parallelismFor({
+      ...track,
+      apphostArgs: ['-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', '8'],
+    }),
     'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=8',
   )
-  assert.throws(() => parallelismFor({ ...track, apphostArgs: ['-parallel', 'none', '-parallel', 'collections'] }), /duplicate xUnit option/)
+  assert.throws(
+    () => parallelismFor({ ...track, apphostArgs: ['-parallel', 'none', '-parallel', 'collections'] }),
+    /duplicate xUnit option/,
+  )
 })
 
 test('execution provenance writer uses the injected artifact store', () => {
   const calls: string[] = []
-  writeExecutionProvenance('/virtual/reports/cli.execution-provenance.json', {
-    runId: 'run-1',
-    manifest: fastManifest(),
-    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
-    assemblySha256: 'a'.repeat(64),
-    sourceSha256: 'b'.repeat(64),
-    parallelism: DEFAULT_XUNIT_PARALLELISM,
-  }, {
-    ensureDirectory: (path) => calls.push(`mkdir:${path}`),
-    writeText: (path, content) => calls.push(`write:${path}:${JSON.parse(content).runId}`),
-  })
-  assert.deepEqual(calls, [
-    'mkdir:/virtual/reports',
-    'write:/virtual/reports/cli.execution-provenance.json:run-1',
-  ])
+  writeExecutionProvenance(
+    '/virtual/reports/cli.execution-provenance.json',
+    {
+      runId: 'run-1',
+      manifest: fastManifest(),
+      assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+      assemblySha256: 'a'.repeat(64),
+      sourceSha256: 'b'.repeat(64),
+      parallelism: DEFAULT_XUNIT_PARALLELISM,
+    },
+    {
+      ensureDirectory: (path) => calls.push(`mkdir:${path}`),
+      writeText: (path, content) => calls.push(`write:${path}:${JSON.parse(content).runId}`),
+    },
+  )
+  assert.deepEqual(calls, ['mkdir:/virtual/reports', 'write:/virtual/reports/cli.execution-provenance.json:run-1'])
 })
 
 test('guard evaluates CLI duration from the execution ledger and fails closed when evidence is missing', () => {
@@ -139,37 +174,60 @@ test('guard evaluates CLI duration from the execution ledger and fails closed wh
     rules: [{ id: 'unit', absoluteMs: 500, percentile: 95, percentileMs: 50 }],
   }
   const artifacts = new Map<string, string>([
-    [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
+    [
+      track.report,
+      '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>',
+    ],
     [track.executionProvenance!, serializeExecutionProvenance(expected)],
-    [track.executionLedger!, JSON.stringify({
-      schemaVersion: 2,
-      runId: expected.runId,
-      manifestHash: manifest.hash,
-      manifestCount: 1,
-      assemblyPath: expected.assemblyPath,
-      assemblySha256: expected.assemblySha256,
-      sourceSha256: expected.sourceSha256,
-      xunitVersion: '3.2.2.0',
-      mtpVersion: '1.9.1.0',
-      parallelism: expected.parallelism,
-      durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
-      durationUnit: 'seconds',
-      cases: [{
-        uid: 'runtime-uid', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli',
-        collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01,
-        startTime: '2026-08-12T00:00:00Z', finishTime: '2026-08-12T00:00:01Z',
-      }],
-    })],
+    [
+      track.executionLedger!,
+      JSON.stringify({
+        schemaVersion: 2,
+        runId: expected.runId,
+        manifestHash: manifest.hash,
+        manifestCount: 1,
+        assemblyPath: expected.assemblyPath,
+        assemblySha256: expected.assemblySha256,
+        sourceSha256: expected.sourceSha256,
+        xunitVersion: '3.2.2.0',
+        mtpVersion: '1.9.1.0',
+        parallelism: expected.parallelism,
+        durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
+        durationUnit: 'seconds',
+        cases: [
+          {
+            uid: 'runtime-uid',
+            testCaseUid: fastCaseUid,
+            name: 'Ns.Cli.Fast',
+            className: 'Ns.Cli',
+            collectionName: 'Ns.Cli collection',
+            outcome: 'passed',
+            executionTimeSeconds: 0.01,
+            startTime: '2026-08-12T00:00:00Z',
+            finishTime: '2026-08-12T00:00:01Z',
+          },
+        ],
+      }),
+    ],
   ])
-  const reader = { readText: (path: string) => {
-    const value = artifacts.get(path)
-    if (value === undefined) throw new Error(`missing ${path}`)
-    return value
-  } }
+  const reader = {
+    readText: (path: string) => {
+      const value = artifacts.get(path)
+      if (value === undefined) throw new Error(`missing ${path}`)
+      return value
+    },
+  }
 
   const evaluation = evaluateTrackArtifacts(track, reader, {
-    trackId: 'cli', timedOut: false, exitCode: 0, elapsedMs: 1, deadlineMs: 60_000,
-    command: 'cli', reportReady: true, cleanupComplete: true, executionLedgerReady: true,
+    trackId: 'cli',
+    timedOut: false,
+    exitCode: 0,
+    elapsedMs: 1,
+    deadlineMs: 60_000,
+    command: 'cli',
+    reportReady: true,
+    cleanupComplete: true,
+    executionLedgerReady: true,
     executionLedgerExpectation: expected,
   })
   assert.equal(evaluation.passed, true)
@@ -196,10 +254,17 @@ function savedExecutionFixture(): {
     parallelism: DEFAULT_XUNIT_PARALLELISM,
   }
   const track: TrackConfig = {
-    id: 'cli', kind: 'dotnet-apphost', csproj: 'virtual.csproj',
-    report: 'reports/cli.trx', executionLedger: 'reports/cli.execution-ledger.json',
-    executionProvenance: 'reports/cli.execution-provenance.json', executionSourceRoots: ['packages/cli'],
-    reportFormat: 'trx', deadlineMs: 60_000, enforce: true, rules: [{ id: 'unit', absoluteMs: 50 }],
+    id: 'cli',
+    kind: 'dotnet-apphost',
+    csproj: 'virtual.csproj',
+    report: 'reports/cli.trx',
+    executionLedger: 'reports/cli.execution-ledger.json',
+    executionProvenance: 'reports/cli.execution-provenance.json',
+    executionSourceRoots: ['packages/cli'],
+    reportFormat: 'trx',
+    deadlineMs: 60_000,
+    enforce: true,
+    rules: [{ id: 'unit', absoluteMs: 50 }],
   }
   return {
     track,
@@ -211,31 +276,59 @@ function savedExecutionFixture(): {
       parallelism: expected.parallelism,
     },
     artifacts: new Map([
-      [track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>'],
+      [
+        track.report,
+        '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Passed" duration="00:00:00.9000000"/></Results></TestRun>',
+      ],
       [track.executionProvenance!, serializeExecutionProvenance(expected)],
-      [track.executionLedger!, JSON.stringify({
-        schemaVersion: 2, runId: expected.runId, manifestHash: manifest.hash, manifestCount: 1,
-        assemblyPath: expected.assemblyPath, assemblySha256: expected.assemblySha256,
-        sourceSha256: expected.sourceSha256, xunitVersion: '3.2.2.0', mtpVersion: '1.9.1.0',
-        parallelism: expected.parallelism, durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
-        durationUnit: 'seconds', cases: [{
-          uid: 'runtime-uid', testCaseUid: fastCaseUid, name: 'Ns.Cli.Fast', className: 'Ns.Cli',
-          collectionName: 'Ns.Cli collection', outcome: 'passed', executionTimeSeconds: 0.01,
-          startTime: '2026-08-12T00:00:00Z', finishTime: '2026-08-12T00:00:01Z',
-        }],
-      })],
+      [
+        track.executionLedger!,
+        JSON.stringify({
+          schemaVersion: 2,
+          runId: expected.runId,
+          manifestHash: manifest.hash,
+          manifestCount: 1,
+          assemblyPath: expected.assemblyPath,
+          assemblySha256: expected.assemblySha256,
+          sourceSha256: expected.sourceSha256,
+          xunitVersion: '3.2.2.0',
+          mtpVersion: '1.9.1.0',
+          parallelism: expected.parallelism,
+          durationSource: 'xunit.v3.ITestResultMessage.ExecutionTime',
+          durationUnit: 'seconds',
+          cases: [
+            {
+              uid: 'runtime-uid',
+              testCaseUid: fastCaseUid,
+              name: 'Ns.Cli.Fast',
+              className: 'Ns.Cli',
+              collectionName: 'Ns.Cli collection',
+              outcome: 'passed',
+              executionTimeSeconds: 0.01,
+              startTime: '2026-08-12T00:00:00Z',
+              finishTime: '2026-08-12T00:00:01Z',
+            },
+          ],
+        }),
+      ],
     ]),
   }
 }
 
 function evaluateSavedFixture(fixture: ReturnType<typeof savedExecutionFixture>): TrackEvaluation {
-  return evaluateTrackArtifacts(fixture.track, {
-    readText: (path) => {
-      const value = fixture.artifacts.get(path)
-      if (value === undefined) throw new Error(`missing ${path}`)
-      return value
+  return evaluateTrackArtifacts(
+    fixture.track,
+    {
+      readText: (path) => {
+        const value = fixture.artifacts.get(path)
+        if (value === undefined) throw new Error(`missing ${path}`)
+        return value
+      },
     },
-  }, undefined, new Date('2026-08-12T00:00:00Z'), fixture.current)
+    undefined,
+    new Date('2026-08-12T00:00:00Z'),
+    fixture.current,
+  )
 }
 
 test('--check rejects an empty TRX instead of treating Total=0 as green', () => {
@@ -249,7 +342,10 @@ test('--check rejects an empty TRX instead of treating Total=0 as green', () => 
 
 test('--check rejects a TRX-ledger outcome mismatch', () => {
   const fixture = savedExecutionFixture()
-  fixture.artifacts.set(fixture.track.report, '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Failed" duration="00:00:00.9000000"/></Results></TestRun>')
+  fixture.artifacts.set(
+    fixture.track.report,
+    '<TestRun><Results><UnitTestResult testName="Ns.Cli.Fast" outcome="Failed" duration="00:00:00.9000000"/></Results></TestRun>',
+  )
   const result = evaluateSavedFixture(fixture)
   assert.equal(result.passed, false)
   assert.match(result.reportError ?? '', /TRX and execution ledger outcome mismatch/)
@@ -286,7 +382,11 @@ test('canonical lane commands keep reporter arguments on the final test process 
   for (const track of nodeTracks) {
     const command = commandFor(track, '/evidence')
     assert.equal(command.command, 'npm')
-    assert.deepEqual(command.args.slice(-3), ['--', '--reporter=json', '--outputFile=/evidence/reports/' + track.id + '.json'])
+    assert.deepEqual(command.args.slice(-3), [
+      '--',
+      '--reporter=json',
+      '--outputFile=/evidence/reports/' + track.id + '.json',
+    ])
   }
 
   const workflow: TrackConfig = {
@@ -309,8 +409,12 @@ test('canonical lane commands keep reporter arguments on the final test process 
 test('prepareReportTarget creates the report parent and removes stale output before lane start', () => {
   const calls: string[] = []
   prepareReportTarget('/evidence/reports/lane.trx', {
-    mkdir: (directory) => { calls.push(`mkdir:${directory}`) },
-    unlink: (path) => { calls.push(`unlink:${path}`) },
+    mkdir: (directory) => {
+      calls.push(`mkdir:${directory}`)
+    },
+    unlink: (path) => {
+      calls.push(`unlink:${path}`)
+    },
   })
   assert.deepEqual(calls, ['mkdir:/evidence/reports', 'unlink:/evidence/reports/lane.trx'])
 
@@ -365,19 +469,19 @@ test('budget calendar policy receives its injected wall-calendar source, never t
     reportFormat: 'trx',
     deadlineMs: 1000,
     enforce: true,
-    rules: [{
-      id: 'unit',
-      absoluteMs: 50,
-      allowlist: [{ id: 'slow', observedMs: 100, reason: 'fixture', owner: 'test', deadline: '2026-01-01' }],
-    }],
+    rules: [
+      {
+        id: 'unit',
+        absoluteMs: 50,
+        allowlist: [{ id: 'slow', observedMs: 100, reason: 'fixture', owner: 'test', deadline: '2026-01-01' }],
+      },
+    ],
   }
 
   assert.equal(calendarNowFor({ calendarNow })(), calendar)
-  const evaluation = evaluateTrackAtCalendarDate(
-    track,
-    [{ name: 'slow', durationMs: 100, outcome: 'passed' }],
-    { calendarNow },
-  )
+  const evaluation = evaluateTrackAtCalendarDate(track, [{ name: 'slow', durationMs: 100, outcome: 'passed' }], {
+    calendarNow,
+  })
   assert.equal(evaluation.passed, false)
   assert.equal(evaluation.rules[0].expiredAllowlist.length, 1)
 })
@@ -478,7 +582,13 @@ test('suite deadline breach remains visible in summary and report errors fail th
 })
 
 test('parseArgs accepts an internal run root and the canonical absolute deadline', () => {
-  const args = parseArgs(['--all', '--run-root', '/tmp/mohist-canonical-gate/run-1', '--suite-deadline-at-ms=301000', '--require-build-stamp'])
+  const args = parseArgs([
+    '--all',
+    '--run-root',
+    '/tmp/mohist-canonical-gate/run-1',
+    '--suite-deadline-at-ms=301000',
+    '--require-build-stamp',
+  ])
   assert.equal(args.all, true)
   assert.equal(args.runRoot, '/tmp/mohist-canonical-gate/run-1')
   assert.equal(args.suiteDeadlineAtMs, 301000)
@@ -495,7 +605,10 @@ test('report evaluation fails closed at the execution cutoff and after external 
   const deadlines = { hardDeadlineAt: 301_000, executionDeadlineAt: 290_000 }
 
   assert.equal(reportEvaluationFailureReason(289_999, deadlines, false), undefined)
-  assert.equal(reportEvaluationFailureReason(290_000, deadlines, false), 'suite execution cutoff reached before report evaluation')
+  assert.equal(
+    reportEvaluationFailureReason(290_000, deadlines, false),
+    'suite execution cutoff reached before report evaluation',
+  )
   assert.equal(
     reportEvaluationFailureReason(1_000, deadlines, true),
     'external termination stopped report evaluation before the canonical cleanup wall',
@@ -505,7 +618,12 @@ test('report evaluation fails closed at the execution cutoff and after external 
 test('Spec partition lanes launch a Node-hosted executor instead of a shell script', () => {
   const command = specPartitionCommand(['run', '/tests/spec', '0', '4', '1', '/tmp/manifests', '/tmp/report.trx'])
   assert.equal(command.command, process.execPath)
-  assert.deepEqual(command.args.slice(0, 4), ['--import', 'tsx', `${process.cwd()}/scripts/test-duration/spec-partition.ts`, 'run'])
+  assert.deepEqual(command.args.slice(0, 4), [
+    '--import',
+    'tsx',
+    `${process.cwd()}/scripts/test-duration/spec-partition.ts`,
+    'run',
+  ])
   assert.doesNotMatch(command.args.join(' '), /ci-spec-partition\.sh/)
 })
 
@@ -523,35 +641,74 @@ test('planTracks gives every Server Spec partition its own report, temp, and por
     rules: [{ id: 'spec', absoluteMs: 5000 }],
   }
   const planned = planTracks([spec], '/evidence')
-  assert.deepEqual(planned.map((lane) => lane.lane.id), [
-    'server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3', 'server-spec-coverage',
-  ])
-  assert.deepEqual(planned.slice(0, 4).map((lane) => lane.reportPath), [
-    '/evidence/reports/server-spec/partition-0.trx',
-    '/evidence/reports/server-spec/partition-1.trx',
-    '/evidence/reports/server-spec/partition-2.trx',
-    '/evidence/reports/server-spec/partition-3.trx',
-  ])
+  assert.deepEqual(
+    planned.map((lane) => lane.lane.id),
+    ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3', 'server-spec-coverage'],
+  )
+  assert.deepEqual(
+    planned.slice(0, 4).map((lane) => lane.reportPath),
+    [
+      '/evidence/reports/server-spec/partition-0.trx',
+      '/evidence/reports/server-spec/partition-1.trx',
+      '/evidence/reports/server-spec/partition-2.trx',
+      '/evidence/reports/server-spec/partition-3.trx',
+    ],
+  )
   assert.deepEqual(planned[3].lane.resources?.slice(-3), ['spec-report-3', 'spec-temp-3', 'spec-port-3'])
   assert.deepEqual(planned[4].lane.dependsOn, ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3'])
-  assert.deepEqual(planned.map((lane) => lane.sandboxOrdinal), [0, 1, 2, 3, 4])
+  assert.deepEqual(
+    planned.map((lane) => lane.sandboxOrdinal),
+    [0, 1, 2, 3, 4],
+  )
 })
 
 test('planTracks isolates a four-way Spec duration phase before remaining fan-out', () => {
   const cli: TrackConfig = {
-    id: 'cli', kind: 'dotnet-apphost', apphost: 'bin/cli', report: 'reports/cli.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
+    id: 'cli',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/cli',
+    report: 'reports/cli.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
   }
   const unit: TrackConfig = {
-    id: 'server-unit', kind: 'dotnet-apphost', apphost: 'bin/unit', report: 'reports/unit.trx', reportFormat: 'trx', deadlineMs: 1000, enforce: false,
+    id: 'server-unit',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/unit',
+    report: 'reports/unit.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
   }
   const runner: TrackConfig = {
-    id: 'runner', kind: 'vitest', run: ['npm', 'run', 'test'], report: 'reports/runner.json', reportFormat: 'vitest', deadlineMs: 1000, enforce: false,
+    id: 'runner',
+    kind: 'vitest',
+    run: ['npm', 'run', 'test'],
+    report: 'reports/runner.json',
+    reportFormat: 'vitest',
+    deadlineMs: 1000,
+    enforce: false,
   }
   const web: TrackConfig = {
-    id: 'web', kind: 'vitest', run: ['npm', 'run', 'test'], report: 'reports/web.json', reportFormat: 'vitest', deadlineMs: 1000, enforce: false,
+    id: 'web',
+    kind: 'vitest',
+    run: ['npm', 'run', 'test'],
+    report: 'reports/web.json',
+    reportFormat: 'vitest',
+    deadlineMs: 1000,
+    enforce: false,
   }
   const spec: TrackConfig = {
-    id: 'server-spec', kind: 'dotnet-apphost', apphost: 'bin/spec', report: 'reports/spec-{partition}.trx', reportFormat: 'trx', partitions: 2, partitionMaxThreads: 1, deadlineMs: 1000, enforce: false,
+    id: 'server-spec',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/spec',
+    report: 'reports/spec-{partition}.trx',
+    reportFormat: 'trx',
+    partitions: 2,
+    partitionMaxThreads: 1,
+    deadlineMs: 1000,
+    enforce: false,
   }
   const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-spec'], 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
