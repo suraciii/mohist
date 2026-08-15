@@ -39,6 +39,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         Assert.Equal("pi", data.GetProperty("runtime").GetString());
         Assert.Equal("high", data.GetProperty("reasoningEffort").GetString());
         Assert.Equal("unknown", data.GetProperty("capabilityState").GetString());
+        Assert.True(data.GetProperty("executability").GetProperty("state").GetString() is not null);
         Assert.False(data.GetProperty("matchesSavedDefinition").GetBoolean());
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("requestFingerprint").GetString()));
         Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));

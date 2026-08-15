@@ -63,7 +63,9 @@ public static class AgentSessionLaunchRoutes
             string projectRef,
             string agentRef,
             AgentSessionLaunchBody body,
-            AgentQuerier agentQuerier) =>
+            AgentQuerier agentQuerier,
+            AgentReadinessService readiness,
+            CancellationToken ct) =>
         {
             if (body is null)
                 return ApiResults.BadRequest("request body is required", "body_required");
@@ -94,6 +96,7 @@ public static class AgentSessionLaunchRoutes
             {
                 return ApiResults.BadRequest(ex.Message, ex.ErrorCode);
             }
+            var executability = await readiness.GetAsync(project.Id, agent, ct);
 
             var request = new AgentLaunchCoordinatorRequest(
                 Prompt: body.Prompt?.Trim() ?? string.Empty,
@@ -121,6 +124,7 @@ public static class AgentSessionLaunchRoutes
                 Sources: resolution.Sources,
                 CapabilityState: resolution.CapabilityState,
                 MatchesSavedDefinition: resolution.MatchesSavedDefinition,
+                Executability: executability,
                 RequestFingerprint: AgentLaunchCoordinatorCodec.Fingerprint(request)));
         });
 
@@ -813,6 +817,7 @@ public sealed record AgentSessionLaunchPreviewResponse(
     IReadOnlyDictionary<string, string> Sources,
     string CapabilityState,
     bool MatchesSavedDefinition,
+    AgentExecutabilityResult Executability,
     string RequestFingerprint);
 
 /// <summary>
