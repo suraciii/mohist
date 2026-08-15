@@ -1,4 +1,3 @@
-using Mohist.Server.SpecTests.Support;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Connections.Features;
@@ -11,7 +10,7 @@ using Mohist.Server.User.Grains;
 using Orleans;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Events;
+namespace Mohist.Server.UnitTests.Events;
 
 /// <summary>
 /// Tests for the project-affinity capture added to
@@ -22,7 +21,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// <see cref="UserNotificationDispatcher"/> can apply the project
 /// gate on every bus emit.
 /// </summary>
-public class MohistHubProjectAffinitySpecs
+public class MohistHubProjectAffinityTests
 {
     [Fact]
     public async Task OnConnectedAsync_QueryStringHasProjectId_StoresAffinity()
@@ -229,16 +228,16 @@ public class MohistHubProjectAffinitySpecs
         TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix)
             => throw new NotSupportedException();
 
-        Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
+        global::Orleans.Runtime.IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
             => throw new NotSupportedException();
 
         IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)

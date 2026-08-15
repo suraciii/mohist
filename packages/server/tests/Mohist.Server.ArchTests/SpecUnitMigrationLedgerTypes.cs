@@ -39,8 +39,17 @@ internal sealed class SpecUnitMigrationLedgerRow
     public SpecUnitMigrationClosure? Closure { get; set; }
     public string? Owner { get; set; }
     public SpecUnitMigrationMoveContract? MoveContract { get; set; }
+    public SpecUnitMigrationMovedRecord? Moved { get; set; }
     public SpecUnitMigrationRowHistory? History { get; set; }
     public string? ValidationHead { get; set; }
+}
+
+internal sealed class SpecUnitMigrationMovedRecord
+{
+    public string? SourcePath { get; set; }
+    public string? SourceFqn { get; set; }
+    public string? TargetPath { get; set; }
+    public string? TargetFqn { get; set; }
 }
 
 internal sealed class SpecUnitMigrationEndpoint
