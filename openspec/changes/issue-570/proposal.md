@@ -21,3 +21,19 @@ execute again. Runner restart, AgentSession activity, idle state, or a missing
 runtime process cannot establish a Workflow task outcome. Existing unresolved
 and blocked Workflow work therefore remains subject to the explicit stop and
 authoritative-result paths; this change does not release or guess-replay it.
+
+## Server Receipt Boundary
+
+The Server already has one safe admission path for a recovered result: the
+normal Workflow result report with the original runner, task attempt, and work
+identity. A completed journal entry contains that full result and can use the
+path after the Workflow has become unknown or blocked.
+
+A `started` entry is not a receipt. It contains no result payload, so the
+Server must not convert it, an AgentSession idle/completed observation, a turn
+status, or a terminal task log into task success or failure. When no completed
+receipt can be replayed, the original attempt remains unresolved. A later
+physical execution is not supplied by this recovery slice. The current only
+abandonment control is explicit Workflow stop; if a later product capability
+schedules a replacement after that abandonment, it must use a new task/work
+identity.

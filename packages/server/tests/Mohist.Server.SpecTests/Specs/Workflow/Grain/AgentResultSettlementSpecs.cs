@@ -127,6 +127,61 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task RecoveredCompletedResultReport_SettlesBlockedAttemptWithOriginalIdentity()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var service = Services.GetRequiredService<WorkflowReportService>();
+
+        Assert.Equal(("accepted", "Running"), await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            new WorkResult("unknown", "Runner restarted before a result was durably recorded")));
+
+        var unknown = await LoadRunAsync(_workflowId!);
+        var unknownTask = Assert.Single(unknown.CurrentStage().Tasks);
+        var deadline = Assert.IsType<DateTimeOffset>(unknownTask.AgentResultSettlement!.DeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        var blocked = await LoadRunAsync(_workflowId!);
+        Assert.Equal(AgentResultSettlementState.Blocked,
+            Assert.Single(blocked.CurrentStage().Tasks).AgentResultSettlement!.State);
+
+        // A completed journal entry is replayed as the original WorkResult.
+        var receipt = new WorkResult(
+            "completed",
+            Output: JsonSerializer.SerializeToElement(new { answer = "recovered" }),
+            ExitCode: 0);
+        Assert.Equal(("accepted", "Completed"), await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            receipt));
+
+        var completed = await LoadRunAsync(_workflowId!);
+        var completedTask = Assert.Single(completed.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Completed, completedTask.Status);
+        Assert.Null(completedTask.AgentResultSettlement);
+        Assert.True(completedTask.Output.HasValue);
+        Assert.Equal("recovered", completedTask.Output.Value.GetProperty("answer").GetString());
+        Assert.DoesNotContain(await EventStore.ListAsync(_workflowId!), entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.TaskFailed);
+
+        Assert.Equal(("stale", "Completed"), await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            receipt));
+    }
+
+    [Fact]
     public async Task UnknownRunnerResultTargetsUniqueAttemptWhenDefinitionIdRepeatsAcrossStages()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinition([
