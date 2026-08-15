@@ -105,6 +105,7 @@ public sealed class DispatchService : IScopedService
         ct.ThrowIfCancellationRequested();
         spare = await AddPendingDispatchesAsync(
             runner,
+            info,
             info.ProjectId,
             runnerId,
             assigned: true,
@@ -117,6 +118,7 @@ public sealed class DispatchService : IScopedService
             ct.ThrowIfCancellationRequested();
             await AddPendingDispatchesAsync(
                 runner,
+                info,
                 info.ProjectId,
                 runnerId,
                 assigned: false,
@@ -174,6 +176,7 @@ public sealed class DispatchService : IScopedService
 
     private async Task<int> AddPendingDispatchesAsync(
         IRunnerGrain runner,
+        RunnerInfo info,
         string? projectId,
         string runnerId,
         bool assigned,
@@ -231,8 +234,15 @@ public sealed class DispatchService : IScopedService
                 if (!readiness.Allows(requiredRuntimes))
                     continue;
 
+                var pendingDispatch = record is null ? null : DeserializeAgentDispatch(record);
+                var expectation = pendingDispatch is null
+                    ? null
+                    : BuildAgentJobCapabilityExpectation(info, readiness, pendingDispatch);
+                if (pendingDispatch?.AgentDefinition?.ReasoningEffort is not null && expectation is null)
+                    continue;
+
                 ct.ThrowIfCancellationRequested();
-                var claim = await runner.TryClaimAgentJobAsync(candidate.OwnerId, projectId);
+                var claim = await runner.TryClaimAgentJobAsync(candidate.OwnerId, projectId, expectation);
                 dispatch = claim?.Dispatch;
             }
             else
@@ -259,6 +269,56 @@ public sealed class DispatchService : IScopedService
         }
 
         return remainingSlots;
+    }
+
+    private static CapabilityClaimExpectation? BuildAgentJobCapabilityExpectation(
+        RunnerInfo info,
+        RunnerRuntimeReadinessSnapshot readiness,
+        WorkDispatch dispatch)
+    {
+        var definition = dispatch.AgentDefinition;
+        if (definition is null || string.IsNullOrWhiteSpace(dispatch.AgentJobId))
+            return null;
+
+        var catalog = FindRuntimeCatalog(info, definition.Runtime);
+        if (catalog is null)
+            return null;
+
+        var witness = readiness.Witnesses.FirstOrDefault(candidate =>
+            string.Equals(candidate.Runtime, definition.Runtime, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(definition.ReasoningEffort)
+            && (catalog.SupportsReasoningEffort != true
+                || catalog.Complete != true
+                || string.IsNullOrWhiteSpace(catalog.CapabilityRevision)
+                || witness?.Ready != true
+                || witness.Generation is not > 0))
+            return null;
+
+        return new CapabilityClaimExpectation(
+            WorkDispatchOwnerKinds.AgentJob,
+            dispatch.AgentJobId,
+            dispatch.WorkId,
+            definition.Runtime,
+            definition.Model,
+            definition.ReasoningEffort,
+            definition.Variant,
+            catalog.CapabilityRevision,
+            witness?.Generation,
+            info.ConnectionGeneration);
+    }
+
+    private static RuntimeCatalogEntry? FindRuntimeCatalog(RunnerInfo info, string runtime)
+    {
+        if (info.RuntimeCatalogs is null)
+            return null;
+
+        foreach (var entry in info.RuntimeCatalogs)
+        {
+            if (string.Equals(entry.Key, runtime, StringComparison.OrdinalIgnoreCase))
+                return entry.Value;
+        }
+
+        return null;
     }
 
     private async Task<(string? WorkKey, WorkDispatch? Dispatch)> RenderActiveWorkflowAsync(

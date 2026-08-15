@@ -55,6 +55,20 @@ public interface IAgentJobStore
     Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default);
 
     /// <summary>
+    /// Atomically transitions a pending AgentJob while fencing the frozen
+    /// work identity. The capability-claim dispatch snapshot is written in
+    /// the same ledger transaction as Pending -> Running; the caller owns
+    /// the execution-tuple predicate before calling.
+    /// </summary>
+    Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        string expectedWorkId,
+        string dispatchJson,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Inserts a new AgentJob ledger row if one does not exist. The
     /// initial <see cref="AgentJobLedgerRecord.Revision"/> must be 0;
     /// on success the returned record carries the post-insert revision.
@@ -209,7 +223,29 @@ public class AgentJobStore : IAgentJobStore
         return ToRecord(existing);
     }
 
-    public async Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default)
+    public Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        CancellationToken ct = default) =>
+        ClaimAsyncCore(key, runnerId, runningSince, null, null, ct);
+
+    public Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        string expectedWorkId,
+        string dispatchJson,
+        CancellationToken ct = default) =>
+        ClaimAsyncCore(key, runnerId, runningSince, expectedWorkId, dispatchJson, ct);
+
+    private async Task<AgentJobLedgerRecord> ClaimAsyncCore(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        string? expectedWorkId,
+        string? dispatchJson,
+        CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -245,6 +281,16 @@ public class AgentJobStore : IAgentJobStore
             throw new AgentJobLedgerReconstructionException(
                 $"AgentJob ledger row {key} has no DispatchJson; cannot transition Pending -> Running.");
         }
+
+        if (expectedWorkId is not null
+            && !string.Equals(existing.WorkId, expectedWorkId, StringComparison.Ordinal))
+        {
+            throw new AgentJobLedgerConflictException(
+                $"AgentJob ledger row {key} work identity changed; expected {expectedWorkId}, found {existing.WorkId}.");
+        }
+
+        if (expectedWorkId is not null && string.IsNullOrWhiteSpace(dispatchJson))
+            throw new ArgumentException("A capability claim requires the updated dispatch snapshot.", nameof(dispatchJson));
 
         var nextRevision = existing.Revision + 1;
         var runningSinceText = FormatTimestamp(runningSince);
@@ -290,6 +336,8 @@ public class AgentJobStore : IAgentJobStore
                 $"AgentJob ledger row {key} claim revision mismatch after update (expected {nextRevision}, saw {updated.Revision}).");
         }
 
+        if (dispatchJson is not null)
+            updated.DispatchJson = dispatchJson;
         StageDirectApiProjection(updated);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -299,6 +347,7 @@ public class AgentJobStore : IAgentJobStore
             key, runnerId, nowText);
         return ToRecord(updated);
     }
+
 
     public async Task<IReadOnlyList<AgentJobLedgerRecord>> ListEligiblePendingAsync(
         string? projectId,
