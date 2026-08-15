@@ -293,8 +293,9 @@ member depends on the previous member's terminal lane. A partitioned member
 uses its coverage lane as the phase barrier. The optional
 `canonical.durationIsolationTrack` is admitted
 after that prefix and gates other Vitest lanes. The current measurement set is
-the CLI track followed by Server Spec: four partition apphosts each run one
-xUnit collection at a time, so aggregate Spec execution concurrency is four.
+the CLI track followed by Server Spec: two isolated partition apphosts each run
+one xUnit collection at a time, so fixture startup is bounded to two concurrent
+processes while retaining parallel Spec execution.
 Server Unit, Server Arch, Workflow, and Node throughput lanes start after Spec
 coverage completes; Runner remains the isolated Node track. This preserves
 parallel partitions without changing duration thresholds. The phase is applied
@@ -335,7 +336,7 @@ empty, failed, skipped, or not-run report is a failure, not a green omission.
 
 CI invokes `npm run verify` once in one job after one dependency install. That
 job runs the same canonical scheduler, fresh build, resources, duration
-measurement prefix, four Spec partitions, coverage lane, report parser, and
+measurement prefix, two Spec partitions, coverage lane, report parser, and
 failure semantics as local execution. CI uploads that one external diagnostic
 run directory after success or failure; it does not reconstruct a gate by
 downloading reports from separately built jobs. The CI machine boundary supplies
