@@ -54,6 +54,30 @@ public class RunnerHubTests
         Assert.Equal(["session-1"], tracker.UnregisterAndGetSessions("runner-1", "new-connection"));
     }
 
+    [Fact]
+    public void RegisteringTheSameConnectionKeepsItsGeneration()
+    {
+        var tracker = new RunnerConnectionTracker();
+
+        var initialGeneration = tracker.Register("runner-1", "connection-1");
+        var repeatedGeneration = tracker.Register("runner-1", "connection-1");
+
+        Assert.Equal(initialGeneration, repeatedGeneration);
+        Assert.Equal(initialGeneration, tracker.GetConnectionGeneration("runner-1"));
+    }
+
+    [Fact]
+    public void RegisteringANewConnectionChangesGeneration()
+    {
+        var tracker = new RunnerConnectionTracker();
+
+        var initialGeneration = tracker.Register("runner-1", "connection-1");
+        var replacementGeneration = tracker.Register("runner-1", "connection-2");
+
+        Assert.NotEqual(initialGeneration, replacementGeneration);
+        Assert.Equal(replacementGeneration, tracker.GetConnectionGeneration("runner-1"));
+    }
+
     private static RunnerHub NewHub(RunnerConnectionTracker tracker, string connectionId)
     {
         return new RunnerHub(tracker, new ThrowingGrainFactory(), NullLogger<RunnerHub>.Instance)
