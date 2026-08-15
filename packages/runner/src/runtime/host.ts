@@ -66,6 +66,8 @@ interface InFlightEntry {
   /** The execution promise; resolves when the work settles (success or failure). */
   done: Promise<void>
   readonly work: DispatchWorkItem
+  /** A settled result held only in memory must not turn the loop into a busy poll. */
+  awaitingResultPersistence: boolean
 }
 
 interface AwaitingAckEntry {
@@ -478,14 +480,7 @@ export class RunnerHost {
       log.warn('work result journal unavailable; runner admission gated')
       return
     }
-    for (const entry of this.workResultJournal.completed()) {
-      const key = workKey(entry.work)
-      if (this.awaitingAck.has(key)) continue
-      this.awaitingAck.set(key, {
-        work: entry.work,
-        entry: { result: entry.result!, attempts: 0, retryAt: 0 },
-      })
-    }
+    this.promoteDurableJournalResults(0)
   }
 
   private async shutdownSharedConnection() {
@@ -545,6 +540,11 @@ export class RunnerHost {
         continue
       }
 
+      // A successful control-plane round is the recovery boundary for a
+      // result held in memory after a local journal write failure. No result
+      // becomes reportable until this retry restores its durable receipt.
+      await this.retryPendingWorkResultPersistence()
+
       await this.prepareOpenCodeWork(works, signal)
 
       // A single poll may return multiple dispatches (repair + new claims).
@@ -579,7 +579,7 @@ export class RunnerHost {
         }
 
         const done = this.executeAndTransition(work, signal, key)
-        this.inFlight.set(key, { done, work })
+        this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
         this.syncOpenCodeWorkOwners()
       }
 
@@ -589,7 +589,11 @@ export class RunnerHost {
       // any work settling so a freed slot re-polls promptly. A failed report
       // also bounds the wait: report retries must not inherit a long poll
       // interval.
-      await raceInterval(this.nextReconciliationInterval(), signal, [...[...this.inFlight.values()].map((e) => e.done)])
+      await raceInterval(
+        this.nextReconciliationInterval(),
+        signal,
+        [...this.inFlight.values()].filter((entry) => !entry.awaitingResultPersistence).map((entry) => entry.done),
+      )
     }
 
     // Drain in-flight executions on abort so completed work can finish its
@@ -707,28 +711,75 @@ export class RunnerHost {
     // A returned result is authoritative even when shutdown raced with its
     // delivery. Persist it before the host releases the work; only an abort
     // that prevented a result from returning stays as the started fence above.
+    let persistence: Awaited<ReturnType<WorkResultJournal['complete']>>
     try {
-      await this.workResultJournal.complete(work, result)
+      persistence = await this.workResultJournal.complete(work, result)
     } catch (error) {
       log.error('work result journal could not persist settled result', { work: work.workId, exception: error })
       // Keep the work in `inFlight` and stop admission. Reporting a result
       // without a durable local copy would turn a restart into result loss.
+      this.markResultPersistencePending(key)
       this.workResultJournal.disable()
       return
     }
 
-    // Move to awaitingAck regardless of outcome. A transport failure on
-    // the first attempt is retried by the reconciliation loop; the result is the
-    // final verdict (success or the failure captured above).
-    this.inFlight.delete(key)
-    this.awaitingAck.set(key, { work, entry: { result, attempts: 0, retryAt: null } })
-    this.syncOpenCodeWorkOwners()
+    if (persistence.state === 'pending' || !this.workResultJournal.ready()) {
+      this.markResultPersistencePending(key)
+      if (persistence.state === 'pending') {
+        log.warn('work result journal persistence deferred; retaining result in memory', {
+          work: work.workId,
+          exception: persistence.error,
+        })
+      }
+      return
+    }
 
-    try {
-      await this.reportOnce(key)
-    } catch (error) {
-      this.scheduleReportRetry(key)
-      log.warn('first work report failed; will retry', { work: work.workId, exception: error })
+    await this.promoteAndReportDurableJournalResults()
+    if (!this.workResultJournal.ready()) this.markResultPersistencePending(key)
+  }
+
+  private async retryPendingWorkResultPersistence(): Promise<void> {
+    if (!this.workResultJournal.needsPersistenceRecovery()) return
+    const persistence = await this.workResultJournal.retryPendingPersistence()
+    if (persistence.state === 'pending') {
+      log.warn('work result journal persistence recovery is still unavailable', { exception: persistence.error })
+      return
+    }
+    await this.promoteAndReportDurableJournalResults()
+  }
+
+  private markResultPersistencePending(key: string): void {
+    const held = this.inFlight.get(key)
+    if (held) held.awaitingResultPersistence = true
+  }
+
+  private promoteDurableJournalResults(retryAt: number | null = null): string[] {
+    if (!this.workResultJournal.ready()) return []
+    const promoted: string[] = []
+    for (const entry of this.workResultJournal.completed()) {
+      const key = workKey(entry.work)
+      if (this.awaitingAck.has(key)) continue
+      this.inFlight.delete(key)
+      this.awaitingAck.set(key, {
+        work: entry.work,
+        entry: { result: entry.result!, attempts: 0, retryAt },
+      })
+      promoted.push(key)
+    }
+    this.syncOpenCodeWorkOwners()
+    return promoted
+  }
+
+  private async promoteAndReportDurableJournalResults(): Promise<void> {
+    for (const key of this.promoteDurableJournalResults()) {
+      const held = this.awaitingAck.get(key)
+      if (!held) continue
+      try {
+        await this.reportOnce(key)
+      } catch (error) {
+        this.scheduleReportRetry(key)
+        log.warn('first work report failed; will retry', { work: held.work.workId, exception: error })
+      }
     }
   }
 
