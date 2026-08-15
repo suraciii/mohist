@@ -232,6 +232,13 @@ public static partial class WorkflowRunExtensions
                 : null;
         }
 
+        public TaskRun? FindTaskForRecoveryReceipt(string taskRunId, string workId) =>
+            run.Stages
+                .SelectMany(stage => stage.Tasks)
+                .SingleOrDefault(task =>
+                    string.Equals(task.Id, taskRunId, StringComparison.Ordinal)
+                    && string.Equals(task.WorkId, workId, StringComparison.Ordinal));
+
         public AgentExecutionBinding? FindBoundAgentExecution(
             string taskRunId,
             string workId,

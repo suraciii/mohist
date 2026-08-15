@@ -5,6 +5,7 @@ namespace Mohist.Server.Runner.Grains;
 public interface IRunnerUpdateOperationGrain : IGrainWithStringKey
 {
     Task<RunnerUpdateOperation?> GetPendingAsync();
+    Task<RunnerUpdateOperation?> GetAsync(string operationId);
     Task<RunnerUpdateOperation> StartOrGetAsync(RunnerUpdateOperation candidate);
     Task<RunnerUpdateOperation> MarkWorkAsync(
         string operationId,
@@ -69,6 +70,16 @@ public sealed class RunnerUpdateOperationGrain(
         await LoadAsync();
         return state.State.Operations.LastOrDefault(operation =>
             operation.Status == RunnerUpdateOperationStatus.Pending);
+    }
+
+    public async Task<RunnerUpdateOperation?> GetAsync(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+            return null;
+
+        await LoadAsync();
+        return state.State.Operations.LastOrDefault(operation =>
+            string.Equals(operation.OperationId, operationId, StringComparison.Ordinal));
     }
 
     public async Task<RunnerUpdateOperation> StartOrGetAsync(RunnerUpdateOperation candidate)

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Runner.Grains;
 using Orleans;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -101,6 +102,13 @@ public sealed class WorkflowRun
     internal void AssignRepositoryContext(WorkflowRepositoryContext? repository) =>
         Repository = repository;
     public List<ApprovalFeedback> Feedback { get; set; } = new();
+    /// <summary>
+    /// Durable acknowledgement ledger for runtime recovery receipts. The
+    /// ledger remains on the run after the task settlement is cleared so an
+    /// exact replay can return the original acknowledgement without applying
+    /// the task result again.
+    /// </summary>
+    public List<AppliedRuntimeRecoveryReceipt> AppliedRecoveryReceipts { get; set; } = new();
 
     public bool IsAssigned => Assignment is not null;
     public string? AssignedTo => Assignment?.WorkerId;

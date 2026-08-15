@@ -205,6 +205,60 @@ public static partial class RunnerRoutes
                 req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
         });
 
+        group.MapPost("/recovery-receipt", async (
+            string runnerId,
+            HttpRequest request,
+            IGrainFactory grains,
+            CancellationToken ct) =>
+        {
+            RuntimeRecoveryReceipt? receipt;
+            try
+            {
+                receipt = await request.ReadFromJsonAsync<RuntimeRecoveryReceipt>(JSON.Options, ct);
+            }
+            catch (JsonException)
+            {
+                return ApiResults.BadRequest("Invalid recovery receipt body", "invalid_recovery_receipt");
+            }
+
+            if (receipt is null)
+                return ApiResults.BadRequest("request body is required", "invalid_recovery_receipt");
+
+            var contractErrors = receipt.ValidateContract();
+            if (contractErrors.Count > 0)
+            {
+                return ApiResults.BadRequest(
+                    "Recovery receipt contract is invalid",
+                    "invalid_recovery_receipt",
+                    new { errors = contractErrors });
+            }
+
+            // Workflow-owned receipts are arbitrated by the Workflow grain;
+            // the grain validates the path identity, frozen binding, and
+            // durable update fence before changing task state.
+            if (!string.Equals(receipt.RunnerId, runnerId, StringComparison.Ordinal))
+            {
+                return Results.Ok(new RuntimeRecoveryReceiptAcknowledgement(
+                    receipt.ReceiptId,
+                    RuntimeRecoveryReceiptAckStatuses.RejectedMismatch,
+                    "runner-identity-mismatch"));
+            }
+
+            var acknowledgement = await grains
+                .GetGrain<IWorkflowGrain>(receipt.WorkflowRunId)
+                .ReceiveRecoveryReceiptAsync(receipt);
+
+            if (string.Equals(acknowledgement.Status, RuntimeRecoveryReceiptAckStatuses.Retryable, StringComparison.Ordinal))
+            {
+                return Results.Json(
+                    acknowledgement,
+                    JSON.Options,
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            return Results.Ok(acknowledgement);
+        });
+
         // Batch status query for the runner's convergence backstop. The
         // runner only asks about workflow runs it still tracks in its local
         // active workspace registry; the server returns the current lifecycle

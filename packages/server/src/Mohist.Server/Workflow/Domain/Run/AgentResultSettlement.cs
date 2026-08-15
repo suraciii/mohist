@@ -36,6 +36,7 @@ public sealed class AgentResultSettlement
     public required string TaskRunId { get; init; }
     public required string WorkId { get; init; }
     public required string RunnerId { get; init; }
+    public int RecoveryGeneration { get; set; }
     public string? AgentSessionId { get; set; }
     public string? AgentTurnId { get; set; }
     public string? Runtime { get; set; }

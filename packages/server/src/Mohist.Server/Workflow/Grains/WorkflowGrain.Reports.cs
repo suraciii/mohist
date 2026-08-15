@@ -1,4 +1,6 @@
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -265,6 +267,130 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public async Task<RuntimeRecoveryReceiptAcknowledgement> ReceiveRecoveryReceiptAsync(RuntimeRecoveryReceipt receipt)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt?.ReceiptId ?? string.Empty, RuntimeRecoveryReceiptAckStatuses.Stale, "missing-workflow");
+
+        if (receipt is null || receipt.ValidateContract().Count > 0)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt?.ReceiptId ?? string.Empty, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "invalid-recovery-receipt");
+
+        var requestFingerprint = receipt.RequestFingerprint();
+        var prior = _run.AppliedRecoveryReceipts.FirstOrDefault(candidate =>
+            string.Equals(candidate.ReceiptId, receipt.ReceiptId, StringComparison.Ordinal));
+        if (prior is not null)
+        {
+            return string.Equals(prior.RequestFingerprint, requestFingerprint, StringComparison.Ordinal)
+                ? new RuntimeRecoveryReceiptAcknowledgement(prior.ReceiptId, prior.Status, prior.Reason)
+                : new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "receipt-id-reused");
+        }
+
+        if (!string.Equals(receipt.WorkflowRunId, GrainKey, StringComparison.Ordinal))
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "workflow-identity-mismatch");
+
+        var task = _run.FindTaskForRecoveryReceipt(receipt.TaskRunId, receipt.WorkId);
+        if (task is null)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "work-not-found");
+        if (_run.Status.IsTerminal() || task.Status != TaskRunStatus.Running)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "work-terminal");
+
+        var settlement = task.AgentResultSettlement;
+        if (settlement is null)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "settlement-missing");
+        if (!MatchesReceiptBinding(settlement, receipt)
+            || settlement.RecoveryGeneration != receipt.RecoveryGeneration)
+        {
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "binding-mismatch");
+        }
+
+        var payload = receipt.Payload!;
+        var payloadType = payload.Type.Trim().ToLowerInvariant();
+        if (payloadType == RuntimeRecoveryReceiptPayloadTypes.UpdateInterrupted)
+        {
+            if (settlement.State != AgentResultSettlementState.RecoverablyInterrupted
+                || !string.Equals(settlement.UpdateOperationId, payload.UpdateOperationId, StringComparison.Ordinal))
+            {
+                return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "update-fence-mismatch");
+            }
+
+            var operation = await GrainFactory
+                .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+                .GetAsync(payload.UpdateOperationId!);
+            var fencedWork = operation?.AffectedWorks.SingleOrDefault(work =>
+                string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
+                && string.Equals(work.OwnerId, GrainKey, StringComparison.Ordinal)
+                && string.Equals(work.WorkId, receipt.WorkId, StringComparison.Ordinal)
+                && string.Equals(work.TaskRunId, receipt.TaskRunId, StringComparison.Ordinal));
+            if (fencedWork is null
+                || fencedWork.Status is not (RunnerUpdateWorkStatus.Marked or RunnerUpdateWorkStatus.Settled))
+            {
+                return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "update-fence-missing");
+            }
+
+            // T-004 owns replacement allocation. Retaining this receipt is
+            // intentional: the Runner must replay it until arbitration exists.
+            return new RuntimeRecoveryReceiptAcknowledgement(
+                receipt.ReceiptId,
+                RuntimeRecoveryReceiptAckStatuses.Retryable,
+                "replacement-arbitration-pending");
+        }
+
+        if (settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "execution-stopped");
+
+        var terminalResult = payload.NormalizedTerminalResult!;
+        if (!string.Equals(payload.Fingerprint, RuntimeRecoveryReceiptFingerprint.For(terminalResult), StringComparison.OrdinalIgnoreCase))
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "result-fingerprint-mismatch");
+
+        var item = _run.FindReportShape(receipt.TaskRunId, receipt.WorkId);
+        if (item is null || !item.IsTask || _workflowItemTranslator is null)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "task-binding-mismatch");
+
+        var translated = _workflowItemTranslator.TranslateResult(item, terminalResult, GrainKey);
+        if (translated is not WorkflowItemTranslator.InboundReport.Task taskReport)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "terminal-result-invalid");
+
+        var activeWork = _run.FindReportableWork(receipt.TaskRunId, receipt.WorkId, receipt.RunnerId);
+        if (activeWork is null || !activeWork.IsTask)
+            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "work-not-reportable");
+
+        var effectiveReport = taskReport.Value with { TaskRunId = receipt.TaskRunId };
+        try
+        {
+            RuntimeTaskFollowUps.Project(effectiveReport.AddTasks);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _log.LogError(
+                "run {run} recovery receipt {receipt} rejected follow-up: {reason}",
+                GrainKey, receipt.ReceiptId, ex.Message);
+            effectiveReport = new TaskReport(
+                activeWork.WorkId,
+                TaskReportStatus.Failed,
+                Output: null,
+                Artifacts: null,
+                Detail: $"Recovery follow-up rejected: {ex.Message}");
+        }
+
+        effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
+        var events = await _workLifecycle.ApplyTaskReportAsync(
+            _run,
+            effectiveReport,
+            activeWork.Item.Stage,
+            receipt.TaskRunId);
+
+        _run.AppliedRecoveryReceipts.Add(new AppliedRuntimeRecoveryReceipt(
+            receipt.ReceiptId,
+            requestFingerprint,
+            RuntimeRecoveryReceiptAckStatuses.Accepted));
+        await CommitAsync(events);
+        await ReconcileAgentResultSettlementAsync();
+        return new RuntimeRecoveryReceiptAcknowledgement(
+            receipt.ReceiptId,
+            RuntimeRecoveryReceiptAckStatuses.Accepted);
+    }
+
     public async Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
     {
         RejectIfRunReloadRequired();
@@ -400,6 +526,17 @@ public partial class WorkflowGrain
             await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
     }
+
+    private static bool MatchesReceiptBinding(
+        AgentResultSettlement settlement,
+        RuntimeRecoveryReceipt receipt) =>
+        string.Equals(settlement.TaskRunId, receipt.TaskRunId, StringComparison.Ordinal)
+        && string.Equals(settlement.WorkId, receipt.WorkId, StringComparison.Ordinal)
+        && string.Equals(settlement.RunnerId, receipt.RunnerId, StringComparison.Ordinal)
+        && string.Equals(settlement.AgentSessionId, receipt.AgentSessionId, StringComparison.Ordinal)
+        && string.Equals(settlement.AgentTurnId, receipt.AgentTurnId, StringComparison.Ordinal)
+        && string.Equals(settlement.Runtime, receipt.Runtime, StringComparison.Ordinal)
+        && string.Equals(settlement.RuntimeSessionId, receipt.RuntimeSessionId, StringComparison.Ordinal);
 
     private async Task DeleteSnapshotBestEffortAsync(string workId)
     {

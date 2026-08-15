@@ -42,6 +42,11 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId);
     Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
+    Task<RuntimeRecoveryReceiptAcknowledgement> ReceiveRecoveryReceiptAsync(RuntimeRecoveryReceipt receipt) =>
+        Task.FromResult(new RuntimeRecoveryReceiptAcknowledgement(
+            receipt?.ReceiptId ?? string.Empty,
+            RuntimeRecoveryReceiptAckStatuses.Stale,
+            "unsupported"));
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 
     Task ReleaseStageLocksAsync(string stage, string reason);

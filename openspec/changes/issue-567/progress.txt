@@ -106,3 +106,28 @@ Channel decision (grounded in live source):
   TypeScript checks, Server unit/architecture/workflow/CLI suites, Runner
   vitest (1639 tests), and Web vitest (4724 tests). The install reported 16
   existing npm audit findings; no dependency metadata changed.
+
+## T-002 Implementation Notes
+
+- Added the runtime-neutral `RuntimeRecoveryReceipt` contract with complete
+  Workflow execution identity, recovery generation, stable receipt id, and a
+  discriminated payload. Terminal results require a SHA-256 payload
+  fingerprint; update interruptions require an operation id and
+  `stopConfirmed=true` and cannot carry a result.
+- Added `POST /api/runner/{id}/recovery-receipt`. Contract errors return 400
+  before grain routing. Semantic `accepted`, `stale`, and `rejected-mismatch`
+  acknowledgements are terminal 200 responses; a matching update fence returns
+  409 `retryable` until T-004 owns replacement allocation.
+- Workflow arbitration validates the frozen settlement binding and generation,
+  checks T-001's durable update-operation inventory, and applies terminal
+  results through the existing task-report lifecycle. Accepted receipt ids and
+  request fingerprints persist on `WorkflowRun`, so exact duplicates return
+  the same acknowledgement without another task transition or event.
+- Focused verification passed: `AgentResultSettlementSpecs` (11 tests),
+  `RunnerPollRecoveryStateApiSpecs` (6 tests), and `RunnerUpdateInterruptSpecs`
+  (2 tests). The Server test runner ignores VSTest filters under the current
+  Microsoft Testing Platform; direct xUnit class filters were used.
+- Full Server spec runs under the default and serial harness each had one
+  unrelated AgentJob poll timing failure; the failing class passed when run
+  directly. The focused T-002 Server classes pass, and `npm run test:fast`
+  passes in full with 1639 Runner and 4724 Web tests.
