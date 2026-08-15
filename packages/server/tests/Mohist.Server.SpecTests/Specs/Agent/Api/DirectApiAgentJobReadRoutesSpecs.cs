@@ -107,6 +107,53 @@ public sealed class DirectApiAgentJobReadRoutesSpecs : AgentSessionLaunchRoutesT
         Assert.Equal("projection_lag", body.GetProperty("code").GetString());
     }
 
+    [Fact]
+    public async Task FutureRoutes_RemainUnmappedAndHaveNoExecutionSideEffect()
+    {
+        var projectId = await CreateProjectAsync("direct-activation-guard");
+        var token = await CreatePatAsync("direct-activation-guard", projectId, "operator");
+        var (jobsBefore, sessionsBefore) = await CountExecutionRowsAsync(projectId);
+
+        var requests = new (HttpMethod Method, string Path, HttpContent? Content)[]
+        {
+            (HttpMethod.Post,
+                $"/api/v1/projects/{projectId}/agents/agent-not-mapped/launch",
+                JsonContent.Create(new { prompt = "must not launch" })),
+            (HttpMethod.Post,
+                $"/api/v1/projects/{projectId}/agent-sessions/session-not-mapped/inputs",
+                JsonContent.Create(new { text = "must not follow up" })),
+            (HttpMethod.Post,
+                $"/api/v1/projects/{projectId}/agent-turns/turn-not-mapped/stop",
+                Content: null),
+            (HttpMethod.Get,
+                $"/api/v1/projects/{projectId}/agent-inputs/input-not-mapped",
+                Content: null),
+            (HttpMethod.Get,
+                $"/api/v1/projects/{projectId}/agent-turns/turn-not-mapped",
+                Content: null),
+            (HttpMethod.Get,
+                $"/api/v1/projects/{projectId}/agent-sessions/session-not-mapped/events",
+                Content: null),
+        };
+
+        using var client = DirectClient(token);
+        foreach (var item in requests)
+        {
+            using var request = new HttpRequestMessage(item.Method, item.Path)
+            {
+                Content = item.Content,
+            };
+            using var response = await client.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.NotEqual(HttpStatusCode.NotImplemented, response.StatusCode);
+        }
+
+        var (jobsAfter, sessionsAfter) = await CountExecutionRowsAsync(projectId);
+        Assert.Equal(jobsBefore, jobsAfter);
+        Assert.Equal(sessionsBefore, sessionsAfter);
+    }
+
     private async Task<(string ProjectId, string AgentId, string JobId)> CreateQueuedJobAsync(string prefix)
     {
         var projectId = await CreateProjectAsync(prefix);
@@ -117,12 +164,15 @@ public sealed class DirectApiAgentJobReadRoutesSpecs : AgentSessionLaunchRoutesT
         return (projectId, agent.Id, data.GetProperty("jobId").GetString()!);
     }
 
-    private async Task<string> CreatePatAsync(string name, string? projectId)
+    private async Task<string> CreatePatAsync(
+        string name,
+        string? projectId,
+        string scope = "readonly")
     {
         using var response = await _fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
         {
             name = $"{name}-{Guid.NewGuid():N}",
-            scope = "readonly",
+            scope,
             ttlHours = 24,
             projectIds = projectId is null ? null : new[] { projectId },
         });
@@ -131,6 +181,15 @@ public sealed class DirectApiAgentJobReadRoutesSpecs : AgentSessionLaunchRoutesT
             .GetProperty("data")
             .GetProperty("token")
             .GetString()!;
+    }
+
+    private async Task<(int Jobs, int Sessions)> CountExecutionRowsAsync(string projectId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var jobs = await db.AgentJobs.CountAsync(row => row.ProjectId == projectId);
+        var sessions = await db.AgentSessions.CountAsync(row => row.LabelProjectId == projectId);
+        return (jobs, sessions);
     }
 
     private HttpClient DirectClient(string token)
