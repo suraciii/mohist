@@ -55,18 +55,17 @@ public sealed record MohistHostPlan
     public CollectorResult InitialCollectorResult { get; }
 
     /// <summary>
-    /// Builds a primary plan: OTel disabled, no listener intent, collector
-    /// seed is <see cref="CollectorResult.Unverified"/>; enabled plans
-    /// pair the listener intent with an unverified collector that will be
-    /// promoted to online after a successful <c>StartAsync</c>.
+    /// Builds a primary plan: OTel disabled, or enabled without an inbound
+    /// collector listener, uses no listener intent; enabled plans with a
+    /// positive collector port pair that listener intent with an unverified
+    /// collector that will be promoted to online after a successful
+    /// <c>StartAsync</c>.
     /// </summary>
     public static MohistHostPlan Primary(
         RuntimeEpoch epoch,
         bool enabled,
         OtelListenerIntent? listenerIntent)
     {
-        if (enabled && listenerIntent is null)
-            throw new ArgumentNullException(nameof(listenerIntent), "A listener intent is required when OTel is enabled.");
         return new(epoch, enabled, listenerIntent, CollectorResult.Unverified());
     }
 

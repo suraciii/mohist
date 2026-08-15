@@ -247,7 +247,7 @@ public sealed class MohistHostRunner
 
     private static async Task OnPrimaryStartedAsync(IMohistHost primary, MohistHostPlan plan)
     {
-        if (!plan.Enabled)
+        if (!plan.Enabled || plan.ListenerIntent is null)
             return;
 
         if (primary.Services.GetService(typeof(RuntimeObservability)) is RuntimeObservability runtime)

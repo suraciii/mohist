@@ -49,7 +49,7 @@ public sealed class MohistHostFactory : IMohistHostFactory
             .Get<Mohist.Server.Otel.OtelOptions>()
             ?? new Mohist.Server.Otel.OtelOptions();
         var enabled = otelOptions.Enabled;
-        var listenerIntent = enabled
+        var listenerIntent = enabled && otelOptions.Port > 0
             ? new OtelListenerIntent(otelOptions.BindHost, otelOptions.Port)
             : null;
         return MohistHostPlan.Primary(epoch, enabled, listenerIntent);

@@ -245,6 +245,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:0");
         builder.UseSetting("Mohist:Otel:Endpoint", "http://127.0.0.1:0/otel");
+        // OTel tracing remains enabled for this fixture, but its inbound
+        // collector is intentionally disabled. TestServer and the in-memory
+        // exporter cover the observable path without touching an OS port.
+        builder.UseSetting("Mohist:Otel:Port", "0");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
@@ -268,6 +272,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:SqliteConnectionString"] = _connectionString,
                 ["Mohist:ServerUrl"] = "http://127.0.0.1:0",
                 ["Mohist:Otel:Endpoint"] = "http://127.0.0.1:0/otel",
+                ["Mohist:Otel:Port"] = "0",
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = ArtifactStorageRoot,

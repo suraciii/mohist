@@ -78,6 +78,16 @@ public sealed class OtelPortIsolationMiddleware
         if (!_options.Enabled)
             return false;
 
+        // TestServer has no socket, so its route tests provide a logical
+        // local-port header. Port 0 is valid only in that explicit seam;
+        // ordinary requests must never be classified from an OS port.
+        if (context.Request.Headers.TryGetValue("X-Mohist-Test-Local-Port", out var requestedPort)
+            && int.TryParse(requestedPort.ToString(), out var logicalPort))
+            return logicalPort == _options.Port;
+
+        if (_options.Port <= 0)
+            return false;
+
         return ResolveLocalPort(context) == _options.Port;
     }
 
