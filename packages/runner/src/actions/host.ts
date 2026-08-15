@@ -1,21 +1,17 @@
-import type { AgentExecutionDefinition, JsonObject, JsonValue } from "../core/types.js"
-import type {
-  ActionCapability,
-  ActionManifest,
-  ActionCapabilitySet,
-} from "./manifest.js"
-import type { TaskLogger } from "../runtime/task-log.js"
-import type { ActionResult } from "../core/types.js"
-import type { IssueFields } from "./issue-fields.js"
-import type { PiRuntime } from "../runtime/pi/index.js"
-import type { SkillResolver } from "../runtime/skill-resolver.js"
+import type { AgentExecutionDefinition, JsonObject, JsonValue } from '../core/types.js'
+import type { ActionCapability, ActionManifest, ActionCapabilitySet } from './manifest.js'
+import type { TaskLogger } from '../runtime/task-log.js'
+import type { ActionResult } from '../core/types.js'
+import type { IssueFields } from './issue-fields.js'
+import type { PiRuntime } from '../runtime/pi/index.js'
+import type { SkillResolver } from '../runtime/skill-resolver.js'
 
 export const ALL_CAPABILITIES: ReadonlySet<ActionCapability> = new Set([
-  "agent-turn",
-  "issue-fields",
-  "workflow-checkpoint",
-  "add-tasks",
-  "write-vars",
+  'agent-turn',
+  'issue-fields',
+  'workflow-checkpoint',
+  'add-tasks',
+  'write-vars',
 ])
 
 export function hasCapability(manifest: ActionManifest, capability: ActionCapability): boolean {
@@ -49,6 +45,8 @@ export interface ActionHost {
   workDir: string
   signal: AbortSignal
   log: TaskLogger | null
+  /** Internal bounded worktree-cleanup attempt, never part of action input. */
+  cleanupAttempt?: number | null
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
   agentDefinition?: AgentExecutionDefinition | null
@@ -60,7 +58,7 @@ export interface ActionHost {
 
 export type ActionInputs = Record<string, JsonValue>
 
-type ActionHostBase = Omit<ActionHost, "agent" | "issue" | "checkpoint">
+type ActionHostBase = Omit<ActionHost, 'agent' | 'issue' | 'checkpoint'>
 
 type ManifestCapability<M extends ActionManifest> = M extends {
   readonly capabilities: infer C extends ReadonlyArray<ActionCapability>
@@ -69,17 +67,17 @@ type ManifestCapability<M extends ActionManifest> = M extends {
   : never
 
 type IsBroadActionManifest<M extends ActionManifest> = [ActionManifest] extends [M]
-  ? [M] extends [ActionManifest] ? true : false
+  ? [M] extends [ActionManifest]
+    ? true
+    : false
   : false
 
-type CapabilityHost<C> =
-  ("agent-turn" extends C ? { agent: AgentTurn } : { agent?: never }) &
-  ("issue-fields" extends C ? { issue: IssueFieldsHost } : { issue?: never }) &
-  ("workflow-checkpoint" extends C ? { checkpoint: CheckpointHost } : { checkpoint?: never })
+type CapabilityHost<C> = ('agent-turn' extends C ? { agent: AgentTurn } : { agent?: never }) &
+  ('issue-fields' extends C ? { issue: IssueFieldsHost } : { issue?: never }) &
+  ('workflow-checkpoint' extends C ? { checkpoint: CheckpointHost } : { checkpoint?: never })
 
-export type ActionHostFor<M extends ActionManifest> = IsBroadActionManifest<M> extends true
-  ? ActionHost
-  : ActionHostBase & CapabilityHost<ManifestCapability<M>>
+export type ActionHostFor<M extends ActionManifest> =
+  IsBroadActionManifest<M> extends true ? ActionHost : ActionHostBase & CapabilityHost<ManifestCapability<M>>
 
 export interface ActionEffects {
   addTasks?: AddTaskEffect[]
@@ -95,12 +93,12 @@ export interface AddTaskEffect {
 }
 
 export interface NormalizedResult {
-  kind: "ok"
+  kind: 'ok'
   output: JsonObject | null
   effects: ActionEffects
 }
 
 export interface NormalizedResultRejected {
-  kind: "error" | "malformed"
+  kind: 'error' | 'malformed'
   message: string
 }

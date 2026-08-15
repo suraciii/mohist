@@ -26,6 +26,23 @@ public sealed class WorkflowSessionWorkPort(IGrainFactory grains) : ISessionWork
         return ack == ReportAck.Accepted;
     }
 
+    public async Task<bool> CanStartAgentCleanupAsync(
+        SessionWorkflowExecutionBinding binding,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return await grains
+            .GetGrain<IWorkflowGrain>(binding.WorkflowRunId)
+            .CanStartAgentCleanupAsync(new AgentExecutionBinding(
+                binding.TaskRunId,
+                binding.WorkId,
+                binding.RunnerId,
+                binding.AgentSessionId,
+                binding.AgentTurnId,
+                binding.Runtime,
+                binding.RuntimeSessionId));
+    }
+
     public async Task ObserveAgentExecutionAsync(
         SessionWorkflowExecutionBinding binding,
         SessionWorkflowObservationKind kind,

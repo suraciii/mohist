@@ -8,7 +8,12 @@ export type RuntimeEventAcknowledgementPolicy = 'matching-receipt' | 'successful
 
 export interface RuntimeEventRecord {
   readonly id: string
-  readonly producerFamily: 'workflow-session' | 'session-followup' | 'generic-followup' | 'binding-reconcile'
+  readonly producerFamily:
+    | 'workflow-session'
+    | 'workflow-cleanup'
+    | 'session-followup'
+    | 'generic-followup'
+    | 'binding-reconcile'
   readonly target: RuntimeEventTarget
   readonly runtimeSessionId: string
   readonly runtime?: string | null

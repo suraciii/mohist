@@ -1,22 +1,22 @@
-import type { ActionResult, JsonObject, ParentIssueContext } from "../core/types.js"
-import type { ServerConnection } from "../server/connection.js"
-import type { TaskLogger } from "../runtime/task-log.js"
-import type { PiRuntime } from "../runtime/pi/index.js"
-import type { ActionHost } from "./host.js"
-import { isObject } from "../core/json.js"
-import { resolvePrompt } from "../core/prompt.js"
-import { sessionNameFromContext } from "./workflow-session-name.js"
-import { hasUnconfirmedCleanup, parseModelIdentifier } from "../runtime/opencode/index.js"
-import type { PiRuntimeEvent, PiTurnRequest } from "../runtime/pi/index.js"
-import { actionErrorMessage, fail, succeed } from "./action-result.js"
-import type { PromptLoaderContext } from "../core/prompt.js"
-import { SkillResolver } from "../runtime/skill-resolver.js"
-import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
-import type { AgentExecutionDefinition } from "../core/types.js"
-import { WorkflowAgentSessionReporter } from "./workflow-agent-session-reporter.js"
-import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
+import type { ActionResult, JsonObject, ParentIssueContext } from '../core/types.js'
+import type { ServerConnection } from '../server/connection.js'
+import type { TaskLogger } from '../runtime/task-log.js'
+import type { PiRuntime } from '../runtime/pi/index.js'
+import type { ActionHost } from './host.js'
+import { isObject } from '../core/json.js'
+import { resolvePrompt } from '../core/prompt.js'
+import { sessionNameFromContext } from './workflow-session-name.js'
+import { hasUnconfirmedCleanup, parseModelIdentifier } from '../runtime/opencode/index.js'
+import type { PiRuntimeEvent, PiTurnRequest } from '../runtime/pi/index.js'
+import { actionErrorMessage, fail, succeed } from './action-result.js'
+import type { PromptLoaderContext } from '../core/prompt.js'
+import { SkillResolver } from '../runtime/skill-resolver.js'
+import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
+import type { AgentExecutionDefinition } from '../core/types.js'
+import { WorkflowAgentSessionReporter } from './workflow-agent-session-reporter.js'
+import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
 
-export const PI_USES = "mohist/pi"
+export const PI_USES = 'mohist/pi'
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
 
 interface ActionInvocationContext {
@@ -40,6 +40,7 @@ interface ActionInvocationContext {
   serverConnection?: ServerConnection | null
   runtimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   runtimeEventRecordId?: () => string
+  cleanupAttempt?: number | null
   preparedPrompt?: string
   preparedOptions?: PiOptions
   log?: TaskLogger | null
@@ -51,38 +52,54 @@ export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssue
   return `Parent issue context (read-only background; JSON):\n${parent}\n\nTreat the parent issue context above as read-only background. The current child issue body is authoritative and controls delivery scope.\n\n${prompt}`
 }
 
-export interface PiOptions { model?: string; variant?: string; timeoutMs?: number; unknownKeys?: readonly string[] }
+export interface PiOptions {
+  model?: string
+  variant?: string
+  timeoutMs?: number
+  unknownKeys?: readonly string[]
+}
 
 export function piAction(context: ActionInvocationContext): Promise<ActionResult>
 export function piAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult>
-export async function piAction(contextOrInputs: ActionInvocationContext | JsonObject, host?: ActionHost): Promise<ActionResult> {
+export async function piAction(
+  contextOrInputs: ActionInvocationContext | JsonObject,
+  host?: ActionHost,
+): Promise<ActionResult> {
   if (host?.agent) return await piActionThroughAgent(contextOrInputs as JsonObject, host)
   const context: ActionInvocationContext = host
     ? {
-      workflowRunId: "",
-      workId: "pi",
-      workType: "task",
-      with: contextOrInputs as JsonObject,
-      workDir: host.workDir,
-      signal: host.signal,
-      piRuntime: host.piRuntime,
-      skillResolver: host.skillResolver,
-      agentDefinition: host.agentDefinition,
-      log: host.log,
-    }
-    : contextOrInputs as ActionInvocationContext
+        workflowRunId: '',
+        workId: 'pi',
+        workType: 'task',
+        with: contextOrInputs as JsonObject,
+        workDir: host.workDir,
+        signal: host.signal,
+        piRuntime: host.piRuntime,
+        skillResolver: host.skillResolver,
+        agentDefinition: host.agentDefinition,
+        log: host.log,
+        cleanupAttempt: host.cleanupAttempt,
+      }
+    : (contextOrInputs as ActionInvocationContext)
   const parsed = await parseInput(context)
-  if (parsed.kind === "failure") return parsed.result
+  if (parsed.kind === 'failure') return parsed.result
   const { prompt, options } = parsed
   const definition = context.agentDefinition
-  const resolvedSkills = await (context.skillResolver ?? new SkillResolver()).resolve(definition?.skills, context.workDir)
+  const resolvedSkills = await (context.skillResolver ?? new SkillResolver()).resolve(
+    definition?.skills,
+    context.workDir,
+  )
   if (!resolvedSkills.ok) return fail(resolvedSkills.code, resolvedSkills.message)
   const executionPrompt = buildExecutionEnvelope(prompt, definition?.instructions, resolvedSkills.skills)
   const model = definition?.model ?? options.model
   const variant = definition?.variant ?? options.variant
   const runtime = context.piRuntime
-  if (!runtime) return fail("runtime-unavailable", "mohist/pi requires the Pi runtime")
-  if (!runtime.ready()) return fail("runtime-unavailable", `mohist/pi requires the Pi runtime to be ready: ${runtime.diagnostic()?.message ?? "no readiness diagnostic"}`)
+  if (!runtime) return fail('runtime-unavailable', 'mohist/pi requires the Pi runtime')
+  if (!runtime.ready())
+    return fail(
+      'runtime-unavailable',
+      `mohist/pi requires the Pi runtime to be ready: ${runtime.diagnostic()?.message ?? 'no readiness diagnostic'}`,
+    )
 
   const sessionName = sessionNameFromContext(context)
   const canBind = !!context.serverConnection && !!context.projectId
@@ -93,46 +110,87 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   if (canBind) {
     try {
       const opened = await context.serverConnection!.openWorkflowAgentSession(
-        context.projectId!, context.workflowRunId, sessionName,
-        { workId: context.workId, workType: context.workType, stage: context.stage, title: context.title, issueNumber: context.issueNumber, epicNumber: context.epicNumber, workDir: context.workDir, runtime: "pi" },
+        context.projectId!,
+        context.workflowRunId,
+        sessionName,
+        {
+          workId: context.workId,
+          workType: context.workType,
+          stage: context.stage,
+          title: context.title,
+          issueNumber: context.issueNumber,
+          epicNumber: context.epicNumber,
+          workDir: context.workDir,
+          runtime: 'pi',
+        },
         context.signal,
       )
-      if (opened.workDir && opened.workDir !== context.workDir) return fail("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
+      if (opened.workDir && opened.workDir !== context.workDir)
+        return fail(
+          'session-workspace-mismatch',
+          'Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying',
+        )
       agentSessionId = opened.sessionId
       runtimeSessionId = opened.runtimeSessionId ?? null
       expectedRuntime = opened.runtime ?? null
       expectedRuntimeSessionId = opened.runtimeSessionId ?? null
     } catch (error) {
-      return fail("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${actionErrorMessage(error)}`)
+      return fail(
+        'session-binding-failed',
+        `Failed to resolve the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
+      )
     }
   }
 
-  if (runtimeSessionId === null || expectedRuntime !== "pi") {
-    const created = await runtime.createSession({ target: { runtime: "pi", runtimeSessionId: null, workDir: context.workDir } })
+  if (runtimeSessionId === null || expectedRuntime !== 'pi') {
+    const created = await runtime.createSession({
+      target: { runtime: 'pi', runtimeSessionId: null, workDir: context.workDir },
+    })
     if (!created.ok) return runtimeFailure(created.error.kind, created.error.message, created.error.diagnostics)
     runtimeSessionId = created.value.runtimeSessionId
     if (canBind) {
       try {
         await context.serverConnection!.attachWorkflowAgentSession(
-          context.projectId!, context.workflowRunId, sessionName,
-          { runtimeSessionId, workDir: context.workDir, processPid: null, model: model ?? null, workId: context.workId, runtime: "pi", expectedRuntime, expectedRuntimeSessionId },
+          context.projectId!,
+          context.workflowRunId,
+          sessionName,
+          {
+            runtimeSessionId,
+            workDir: context.workDir,
+            processPid: null,
+            model: model ?? null,
+            workId: context.workId,
+            runtime: 'pi',
+            expectedRuntime,
+            expectedRuntimeSessionId,
+          },
           context.signal,
         )
       } catch (error) {
-        return fail("session-binding-failed", `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
+        return fail(
+          'session-binding-failed',
+          `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
+          { exitCode: 1, turnFact: { finalAssistantText: null } },
+        )
       }
     }
   }
 
   const events: PiRuntimeEvent[] = []
   const reporter = createWorkflowReporter(context, sessionName, agentSessionId, runtimeSessionId)
+  if (context.cleanupAttempt && !reporter) {
+    return fail('session-reporting-failed', 'Workflow cleanup requires the durable AgentSession runtime-event outbox', {
+      exitCode: 1,
+      turnFact: { finalAssistantText: null },
+    })
+  }
   const report = async (facts: readonly PiRuntimeEvent[], signal = context.signal) => {
     if (!canBind || facts.length === 0) return
     if (reporter) {
-      const input = facts.find((event) => event.type === "session.input")
+      const input = facts.find((event) => event.type === 'session.input')
       if (input) {
-        if (facts.length !== 1 || typeof input.payload.text !== "string") {
-          throw new Error("Workflow session.input must be reported by itself with a text payload")
+        if (facts.length !== 1 || typeof input.payload.text !== 'string') {
+          throw new Error('Workflow session.input must be reported by itself with a text payload')
         }
         await reporter.awaitInput(input.payload.text, input.runtimeSessionId)
         return
@@ -142,8 +200,16 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       return
     }
     await context.serverConnection!.workflowAgentSessionRuntimeEvents(
-      context.projectId!, context.workflowRunId, sessionName,
-      { workId: context.workId, workType: context.workType, stage: context.stage, runtimeSessionId, runtimeEvents: facts.map((event) => ({ id: event.id, type: event.type, payload: event.payload })) },
+      context.projectId!,
+      context.workflowRunId,
+      sessionName,
+      {
+        workId: context.workId,
+        workType: context.workType,
+        stage: context.stage,
+        runtimeSessionId,
+        runtimeEvents: facts.map((event) => ({ id: event.id, type: event.type, payload: event.payload })),
+      },
       signal,
     )
   }
@@ -151,54 +217,107 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   try {
     await report([inputEvent(runtimeSessionId, executionPrompt, context)])
   } catch {
-    return fail("session-reporting-failed", "Workflow AgentSession rejected session.input; prompt was not submitted", { exitCode: 1, turnFact: { finalAssistantText: null } })
+    return fail('session-reporting-failed', 'Workflow AgentSession rejected session.input; prompt was not submitted', {
+      exitCode: 1,
+      turnFact: { finalAssistantText: null },
+    })
   }
 
-  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt: executionPrompt, durationMs: options.timeoutMs ?? PI_TURN_DURATION_MS, options: { model: model ?? null, variant: variant ?? null, ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}), unknownKeys: options.unknownKeys } }
+  const request: PiTurnRequest = {
+    target: { runtime: 'pi', runtimeSessionId, workDir: context.workDir },
+    prompt: executionPrompt,
+    durationMs: options.timeoutMs ?? PI_TURN_DURATION_MS,
+    options: {
+      model: model ?? null,
+      variant: variant ?? null,
+      ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
+      unknownKeys: options.unknownKeys,
+    },
+  }
   let result
   try {
-    result = await runtime.runTurn(request, context.signal, { onEvent: (event) => { events.push(event) } })
+    result = await runtime.runTurn(request, context.signal, {
+      onEvent: (event) => {
+        events.push(event)
+      },
+    })
   } catch (error) {
     let terminalReportingFailed = false
     try {
       await reportWithTerminalSignal(report, [
         ...events,
-        { id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: "turn-failed" } },
-        activityEvent(runtimeSessionId, "idle", context),
+        {
+          id: `turn-failed-${context.workId}`,
+          type: 'turn.failed',
+          runtimeSessionId,
+          workDir: context.workDir,
+          payload: { status: 'failed', errorCode: 'turn-failed' },
+        },
+        activityEvent(runtimeSessionId, 'idle', context),
       ])
     } catch {
       terminalReportingFailed = true
     }
     const message = actionErrorMessage(error)
-    return fail("turn-failed", terminalReportingFailed
-      ? `${message}; Session terminal reporting failed and terminal state was not accepted`
-      : message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+    return fail(
+      'turn-failed',
+      terminalReportingFailed
+        ? `${message}; Session terminal reporting failed and terminal state was not accepted`
+        : message,
+      { exitCode: 1, turnFact: { finalAssistantText: null } },
+    )
   }
 
   const unknownOutcome = !result.ok && hasUnconfirmedCleanup(result.diagnostics ?? result.error.diagnostics ?? [])
   const finalText = result.ok ? result.value.facts.finalAssistantText : null
   const runtimeCode = result.ok ? null : runtimeErrorCode(result.error.kind)
   const finalFacts = [...events]
-  const submittedFailure = !result.ok && (result.error.kind === "deadline-exceeded" || result.error.kind === "interrupted" || result.error.kind === "turn-failed")
+  const submittedFailure =
+    !result.ok &&
+    (result.error.kind === 'deadline-exceeded' ||
+      result.error.kind === 'interrupted' ||
+      result.error.kind === 'turn-failed')
   if (result.ok || submittedFailure) {
-    if (!result.ok) finalFacts.push({ id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: unknownOutcome ? "unknown" : "failed", errorCode: runtimeCode ?? "turn-failed", message: result.error.message } })
-    finalFacts.push(activityEvent(runtimeSessionId, "idle", context))
+    if (!result.ok)
+      finalFacts.push({
+        id: `turn-failed-${context.workId}`,
+        type: 'turn.failed',
+        runtimeSessionId,
+        workDir: context.workDir,
+        payload: {
+          status: unknownOutcome ? 'unknown' : 'failed',
+          errorCode: runtimeCode ?? 'turn-failed',
+          message: result.error.message,
+        },
+      })
+    finalFacts.push(activityEvent(runtimeSessionId, 'idle', context))
   }
   try {
     await reportWithTerminalSignal(report, finalFacts)
   } catch {
-    if (result.ok) return fail("session-reporting-failed", "Workflow AgentSession did not accept the final Pi turn facts", { exitCode: 1, turnFact: { finalAssistantText: null } })
-    return fail(runtimeCode ?? "turn-failed", `${result.error.message}; Session terminal reporting failed and terminal state was not accepted`, { exitCode: 1, turnFact: { finalAssistantText: null } })
+    if (result.ok)
+      return fail('session-reporting-failed', 'Workflow AgentSession did not accept the final Pi turn facts', {
+        exitCode: 1,
+        turnFact: { finalAssistantText: null },
+      })
+    return fail(
+      runtimeCode ?? 'turn-failed',
+      `${result.error.message}; Session terminal reporting failed and terminal state was not accepted`,
+      { exitCode: 1, turnFact: { finalAssistantText: null } },
+    )
   }
-  if (!result.ok) return fail(runtimeCode ?? "turn-failed", result.error.message, {
-    exitCode: 1,
-    outcome: unknownOutcome ? "unknown" : undefined,
-    turnFact: { finalAssistantText: null },
-  })
+  if (!result.ok)
+    return fail(runtimeCode ?? 'turn-failed', result.error.message, {
+      exitCode: 1,
+      outcome: unknownOutcome ? 'unknown' : undefined,
+      turnFact: { finalAssistantText: null },
+    })
   return succeed(null, { exitCode: 0, turnFact: { finalAssistantText: finalText } })
 }
 
-function buildPromptLoaderContext(context: Pick<ActionInvocationContext, "workDir" | "workId" | "title" | "stage">): PromptLoaderContext {
+function buildPromptLoaderContext(
+  context: Pick<ActionInvocationContext, 'workDir' | 'workId' | 'title' | 'stage'>,
+): PromptLoaderContext {
   return {
     with: {},
     workDir: context.workDir,
@@ -208,7 +327,10 @@ function buildPromptLoaderContext(context: Pick<ActionInvocationContext, "workDi
   }
 }
 
-async function reportWithTerminalSignal(report: (facts: readonly PiRuntimeEvent[], signal?: AbortSignal) => Promise<void>, facts: readonly PiRuntimeEvent[]): Promise<void> {
+async function reportWithTerminalSignal(
+  report: (facts: readonly PiRuntimeEvent[], signal?: AbortSignal) => Promise<void>,
+  facts: readonly PiRuntimeEvent[],
+): Promise<void> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 30_000)
   try {
@@ -218,57 +340,79 @@ async function reportWithTerminalSignal(report: (facts: readonly PiRuntimeEvent[
   }
 }
 
-async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok"; prompt: string; options: PiOptions } | { kind: "failure"; result: ActionResult }> {
+async function parseInput(
+  context: ActionInvocationContext,
+): Promise<{ kind: 'ok'; prompt: string; options: PiOptions } | { kind: 'failure'; result: ActionResult }> {
   if (context.preparedPrompt !== undefined) {
-    return { kind: "ok", prompt: context.preparedPrompt, options: context.preparedOptions ?? {} }
+    return { kind: 'ok', prompt: context.preparedPrompt, options: context.preparedOptions ?? {} }
   }
   const input = context.with ?? {}
-  const allowed = new Set(["prompt", "session", "options", "timeout", "working-directory"])
+  const allowed = new Set(['prompt', 'session', 'options', 'timeout', 'working-directory'])
   const invalid = Object.keys(input).find((key) => !allowed.has(key))
-  if (invalid) return { kind: "failure", result: fail("invalid-input", `mohist/pi does not accept top-level input '${invalid}'`) }
+  if (invalid)
+    return { kind: 'failure', result: fail('invalid-input', `mohist/pi does not accept top-level input '${invalid}'`) }
   const rawSession = input.session
-  if (rawSession !== undefined && rawSession !== null && typeof rawSession !== "string") return { kind: "failure", result: fail("invalid-input", "mohist/pi 'session' must be a string when present") }
-  if (rawSession !== undefined && rawSession !== null && !rawSession.trim()) return { kind: "failure", result: fail("invalid-input", "mohist/pi 'session' must not be empty") }
+  if (rawSession !== undefined && rawSession !== null && typeof rawSession !== 'string')
+    return { kind: 'failure', result: fail('invalid-input', "mohist/pi 'session' must be a string when present") }
+  if (rawSession !== undefined && rawSession !== null && !rawSession.trim())
+    return { kind: 'failure', result: fail('invalid-input', "mohist/pi 'session' must not be empty") }
   let prompt: string | undefined
-  try { prompt = await resolvePrompt(input.prompt, buildPromptLoaderContext(context)) } catch (error) { return { kind: "failure", result: fail("invalid-input", actionErrorMessage(error)) } }
-  if (!prompt?.trim()) return { kind: "failure", result: fail("invalid-input", "mohist/pi requires 'prompt' that resolves to non-empty text") }
+  try {
+    prompt = await resolvePrompt(input.prompt, buildPromptLoaderContext(context))
+  } catch (error) {
+    return { kind: 'failure', result: fail('invalid-input', actionErrorMessage(error)) }
+  }
+  if (!prompt?.trim())
+    return {
+      kind: 'failure',
+      result: fail('invalid-input', "mohist/pi requires 'prompt' that resolves to non-empty text"),
+    }
   const timeout = input.timeout
-  if (timeout !== undefined && (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0)) {
-    return { kind: "failure", result: fail("invalid-input", "mohist/pi 'timeout' must be a positive finite number when present") }
+  if (timeout !== undefined && (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0)) {
+    return {
+      kind: 'failure',
+      result: fail('invalid-input', "mohist/pi 'timeout' must be a positive finite number when present"),
+    }
   }
   const rawOptions = input.options
-  if (rawOptions !== undefined && rawOptions !== null && !isObject(rawOptions)) return { kind: "failure", result: fail("invalid-input", "mohist/pi 'options' must be an object when present") }
+  if (rawOptions !== undefined && rawOptions !== null && !isObject(rawOptions))
+    return { kind: 'failure', result: fail('invalid-input', "mohist/pi 'options' must be an object when present") }
   const options: PiOptions = {}
-  if (typeof timeout === "number") options.timeoutMs = timeout
+  if (typeof timeout === 'number') options.timeoutMs = timeout
   const record = (rawOptions ?? {}) as Record<string, unknown>
-  for (const key of ["model", "variant"] as const) {
+  for (const key of ['model', 'variant'] as const) {
     const value = record[key]
     if (value === undefined || value === null) continue
-    if (typeof value !== "string") return { kind: "failure", result: fail("invalid-input", `mohist/pi 'options.${key}' must be a string when present`) }
-    if (key === "model") {
+    if (typeof value !== 'string')
+      return {
+        kind: 'failure',
+        result: fail('invalid-input', `mohist/pi 'options.${key}' must be a string when present`),
+      }
+    if (key === 'model') {
       const parsed = parseModelIdentifier(value)
-      if (parsed.kind === "failure") return { kind: "failure", result: fail("invalid-input", `mohist/pi ${parsed.message}`) }
+      if (parsed.kind === 'failure')
+        return { kind: 'failure', result: fail('invalid-input', `mohist/pi ${parsed.message}`) }
     }
     options[key] = value
   }
-  const unknownKeys = Object.keys(record).filter((key) => key !== "model" && key !== "variant")
+  const unknownKeys = Object.keys(record).filter((key) => key !== 'model' && key !== 'variant')
   if (unknownKeys.length > 0) options.unknownKeys = unknownKeys
-  return { kind: "ok", prompt: composePiPrompt(prompt, context.parentIssueContext), options }
+  return { kind: 'ok', prompt: composePiPrompt(prompt, context.parentIssueContext), options }
 }
 
 async function piActionThroughAgent(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const parsed = await parseInput({
-    workflowRunId: "",
-    workId: "pi",
-    workType: "task",
+    workflowRunId: '',
+    workId: 'pi',
+    workType: 'task',
     with: inputs,
     workDir: host.workDir,
     signal: host.signal,
     skillResolver: host.skillResolver,
     agentDefinition: host.agentDefinition,
   })
-  if (parsed.kind === "failure") return parsed.result
-  const session = typeof inputs.session === "string" ? inputs.session : undefined
+  if (parsed.kind === 'failure') return parsed.result
+  const session = typeof inputs.session === 'string' ? inputs.session : undefined
   return await host.agent!.turn({ prompt: parsed.prompt, session, options: parsed.options })
 }
 
@@ -293,27 +437,48 @@ function createWorkflowReporter(
       runnerId: context.runnerId,
       agentSessionId,
     },
-    runtime: "pi",
+    runtime: 'pi',
     randomId: context.runtimeEventRecordId,
+    cleanupAttempt: context.cleanupAttempt,
   })
 }
 
 function inputEvent(runtimeSessionId: string, prompt: string, context: ActionInvocationContext): PiRuntimeEvent {
-  return { id: `session-input-${context.workId}`, type: "session.input", runtimeSessionId, workDir: context.workDir, payload: { text: prompt, kind: context.workType, source: "workflow", role: "user", runtimeSessionId } }
+  return {
+    id: `session-input-${context.workId}`,
+    type: 'session.input',
+    runtimeSessionId,
+    workDir: context.workDir,
+    payload: { text: prompt, kind: context.workType, source: 'workflow', role: 'user', runtimeSessionId },
+  }
 }
 
-function activityEvent(runtimeSessionId: string, activity: "idle" | "unknown", context: ActionInvocationContext): PiRuntimeEvent {
-  return { id: `session-activity-${context.workId}-${activity}`, type: "session.activity", runtimeSessionId, workDir: context.workDir, payload: { activity, observedAt: new Date().toISOString() } }
+function activityEvent(
+  runtimeSessionId: string,
+  activity: 'idle' | 'unknown',
+  context: ActionInvocationContext,
+): PiRuntimeEvent {
+  return {
+    id: `session-activity-${context.workId}-${activity}`,
+    type: 'session.activity',
+    runtimeSessionId,
+    workDir: context.workDir,
+    payload: { activity, observedAt: new Date().toISOString() },
+  }
 }
 
 function runtimeErrorCode(kind: string): string {
-  if (kind === "deadline-exceeded") return "timeout"
-  if (kind === "missing-session") return "runtime-session-missing"
+  if (kind === 'deadline-exceeded') return 'timeout'
+  if (kind === 'missing-session') return 'runtime-session-missing'
   return kind
 }
 
-function runtimeFailure(kind: string, message: string, diagnostics: readonly { code: string; message: string }[]): ActionResult {
+function runtimeFailure(
+  kind: string,
+  message: string,
+  diagnostics: readonly { code: string; message: string }[],
+): ActionResult {
   const code = runtimeErrorCode(kind)
-  const hint = kind === "missing-session" ? " Reset the Workflow Session before retrying." : ""
+  const hint = kind === 'missing-session' ? ' Reset the Workflow Session before retrying.' : ''
   return fail(code, `${message}${hint}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
 }

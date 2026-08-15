@@ -242,8 +242,12 @@ export class WorkExecutor {
         variables,
         signal,
       )
-      const worktreeHostBuilder = (cleanupWork: DispatchWorkItem, cleanupSignal: AbortSignal, cleanupWorkDir: string) =>
-        buildActionHost(this.capabilityDeps(), cleanupWork, cleanupWorkDir, cleanupSignal, log, caps)
+      const worktreeHostBuilder = (
+        cleanupWork: DispatchWorkItem,
+        cleanupSignal: AbortSignal,
+        cleanupWorkDir: string,
+        cleanupAttempt?: number,
+      ) => buildActionHost(this.capabilityDeps(), cleanupWork, cleanupWorkDir, cleanupSignal, log, caps, cleanupAttempt)
       const worktreeResult = await enforceCleanWorktree(
         work,
         workDir,

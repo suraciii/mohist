@@ -441,6 +441,55 @@ export class ServerConnection {
     return response.json() as Promise<WorkflowAgentSession>
   }
 
+  async workflowAgentSessionCleanupTurn(
+    projectId: string,
+    workflowRunId: string,
+    sessionName: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<WorkflowAgentSessionCleanupTurnAcceptance> {
+    const response = await this.fetchWithAuth(
+      this.url(
+        `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/cleanup-turn`,
+      ),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
+    )
+    if (!response.ok) throw new Error(`workflow cleanup turn failed: ${response.status} ${await response.text()}`)
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      throw new Error('workflow cleanup turn returned malformed JSON')
+    }
+    if (
+      !isObjectRecord(payload) ||
+      typeof payload.cleanupOperationId !== 'string' ||
+      payload.cleanupOperationId.length === 0 ||
+      typeof payload.inputDeliveryId !== 'string' ||
+      payload.inputDeliveryId.length === 0 ||
+      typeof payload.agentTurnId !== 'string' ||
+      payload.agentTurnId.length === 0 ||
+      typeof payload.agentSessionId !== 'string' ||
+      payload.agentSessionId.length === 0
+    ) {
+      throw new Error('workflow cleanup turn returned a malformed acceptance response')
+    }
+    const requestedOperationId = isObjectRecord(body) ? body.cleanupOperationId : null
+    if (typeof requestedOperationId === 'string' && requestedOperationId !== payload.cleanupOperationId)
+      throw new Error('workflow cleanup turn returned a mismatched operation identity')
+    return {
+      cleanupOperationId: payload.cleanupOperationId,
+      inputDeliveryId: payload.inputDeliveryId,
+      agentTurnId: payload.agentTurnId,
+      agentSessionId: payload.agentSessionId,
+    }
+  }
+
   async workflowAgentSessionRuntimeEvents(
     projectId: string,
     workflowRunId: string,
@@ -790,6 +839,13 @@ export interface AgentSessionRuntimeEventAcceptance {
   inputDeliveryId?: string
   agentTurnId?: string
   agentSessionId?: string
+}
+
+export interface WorkflowAgentSessionCleanupTurnAcceptance {
+  cleanupOperationId: string
+  inputDeliveryId: string
+  agentTurnId: string
+  agentSessionId: string
 }
 
 export type AgentSession = WorkflowAgentSession

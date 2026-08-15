@@ -157,6 +157,10 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
             SessionWorkflowExecutionBinding binding,
             CancellationToken cancellationToken = default) => Task.FromResult(true);
 
+        public Task<bool> CanStartAgentCleanupAsync(
+            SessionWorkflowExecutionBinding binding,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
+
         public Task ObserveAgentExecutionAsync(
             SessionWorkflowExecutionBinding binding,
             SessionWorkflowObservationKind kind,

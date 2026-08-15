@@ -8,6 +8,10 @@ public interface ISessionWorkPort
         SessionWorkflowExecutionBinding binding,
         CancellationToken cancellationToken = default);
 
+    Task<bool> CanStartAgentCleanupAsync(
+        SessionWorkflowExecutionBinding binding,
+        CancellationToken cancellationToken = default);
+
     Task ObserveAgentExecutionAsync(
         SessionWorkflowExecutionBinding binding,
         SessionWorkflowObservationKind kind,

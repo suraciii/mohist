@@ -13,6 +13,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> ReconcileMissingBindingAsync(ReconcileMissingBindingCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<WorkflowAgentSessionInputReceipt> AcceptWorkflowInputAsync(AcceptWorkflowAgentSessionInputCommand command);
+    Task<WorkflowAgentSessionCleanupReceipt> AcceptWorkflowCleanupAsync(AcceptWorkflowAgentSessionCleanupCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
 
     /// <summary>
@@ -228,6 +229,30 @@ public sealed record WorkflowAgentSessionInputReceipt(
     [property: Id(0)] string InputDeliveryId,
     [property: Id(1)] string AgentTurnId,
     [property: Id(2)] bool WorkflowBindingAccepted,
+    [property: Id(3)] string AgentSessionId);
+
+/// <summary>
+/// A replay-idempotent cleanup turn for a Workflow task whose original Agent
+/// execution has already finished. The cleanup operation is a distinct
+/// Session follow-up, never a replacement Workflow execution binding.
+/// </summary>
+[GenerateSerializer]
+public sealed record AcceptWorkflowAgentSessionCleanupCommand(
+    [property: Id(0)] string CleanupOperationId,
+    [property: Id(1)] string Prompt,
+    [property: Id(2)] string WorkflowRunId,
+    [property: Id(3)] string TaskRunId,
+    [property: Id(4)] string WorkId,
+    [property: Id(5)] string RunnerId,
+    [property: Id(6)] string AgentSessionId,
+    [property: Id(7)] string Runtime,
+    [property: Id(8)] string RuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record WorkflowAgentSessionCleanupReceipt(
+    [property: Id(0)] string CleanupOperationId,
+    [property: Id(1)] string InputDeliveryId,
+    [property: Id(2)] string AgentTurnId,
     [property: Id(3)] string AgentSessionId);
 
 [GenerateSerializer]
