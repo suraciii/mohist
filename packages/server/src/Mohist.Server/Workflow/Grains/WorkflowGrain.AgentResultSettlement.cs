@@ -27,6 +27,19 @@ public partial class WorkflowGrain
         await ReconcileAgentResultSettlementAsync();
     }
 
+    private async Task ReconcileAgentResultSettlementIfDueAsync()
+    {
+        var settlement = _run?.FindUnresolvedAgentResultSettlementTask()?.Task.AgentResultSettlement;
+        if (settlement?.State != AgentResultSettlementState.Unknown
+            || settlement.DeadlineAt is not { } deadline
+            || deadline > Now())
+        {
+            return;
+        }
+
+        await ReconcileAgentResultSettlementAsync();
+    }
+
     private async Task ReconcileAgentResultSettlementAsync()
     {
         if (_run is null)

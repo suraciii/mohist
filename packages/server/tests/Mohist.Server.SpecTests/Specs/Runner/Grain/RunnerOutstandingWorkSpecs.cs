@@ -209,7 +209,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RunnerLoss_AcceptedTerminalReportClearsInterruption()
+    public async Task RunnerLoss_AcceptedTerminalReportClearsInterruptionBeforeDeadlineWins()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
         var runnerId = _runnerId!;
@@ -218,6 +218,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         var interrupted = await LoadRunAsync(work.WorkflowRunId);
         var taskRunId = interrupted.Stages.Single().Tasks.Single().Id;
+        var deadline = interrupted.Stages.Single().Tasks.Single().Interruption!.RecoveryDeadlineAt;
 
         Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
@@ -229,12 +230,60 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
                 Artifacts: null,
                 TaskRunId: taskRunId)));
 
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.RunnerLossRecoveryReminderName, default);
+
         var completed = await LoadRunAsync(work.WorkflowRunId);
         var task = completed.Stages.Single().Tasks.Single();
         Assert.Equal(TaskRunStatus.Completed, task.Status);
         Assert.Null(task.Interruption);
         Assert.Equal(WorkflowRunStatus.Ready, completed.Status);
         Assert.Null(completed.Failure);
+    }
+
+    [Fact]
+    public async Task RunnerLoss_LateReportAfterDeadlineIsStaleAndDoesNotDuplicateTerminalEvents()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+        var runnerId = _runnerId!;
+        var (work, _) = await PollWorkAnyAsync();
+
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+        var interrupted = await LoadRunAsync(work.WorkflowRunId);
+        var taskRunId = interrupted.Stages.Single().Tasks.Single().Id;
+        var deadline = interrupted.Stages.Single().Tasks.Single().Interruption!.RecoveryDeadlineAt;
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+
+        var reportService = Services.GetRequiredService<Mohist.Server.Runner.Services.WorkflowReportService>();
+        var late = await reportService.ReportAsync(
+            runnerId,
+            work.WorkflowRunId,
+            work.WorkId,
+            taskRunId,
+            new WorkResult("completed", "late previous-generation result"));
+
+        Assert.Equal("stale", late.Ack);
+        var eventTypes = (await EventStore.ListAsync(work.WorkflowRunId))
+            .Select(entry => entry.Envelope.Type)
+            .ToArray();
+        Assert.Equal(1, eventTypes.Count(type => type == EventCatalog.ReverseDns.TaskInterrupted));
+        Assert.Equal(1, eventTypes.Count(type => type == EventCatalog.ReverseDns.TaskFailed));
+
+        var duplicate = await reportService.ReportAsync(
+            runnerId,
+            work.WorkflowRunId,
+            work.WorkId,
+            taskRunId,
+            new WorkResult("completed", "duplicate late result"));
+        Assert.Equal("stale", duplicate.Ack);
+
+        var failed = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal(TaskRunStatus.Failed, failed.Stages.Single().Tasks.Single().Status);
+        Assert.Equal("runner-lost", failed.Failure?.Message);
+        var finalEventTypes = (await EventStore.ListAsync(work.WorkflowRunId))
+            .Select(entry => entry.Envelope.Type)
+            .ToArray();
+        Assert.Equal(eventTypes.Length, finalEventTypes.Length);
     }
 
     [Fact]

@@ -167,6 +167,44 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task LateReportAtRecoveryDeadlineIsStaleAfterOwnerTerminalizesTheJob()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-recovery-late-report-runner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-recovery-late-report-project-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-recovery-late-report-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("late result loses deadline race", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+
+        var recovering = await job.GetRuntimeSnapshotAsync();
+        var deadline = Assert.IsType<DateTimeOffset>(recovering.RecoveryDeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+
+        var late = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult("completed", "late previous-generation result"));
+        Assert.False(late.Accepted);
+        Assert.Equal("stale", late.Reason);
+
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, terminal.FailureReason);
+        Assert.False((await job.GetRuntimeSnapshotAsync()).IsRecovering);
+
+        var duplicate = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult("completed", "duplicate late result"));
+        Assert.False(duplicate.Accepted);
+        Assert.Equal("stale", duplicate.Reason);
+        Assert.Equal(AgentJobStatus.Failed, (await job.GetTerminalResultAsync()).Status);
+    }
+
+    [Fact]
     public async Task RunnerLossRecoveryReminder_FailsAtPersistedDeadlineWithRecordedReason()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(

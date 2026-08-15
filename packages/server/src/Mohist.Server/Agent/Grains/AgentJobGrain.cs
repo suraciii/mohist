@@ -146,6 +146,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Unknown)
         {
+            if (await FailRecoveringJobIfDueAsync())
+                return;
+
             if (EnsureUnknownInitialTurnDelivery(State.FailureReason ?? AgentJobFailureReasons.RunnerUnavailable))
             {
                 await EnsureRecoveryReminderAsync();
@@ -352,6 +355,13 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     public async Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         await HydrateAsync();
+
+        // A late report cannot win the recovery-deadline race merely because
+        // the durable reminder has not executed yet. Terminalize the
+        // recovering job first, then return Stale so the reporter retires its
+        // journal entry.
+        if (await FailRecoveringJobIfDueAsync())
+            return new AgentJobReportResult(false, "stale");
 
         if (IsTerminal)
         {
@@ -1449,6 +1459,29 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             TimeSpan.FromMilliseconds(-1));
     }
 
+    private async Task<bool> FailRecoveringJobIfDueAsync()
+    {
+        if (State.Status != AgentJobStatus.Unknown
+            || State.RecoveryDeadlineAt is not { } deadline
+            || _timeProvider.GetUtcNow() < deadline)
+        {
+            return false;
+        }
+
+        var reason = State.FailureReason ?? AgentJobFailureReasons.RunnerLost;
+        await EnterTerminalStateAsync(
+            AgentJobStatus.Failed,
+            exitCode: 1,
+            failureReason: reason,
+            failureCategory: reason,
+            pendingReason: reason,
+            message: reason,
+            output: null,
+            artifactUploadIds: null,
+            terminalExitCode: 1);
+        return true;
+    }
+
     private async Task OnJobTimeoutAsync()
     {
         if (IsTerminal || State.RunnerId is null)
@@ -1937,22 +1970,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Unknown)
         {
-            if (State.RecoveryDeadlineAt is { } deadline
-                && _timeProvider.GetUtcNow() >= deadline)
-            {
-                var reason = State.FailureReason ?? AgentJobFailureReasons.RunnerLost;
-                await EnterTerminalStateAsync(
-                    AgentJobStatus.Failed,
-                    exitCode: 1,
-                    failureReason: reason,
-                    failureCategory: reason,
-                    pendingReason: reason,
-                    message: reason,
-                    output: null,
-                    artifactUploadIds: null,
-                    terminalExitCode: 1);
+            if (await FailRecoveringJobIfDueAsync())
                 return;
-            }
 
             if (State.PendingInitialTurnTerminalDelivery is { } pending)
                 await DeliverInitialTurnTerminalAsync(pending);
