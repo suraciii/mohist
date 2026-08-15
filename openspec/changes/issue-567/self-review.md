@@ -1,195 +1,141 @@
 # Self Review — Issue 567 (Runner 更新应中断并恢复活跃 Agent 工作)
 
-Reviewed: `proposal.md`, `design.md`, `tasks.json`, `recovery.md`, and all five
-`specs/` files, judged against the issue body (goals + four acceptance criteria)
-*before* re-reading the plan's own framing. Every factual claim about the
-current codebase was verified against live source (see "Verified codebase
-claims" below). This is a first review: full sweep.
+Re-review (round 2): the previous round FAILED on one must-fix (MF-1, the
+missing Server→Runner channel for the update-operation identity) plus six
+observations. Artifacts were revised in `0cd3dd634`, `c43a0a7b6`, `10553398e`;
+this round verifies those dispositions and checks the fixes for regressions
+rather than re-sweeping from scratch. Every claim added by the fix was
+verified against live source (details below).
 
 ## Verdict
 
-**FAIL** — one must-fix problem: the receipt protocol's triggering input (the
-update-operation identity and the update-interrupt fact) has no specified path
-from the Server to the Runner process.
+**PASS** — MF-1 is fixed properly, the observations' dispositions hold, and
+the fix introduced no regressions. The plan is ready to build.
 
-## Must-fix findings
+## Disposition verification
 
-### MF-1: No specified Server→Runner channel for the update-operation identity / update-interrupt fact
+### MF-1 (must-fix): Server→Runner channel for the update-operation identity — FIXED
 
-The plan's central mechanism is the `update-interrupted` receipt: the spec
-(`runtime-agent-recovery-receipt`) requires its payload to "name the update
-operation", D2 requires the `interrupted` journal entry to carry
-`updateOperationId`, and D3 has `RunnerHost` write receipts "referencing the
-update operation" at shutdown. Nothing in the design, tasks, or specs specifies
-how the Runner process obtains that identity — or how it learns that a given
-SIGTERM shutdown is update-caused at all (versus an ordinary service restart,
-which must not produce receipts).
+The fix specifies the full handoff the previous round demanded, consistently
+across all artifacts:
 
-The plan's only statement is T-003's note: *"The runner learns the update
-operation id from the T-001 confirmation response."* That response is the HTTP
-`RunnerUpdateInterruptResponse` returned by `POST /api/runner/{id}/update-interrupt`
-to the **CLI** (`RunnerRefreshVerifier.InterruptRunnerAsync`,
-`UpdateOperations.UpdateRunnerAsync`) — the Runner is never a party to that
-call. Verified in source: the Runner today has no awareness of the server-side
-drain/interrupt (the poll response carries dispatches only; no drain/interrupt
-knowledge exists anywhere under `packages/runner/src`), and the plan adds none —
-no SignalR push, poll-response field, or shutdown-time fetch is specified, even
-though suitable channels exist (`RunnerSessionStopDelivery`,
-`RunnerSessionCommandDispatcher`, the poll contract, or a bounded shutdown-time
-query).
+- **Channel.** A runner-authenticated, read-only pending-operation query
+  (`GET /api/runner/{id}/update-operation/pending`) owned by T-001 (description,
+  AC2, output, notes), consumed by T-003 at shutdown. The endpoint follows the
+  existing authenticated runner-GET pattern (`/config`,
+  `RunnerRoutes.cs:196`); nothing like it exists today, matching the gap.
+- **Payload.** Operation id, creation time, and the **affected-work
+  inventory** — the richer payload the previous round suggested — resolving
+  Obs-4 as a side effect.
+- **No-operation-known behavior.** Ordinary restart, unreachable Server
+  (e.g. a `full` update's just-restarted Server despite in-budget retries),
+  or expired handoff budget ⇒ no receipts, `started` fences stand, honest
+  unresolved. Stated identically in the new spec requirement, D3, the new
+  risk row, recovery.md's two new failure-rule rows, and T-003's ACs.
+- **Wrong topology statement removed.** T-003's notes now assert the
+  CLI's `/update-interrupt` confirmation response "is never a party to the
+  Runner process" — verified in source that `RunnerRefreshOutcome.cs:175` is
+  its sole caller and no runner-side channel carries update knowledge. The
+  only two remaining "confirmation response" mentions (design context,
+  T-003 notes) both state the correct CLI-only topology; nothing relies on
+  the response reaching the Runner.
+- **Specified behavior, not just mechanism.** New spec requirement "The
+  Runner learns the update-interrupt fact at shutdown" with four scenarios
+  (fetch / ordinary restart / unreachable / inventory-limits); the
+  prompt-stop requirement gained the bounded-handoff clause plus a
+  "shutdown handoff is bounded" scenario.
+- **Design rationale recorded.** D3 explains why a shutdown-time fetch beats
+  a SignalR push at fence creation (losable, needs a fetch fallback anyway)
+  or a poll-response field (missable via the 204-when-idle contract; caches
+  a fact a later unrelated restart could act on). The fetch is authoritative
+  at the decision moment and distinguishes update-caused from ordinary
+  shutdown by construction.
 
-**Why this is must-fix:** without the handoff, T-003 cannot emit a valid
-`update-interrupted` receipt, so T-004/T-005 replacement arbitration never
-fires for any work, and every managed update ends with all affected work
-unresolved via the no-receipt settlement-deadline backstop. That defeats the
-issue's core goal — "Runner 重连后，系统应依据持久化的工作事实恢复或重新投递这些工作"
-(work recovered or re-dispatched from persisted facts after reconnect) — and
-acceptance criterion 3 ("重连和 reconciliation 后工作能够继续执行或进入明确终态"):
-work would only ever reach the *terminal* half of that criterion, never the
-*continue-executing* half, in the normal path. The plan is therefore incomplete
-on a load-bearing mechanism, and its one pointer to a mechanism is factually
-wrong about the call topology. The fix is to specify the channel (e.g. a SignalR
-notification at fence creation, a poll-response field, or a bounded
-shutdown-time fetch of pending update operations for the runner's identity),
-what payload it carries (operation id and, ideally, the affected-work inventory
-— see Obs-4), and the no-operation-known behavior (no receipt, `started` fence
-stands, per the honesty rule).
+Grounding re-verified against live source: `RunnerUpdateInterruptResponse`
+(`RunnerRoutes.cs:98`) is grain-memory-only today with exactly the shape the
+plan extends; `WorkResultJournal` has only `started`/`completed`
+(`work-result-journal.ts:7`) so the `interrupted` state is additive; Pi's
+`stopConfirmed` (`session.abort()` + `isStreaming` watch,
+`pi/runtime.ts:301–327`) exists as described; SignalR dispatchers
+(`RunnerSessionStopDelivery`, `RunnerSessionCommandDispatcher`) exist as the
+context inventories them.
 
-## Per-dimension verdicts (first review, full sweep)
+### Observations 1–6 — dispositions hold
 
-### 1. Issue goals & acceptance criteria — checked, no issue in mapping
+- **Obs-1 (abandoned confirmed interrupt):** no action; the fix additionally
+  makes the stale-pending-operation hazard explicit and safe (inventory rule:
+  works an operation does not name get no receipts; arbitration remains the
+  authority for mismatches). If a stale operation *does* name a held work,
+  that work was already durably fenced at confirmation (D1), so a receipt
+  merely triggers the already-promised replacement — correct, not harmful.
+- **Obs-2 (non-Agent active work):** still out of scope, matching the issue's
+  Agent-work framing. Holds.
+- **Obs-3 (terminal-result receipt channel ambiguity):** unchanged; harmless
+  (both paths at-most-once). Holds.
+- **Obs-4 (fence inventory vs runner in-flight set):** resolved by the fix —
+  the handoff carries the inventory, and the spec's
+  "Receipts are limited to works the operation names" scenario plus T-003's
+  AC/test coverage (inventory not naming a held work) pin the rule.
+- **Obs-5 (T-002 interim retryable semantics):** unchanged, still explicitly
+  interim. Holds.
+- **Obs-6 (open questions):** appropriately scoped; the fix added the
+  handoff-budget constants to the open-questions list rather than inventing
+  values. Holds.
 
-Re-read the issue first. Goal→plan mapping is complete and explicit:
+## Regression check on the fix
 
-- 停止接收新工作 → admission closes at confirmation (landed `_draining` +
-  `runner-update-work-interruption` spec; server refuses claims/dispatch to the
-  draining Runner).
-- 立即转入可恢复中断状态 → durable `RunnerUpdateOperation` fence at
-  confirmation, synchronous per-owner marking, explicitly *not* via disconnect
-  observation or settlement timeout (D1, T-001, spec scenarios).
-- 尽快终止旧 Runner、启动新版本 → bounded cooperative stop; restart proceeds
-  when the budget expires; never waits for natural turn completion (D3, T-003,
-  "prompt stop" requirement + scenarios).
-- 重连后依据持久化事实恢复/重投递、保持身份与幂等 → receipts with frozen
-  binding, at-most-once arbitration, replacement delivery identity, journal
-  fencing, server-side redelivery suppression (T-002/T-003/T-004/T-006).
-- 用户看到中断中/恢复中/已恢复 → interrupting/interrupted → recovering →
-  recovered lifecycle in read models, DTOs, web (`agent-work-interruption-visibility`,
-  T-007).
-- 不再出现 `session.abort fetch failed` 式错误 → actionable stop-failure
-  states carrying update context (visibility spec, requirement 2).
-- 无法确认恢复时 CLI 明确报告、不宣称成功 → bounded recovery wait, per-work
-  recovered/unresolved listing, non-success exit (`runner-update-recovery-reporting`,
-  T-008).
+Adversarially probed the new text; each failure case holds:
 
-All four acceptance criteria are addressed (AC4's deterministic-test demand is
-an explicit per-task acceptance criterion, incl. the full
-active→interrupt→restart→reconnect→resume sequence and duplicate-delivery
-idempotence in T-006).
+- **Prompt-stop regression (AC1)?** The handoff is bounded, is part of the
+  bounded shutdown, and "SHALL NOT delay the restart" beyond its bound
+  (spec scenario + D3 + T-003 AC3). Total shutdown = handoff budget + stop
+  budget, both fixed. The update still never waits for natural turn
+  completion. No regression.
+- **Race: fetch before the operation exists?** The operation is persisted and
+  all markings committed *before* the route returns the confirmation that
+  authorizes restart (T-001 AC1/AC6), so the Runner's shutdown fetch always
+  lands after durability. No race.
+- **`full` update (Server restarts before Runner)?** The operation is durable
+  and storage-backed, so the just-restarted Server can answer; the handoff
+  budget includes brief retries; expiry degrades to honest-unresolved. Covered
+  by an explicit risk row and spec scenario.
+- **Chained updates?** "Most recent not-yet-settled" returns the newest
+  operation, which fences the replacement identities; D3 states this
+  explicitly.
+- **TOCTOU between fetch and receipt delivery?** Receipts carry the operation
+  id; arbitration re-validates against the durable operation at apply time
+  (D5), so a settled-in-between operation is resolved authoritatively.
+- **Cross-artifact consistency?** Spec format conforms
+  (`### Requirement` / `#### Scenario` WHEN-THEN-AND, matching sibling
+  changes); all eight task spec anchors resolve to real requirement headers;
+  the new requirement contradicts none of the existing seven in
+  `runtime-agent-recovery-receipt` (it supplies the source for the
+  operation-id naming that the payload requirement already required).
+- **Task graph?** `tasks.json` parses; the graph stays acyclic (T-003 now
+  legitimately depends on T-001 for the query and T-002 for the receipt
+  port); T-001's added query fits its existing scope and output.
 
-### 2. Coverage — checked, no issue
+## Pre-existing problems missed in round 1
 
-Every goal and acceptance criterion has a corresponding spec requirement,
-design decision, and task. No goal is left to implicit coverage. (MF-1 is a
-*mechanism* gap inside covered goals, not a missing goal; it is counted under
-correctness.)
-
-### 3. Correctness — one must-fix (MF-1); otherwise checked, no issue
-
-Adversarially probed the design's failure cases; each holds up:
-
-- Crash mid-marking: operation record persisted first, idempotent marking,
-  confirmation only after all markings commit (D1 risk item, T-001 AC5). Sound.
-- Unconfirmed interrupt changes nothing: matches the landed admission fence
-  (verified `ManagedRunnerInterruptSpecs`, `RunnerUpdateInterruptSpecs`).
-- Stop-unconfirmed / budget-expired / runtime-unreachable: no receipt, `started`
-  fence stands, work reported unresolved — honest-failure invariant is stated
-  consistently across design, specs, and T-003; cannot be manufactured from
-  idle observation or transcript text. Sound.
-- Duplicate receipts / redelivery: exact-duplicate no-op with same ack; journal
-  `begin` fence refuses replay per identity; `HasUnresolvedAgentResult()`
-  suppression ends only when the replacement settles; frozen original binding
-  blocks late old-turn settlement. Sound and consistent with the existing
-  `WorkResultJournal` and `AgentResultSettlement` semantics.
-- First rollout with pre-change old Runner: no receipts → fence stands, legacy
-  `agent-result-unconfirmed` backstop, safe degradation. Sound.
-- The one mechanism that cannot be assembled from the plan as written is the
-  Runner's knowledge of the operation id / update-caused shutdown → MF-1.
-
-### 4. Consistency with the current codebase — checked, no issue (MF-1's wrong
-pointer noted there)
-
-Verified codebase claims (all accurate):
-
-- `RunnerGrain.BeginUpdateInterruptAsync()` exists (drain + runtime-state
-  snapshot, `RunnerGrain.cs:338`); `POST /api/runner/{id}/update-interrupt`
-  exists with exactly the described response shape (`RunnerRoutes.cs:98`), and
-  is grain-memory-only today — the gap the plan describes is real.
-- CLI admission fence landed: `UpdateOperations.UpdateRunnerAsync` refuses
-  restart on unconfirmed interrupt; `ManagedRuntimeTransaction`,
-  `RunnerRefreshVerifier`, `UpdateOutcomeReporter`, `RunnerRefreshOutcome` all
-  exist as named.
-- `WorkResultJournal` (`started`/`completed`, retire-on-durable-ack,
-  `.mohist/runner-state/`) and `RunnerHost.executeAndTransition` persist-before-
-  first-report match the "already landed" claims; issue-570 is indeed the landed
-  returned-result slice.
-- `AgentResultSettlement` carries exactly the frozen binding fields listed
-  (TaskRunId/WorkId/RunnerId/AgentSessionId/AgentTurnId/Runtime/RuntimeSessionId)
-  with `AwaitingResult → Unknown → Blocked`; `WorkflowRun.HasUnresolvedAgentResult()`
-  suppresses redelivery; `WorkflowWorkLifecycle.ClaimWorkAsync` allocates work
-  identities; `AgentJobGrain` + `AgentJobStatus.Unknown` exist; `DispatchService`
-  redelivery/suppression and poll-reported work keys behave as T-006 assumes.
-- Pi adapter's `session.abort()` + `isStreaming` watch → first-class
-  `stopConfirmed` exists (`pi/runtime.ts` cancel); OpenCode lifecycle surface
-  exists. The `session.abort fetch failed` symptom maps to the abort-transport
-  failure path the visibility spec targets.
-- Spec format (`### Requirement` / `#### Scenario` WHEN-THEN), spec-test
-  conventions, deterministic test patterns (fakes, injectable time), and web
-  vitest + playwright browser tests all match repo conventions; task spec
-  anchors all resolve to real requirement headers.
-
-The single inconsistency: T-003's note points the Runner at a response only
-the CLI receives (folded into MF-1).
-
-### 5. Task breakdown — checked, no issue
-
-Eight tasks, dependency graph acyclic and sensible (T-006 correctly waits on
-runner receipts + both arbitration tasks; T-008 owns the full `npm run verify`
-gate). Every task has concrete, verifiable acceptance criteria including
-deterministic test requirements and the repo's real test gates. Slice order
-(durable fence → receipt port → runner journal → arbitration → resumption →
-visibility/reporting) is independently shippable as claimed, and T-002's
-interim "retryable response" for fence-matching receipts composes correctly
-with T-003-before-T-004 ordering.
+None found that meet the must-fix bar; the round-1 full sweep's per-dimension
+verdicts stand. The one candidate surfaced this round — the undefined
+"not-yet-settled" boundary for the pending-operation query — is new text from
+the fix (below), not a round-1 miss.
 
 ## Observations (non-blocking)
 
-1. **Abandoned confirmed interrupt.** If the interrupt is confirmed but the
-   restart then fails (or the operator aborts), admission stays draining
-   indefinitely — `CancelDrainAsync` exists on `IRunnerGrain` but no caller
-   invokes it — and marked work resolves only via the settlement-deadline
-   backstop. Pre-existing behavior carried forward; safe, but the
-   update-operation record might want an explicit abandoned/cancelled
-   disposition for the read model.
-2. **Non-Agent active work** (script/check tasks) interrupted by an update is
-   out of scope, matching the issue's Agent-work framing — but such work also
-   ends behind a `started` fence with the same unresolved consequences. Worth
-   a sentence in the proposal's non-goals; not required by this issue.
-3. **Terminal-result receipt channel ambiguity.** The spec supports reading
-   `terminal-result` receipts as riding either the new `/recovery-receipt`
-   endpoint or the existing `/report` acknowledgement path (T-002 implements
-   endpoint arbitration while its AC says "normal report acknowledgement
-   retires the Runner-local receipt"). Harmless — both are at-most-once — but
-   pinning one during implementation would avoid double-building.
-4. **Fence inventory vs runner in-flight set.** If the notification carries
-   only the operation id, the Runner may emit receipts for works the fence
-   doesn't name (server rejects terminally — safe but noisy). Carrying the
-   affected-work inventory in whatever channel MF-1 specifies resolves this
-   cheaply.
-5. **T-002 interim retryable semantics** disappear at T-004; tests should not
-   cement the retryable behavior as a permanent contract.
-6. **Open questions** (stop-budget and recovery-wait defaults, AgentJob input
-   envelope, recovery read-model endpoint location) are appropriately scoped
-   for implementation-time resolution and do not block the plan.
+1. **"Not yet fully settled" is not precisely defined** for the
+   pending-operation query (does CLI-reported-unresolved work settle an
+   operation? does a deadline-expired entry?). Safety properties do not
+   depend on the answer (inventory rule + arbitration authority make a stale
+   pending operation quiet), but implementation should pin the definition to
+   avoid a forever-pending operation causing pointless shutdown fetches.
+2. **T-001's spec-test AC list doesn't name the pending-operation query**
+   explicitly (AC7 lists fence scenarios); the query behavior is covered
+   end-to-end by T-003's handoff test AC (found / absent / unreachable /
+   inventory-miss) and AC2 is independently verifiable, but an explicit
+   server-side query test line in T-001 would make the split cleaner.
+3. Previous round's Obs-1/2/3/5/6 remain open as observations, unchanged in
+   substance.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
