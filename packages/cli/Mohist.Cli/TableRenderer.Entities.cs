@@ -125,35 +125,38 @@ internal sealed partial class TableRenderer
         if (!string.IsNullOrEmpty(instructions))
             _out.WriteLine($"instructions:        {Truncate(instructions, BodySoftCap)}");
 
-        // Server-authoritative Readiness (T-005): present the Server's
-        // conclusion verbatim, list gaps, and surface the single setup
-        // entry. Clients do not derive a second Readiness verdict here.
-        if (data["readiness"] is JsonObject readiness)
+        // Server-authoritative executability is rendered verbatim; the CLI
+        // never derives a second verdict from the definition or availability.
+        if (data["executability"] is JsonObject executability)
         {
-            var conclusion = StringOf(readiness, "conclusion");
-            if (!string.IsNullOrWhiteSpace(conclusion))
-                _out.WriteLine($"readiness:           {conclusion}");
-            if (readiness["gaps"] is JsonArray gapArray && gapArray.Count > 0)
+            var state = StringOf(executability, "state");
+            if (!string.IsNullOrWhiteSpace(state))
+                _out.WriteLine($"executability:       {state}");
+            if (executability["gaps"] is JsonArray gapArray && gapArray.Count > 0)
             {
-                _out.WriteLine("readiness gaps:");
+                _out.WriteLine("executability gaps:");
                 foreach (var gapNode in gapArray.OfType<JsonObject>())
                 {
                     var message = StringOf(gapNode, "message");
-                    var action = StringOf(gapNode, "action");
+                    var nextAction = StringOf(gapNode, "nextAction");
                     var first = !string.IsNullOrWhiteSpace(message) ? message : "(missing message)";
                     var line = $"  - {first}";
-                    if (!string.IsNullOrWhiteSpace(action))
-                        line += $" — {action}";
+                    if (!string.IsNullOrWhiteSpace(nextAction))
+                        line += $" - {nextAction}";
+                    if (gapNode["fixEntryPoint"] is JsonObject entryPoint)
+                    {
+                        var label = StringOf(entryPoint, "label");
+                        var path = StringOf(entryPoint, "path");
+                        var command = StringOf(entryPoint, "command");
+                        if (!string.IsNullOrWhiteSpace(label) || !string.IsNullOrWhiteSpace(path) || !string.IsNullOrWhiteSpace(command))
+                            line += $" (fix: {label} {path}; {command})";
+                    }
                     _out.WriteLine(line);
                 }
             }
-            if (readiness["setup"] is JsonObject setup)
-            {
-                var label = StringOf(setup, "label");
-                var path = StringOf(setup, "path");
-                if (!string.IsNullOrWhiteSpace(label) || !string.IsNullOrWhiteSpace(path))
-                    _out.WriteLine($"readiness setup:     {label} ({path})");
-            }
+            var pendingLaunchNote = StringOf(executability, "pendingLaunchNote");
+            if (!string.IsNullOrWhiteSpace(pendingLaunchNote))
+                _out.WriteLine($"pending launch:       {pendingLaunchNote}");
         }
     }
 

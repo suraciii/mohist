@@ -40,18 +40,19 @@ public sealed class AgentReadinessTests
     }
 
     [Theory]
-    [InlineData(AgentReadinessKind.NeedsSetup, false, "rejected")]
-    [InlineData(AgentReadinessKind.Unknown, true, "accepted")]
-    [InlineData(AgentReadinessKind.Ready, true, "accepted")]
-    public void DispatchPolicyMakesReadinessDecision(string readiness, bool accepted, string kind)
+    [InlineData(AgentExecutabilityStates.NotConfigured, false, "agent_not_configured")]
+    [InlineData(AgentExecutabilityStates.NotExecutable, false, "agent_not_executable")]
+    [InlineData(AgentExecutabilityStates.Unknown, true, "accepted")]
+    [InlineData(AgentExecutabilityStates.Executable, true, "accepted")]
+    public void DispatchPolicyMakesExecutabilityDecision(string executability, bool accepted, string kind)
     {
-        var decision = AgentConnectionDispatchDecision.For(readiness);
+        var decision = AgentConnectionDispatchDecision.For(executability);
 
         Assert.Equal(accepted, decision.Accepted);
         Assert.Equal(kind, decision.Kind);
-        if (readiness == AgentReadinessKind.NeedsSetup)
-            Assert.Contains("model", decision.Reason, StringComparison.OrdinalIgnoreCase);
-        if (readiness == AgentReadinessKind.Unknown)
+        if (executability == AgentExecutabilityStates.NotConfigured)
+            Assert.Contains("definition", decision.Reason, StringComparison.OrdinalIgnoreCase);
+        if (executability == AgentExecutabilityStates.Unknown)
             Assert.Contains("Runner", decision.Reason, StringComparison.Ordinal);
     }
 

@@ -6,6 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Api;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
@@ -25,7 +27,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
-    public async Task Launch_NeedsSetup_ReturnsGapsBeforeCreatingSessionOrJob()
+    public async Task Launch_NotConfigured_ReturnsGapsBeforeCreatingSessionOrJob()
     {
         var projectId = await CreateProjectAsync("launch-readiness-gate");
         using var created = await _fixture.Client.PostAsJsonAsync(
@@ -42,7 +44,8 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         using var view = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agentId}");
         var viewBody = await view.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("Needs setup", viewBody.GetProperty("data").GetProperty("readiness").GetProperty("conclusion").GetString());
+        var executability = viewBody.GetProperty("data").GetProperty("executability");
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, executability.GetProperty("state").GetString());
 
         var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
         var jobsBefore = await CountJobsAsync(projectId, agentId);
@@ -50,8 +53,48 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         using var launch = await LaunchAsync(projectId, agentId, new { prompt = "do it" });
         Assert.Equal(HttpStatusCode.Conflict, launch.StatusCode);
         var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("agent_needs_setup", launchBody.GetProperty("code").GetString());
+        Assert.Equal("agent_not_configured", launchBody.GetProperty("code").GetString());
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, launchBody.GetProperty("details").GetProperty("state").GetString());
         Assert.Contains("model-reference-malformed", launchBody.GetProperty("details").GetProperty("gaps").EnumerateArray().Select(g => g.GetProperty("code").GetString()));
+        Assert.Equal($"/agents/{agentId}", launchBody.GetProperty("details").GetProperty("gaps").EnumerateArray().First().GetProperty("fixEntryPoint").GetProperty("path").GetString());
+        Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
+        Assert.Equal(jobsBefore, await CountJobsAsync(projectId, agentId));
+        Assert.Equal(workspacesBefore, await CountWorkspacesAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Launch_NotExecutable_ReturnsExecutionFailureBeforeCreatingSessionOrJob()
+    {
+        var projectId = await CreateProjectAsync("launch-executability-gate");
+        using var created = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents",
+            new
+            {
+                name = "rejected-model-agent",
+                instructions = "run the task",
+                agentConfig = new { model = "openai/gpt-5.6", runtime = "pi" },
+            });
+        created.EnsureSuccessStatusCode();
+        var agentId = (await created.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetString()!;
+        await SeedFailedExecutionAsync(projectId, agentId, "run the task", "unauthorized");
+
+        using var view = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agentId}");
+        var viewBody = await view.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(
+            AgentExecutabilityStates.NotExecutable,
+            viewBody.GetProperty("data").GetProperty("executability").GetProperty("state").GetString());
+
+        var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
+        var jobsBefore = await CountJobsAsync(projectId, agentId);
+        var workspacesBefore = await CountWorkspacesAsync(projectId);
+        using var launch = await LaunchAsync(projectId, agentId, new { prompt = "do it" });
+
+        Assert.Equal(HttpStatusCode.Conflict, launch.StatusCode);
+        var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("agent_not_executable", launchBody.GetProperty("code").GetString());
+        Assert.Equal(AgentExecutabilityStates.NotExecutable, launchBody.GetProperty("details").GetProperty("state").GetString());
+        Assert.Contains("execution-config-failure", launchBody.GetProperty("details").GetProperty("gaps").EnumerateArray().Select(g => g.GetProperty("code").GetString()));
         Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
         Assert.Equal(jobsBefore, await CountJobsAsync(projectId, agentId));
         Assert.Equal(workspacesBefore, await CountWorkspacesAsync(projectId));
@@ -70,6 +113,47 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         await using var scope = _fixture.Services.CreateAsyncScope();
         var jobs = scope.ServiceProvider.GetRequiredService<AgentJobQuerier>();
         return (await jobs.ListByAgentAsync(projectId, agentId, limit: 200)).Count;
+    }
+
+    private async Task SeedFailedExecutionAsync(string projectId, string agentId, string instructions, string failureCategory)
+    {
+        var terminalAt = _fixture.TimeProvider.GetUtcNow();
+        var jobKey = $"launch-executability-{Guid.NewGuid():N}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        db.AgentJobs.Add(new AgentJobRow
+        {
+            JobKey = jobKey,
+            State = JSON.Serialize(new AgentJobState
+            {
+                Status = AgentJobStatus.Failed,
+                SubmittedAt = terminalAt,
+                TerminalAt = terminalAt,
+                Input = new AgentJobInput(
+                    "previous execution",
+                    Model: "openai/gpt-5.6",
+                    ProjectId: projectId,
+                    Runtime: "pi",
+                    AgentId: agentId,
+                    AgentInstructions: instructions,
+                    Skills: []),
+                PendingSessionClose = new PendingSessionClose(
+                    $"agent-job:{jobKey}:terminal",
+                    AgentJobStatus.Failed.ToString(),
+                    1,
+                    failureCategory,
+                    failureCategory,
+                    terminalAt),
+            }),
+            ProjectId = projectId,
+            AgentId = agentId,
+            Status = AgentJobStatus.Failed.ToString().ToLowerInvariant(),
+            SubmittedAt = terminalAt.ToString("O"),
+            TerminalAt = terminalAt.ToString("O"),
+            LaunchVisibility = "visible",
+        });
+        await db.SaveChangesAsync();
     }
 
     [Fact]

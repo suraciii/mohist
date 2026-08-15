@@ -1289,8 +1289,9 @@ public static class SlackConnectionRoutes
         if (agent is null)
             return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
 
-        var dispatchDecision = AgentConnectionDispatchDecision.For(
-            AgentReadinessDeriver.Derive(agent.AgentConfig));
+        var executability = await req.Services.GetRequiredService<AgentReadinessService>()
+            .GetAsync(projectId, agent, ct);
+        var dispatchDecision = AgentConnectionDispatchDecision.For(executability.State);
         if (!dispatchDecision.Accepted)
         {
             await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
@@ -1893,8 +1894,9 @@ public static class SlackConnectionRoutes
         if (agent is null)
             return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
 
-        var dispatchDecision = AgentConnectionDispatchDecision.For(
-            AgentReadinessDeriver.Derive(agent.AgentConfig));
+        var executability = await req.Services.GetRequiredService<AgentReadinessService>()
+            .GetAsync(projectId, agent, ct);
+        var dispatchDecision = AgentConnectionDispatchDecision.For(executability.State);
         if (!dispatchDecision.Accepted)
         {
             await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,

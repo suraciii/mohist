@@ -16,7 +16,7 @@ internal sealed record ResourceDescriptor(
 internal static class ResourceOutputCatalog
 {
     private static readonly IReadOnlyList<string> AgentFields =
-        ["id", "projectId", "name", "avatar", "description", "instructions", "agentConfig", "skills", "allowedSubagentAgentIds", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "readiness"];
+        ["id", "projectId", "name", "avatar", "description", "instructions", "agentConfig", "skills", "allowedSubagentAgentIds", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "executability"];
 
     public static ResourceDescriptor For(string? tableShape)
     {
@@ -119,7 +119,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.WorkflowProfileDetail => ["projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource", "agentAction", "agentRuntime", "stages"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "projectId", "name", "position", "match", "agentId", "responsePrompt", "continue", "status", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.AgentSubscription => ["id", "projectId", "agentId", "name", "match", "responsePrompt", "continue", "position", "status", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.AgentSubscriptionList => ["subscriptions", "state", "agentStatus", "readiness", "connection"],
+            MohistCliApi.TableShape.AgentSubscriptionList => ["subscriptions", "state", "agentStatus", "executability", "connection"],
             MohistCliApi.TableShape.WebhookSubscription or MohistCliApi.TableShape.WebhookSubscriptionList =>
                 ["id", "projectId", "name", "match", "targetUrl", "status", "eventSelectionMode", "eventTypes", "authType", "hasSecret", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.WebhookDeliveryFailureList =>

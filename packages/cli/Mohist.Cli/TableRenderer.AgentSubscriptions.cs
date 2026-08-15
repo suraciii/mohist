@@ -14,7 +14,7 @@ internal sealed partial class TableRenderer
 
         _out.WriteLine($"state: {StringOf(envelope, "state")}");
         _out.WriteLine($"agent status: {StringOf(envelope, "agentStatus")}");
-        _out.WriteLine($"readiness: {StringOf(envelope, "readiness")}");
+        _out.WriteLine($"executability: {StringOf(envelope, "executability")}");
         _out.WriteLine($"connection: {StringOf(envelope, "connection")}");
         var rows = envelope["subscriptions"] as JsonArray;
         if (rows is null || rows.Count == 0)
