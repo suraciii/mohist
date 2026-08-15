@@ -1,0 +1,138 @@
+{
+  "project": "mohist-local",
+  "description": "Complete the Workflow-to-Agent handoff path: materialize the reserved AgentJob/AgentSession lineage from an accepted receipt, execute through shared AgentJob admission, deliver the terminal over typed transport, finalize Workflow completion effects with receipts, cut mohist/agent dispatches over, and expose one stable invocation status and lineage on both surfaces.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Materialize the reserved AgentJob and AgentSession lineage from an accepted handoff",
+      "spec": "specs/workflow-agent-action/spec.md#idempotent-activation-materializes-the-reserved-lineage",
+      "description": "Extend the delivered handoff fence with idempotent activation. Freeze the resolved AgentId, AgentName, task-level Expect, logical SessionName, and workspace identity next to the execution definition at first preflight (fingerprint extended over the added rendered facts). Add an ActivateAsync command and a durable activation step machine on WorkflowAgentHandoffGrain — PrepareJob via AgentJobGrain.PrepareManualLaunchAsync, EnsureInitialLaunch via AgentSessionGrain.EnsureInitialLaunchAsync, SubmitJob via SubmitPreparedLaunchAsync — under the minted identifiers and the frozen definition, with a recovery reminder and a participant-probe seam. Add the positive WorkflowInvocation discriminator to AgentJobInput. Inert until the cutover task calls it.",
+      "acceptanceCriteria": [
+        "First prepare freezes AgentId, AgentName, task Expect, SessionName, and resolved workspace identity alongside the execution definition, and the canonical fingerprint covers every added rendered fact; a conflicting re-render is rejected as a conflict without mutating the stored plan, invocation, or rejection (grain spec).",
+        "ActivateAsync on an accepted receipt runs PrepareJob → EnsureInitialLaunch → SubmitJob in order and ends in a terminal Activated disposition; replayed activation of an Activated plan is a no-op returning the same invocation.",
+        "Crash or acknowledgement loss after any durable participant write (simulated via the participant probe) resumes from the persisted activation cursor and reuses the exact AgentJob, AgentSession, first SessionInput, and first AgentTurn without duplicates, replacement work, or a second execution (grain specs per step).",
+        "Activation uses only minted identifiers and the frozen definition: editing the Agent definition after acceptance does not change the activated execution, and activation never re-reads mutable Agent configuration (grain spec).",
+        "Prepared and Rejected plans never materialize: Prepared stays unactivated, Rejected replays its frozen rejection, and neither creates an AgentJob, AgentSession, SessionInput, AgentTurn, or Runner work (grain spec).",
+        "AgentJobInput carries the workflow discriminator (invocation id, task run id, work id) distinguishing handoff jobs from direct and routed launches, and it introduces no branch in admission or execution.",
+        "Relevant Server grain specs and `npm run test:fast` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended frozen plan shape, ActivateAsync step machine with recovery reminder and probe seam, pre-minted participant materialization, workflow discriminator on AgentJobInput, and passing idempotency/replay grain specs.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1–D3. Mirror AgentLaunchCoordinatorGrain's durable step machine and participant probe; keep the job Visible (no provisional-launch step — a handoff has no parent link or approval gate). Extending the delivered record shape is a compatible edit because nothing calls the fence yet."
+    },
+    {
+      "id": "T-002",
+      "title": "Execute workflow-originated AgentJobs through shared admission with the declared deadline",
+      "spec": "specs/workflow-agent-action/spec.md#shared-agentjob-admission-and-scheduling",
+      "description": "Make a workflow-originated AgentJob execute through the unchanged admission boundary — shared Agent readiness, workspace resolution, per-Agent concurrency permits, and Runner claim through the existing agent-job ledger poll — and give it a per-invocation deadline: the frozen TimeoutMilliseconds becomes an AgentJobInput deadline that ArmJobTimeout honors over the global JobTimeout backstop, defaulting to the runtime action default (3600000 ms) matching inline mohist/opencode/mohist/pi semantics. No second queue, scheduler, or Runner-process control.",
+      "acceptanceCriteria": [
+        "A workflow-originated job for an Agent already at its concurrency limit from other launches waits under the same per-Agent permit gate and is later admitted through the same path as a direct launch (grain spec with fake time).",
+        "With no eligible Runner online, the job remains admitted-but-waiting with its waiting reason and the Workflow task is not independently failed by the wait (grain spec).",
+        "An eligible Runner claims the workflow-originated job through the existing claim path (RunnerGrain.TryClaimAgentJobAsync / dispatch agent-job ledger poll), and the dispatch carries the AgentJob owner kind together with the workflow lineage and frozen expect (claim/dispatch specs).",
+        "A per-invocation deadline overrides the global AgentJobOptions.JobTimeout backstop in ArmJobTimeout when present: omitted timeout defaults to 60 minutes matching inline actions, and an explicit short timeout bounds the execution exactly as declared (grain specs with injected time).",
+        "Direct launches keep the existing global backstop and admission behavior unchanged (existing admission specs pass unchanged).",
+        "Relevant Server grain/claim specs and `npm run test:fast` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Per-invocation deadline on AgentJobInput honored by ArmJobTimeout, verified shared concurrency/claim behavior for workflow-originated jobs, and passing admission grain specs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D4; resolves open question O2 in favor of the action default (60 min) for parity with inline semantics. Tests may drive jobs directly through the manual-launch entry points with the discriminator where activation is not needed."
+    },
+    {
+      "id": "T-003",
+      "title": "Deliver the AgentJob terminal over typed transport with boundary completion evaluation",
+      "spec": "specs/workflow-agent-action/spec.md#typed-terminal-transport",
+      "description": "Stage a durable PendingWorkflowTerminalDelivery obligation in AgentJobState.EnterTerminalStateAsync only for jobs carrying the workflow discriminator, and emit it as a new com.mohist.agent.job.workflow-terminal CloudEvent with stable event id workflow-terminal:{jobKey} and a typed payload: invocation identity (invocation/project/workflow run/task run/work id + job/session/input/turn ids), terminal facts (status, output, failure reason/category, exit code, artifact upload ids), the completion evaluation, and a timestamp. The Runner's agent-job executor evaluates the frozen expect against the workspace after the agent turn settles (reusing evaluateCompletion) and reports the typed evaluation alongside the agent result via the existing WorkDispatch.Expect field; the AgentJob recovery reminder retries emission until the event-store append succeeds. Agent facts never ride the Workflow task-report endpoint.",
+      "acceptanceCriteria": [
+        "EnterTerminalStateAsync stages the terminal-delivery obligation only when the input carries the workflow discriminator; direct and routed launches stage nothing extra (grain spec).",
+        "The event carries the full invocation identity, terminal facts, completion evaluation, and timestamp under the stable event id, and the recovery reminder retries after a simulated append failure and clears the obligation exactly once (grain specs with failure injection).",
+        "The agent-job executor evaluates the frozen expect after the agent turn settles and reports satisfied / matched promise / missing files / failIf matches / message as typed facts alongside the agent result; the AgentJob terminal verdict stays Completed even when the Workflow expectation is unsatisfied (Runner tests).",
+        "The frozen expect reaches the Runner through the existing WorkDispatch.Expect field and no Workflow task-report payload encodes agent execution facts (Runner and Server tests).",
+        "Duplicate or lost terminal emission resolves against the same event identity without a second outcome-shaping append (grain/event specs).",
+        "Relevant Runner and Server tests plus `npm run test:fast` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Terminal-delivery obligation, workflow-terminal event type with stable id and typed payload, runner-side expect evaluation on agent-job dispatch, and passing emission/replay specs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D5+D6, mirroring the subagent-terminal obligation and delivery pattern. The path stays dark until the cutover task because only discriminator-carrying jobs stage the obligation; the consuming finalizer handler lands in T-004."
+    },
+    {
+      "id": "T-004",
+      "title": "Finalize Workflow completion effects from the AgentJob terminal with receipts",
+      "spec": "specs/workflow-agent-action/spec.md#workflow-owned-completion-finalization-with-receipts",
+      "description": "Add WorkflowGrain.SettleAgentInvocationAsync, invoked by the workflow-terminal subscription handler and by run reconciliation. It validates the attempt through reportable-work lookup, then applies effects in the inline executor's order — artifact binding via the shared pending-upload service, settlement (ApplyTaskReportAsync for success; the domain FailTask path for failure or unsatisfied expectation with the inline expectation-failed code and message), setVars extraction and application, advancement — guarded by a durable AgentInvocationSettlement receipt on the TaskRun with per-effect flags and a frozen terminal snapshot. An own reconcile reminder resumes interrupted settlements; StopAsync cascades cancellation to the running invocation's AgentJob.",
+      "acceptanceCriteria": [
+        "A completed AgentJob terminal completes the Workflow task exactly once: job output applied, expect decision enforced (unsatisfied evaluation fails the task with the same expectation-failed code and message the inline path produces; the matched promise projects into output.promise), artifacts bound and recorded, setVars applied, and advancement happens exactly once for that attempt (grain spec).",
+        "A failed AgentJob terminal follows the normal Workflow failure semantics: recovery handler when-matching decides under the remaining recovery budget (grain specs for retry/recovery decisions).",
+        "A duplicate terminal delivery is acknowledged as already-applied from the receipt without reapplying artifacts, variables, task outcome, or advancement (grain spec invoking the handler twice, including dead-letter redelivery).",
+        "Interruption after receipt persistence but before later effects (failure injected per effect) resumes from the recorded flags via the finalizer reconcile reminder and completes the remaining effects exactly once (grain specs with fake time).",
+        "A stale terminal for an attempt that is no longer reportable (task already terminal, run stopped or deleted) is acknowledged without applying effects (grain spec).",
+        "StopAsync cancels the running handoff invocation's AgentJob through CancelAsync and the cancelled terminal settles under the existing stop semantics; inline mohist/opencode/mohist/pi settlement is unchanged (grain specs).",
+        "A spec asserts the same task outcome for an inline task and a handoff task given the same terminal facts, proving the two settlement paths converge on the same domain calls.",
+        "Relevant Server tests and `npm run test:fast` pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SettleAgentInvocationAsync command, durable per-effect settlement receipts, finalizer reconcile reminder, stop cascade, idempotent workflow-terminal subscription handler, and passing settlement specs.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Design D7; the agent-result-settlement reminder shows the reconcile pattern. Coordinate with the issue-589 AgentResultSettlement model: handoff tasks produce no Runner task report, so they must not create an inline-style agent-result settlement. Workflow advancement never leaves the Workflow grain; the AgentJob applies no task effect."
+    },
+    {
+      "id": "T-005",
+      "title": "Cut new mohist/agent dispatches over to the handoff path with persisted linkage",
+      "spec": "specs/workflow-agent-action/spec.md#mohistagent-dispatch-cutover-with-an-unchanged-input-contract",
+      "description": "Switch WorkflowItemTranslator.ResolveAgentTaskAsync from the inline rewrite to the handoff: render the command from the persisted with-input, drive Prepare → Accept → Activate on the handoff grain, and return a delegated outcome instead of a WorkDispatch. Durable rejections surface as the same WorkflowDispatchRejectedException codes the inline path throws. Persist the immutable invocation linkage (invocation id + minted Job/Session/Input/Turn ids) on the TaskRun in the same claim-time write, mark the delegated running task agent-owned so BuildRuntimeStateAsync suppresses its workflow projection, and stamp the reciprocal lineage labels on the AgentSession at materialization. Task input (name, prompt, session, timeout) is unchanged.",
+      "acceptanceCriteria": [
+        "A new mohist/agent task dispatches through durable handoff admission and AgentJob activation; it is no longer rewritten to an inline mohist/opencode or mohist/pi TaskRun execution, no Workflow dispatch snapshot is stored, and the runner's agent-job ledger poll claims the job (translator + grain specs).",
+        "The task input contract is unchanged: name resolves the Agent by the shared resolution order, prompt is the execution input, session names the logical session defaulting to the work id, and timeout bounds the execution; profile save and validation still require only name and prompt without checking whether the Agent exists (specs).",
+        "Invalid input keeps its existing rejections: missing non-empty name or prompt, non-positive timeout, or check usage fail with the existing invalid-input and task-only errors, re-validated by the durable preflight (translator + grain specs).",
+        "A durable rejection surfaces as the same WorkflowDispatchRejectedException with the same codes (agent_not_found, invalid_agent_input), preserving dispatch-rejection and task-failure behavior (translator specs).",
+        "The TaskRun persists the immutable invocation linkage at handoff time in the same claim-time write, and a replayed dispatch reuses it without duplication.",
+        "A delegated running task is marked agent-owned so BuildRuntimeStateAsync suppresses its workflow projection; the AgentJob is the single active-work entry and slot counts are not double-counted (grain/spec tests).",
+        "Stopping the run cancels the activated AgentJob through the linkage and the task settles under stop semantics; already-dispatched inline attempts finish on the inline path (grain specs).",
+        "An end-to-end Server spec covers dispatch → activation → terminal → finalized task with expect, artifacts, and setVars matching the T-004 outcome contract.",
+        "Relevant Server tests and `npm run test:fast` pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Handoff-driven translator path with delegated dispatch outcome, TaskRun invocation linkage, agent-owned runtime-view suppression, stop cascade wiring, and passing cutover/end-to-end specs.",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Design D8 + the persistence half of D9. Make the switch only here — activation participants, transport, and finalizer must all exist so no handoff work is dispatched without an owner for its completion effects. Resolve open question O1 (named-session continuation) before this task and document the answer; the spec freezes per-attempt lineage."
+    },
+    {
+      "id": "T-006",
+      "title": "Expose stable invocation status and cross-surface lineage; document and lock sibling paths",
+      "spec": "specs/workflow-agent-action/spec.md#stable-invocation-status-and-cross-surface-lineage",
+      "description": "Derive the stable invocation status (queued, executing, completed, failed, cancelled, recovering) from the authoritative AgentJob ledger, receipts, and task state — never a stored mirror — and expose it with the minted Job/Session/Input/Turn identifiers and the final result on Workflow read surfaces, while Agent/Session read surfaces resolve the owning WorkflowRun and TaskRun through the reciprocal lineage labels. Update docs for the BREAKING cutover and freeze semantics, and lock sibling-path regressions. This task owns the full npm run verify gate.",
+      "acceptanceCriteria": [
+        "The status mapping is verified for every condition: admitted-but-not-claimed (including permit and runner waiting reasons) → queued; claimed and running, and AgentJob Unknown non-terminal → executing; terminal Completed/Failed/Cancelled → completed/failed/cancelled; failed terminal with a pending or applying recovery decision → recovering (read-model specs with fake time).",
+        "Workflow read surfaces expose the invocation status, the minted AgentJob/AgentSession/SessionInput/AgentTurn identifiers, and the final result once terminal, without reading runtime transcript content (API/read-model tests).",
+        "Agent/Session read surfaces locate the owning WorkflowRun and TaskRun through the lineage labels, and both surfaces resolve to one execution identity (read-model tests).",
+        "Sibling regressions are locked: direct Agent launches (Web UI, CLI, event routing, connections) and inline mohist/opencode / mohist/pi tasks keep their existing execution semantics, admission, and identifiers (existing suites pass, extended where needed).",
+        "Docs are updated: docs/actions/agent.md, docs/agent-sessions.md (\"Two Invocation Paths\"), and design/agent-execution.md ownership paths document the delegation, the BREAKING identifier/status contract, post-acceptance freeze semantics, and the resolved named-session answer.",
+        "Full `npm run verify` passes."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Derived invocation-status projection and identifiers on Workflow and Agent/Session read surfaces, reciprocal lineage exposure, updated docs, sibling-path regression coverage, and a green full verification gate.",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Design D9 derivation table plus the runtime-view and drift risks. Open questions O3 (read-surface placement) and O4 (Unknown mapping, current proposal: executing while not terminal) are settled here by the specs this task exercises."
+    }
+  ]
+}
