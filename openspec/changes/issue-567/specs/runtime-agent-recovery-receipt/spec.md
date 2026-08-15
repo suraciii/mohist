@@ -31,6 +31,20 @@ the receipt against the current Workflow settlement before applying it.
   task outcome or replacement dispatch
 - **AND** the Workflow SHALL retain its existing unresolved recovery state
 
+#### Scenario: Host abort occurs before a terminal result exists
+
+- **WHEN** the run-lifetime signal aborts while the Action has not returned a
+  normalized `WorkItemResult`
+- **THEN** the Runner SHALL leave the dispatch in the durable `started` state
+  without sending a result report
+- **AND** a restarted Runner SHALL refuse the same dispatch at the journal
+  fence and SHALL NOT execute it again
+
+This addendum distinguishes an abort after a returned result, which is safely
+completed and redelivered, from an abort that has no terminal receipt. The
+latter remains unresolved even when the Action threw because cancellation,
+process loss, and OOM do not prove that no physical effect occurred.
+
 ### Requirement: Confirmed update interruption creates a distinct attempt
 
 A confirmed update interruption SHALL be a physical-stop fact rather than a

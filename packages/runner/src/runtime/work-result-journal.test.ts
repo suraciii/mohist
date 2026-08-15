@@ -97,4 +97,25 @@ describe('WorkResultJournal', () => {
       { fileSystem },
     )
   })
+
+  it('KeepsTheStartedFenceAfterCompletionPersistenceFails', async () => {
+    const fileSystem = new FailingWriteFileSystem()
+    await withTestRunnerResources(
+      async () => {
+        const journal = new WorkResultJournal('/runner')
+        await journal.load()
+        await journal.begin(work)
+        fileSystem.failWrites = true
+
+        await expect(journal.complete(work, result)).rejects.toThrow('disk full')
+
+        fileSystem.failWrites = false
+        const restarted = new WorkResultJournal('/runner')
+        await restarted.load()
+        expect(restarted.completed()).toEqual([])
+        expect(await restarted.begin(work)).toBe('started')
+      },
+      { fileSystem },
+    )
+  })
 })

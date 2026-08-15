@@ -343,6 +343,94 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('AbortBeforeReturnedResult_LeavesStartedFenceWithoutReportingOrReplaying', async () => {
+    const executionStarted = deferred<void>()
+    const redeliveryPolled = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-abort-before-result',
+      workId: 'work-abort-before-result',
+      taskRunId: 'task-abort-before-result',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    let executions = 0
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (_work, signal, collector) => {
+        executions += 1
+        executionStarted.resolve()
+        await new Promise<never>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(new Error('execution aborted before a terminal result'))
+            return
+          }
+          signal.addEventListener('abort', () => reject(new Error('execution aborted before a terminal result')), {
+            once: true,
+          })
+        })
+        return { result: { status: 'failed' as const }, collector: collector! }
+      })
+
+    let pollCount = 0
+    poll.mockImplementation(async () => {
+      pollCount += 1
+      if (pollCount === 1) return [work]
+      if (pollCount === 2) {
+        redeliveryPolled.resolve()
+        return [work]
+      }
+      return []
+    })
+
+    const firstController = new AbortController()
+    const firstHost = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const firstRun = firstHost.run(firstController.signal)
+    let secondRun: { controller: AbortController; run: Promise<void> } | null = null
+
+    try {
+      await executionStarted.promise
+      firstController.abort()
+      await expect(firstRun).resolves.toBeUndefined()
+
+      expect(report).not.toHaveBeenCalled()
+      const fenced = new WorkResultJournal('/virtual/mohist-runner-test')
+      await fenced.load()
+      expect(fenced.completed()).toEqual([])
+      expect(await fenced.begin(work)).toBe('started')
+
+      const secondController = new AbortController()
+      const secondHost = new RunnerHost({
+        serverUrl: 'https://runner.test',
+        runnerId: 'runner-test',
+        projectId: 'project-1',
+        runnerRoot: '/virtual/mohist-runner-test',
+        pollIntervalMs: QUIET_INTERVAL_MS,
+        heartbeatIntervalMs: QUIET_INTERVAL_MS,
+        dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+      })
+      secondRun = { controller: secondController, run: secondHost.run(secondController.signal) }
+      await redeliveryPolled.promise
+      expect(executions).toBe(1)
+      expect(report).not.toHaveBeenCalled()
+    } finally {
+      firstController.abort()
+      await firstRun.catch(() => undefined)
+      secondRun?.controller.abort()
+      await secondRun?.run.catch(() => undefined)
+      executeWithLog.mockRestore()
+    }
+  })
+
   it('PollBody_CarriesInFlightAndAwaitingAck_Keys', async () => {
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()
