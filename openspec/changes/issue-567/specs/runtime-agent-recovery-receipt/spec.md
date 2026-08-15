@@ -41,6 +41,45 @@ Each receipt SHALL carry an immutable identity — the frozen Workflow execution
 - **THEN** the Runner SHALL NOT write an `update-interrupted` receipt for that turn
 - **AND** the existing unresolved fence SHALL be preserved with no inference
 
+### Requirement: The Runner learns the update-interrupt fact at shutdown
+
+An `update-interrupted` receipt SHALL reference an update operation obtained
+from the Server through a bounded shutdown handoff. When the Runner begins
+shutdown with in-flight work, it SHALL query the Server, within a fixed small
+budget that is part of the bounded shutdown, for the most recent update
+operation naming its Runner identity that is not yet fully settled. A query
+that returns an operation SHALL carry the update-operation identity, its
+creation time, and its affected-work inventory; the Runner SHALL write
+`update-interrupted` receipts only for in-flight works that the returned
+inventory names. A shutdown for which no pending operation is known — an
+ordinary service restart, an unreachable Server, or an expired handoff budget
+— MUST NOT produce any `update-interrupted` receipt: in-flight works keep
+their `started` fences and are reported unresolved.
+
+#### Scenario: Update-caused shutdown obtains the pending operation
+
+- **WHEN** the Runner shuts down while it holds in-flight work and the Server has a pending update operation naming that Runner's identity
+- **THEN** the shutdown handoff SHALL return that operation's identity, creation time, and affected-work inventory within its bounded budget
+- **AND** receipts for held in-flight works the inventory names SHALL reference that operation identity
+
+#### Scenario: Ordinary service restart produces no receipts
+
+- **WHEN** the Runner shuts down and the handoff finds no pending update operation for its identity
+- **THEN** the Runner SHALL NOT write any `update-interrupted` receipt
+- **AND** in-flight works SHALL keep their `started` fences with no re-execution
+
+#### Scenario: Handoff cannot reach the Server in time
+
+- **WHEN** the handoff query fails, or the Server cannot answer before the handoff budget expires
+- **THEN** the Runner SHALL write no `update-interrupted` receipts
+- **AND** the `started` fences SHALL stand and the affected work SHALL be reported unresolved
+
+#### Scenario: Receipts are limited to works the operation names
+
+- **WHEN** the pending operation's inventory does not name a work the Runner holds in flight at shutdown
+- **THEN** the Runner SHALL NOT write an `update-interrupted` receipt for that work
+- **AND** that work SHALL keep its `started` fence and resolve through existing unresolved-result handling
+
 ### Requirement: The Runner retries the exact receipt until the Server acknowledges it
 
 A receipt delivery failure SHALL retain the receipt unchanged, and the Runner SHALL retry delivery of the same receipt id and payload until the Server acknowledges it. The Runner SHALL retire its local receipt only after that durable acknowledgement, and a restart SHALL reload unacknowledged receipts and continue replaying them without re-executing the work.

@@ -50,7 +50,7 @@ When the Server confirms a Runner update interrupt, it SHALL durably create a Se
 
 ### Requirement: The update stops the old Runner promptly without waiting for Agent turns to finish
 
-A confirmed update interrupt SHALL stop Runner admission immediately: from confirmation until shutdown the old Runner MUST NOT claim or begin new work. The update flow SHALL stop the old Runner through a bounded cooperative interruption of in-flight Agent work; it MUST NOT wait for long-running Agent turns to complete naturally before the service restart, and the restart SHALL NOT be delayed by the remaining duration of an interrupted turn.
+A confirmed update interrupt SHALL stop Runner admission immediately: from confirmation until shutdown the old Runner MUST NOT claim or begin new work. The update flow SHALL stop the old Runner through a bounded cooperative interruption of in-flight Agent work; it MUST NOT wait for long-running Agent turns to complete naturally before the service restart, and the restart SHALL NOT be delayed by the remaining duration of an interrupted turn. The bounded shutdown SHALL include a bounded handoff through which the old Runner learns of a pending update operation; a handoff that does not complete within its bound SHALL NOT delay the restart.
 
 #### Scenario: Admission closes at confirmation
 
@@ -63,3 +63,9 @@ A confirmed update interrupt SHALL stop Runner admission immediately: from confi
 - **WHEN** an in-flight Agent turn would otherwise continue executing for a long time
 - **THEN** the update SHALL bound the old Runner's shutdown through cooperative interruption of that turn
 - **AND** the Runner service restart SHALL proceed without waiting for the turn to finish naturally
+
+#### Scenario: The shutdown handoff is bounded
+
+- **WHEN** the old Runner cannot obtain the pending update operation from the Server within the handoff budget during shutdown
+- **THEN** the Runner service restart SHALL proceed without waiting beyond the bounded shutdown
+- **AND** the affected in-flight work SHALL keep its unresolved `started` fence instead of blocking the restart

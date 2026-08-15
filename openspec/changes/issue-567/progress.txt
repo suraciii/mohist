@@ -1,0 +1,58 @@
+# Progress — self-review must-fix disposal (issue-567)
+
+## Findings under disposal
+
+- MF-1 (must-fix): no specified Server→Runner channel for the
+  update-operation identity / update-interrupt fact. T-003's note pointed at
+  the T-001 confirmation response, which only the CLI receives.
+- Observations 1–6: no action required (Obs-4 is resolved as a side effect of
+  the MF-1 fix: the handoff payload carries the affected-work inventory).
+
+## MF-1 disposition: FIXED via bounded shutdown-time pending-operation handoff
+
+Channel decision (grounded in live source):
+
+- The CLI is the sole party to `POST /api/runner/{id}/update-interrupt`
+  (`RunnerRefreshVerifier.InterruptRunnerAsync`); the Runner never sees that
+  response. Confirmed.
+- Available channels: SignalR hub invocations (`CancelAgentSession`,
+  `SessionCommand` via `RunnerHub`), the `/poll` contract (dispatches only,
+  204 when idle), dedicated runner HTTP GETs (`/config`, machine-credential
+  auth). None carries update/drain knowledge to the Runner today.
+- Chosen: a bounded shutdown-time fetch (e.g.
+  `GET /api/runner/{id}/update-operation/pending`) returning the runner's most
+  recent not-yet-settled update operation: id, creation time, affected-work
+  inventory. Runs only when in-flight work exists; own small budget with brief
+  retries (a `full` update restarts the Server before the Runner, so the new
+  Server may still be booting); completes before the cooperative stop.
+- Why not push-at-fence-creation / poll-field: push can be lost (reconnecting
+  runner) and would need a fetch fallback anyway; poll field can be missed
+  (204-when-idle, stop can beat next poll) and caches a fact a later unrelated
+  restart could act on. The fetch is authoritative at the decision moment,
+  distinguishes update-caused vs ordinary restart by construction, and needs
+  no new runner-side durability.
+- No-operation-known behavior: no receipts, `started` fence stands, honest
+  unresolved (same honesty rule as stop-unconfirmed).
+- Inventory rule: receipts only for in-flight works the returned operation
+  names (stale pending operations from abandoned updates stay safe/noise-free;
+  arbitration remains the authority for mismatches).
+
+## Edit checklist
+
+- [x] progress.txt created (this file)
+- [x] specs/runtime-agent-recovery-receipt: new requirement "The Runner learns
+      the update-interrupt fact at shutdown" (4 scenarios: fetch/ordinary
+      restart/unreachable/inventory-limits)
+- [x] specs/runner-update-work-interruption: prompt-stop requirement gains the
+      bounded-handoff clause + scenario
+- [x] design.md: context channel inventory; D3 rewritten around the handoff;
+      new risk row; open question extended
+- [x] recovery.md: "Shutdown Handoff" section + 2 failure-rule rows
+- [x] proposal.md: handoff clause in the receipt bullet; Impact bullets
+- [x] tasks.json: T-001 owns the pending-operation query endpoint (desc/AC/
+      output/notes); T-003 owns the handoff (desc/ACs/notes — wrong
+      confirmation-response note replaced); T-003 test AC covers handoff cases
+
+## Commits
+
+- (appended per commit)
