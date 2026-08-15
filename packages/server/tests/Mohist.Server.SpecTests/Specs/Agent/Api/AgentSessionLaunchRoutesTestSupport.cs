@@ -34,6 +34,25 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string projectId,
         string? expectedSessionId)
     {
+        var claim = await AcquirePreparedAgentJobAsync(agentJobId, runnerId, projectId);
+        try
+        {
+            AssertPreparedAgentJobClaim(claim, agentJobId, runnerId, expectedSessionId);
+        }
+        catch
+        {
+            await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
+            await DrainDispatchAsync(runnerId);
+            throw;
+        }
+        return claim;
+    }
+
+    protected async Task<ClaimResult> AcquirePreparedAgentJobAsync(
+        string agentJobId,
+        string runnerId,
+        string projectId)
+    {
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
             agentJobId,
             TimeSpan.FromSeconds(5));
@@ -47,12 +66,19 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             .GetGrain<IRunnerGrain>(runnerId)
             .TryClaimAgentJobAsync(agentJobId, projectId);
 
-        Assert.NotNull(claim);
+        return Assert.IsType<ClaimResult>(claim);
+    }
+
+    protected static void AssertPreparedAgentJobClaim(
+        ClaimResult claim,
+        string agentJobId,
+        string runnerId,
+        string? expectedSessionId)
+    {
         Assert.Equal(agentJobId, claim.AgentJobId);
         Assert.Equal(runnerId, claim.RunnerId);
         Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claim.Dispatch.OwnerKind);
-        return claim;
     }
 
     protected async Task<PollSnapshot> PollDispatchForSessionAsync(
@@ -109,6 +135,28 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                     ArtifactUploadIds: null,
                     ExitCode: 0));
         Assert.True(report.Accepted, "AgentJob rejected completed cleanup report");
+    }
+
+    protected async Task CleanupLaunchedAgentJobAsync(string? runnerId, string? agentJobId)
+    {
+        if (string.IsNullOrWhiteSpace(agentJobId)) return;
+
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId);
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        if (snapshot.Status == AgentJobStatus.Pending)
+        {
+            await job.CancelAsync();
+        }
+        else if (snapshot.Status == AgentJobStatus.Running
+            && !string.IsNullOrWhiteSpace(runnerId)
+            && string.Equals(snapshot.RunnerId, runnerId, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(snapshot.CurrentWorkId))
+        {
+            await CompleteClaimedAgentJobAsync(runnerId!, agentJobId, snapshot.CurrentWorkId!);
+        }
+
+        if (!string.IsNullOrWhiteSpace(runnerId))
+            await DrainDispatchAsync(runnerId!);
     }
 
     private async Task<PollSnapshot?> PollDispatchOnceAsync(

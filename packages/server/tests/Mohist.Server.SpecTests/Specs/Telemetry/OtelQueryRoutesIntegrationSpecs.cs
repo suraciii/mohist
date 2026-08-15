@@ -332,7 +332,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     public async Task GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404()
     {
         using var client = _factory.CreateOtlpClient();
-        client.DefaultRequestHeaders.Host = "localhost:3456";
+        client.DefaultRequestHeaders.Host = "localhost:1";
 
         using var response = await client.GetAsync(ListPath);
 
