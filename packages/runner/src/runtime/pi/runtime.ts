@@ -1,9 +1,9 @@
-import { createCredentialMaskerFromEnvironment, CredentialMasker } from "../task-log.js"
-import { resolve } from "node:path"
-import { diagnostic, piError, resetDiagnostic } from "./errors.js"
-import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from "./policy.js"
-import { createPiProjector } from "./projector.js"
-import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from "./sdk.js"
+import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task-log.js'
+import { resolve } from 'node:path'
+import { diagnostic, piError, resetDiagnostic } from './errors.js'
+import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
+import { createPiProjector } from './projector.js'
+import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from './sdk.js'
 import type {
   PiCancelFacts,
   PiCancelRequest,
@@ -29,7 +29,7 @@ import type {
   PiTurnObserver,
   PiTurnRequest,
   PiTurnResult,
-} from "./types.js"
+} from './types.js'
 
 export interface PiClock {
   readonly now: () => number
@@ -45,28 +45,45 @@ export interface PiRuntimeDeps {
   readonly masker?: CredentialMasker
 }
 
-const defaultClock: PiClock = { now: () => Date.now(), setTimeout: (callback, delay) => setTimeout(callback, delay), clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) }
+const defaultClock: PiClock = {
+  now: () => Date.now(),
+  setTimeout: (callback, delay) => setTimeout(callback, delay),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
 const CANCEL_CONFIRMATION_TIMEOUT_MS = 5_000
 
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
   private readonly sessions = new Map<string, PiSdkSession>()
   private readonly sessionMutexes = new Map<string, Promise<unknown>>()
-  private readonly state: { ready: boolean; diagnostic: PiDiagnostic | null; catalog: PiCatalog | null; services: PiSdkServices | null } = { ready: false, diagnostic: null, catalog: null, services: null }
+  private readonly state: {
+    ready: boolean
+    diagnostic: PiDiagnostic | null
+    catalog: PiCatalog | null
+    services: PiSdkServices | null
+  } = { ready: false, diagnostic: null, catalog: null, services: null }
   private startInFlight: Promise<PiResult<PiReadyState>> | null = null
 
-  constructor(deps: PiRuntimeDeps) { this.deps = deps }
+  constructor(deps: PiRuntimeDeps) {
+    this.deps = deps
+  }
 
   private withSessionLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.sessionMutexes.get(path)
     if (previous) {
       const settled = previous.catch(() => undefined)
       const current = settled.then(operation)
-      this.sessionMutexes.set(path, current.catch(() => undefined))
+      this.sessionMutexes.set(
+        path,
+        current.catch(() => undefined),
+      )
       return current
     }
     const current = operation()
-    this.sessionMutexes.set(path, current.catch(() => undefined))
+    this.sessionMutexes.set(
+      path,
+      current.catch(() => undefined),
+    )
     return current
   }
 
@@ -74,21 +91,31 @@ export class PiRuntime {
     if (this.state.ready) return { ok: true, value: this.readyState(), diagnostics: [] }
     if (this.startInFlight) return this.startInFlight
     this.startInFlight = this.attemptStart()
-    try { return await this.startInFlight } finally { this.startInFlight = null }
+    try {
+      return await this.startInFlight
+    } finally {
+      this.startInFlight = null
+    }
   }
 
-  ready(): boolean { return this.state.ready }
-  diagnostic(): PiDiagnostic | null { return this.state.diagnostic }
-  catalog(): PiCatalog | null { return this.state.catalog }
+  ready(): boolean {
+    return this.state.ready
+  }
+  diagnostic(): PiDiagnostic | null {
+    return this.state.diagnostic
+  }
+  catalog(): PiCatalog | null {
+    return this.state.catalog
+  }
 
   async resolveSession(request: PiSessionResolveRequest): Promise<PiResult<PiSessionResolveResult>> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     const runtimeSessionId = request.target.runtimeSessionId
-    if (!runtimeSessionId) return this.failure("missing-session", "Pi Session binding is missing")
+    if (!runtimeSessionId) return this.failure('missing-session', 'Pi Session binding is missing')
     const path = normalizedPath(runtimeSessionId)
-    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     try {
-      const session = this.sessions.get(path) ?? await this.state.services.openSession(path, request.target.workDir)
+      const session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir))
       this.sessions.set(path, session)
       return {
         ok: true,
@@ -97,8 +124,12 @@ export class PiRuntime {
       }
     } catch (cause) {
       return isMissingSessionFile(cause)
-        ? this.failure("missing-session", "The bound Pi Session is missing", [diagnostic("session-open-failed", this.mask(message(cause)))])
-        : this.failure("turn-failed", "The bound Pi Session could not be opened", [diagnostic("session-open-failed", this.mask(message(cause)))])
+        ? this.failure('missing-session', 'The bound Pi Session is missing', [
+            diagnostic('session-open-failed', this.mask(message(cause))),
+          ])
+        : this.failure('turn-failed', 'The bound Pi Session could not be opened', [
+            diagnostic('session-open-failed', this.mask(message(cause))),
+          ])
     }
   }
 
@@ -107,34 +138,61 @@ export class PiRuntime {
     try {
       const session = await this.state.services.createSession(request.target.workDir)
       const path = normalizedPath(session.sessionFile)
-      if (!path) return this.failure("incompatible-runtime", "Pi did not return an absolute session-file path")
+      if (!path) return this.failure('incompatible-runtime', 'Pi did not return an absolute session-file path')
       this.sessions.set(path, session)
       return { ok: true, value: { runtimeSessionId: path, workDir: request.target.workDir }, diagnostics: [] }
-    } catch (cause) { return this.failure("turn-failed", "Pi Session creation failed", [diagnostic("session-create-failed", this.mask(message(cause)))]) }
+    } catch (cause) {
+      return this.failure('turn-failed', 'Pi Session creation failed', [
+        diagnostic('session-create-failed', this.mask(message(cause))),
+      ])
+    }
   }
 
-  async runTurn(request: PiTurnRequest, signal: AbortSignal, observer?: PiTurnObserver): Promise<PiResult<PiTurnResult>> {
+  async runTurn(
+    request: PiTurnRequest,
+    signal: AbortSignal,
+    observer?: PiTurnObserver,
+  ): Promise<PiResult<PiTurnResult>> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
-    if (!request.prompt || request.prompt.trim().length === 0) return this.failure("invalid-input", "Pi prompt must be non-empty")
+    if (!request.prompt || request.prompt.trim().length === 0)
+      return this.failure('invalid-input', 'Pi prompt must be non-empty')
     const runtimeSessionId = request.target.runtimeSessionId
-    if (!runtimeSessionId) return this.failure("missing-session", "Pi turn requires a bound Session", [resetDiagnostic()])
+    if (!runtimeSessionId)
+      return this.failure('missing-session', 'Pi turn requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
-    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     let session: PiSdkSession
     try {
-      session = this.sessions.get(path) ?? await this.state.services.openSession(path, request.target.workDir)
+      session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir))
       this.sessions.set(path, session)
-    } catch (cause) { return this.failure("missing-session", "The bound Pi Session is missing or corrupt", [resetDiagnostic(), diagnostic("session-open-failed", this.mask(message(cause)))]) }
+    } catch (cause) {
+      return this.failure('missing-session', 'The bound Pi Session is missing or corrupt', [
+        resetDiagnostic(),
+        diagnostic('session-open-failed', this.mask(message(cause))),
+      ])
+    }
 
     const diagnostics: PiDiagnostic[] = []
     if (request.options?.unknownKeys && request.options.unknownKeys.length > 0) {
-      diagnostics.push(diagnostic("options-unknown-keys", `Ignored unknown option keys: ${request.options.unknownKeys.join(", ")}`, "info"))
+      diagnostics.push(
+        diagnostic(
+          'options-unknown-keys',
+          `Ignored unknown option keys: ${request.options.unknownKeys.join(', ')}`,
+          'info',
+        ),
+      )
     }
-    const projector = createPiProjector(path, request.target.workDir, this.deps.masker ?? createCredentialMaskerFromEnvironment())
+    const projector = createPiProjector(
+      path,
+      request.target.workDir,
+      this.deps.masker ?? createCredentialMaskerFromEnvironment(),
+    )
     const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
     let fixed: PiResult<PiTurnResult> | null = null
     let resolveFixed!: () => void
-    const fixedSignal = new Promise<void>((resolve) => { resolveFixed = resolve })
+    const fixedSignal = new Promise<void>((resolve) => {
+      resolveFixed = resolve
+    })
     const fixAndAbort = (result: PiResult<PiTurnResult>) => {
       if (fixed) return
       fixed = result
@@ -144,40 +202,78 @@ export class PiRuntime {
       const facts = projector.project(event)
       report(facts)
       if (isRetryFailure(event, this.policy()) && !fixed) {
-        fixAndAbort(this.finishFailure("turn-failed", "Pi provider retries exhausted", diagnostics))
+        fixAndAbort(this.finishFailure('turn-failed', 'Pi provider retries exhausted', diagnostics))
       }
     })
     const model = request.options?.model
     if (model) {
       const parsed = splitModel(model)
-      if (!parsed) { unsubscribe(); return this.failure("invalid-input", "options.model must use provider/model syntax") }
-      try { await session.setModel(this.state.services.model(parsed.provider, parsed.id)) } catch (cause) { unsubscribe(); return this.failure("turn-failed", "Pi rejected the selected model", [diagnostic("model-rejected", this.mask(message(cause)))]) }
+      if (!parsed) {
+        unsubscribe()
+        return this.failure('invalid-input', 'options.model must use provider/model syntax')
+      }
+      try {
+        await session.setModel(this.state.services.model(parsed.provider, parsed.id))
+      } catch (cause) {
+        unsubscribe()
+        return this.failure('turn-failed', 'Pi rejected the selected model', [
+          diagnostic('model-rejected', this.mask(message(cause))),
+        ])
+      }
     }
     if (request.options?.reasoningEffort) session.setThinkingLevel(request.options.reasoningEffort)
     if (request.options?.variant) session.setThinkingLevel(request.options.variant)
     const clock = this.deps.clock ?? defaultClock
     const duration = request.durationMs ?? null
-    const deadline = duration !== null && duration >= 0 ? clock.setTimeout(() => { fixAndAbort(this.finishFailure("deadline-exceeded", "Pi turn deadline exceeded", diagnostics)) }, duration) : null
+    const deadline =
+      duration !== null && duration >= 0
+        ? clock.setTimeout(() => {
+            fixAndAbort(this.finishFailure('deadline-exceeded', 'Pi turn deadline exceeded', diagnostics))
+          }, duration)
+        : null
     const warningDelay = duration !== null && duration >= 0 ? Math.max(0, duration - 5 * 60_000) : null
-    const warning = warningDelay === null ? null : clock.setTimeout(() => { if (!fixed) void session.steer("This turn is nearing its execution deadline; wrap up the current work and return the final answer.") }, warningDelay)
-    const cancel = () => { if (!fixed) fixAndAbort(this.finishFailure("interrupted", "Pi turn was interrupted", diagnostics)) }
-    signal.addEventListener("abort", cancel, { once: true })
+    const warning =
+      warningDelay === null
+        ? null
+        : clock.setTimeout(() => {
+            if (!fixed)
+              void session.steer(
+                'This turn is nearing its execution deadline; wrap up the current work and return the final answer.',
+              )
+          }, warningDelay)
+    const cancel = () => {
+      if (!fixed) fixAndAbort(this.finishFailure('interrupted', 'Pi turn was interrupted', diagnostics))
+    }
+    signal.addEventListener('abort', cancel, { once: true })
     try {
-      const promptOperation = this.withSessionLock(path, () => session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => "completed" as const))
-      const promptOutcome = await Promise.race([
-        promptOperation,
-        fixedSignal.then(() => "fixed" as const),
-      ])
+      const promptOperation = this.withSessionLock(path, () =>
+        session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => 'completed' as const),
+      )
+      const promptOutcome = await Promise.race([promptOperation, fixedSignal.then(() => 'fixed' as const)])
       if (fixed) return fixed
-      if (lastMessageFailed(session.messages)) return this.failure("turn-failed", "Pi turn failed", [diagnostic("turn-failed", this.mask(lastMessageError(session.messages) ?? "Pi reported an error"))])
+      if (lastMessageFailed(session.messages))
+        return this.failure('turn-failed', 'Pi turn failed', [
+          diagnostic('turn-failed', this.mask(lastMessageError(session.messages) ?? 'Pi reported an error')),
+        ])
       report(projector.reconcile(session.messages))
-      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), "info")))
-      return { ok: true, value: { facts: { finalAssistantText: finalText(session.messages), runtimeSessionId: path, workDir: request.target.workDir }, diagnostics }, diagnostics }
+      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), 'info')))
+      return {
+        ok: true,
+        value: {
+          facts: {
+            finalAssistantText: finalText(session.messages),
+            runtimeSessionId: path,
+            workDir: request.target.workDir,
+          },
+          diagnostics,
+        },
+        diagnostics,
+      }
     } catch (cause) {
       if (fixed) return fixed
-      return this.failure("turn-failed", "Pi turn failed", [diagnostic("turn-failed", this.mask(message(cause)))])
+      return this.failure('turn-failed', 'Pi turn failed', [diagnostic('turn-failed', this.mask(message(cause)))])
     } finally {
-      signal.removeEventListener("abort", cancel)
+      signal.removeEventListener('abort', cancel)
       if (deadline !== null) clock.clearTimeout(deadline)
       if (warning !== null) clock.clearTimeout(warning)
       unsubscribe()
@@ -211,11 +307,13 @@ export class PiRuntime {
    */
   async followup(request: PiFollowupRequest, observer?: PiTurnObserver): Promise<PiFollowupResult> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
-    if (!request.prompt || request.prompt.trim().length === 0) return this.failure("invalid-input", "Pi follow-up prompt must be non-empty")
+    if (!request.prompt || request.prompt.trim().length === 0)
+      return this.failure('invalid-input', 'Pi follow-up prompt must be non-empty')
     const runtimeSessionId = request.target.runtimeSessionId
-    if (!runtimeSessionId) return this.failure("missing-session", "Pi follow-up requires a bound Session", [resetDiagnostic()])
+    if (!runtimeSessionId)
+      return this.failure('missing-session', 'Pi follow-up requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
-    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     const session = await this.resolveFollowupSession(path, request.target.workDir)
     if (!session.ok) return session.failure
     const configured = await this.applyFollowupOptions(session.value, request.options)
@@ -230,11 +328,15 @@ export class PiRuntime {
           diagnostics: [],
         }
       } catch (cause) {
-        return this.failure("turn-failed", "Pi steer failed", [diagnostic("steer-failed", this.mask(message(cause)))])
+        return this.failure('turn-failed', 'Pi steer failed', [diagnostic('steer-failed', this.mask(message(cause)))])
       }
     }
 
-    const projector = createPiProjector(path, request.target.workDir, this.deps.masker ?? createCredentialMaskerFromEnvironment())
+    const projector = createPiProjector(
+      path,
+      request.target.workDir,
+      this.deps.masker ?? createCredentialMaskerFromEnvironment(),
+    )
     const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
     return new Promise<PiFollowupResult>((resolve) => {
       let settled = false
@@ -256,17 +358,24 @@ export class PiRuntime {
                   diagnostics: [],
                 })
               } else {
-                settle(this.failure(
-                  "turn-failed",
-                  "Pi rejected follow-up reception (preflight rejected the prompt)",
-                  [diagnostic("preflight-rejected", "Pi preflight rejected the follow-up prompt — model or credentials missing")],
-                ))
+                settle(
+                  this.failure('turn-failed', 'Pi rejected follow-up reception (preflight rejected the prompt)', [
+                    diagnostic(
+                      'preflight-rejected',
+                      'Pi preflight rejected the follow-up prompt — model or credentials missing',
+                    ),
+                  ]),
+                )
               }
             },
           })
           report(projector.reconcile(session.value.messages))
         } catch (cause) {
-          settle(this.failure("turn-failed", "Pi follow-up prompt failed", [diagnostic("prompt-failed", this.mask(message(cause)))]))
+          settle(
+            this.failure('turn-failed', 'Pi follow-up prompt failed', [
+              diagnostic('prompt-failed', this.mask(message(cause))),
+            ]),
+          )
         } finally {
           unsubscribe()
         }
@@ -276,17 +385,17 @@ export class PiRuntime {
 
   private async applyFollowupOptions(
     session: PiSdkSession,
-    options: PiFollowupRequest["options"],
+    options: PiFollowupRequest['options'],
   ): Promise<PiFollowupResult | null> {
     const model = options?.model
     if (model) {
       const parsed = splitModel(model)
-      if (!parsed) return this.failure("invalid-input", "options.model must use provider/model syntax")
+      if (!parsed) return this.failure('invalid-input', 'options.model must use provider/model syntax')
       try {
         await session.setModel(this.state.services!.model(parsed.provider, parsed.id))
       } catch (cause) {
-        return this.failure("turn-failed", "Pi rejected the selected model", [
-          diagnostic("model-rejected", this.mask(message(cause))),
+        return this.failure('turn-failed', 'Pi rejected the selected model', [
+          diagnostic('model-rejected', this.mask(message(cause))),
         ])
       }
     }
@@ -314,9 +423,10 @@ export class PiRuntime {
   async cancel(request: PiCancelRequest): Promise<PiCancelResult> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     const runtimeSessionId = request.target.runtimeSessionId
-    if (!runtimeSessionId) return this.failure("missing-session", "Pi cancel requires a bound Session", [resetDiagnostic()])
+    if (!runtimeSessionId)
+      return this.failure('missing-session', 'Pi cancel requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
-    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     const session = await this.resolveFollowupSession(path, request.target.workDir)
     if (!session.ok) return session.failure
 
@@ -329,15 +439,25 @@ export class PiRuntime {
       if (confirmation) stopConfirmed = await confirmation.wait
       if (!stopConfirmed) {
         stopConfirmed = false
-        diagnostics.push(diagnostic("abort-unconfirmed", this.mask("Pi did not confirm that the turn stopped through its event sequence")))
+        diagnostics.push(
+          diagnostic(
+            'abort-unconfirmed',
+            this.mask('Pi did not confirm that the turn stopped through its event sequence'),
+          ),
+        )
       }
     } catch (cause) {
       stopConfirmed = false
-      diagnostics.push(diagnostic("abort-unconfirmed", this.mask(message(cause))))
+      diagnostics.push(diagnostic('abort-unconfirmed', this.mask(message(cause))))
     } finally {
       confirmation?.dispose()
     }
-    const facts: PiCancelFacts = { runtimeSessionId: path, workDir: request.target.workDir, cancelled: true, stopConfirmed }
+    const facts: PiCancelFacts = {
+      runtimeSessionId: path,
+      workDir: request.target.workDir,
+      cancelled: true,
+      stopConfirmed,
+    }
     return { ok: true, value: facts, diagnostics }
   }
 
@@ -374,28 +494,35 @@ export class PiRuntime {
   async compact(request: PiCompactRequest, observer?: PiTurnObserver): Promise<PiCompactResult> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     const runtimeSessionId = request.target.runtimeSessionId
-    if (!runtimeSessionId) return this.failure("missing-session", "Pi compact requires a bound Session", [resetDiagnostic()])
+    if (!runtimeSessionId)
+      return this.failure('missing-session', 'Pi compact requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
-    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     const session = await this.resolveFollowupSession(path, request.target.workDir)
     if (!session.ok) return session.failure
 
-    const projector = createPiProjector(path, request.target.workDir, this.deps.masker ?? createCredentialMaskerFromEnvironment())
+    const projector = createPiProjector(
+      path,
+      request.target.workDir,
+      this.deps.masker ?? createCredentialMaskerFromEnvironment(),
+    )
     return this.withSessionLock(path, async () => {
       if (session.value.isStreaming) {
-        return this.failure(
-          "conflict",
-          "Pi compact refused: the physical session is still streaming",
-          [diagnostic("session-streaming", "Cannot compact while the Pi session is streaming; wait for the turn to finish")],
-        )
+        return this.failure('conflict', 'Pi compact refused: the physical session is still streaming', [
+          diagnostic(
+            'session-streaming',
+            'Cannot compact while the Pi session is streaming; wait for the turn to finish',
+          ),
+        ])
       }
       const diagnostics: PiDiagnostic[] = []
-      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), "info")))
+      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), 'info')))
       const pendingReports: Promise<void>[] = []
-      const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => {
-        const result = observer?.onEvent?.(event)
-        if (result) pendingReports.push(Promise.resolve(result))
-      })
+      const report = (events: readonly PiRuntimeEvent[]) =>
+        events.forEach((event) => {
+          const result = observer?.onEvent?.(event)
+          if (result) pendingReports.push(Promise.resolve(result))
+        })
       let unsubscribe: () => void = () => {}
       try {
         unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
@@ -405,11 +532,9 @@ export class PiRuntime {
         const facts: PiCompactFacts = { runtimeSessionId: path, workDir: request.target.workDir }
         return { ok: true, value: facts, diagnostics }
       } catch (cause) {
-        return this.failure(
-          "turn-failed",
-          "Pi compact failed",
-          [diagnostic("compact-failed", this.mask(message(cause)))],
-        )
+        return this.failure('turn-failed', 'Pi compact failed', [
+          diagnostic('compact-failed', this.mask(message(cause))),
+        ])
       } finally {
         unsubscribe()
       }
@@ -440,38 +565,49 @@ export class PiRuntime {
     const priorPath = request.target.runtimeSessionId ? normalizedPath(request.target.runtimeSessionId) : null
     const cachedPrior: PiSdkSession | null = priorPath ? (this.sessions.get(priorPath) ?? null) : null
     let openedPrior: PiSdkSession | null = null
-    const carry = await this.readCarryOver(priorPath, workDir, cachedPrior, (session) => { openedPrior = session })
+    const carry = await this.readCarryOver(priorPath, workDir, cachedPrior, (session) => {
+      openedPrior = session
+    })
 
     let nextSession: PiSdkSession
-    try { nextSession = await this.state.services.createSession(workDir) }
-    catch (cause) {
+    try {
+      nextSession = await this.state.services.createSession(workDir)
+    } catch (cause) {
       if (openedPrior && priorPath) this.sessions.set(priorPath, openedPrior)
-      return this.failure("turn-failed", "Pi reset failed: could not create a new Pi session", [diagnostic("reset-create-failed", this.mask(message(cause)))])
+      return this.failure('turn-failed', 'Pi reset failed: could not create a new Pi session', [
+        diagnostic('reset-create-failed', this.mask(message(cause))),
+      ])
     }
     const newPath = normalizedPath(nextSession.sessionFile)
     if (!newPath) {
       nextSession.dispose()
       if (openedPrior && priorPath) this.sessions.set(priorPath, openedPrior)
-      return this.failure("incompatible-runtime", "Pi did not return an absolute session-file path for the new session")
+      return this.failure('incompatible-runtime', 'Pi did not return an absolute session-file path for the new session')
     }
 
     const diagnostics: PiDiagnostic[] = []
     if (carry?.model !== undefined) {
-      try { await nextSession.setModel(carry.model) }
-      catch (cause) {
-        diagnostics.push(diagnostic("reset-model-carry-failed", this.mask(message(cause))))
+      try {
+        await nextSession.setModel(carry.model)
+      } catch (cause) {
+        diagnostics.push(diagnostic('reset-model-carry-failed', this.mask(message(cause))))
       }
     }
     if (carry?.thinkingLevel) {
-      try { nextSession.setThinkingLevel(carry.thinkingLevel) }
-      catch (cause) {
-        diagnostics.push(diagnostic("reset-thinking-carry-failed", this.mask(message(cause))))
+      try {
+        nextSession.setThinkingLevel(carry.thinkingLevel)
+      } catch (cause) {
+        diagnostics.push(diagnostic('reset-thinking-carry-failed', this.mask(message(cause))))
       }
     }
 
     const priorToDispose: PiSdkSession | null = openedPrior ?? cachedPrior
     if (priorToDispose && priorPath) {
-      try { priorToDispose.dispose() } catch { /* best-effort cleanup */ }
+      try {
+        priorToDispose.dispose()
+      } catch {
+        /* best-effort cleanup */
+      }
       if (this.sessions.get(priorPath) === priorToDispose) this.sessions.delete(priorPath)
     }
     this.sessions.set(newPath, nextSession)
@@ -501,7 +637,10 @@ export class PiRuntime {
     }
   }
 
-  private async resolveFollowupSession(path: string, workDir: string): Promise<{ ok: true; value: PiSdkSession } | { ok: false; failure: PiResult<never> }> {
+  private async resolveFollowupSession(
+    path: string,
+    workDir: string,
+  ): Promise<{ ok: true; value: PiSdkSession } | { ok: false; failure: PiResult<never> }> {
     if (!this.state.services) return { ok: false, failure: this.unavailable() }
     let session: PiSdkSession
     try {
@@ -520,9 +659,9 @@ export class PiRuntime {
       return {
         ok: false,
         failure: this.failure(
-          "missing-session",
-          "The bound Pi Session is missing or corrupt — issue a Reset to establish a fresh Pi Session, then retry",
-          [resetDiagnostic(), diagnostic("session-open-failed", this.mask(message(cause)))],
+          'missing-session',
+          'The bound Pi Session is missing or corrupt — issue a Reset to establish a fresh Pi Session, then retry',
+          [resetDiagnostic(), diagnostic('session-open-failed', this.mask(message(cause)))],
         ),
       }
     }
@@ -542,7 +681,10 @@ export class PiRuntime {
     this.state.catalog = null
     this.state.diagnostic = null
     try {
-      const services = await (this.deps.sdkFactory ?? realPiSdkFactory).create({ cwd: process.cwd(), agentDir: this.deps.agentDir })
+      const services = await (this.deps.sdkFactory ?? realPiSdkFactory).create({
+        cwd: process.cwd(),
+        agentDir: this.deps.agentDir,
+      })
       this.state.services = services
       try {
         const models = await services.catalog()
@@ -550,46 +692,126 @@ export class PiRuntime {
           models: models.map((model) => ({
             provider: model.provider,
             id: model.id,
-            thinkingLevels: [...(model.thinkingLevels ?? ["off"])],
+            thinkingLevels: [...(model.thinkingLevels ?? ['off'])],
           })),
         }
       } catch (cause) {
-        this.state.diagnostic = diagnostic("pi-catalog-failed", `Pi model catalog unavailable: ${this.mask(message(cause))}`)
+        this.state.diagnostic = diagnostic(
+          'pi-catalog-failed',
+          `Pi model catalog unavailable: ${this.mask(message(cause))}`,
+        )
         this.state.services = null
         await services.close().catch(() => undefined)
         return this.unavailable()
       }
       this.state.ready = true
       return { ok: true, value: this.readyState(), diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [] }
-    } catch (cause) { this.state.services = null; this.state.diagnostic = diagnostic("pi-start-failed", this.mask(message(cause))); return this.unavailable() }
+    } catch (cause) {
+      this.state.services = null
+      this.state.diagnostic = diagnostic('pi-start-failed', this.mask(message(cause)))
+      return this.unavailable()
+    }
   }
 
-  private policy(): PiProviderErrorPolicy { return this.deps.providerErrorPolicy ?? DEFAULT_PI_PROVIDER_ERROR_POLICY }
-  private mask(value: string): string { return (this.deps.masker ?? createCredentialMaskerFromEnvironment()).mask(value) }
-  private readyState(): PiReadyState { return { ready: this.state.ready, diagnostic: this.state.diagnostic, catalog: this.state.catalog } }
-  private unavailable(): PiResult<never> { return { ok: false, error: piError("unavailable-runtime", "Pi runtime is not ready", this.state.diagnostic ? [this.state.diagnostic] : []), diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [] } }
-  private failure(kind: "invalid-input" | "missing-session" | "incompatible-runtime" | "turn-failed" | "conflict", messageText: string, diagnostics: readonly PiDiagnostic[] = []): PiResult<never> { return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics } }
-  private finishFailure(kind: "deadline-exceeded" | "interrupted" | "turn-failed", messageText: string, diagnostics: PiDiagnostic[] = []): PiResult<PiTurnResult> { return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics } }
+  private policy(): PiProviderErrorPolicy {
+    return this.deps.providerErrorPolicy ?? DEFAULT_PI_PROVIDER_ERROR_POLICY
+  }
+  private mask(value: string): string {
+    return (this.deps.masker ?? createCredentialMaskerFromEnvironment()).mask(value)
+  }
+  private readyState(): PiReadyState {
+    return { ready: this.state.ready, diagnostic: this.state.diagnostic, catalog: this.state.catalog }
+  }
+  private unavailable(): PiResult<never> {
+    return {
+      ok: false,
+      error: piError(
+        'unavailable-runtime',
+        'Pi runtime is not ready',
+        this.state.diagnostic ? [this.state.diagnostic] : [],
+      ),
+      diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [],
+    }
+  }
+  private failure(
+    kind: 'invalid-input' | 'missing-session' | 'incompatible-runtime' | 'turn-failed' | 'conflict',
+    messageText: string,
+    diagnostics: readonly PiDiagnostic[] = [],
+  ): PiResult<never> {
+    return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics }
+  }
+  private finishFailure(
+    kind: 'deadline-exceeded' | 'interrupted' | 'turn-failed',
+    messageText: string,
+    diagnostics: PiDiagnostic[] = [],
+  ): PiResult<PiTurnResult> {
+    return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics }
+  }
 }
 
 function isMissingSessionFile(cause: unknown): boolean {
-  if (!cause || typeof cause !== "object") return false
+  if (!cause || typeof cause !== 'object') return false
   const value = cause as { code?: unknown; cause?: unknown }
-  return value.code === "ENOENT" || isMissingSessionFile(value.cause)
+  return value.code === 'ENOENT' || isMissingSessionFile(value.cause)
 }
 
-function normalizedPath(value: string | undefined): string | null { if (!value) return null; const path = value.replaceAll("\\", "/"); return path.startsWith("/") ? resolve(path) : null }
-function splitModel(value: string): { provider: string; id: string } | null { const index = value.indexOf("/"); return index > 0 && index < value.length - 1 ? { provider: value.slice(0, index), id: value.slice(index + 1) } : null }
-function message(cause: unknown): string { return cause instanceof Error ? cause.message || "Pi operation failed" : String(cause) }
-function finalText(messages: readonly { role?: string; content?: unknown }[]): string | null { const assistant = [...messages].reverse().find((item) => item.role === "assistant"); return contentText(assistant?.content) }
-function contentText(content: unknown): string | null { if (typeof content === "string") return content; if (!Array.isArray(content)) return null; const text = content.map((part) => typeof part === "string" ? part : part && typeof part === "object" && "text" in part && typeof part.text === "string" ? part.text : "").join(""); return text || null }
-function lastMessageFailed(messages: readonly { role?: string; stopReason?: string }[]): boolean { const item = [...messages].reverse().find((entry) => entry.role === "assistant"); return item?.stopReason === "error" }
-function lastMessageError(messages: readonly { role?: string; errorMessage?: string }[]): string | undefined { return [...messages].reverse().find((entry) => entry.role === "assistant")?.errorMessage }
-function isRetryFailure(event: unknown, policy: PiProviderErrorPolicy): boolean { if (!event || typeof event !== "object" || (event as { type?: unknown }).type !== "auto_retry_start") return false; const value = event as { errorMessage?: unknown; attempt?: unknown }; const text = typeof value.errorMessage === "string" ? value.errorMessage : ""; return isProviderFailure(text, policy) || (typeof value.attempt === "number" && value.attempt >= policy.consecutiveRetryThreshold) }
-function isPiStopEvent(event: unknown): boolean { return Boolean(event && typeof event === "object" && (event as { type?: unknown }).type === "agent_settled") }
-function watchPiStop(session: PiSdkSession, clock: PiClock): { readonly wait: Promise<boolean>; readonly dispose: () => void } {
+function normalizedPath(value: string | undefined): string | null {
+  if (!value) return null
+  const path = value.replaceAll('\\', '/')
+  return path.startsWith('/') ? resolve(path) : null
+}
+function splitModel(value: string): { provider: string; id: string } | null {
+  const index = value.indexOf('/')
+  return index > 0 && index < value.length - 1 ? { provider: value.slice(0, index), id: value.slice(index + 1) } : null
+}
+function message(cause: unknown): string {
+  return cause instanceof Error ? cause.message || 'Pi operation failed' : String(cause)
+}
+function finalText(messages: readonly { role?: string; content?: unknown }[]): string | null {
+  const assistant = [...messages].reverse().find((item) => item.role === 'assistant')
+  return contentText(assistant?.content)
+}
+function contentText(content: unknown): string | null {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return null
+  const text = content
+    .map((part) =>
+      typeof part === 'string'
+        ? part
+        : part && typeof part === 'object' && 'text' in part && typeof part.text === 'string'
+          ? part.text
+          : '',
+    )
+    .join('')
+  return text || null
+}
+function lastMessageFailed(messages: readonly { role?: string; stopReason?: string }[]): boolean {
+  const item = [...messages].reverse().find((entry) => entry.role === 'assistant')
+  return item?.stopReason === 'error'
+}
+function lastMessageError(messages: readonly { role?: string; errorMessage?: string }[]): string | undefined {
+  return [...messages].reverse().find((entry) => entry.role === 'assistant')?.errorMessage
+}
+function isRetryFailure(event: unknown, policy: PiProviderErrorPolicy): boolean {
+  if (!event || typeof event !== 'object' || (event as { type?: unknown }).type !== 'auto_retry_start') return false
+  const value = event as { errorMessage?: unknown; attempt?: unknown }
+  const text = typeof value.errorMessage === 'string' ? value.errorMessage : ''
+  return (
+    isProviderFailure(text, policy) ||
+    (typeof value.attempt === 'number' && value.attempt >= policy.consecutiveRetryThreshold)
+  )
+}
+function isPiStopEvent(event: unknown): boolean {
+  return Boolean(event && typeof event === 'object' && (event as { type?: unknown }).type === 'agent_settled')
+}
+function watchPiStop(
+  session: PiSdkSession,
+  clock: PiClock,
+): { readonly wait: Promise<boolean>; readonly dispose: () => void } {
   let resolveWait: (confirmed: boolean) => void = () => {}
-  const wait = new Promise<boolean>((resolve) => { resolveWait = resolve })
+  const wait = new Promise<boolean>((resolve) => {
+    resolveWait = resolve
+  })
   let settled = false
   let stopEventObserved = false
   let timeout: unknown | null = null
@@ -615,4 +837,17 @@ function watchPiStop(session: PiSdkSession, clock: PiClock): { readonly wait: Pr
   timeout = clock.setTimeout(() => complete(stopEventObserved && !session.isStreaming), CANCEL_CONFIRMATION_TIMEOUT_MS)
   return { wait, dispose: () => complete(false) }
 }
-async function abortAndDiagnose(session: PiSdkSession, diagnostics: PiDiagnostic[], mask: (text: string) => string): Promise<void> { try { await session.abort(); await Promise.resolve(); if (session.isStreaming) diagnostics.push(diagnostic("abort-unconfirmed", mask("Pi did not confirm that the turn stopped"))) } catch (cause) { diagnostics.push(diagnostic("abort-unconfirmed", mask(message(cause)))) } }
+async function abortAndDiagnose(
+  session: PiSdkSession,
+  diagnostics: PiDiagnostic[],
+  mask: (text: string) => string,
+): Promise<void> {
+  try {
+    await session.abort()
+    await Promise.resolve()
+    if (session.isStreaming)
+      diagnostics.push(diagnostic('abort-unconfirmed', mask('Pi did not confirm that the turn stopped')))
+  } catch (cause) {
+    diagnostics.push(diagnostic('abort-unconfirmed', mask(message(cause))))
+  }
+}

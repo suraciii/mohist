@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest"
-import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
-import type { AgentJobRuntimeAccessors } from "../src/runtime/agent-job-executor.js"
-import type { ServerConnection } from "../src/server/connection.js"
-import type { DispatchWorkItem, JsonObject } from "../src/core/types.js"
+import { describe, expect, it, vi } from 'vitest'
+import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
+import type { AgentJobRuntimeAccessors } from '../src/runtime/agent-job-executor.js'
+import type { ServerConnection } from '../src/server/connection.js'
+import type { DispatchWorkItem, JsonObject } from '../src/core/types.js'
 import type {
   OpenCodeRuntime,
   RuntimeResult,
@@ -10,7 +10,7 @@ import type {
   RuntimeTurnObserver,
   RuntimeTurnRequest,
   RuntimeTurnResult,
-} from "../src/runtime/opencode/index.js"
+} from '../src/runtime/opencode/index.js'
 import type {
   PiRuntime,
   PiResult,
@@ -19,7 +19,7 @@ import type {
   PiTurnObserver,
   PiTurnRequest,
   PiTurnResult,
-} from "../src/runtime/pi/index.js"
+} from '../src/runtime/pi/index.js'
 
 interface FakeOpenCodeRuntimeHandles {
   runtime: OpenCodeRuntime
@@ -34,9 +34,9 @@ function makeFakeOpenCodeRuntime(): FakeOpenCodeRuntimeHandles {
     ok: true,
     value: {
       facts: {
-        finalAssistantText: "agent finished",
-        runtimeSessionId: "ses_default",
-        workDir: "/tmp/ws",
+        finalAssistantText: 'agent finished',
+        runtimeSessionId: 'ses_default',
+        workDir: '/tmp/ws',
       },
       diagnostics: [],
     },
@@ -52,9 +52,7 @@ function makeFakeOpenCodeRuntime(): FakeOpenCodeRuntimeHandles {
       observer?: RuntimeTurnObserver,
     ): Promise<RuntimeResult<RuntimeTurnResult>> {
       runTurnCalls.push(request)
-      const session = nextResult.ok
-        ? nextResult.value.facts
-        : { runtimeSessionId: "ses_default", workDir: "/tmp/ws" }
+      const session = nextResult.ok ? nextResult.value.facts : { runtimeSessionId: 'ses_default', workDir: '/tmp/ws' }
       try {
         await observer?.onSessionReady?.(session)
       } catch (error) {
@@ -62,11 +60,11 @@ function makeFakeOpenCodeRuntime(): FakeOpenCodeRuntimeHandles {
         return {
           ok: false,
           error: {
-            kind: "turn-failed",
+            kind: 'turn-failed',
             message,
-            diagnostics: [{ severity: "error", code: "turn-failed", message }],
+            diagnostics: [{ severity: 'error', code: 'turn-failed', message }],
           },
-          diagnostics: [{ severity: "error", code: "turn-failed", message }],
+          diagnostics: [{ severity: 'error', code: 'turn-failed', message }],
         }
       }
       if (nextResult.ok) for (const event of nextEvents) observer?.onEvent?.(event)
@@ -99,14 +97,14 @@ function makeFakePiRuntime(): FakePiRuntimeHandles {
   const runTurnCalls: PiTurnRequest[] = []
   const createSessionCalls: { workDir: string }[] = []
   let ready = true
-  let nextSessionId = "/virtual/sessions/agent.jsonl"
+  let nextSessionId = '/virtual/sessions/agent.jsonl'
   let nextResult: PiResult<PiTurnResult> = {
     ok: true,
     value: {
       facts: {
-        finalAssistantText: "pi agent finished",
+        finalAssistantText: 'pi agent finished',
         runtimeSessionId: nextSessionId,
-        workDir: "/tmp/agent-job-ws",
+        workDir: '/tmp/agent-job-ws',
       } satisfies PiTurnFacts,
       diagnostics: [],
     },
@@ -114,14 +112,16 @@ function makeFakePiRuntime(): FakePiRuntimeHandles {
   }
   let nextCreateSession: PiResult<{ runtimeSessionId: string; workDir: string }> = {
     ok: true,
-    value: { runtimeSessionId: nextSessionId, workDir: "/tmp/agent-job-ws" },
+    value: { runtimeSessionId: nextSessionId, workDir: '/tmp/agent-job-ws' },
     diagnostics: [],
   }
   const runtime: Partial<PiRuntime> = {
     ready: () => ready,
     diagnostic: () => null,
-    catalog: () => ({ models: [{ provider: "openai", id: "gpt-5.5", thinkingLevels: ["low", "high"] }] }),
-    async createSession(request: { target: { workDir: string } }): Promise<PiResult<{ runtimeSessionId: string; workDir: string }>> {
+    catalog: () => ({ models: [{ provider: 'openai', id: 'gpt-5.5', thinkingLevels: ['low', 'high'] }] }),
+    async createSession(request: {
+      target: { workDir: string }
+    }): Promise<PiResult<{ runtimeSessionId: string; workDir: string }>> {
       createSessionCalls.push({ workDir: request.target.workDir })
       return nextCreateSession
     },
@@ -133,8 +133,20 @@ function makeFakePiRuntime(): FakePiRuntimeHandles {
       runTurnCalls.push(request)
       if (observer?.onEvent) {
         const sample: PiRuntimeEvent[] = [
-          { id: "pi-msg-1", type: "message", runtimeSessionId: request.target.runtimeSessionId ?? nextSessionId, workDir: request.target.workDir, payload: { role: "assistant", content: "thinking" } },
-          { id: "pi-msg-2", type: "message", runtimeSessionId: request.target.runtimeSessionId ?? nextSessionId, workDir: request.target.workDir, payload: { role: "assistant", content: "done" } },
+          {
+            id: 'pi-msg-1',
+            type: 'message',
+            runtimeSessionId: request.target.runtimeSessionId ?? nextSessionId,
+            workDir: request.target.workDir,
+            payload: { role: 'assistant', content: 'thinking' },
+          },
+          {
+            id: 'pi-msg-2',
+            type: 'message',
+            runtimeSessionId: request.target.runtimeSessionId ?? nextSessionId,
+            workDir: request.target.workDir,
+            payload: { role: 'assistant', content: 'done' },
+          },
         ]
         for (const event of sample) observer.onEvent(event)
       }
@@ -145,9 +157,15 @@ function makeFakePiRuntime(): FakePiRuntimeHandles {
     runtime: runtime as PiRuntime,
     runTurnCalls,
     createSessionCalls,
-    setReady(value) { ready = value },
-    setTurnResult(result) { nextResult = result },
-    setCreateSessionResult(result) { nextCreateSession = result },
+    setReady(value) {
+      ready = value
+    },
+    setTurnResult(result) {
+      nextResult = result
+    },
+    setCreateSessionResult(result) {
+      nextCreateSession = result
+    },
     setNextSessionId(value) {
       nextSessionId = value
       if (nextResult.ok) {
@@ -162,7 +180,7 @@ function makeFakePiRuntime(): FakePiRuntimeHandles {
       }
       nextCreateSession = {
         ok: true,
-        value: { runtimeSessionId: value, workDir: "/tmp/agent-job-ws" },
+        value: { runtimeSessionId: value, workDir: '/tmp/agent-job-ws' },
         diagnostics: [],
       }
     },
@@ -178,10 +196,13 @@ function makeAccessors(
   }
 }
 
-function makeAccessorsFromFake(handles: FakeOpenCodeRuntimeHandles | FakePiRuntimeHandles | null, runtimeName: "opencode" | "pi"): AgentJobRuntimeAccessors {
+function makeAccessorsFromFake(
+  handles: FakeOpenCodeRuntimeHandles | FakePiRuntimeHandles | null,
+  runtimeName: 'opencode' | 'pi',
+): AgentJobRuntimeAccessors {
   return {
-    openCode: runtimeName === "opencode" && handles ? (handles as FakeOpenCodeRuntimeHandles).runtime : null,
-    pi: runtimeName === "pi" && handles ? (handles as FakePiRuntimeHandles).runtime : null,
+    openCode: runtimeName === 'opencode' && handles ? (handles as FakeOpenCodeRuntimeHandles).runtime : null,
+    pi: runtimeName === 'pi' && handles ? (handles as FakePiRuntimeHandles).runtime : null,
   }
 }
 
@@ -198,13 +219,12 @@ interface FakeConnectionHandles {
 }
 
 function makeFakeConnection(): FakeConnectionHandles {
-  const attachCalls: FakeConnectionHandles["attachCalls"] = []
-  const eventCalls: FakeConnectionHandles["eventCalls"] = []
+  const attachCalls: FakeConnectionHandles['attachCalls'] = []
+  const eventCalls: FakeConnectionHandles['eventCalls'] = []
   let agentSession: { runtimeSessionId: string | null } | null = null
   let eventWriter: (body: Record<string, unknown>) => Promise<void> = async () => {}
   const connection = {
-    async openAgentSession() {
-    },
+    async openAgentSession() {},
     async attachAgentSession(
       projectId: string,
       sessionId: string,
@@ -217,7 +237,7 @@ function makeFakeConnection(): FakeConnectionHandles {
       if (agentSession === null) return null
       return {
         runtimeSessionId: agentSession.runtimeSessionId,
-        workDir: "/tmp/ws",
+        workDir: '/tmp/ws',
       } as never
     },
     async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: Record<string, unknown>) {
@@ -240,23 +260,23 @@ function makeFakeConnection(): FakeConnectionHandles {
 
 function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
-    workflowRunId: "",
-    workId: "aj-1",
-    workType: "task",
-    ownerKind: "agent-job",
-    agentJobId: "aj-1",
-    agentSessionId: "session-1",
-    projectId: "proj-1",
-    with: { prompt: "do the agent thing" },
+    workflowRunId: '',
+    workId: 'aj-1',
+    workType: 'task',
+    ownerKind: 'agent-job',
+    agentJobId: 'aj-1',
+    agentSessionId: 'session-1',
+    projectId: 'proj-1',
+    with: { prompt: 'do the agent thing' },
     variables: {
-      workspace: { path: "/tmp/agent-job-ws", branch: null, changeDir: null },
+      workspace: { path: '/tmp/agent-job-ws', branch: null, changeDir: null },
     },
     ...overrides,
   }
 }
 
-describe("AgentJobExecutor selects the runtime from the dispatch", () => {
-  it("selects OpenCodeRuntime for a dispatch with runtime: opencode", async () => {
+describe('AgentJobExecutor selects the runtime from the dispatch', () => {
+  it('selects OpenCodeRuntime for a dispatch with runtime: opencode', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
@@ -266,18 +286,18 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: "ship it", runtime: "opencode" },
+      with: { prompt: 'ship it', runtime: 'opencode' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
+    expect(result.status).toBe('completed')
     expect(openCode.runTurnCalls).toHaveLength(1)
     expect(pi.runTurnCalls).toHaveLength(0)
     const parsed = result.output as Record<string, unknown>
-    expect(parsed.kind).toBe("opencode")
+    expect(parsed.kind).toBe('opencode')
   })
 
-  it("passes the same complete startup-before-task prompt to OpenCode and Pi", async () => {
+  it('passes the same complete startup-before-task prompt to OpenCode and Pi', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
@@ -286,58 +306,65 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
       pi: pi.runtime,
     })
     const startup = {
-      projectId: "proj_1",
-      sessionId: "sess_child",
-      parentSessionId: "sess_parent",
-      allowedSubagents: [{
-        agentId: "agent_allowed",
-        nameAtLaunch: "allowed-agent",
-        descriptionAtLaunch: "stable launch description",
-      }],
-      spawnCommand: "mo agent spawn <agent-ref> --parent-session <session-id>",
-      workDir: "/inherited/agent-workspace",
-      pinnedRunnerId: "runner_pinned",
-      agentId: "agent_target",
-      agentName: "target-agent",
+      projectId: 'proj_1',
+      sessionId: 'sess_child',
+      parentSessionId: 'sess_parent',
+      allowedSubagents: [
+        {
+          agentId: 'agent_allowed',
+          nameAtLaunch: 'allowed-agent',
+          descriptionAtLaunch: 'stable launch description',
+        },
+      ],
+      spawnCommand: 'mo agent spawn <agent-ref> --parent-session <session-id>',
+      workDir: '/inherited/agent-workspace',
+      pinnedRunnerId: 'runner_pinned',
+      agentId: 'agent_target',
+      agentName: 'target-agent',
     } as const
 
     const commonWork = {
       agentSessionId: null,
       agentSessionStartup: startup,
-      with: { prompt: "target task", instructions: "follow the brief", runtime: "opencode" },
+      with: { prompt: 'target task', instructions: 'follow the brief', runtime: 'opencode' },
     } satisfies Partial<DispatchWorkItem>
     const openCodeResult = await executor.execute(buildAgentJobWork(commonWork), new AbortController().signal)
-    const piResult = await executor.execute(buildAgentJobWork({
-      ...commonWork,
-      workId: "aj-pi",
-      agentJobId: "aj-pi",
-      with: { ...commonWork.with, runtime: "pi" },
-    }), new AbortController().signal)
+    const piResult = await executor.execute(
+      buildAgentJobWork({
+        ...commonWork,
+        workId: 'aj-pi',
+        agentJobId: 'aj-pi',
+        with: { ...commonWork.with, runtime: 'pi' },
+      }),
+      new AbortController().signal,
+    )
 
-    expect(openCodeResult.status).toBe("completed")
-    expect(piResult.status).toBe("completed")
+    expect(openCodeResult.status).toBe('completed')
+    expect(piResult.status).toBe('completed')
     const openCodePrompt = openCode.runTurnCalls[0]?.prompt
     const piPrompt = pi.runTurnCalls[0]?.prompt
     expect(openCodePrompt).toBeDefined()
     expect(piPrompt).toBe(openCodePrompt)
-    expect(openCodePrompt).toMatch(/^\[mohist-agent-session-startup\][\s\S]*\[\/mohist-agent-session-startup\]\n\n[\s\S]*target task$/)
+    expect(openCodePrompt).toMatch(
+      /^\[mohist-agent-session-startup\][\s\S]*\[\/mohist-agent-session-startup\]\n\n[\s\S]*target task$/,
+    )
     for (const value of [
-      "agent_target",
-      "target-agent",
-      "/inherited/agent-workspace",
-      "runner_pinned",
-      "sess_parent",
-      "sess_child",
-      "agent_allowed",
-      "allowed-agent",
-      "stable launch description",
-      "mo agent spawn <agent-ref> --parent-session <session-id>",
+      'agent_target',
+      'target-agent',
+      '/inherited/agent-workspace',
+      'runner_pinned',
+      'sess_parent',
+      'sess_child',
+      'agent_allowed',
+      'allowed-agent',
+      'stable launch description',
+      'mo agent spawn <agent-ref> --parent-session <session-id>',
     ]) {
       expect(openCodePrompt).toContain(value)
     }
   })
 
-  it("selects PiRuntime for a dispatch with runtime: pi", async () => {
+  it('selects PiRuntime for a dispatch with runtime: pi', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
@@ -347,18 +374,18 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: "ship it on pi", runtime: "pi" },
+      with: { prompt: 'ship it on pi', runtime: 'pi' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
+    expect(result.status).toBe('completed')
     expect(pi.runTurnCalls).toHaveLength(1)
     expect(openCode.runTurnCalls).toHaveLength(0)
     const parsed = result.output as Record<string, unknown>
-    expect(parsed.kind).toBe("pi")
+    expect(parsed.kind).toBe('pi')
   })
 
-  it("treats an absent dispatch `runtime` as opencode (legacy partial rollout)", async () => {
+  it('treats an absent dispatch `runtime` as opencode (legacy partial rollout)', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
@@ -367,15 +394,15 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
       pi: pi.runtime,
     })
 
-    const work = buildAgentJobWork({ with: { prompt: "legacy dispatch" } })
+    const work = buildAgentJobWork({ with: { prompt: 'legacy dispatch' } })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
+    expect(result.status).toBe('completed')
     expect(openCode.runTurnCalls).toHaveLength(1)
     expect(pi.runTurnCalls).toHaveLength(0)
   })
 
-  it("fails with runtime-unavailable when the selected pi runtime is not ready", async () => {
+  it('fails with runtime-unavailable when the selected pi runtime is not ready', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     pi.setReady(false)
@@ -386,22 +413,22 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: "pi unavailable", runtime: "pi" },
+      with: { prompt: 'pi unavailable', runtime: 'pi' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("runtime-unavailable")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('runtime-unavailable')
     expect(result.message).toMatch(/Pi runtime/)
     // Critical: NO silent fallback to OpenCode.
     expect(openCode.runTurnCalls).toHaveLength(0)
     expect(pi.runTurnCalls).toHaveLength(0)
   })
 
-  it("fails with runtime-unavailable when the selected opencode runtime is not ready", async () => {
+  it('fails with runtime-unavailable when the selected opencode runtime is not ready', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     openCode.runtime.ready = () => false
-    openCode.runtime.diagnostic = () => ({ severity: "warning", code: "opencode-not-ready", message: "opencode down" })
+    openCode.runtime.diagnostic = () => ({ severity: 'warning', code: 'opencode-not-ready', message: 'opencode down' })
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
     const executor = new AgentJobExecutor(connection.connection, {
@@ -410,18 +437,18 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: "opencode unavailable", runtime: "opencode" },
+      with: { prompt: 'opencode unavailable', runtime: 'opencode' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("runtime-unavailable")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('runtime-unavailable')
     expect(result.message).toMatch(/OpenCode runtime/)
     // Critical: NO silent fallback to Pi.
     expect(pi.runTurnCalls).toHaveLength(0)
   })
 
-  it("fails when the selected pi runtime accessor returns null (host wiring)", async () => {
+  it('fails when the selected pi runtime accessor returns null (host wiring)', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const connection = makeFakeConnection()
     // Late-binding accessor returns null (e.g. Pi runtime not constructed yet).
@@ -431,23 +458,23 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: "pi accessor null", runtime: "pi" },
+      with: { prompt: 'pi accessor null', runtime: 'pi' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("runtime-unavailable")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('runtime-unavailable')
     // No silent fallback to OpenCode.
     expect(openCode.runTurnCalls).toHaveLength(0)
   })
 
-  it("does not flag `runtime` as an unknown dispatch option key (pi path)", async () => {
+  it('does not flag `runtime` as an unknown dispatch option key (pi path)', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: "audit pi", runtime: "pi" },
+      with: { prompt: 'audit pi', runtime: 'pi' },
     })
     await executor.execute(work, new AbortController().signal)
 
@@ -456,228 +483,246 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
   })
 })
 
-describe("AgentJobExecutor drives PiRuntime end-to-end", () => {
-  it("creates a Pi session when no binding exists and executes the turn", async () => {
+describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
+  it('creates a Pi session when no binding exists and executes the turn', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: null })
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: "execute on pi", runtime: "pi", model: "openai/gpt-5.5", reasoningEffort: "high" },
+      with: { prompt: 'execute on pi', runtime: 'pi', model: 'openai/gpt-5.5', reasoningEffort: 'high' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
+    expect(result.status).toBe('completed')
     expect(pi.createSessionCalls).toHaveLength(1)
     expect(pi.runTurnCalls).toHaveLength(1)
     const request = pi.runTurnCalls[0]
-    expect(request.target.runtime).toBe("pi")
-    expect(request.target.workDir).toBe("/tmp/agent-job-ws")
-    expect(request.options?.model).toBe("openai/gpt-5.5")
+    expect(request.target.runtime).toBe('pi')
+    expect(request.target.workDir).toBe('/tmp/agent-job-ws')
+    expect(request.options?.model).toBe('openai/gpt-5.5')
     expect(request.options?.variant).toBeNull()
-    expect(request.options?.reasoningEffort).toBe("high")
+    expect(request.options?.reasoningEffort).toBe('high')
   })
 
-  it("rejects a Pi runtime-specific variant instead of treating it as reasoning effort", async () => {
+  it('rejects a Pi runtime-specific variant instead of treating it as reasoning effort', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
-    const result = await executor.execute(buildAgentJobWork({
-      with: { prompt: "do not alias", runtime: "pi", variant: "high" },
-    }), new AbortController().signal)
+    const result = await executor.execute(
+      buildAgentJobWork({
+        with: { prompt: 'do not alias', runtime: 'pi', variant: 'high' },
+      }),
+      new AbortController().signal,
+    )
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("incompatible-execution-configuration")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('incompatible-execution-configuration')
     expect(pi.runTurnCalls).toHaveLength(0)
   })
 
-  it("rejects reasoning effort without an explicit model before opening a Pi session", async () => {
+  it('rejects reasoning effort without an explicit model before opening a Pi session', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
-    const result = await executor.execute(buildAgentJobWork({
-      with: { prompt: "needs model", runtime: "pi", reasoningEffort: "high" },
-    }), new AbortController().signal)
+    const result = await executor.execute(
+      buildAgentJobWork({
+        with: { prompt: 'needs model', runtime: 'pi', reasoningEffort: 'high' },
+      }),
+      new AbortController().signal,
+    )
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("incompatible-execution-configuration")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('incompatible-execution-configuration')
     expect(pi.createSessionCalls).toHaveLength(0)
     expect(pi.runTurnCalls).toHaveLength(0)
   })
 
-  it("labels Pi session-creation failures with the Pi runtime", async () => {
+  it('labels Pi session-creation failures with the Pi runtime', async () => {
     const pi = makeFakePiRuntime()
     pi.setCreateSessionResult({
       ok: false,
       error: {
-        kind: "turn-failed",
-        message: "Pi session creation failed",
-        diagnostics: [{
-          severity: "error",
-          code: "session-create-failed",
-          message: "provider credentials unavailable",
-        }],
+        kind: 'turn-failed',
+        message: 'Pi session creation failed',
+        diagnostics: [
+          {
+            severity: 'error',
+            code: 'session-create-failed',
+            message: 'provider credentials unavailable',
+          },
+        ],
       },
-      diagnostics: [{
-        severity: "error",
-        code: "session-create-failed",
-        message: "provider credentials unavailable",
-      }],
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'session-create-failed',
+          message: 'provider credentials unavailable',
+        },
+      ],
     })
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const result = await executor.execute(
-      buildAgentJobWork({ with: { prompt: "create a Pi session", runtime: "pi" } }),
+      buildAgentJobWork({ with: { prompt: 'create a Pi session', runtime: 'pi' } }),
       new AbortController().signal,
     )
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("turn-failed")
-    expect((result.output as Record<string, unknown>).kind).toBe("pi")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('turn-failed')
+    expect((result.output as Record<string, unknown>).kind).toBe('pi')
   })
 
-  it("reuses an existing pi binding on a follow-up dispatch", async () => {
+  it('reuses an existing pi binding on a follow-up dispatch', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    connection.setAgentSession({ runtimeSessionId: "/virtual/sessions/existing.jsonl" })
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    connection.setAgentSession({ runtimeSessionId: '/virtual/sessions/existing.jsonl' })
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: "follow-up", runtime: "pi" },
+      with: { prompt: 'follow-up', runtime: 'pi' },
     })
     await executor.execute(work, new AbortController().signal)
 
     expect(pi.createSessionCalls).toHaveLength(0)
     expect(pi.runTurnCalls).toHaveLength(1)
-    expect(pi.runTurnCalls[0].target.runtimeSessionId).toBe("/virtual/sessions/existing.jsonl")
+    expect(pi.runTurnCalls[0].target.runtimeSessionId).toBe('/virtual/sessions/existing.jsonl')
   })
 
-  it("labels the terminal output with the runtime that executed", async () => {
+  it('labels the terminal output with the runtime that executed', async () => {
     const pi = makeFakePiRuntime()
-    pi.setNextSessionId("/virtual/sessions/labeled.jsonl")
+    pi.setNextSessionId('/virtual/sessions/labeled.jsonl')
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: "label me", runtime: "pi", model: "openai/gpt-5.5" },
+      with: { prompt: 'label me', runtime: 'pi', model: 'openai/gpt-5.5' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
+    expect(result.status).toBe('completed')
     const parsed = result.output as JsonObject as Record<string, unknown>
-    expect(parsed.kind).toBe("pi")
-    expect(parsed.status).toBe("success")
-    expect(parsed.runtimeSessionId).toBe("/virtual/sessions/labeled.jsonl")
-    expect(parsed.model).toBe("openai/gpt-5.5")
+    expect(parsed.kind).toBe('pi')
+    expect(parsed.status).toBe('success')
+    expect(parsed.runtimeSessionId).toBe('/virtual/sessions/labeled.jsonl')
+    expect(parsed.model).toBe('openai/gpt-5.5')
   })
 
-  it("projects Pi turn facts through the existing AgentSession observer channel", async () => {
+  it('projects Pi turn facts through the existing AgentSession observer channel', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      agentSessionId: "session-pi",
-      with: { prompt: "project pi facts", runtime: "pi" },
+      agentSessionId: 'session-pi',
+      with: { prompt: 'project pi facts', runtime: 'pi' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
+    expect(result.status).toBe('completed')
     // Attach + session.input + at least one runtime event forwarded.
     expect(connection.attachCalls).toHaveLength(1)
     expect(connection.attachCalls[0].body).toMatchObject({
       runtimeSessionId: expect.stringMatching(/\.jsonl$/) as unknown as string,
-      workDir: "/tmp/agent-job-ws",
-      workId: "aj-1",
-      agentJobId: "aj-1",
+      workDir: '/tmp/agent-job-ws',
+      workId: 'aj-1',
+      agentJobId: 'aj-1',
     })
-    const eventTypes = connection.eventCalls.map((call) => (call.body.runtimeEvents as Array<{ type: string }>)[0]?.type)
-    expect(eventTypes).toContain("session.input")
+    const eventTypes = connection.eventCalls.map(
+      (call) => (call.body.runtimeEvents as Array<{ type: string }>)[0]?.type,
+    )
+    expect(eventTypes).toContain('session.input')
     // Pi-runtime events (from the fake's observer sample) reach the server.
-    expect(eventTypes.filter((t) => t === "message").length).toBeGreaterThan(0)
+    expect(eventTypes.filter((t) => t === 'message').length).toBeGreaterThan(0)
   })
 
-  it("forwards uncredentialed-model failures as actionable turn-failed without swallowing them", async () => {
+  it('forwards uncredentialed-model failures as actionable turn-failed without swallowing them', async () => {
     const pi = makeFakePiRuntime()
     pi.setTurnResult({
       ok: false,
       error: {
-        kind: "turn-failed",
-        message: "Pi rejected the selected model",
-        diagnostics: [{
-          severity: "error",
-          code: "model-rejected",
-          message: "provider not configured for model",
-        }],
+        kind: 'turn-failed',
+        message: 'Pi rejected the selected model',
+        diagnostics: [
+          {
+            severity: 'error',
+            code: 'model-rejected',
+            message: 'provider not configured for model',
+          },
+        ],
       },
-      diagnostics: [{
-        severity: "error",
-        code: "model-rejected",
-        message: "provider not configured for model",
-      }],
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'model-rejected',
+          message: 'provider not configured for model',
+        },
+      ],
     })
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: "no creds", runtime: "pi", model: "openai/gpt-uncredentialed" },
+      with: { prompt: 'no creds', runtime: 'pi', model: 'openai/gpt-uncredentialed' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("turn-failed")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('turn-failed')
     expect(result.error?.message).toMatch(/Pi rejected the selected model/)
     // Actionable diagnostic surfaces (the runtime is the final validator).
     const parsed = result.output as Record<string, unknown>
     const diagnostics = parsed.diagnostics as Array<{ code: string; message: string }>
-    expect(diagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "model-rejected", message: expect.stringMatching(/provider/) }),
-    ]))
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'model-rejected', message: expect.stringMatching(/provider/) }),
+      ]),
+    )
     // The terminal output keeps the runtime label so callers know which backend rejected the model.
-    expect(parsed.kind).toBe("pi")
+    expect(parsed.kind).toBe('pi')
   })
 
-  it("surfaces missing-session with the reset hint", async () => {
+  it('surfaces missing-session with the reset hint', async () => {
     const pi = makeFakePiRuntime()
     pi.setTurnResult({
       ok: false,
       error: {
-        kind: "missing-session",
-        message: "Pi session file is missing",
+        kind: 'missing-session',
+        message: 'Pi session file is missing',
         diagnostics: [],
       },
       diagnostics: [],
     })
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: "stale binding", runtime: "pi" },
+      with: { prompt: 'stale binding', runtime: 'pi' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("runtime-session-missing")
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('runtime-session-missing')
     const parsed = result.output as Record<string, unknown>
-    expect(parsed.kind).toBe("pi")
-    expect(parsed.hint).toBe("reset")
+    expect(parsed.kind).toBe('pi')
+    expect(parsed.hint).toBe('reset')
   })
 
-  it("passes a fresh prompt from the dispatch through the composed prompt helper", async () => {
+  it('passes a fresh prompt from the dispatch through the composed prompt helper', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: "main task", instructions: "be terse", runtime: "pi" },
+      with: { prompt: 'main task', instructions: 'be terse', runtime: 'pi' },
     })
     await executor.execute(work, new AbortController().signal)
 
     expect(pi.runTurnCalls).toHaveLength(1)
-    expect(pi.runTurnCalls[0].prompt).toBe("be terse\n\nmain task")
+    expect(pi.runTurnCalls[0].prompt).toBe('be terse\n\nmain task')
   })
 })
