@@ -34,17 +34,20 @@ task-run identity, it reports `status: unknown` through the existing result
 route after connection. That is an explicit result-unconfirmed observation, not
 a synthesized `WorkItemResult`: the Server matches the original
 `runnerId`/`taskRunId`/`workId` tuple and enters its existing unknown/blocked
-settlement. The Runner retains the `started` fence until that observation gets
-an Accepted or Stale acknowledgement, then removes it atomically. A transport
-or local-delete failure leaves the original fence durable and retries the same
-observation.
+settlement. For an AgentJob dispatch, the same receipt retains the original
+`runnerId`/`agentJobId`/`workId` tuple and moves the AgentJob to its durable
+`Unknown` state; it does not enter the terminal failed path. Both owners retain
+their work identity and refuse physical replay.
 
-Only entries loaded before this process begins admitting work are eligible.
-Current-process `started` entries, checks, AgentJobs, ordinary tasks, and
-legacy entries without a complete Workflow Agent attempt identity stay fenced;
-they are never projected as unknown reports. This prevents an active execution
-from being mistaken for a lost result and prevents the generic task fallback
-from turning an unsupported work type into a failure.
+The Runner retains the `started` fence until the observation gets an Accepted
+or Stale acknowledgement, then removes it atomically. A transport or
+local-delete failure leaves the original fence durable and retries the same
+observation. Only entries loaded before this process begins admitting work are
+eligible. Current-process `started` entries, checks, ordinary tasks, and legacy
+entries without the complete owner identity stay fenced; they are never
+projected as unknown reports. This prevents an active execution from being
+mistaken for a lost result and prevents the generic task fallback from turning
+an unsupported work type into a failure.
 
 This is identity redelivery, not physical execution replay. It recovers the
 result-before-report crash window. A process that died while the physical
@@ -72,7 +75,7 @@ the persisted Workflow attempt still matches the original `taskRunId`,
 `workId`, and authenticated `runnerId`; an unknown or blocked settlement is
 still reportable under that same tuple.
 
-The Server has no safe source for a result from a `started` entry. The
+The Server has no safe source for a terminal result from a `started` entry. The
 Workflow work projection stores lookup and active-work facts, not a result.
 AgentSession terminal observations and the runtime close event carry physical
 activity, status, and exit information, but not the complete Workflow result
@@ -80,6 +83,15 @@ contract. Terminal task-log ownership is written after Workflow task
 settlement and authorizes log upload only; it is not a result receipt. The
 Workflow therefore must retain `unknown` or `blocked` when those are the only
 facts available.
+
+AgentJob has an explicit durable `Unknown` state for the same boundary. A
+recovered AgentJob observation may enter that state only after the Runner has
+presented the exact local `started` fence identity. The AgentJob report handler
+must validate the current Runner and work identity before recording Unknown;
+`status: unknown` must never call the normal success/failure terminalization
+path. A subsequent authoritative terminal report is still allowed to resolve
+the original Job, while an already-terminal Job returns the existing stale
+acknowledgement.
 
 This preserves a single recovery rule:
 

@@ -341,7 +341,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 Key, runnerId, workId, State.RunnerId, State.WorkId);
             return new AgentJobReportResult(false, "runner-or-work-mismatch");
         }
-
+        if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase)) return await ReportUnknownResultAsync(result);
         var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
             || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
             || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)

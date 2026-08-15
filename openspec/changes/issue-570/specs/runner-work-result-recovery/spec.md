@@ -34,9 +34,9 @@ infer success, failure, output, artifacts, or replacement work.
 The Runner MUST remove that started fence only after the Server durably
 acknowledges the observation as Accepted or Stale. A failed delivery or local
 delete MUST retain the fence and retry the same observation. Entries not loaded
-at startup, non-Agent tasks, checks, AgentJobs, or records missing the complete
-Workflow Agent identity MUST remain fences and MUST NOT be sent through this
-unknown-result route.
+at startup, non-Agent tasks, checks, or records missing the complete owner
+identity MUST remain fences and MUST NOT be sent through this unknown-result
+route.
 
 ### Scenario: recovered Agent started fence enters settlement without a terminal result
 
@@ -46,6 +46,24 @@ unknown-result route.
 - AND the Server MUST preserve the running task under the existing unknown or
   blocked settlement rather than write task success or failure
 - AND the Runner MUST NOT execute the original dispatch again
+
+### Scenario: recovered AgentJob started fence enters Unknown without terminal failure
+
+- WHEN a Runner restarts with a durable `started` entry for an AgentJob
+  dispatch and no completed receipt
+- THEN it MUST report the original AgentJob and work identity with
+  `status: unknown`
+- AND the Server MUST validate the original Runner and work identity before
+  moving the AgentJob to durable `Unknown`
+- AND the Server MUST NOT write AgentJob `Failed` or `Completed`
+- AND the Runner MUST NOT execute the original dispatch again
+
+### Scenario: recovered AgentJob observation is idempotent
+
+- WHEN the same unknown observation is delivered more than once
+- THEN the first accepted observation MUST remain Unknown
+- AND later delivery MUST be acknowledged as stale or idempotently accepted
+- AND no second terminal transition or new work identity MUST be created
 
 ### Scenario: unknown observation acknowledgement is interrupted
 
