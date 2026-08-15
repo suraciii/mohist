@@ -144,8 +144,16 @@ export class NodeRuntimeEventOutboxFileSystem implements RuntimeEventOutboxFileS
     const fileSystem = currentRunnerFileSystem()
     await fileSystem.ensureDir(dirname(path))
     const temporary = nextTemporaryFilePath(path)
-    await fileSystem.writeText(temporary, body, { mode: 0o600 })
-    await fileSystem.rename(temporary, path)
+    try {
+      await fileSystem.writeText(temporary, body, { mode: 0o600 })
+      await fileSystem.rename(temporary, path)
+    } catch (error) {
+      // A failed write can leave a partial temporary file behind (notably on
+      // ENOSPC). Remove only this attempt's unique path and preserve the
+      // original error for the outbox's existing recovery handling.
+      await fileSystem.deleteFile(temporary).catch(() => undefined)
+      throw error
+    }
   }
 }
 
