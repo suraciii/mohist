@@ -13,7 +13,7 @@ using Orleans;
 
 namespace Mohist.Server.Sessions.Grains;
 
-public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
+public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 {
     private static readonly TimeSpan FollowupLeaseWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);

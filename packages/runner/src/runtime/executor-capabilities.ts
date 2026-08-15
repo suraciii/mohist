@@ -44,11 +44,13 @@ export function buildActionHost(
   signal: AbortSignal,
   log: TaskLogger,
   caps: ActionCapabilitySet,
+  cleanupAttempt?: number,
 ): ActionHost {
   const host: ActionHost = {
     workDir,
     signal,
     log,
+    cleanupAttempt: cleanupAttempt ?? null,
     piRuntime: deps.piRuntime,
     skillResolver: deps.skillResolver,
     agentDefinition: work.agentDefinition,
@@ -60,7 +62,7 @@ export function buildActionHost(
   }
 
   if (caps.has('agent-turn')) {
-    host.agent = buildAgentTurnCapability(deps, work, workDir, signal)
+    host.agent = buildAgentTurnCapability(deps, work, workDir, signal, cleanupAttempt)
   }
 
   if (caps.has('issue-fields')) {
@@ -79,12 +81,13 @@ function buildAgentTurnCapability(
   work: DispatchWorkItem,
   workDir: string,
   signal: AbortSignal,
+  cleanupAttempt?: number,
 ) {
   const self = deps
   return {
     async turn(request: AgentTurnRequest): Promise<ActionResult> {
       if (work.uses?.trim().toLowerCase() === 'mohist/pi') {
-        return await runPiAgentTurn(self, work, workDir, signal, request)
+        return await runPiAgentTurn(self, work, workDir, signal, request, cleanupAttempt)
       }
       const definition = work.agentDefinition
       const skillNames = definition?.skills ?? []
@@ -143,6 +146,7 @@ function buildAgentTurnCapability(
               opened.runtimeSessionId ?? null,
               self.agentSessionRuntimeEventOutbox,
               self.runtimeEventRecordId,
+              cleanupAttempt,
             )
             return await workflowActionFailure(
               mismatchReporter,
@@ -192,6 +196,7 @@ function buildAgentTurnCapability(
         binding.runtimeSessionId,
         self.agentSessionRuntimeEventOutbox,
         self.runtimeEventRecordId,
+        cleanupAttempt,
       )
 
       if (!runtime) {
@@ -264,6 +269,7 @@ function buildAgentTurnCapability(
             created.value.runtimeSessionId,
             self.agentSessionRuntimeEventOutbox,
             self.runtimeEventRecordId,
+            cleanupAttempt,
           )
           return await workflowActionFailure(
             attachReporter,
@@ -289,6 +295,7 @@ function buildAgentTurnCapability(
           binding.runtimeSessionId,
           self.agentSessionRuntimeEventOutbox,
           self.runtimeEventRecordId,
+          cleanupAttempt,
         )
       }
 
@@ -354,6 +361,7 @@ function buildAgentTurnCapability(
           binding.runtimeSessionId,
           self.agentSessionRuntimeEventOutbox,
           self.runtimeEventRecordId,
+          cleanupAttempt,
         )
       }
 
@@ -457,6 +465,7 @@ function buildAgentTurnCapability(
         selectedBinding.runtimeSessionId,
         self.agentSessionRuntimeEventOutbox,
         self.runtimeEventRecordId,
+        cleanupAttempt,
       )
 
       if (reporter && selectedBinding.runtimeSessionId) {
@@ -515,6 +524,7 @@ async function runPiAgentTurn(
   workDir: string,
   signal: AbortSignal,
   request: AgentTurnRequest,
+  cleanupAttempt?: number,
 ): Promise<ActionResult> {
   return await piAction({
     workflowRunId: work.workflowRunId,
@@ -536,6 +546,7 @@ async function runPiAgentTurn(
     runtimeEventOutbox: deps.agentSessionRuntimeEventOutbox,
     runtimeEventRecordId: deps.runtimeEventRecordId,
     runnerId: deps.connection.runnerId,
+    cleanupAttempt,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
     preparedOptions: request.options,
   })
@@ -598,6 +609,7 @@ function createWorkflowReporter(
   runtimeSessionId: string | null,
   outbox: AgentSessionRuntimeEventOutbox | null,
   runtimeEventRecordId: () => string,
+  cleanupAttempt?: number,
 ): WorkflowAgentSessionReporter | null {
   if (!projectId) return null
   if (!outbox) return null
@@ -611,6 +623,7 @@ function createWorkflowReporter(
     workMetadata: { ...workMetadata, runnerId, agentSessionId },
     runtime: 'opencode',
     randomId: runtimeEventRecordId,
+    cleanupAttempt,
   })
 }
 

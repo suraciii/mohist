@@ -290,6 +290,24 @@ public static partial class WorkflowRunExtensions
             return AgentExecutionUpdate.Updated;
         }
 
+        public bool CanStartAgentCleanup(AgentExecutionBinding binding)
+        {
+            if (!IsValid(binding))
+                return false;
+
+            var match = FindTaskAttempt(run, binding.TaskRunId, binding.WorkId, binding.RunnerId);
+            if (match is not { } found
+                || found.Task.Status != TaskRunStatus.Running
+                || found.Task.AgentResultSettlement is not { } settlement)
+            {
+                return false;
+            }
+
+            return MatchesAttempt(settlement, binding)
+                && HasFullExecutionBinding(settlement)
+                && MatchesBoundFields(settlement, binding);
+        }
+
         public AgentExecutionUpdate ObserveAgentExecution(
             AgentExecutionObservation observation,
             DateTimeOffset now,

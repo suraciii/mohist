@@ -388,13 +388,25 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private takeBatch(label: string, limit: number): InternalRecord[] {
     const matching: InternalRecord[] = []
     for (const record of this.records.values()) {
-      const recordLabel = runtimeEventDeliveryKey(record)
+      const recordLabel = runtimeEventSchedulingKey(record)
       if (recordLabel !== label) continue
       matching.push(record)
-      if (matching.length >= limit) break
     }
     matching.sort(sortBySequence)
-    return matching
+    const first = matching[0]
+    if (!first) return []
+    // Preserve wire identity while serializing the logical Workflow session;
+    // input boundaries wait for the prior terminal acknowledgement.
+    if (isWorkflowSessionBoundary(first)) return [first]
+    const executionKey = runtimeEventDeliveryKey(first)
+    const batch: InternalRecord[] = []
+    for (const record of matching) {
+      if (runtimeEventDeliveryKey(record) !== executionKey) break
+      if (isWorkflowSessionBoundary(record)) break
+      batch.push(record)
+      if (batch.length >= limit) break
+    }
+    return batch
   }
 
   private async deliverBatch(batch: InternalRecord[], signal: AbortSignal): Promise<boolean> {
@@ -446,8 +458,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       if (this.records.get(record.id) !== record) continue
       this.records.delete(record.id)
       removed.push(record)
-      if (record.producerFamily === 'workflow-session' && record.event.type === 'session.input')
-        this.resolveInputReceipt(record.id, receipt)
+      if (requiresInputReceipt(record)) this.resolveInputReceipt(record.id, receipt)
       anyAcknowledged = true
     }
     if (!anyAcknowledged) {
@@ -596,7 +607,7 @@ interface GroupSnapshot {
 function collectGroups(records: InternalRecord[]): GroupSnapshot[] {
   const groups = new Map<string, InternalRecord[]>()
   for (const record of records) {
-    const label = runtimeEventDeliveryKey(record)
+    const label = runtimeEventSchedulingKey(record)
     const list = groups.get(label)
     if (list) list.push(record)
     else groups.set(label, [record])
@@ -640,6 +651,16 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
       execution: workflowExecutionIdentity(record),
     }
   }
+  if (record.producerFamily === 'workflow-cleanup') {
+    if (record.target.kind !== 'workflow') throw new Error('workflow-cleanup family requires workflow target')
+    return {
+      family: 'workflow-cleanup',
+      projectId: record.target.projectId,
+      workflowRunId: record.target.workflowRunId,
+      sessionName: record.target.sessionName,
+      cleanupOperationId: record.id,
+    }
+  }
   if (record.producerFamily === 'binding-reconcile') {
     if (record.target.kind !== 'session') throw new Error('binding-reconcile family requires session target')
     return {
@@ -671,6 +692,24 @@ export function runtimeEventDeliveryKey(record: RuntimeEventRecord): string {
   return sequenceKeyLabel(sequenceKey(record))
 }
 
+function runtimeEventSchedulingKey(record: RuntimeEventRecord): string {
+  if (record.producerFamily !== 'workflow-session' && record.producerFamily !== 'workflow-cleanup')
+    return runtimeEventDeliveryKey(record)
+  if (record.target.kind !== 'workflow') throw new Error('workflow scheduling family requires workflow target')
+  return JSON.stringify({
+    family: 'workflow-session',
+    projectId: record.target.projectId,
+    workflowRunId: record.target.workflowRunId,
+    sessionName: record.target.sessionName,
+  })
+}
+
+function isWorkflowSessionBoundary(record: RuntimeEventRecord): boolean {
+  return (
+    (record.producerFamily === 'workflow-session' && record.event.type === 'session.input') ||
+    (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup')
+  )
+}
 export interface WorkflowRuntimeEventExecutionIdentity {
   readonly runnerId: string
   readonly agentSessionId: string
@@ -710,7 +749,6 @@ export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowR
     runtimeSessionId: record.runtimeSessionId,
   }
 }
-
 function nonEmpty(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.length > 0
 }
@@ -723,6 +761,15 @@ function sequenceKeyLabel(key: SequenceKey): string {
       workflowRunId: key.workflowRunId,
       sessionName: key.sessionName,
       execution: key.execution ?? null,
+    })
+  }
+  if (key.family === 'workflow-cleanup') {
+    return JSON.stringify({
+      family: key.family,
+      projectId: key.projectId,
+      workflowRunId: key.workflowRunId,
+      sessionName: key.sessionName,
+      cleanupOperationId: key.cleanupOperationId,
     })
   }
   if (key.family === 'binding-reconcile') {
@@ -750,7 +797,25 @@ function matchingReceipt(
       ? matching
       : null
   }
+  if (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup') {
+    const inputDeliveryId = record.event.payload.inputDeliveryId
+    const agentTurnId = record.event.payload.turnId
+    return typeof inputDeliveryId === 'string' &&
+      typeof agentTurnId === 'string' &&
+      matching.inputDeliveryId === inputDeliveryId &&
+      matching.agentSessionId === record.work?.agentSessionId &&
+      matching.agentTurnId === agentTurnId
+      ? matching
+      : null
+  }
   return matching
+}
+
+function requiresInputReceipt(record: RuntimeEventRecord): boolean {
+  return (
+    record.event.type === 'session.input' ||
+    (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup')
+  )
 }
 
 function sortBySequence(a: InternalRecord, b: InternalRecord): number {
@@ -801,6 +866,7 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
     typeof id !== 'string' ||
     !isRuntimeTarget(target) ||
     (family !== 'workflow-session' &&
+      family !== 'workflow-cleanup' &&
       family !== 'session-followup' &&
       family !== 'generic-followup' &&
       family !== 'binding-reconcile') ||
@@ -916,12 +982,18 @@ async function defaultDelivery(
 }
 
 interface SequenceKey {
-  readonly family: 'workflow-session' | 'session-followup' | 'generic-followup' | 'binding-reconcile'
+  readonly family:
+    | 'workflow-session'
+    | 'workflow-cleanup'
+    | 'session-followup'
+    | 'generic-followup'
+    | 'binding-reconcile'
   readonly projectId?: string
   readonly workflowRunId?: string
   readonly sessionName?: string
   readonly sessionId?: string
   readonly runtimeSessionId?: string
   readonly sessionTurnId?: string
+  readonly cleanupOperationId?: string
   readonly execution?: WorkflowRuntimeEventExecutionIdentity | null
 }

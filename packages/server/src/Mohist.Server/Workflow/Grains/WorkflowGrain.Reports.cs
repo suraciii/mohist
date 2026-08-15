@@ -16,6 +16,12 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding)
+    {
+        RejectIfRunReloadRequired();
+        return Task.FromResult(_run?.CanStartAgentCleanup(binding) == true);
+    }
+
     public async Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
     {
         RejectIfRunReloadRequired();
