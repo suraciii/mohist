@@ -118,6 +118,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
         var state = _state.State ??= new RunnerState();
         _info = state.LastKnownInfo;
+        _draining = !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId);
         if (_info is not null && state.LastKnownActionCatalogJson is not null)
         {
             var catalog = JSON.Deserialize<ActionCatalog>(state.LastKnownActionCatalogJson);
@@ -150,17 +151,21 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _pollAdmissionToken = null;
             SetRunnerInfo(InfoForRegister(info));
             _status = RunnerStatus.Online;
-            // A successful registration is the reconnect boundary for an
-            // update interruption. The new process may now reconcile the
-            // durable AgentJob ledger and receive the preserved work again.
-            _draining = false;
+            // Registration is the update handoff completion boundary. Persist
+            // it before reopening admission so an activation cannot silently
+            // erase a confirmed fence while the old process is still active.
+            var updateInterruptFence = UpdateInterruptFence();
             _readinessConnectionGeneration = null;
             _runtimeReadiness.Clear();
             _lastPresenceAt = _timeProvider.GetUtcNow();
             _pendingBuildGitHash = null;
             _pendingRuntimeIdentity = null;
             _slots = await _definitions.GetOrInitAsync(RunnerId);
-            await PersistAsync();
+            await PersistUpdateInterruptFenceAsync(
+                updateInterruptFence,
+                pendingId: null,
+                lastCancelledId: null);
+            _draining = false;
             await UpsertRegistryAsync();
             EnsurePresenceTimer();
             _log.LogInformation("Runner {Id} registered from {Host} as global resource with {Slots} persisted execution slots", info.RunnerId, info.Hostname, _slots);
@@ -339,16 +344,70 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
-    public async Task<RunnerRuntimeState?> BeginUpdateInterruptAsync()
+    public async Task<RunnerRuntimeState?> BeginUpdateInterruptAsync(string? updateInterruptId = null)
     {
+        var requestedId = NormalizeUpdateInterruptId(updateInterruptId);
+        if (!string.IsNullOrEmpty(updateInterruptId) && requestedId is null)
+            throw new ArgumentException("update interrupt id must be a UUID", nameof(updateInterruptId));
+
         await _lifecycleGate.WaitAsync();
         try
         {
             if (_status != RunnerStatus.Online || _info is null)
                 return null;
 
+            var fence = UpdateInterruptFence();
+            if (string.IsNullOrWhiteSpace(fence.PendingId))
+            {
+                // A delayed duplicate begin must not recreate a fence that a
+                // matching rollback has already durably released.
+                if (requestedId is not null
+                    && string.Equals(fence.LastCancelledId, requestedId, StringComparison.Ordinal))
+                {
+                    return await BuildRuntimeStateAsync();
+                }
+
+                await PersistUpdateInterruptFenceAsync(
+                    fence,
+                    requestedId ?? Guid.NewGuid().ToString("N"),
+                    lastCancelledId: null);
+            }
+
             _draining = true;
             return await BuildRuntimeStateAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async Task<RunnerUpdateInterruptCancelResult> CancelUpdateInterruptAsync(string updateInterruptId)
+    {
+        var normalizedId = NormalizeUpdateInterruptId(updateInterruptId)
+            ?? throw new ArgumentException("update interrupt id must be a UUID", nameof(updateInterruptId));
+
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            var fence = UpdateInterruptFence();
+            if (string.Equals(fence.PendingId, normalizedId, StringComparison.Ordinal))
+            {
+                await PersistUpdateInterruptFenceAsync(
+                    fence,
+                    pendingId: null,
+                    lastCancelledId: normalizedId);
+                _draining = false;
+                return new RunnerUpdateInterruptCancelResult(normalizedId, RunnerUpdateInterruptCancelStatus.Cancelled);
+            }
+
+            if (string.IsNullOrWhiteSpace(fence.PendingId)
+                && string.Equals(fence.LastCancelledId, normalizedId, StringComparison.Ordinal))
+            {
+                return new RunnerUpdateInterruptCancelResult(normalizedId, RunnerUpdateInterruptCancelStatus.AlreadyCancelled);
+            }
+
+            return new RunnerUpdateInterruptCancelResult(normalizedId, RunnerUpdateInterruptCancelStatus.Superseded);
         }
         finally
         {
@@ -361,6 +420,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
+            // Generic draining is intentionally not allowed to undo a
+            // persisted update fence. Only the matching update lease or a
+            // successful replacement registration can reopen that boundary.
+            if (!string.IsNullOrWhiteSpace(_state.State?.UpdateInterruptFence?.PendingId))
+                return;
             _draining = false;
         }
         finally
@@ -515,7 +579,12 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 TakenAt: w.RunningSince));
         }
 
-        return new RunnerRuntimeState(_status, _lastPresenceAt, activeWorks, _draining);
+        return new RunnerRuntimeState(
+            _status,
+            _lastPresenceAt,
+            activeWorks,
+            _draining,
+            _state.State?.UpdateInterruptFence?.PendingId);
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)
@@ -795,6 +864,42 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         state.LastKnownInfo = retained;
         state.LastKnownActionCatalogJson = retained?.ActionCatalog is { } catalog
             ? JSON.Serialize(catalog)
+            : null;
+    }
+
+    private RunnerUpdateInterruptFence UpdateInterruptFence()
+    {
+        var state = _state.State ??= new RunnerState();
+        return state.UpdateInterruptFence ??= new RunnerUpdateInterruptFence();
+    }
+
+    private async Task PersistUpdateInterruptFenceAsync(
+        RunnerUpdateInterruptFence fence,
+        string? pendingId,
+        string? lastCancelledId)
+    {
+        var previousPendingId = fence.PendingId;
+        var previousLastCancelledId = fence.LastCancelledId;
+        fence.PendingId = pendingId;
+        fence.LastCancelledId = lastCancelledId;
+        try
+        {
+            await PersistAsync();
+        }
+        catch
+        {
+            fence.PendingId = previousPendingId;
+            fence.LastCancelledId = previousLastCancelledId;
+            throw;
+        }
+    }
+
+    private static string? NormalizeUpdateInterruptId(string? updateInterruptId)
+    {
+        if (string.IsNullOrWhiteSpace(updateInterruptId))
+            return null;
+        return Guid.TryParse(updateInterruptId, out var parsed)
+            ? parsed.ToString("N")
             : null;
     }
 

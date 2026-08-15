@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Mohist.Cli;
 using Mohist.Cli.Tests.Support;
 using Xunit;
@@ -31,6 +32,42 @@ public sealed partial class ManagedRuntimeTransactionSpecs
         Assert.True(runnerRestart >= 0);
         Assert.Contains("MOHIST_RUNTIME_IDENTITY_PATH=", fixture.Files.Read(
             Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ManagedRunnerUpdate_WhenActivationFails_CancelsConfirmedInterrupt()
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        SeedSourceRunner(fixture, "runner-pluto");
+        var sourceUnit = fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service"));
+        fixture.Commands.QueueResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "restart", "mohist-runner.service"]),
+            17,
+            "",
+            "");
+        fixture.Commands.QueueResultFor(
+            "systemctl",
+            args => args.SequenceEqual(["--user", "restart", "mohist-runner.service"]),
+            0,
+            "",
+            "");
+        var handler = BuildManagedRunnerHandler(fixture, interruptConfirmed: true);
+        var updater = BuildManagedRunnerUpdater(fixture, handler);
+
+        var result = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, result);
+        Assert.Equal(sourceUnit, fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")));
+        Assert.Equal(2, fixture.Commands.ExecutedCommands.Count(command =>
+            command.FileName == "systemctl"
+            && command.Args.SequenceEqual(["--user", "restart", "mohist-runner.service"])));
+        Assert.Equal(3, handler.Requests.Count);
+        var updateInterruptId = ReadUpdateInterruptId(handler.Requests[1].Body);
+        Assert.Equal(HttpMethod.Post, handler.Requests[2].Method);
+        Assert.Equal(
+            $"/api/runner/runner-pluto/update-interrupt/{updateInterruptId}/cancel",
+            handler.Requests[2].RequestUri!.AbsolutePath);
     }
 
     [Fact]
@@ -102,7 +139,8 @@ public sealed partial class ManagedRuntimeTransactionSpecs
         ManagedFixture fixture,
         HttpMessageHandler handler)
     {
-        var systemd = fixture.Systemd ?? throw new InvalidOperationException("managed updater requires systemd");
+        var systemd = fixture.Systemd
+            ?? throw new InvalidOperationException("managed updater requires systemd");
         return SourceCodeUpdater.CreateWithDefaults(
             TextWriter.Null,
             TextWriter.Null,
@@ -122,10 +160,27 @@ public sealed partial class ManagedRuntimeTransactionSpecs
         bool interruptConfirmed)
     {
         var identityReads = 0;
+        string? updateInterruptId = null;
         var sourceUnit = fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service"));
         return new RecordingHttpHandler((request, _) =>
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post
+                && updateInterruptId is not null
+                && path == $"/api/runner/runner-pluto/update-interrupt/{updateInterruptId}/cancel")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-pluto",
+                        updateInterruptId,
+                        status = "cancelled",
+                    },
+                }));
+            }
+
             if (request.Method == HttpMethod.Post
                 && path == "/api/runner/runner-pluto/update-interrupt")
             {
@@ -133,6 +188,8 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                 Assert.False(fixture.Files.HasFile(fixture.ActivePath));
                 Assert.Equal(sourceUnit, fixture.Files.Read(
                     Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")));
+                updateInterruptId = ReadUpdateInterruptId(
+                    request.Content?.ReadAsStringAsync().GetAwaiter().GetResult());
                 return Task.FromResult(interruptConfirmed
                     ? RecordingHttpHandler.Json(new
                     {
@@ -141,6 +198,7 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                         {
                             runnerId = "runner-pluto",
                             status = "interrupted",
+                            updateInterruptId,
                             interruptedWorkIds = new[] { "agent-job-1" },
                             interruptedWorkCount = 1,
                         },
@@ -193,4 +251,14 @@ public sealed partial class ManagedRuntimeTransactionSpecs
             }));
         });
     }
+
+    private static string ReadUpdateInterruptId(string? body)
+    {
+        using var document = JsonDocument.Parse(body ?? throw new InvalidOperationException(
+            "update interrupt request body is required"));
+        var updateInterruptId = document.RootElement.GetProperty("updateInterruptId").GetString();
+        Assert.True(Guid.TryParse(updateInterruptId, out _));
+        return updateInterruptId!;
+    }
+
 }
