@@ -44,6 +44,7 @@ public sealed class DispatchService : IScopedService
         RunnerPollRequest req,
         CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         var admission = await runner.TryBeginPollAsync();
         if (!admission.Admitted)
@@ -51,11 +52,11 @@ public sealed class DispatchService : IScopedService
 
         try
         {
-            return await PollCoreAsync(runner, runnerId, req, admission.Slots, ct);
+            return await PollCoreAsync(runner, runnerId, req, admission.Slots, ct).WaitAsync(ct);
         }
         finally
         {
-            await runner.EndPollAsync();
+            await runner.EndPollAsync(admission.AdmissionToken);
         }
     }
 
@@ -66,12 +67,14 @@ public sealed class DispatchService : IScopedService
         int slots,
         CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         await runner.TouchPresenceAsync();
         var info = await runner.GetInfoAsync();
         if (info is null)
             return new RunnerPollResponse([]);
 
-        await _pollObserver.AfterRunnerInfoAsync(runnerId);
+        await _pollObserver.AfterRunnerInfoAsync(runnerId).WaitAsync(ct);
+        ct.ThrowIfCancellationRequested();
 
         var readiness = await runner.ObserveRuntimeReadinessAsync(
             req.ConnectionGeneration,
@@ -79,6 +82,7 @@ public sealed class DispatchService : IScopedService
 
         var dispatches = new List<WorkDispatch>();
         var reportedWorkKeys = ReportedWorkKeys(req);
+        ct.ThrowIfCancellationRequested();
         var activeWorkKeys = await AddMissingRedeliveriesAsync(
             runnerId,
             reportedWorkKeys,
@@ -98,6 +102,7 @@ public sealed class DispatchService : IScopedService
         if (req.AdmissionReady is false)
             return new RunnerPollResponse(dispatches);
 
+        ct.ThrowIfCancellationRequested();
         spare = await AddPendingDispatchesAsync(
             runner,
             info.ProjectId,
@@ -109,6 +114,7 @@ public sealed class DispatchService : IScopedService
             ct);
         if (spare > 0)
         {
+            ct.ThrowIfCancellationRequested();
             await AddPendingDispatchesAsync(
                 runner,
                 info.ProjectId,
@@ -136,6 +142,7 @@ public sealed class DispatchService : IScopedService
 
         foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(runnerId, ct))
         {
+            ct.ThrowIfCancellationRequested();
             var (workKey, dispatch) = await RenderActiveWorkflowAsync(
                 workflowRunId,
                 runnerId,
@@ -151,6 +158,7 @@ public sealed class DispatchService : IScopedService
 
         foreach (var record in await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
         {
+            ct.ThrowIfCancellationRequested();
             var workKey = AgentJobWorkKey(record.JobKey, record.WorkId);
             activeWorkKeys.Add(workKey);
             if (reportedWorkKeys.Contains(workKey))
@@ -174,6 +182,7 @@ public sealed class DispatchService : IScopedService
         RunnerRuntimeReadinessSnapshot readiness,
         CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var candidateLimit = Math.Max(availableSlots, 20);
         var workflowCandidates = assigned
             ? (await _workflowRuns.FindAssignedCandidatesAsync(runnerId, candidateLimit, ct))
@@ -208,6 +217,7 @@ public sealed class DispatchService : IScopedService
         var remainingSlots = availableSlots;
         foreach (var candidate in candidates)
         {
+            ct.ThrowIfCancellationRequested();
             if (remainingSlots <= 0)
                 break;
 
@@ -221,6 +231,7 @@ public sealed class DispatchService : IScopedService
                 if (!readiness.Allows(requiredRuntimes))
                     continue;
 
+                ct.ThrowIfCancellationRequested();
                 var claim = await runner.TryClaimAgentJobAsync(candidate.OwnerId, projectId);
                 dispatch = claim?.Dispatch;
             }
@@ -230,6 +241,7 @@ public sealed class DispatchService : IScopedService
                 if (!readiness.Allows(requiredRuntimes))
                     continue;
 
+                ct.ThrowIfCancellationRequested();
                 dispatch = await ClaimAndRenderWorkflowAsync(
                     runner,
                     candidate.OwnerId,
@@ -289,8 +301,13 @@ public sealed class DispatchService : IScopedService
         }
         catch (WorkflowDispatchRejectedException ex)
         {
+            ct.ThrowIfCancellationRequested();
             await RejectWorkflowDispatchAsync(workflowRunId, runnerId, workId, ex);
             return (null, null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -311,9 +328,14 @@ public sealed class DispatchService : IScopedService
         CancellationToken ct)
     {
         WorkItem? item;
+        ct.ThrowIfCancellationRequested();
         try
         {
             item = await runner.TryClaimWorkflowAsync(workflowRunId, projectId, assignWorker);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -326,6 +348,7 @@ public sealed class DispatchService : IScopedService
         if (item is null)
             return null;
 
+        ct.ThrowIfCancellationRequested();
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
         if (run is null)
             return null;
@@ -341,8 +364,13 @@ public sealed class DispatchService : IScopedService
         }
         catch (WorkflowDispatchRejectedException ex)
         {
+            ct.ThrowIfCancellationRequested();
             await RejectWorkflowDispatchAsync(workflowRunId, runnerId, item.Id!, ex);
             return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
