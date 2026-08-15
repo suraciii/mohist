@@ -157,13 +157,13 @@ condition to diagnose, not a normal way to finish a test run.
 contract is:
 
 ```bash
-timeout -k 10s 270s npm run verify
+timeout -k 10s 300s npm run verify
 ```
 
-CI applies a five-minute job deadline to checkout, setup, install, the gate, and
-diagnostic upload together. Its gate step uses `timeout -k 10s 240s npm run
-verify`, leaving the rest of the job wall for those non-gate phases and for
-bounded process-tree convergence.
+CI gives the job seven minutes for checkout, setup, install, the gate, cleanup,
+and diagnostic upload. Its gate step uses `timeout -k 10s 300s npm run verify`,
+matching the canonical absolute deadline while leaving the job-level wall for
+bounded process-tree convergence and artifact upload.
 
 It is not followed by `npm test` or `npm run test:budget -- --all`: the
 canonical gate already covers their controlled work. Focused commands,
@@ -210,22 +210,30 @@ logs and reports, and `summary.json` with every lane result, every parsed track
 count, cleanup status, deadline result, and the first failure. Failure to write
 the plan or final summary is itself a gate failure.
 
-The DAG is deliberately small:
+The DAG is deliberately small. The build and read-only script boundary checks
+start together after the docs check. They have separate logs and process-tree
+ownership; failure or cancellation of either aborts the sibling. The build
+stamp is written only after both phases succeed and the source identity is
+revalidated:
 
 ```text diagram
 docs check
-    |
-    +--> fresh build
-             |
-             +--> script type/boundary check
-                      |
-                      +--> ordered duration-measurement lanes
-                               |
-                               +--> bounded throughput lanes
-                                        |
-                                        +--> Spec partition coverage check
-                                                  |
-                                                  +--> shared report and duration evaluation
+    +-------------------+
+    |                   |
+    +--> fresh build    +--> read-only script/boundary checks
+             |                   |
+             +---------+---------+
+                       |
+                source revalidation
+                and matching build stamp
+                       |
+                ordered duration-measurement lanes
+                       |
+                bounded throughput lanes
+                       |
+                Spec partition coverage check
+                       |
+                shared report and duration evaluation
 ```
 
 The full 300-second absolute deadline starts before the build and is shared by

@@ -250,6 +250,68 @@ function assertMatchingCleanSource(expected: SourceIdentity, actual: SourceIdent
   }
 }
 
+function phaseSucceeded(result: PhaseResult): boolean {
+  return result.exitCode === 0 && !result.timedOut && !result.cancelled && result.cleanupComplete !== false
+}
+
+function linkAbortSignal(parent: AbortSignal): {
+  readonly signal: AbortSignal
+  readonly dispose: () => void
+  readonly abort: () => void
+} {
+  const controller = new AbortController()
+  const abort = () => {
+    if (!controller.signal.aborted) controller.abort()
+  }
+  if (parent.aborted) abort()
+  else parent.addEventListener('abort', abort, { once: true })
+  return {
+    signal: controller.signal,
+    abort,
+    dispose: () => parent.removeEventListener('abort', abort),
+  }
+}
+
+async function runBuildAndBoundaries(
+  runtime: CanonicalGateRuntime,
+  artifactRoot: string,
+  deadlines: SuiteDeadlines,
+  source: SourceIdentity,
+  now: () => number,
+  abortSignal: AbortSignal,
+  timeoutScheduler?: TimeoutScheduler,
+): Promise<{ readonly build: PhaseResult; readonly boundary: PhaseResult }> {
+  const linked = linkAbortSignal(abortSignal)
+  const run = (name: string, args: readonly string[], afterSuccess?: () => void): Promise<PhaseResult> =>
+    runtime
+      .runPhase(name, 'npm', args, artifactRoot, deadlines, now, linked.signal, timeoutScheduler)
+      .then((result) => {
+        if (!phaseSucceeded(result)) linked.abort()
+        else afterSuccess?.()
+        return result
+      })
+      .catch((error) => {
+        linked.abort()
+        throw error
+      })
+
+  try {
+    const buildPromise = run('build', ['run', 'build'], () =>
+      assertMatchingCleanSource(source, runtime.sourceIdentity()),
+    )
+    const boundaryPromise = run('script-boundaries', ['run', 'archtest'])
+    const results = await Promise.allSettled([buildPromise, boundaryPromise])
+    if (results[0].status === 'rejected') throw results[0].reason
+    if (results[1].status === 'rejected') throw results[1].reason
+    return {
+      build: results[0].value,
+      boundary: results[1].value,
+    }
+  } finally {
+    linked.dispose()
+  }
+}
+
 export interface CanonicalArgs {
   readonly artifactParent?: string
 }
@@ -313,17 +375,16 @@ export async function main(
     if (docs.timedOut || docs.cancelled || docs.cleanupComplete === false || docs.exitCode !== 0) return 1
     if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
 
-    const build = await runtime.runPhase(
-      'build',
-      'npm',
-      ['run', 'build'],
+    const { build, boundary } = await runBuildAndBoundaries(
+      runtime,
       artifactRoot,
       deadlines,
+      source,
       runtime.now,
       abortSignal,
       runtime.timeoutScheduler,
     )
-    if (build.timedOut || build.cancelled || build.cleanupComplete === false || build.exitCode !== 0) return 1
+    if (!phaseSucceeded(build) || !phaseSucceeded(boundary)) return 1
     if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
     assertMatchingCleanSource(source, runtime.sourceIdentity())
 
@@ -331,20 +392,6 @@ export async function main(
       resolve(artifactRoot, 'build-stamp.json'),
       JSON.stringify({ runId, builtAt: runtime.now(), sourceRevision }, null, 2) + '\n',
     )
-    const boundary = await runtime.runPhase(
-      'script-boundaries',
-      'npm',
-      ['run', 'archtest'],
-      artifactRoot,
-      deadlines,
-      runtime.now,
-      abortSignal,
-      runtime.timeoutScheduler,
-    )
-    if (boundary.timedOut || boundary.cancelled || boundary.cleanupComplete === false || boundary.exitCode !== 0)
-      return 1
-    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
-    assertMatchingCleanSource(source, runtime.sourceIdentity())
 
     const durationCode = await runtime.runDurationGate(
       [

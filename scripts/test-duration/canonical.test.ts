@@ -229,8 +229,9 @@ test('canonical propagates one external termination signal through phases and th
         disposed = true
       },
     }),
-    runPhase: async (_name, _command, _args, _artifactRoot, _deadlines, _now, abortSignal) => {
-      assert.equal(abortSignal, controller.signal)
+    runPhase: async (name, _command, _args, _artifactRoot, _deadlines, _now, abortSignal) => {
+      if (name === 'docs') assert.equal(abortSignal, controller.signal)
+      else assert.notEqual(abortSignal, controller.signal)
       return { exitCode: 0, timedOut: false }
     },
     runDurationGate: async (_argv, guardRuntime) => {
@@ -242,6 +243,51 @@ test('canonical propagates one external termination signal through phases and th
 
   assert.equal(await main(runtime), 1)
   assert.equal(disposed, true)
+})
+
+test('canonical cancels the sibling build phase when script boundaries fail', async () => {
+  const { runtime: base } = fakeRuntime([], 0)
+  let buildCancelled = false
+  const runtime: CanonicalGateRuntime = {
+    ...base,
+    runPhase: async (name, _command, _args, _artifactRoot, _deadlines, _now, abortSignal) => {
+      if (name === 'docs') return { exitCode: 0, timedOut: false }
+      if (name === 'script-boundaries') return { exitCode: 1, timedOut: false, cleanupComplete: true }
+      await new Promise<void>((resolvePromise) =>
+        abortSignal.addEventListener('abort', () => resolvePromise(), { once: true }),
+      )
+      buildCancelled = true
+      return { exitCode: null, timedOut: false, cancelled: true, cleanupComplete: true }
+    },
+  }
+
+  assert.equal(await main(runtime), 1)
+  assert.equal(buildCancelled, true)
+})
+
+test('canonical starts the read-only boundary phase without waiting for build completion', async () => {
+  const { runtime: base } = fakeRuntime([], 0)
+  let releaseBuild!: () => void
+  const buildGate = new Promise<void>((resolvePromise) => {
+    releaseBuild = resolvePromise
+  })
+  let boundaryStarted = false
+  const runtime: CanonicalGateRuntime = {
+    ...base,
+    runPhase: async (name) => {
+      if (name === 'docs') return { exitCode: 0, timedOut: false }
+      if (name === 'build') {
+        await buildGate
+        return { exitCode: 0, timedOut: false }
+      }
+      boundaryStarted = true
+      releaseBuild()
+      return { exitCode: 0, timedOut: false }
+    },
+  }
+
+  assert.equal(await main(runtime), 0)
+  assert.equal(boundaryStarted, true)
 })
 
 test('canonical fails before phases when build inputs are dirty or untracked', async () => {
