@@ -323,7 +323,7 @@ public sealed class WorkflowAgentHandoffGrainFixture : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         _database = TestSqliteDatabase.CreateMigrated();
-        var builder = new InProcessTestClusterBuilder();
+        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {

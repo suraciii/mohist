@@ -555,7 +555,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         // fails on the first row insert ("no such table").
         MigratedSqliteTemplate.CopyTo(_keeper);
 
-        var builder = new InProcessTestClusterBuilder();
+        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.Options.InitialSilosCount = 2;
         builder.ConfigureClient(clientBuilder =>
             clientBuilder.Services.Configure<ClusterMembershipOptions>(ConfigureTestClusterMembership));
