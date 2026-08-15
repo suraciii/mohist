@@ -2,7 +2,6 @@ using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.xUnitV3;
 using Mohist.Server.Infrastructure.Data.Db;
-using System.Text.RegularExpressions;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
 using static ArchUnitNET.Fluent.Slices.SliceRuleDefinition;
@@ -566,28 +565,24 @@ public class ArchitectureRules
     {
         foreach (var from in DomainNamespaces)
         {
-            var forbiddenTargets = DomainNamespaces
-                .Where(to => to != from && !AllowedDomainDependencies.Contains((from, to)))
-                .Select(Regex.Escape)
-                .ToArray();
+            foreach (var to in DomainNamespaces)
+            {
+                if (from == to || AllowedDomainDependencies.Contains((from, to))) continue;
 
-            if (forbiddenTargets.Length == 0) continue;
+                var fromTypes = Types()
+                    .That().ResideInNamespaceMatching($@"Mohist\.Server\.{from}(\.|$)")
+                    .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
+                    .As($"{from}");
 
-            var fromTypes = Types()
-                .That().ResideInNamespaceMatching($@"Mohist\.Server\.{Regex.Escape(from)}(\.|$)")
-                .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
-                .As($"{from}");
+                var toTypes = Types()
+                    .That().ResideInNamespaceMatching($@"Mohist\.Server\.{to}(\.|$)")
+                    .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
+                    .As($"{to}");
 
-            var toTypes = Types()
-                .That().ResideInNamespaceMatching(
-                    $@"Mohist\.Server\.({string.Join("|", forbiddenTargets)})(\.|$)")
-                .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
-                .As($"forbidden targets of {from}");
-
-            Types().That().Are(fromTypes)
-                .Should().NotDependOnAny(toTypes)
-                .Because($"{from} must not depend on any forbidden domain module")
-                .Check(_architecture);
+                Types().That().Are(fromTypes)
+                    .Should().NotDependOnAny(toTypes)
+                    .Check(_architecture);
+            }
         }
     }
 
