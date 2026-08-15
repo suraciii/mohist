@@ -98,6 +98,17 @@ function usesOpenCode(work: DispatchWorkItem): boolean {
 }
 
 /**
+ * True when the dispatch is an unresolved-agent recovery probe: the
+ * server recorded a runtime binding and re-delivered the work to the
+ * runner that owns it. Such a dispatch is reconciled against the
+ * recorded binding, never executed as a fresh prompt.
+ */
+function isAgentRecoveryDispatch(work: DispatchWorkItem): boolean {
+  const recovery = work.agentRecovery
+  return Boolean(recovery && recovery.runtime.trim() && recovery.runtimeSessionId.trim())
+}
+
+/**
  * Resolves the runner's build git hash from the on-disk build manifest.
  * Returns `null` when the manifest is missing or unreadable (treated as
  * unknown-identity, non-fatal).
@@ -563,9 +574,12 @@ export class RunnerHost {
         // better.
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
+        const recovery = isAgentRecoveryDispatch(work)
         let admission: Awaited<ReturnType<WorkResultJournal['begin']>>
         try {
-          admission = await this.workResultJournal.begin(work)
+          admission = recovery
+            ? await this.workResultJournal.beginRecovery(work)
+            : await this.workResultJournal.begin(work)
         } catch (error) {
           log.error('work result journal could not fence dispatch; skipping work', {
             work: work.workId,
@@ -573,12 +587,34 @@ export class RunnerHost {
           })
           continue
         }
-        if (admission !== 'new') {
+        if (!recovery && admission !== 'new') {
           log.warn('work dispatch has a durable unfinished result; refusing replay', {
             work: work.workId,
             state: admission,
           })
           continue
+        }
+        if (recovery) {
+          if (admission === 'completed') {
+            log.warn('recovery dispatch has a durable completed result; awaiting its report', {
+              work: work.workId,
+            })
+            continue
+          }
+          // The delivery-driven reconciliation supersedes the startup
+          // unknown-report sweep for this identity.
+          this.recoveredStartedWork.drop(key)
+          if (work.agentRecovery!.runtime.trim().toLowerCase() !== 'pi') {
+            // No turn-adoption API: the execution context is provably
+            // gone, so surface unknown without executing anything.
+            this.recoveredStartedWork.enqueue(work)
+            log.warn('recovery dispatch runtime has no turn adoption; reporting unknown', {
+              work: work.workId,
+              runtime: work.agentRecovery!.runtime,
+            })
+            continue
+          }
+          log.info('recovery dispatch admitted for reconciliation', { work: work.workId })
         }
 
         const done = this.executeAndTransition(work, signal, key)
@@ -616,7 +652,7 @@ export class RunnerHost {
 
   private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
     const runtime = this.openCodeRuntime
-    const owners = works.filter(usesOpenCode).map(workKey)
+    const owners = works.filter((work) => usesOpenCode(work) && !isAgentRecoveryDispatch(work)).map(workKey)
     if (!runtime || owners.length === 0) return
     runtime.setWorkOwners([...this.openCodeOwners(), ...owners])
     if (!runtime.ready()) {

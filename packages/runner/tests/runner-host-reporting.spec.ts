@@ -441,6 +441,160 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('RecoveryDispatch_RearmsTheStartedFenceAndReconcilesUnderTheOriginalIdentity', async () => {
+    const receiptAcknowledged = deferred<void>()
+    const fencedWork = {
+      workflowRunId: 'wr-recovery-rearm',
+      workId: 'work-recovery-rearm',
+      taskRunId: 'task-recovery-rearm',
+      workType: 'task',
+      uses: 'mohist/pi',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const recoveryDispatch = {
+      ...fencedWork,
+      variables: { workspace: { path: '/virtual/mohist-runner-test-2' } },
+      agentRecovery: { runtime: 'pi', runtimeSessionId: '/virtual/mohist-runner-test/sessions/pi-1' },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(fencedWork)
+
+    let attempts = 0
+    report.mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) return { tracked: false, reason: 'observation-not-durable' }
+      return { tracked: true, reason: 'accepted' }
+    })
+    poll.mockResolvedValueOnce([recoveryDispatch]).mockResolvedValue([])
+    let executions = 0
+    let executedWork: unknown = null
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (work, _signal, collector) => {
+        executions += 1
+        executedWork = work
+        return {
+          result: { status: 'completed', output: null },
+          collector: collector!,
+        }
+      })
+    const originalAcknowledge = WorkResultJournal.prototype.acknowledge
+    const acknowledge = vi.spyOn(WorkResultJournal.prototype, 'acknowledge').mockImplementation(async function (
+      this: WorkResultJournal,
+      acknowledged,
+    ) {
+      await originalAcknowledge.call(this, acknowledged)
+      if (acknowledged.workId === fencedWork.workId) receiptAcknowledged.resolve()
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await receiptAcknowledged.promise
+
+      expect(executions).toBe(1)
+      expect(executedWork).toEqual(recoveryDispatch)
+      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown', 'completed'])
+      expect(report).toHaveBeenLastCalledWith(
+        expect.objectContaining({ workId: fencedWork.workId, taskRunId: fencedWork.taskRunId }),
+        expect.objectContaining({ status: 'completed' }),
+        expect.any(AbortSignal),
+      )
+
+      // The startup unknown observation must not fire again after the
+      // delivery-driven reconciliation took over its identity.
+      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS * 2)
+      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown', 'completed'])
+
+      const retired = new WorkResultJournal('/virtual/mohist-runner-test')
+      await retired.load()
+      expect(retired.started()).toEqual([])
+      expect(retired.completed()).toEqual([])
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      acknowledge.mockRestore()
+      executeWithLog.mockRestore()
+    }
+  })
+
+  it('RecoveryDispatch_WithoutATurnAdoptionRuntime_ReportsUnknownWithoutExecuting', async () => {
+    const observationAcknowledged = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-recovery-opencode',
+      workId: 'work-recovery-opencode',
+      taskRunId: 'task-recovery-opencode',
+      workType: 'task',
+      uses: 'mohist/opencode',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      agentRecovery: { runtime: 'opencode', runtimeSessionId: 'opencode-session-1' },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+
+    report.mockResolvedValue({ tracked: true, reason: 'accepted' })
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    const executeWithLog = vi.spyOn(WorkExecutor.prototype, 'executeWithLog').mockImplementation(async () => {
+      throw new Error('recovery dispatch must not execute')
+    })
+    const originalAcknowledgeUnconfirmed = WorkResultJournal.prototype.acknowledgeUnconfirmed
+    const acknowledgeUnconfirmed = vi
+      .spyOn(WorkResultJournal.prototype, 'acknowledgeUnconfirmed')
+      .mockImplementation(async function (this: WorkResultJournal, acknowledged) {
+        await originalAcknowledgeUnconfirmed.call(this, acknowledged)
+        if (acknowledged.workId === work.workId) observationAcknowledged.resolve()
+      })
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await vi.advanceTimersByTimeAsync(5)
+      await observationAcknowledged.promise
+
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflowRunId: work.workflowRunId,
+          workId: work.workId,
+          taskRunId: work.taskRunId,
+        }),
+        expect.objectContaining({ status: 'unknown' }),
+        expect.any(AbortSignal),
+      )
+
+      const retired = new WorkResultJournal('/virtual/mohist-runner-test')
+      await retired.load()
+      expect(retired.started()).toEqual([])
+      expect(retired.completed()).toEqual([])
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      acknowledgeUnconfirmed.mockRestore()
+      executeWithLog.mockRestore()
+    }
+  })
+
   it('AbortAfterReturnedResult_PersistsAndRedrivesTheReceiptWithoutReexecution', async () => {
     const executionStarted = deferred<void>()
     const receiptAcknowledged = deferred<void>()

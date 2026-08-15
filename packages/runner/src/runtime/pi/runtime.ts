@@ -14,6 +14,9 @@ import type {
   PiDiagnostic,
   PiFollowupRequest,
   PiFollowupResult,
+  PiInspectTurnFacts,
+  PiInspectTurnRequest,
+  PiInspectTurnResult,
   PiProviderErrorPolicy,
   PiReadyState,
   PiCatalog,
@@ -277,6 +280,43 @@ export class PiRuntime {
       if (deadline !== null) clock.clearTimeout(deadline)
       if (warning !== null) clock.clearTimeout(warning)
       unsubscribe()
+    }
+  }
+
+  /**
+   * Reads the recorded turn state of the bound Pi Session without
+   * starting one. Recovery reconciliation adopts a terminal turn
+   * (`failed`/`finalAssistantText`) as the authoritative outcome; an
+   * active turn or a missing session proves the execution context is
+   * not adoptable by this process. Never mutates the session.
+   */
+  async inspectTurn(request: PiInspectTurnRequest): Promise<PiInspectTurnResult> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    const runtimeSessionId = request.target.runtimeSessionId
+    if (!runtimeSessionId)
+      return this.failure('missing-session', 'Pi turn inspection requires a bound Session', [resetDiagnostic()])
+    const path = normalizedPath(runtimeSessionId)
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
+    try {
+      const session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir))
+      this.sessions.set(path, session)
+      const facts: PiInspectTurnFacts = {
+        runtimeSessionId: path,
+        workDir: request.target.workDir,
+        activeTurn: session.isStreaming,
+        finalAssistantText: finalText(session.messages),
+        failed: lastMessageFailed(session.messages),
+        errorMessage: lastMessageError(session.messages) ?? null,
+      }
+      return { ok: true, value: facts, diagnostics: [] }
+    } catch (cause) {
+      return isMissingSessionFile(cause)
+        ? this.failure('missing-session', 'The bound Pi Session is missing', [
+            diagnostic('session-open-failed', this.mask(message(cause))),
+          ])
+        : this.failure('turn-failed', 'The bound Pi Session could not be opened', [
+            diagnostic('session-open-failed', this.mask(message(cause))),
+          ])
     }
   }
 
