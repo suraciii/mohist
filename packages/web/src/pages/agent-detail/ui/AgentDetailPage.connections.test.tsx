@@ -4,11 +4,7 @@ import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-q
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo, AgentSessionListItemDto, AgentStatusDetailResponse } from '../../../entities/agent'
-import {
-  AgentDetailPage,
-  type AgentDetailPageComponents,
-  type AgentDetailPageDataHook,
-} from './AgentDetailPage'
+import { AgentDetailPage, type AgentDetailPageComponents, type AgentDetailPageDataHook } from './AgentDetailPage'
 
 const state: {
   agent: AgentInfo | undefined
@@ -28,17 +24,17 @@ const components: AgentDetailPageComponents = {
   AgentProfileEditor: () => null,
   SubscriptionsSection: () => null,
   ConnectionsSection: ({ agent }) => (
-    <div
-      data-testid="agent-connections-section"
-      data-agent-id={agent.id}
-      data-agent-status={agent.status}
-    />
+    <div data-testid="agent-connections-section" data-agent-id={agent.id} data-agent-status={agent.status} />
   ),
 }
 
 const dataHook: AgentDetailPageDataHook = () => {
-  const archiveAgent = useMutation<AgentInfo, Error, string>({ mutationFn: async (id) => ({ ...state.agent!, id, status: 'archived' }) as AgentInfo })
-  const unarchiveAgent = useMutation<AgentInfo, Error, string>({ mutationFn: async (id) => ({ ...state.agent!, id, status: 'active' }) as AgentInfo })
+  const archiveAgent = useMutation<AgentInfo, Error, string>({
+    mutationFn: async (id) => ({ ...state.agent!, id, status: 'archived' }) as AgentInfo,
+  })
+  const unarchiveAgent = useMutation<AgentInfo, Error, string>({
+    mutationFn: async (id) => ({ ...state.agent!, id, status: 'active' }) as AgentInfo,
+  })
 
   return {
     agent: state.agent,
@@ -58,10 +54,12 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
     id: 'agent-1',
     projectId: 'proj-1',
     name: 'Test Agent',
+    purpose: null,
     description: 'A test agent',
     instructions: '...',
     agentConfig: null,
     skills: [],
+    permissions: [],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-06-01T00:00:00.000Z',
@@ -78,11 +76,18 @@ function renderPage() {
   const queryClient = createQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1', name: 'Test',
-        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
         <MemoryRouter initialEntries={['/Test/agents/agent-1']}>
           <Routes>
             <Route

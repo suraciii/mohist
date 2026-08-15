@@ -31,6 +31,8 @@ public class AgentDefinitionApiSpecs
         Assert.StartsWith("agent_", created.Id);
         Assert.Equal(project.Id, created.ProjectId);
         Assert.Equal("reviewer", created.Name);
+        Assert.Equal("Review changes", created.Purpose);
+        Assert.Equal(["repo:read", "issue:write"], created.Permissions);
         Assert.Equal("active", created.Status);
         Assert.NotEqual(default, DateTimeOffset.Parse(created.CreatedAt));
         Assert.NotEqual(default, DateTimeOffset.Parse(created.UpdatedAt));
@@ -131,9 +133,11 @@ public class AgentDefinitionApiSpecs
         {
             name = "first-renamed",
             description = "after",
+            purpose = "Validate the release plan",
             instructions = "new instructions",
             agentConfig = new { model = "openai/gpt-5.5" },
             skills = new[] { "review", "debug" },
+            permissions = new[] { "repo:read", "artifact:publish" },
             maxConcurrentRuns = 3
         });
         using var immutable = await _client.PatchAsJsonAsync($"/api/projects/{project.Id}/agents/{first.Id}", new { id = "agent_nope" });
@@ -143,8 +147,10 @@ public class AgentDefinitionApiSpecs
 
         Assert.Equal("first-renamed", patched.Name);
         Assert.Equal("after", patched.Description);
+        Assert.Equal("Validate the release plan", patched.Purpose);
         Assert.Equal("new instructions", patched.Instructions);
         Assert.Equal(["review", "debug"], patched.Skills);
+        Assert.Equal(["repo:read", "artifact:publish"], patched.Permissions);
         Assert.Equal(3, patched.MaxConcurrentRuns);
         Assert.Equal("openai/gpt-5.5", patched.AgentConfig!.Value.GetProperty("model").GetString());
         Assert.NotEqual(default, DateTimeOffset.Parse(patched.UpdatedAt));
@@ -163,15 +169,54 @@ public class AgentDefinitionApiSpecs
         var patched = await _client.PatchDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}", new
         {
             description = (string?)null,
+            purpose = (string?)null,
             agentConfig = (object?)null,
             skills = (string[]?)null,
+            permissions = Array.Empty<string>(),
             maxConcurrentRuns = (int?)null
         });
 
         Assert.Equal(string.Empty, patched.Description);
+        Assert.Null(patched.Purpose);
         Assert.Null(patched.AgentConfig);
         Assert.Empty(patched.Skills);
+        Assert.Empty(patched.Permissions);
         Assert.Null(patched.MaxConcurrentRuns);
+    }
+
+    [Fact]
+    public async Task CreateAndPatch_RejectInvalidPermissionsWithoutPersistingThem()
+    {
+        var project = await CreateProjectAsync("agent-invalid-permissions");
+        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/agents", new
+        {
+            name = "invalid-permissions",
+            instructions = "instructions",
+            permissions = new[] { "shell:exec" },
+        });
+        var createBody = await create.Content.ReadFromJsonAsync<JsonElement>();
+        var agents = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{project.Id}/agents?all=true");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("permission-target"));
+
+        using var patch = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/agents/{created.Id}",
+            new { permissions = new[] { "shell:exec" } });
+        var patchBody = await patch.Content.ReadFromJsonAsync<JsonElement>();
+        using var malformedPatch = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/agents/{created.Id}",
+            new { permissions = new object[] { 42 } });
+        var malformedPatchBody = await malformedPatch.Content.ReadFromJsonAsync<JsonElement>();
+        var shown = await _client.GetDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+        Assert.Equal("invalid_agent_permissions", createBody.GetProperty("code").GetString());
+        Assert.Contains("shell:exec", createBody.GetProperty("error").GetString());
+        Assert.DoesNotContain(agents, agent => agent.Name == "invalid-permissions");
+        Assert.Equal(HttpStatusCode.BadRequest, patch.StatusCode);
+        Assert.Equal("invalid_agent_permissions", patchBody.GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, malformedPatch.StatusCode);
+        Assert.Equal("invalid_agent_permissions", malformedPatchBody.GetProperty("code").GetString());
+        Assert.Equal(["repo:read", "issue:write"], shown.Permissions);
     }
 
     [Theory]
@@ -411,9 +456,11 @@ public class AgentDefinitionApiSpecs
     {
         name,
         description = "agent description",
+        purpose = "Review changes",
         instructions = $"instructions for {name}",
         agentConfig = new { model = "openai/gpt-5.6" },
         skills = new[] { "coding" },
+        permissions = new[] { "repo:read", "issue:write" },
         maxConcurrentRuns = 1
     };
 
@@ -430,9 +477,11 @@ public class AgentDefinitionApiSpecs
         string ProjectId,
         string Name,
         string Description,
+        string? Purpose,
         string Instructions,
         JsonElement? AgentConfig,
         string[] Skills,
+        string[] Permissions,
         int? MaxConcurrentRuns,
         string Status,
         string CreatedAt,

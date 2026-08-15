@@ -16,10 +16,12 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
     id: 'agent-1',
     projectId: 'proj-1',
     name: 'Test Agent',
+    purpose: null,
     description: '',
     instructions: '...',
     agentConfig: null,
     skills: [],
+    permissions: [],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-06-01T00:00:00.000Z',
@@ -65,21 +67,22 @@ function renderSection(agent: AgentInfo = makeAgent(), { withRoutes = false }: {
   if (withRoutes) {
     return render(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-          id: 'proj-1', name: 'Test',
-          createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-          repositories: [],
-        }]}>
+        <ProjectProvider
+          initialProjectId="proj-1"
+          initialProjects={[
+            {
+              id: 'proj-1',
+              name: 'Test',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              repositories: [],
+            },
+          ]}
+        >
           <MemoryRouter initialEntries={['/Test/agents/agent-1']}>
             <Routes>
-              <Route
-                path="/:projectName/agents/:agentId"
-                element={<ConnectionsSection agent={agent} />}
-              />
-              <Route
-                path="/:projectName/connections/:connectionId"
-                element={<div data-testid="connection-page" />}
-              />
+              <Route path="/:projectName/agents/:agentId" element={<ConnectionsSection agent={agent} />} />
+              <Route path="/:projectName/connections/:connectionId" element={<div data-testid="connection-page" />} />
             </Routes>
           </MemoryRouter>
         </ProjectProvider>
@@ -88,11 +91,18 @@ function renderSection(agent: AgentInfo = makeAgent(), { withRoutes = false }: {
   }
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1', name: 'Test',
-        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
         <MemoryRouter>
           <ConnectionsSection agent={agent} />
         </MemoryRouter>
@@ -105,9 +115,7 @@ describe('ConnectionsSection (MSW integration)', () => {
   beforeEach(() => {
     // Default: empty list, will be overridden per-test as needed.
     server.use(
-      http.get('*/api/projects/:projectId/slack-connections', () =>
-        HttpResponse.json({ success: true, data: [] }),
-      ),
+      http.get('*/api/projects/:projectId/slack-connections', () => HttpResponse.json({ success: true, data: [] })),
     )
   })
 
@@ -145,17 +153,24 @@ describe('ConnectionsSection (MSW integration)', () => {
       http.post('*/api/projects/:projectId/slack-connections', async ({ request }) => {
         const text = await request.text()
         let body: unknown = text
-        try { body = JSON.parse(text) } catch { /* keep raw */ }
+        try {
+          body = JSON.parse(text)
+        } catch {
+          /* keep raw */
+        }
         createCalls.push({ method: request.method, body })
-        return HttpResponse.json({
-          success: true,
-          data: {
-            connection: makeConnection({ id: 'conn_created', agentId: 'agent-1', botName: 'preview-bot' }),
-            botName: 'preview-bot',
-            appDescription: 'A derived description',
-            slackAppCreationReference: 'https://api.slack.com/apps?new_app=1',
+        return HttpResponse.json(
+          {
+            success: true,
+            data: {
+              connection: makeConnection({ id: 'conn_created', agentId: 'agent-1', botName: 'preview-bot' }),
+              botName: 'preview-bot',
+              appDescription: 'A derived description',
+              slackAppCreationReference: 'https://api.slack.com/apps?new_app=1',
+            },
           },
-        }, { status: 201 })
+          { status: 201 },
+        )
       }),
     )
 

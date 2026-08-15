@@ -142,7 +142,8 @@ public sealed class SlackManagerToolExecutor : IScopedService
                 $"You are responsible for {responsibility}.",
                 profile.ToAgentConfig(),
                 Skills: [],
-                MaxConcurrentRuns: null));
+                MaxConcurrentRuns: null,
+                Purpose: responsibility));
         }
 
         var result = await _manager.CreateAsync(new SlackManagerCreateRequest(

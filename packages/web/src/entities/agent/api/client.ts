@@ -29,10 +29,12 @@ export interface AgentInfo {
   id: string
   projectId: string
   name: string
+  purpose: string | null
   description: string
   instructions: string
   agentConfig: Record<string, unknown> | null
   skills: string[]
+  permissions: string[]
   maxConcurrentRuns: number | null
   status: string
   createdAt: string
@@ -42,19 +44,23 @@ export interface AgentInfo {
 
 export interface AgentCreateRequest {
   name: string
+  purpose?: string | null
   description?: string | null
   instructions: string
   agentConfig?: Record<string, unknown> | null
   skills?: string[] | null
+  permissions?: string[]
   maxConcurrentRuns?: number | null
 }
 
 export interface AgentUpdateRequest {
   name?: string | null
+  purpose?: string | null
   description?: string | null
   instructions?: string | null
   agentConfig?: Record<string, unknown> | null
   skills?: string[] | null
+  permissions?: string[]
   maxConcurrentRuns?: number | null
 }
 

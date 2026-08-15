@@ -74,10 +74,12 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
     id: 'agent-1',
     projectId: 'proj-1',
     name: 'Test Agent',
+    purpose: 'A test purpose',
     description: 'A test agent',
     instructions: 'Do stuff',
     agentConfig: null,
     skills: [],
+    permissions: [],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-06-01T00:00:00.000Z',
@@ -144,16 +146,16 @@ describe('AgentListPage', () => {
         makeAgent({
           id: 'ready',
           name: 'Ready Agent',
-          description: 'Reviews pull requests',
+          purpose: 'Reviews pull requests',
           executability: { state: 'executable', gaps: [], pendingLaunchNote: null },
         }),
         makeAgent({
           id: 'setup',
           name: 'Setup Agent',
-          description: 'Needs configuration',
+          purpose: 'Needs configuration',
           executability: { state: 'not-configured', gaps: [], pendingLaunchNote: null },
         }),
-        makeAgent({ id: 'unknown', name: 'Unknown Agent', description: '', executability: null }),
+        makeAgent({ id: 'unknown', name: 'Unknown Agent', purpose: null, executability: null }),
       ])
       renderPage()
 

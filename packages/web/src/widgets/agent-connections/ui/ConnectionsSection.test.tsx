@@ -47,10 +47,12 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
     id: 'agent-1',
     projectId: 'proj-1',
     name: 'Test Agent',
+    purpose: null,
     description: '',
     instructions: '...',
     agentConfig: null,
     skills: [],
+    permissions: [],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-06-01T00:00:00.000Z',
@@ -71,9 +73,7 @@ const operationsHook: ConnectionOperationsHook = () => ({
   createMutation: {
     mutate: (data, options) => {
       mocks.createMutateCalls.push({ data, options })
-      const onSuccess = options?.onSuccess as
-        | ((created: { connection: AgentConnectionDto }) => void)
-        | undefined
+      const onSuccess = options?.onSuccess as ((created: { connection: AgentConnectionDto }) => void) | undefined
       onSuccess?.({ connection: makeConnection({ id: 'conn_new', agentId: (data as { agentId: string }).agentId }) })
     },
     isPending: mocks.createPending,
@@ -85,11 +85,18 @@ function renderSection(agent: AgentInfo = makeAgent(), { withRoutes = false }: {
   if (withRoutes) {
     return render(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-          id: 'proj-1', name: 'Test',
-          createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-          repositories: [],
-        }]}>
+        <ProjectProvider
+          initialProjectId="proj-1"
+          initialProjects={[
+            {
+              id: 'proj-1',
+              name: 'Test',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              repositories: [],
+            },
+          ]}
+        >
           <MemoryRouter initialEntries={['/Test/agents/agent-1']}>
             <Routes>
               <Route
@@ -108,11 +115,18 @@ function renderSection(agent: AgentInfo = makeAgent(), { withRoutes = false }: {
   }
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1', name: 'Test',
-        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
         <MemoryRouter>
           <ConnectionsSection agent={agent} operationsHook={operationsHook} />
         </MemoryRouter>
@@ -186,7 +200,12 @@ describe('ConnectionsSection', () => {
 
     it('renders disabled state for desiredState=disabled', () => {
       mocks.connections = [
-        makeConnection({ id: 'conn_d', setupProgress: 'complete', connectionHealth: 'healthy', desiredState: 'disabled' }),
+        makeConnection({
+          id: 'conn_d',
+          setupProgress: 'complete',
+          connectionHealth: 'healthy',
+          desiredState: 'disabled',
+        }),
       ]
       renderSection()
       const row = screen.getByTestId('agent-connection-row-conn_d')
@@ -195,7 +214,12 @@ describe('ConnectionsSection', () => {
 
     it('renders ready state for a complete, healthy, enabled connection', () => {
       mocks.connections = [
-        makeConnection({ id: 'conn_r', setupProgress: 'complete', connectionHealth: 'healthy', desiredState: 'enabled' }),
+        makeConnection({
+          id: 'conn_r',
+          setupProgress: 'complete',
+          connectionHealth: 'healthy',
+          desiredState: 'enabled',
+        }),
       ]
       renderSection()
       const row = screen.getByTestId('agent-connection-row-conn_r')

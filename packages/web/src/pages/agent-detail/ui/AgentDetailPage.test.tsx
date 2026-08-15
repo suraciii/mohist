@@ -15,11 +15,7 @@ import {
   type AgentSessionComposerDataHook,
   type AgentSessionComposerPageComponents,
 } from '../../agent-session-composer'
-import {
-  AgentDetailPage,
-  type AgentDetailPageComponents,
-  type AgentDetailPageDataHook,
-} from './AgentDetailPage'
+import { AgentDetailPage, type AgentDetailPageComponents, type AgentDetailPageDataHook } from './AgentDetailPage'
 
 const state: {
   agent: AgentInfo | undefined
@@ -40,15 +36,9 @@ const state: {
 }
 
 const components: AgentDetailPageComponents = {
-  AgentProfileEditor: ({ open }) => (
-    open ? <div data-testid="agent-profile-editor" /> : null
-  ),
+  AgentProfileEditor: ({ open }) => (open ? <div data-testid="agent-profile-editor" /> : null),
   SubscriptionsSection: ({ agent }) => (
-    <div
-      data-testid="agent-subscriptions-section"
-      data-agent-id={agent.id}
-      data-agent-status={agent.status}
-    />
+    <div data-testid="agent-subscriptions-section" data-agent-id={agent.id} data-agent-status={agent.status} />
   ),
   ConnectionsSection: () => null,
 }
@@ -140,17 +130,21 @@ function renderPage() {
   const queryClient = createQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1', name: 'Test',
-        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
         <MemoryRouter initialEntries={['/agents/agent-1']}>
           <Routes>
-            <Route
-              path="/agents/:agentId"
-              element={<AgentDetailPage components={components} dataHook={dataHook} />}
-            />
+            <Route path="/agents/:agentId" element={<AgentDetailPage components={components} dataHook={dataHook} />} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
@@ -162,11 +156,18 @@ function renderJourneyPage() {
   const queryClient = createQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1', name: 'Test',
-        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
         <MemoryRouter initialEntries={['/Test/agents/agent-1']}>
           <Routes>
             <Route
@@ -181,7 +182,7 @@ function renderJourneyPage() {
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -190,10 +191,12 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
     id: 'agent-1',
     projectId: 'proj-1',
     name: 'Test Agent',
+    purpose: 'Review pull requests',
     description: 'A test agent',
     instructions: 'You are a helpful assistant.',
     agentConfig: { model: 'gpt-4', variant: 'high' },
     skills: ['code', 'debug'],
+    permissions: ['repo:read'],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-06-01T00:00:00.000Z',
@@ -251,7 +254,9 @@ describe('AgentDetailPage', () => {
       renderPage()
       await screen.findByTestId('agent-detail-page')
       expect(screen.getByText('Test Agent')).toBeInTheDocument()
-      expect(screen.getByTestId('agent-detail-purpose')).toHaveTextContent('A test agent')
+      expect(screen.getByTestId('agent-detail-purpose')).toHaveTextContent('Review pull requests')
+      expect(screen.getByTestId('agent-detail-description')).toHaveTextContent('A test agent')
+      expect(screen.getByTestId('agent-detail-permissions')).toHaveTextContent('repo:read')
       expect(screen.getByTestId('agent-detail-lifecycle')).toHaveTextContent('Active')
       expect(screen.getByTestId('agent-detail-instructions')).toHaveTextContent('You are a helpful assistant.')
       expect(screen.getByTestId('agent-detail-config')).toBeInTheDocument()
@@ -260,7 +265,7 @@ describe('AgentDetailPage', () => {
     })
 
     it('renders the archived Agent definition identity and lifecycle', async () => {
-      mockAgent(makeAgent({ description: 'Retained for audit', status: 'archived' }))
+      mockAgent(makeAgent({ purpose: 'Retained for audit', status: 'archived' }))
       renderPage()
 
       await screen.findByTestId('agent-detail-page')
@@ -269,10 +274,12 @@ describe('AgentDetailPage', () => {
     })
 
     it('renders runtime, max concurrent runs, and edit timing in the definition summary', async () => {
-      mockAgent(makeAgent({
-        agentConfig: { runtime: 'pi', model: 'gpt-4', variant: 'high' },
-        maxConcurrentRuns: 3,
-      }))
+      mockAgent(
+        makeAgent({
+          agentConfig: { runtime: 'pi', model: 'gpt-4', variant: 'high' },
+          maxConcurrentRuns: 3,
+        }),
+      )
       renderPage()
 
       await screen.findByTestId('agent-detail-page')
@@ -491,5 +498,4 @@ describe('AgentDetailPage', () => {
       expect(section).toHaveAttribute('data-agent-status', 'archived')
     })
   })
-
 })
