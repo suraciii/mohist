@@ -10,6 +10,11 @@ export function usesOpenCode(work: DispatchWorkItem): boolean {
   return runtimeKindForWork(work) === 'opencode'
 }
 
+export function isAgentRecoveryDispatch(work: DispatchWorkItem): boolean {
+  const recovery = work.agentRecovery
+  return Boolean(recovery && recovery.runtime.trim() && recovery.runtimeSessionId.trim())
+}
+
 export function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {
   const declared = typeof work.with?.runtime === 'string' ? work.with.runtime : work.agentDefinition?.runtime
   const candidate = (declared ?? work.uses ?? '').trim().toLowerCase()

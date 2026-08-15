@@ -30,7 +30,7 @@ namespace Mohist.Server.Runner.Grains;
 /// No work-completion wall clock — work liveness is the runner process's
 /// poll report; the only server-side timer is presence expiry.
 /// </summary>
-public class RunnerGrain : Grain, IRunnerGrain, IRemindable
+public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
@@ -995,23 +995,4 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return element.Clone();
     }
 
-    private async Task PersistAsync()
-    {
-        await _state.WriteStateAsync();
-    }
-
-    /// <summary>
-    /// Resolves the issue reference carried on a workflow run's metadata
-    /// typed metadata. Returns null when the run has no issue context. Used to
-    /// project the issue ref for
-    /// active workflow work — issue metadata lives on the run, not the work
-    /// item, so without this the read model would lose the issue reference.
-    /// </summary>
-    private static WorkIssueRef? IssueFromRun(WorkflowRun run)
-    {
-        if (string.IsNullOrWhiteSpace(run.Metadata.ProjectId)
-            || run.Metadata.IssueNumber is not > 0)
-            return null;
-        return new WorkIssueRef(run.Metadata.ProjectId, run.Metadata.IssueNumber.Value);
-    }
 }
