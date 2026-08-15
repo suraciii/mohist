@@ -128,5 +128,4 @@ public sealed partial class AgentJobGrain
                 "AgentJob RunnerLossRecoveryTimeout must be longer than the two-minute runner presence timeout.");
         return timeout;
     }
-    }
 }

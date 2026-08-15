@@ -207,7 +207,6 @@ describe('PiRuntime', () => {
   })
 
   it('creates a physical binding and runs a literal prompt with per-turn selection', async () => {
-
     const session = new FakeSession()
     const runtime = new PiRuntime({ agentDir: '/global', sdkFactory: factory(session) })
     await runtime.start()
@@ -252,7 +251,6 @@ describe('PiRuntime', () => {
     session.complete('answer')
     await expect(resultPromise).resolves.toMatchObject({ ok: true })
   })
-
 
   it('aborts and quarantines the Pi runtime when a turn exceeds its resource budget', async () => {
     const session = new FakeSession()

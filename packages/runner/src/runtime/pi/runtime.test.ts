@@ -139,7 +139,6 @@ describe('PiRuntime shutdown', () => {
 
 describe('PiRuntime followup', () => {
   it('applies the requested model and variant before accepting an idle follow-up', async () => {
-
     const setModel = vi.fn(async () => undefined)
     const setThinkingLevel = vi.fn()
     const prompt = vi.fn(async (_text: string, options?: { preflight?: (accepted: boolean) => void }) => {

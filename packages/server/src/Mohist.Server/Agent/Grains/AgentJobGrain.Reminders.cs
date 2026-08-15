@@ -46,9 +46,13 @@ public sealed partial class AgentJobGrain
 
         if (State.Status == AgentJobStatus.Unknown)
         {
+            if (await FailRecoveringJobIfDueAsync())
+                return;
+
             if (State.PendingInitialTurnTerminalDelivery is { } pending)
                 await DeliverInitialTurnTerminalAsync(pending);
-            if (State.PendingInitialTurnTerminalDelivery is null)
+            if (State.PendingInitialTurnTerminalDelivery is null
+                && State.RecoveryDeadlineAt is null)
                 await UnregisterSelfAsync(reminderName);
             return;
         }

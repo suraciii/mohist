@@ -887,7 +887,6 @@ export class PiRuntime {
   ): PiResult<PiTurnResult> {
     return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics }
   }
-
 }
 
 function isMissingSessionFile(cause: unknown): boolean {

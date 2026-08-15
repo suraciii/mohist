@@ -29,7 +29,7 @@ import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
 import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
-import { AWAITING_ACK_RETRY_INTERVAL_MS, boundedSignal, delay, POLL_TIMEOUT_MS, raceInterval } from './host-timing.js'
+import { AWAITING_ACK_RETRY_INTERVAL_MS, POLL_TIMEOUT_MS } from './host-timing.js'
 import { TerminalTaskLogDeliveryStoreImpl, type TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
@@ -591,6 +591,7 @@ export class RunnerHost {
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
       // already holds.
+      const startupRecoveryKeys = new Set<string>()
       for (const work of works) {
         if (signal.aborted) break
         const key = workKey(work)
@@ -601,6 +602,7 @@ export class RunnerHost {
         // better.
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
+        const startupObserved = this.recoveredStartedWork.has(key)
         const recovery = isAgentRecoveryDispatch(work)
         let admission: Awaited<ReturnType<WorkResultJournal['begin']>>
         try {
@@ -614,29 +616,38 @@ export class RunnerHost {
           })
           continue
         }
-        if (admission !== 'new') {
-          if (admission === 'started') {
-            // An explicit redelivery takes precedence over the startup
-            // unknown observation. It remains a hard physical-execution
-            // fence: reconciliation can adopt a live bound turn or surface
-            // the runner-restarted fact, but it can never call executeWork.
-            this.recoveredStartedWork.drop(key)
-            const done = this.reconcileStartedDispatch(work, signal, key)
-            this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
-            this.syncOpenCodeWorkOwners()
-          } else {
-            log.warn('work dispatch has a durable unfinished result; retaining fence', {
-              work: work.workId,
-              state: admission,
-            })
-          }
+        if (!recovery && startupObserved && admission === 'new') {
+          // The startup observation may have retired the durable fence just
+          // before this same identity was redelivered. Re-arm it locally and
+          // reconcile the delivery instead of treating it as fresh work.
+          this.recoveredStartedWork.drop(key)
+          const done = this.reconcileStartedDispatch(work, signal, key)
+          this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
+          this.syncOpenCodeWorkOwners()
+          continue
+        }
+        if (admission === 'started' && !recovery) {
+          // A redelivered started fence can adopt a live bound turn or
+          // produce the runner-restarted observation; it never re-executes.
+          this.recoveredStartedWork.drop(key)
+          const done = this.reconcileStartedDispatch(work, signal, key)
+          this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
+          this.syncOpenCodeWorkOwners()
+          continue
+        }
+        if (admission !== 'new' && (!recovery || admission === 'completed')) {
+          log.warn('work dispatch has a durable unfinished result; retaining fence', {
+            work: work.workId,
+            state: admission,
+          })
           continue
         }
         if (recovery) {
           // The delivery-driven reconciliation supersedes the startup
           // unknown-report sweep for this identity.
-          this.recoveredStartedWork.drop(key)
+          if (startupObserved) startupRecoveryKeys.add(key)
           if (work.agentRecovery!.runtime.trim().toLowerCase() !== 'pi') {
+            this.recoveredStartedWork.drop(key)
             // No turn-adoption API: the execution context is provably
             // gone, so surface unknown without executing anything.
             this.recoveredStartedWork.enqueue(work)
@@ -653,6 +664,9 @@ export class RunnerHost {
         this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
         this.syncOpenCodeWorkOwners()
       }
+
+      await this.recoveredStartedWork.retryDue(Date.now())
+      for (const key of startupRecoveryKeys) this.recoveredStartedWork.drop(key)
 
       if (signal.aborted) break
       // Pace the next round. With nothing in flight, sleep one interval
@@ -985,7 +999,6 @@ export class RunnerHost {
         }
       }),
     )
-    await this.recoveredStartedWork.retryDue(now)
   }
 
   private nextReconciliationInterval(): number {
