@@ -28,11 +28,7 @@ function TriggerToast({
 }) {
   const toast = useRuntimeToast()
   return (
-    <button
-      type="button"
-      data-testid={`trigger-${testId}`}
-      onClick={() => toast.push({ tone, title, testId, ttlMs })}
-    >
+    <button type="button" data-testid={`trigger-${testId}`} onClick={() => toast.push({ tone, title, testId, ttlMs })}>
       push
     </button>
   )
@@ -85,6 +81,19 @@ describe('RuntimeToastHost', () => {
     expect(screen.queryByTestId('runtime-toast-short')).toBeNull()
   })
 
+  it('clears auto-dismiss timers when the host unmounts', () => {
+    vi.useFakeTimers()
+    const timerCountBeforeRender = vi.getTimerCount()
+    const view = renderWithHost(<TriggerToast testId="runtime-toast-delayed" ttlMs={5_000} />)
+
+    fireEvent.click(screen.getByTestId('trigger-runtime-toast-delayed'))
+    expect(vi.getTimerCount()).toBe(timerCountBeforeRender + 1)
+
+    view.unmount()
+
+    expect(vi.getTimerCount()).toBe(timerCountBeforeRender)
+  })
+
   it('allows manual dismiss via the dismiss button', async () => {
     renderWithHost(<TriggerToast />)
     fireEvent.click(screen.getByTestId('trigger-runtime-toast-connection-disconnected'))
@@ -123,7 +132,13 @@ describe('RuntimeToastHost', () => {
         <button
           type="button"
           data-testid="trigger-notice"
-          onClick={() => toast.push({ tone: 'transport', title: 'Live events disconnected', testId: 'runtime-toast-connection-disconnected' })}
+          onClick={() =>
+            toast.push({
+              tone: 'transport',
+              title: 'Live events disconnected',
+              testId: 'runtime-toast-connection-disconnected',
+            })
+          }
         >
           push
         </button>
