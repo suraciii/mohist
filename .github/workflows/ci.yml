@@ -12,25 +12,208 @@ on:
 permissions:
   contents: read
 
-# A superseded push to the same PR cancels the obsolete canonical run.
+# A superseded push to the same PR cancels the obsolete run instead of
+# finishing side by side with the fresh one.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# CI deliberately invokes the same canonical entry point as a local final gate.
-# It must not reconstruct duration evidence from independently restored/built
-# jobs, because that changes the resource ownership and duration environment.
+# The Spec suite is split across four independent jobs. Each job discovers the
+# same compiled class list, selects a deterministic disjoint subset, and keeps
+# the existing xUnit collection and thread limits. A final job verifies that
+# the partition manifests cover every discovered class exactly once.
 jobs:
-  canonical:
-    name: Canonical verification
+  changes:
+    name: Detect Changed Paths
     runs-on: ubuntu-latest
-    # The canonical gate owns a five-minute execution deadline. Keep extra
-    # job wall for bounded cleanup and diagnostic artifact upload.
-    timeout-minutes: 7
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      dotnet: ${{ steps.filter.outputs.dotnet }}
+      node: ${{ steps.filter.outputs.node }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Filter changed paths
+        id: filter
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          base_ref=""
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base_ref="$PR_BASE_SHA"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            base_ref="$PUSH_BEFORE_SHA"
+          fi
+
+          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]] || ! git rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
+            echo "No comparable base; running every track."
+            echo "dotnet=true" >> "$GITHUB_OUTPUT"
+            echo "node=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          dotnet=false
+          node=false
+          while IFS= read -r file; do
+            case "$file" in
+              packages/server/*|packages/cli/*|Mohist.sln|Directory.Build.props|Directory.Packages.props|global.json|eng/*|.github/workflows/ci.yml)
+                dotnet=true ;;
+            esac
+            case "$file" in
+              packages/web/*|packages/runner/*|packages/mohist-slack/*|package.json|package-lock.json|tsconfig*.json|biome.json|scripts/*|docs/*|design/*|*.md|.github/workflows/ci.yml)
+                node=true ;;
+            esac
+          done <<< "$(git diff --name-only "$base_ref"...HEAD)"
+
+          echo "dotnet=$dotnet" >> "$GITHUB_OUTPUT"
+          echo "node=$node" >> "$GITHUB_OUTPUT"
+
+  dotnet-spec:
+    name: .NET spec tests (partition ${{ matrix.partition }})
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [0, 1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
       DOTNET_GENERATE_ASPNET_CERT: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      # Project uses Central Package Management (Directory.Packages.props) with
+      # no packages.lock.json, so setup-dotnet's `cache: true` (which requires a
+      # lock file) cannot be used. Cache the restored NuGet global packages
+      # folder keyed on the props hash instead, to skip re-downloading ~120
+      # packages from nuget.org on every run.
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet restore Mohist.sln
+
+      - name: Build
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
+
+      - name: Test Spec partition
+        run: |
+          timeout --signal=TERM -k 10s 240s ./scripts/ci-spec-partition.sh run \
+            packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests \
+            "${{ matrix.partition }}" "${{ strategy.job-total }}" \
+            "artifacts/spec-partition-${{ matrix.partition }}" \
+            "artifacts/spec-partition-${{ matrix.partition }}/spec.trx"
+        timeout-minutes: 5
+
+      - name: Upload Spec partition artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-spec-partition-${{ matrix.partition }}-${{ github.run_attempt }}
+          path: artifacts/spec-partition-${{ matrix.partition }}
+          if-no-files-found: error
+          retention-days: 7
+
+  dotnet-spec-coverage:
+    name: .NET spec coverage
+    needs: [changes, dotnet-spec]
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download Spec partition artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dotnet-spec-partition-*-${{ github.run_attempt }}
+          path: artifacts/spec-partitions
+          merge-multiple: false
+
+      - name: Verify complete Spec coverage
+        run: timeout --signal=TERM -k 10s 60s ./scripts/ci-spec-partition.sh verify artifacts/spec-partitions
+
+  dotnet-core:
+    name: .NET build and test
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY: false
+      DOTNET_GENERATE_ASPNET_CERT: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet restore Mohist.sln
+
+      - name: Build
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore
+
+      - name: Test
+        run: |
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-build
+        timeout-minutes: 5
+
+      - name: Upload failed test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-core-test-results-${{ github.run_attempt }}
+          path: "**/TestResults/*.log"
+          if-no-files-found: warn
+          retention-days: 7
+
+  node:
+    name: Node build and test
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -45,39 +228,50 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          global-json-file: global.json
-
-      # Central Package Management has no packages.lock.json, so cache the
-      # restored global packages folder by its authoritative package graph.
-      - name: Cache NuGet packages
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
       - name: Install dependencies
-        run: timeout -k 10s 120s npm ci
+        run: timeout --signal=TERM --kill-after=30s 300s npm ci
 
-      - name: Run canonical gate
-        # The gate enforces its own 300s absolute deadline. The job-level wall
-        # leaves room for bounded cleanup and the always-run artifact upload.
-        timeout-minutes: 6
+      - name: Resolve file size ratchet base
+        shell: bash
         env:
-          TMPDIR: ${{ runner.temp }}
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
-        run: timeout -k 10s 300s npm run verify
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          base_ref=""
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base_ref="$PR_BASE_SHA"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            base_ref="$PUSH_BEFORE_SHA"
+          fi
 
-      - name: Upload canonical diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: canonical-gate-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/mohist-canonical-gate-*
-          if-no-files-found: warn
-          retention-days: 7
+          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then
+            base_ref="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+          fi
+
+          git rev-parse --verify "${base_ref}^{commit}" >/dev/null
+          printf 'FILE_SIZE_BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
+
+      - name: Check format
+        run: timeout --signal=TERM --kill-after=30s 60s npm run format:check
+
+      - name: Check file sizes
+        run: timeout --signal=TERM --kill-after=30s 60s npm run check:filesizes
+
+      - name: Check Node architecture scripts
+        run: |
+          timeout --signal=TERM --kill-after=30s 180s npm run archtest
+
+      - name: Check active documentation
+        run: timeout --signal=TERM --kill-after=30s 180s npm run docs:check
+
+      - name: Build
+        run: timeout --signal=TERM --kill-after=30s 300s npm run build --workspaces --if-present
+
+      - name: Test runner
+        run: timeout --signal=TERM --kill-after=30s 180s npm run test:ci -w packages/runner
+
+      - name: Test runner integration
+        run: timeout --signal=TERM --kill-after=30s 180s npm run test:integration -w packages/runner
+
+      - name: Test web
+        run: timeout --signal=TERM --kill-after=30s 180s npm run test:ci -w packages/web
