@@ -1,9 +1,15 @@
-import type { ActionCatalog } from "../actions/manifest.js"
+import type { ActionCatalog } from '../actions/manifest.js'
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
-export type WorkType = "task" | "checks"
+export type WorkType = 'task' | 'checks'
+
+export interface RuntimeReadinessWitness {
+  runtime: string
+  ready: boolean
+  generation: number | null
+}
 
 export interface CheckItem {
   name: string
@@ -33,12 +39,10 @@ export interface TaskArtifactDeclaration {
  * `variables`, `prompts`, `projectId`, `issueNumber`, etc. without
  * smuggling them into the domain protocol.
  */
-export type WorkItem =
-  | TaskWorkItem
-  | ChecksWorkItem
+export type WorkItem = TaskWorkItem | ChecksWorkItem
 
 export interface TaskWorkItem {
-  workType: "task"
+  workType: 'task'
   stage: string
   id: string
   title?: string | null
@@ -51,7 +55,7 @@ export interface TaskWorkItem {
 }
 
 export interface ChecksWorkItem {
-  workType: "checks"
+  workType: 'checks'
   stage: string
   id: string
   items: ReadonlyArray<CheckItem>
@@ -288,10 +292,7 @@ export interface ActionError {
   message: string
 }
 
-export type ActionResult = (
-  | { output: JsonObject | null; error?: never }
-  | { output?: never; error: ActionError }
-) & {
+export type ActionResult = ({ output: JsonObject | null; error?: never } | { output?: never; error: ActionError }) & {
   effects?: {
     addTasks?: AddTaskInput[]
     writeVars?: JsonObject
@@ -301,7 +302,7 @@ export type ActionResult = (
    * The Agent runtime could not establish a result. This remains internal to
    * the Runner until it is projected as a Workflow `unknown` observation.
    */
-  outcome?: "unknown"
+  outcome?: 'unknown'
   /**
    * Runner-private Action-result facts that must never be serialized
    * into `WorkItemResult.output`, `TaskRun.Output`, recovery matching,
@@ -372,7 +373,6 @@ export interface RunnerOptions {
    * batches are smaller but the rail tolerates more slack.
    */
   taskLogIncrementalUploadTimeoutMs?: number
-
 }
 
 export interface RuntimeCatalogEntry {

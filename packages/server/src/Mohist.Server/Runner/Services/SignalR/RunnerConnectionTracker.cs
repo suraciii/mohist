@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Runner.Services.SignalR;
@@ -59,6 +60,20 @@ public class RunnerConnectionTracker : ISingletonService, IAgentSessionConnectio
         return _connections.TryGetValue(runnerId, out var connection)
             ? connection.Generation
             : null;
+    }
+
+    public RunnerPollRequest ApplyPollAdmission(string runnerId, RunnerPollRequest req)
+    {
+        var currentConnectionId = GetConnectionId(runnerId);
+        var connectionGeneration = currentConnectionId is not null
+            && string.Equals(req.ConnectionId, currentConnectionId, StringComparison.Ordinal)
+            ? GetConnectionGeneration(runnerId)
+            : null;
+        return req with
+        {
+            ConnectionGeneration = connectionGeneration,
+            AdmissionReady = req.AdmissionReady ?? true,
+        };
     }
 
     private sealed record RunnerConnectionLease(string ConnectionId, string Generation);

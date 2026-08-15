@@ -75,6 +75,45 @@ public sealed class WorkflowItemTranslator : IScopedService
             $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
     }
 
+    /// <summary>
+    /// Resolves only the runtime identities needed for admission. This is a
+    /// read-only projection: it must not claim the workflow task or persist a
+    /// dispatch snapshot. Unknown resolution stays pending so a later poll can
+    /// retry with a complete immutable profile.
+    /// </summary>
+    public async Task<IReadOnlyList<string>?> ResolveRequiredRuntimesAsync(
+        WorkItem item,
+        WorkflowRun run)
+    {
+        if (item.IsChecks)
+            return (item.Items ?? [])
+                .Select(check => RuntimeForUses(check.Uses))
+                .Where(runtime => runtime is not null)
+                .Select(runtime => runtime!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
+        {
+            if (item.With is null
+                || !item.With.TryGetValue("name", out var name)
+                || name is null
+                || name.Value.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(name.Value.GetString()))
+                return [];
+            if (_agentSnapshots is null || string.IsNullOrWhiteSpace(run.Metadata.ProjectId))
+                return null;
+
+            var snapshot = await _agentSnapshots.ResolveAsync(run.Metadata.ProjectId, name.Value.GetString()!);
+            return snapshot is null || string.IsNullOrWhiteSpace(snapshot.Runtime)
+                ? []
+                : [snapshot.Runtime.Trim()];
+        }
+
+        var runtime = RuntimeForUses(item.Uses);
+        return runtime is null ? [] : [runtime];
+    }
+
     private async Task<WorkDispatch> BuildTaskDispatchAsync(
         WorkItem item,
         string workflowRunId,
@@ -328,6 +367,13 @@ public sealed class WorkflowItemTranslator : IScopedService
         if (source.TryGetValue(key, out var value))
             target[key] = value?.Clone();
     }
+
+    private static string? RuntimeForUses(string? uses) => uses switch
+    {
+        "mohist/pi" => "pi",
+        "mohist/opencode" => "opencode",
+        _ => null,
+    };
 
     private static string? SerializeRaw(Dictionary<string, JsonElement?>? values) =>
         values is not null && values.Count > 0 ? JSON.Serialize(values) : null;

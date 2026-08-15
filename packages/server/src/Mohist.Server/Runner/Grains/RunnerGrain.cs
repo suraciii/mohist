@@ -42,6 +42,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private bool _draining;
     private DateTimeOffset _lastPresenceAt;
     private IDisposable? _presenceTimer;
+    private string? _readinessConnectionGeneration;
+    private readonly Dictionary<string, RuntimeReadinessWitness> _runtimeReadiness = new(StringComparer.OrdinalIgnoreCase);
 
     // Authoritative source for dispatch capacity. Loaded from the persisted
     // definition state in OnActivateAsync / RegisterAsync and updated via
@@ -151,6 +153,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             // update interruption. The new process may now reconcile the
             // durable AgentJob ledger and receive the preserved work again.
             _draining = false;
+            _readinessConnectionGeneration = null;
+            _runtimeReadiness.Clear();
             _lastPresenceAt = _timeProvider.GetUtcNow();
             _pendingBuildGitHash = null;
             _pendingRuntimeIdentity = null;
@@ -268,6 +272,54 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _lifecycleGate.Release();
         }
 
+    }
+
+    public async Task<RunnerRuntimeReadinessSnapshot> ObserveRuntimeReadinessAsync(
+        string? connectionGeneration,
+        List<RuntimeReadinessWitness> witnesses)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_status != RunnerStatus.Online
+                || _info is null
+                || string.IsNullOrWhiteSpace(connectionGeneration))
+                return RunnerRuntimeReadinessSnapshot.Empty;
+
+            var normalizedConnectionGeneration = connectionGeneration.Trim();
+            if (_info.ConnectionGeneration is { } registered
+                && !string.Equals(registered, normalizedConnectionGeneration, StringComparison.Ordinal))
+                return new RunnerRuntimeReadinessSnapshot(normalizedConnectionGeneration, []);
+
+            if (!string.Equals(_readinessConnectionGeneration, normalizedConnectionGeneration, StringComparison.Ordinal))
+            {
+                _readinessConnectionGeneration = normalizedConnectionGeneration;
+                _runtimeReadiness.Clear();
+            }
+
+            foreach (var witness in witnesses ?? [])
+            {
+                var runtime = witness.Runtime?.Trim();
+                if (string.IsNullOrWhiteSpace(runtime) || witness.Generation is not > 0)
+                    continue;
+
+                if (_runtimeReadiness.TryGetValue(runtime, out var previous)
+                    && previous.Generation is { } previousGeneration
+                    && witness.Generation is { } incomingGeneration
+                    && previousGeneration > incomingGeneration)
+                    continue;
+
+                _runtimeReadiness[runtime] = witness with { Runtime = runtime };
+            }
+
+            return new RunnerRuntimeReadinessSnapshot(
+                _readinessConnectionGeneration,
+                _runtimeReadiness.Values.ToList());
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
     }
 
     public async Task BeginDrainAsync()
