@@ -6,6 +6,7 @@ import type { PiRuntime } from './pi/index.js'
 import type { RuntimeAccessor } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { BindingRecoveryCoordinator } from './binding-recovery.js'
+import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
 import { inlineSlackCollaborationSkill, readSlackExecutionContext } from './slack-execution-context.js'
@@ -74,6 +75,7 @@ export class AgentJobExecutor {
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
     private readonly options: AgentJobExecutorOptions = {},
+    private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -218,6 +220,7 @@ export class AgentJobExecutor {
       runtimes: this.runtimes,
       bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
       options: this.options,
+      runtimeTurnRegistry: this.runtimeTurnRegistry,
     }
   }
 

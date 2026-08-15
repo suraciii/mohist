@@ -131,3 +131,34 @@ Channel decision (grounded in live source):
   unrelated AgentJob poll timing failure; the failing class passed when run
   directly. The focused T-002 Server classes pass, and `npm run test:fast`
   passes in full with 1639 Runner and 4724 Web tests.
+
+## T-003 Implementation Notes
+
+- Extended `WorkResultJournal` in the existing atomic file with the
+  `interrupted` state. It stores the complete immutable
+  `RuntimeRecoveryReceipt`, reloads it with completed entries, and retires
+  either terminal state only after acknowledgement. Started, completed, and
+  interrupted transitions reject a second terminal record for the same work.
+- Added Runner-owned receipt and pending-operation types. Terminal-result
+  fingerprints follow the Server `WorkResult` property order and omit nullable
+  and Runner-private fields, while update-interrupted payloads contain only the
+  operation id and `stopConfirmed=true`.
+- Added a live runtime-turn registry. Workflow and AgentJob execution register
+  the physical runtime/session/turn binding only after the Agent turn is
+  accepted; RunnerHost uses that binding to call the existing Pi/OpenCode
+  confirmed-stop paths. Missing bindings, idle observations, and unconfirmed
+  stops cannot manufacture interruption receipts.
+- RunnerHost now performs a bounded pending-operation handoff before bounded
+  cooperative stop. The fetched operation is the only update context and its
+  inventory gates receipt creation. Confirmed stops persist before delivery;
+  returned results use the receipt-shaped terminal path when their binding is
+  complete, and all receipt deliveries retry the same journal payload until a
+  terminal acknowledgement.
+- `ServerConnection` now parses the runner-facing pending-operation response
+  and sends recovery receipts, treating HTTP 409/retryable acknowledgements as
+  delivery failures. Added deterministic journal, receipt, handoff, and
+  delivery contract tests.
+- Verification so far: Runner typecheck and test typecheck pass; the full
+  Runner vitest suite passes (153 files, 1647 tests). The pending-operation
+  handoff retries timed-out or failed queries within its fixed budget, while a
+  successful empty response ends the handoff without creating update context.

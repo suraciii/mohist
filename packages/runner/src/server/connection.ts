@@ -14,6 +14,11 @@ import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
+import type {
+  PendingUpdateOperation,
+  RecoveryReceiptAcknowledgement,
+  RuntimeRecoveryReceipt,
+} from '../runtime/recovery-receipt.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
 
@@ -96,6 +101,49 @@ export class ServerConnection {
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
     const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] }
     return (payload.dispatches ?? []).map(parseDispatchWorkItem)
+  }
+
+  async fetchPendingUpdateOperation(signal: AbortSignal): Promise<PendingUpdateOperation | null> {
+    const response = await this.fetchWithAuth(this.url('update-operation/pending'), { method: 'GET', signal })
+    if (!response.ok) throw new Error(`pending update operation failed: ${response.status} ${await response.text()}`)
+    const payload = (await response.json()) as unknown
+    const operation = readObject(payload, ['operation']) ?? readObject(payload, ['data', 'operation'])
+    return operation ? parsePendingUpdateOperation(operation) : null
+  }
+
+  async sendRecoveryReceipt(
+    receipt: RuntimeRecoveryReceipt,
+    signal: AbortSignal,
+  ): Promise<RecoveryReceiptAcknowledgement> {
+    const response = await this.fetchWithAuth(this.url('recovery-receipt'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(receipt),
+      signal,
+    })
+    const text = await response.text()
+    let payload: unknown = null
+    if (text) {
+      try {
+        payload = JSON.parse(text)
+      } catch {
+        payload = null
+      }
+    }
+    if (!response.ok && response.status !== 409) {
+      throw new Error(`recovery receipt failed: ${response.status} ${text}`)
+    }
+    const acknowledgement = parseRecoveryReceiptAcknowledgement(payload)
+    if (response.status === 409 || acknowledgement.status === 'retryable') {
+      const error = new Error(
+        `recovery receipt is retryable: ${acknowledgement.reason ?? 'server not ready'}`,
+      ) as Error & {
+        retryable?: boolean
+      }
+      error.retryable = true
+      throw error
+    }
+    return acknowledgement
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
@@ -972,6 +1020,46 @@ export function parseWorkspaceReclaimability(payload: unknown): WorkspaceReclaim
     throw new Error('workspace reclaimability returned an invalid session count')
   }
   return { status, activeBoundSessions: count }
+}
+
+function parsePendingUpdateOperation(value: Record<string, unknown>): PendingUpdateOperation {
+  const operationId = readString(value, ['operationId'])
+  const createdAt = readString(value, ['createdAt'])
+  const affectedWorks = value.affectedWorks
+  if (!operationId || !createdAt || !Array.isArray(affectedWorks))
+    throw new Error('pending update operation returned a malformed response')
+  return {
+    operationId,
+    createdAt,
+    ...(typeof value.runnerId === 'string' ? { runnerId: value.runnerId } : {}),
+    affectedWorks: affectedWorks.map((item) => {
+      if (!isObjectRecord(item)) throw new Error('pending update operation returned a malformed work')
+      const ownerKind = readString(item, ['ownerKind'])
+      const ownerId = readString(item, ['ownerId'])
+      const workId = readString(item, ['workId'])
+      const workType = readString(item, ['workType'])
+      if (!ownerKind || !ownerId || !workId || !workType)
+        throw new Error('pending update operation returned a malformed work')
+      return {
+        ownerKind,
+        ownerId,
+        workId,
+        workType,
+        ...(typeof item.taskRunId === 'string' ? { taskRunId: item.taskRunId } : {}),
+        ...(typeof item.status === 'string' ? { status: item.status } : {}),
+      }
+    }),
+  }
+}
+
+function parseRecoveryReceiptAcknowledgement(value: unknown): RecoveryReceiptAcknowledgement {
+  if (!isObjectRecord(value) || typeof value.appliedReceiptId !== 'string' || typeof value.status !== 'string')
+    throw new Error('recovery receipt returned a malformed acknowledgement')
+  return {
+    appliedReceiptId: value.appliedReceiptId,
+    status: value.status,
+    ...(typeof value.reason === 'string' ? { reason: value.reason } : {}),
+  }
 }
 
 function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string) {
