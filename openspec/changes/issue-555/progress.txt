@@ -57,3 +57,78 @@ Files changed:
 Disposition summary: MF-1 FIXED; observations 1-7 no action required
 (observation 1's prose count fixed in passing per the reviewer's note);
 no won't-fix dispositions — no must-fix finding was left unfixed.
+
+# T-001: Direct API authentication boundary and route group
+
+Status: COMPLETE. Auth pipeline extension (carrier kind +
+ExternalAgentCaller in HttpContext.Items), ExternalAgentApiMiddleware,
+/api/v1 route group with RouteScopeRequirement metadata, public error
+envelope with Bearer challenge, and 9 pipeline-order SpecTests all
+shipped and green.
+
+## Codebase Patterns
+
+- Middleware composition is pinned in MohistHostFactory:
+  UseMohistAuth() -> UseExternalAgentApi() -> MapMohistApi(). The direct
+  boundary middleware is factory-based (IMiddleware + IScopedService),
+  same as AuthResolutionMiddleware. Routing runs before both (implicit
+  UseRouting), so RouteValues/endpoint metadata are readable there.
+- AuthResolutionMiddleware now AUTHENTICATES ONLY on /api/v1 paths
+  (IsDirectApiPath): it skips its own scope/runner-impersonation gates
+  there and delegates authorization to ExternalAgentApiMiddleware so
+  401/403 use the direct error envelope, not the control-plane one.
+- Carrier + caller facts travel in HttpContext.Items:
+  "mohist.credentialCarrier" (CredentialCarrier enum) and
+  "mohist.externalAgentCaller" (ExternalAgentCaller). The caller is
+  recorded for CredentialKind.Pat only — caller presence in Items is
+  exactly "the bearer credential is a PAT".
+- 401 vs 403 split on /api/v1 (spec-mandated): non-Bearer carrier OR
+  non-PAT bearer credential (runner/integration/service file cred) ->
+  401 non-classifying; PAT without grant / wrong scope / out-of-grant
+  project -> 403. operator_all is honored ONLY as the persisted grant
+  kind, never inferred from operator scope.
+- DirectApiAuthResponses is the single 401/403 writer shared by the auth
+  layer (unresolvable token on /api/v1) and the boundary middleware, so
+  the non-classifying body cannot drift between the two rejection points.
+- New production comments must NOT reference issue numbers, T-00x task
+  IDs, design/*.md paths, or openspec/ — CommentReferenceRules
+  (ArchTests) ratchets against comment-reference-baseline.json, which is
+  EMPTY by convention. Keep comments self-contained; do not grow the
+  baseline.
+- Route group: DirectApiRoutes.MapDirectApiRoutes() is the ONE
+  registration (called first inside MohistApiRegistration.MapMohistApi);
+  PathPrefix constant "/api/v1" + projectId route name are shared with
+  the middleware. Seven templates = design/agent-api.md route table
+  exactly. Placeholder delegates answer 501 not_implemented via
+  DirectApiResults; T-003..T-007 replace delegates in place without
+  touching the pipeline.
+- SpecTests for the direct API live in
+  packages/server/tests/Mohist.Server.SpecTests/Specs/DirectApi/,
+  collection "IntegrationMisc". PATs for tests are minted through the
+  real control-plane route POST /api/auth/tokens
+  (body: name/scope/projectIds/allProjects; response data.token).
+  FakeTimeProvider is pinned at 2026-06-30 — seed credential rows with
+  ExpiresAt in 2027 and RevokedAt before "now" as needed.
+
+## Gotchas
+
+- MTP (Microsoft.Testing.Platform) ignores VSTest --filter syntax on
+  SpecTests; use `dotnet run --project ... -- -class "<FQN>"` for a
+  focused run, or the plain `dotnet test` runs the whole suite (~2.5min).
+- npm install is needed before npm run test:fast (concurrently isn't
+  installed by default in this workspace).
+- ArchTests embed server sources as resources and re-run on every build;
+  after editing src comments re-run test:fast:arch (or full arch suite)
+  — the comment-reference rule only fails on NEW offenders.
+
+## Decisions
+
+- Non-PAT bearer credentials on /api/v1 answer 401 (not 403): the spec's
+  "request without a usable Bearer PAT -> 401 unauthenticated" clause
+  covers runner/integration/file credentials; 403 stays reserved for a
+  genuine PAT that lacks grant/scope/project authorization. Pinned by
+  NonPatBearerCredential_CannotSubstituteForAPat_AndAnswersUnauthenticated
+  and the extended non-classifying battery.
+- Unmatched /api/v1 paths still pass through the boundary middleware
+  (routing leaves endpoint null but the pipeline runs), so "any /api/v1
+  path" rejection semantics hold even for unknown routes.
