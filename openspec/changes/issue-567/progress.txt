@@ -55,4 +55,22 @@ Channel decision (grounded in live source):
 
 ## Commits
 
-- (appended per commit)
+- 0cd3dd634 — specs: new handoff requirement (runtime-agent-recovery-receipt,
+  4 scenarios) + bounded-handoff clause/scenario
+  (runner-update-work-interruption prompt-stop)
+- c43a0a7b6 — design.md (context channels, D3 rewrite, risk row, open
+  question), recovery.md (Shutdown Handoff + failure-rule rows), proposal.md
+  (receipt bullet + Impact)
+- (final) — tasks.json: T-001 pending-operation query (desc/AC/output/notes);
+  T-003 handoff (desc/2 ACs/test AC/notes with the wrong confirmation-response
+  note replaced)
+
+## Verification notes
+
+- tasks.json parses as JSON after edits (node JSON.parse).
+- The only remaining mentions of the `/update-interrupt` confirmation
+  response now describe the CLI-only topology (design context, T-003 note) —
+  nothing relies on it reaching the Runner.
+- No openspec CLI validator exists in the repo; spec format matches sibling
+  changes (`### Requirement` / `#### Scenario` WHEN/THEN/AND).
+- self-review.md untouched.
