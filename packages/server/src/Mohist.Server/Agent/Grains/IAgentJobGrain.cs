@@ -175,7 +175,37 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(20)] AgentSessionStartup? AgentSessionStartup = null,
     [property: Id(21)] AgentJobSpawnOrigin? SpawnOrigin = null,
     [property: Id(22)] string? WorkspacePath = null,
-    [property: Id(23)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
+    [property: Id(23)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
+    /// <summary>
+    /// Ordered Skills snapshot captured at launch time. Carried so a caller
+    /// that froze a full Agent execution definition (the Workflow handoff)
+    /// delivers the same Skill list the definition promises; manual launches
+    /// without a Skills snapshot omit it and the dispatch treats an absent
+    /// list as empty. Append-only Orleans field id (next free after
+    /// <see cref="WorkspaceRepositories"/>).
+    /// </summary>
+    [property: Id(24)] IReadOnlyList<string>? Skills = null,
+    /// <summary>
+    /// Positive workflow-invocation discriminator for a handoff launch.
+    /// Distinguishes handoff jobs from direct and routed launches (which also
+    /// carry <see cref="WorkflowRunId"/>); carries lineage only and
+    /// introduces no branch in admission or execution. Append-only Orleans
+    /// field id (next free after <see cref="Skills"/>).
+    /// </summary>
+    [property: Id(25)] AgentJobWorkflowInvocation? WorkflowInvocation = null);
+
+/// <summary>
+/// Lineage discriminator a Workflow handoff stamps on its AgentJob input:
+/// the handoff invocation identity plus the owning task run and work item.
+/// Carried through the durable plan and input so downstream consumers can
+/// tell a workflow-originated job from direct and routed launches without
+/// guessing from <see cref="AgentJobInput.WorkflowRunId"/>.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentJobWorkflowInvocation(
+    [property: Id(0)] string InvocationId,
+    [property: Id(1)] string TaskRunId,
+    [property: Id(2)] string WorkId);
 
 [GenerateSerializer]
 public sealed record AgentJobSpawnOrigin(
@@ -610,7 +640,14 @@ public sealed record AgentJobInput(
     [property: Id(19)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
     [property: Id(20)] string? PinnedRunnerId = null,
     [property: Id(21)] AgentSessionStartup? AgentSessionStartup = null,
-    [property: Id(22)] AgentJobSpawnOrigin? SpawnOrigin = null);
+    [property: Id(22)] AgentJobSpawnOrigin? SpawnOrigin = null,
+    /// <summary>
+    /// Positive workflow-invocation discriminator present only on jobs a
+    /// Workflow handoff materialized. Carries lineage; it never branches
+    /// admission or execution. Append-only Orleans field id (next free after
+    /// <see cref="SpawnOrigin"/>).
+    /// </summary>
+    [property: Id(25)] AgentJobWorkflowInvocation? WorkflowInvocation = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

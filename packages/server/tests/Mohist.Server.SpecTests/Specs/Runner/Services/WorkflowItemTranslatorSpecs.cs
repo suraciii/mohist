@@ -497,6 +497,12 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
         public Task<AgentExecutionDefinition?> ResolveAsync(string projectId, string agentRef) =>
             Task.FromResult(Snapshot);
+
+        public Task<AgentExecutionSnapshot?> ResolveSnapshotAsync(string projectId, string agentRef) =>
+            Task.FromResult<AgentExecutionSnapshot?>(
+                Snapshot is null
+                    ? null
+                    : new AgentExecutionSnapshot(agentRef, agentRef, Snapshot));
     }
 
     private sealed class NullLogger<T> : Microsoft.Extensions.Logging.ILogger<T>

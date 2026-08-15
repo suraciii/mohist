@@ -10,6 +10,12 @@ public sealed class AgentExecutionSnapshotResolver(
 {
     public async Task<AgentExecutionDefinition?> ResolveAsync(string projectId, string agentRef)
     {
+        var snapshot = await ResolveSnapshotAsync(projectId, agentRef);
+        return snapshot?.Definition;
+    }
+
+    public async Task<AgentExecutionSnapshot?> ResolveSnapshotAsync(string projectId, string agentRef)
+    {
         var agent = await AgentRefResolver.ResolveAsync(agents, projectId, agentRef);
         if (agent is null || agent.Status != AgentStatus.Active)
             return null;
@@ -31,12 +37,15 @@ public sealed class AgentExecutionSnapshotResolver(
             }
         }
 
-        return new AgentExecutionDefinition(
-            Instructions: agent.Instructions,
-            Runtime: AgentLauncher.ResolveRuntime(config),
-            Model: AgentLauncher.ResolveModelAndVariant(config).Model,
-            Variant: AgentLauncher.ResolveModelAndVariant(config).Variant,
-            Skills: agent.Skills.ToArray(),
-            AllowedSubagents: allowedSubagents.ToArray());
+        return new AgentExecutionSnapshot(
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            Definition: new AgentExecutionDefinition(
+                Instructions: agent.Instructions,
+                Runtime: AgentLauncher.ResolveRuntime(config),
+                Model: AgentLauncher.ResolveModelAndVariant(config).Model,
+                Variant: AgentLauncher.ResolveModelAndVariant(config).Variant,
+                Skills: agent.Skills.ToArray(),
+                AllowedSubagents: allowedSubagents.ToArray()));
     }
 }

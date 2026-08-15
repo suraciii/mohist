@@ -273,6 +273,7 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         services.TryAddSingleton<IAgentSessionPersistenceObserver>(NoopAgentSessionPersistenceObserver.Instance);
         services.TryAddSingleton<IAgentLaunchParticipantProbe>(NoopAgentLaunchParticipantProbe.Instance);
+        services.TryAddSingleton<IWorkflowAgentHandoffParticipantProbe>(NoopWorkflowAgentHandoffParticipantProbe.Instance);
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
         var otelOptions = configuration

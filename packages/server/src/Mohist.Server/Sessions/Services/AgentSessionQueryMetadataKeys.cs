@@ -12,6 +12,17 @@ public static class AgentSessionQueryMetadataKeys
     public const string SessionName = "mohist.io/session-name";
     public const string WorkId = "mohist.io/work-id";
     public const string WorkType = "mohist.io/work-type";
+    /// <summary>
+    /// Owning task run of a workflow-originated Agent invocation, stamped on
+    /// the AgentSession lineage at materialization so the Session surface
+    /// resolves the WorkflowRun/TaskRun pair without a grain read.
+    /// </summary>
+    public const string TaskRunId = "mohist.io/task-run-id";
+    /// <summary>
+    /// Workflow Agent handoff invocation id, stamped next to the task run and
+    /// work ids so both surfaces resolve one execution identity.
+    /// </summary>
+    public const string InvocationId = "mohist.io/agent-invocation-id";
     public const string Stage = "mohist.io/stage";
     public const string Title = "mohist.io/title";
     public const string ConnectionId = "mohist.io/connection-id";

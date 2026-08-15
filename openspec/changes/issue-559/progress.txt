@@ -1,0 +1,92 @@
+# progress — issue-559 (Reusable Agent Workflow Action)
+
+## Codebase Patterns
+
+- The handoff fence (`WorkflowAgentHandoffGrain`, keyed
+  `workflow-agent-handoff/{token}` by `(projectId, workflowRunId, taskRunId,
+  commandId)`) was delivered inert on master. Nothing calls it; extending its
+  persisted record shape (new `WorkflowAgentHandoffPlan` fields Id(8)–Id(12),
+  `WorkflowAgentHandoffState.Activation` Id(1)) is a compatible edit, not a
+  migration.
+- Durable step machines follow the `AgentLaunchCoordinatorGrain` template:
+  one persisted cursor (`NextStep` + `CommandId`), participant call → probe →
+  advance-cursor-and-persist, recovery reminder resumes `AdvanceAsync` from
+  `OnActivateAsync` and `ReceiveReminder`, `UnregisterReminder` once terminal.
+  The handoff activation mirrors this exactly (steps: PrepareJob →
+  EnsureInitialLaunch → SubmitJob; reminder
+  `workflow-agent-handoff-activation`, 1s/1s).
+- Participant probe seam: `IWorkflowAgentHandoffParticipantProbe` (production
+  default `NoopWorkflowAgentHandoffParticipantProbe.Instance`, registered in
+  `MohistServiceRegistration` via TryAddSingleton). Test probe lives in
+  Mohist.Server.TestSupport (`WorkflowAgentHandoffParticipantProbe` with
+  `FailNext(gate)/StopFailing/ClearObservations/ParticipantIds`). The probe is
+  invoked after the participant grain call returns and BEFORE the cursor
+  advances — a throw simulates lost acknowledgement with the participant write
+  durable.
+- Arch rule `DomainModules_ShouldNotDependOnEachOther`
+  (Mohist.Server.ArchTests/ArchitectureRules.cs) forbids cross-domain edges;
+  `("Workflow", "Agent")` was added to `AllowedDomainDependencies` for the
+  handoff process manager driving Agent's manual-launch entry points (design
+  D1/D3). `("Workflow", "Sessions")` was already allowed (lineage labels).
+  When adding a cross-domain call, update this list with a rationale comment.
+- SpecTest filtering: MTP runner does NOT accept `--filter`; use the exe
+  directly: `./Mohist.Server.SpecTests -class "<fqcn>"` from the bin dir.
+- `AgentJobGrain.PrepareManualLaunchAsync` requires caller-minted
+  SessionId/InputId/TurnId + AgentId; `PlansEquivalent` replays return the
+  stored input, conflicting plans throw. `SubmitPreparedLaunchAsync` flows
+  into `TryAdmitAsync` (shared admission). Launch stays `Visible` when
+  `AgentSessionStartup?.ParentSessionId` is null (handoff passes no startup
+  context).
+- `IAgentExecutionSnapshotResolver.ResolveSnapshotAsync` (new) returns
+  `AgentExecutionSnapshot(AgentId, AgentName, Definition)` from one read so a
+  frozen plan never mixes old identity with new definition;
+  `ResolveAsync` delegates to it.
+- Flaky: `AgentSessionLaunchRuntimeResolutionSpecs.Launch_WithoutRuntimeOverride_UsesAgentConfigRuntime`
+  polls once and can miss the dispatch under full-suite load; passes in
+  isolation and on full-suite re-runs. Not related to this change.
+
+## T-001 decisions / gotchas
+
+- Fingerprint (`WorkflowAgentHandoffCodec.Fingerprint`) covers all 9 command
+  fields including the new `Expect` — the only caller-rendered added fact.
+  AgentId/AgentName/workspace are resolved server-side (frozen in the plan,
+  covered by replay specs), not fingerprinted.
+- `WorkflowAgentHandoffRunContext.Workspace`: `issue-{n}` named workspace for
+  issue-linked runs (mirrors the inline dispatch renderer), else the run's
+  free-form workspace path/branch, else null. Resolved once at first preflight
+  via `IWorkflowRunStore`; never re-read.
+- Session metadata labels at materialization:
+  `WorkflowAgentSessionMetadata.Labels` (project/run/session-name/source=
+  workflow/work id/work type/task lineage) + `GenericAgentSessionMetadata`
+  AgentId/AgentName/Workspace* + new `AgentSessionQueryMetadataKeys.TaskRunId`
+  (`mohist.io/task-run-id`) and `.InvocationId`
+  (`mohist.io/agent-invocation-id`). `JobId` label comes from the
+  EnsureInitialLaunchCommand job id.
+- `AgentJobWorkflowInvocation(InvocationId, TaskRunId, WorkId)` discriminator:
+  Id(25) on both `PrepareManualLaunchCommand` (after new Id(24) Skills) and
+  `AgentJobInput`. Carried only — no admission/execution branch reads it
+  (verified by grep). T-003's terminal staging will be its first reader.
+  `PrepareManualLaunchCommand.Skills` (Id 24) carries the frozen definition's
+  Skills into the existing `AgentJobInput.Skills` (Id 13) for dispatch.
+- Activation idempotency mechanics: `SubmitJobAsync` persists
+  `Disposition=Activated` + `Activation.CompletedAt` in ONE WriteStateAsync so
+  a replay of ActivateAsync is a pure no-op. Probe failures surface to the
+  caller as `WorkflowAgentHandoffActivationPendingException`; recovery replays
+  the idempotent participant command under the same minted ids.
+- Recovery specs simulate crash via `handoff.AsReference<IGrainManagementExtension>().DeactivateOnIdle()`
+  then retry `ActivateAsync` — `OnActivateAsync` resumes the persisted cursor.
+- TestSupport gained `WorkflowAgentHandoffParticipantProbe`; the handoff spec
+  fixture RemoveAll's the noop registration and adds the faulting probe
+  singleton.
+- Inert: no production caller of Prepare/Accept/Activate yet — the translator
+  cutover is T-005.
+- `TimeoutMilliseconds` stays frozen on the command only; the AgentJobInput
+  deadline + ArmJobTimeout honoring is T-002 (D4).
+
+## Verification status (T-001)
+
+- Full SpecTests: 3930/3930 (one unrelated flaky poll miss on first run,
+  passed on re-run).
+- `npm run test:fast`: all lanes green (typecheck, unit 2662, arch 68, wf 178,
+  cli 1848, web 4724, runner 1639).
+- Arch fix: `("Workflow", "Agent")` allowance added (see above).

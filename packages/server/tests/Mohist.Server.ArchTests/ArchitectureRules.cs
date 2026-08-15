@@ -558,6 +558,17 @@ public class ArchitectureRules
         // Allowed here so the follow-up gate ships with the launch gate from
         // T-001; relocation can follow.
         ("Sessions", "Agent"),
+        // issue-559 T-001: the Workflow handoff process manager
+        // (WorkflowAgentHandoffGrain) materializes the reserved lineage by
+        // driving Agent's manual-launch participant entry points
+        // (AgentJobGrain.PrepareManualLaunchAsync / SubmitPreparedLaunchAsync
+        // plus the PrepareManualLaunchCommand / AgentJobWorkflowInvocation
+        // records) under pre-minted ids — design D1/D3 deliberately reuse that
+        // machinery instead of duplicating a workflow-shaped submit path. The
+        // dependency is cross-grain orchestration over public grain
+        // interfaces, mirroring the issue-520 Sessions→Agent coordination
+        // allowance; Workflow keeps no AgentJob state of its own.
+        ("Workflow", "Agent"),
     ];
 
     [Fact]

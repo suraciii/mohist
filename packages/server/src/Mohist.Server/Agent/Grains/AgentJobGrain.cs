@@ -832,7 +832,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             PinnedRunnerId: command.PinnedRunnerId,
             AgentSessionStartup: command.AgentSessionStartup,
             SpawnOrigin: command.SpawnOrigin,
-            WorkspaceRepositories: command.WorkspaceRepositories);
+            WorkspaceRepositories: command.WorkspaceRepositories,
+            Skills: command.Skills,
+            WorkflowInvocation: command.WorkflowInvocation);
 
     private static AgentSlackExecutionContext? SlackExecutionContextFor(PrepareManualLaunchCommand command)
     {
@@ -867,7 +869,23 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && left.EpicNumber == right.EpicNumber
         && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
-        && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
+        && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
+        && SkillsEquivalent(left.Skills, right.Skills)
+        && Equals(left.WorkflowInvocation, right.WorkflowInvocation);
+
+    private static bool SkillsEquivalent(
+        IReadOnlyList<string>? left,
+        IReadOnlyList<string>? right)
+    {
+        if (left is null && right is null) return true;
+        if (left is null || right is null) return false;
+        if (left.Count != right.Count) return false;
+        for (var index = 0; index < left.Count; index++)
+        {
+            if (!string.Equals(left[index], right[index], StringComparison.Ordinal)) return false;
+        }
+        return true;
+    }
 
     private static bool AttachmentDescriptorsEquivalent(
         IReadOnlyList<AgentSessionInputAttachmentDescriptor>? left,

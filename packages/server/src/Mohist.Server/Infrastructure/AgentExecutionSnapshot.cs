@@ -33,6 +33,19 @@ public sealed record AllowedSubagentSnapshot(
     [property: Id(2)] string DescriptionAtLaunch);
 
 /// <summary>
+/// Agent identity plus the immutable execution definition resolved in one
+/// read. Callers that must freeze <em>who</em> executes (concurrency gates,
+/// lineage labels) next to <em>how</em> (the definition) use this instead of
+/// re-resolving identity separately, so one snapshot cannot mix an old
+/// identity with a new definition or vice versa.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentExecutionSnapshot(
+    [property: Id(0)] string AgentId,
+    [property: Id(1)] string AgentName,
+    [property: Id(2)] AgentExecutionDefinition Definition);
+
+/// <summary>
 /// Immutable Project Repository snapshot the Server resolves from
 /// <c>Project.Repository(name)</c> at explicit Project-backed launch
 /// and carries in the launch plan for named-workspace repository
@@ -59,4 +72,11 @@ public sealed record AgentSessionStartup(
 public interface IAgentExecutionSnapshotResolver
 {
     Task<AgentExecutionDefinition?> ResolveAsync(string projectId, string agentRef);
+
+    /// <summary>
+    /// Same resolution as <see cref="ResolveAsync"/>, but returns the Agent
+    /// identity alongside the definition from a single read so a caller can
+    /// freeze both without a second mutable-state read.
+    /// </summary>
+    Task<AgentExecutionSnapshot?> ResolveSnapshotAsync(string projectId, string agentRef);
 }

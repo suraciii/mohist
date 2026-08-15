@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
@@ -262,7 +263,9 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     private static WorkflowAgentHandoffCommand Command(
         string projectId,
         string agentId,
-        string prompt) =>
+        string prompt,
+        string? session = "workflow-session",
+        string? expect = "{\"files\":[\"plans/agent.md\"]}") =>
         new(
             CommandId: $"workflow-work-{Guid.NewGuid():N}",
             ProjectId: projectId,
@@ -270,8 +273,9 @@ public sealed class WorkflowAgentHandoffGrainSpecs
             TaskRunId: $"task-run-{Guid.NewGuid():N}",
             AgentRef: agentId,
             Prompt: prompt,
-            Session: "workflow-session",
-            TimeoutMilliseconds: 60_000);
+            Session: session,
+            TimeoutMilliseconds: 60_000,
+            Expect: expect);
 
     private static AgentExecutionDefinition Definition(string runtime) =>
         new(
@@ -319,6 +323,7 @@ public sealed class WorkflowAgentHandoffGrainFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(
         new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public WorkflowAgentHandoffPreflightProbe Preflight { get; } = new();
+    public WorkflowAgentHandoffParticipantProbe ActivationFaults { get; } = new();
 
     public async ValueTask InitializeAsync()
     {
@@ -334,6 +339,8 @@ public sealed class WorkflowAgentHandoffGrainFixture : IAsyncLifetime
                 _eventStore,
                 TimeProvider);
             siloBuilder.Services.AddSingleton<IWorkflowAgentHandoffPreflight>(Preflight);
+            siloBuilder.Services.RemoveAll<IWorkflowAgentHandoffParticipantProbe>();
+            siloBuilder.Services.AddSingleton<IWorkflowAgentHandoffParticipantProbe>(ActivationFaults);
         });
         Cluster = builder.Build();
         await Cluster.DeployAsync();
@@ -350,8 +357,9 @@ public sealed class WorkflowAgentHandoffGrainFixture : IAsyncLifetime
 public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPreflight
 {
     private readonly object _gate = new();
-    private readonly Dictionary<(string ProjectId, string AgentRef), AgentExecutionDefinition> _definitions = [];
+    private readonly Dictionary<(string ProjectId, string AgentRef), WorkflowAgentHandoffAgentSnapshot> _definitions = [];
     private readonly Dictionary<(string ProjectId, string AgentRef), int> _resolveCounts = [];
+    private readonly Dictionary<string, WorkflowAgentHandoffRunContext> _runContexts = [];
 
     public void Reset()
     {
@@ -359,13 +367,28 @@ public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPr
         {
             _definitions.Clear();
             _resolveCounts.Clear();
+            _runContexts.Clear();
         }
     }
 
-    public void Set(string projectId, string agentRef, AgentExecutionDefinition definition)
+    public void Set(
+        string projectId,
+        string agentRef,
+        AgentExecutionDefinition definition,
+        string? agentId = null,
+        string? agentName = null)
     {
         lock (_gate)
-            _definitions[(projectId, agentRef)] = definition;
+            _definitions[(projectId, agentRef)] = new WorkflowAgentHandoffAgentSnapshot(
+                agentId ?? agentRef,
+                agentName ?? agentRef,
+                definition);
+    }
+
+    public void SetRunContext(string workflowRunId, WorkflowAgentHandoffRunContext runContext)
+    {
+        lock (_gate)
+            _runContexts[workflowRunId] = runContext;
     }
 
     public int ResolveCount(string projectId, string agentRef)
@@ -374,14 +397,21 @@ public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPr
             return _resolveCounts.GetValueOrDefault((projectId, agentRef));
     }
 
-    public Task<AgentExecutionDefinition?> ResolveAgentAsync(string projectId, string agentRef)
+    public Task<WorkflowAgentHandoffAgentSnapshot?> ResolveAgentAsync(string projectId, string agentRef)
     {
         lock (_gate)
         {
             var key = (projectId, agentRef);
             _resolveCounts[key] = _resolveCounts.GetValueOrDefault(key) + 1;
-            return Task.FromResult<AgentExecutionDefinition?>(
+            return Task.FromResult<WorkflowAgentHandoffAgentSnapshot?>(
                 _definitions.GetValueOrDefault(key));
         }
+    }
+
+    public Task<WorkflowAgentHandoffRunContext?> ResolveRunContextAsync(string workflowRunId)
+    {
+        lock (_gate)
+            return Task.FromResult<WorkflowAgentHandoffRunContext?>(
+                _runContexts.GetValueOrDefault(workflowRunId));
     }
 }
