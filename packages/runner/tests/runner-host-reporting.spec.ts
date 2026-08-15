@@ -312,6 +312,70 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('Restart_ReportsRecoveredAgentJobStartedFenceAsUnknownWithoutReplayingWork', async () => {
+    const observationAcknowledged = deferred<void>()
+    const work = {
+      workflowRunId: '',
+      workId: 'work-recovered-agent-job-started',
+      workType: 'agent-job',
+      ownerKind: 'agent-job',
+      agentJobId: 'agent-job-recovered-started',
+      agentSessionId: 'session-recovered-started',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+
+    const originalAcknowledgeUnconfirmed = WorkResultJournal.prototype.acknowledgeUnconfirmed
+    const acknowledgeUnconfirmed = vi
+      .spyOn(WorkResultJournal.prototype, 'acknowledgeUnconfirmed')
+      .mockImplementation(async function (this: WorkResultJournal, acknowledged) {
+        await originalAcknowledgeUnconfirmed.call(this, acknowledged)
+        if (acknowledged.workId === work.workId) observationAcknowledged.resolve()
+      })
+    report.mockResolvedValue({ tracked: true, reason: 'unknown' })
+    poll.mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await observationAcknowledged.promise
+
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerKind: 'agent-job',
+          agentJobId: work.agentJobId,
+          workId: work.workId,
+        }),
+        expect.objectContaining({
+          status: 'unknown',
+          message: 'Runner restarted after a durable started fence without a completed result receipt.',
+        }),
+        expect.any(AbortSignal),
+      )
+      expect(blockingAction).not.toHaveBeenCalled()
+
+      const persisted = new WorkResultJournal('/virtual/mohist-runner-test')
+      await persisted.load()
+      expect(persisted.started()).toEqual([])
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      acknowledgeUnconfirmed.mockRestore()
+    }
+  })
+
   it('Restart_RetriesRecoveredAgentStartedObservationUntilItsFenceCanBeDurablyRetired', async () => {
     const firstObservation = deferred<void>()
     const retired = deferred<void>()
