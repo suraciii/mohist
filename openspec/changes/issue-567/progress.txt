@@ -845,3 +845,21 @@ Channel decision (grounded in live source):
   selected T-004 implementation and deterministic acceptance coverage were
   already committed on the prepared workflow branch; this commit records the
   current task verification and preserves the implementation unchanged.
+
+## T-005 Current Task Verification
+
+- AgentJob recovery uses a fresh generation-specific input and turn envelope
+  (`recovery-input:{job}:{generation}` and `recovery-turn:{work}`), while reusing
+  the immutable prompt and accepted attachment descriptors as-is. This keeps
+  turn-coordinator identities distinct without changing the requested work.
+- A matching `update-interrupted` receipt is applied through the AgentJob owner
+  ledger exactly once; it allocates one replacement dispatch, preserves the
+  original work in `RecoveryAttempts`, and leaves the original work excluded
+  from both running redelivery and pending claims. A job without a valid launch
+  snapshot enters `Interrupted` with no failed/completed verdict.
+- Added a reconciliation assertion that a cannot-continue AgentJob poll never
+  re-offers its fenced original work identity. The focused AgentJob recovery
+  suite passed 8/8 after the change; the related Server classes passed 50/50.
+- Full Server SpecTests passed 3,947/3,947, and `npm run test:fast` passed all
+  configured tracks: typechecks, Workflow Definition 178, CLI 1,856, Server
+  Unit 2,674, Server Arch 68, Runner 1,661, and Web 4,727.

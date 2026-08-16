@@ -300,6 +300,14 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
         var unchanged = await setup.Job.GetRuntimeSnapshotAsync();
         Assert.Equal(setup.WorkId, unchanged.CurrentWorkId);
         Assert.Equal(setup.WorkId, unchanged.OriginalWorkId);
+
+        var dispatchService = _fixture.Services
+            .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
+        var poll = await dispatchService.PollAsync(
+            setup.RunnerId,
+            new RunnerPollRequest([], []));
+        Assert.DoesNotContain(poll.Dispatches, dispatch =>
+            string.Equals(dispatch.WorkId, setup.WorkId, StringComparison.Ordinal));
     }
 
     private async Task<JobSetup> CreateRunningJobAsync(string name, bool attachmentsOnly = false)
