@@ -452,3 +452,11 @@
 - The requested T-001 implementation is already present in commit `d7e9d99d3`; no duplicate production edit was needed. The handoff plan freezes Agent identity, definition, expect, logical session name, and run workspace context, while activation persists PrepareJob -> EnsureInitialLaunch -> SubmitJob with the participant probe and recovery reminder.
 - Focused Server coverage passed 26/26: `WorkflowAgentHandoffGrainSpecs` 8/8, `WorkflowAgentHandoffActivationSpecs` 11/11, `WorkflowAgentHandoffPreflightSpecs` 1/1, and `WorkflowAgentJobAdmissionSpecs` 6/6.
 - `npm run test:fast` passed all lanes: scripts/Web/Runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices were non-failing.
+
+## T-002 verification on current run
+
+- The T-002 implementation already present in commit `66d7cb02e` was revalidated without duplicate production edits: workflow jobs carry the frozen per-invocation timeout and expect through `AgentJobInput`, use the shared Agent readiness/concurrency/admission boundary, and reach Runner through the existing AgentJob ledger poll with AgentJob ownership and workflow lineage.
+- Focused `WorkflowAgentJobAdmissionSpecs` passed 6/6, covering shared per-Agent permit waiting and later admission, admitted no-runner waiting, ledger-poll claim with lineage and expect, explicit short timeout, the 60-minute default deadline, and the unchanged direct global backstop.
+- Existing admission/claim regressions passed: `AgentJobGrainSpecs` 20/20, `AgentJobDispatchEnvelopeSpecs` 7/7, `AgentJobGrainRoutedLaunchSpecs` 11/11, `AgentConcurrencyReconciliationSpecs` 3/3, and `AgentSessionFollowupConcurrencySpecs` 15/15.
+- `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and transient concurrent-build copy retries were non-failing.
+- No additional production edit was required during this T-002 run; this entry records the verification on the workflow branch.
