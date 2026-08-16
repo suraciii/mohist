@@ -37,7 +37,7 @@ export function hostFromActionContext(context: ActionContext): ActionHost {
   }
 }
 
-function runtimeModel(options: { model?: string; variant?: string } | undefined) {
+function runtimeModel(options: { model?: string; variant?: string; reasoningEffort?: string } | undefined) {
   if (!options?.model) return null
   const parsed = parseModelIdentifier(options.model)
   if (parsed.kind !== "ok") return null
@@ -53,7 +53,7 @@ function runtimeErrorCode(kind: string): string {
 function buildTurnRequest(
   binding: { runtimeSessionId: string | null; workDir: string },
   prompt: string,
-  options: { model?: string; variant?: string } | undefined,
+  options: { model?: string; variant?: string; reasoningEffort?: string } | undefined,
   deadlineMs: number | undefined,
 ) {
   const modelOptions = options?.model ? parseModelIdentifier(options.model) : null
@@ -68,6 +68,7 @@ function buildTurnRequest(
     options: {
       model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
       variant: options?.variant ?? null,
+      reasoningEffort: options?.reasoningEffort ?? null,
       unknownKeys: undefined as readonly string[] | undefined,
     },
   }

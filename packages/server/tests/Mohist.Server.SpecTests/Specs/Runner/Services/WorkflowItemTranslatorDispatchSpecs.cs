@@ -158,6 +158,44 @@ public partial class WorkflowItemTranslatorSpecs
     }
 
     [Fact]
+    public async Task TranslateToDispatch_AgentTask_FreezesReasoningEffortOnTheDispatchSnapshot()
+    {
+        // Issue-557 T-002: the workflow-task launch path freezes the
+        // canonical effort member of the execution tuple onto the
+        // dispatch's AgentDefinition beside model and variant. The
+        // snapshot is resolved once at translation time; a later Agent
+        // edit cannot rewrite the delivered dispatch.
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-effort");
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", "opencode", "model-a", "balanced",
+            ["mohist"], AllowedSubagents: null, ReasoningEffort: "high");
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        Assert.Equal("high", dispatch.AgentDefinition!.ReasoningEffort);
+        Assert.Equal("model-a", dispatch.AgentDefinition.Model);
+        Assert.Equal("balanced", dispatch.AgentDefinition.Variant);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_LeavesEffortUnset_WhenSnapshotCarriesNone()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-no-effort");
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", "opencode", "model-a", "fast", []);
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        Assert.Null(dispatch.AgentDefinition!.ReasoningEffort);
+    }
+
+    [Fact]
     public async Task TranslateToDispatch_AgentTask_MissingAgent_RejectsWithAgentNotFound()
     {
         var runId = $"wr-{Guid.NewGuid():N}";

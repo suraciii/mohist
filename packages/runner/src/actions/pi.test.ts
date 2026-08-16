@@ -151,6 +151,38 @@ describe("mohist/pi Action", () => {
     expect(pi.turns[0]).toMatchObject({ options: { model: "provider/model", variant: "high", unknownKeys: ["legacy"] } })
   })
 
+  it("accepts the frozen reasoning effort in options and forwards it to the turn beside model and variant", async () => {
+    // Issue-557 T-002: `vars.agent.reasoningEffort` reaches the mohist/pi
+    // dispatch `options`; the effort is a known tuple member (never an
+    // unknown-key diagnostic) and is forwarded into the Pi turn options.
+    const pi = runtime()
+    const connection = server()
+    const result = await piAction(context({
+      with: { prompt: "hello", options: { model: "provider/model", variant: "balanced", reasoningEffort: "high" } },
+      piRuntime: pi as never,
+      serverConnection: connection as never,
+      projectId: "project",
+    }))
+    expect(result).not.toHaveProperty("error")
+    expect(pi.turns[0]).toMatchObject({
+      options: { model: "provider/model", variant: "balanced", reasoningEffort: "high", unknownKeys: undefined },
+    })
+  })
+
+  it("rejects a non-string reasoning effort option like a non-string variant", async () => {
+    const pi = runtime()
+    const connection = server()
+    const result = await piAction(context({
+      with: { prompt: "hello", options: { reasoningEffort: 42 as never } },
+      piRuntime: pi as never,
+      serverConnection: connection as never,
+      projectId: "project",
+    }))
+    expect(result).toMatchObject({ error: { code: "invalid-input" } })
+    expect(result.error?.message).toMatch(/options\.reasoningEffort.*must be a string/)
+    expect(pi.createSession).not.toHaveBeenCalled()
+  })
+
   it("uses the dispatch-only Agent definition without expanding Action options", async () => {
     const pi = runtime()
     const connection = server()
@@ -175,5 +207,51 @@ describe("mohist/pi Action", () => {
       prompt: "Review with the configured policy.\n\nreview this",
       options: { model: "provider/configured-model", variant: "high" },
     })
+  })
+
+  it("freezes the Agent definition's reasoning effort over the caller option, with the option used when unset", async () => {
+    // Issue-557 T-002: the frozen Agent definition (resolved at dispatch
+    // translation, AgentExecutionDefinition.ReasoningEffort) wins over the
+    // workflow options; without a definition the caller option is used;
+    // absent everywhere means null (unset), never synthesized.
+    const pi = runtime()
+    const connection = server()
+    const definition: AgentExecutionDefinition = {
+      instructions: "Review with the configured policy.",
+      runtime: "pi",
+      model: "provider/configured-model",
+      variant: "balanced",
+      reasoningEffort: "high",
+      skills: [],
+    }
+
+    await piAction(context({
+      with: { prompt: "review this", options: { reasoningEffort: "low" } },
+      agentDefinition: definition,
+      piRuntime: pi as never,
+      serverConnection: connection as never,
+      projectId: "project",
+    }))
+    expect(pi.turns[0]).toMatchObject({ options: { reasoningEffort: "high" } })
+
+    const callerOnly = runtime()
+    const callerConnection = server()
+    await piAction(context({
+      with: { prompt: "review this", options: { reasoningEffort: "low" } },
+      piRuntime: callerOnly as never,
+      serverConnection: callerConnection as never,
+      projectId: "project",
+    }))
+    expect(callerOnly.turns[0]).toMatchObject({ options: { reasoningEffort: "low" } })
+
+    const unset = runtime()
+    const unsetConnection = server()
+    await piAction(context({
+      with: { prompt: "review this" },
+      piRuntime: unset as never,
+      serverConnection: unsetConnection as never,
+      projectId: "project",
+    }))
+    expect(unset.turns[0]).toMatchObject({ options: { reasoningEffort: null } })
   })
 })

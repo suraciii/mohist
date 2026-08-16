@@ -48,6 +48,8 @@ export function composeOpencodePrompt(prompt: string, parentIssueContext?: { tit
 export interface OpencodeOptions {
   model?: string
   variant?: string
+  /** Canonical reasoning effort frozen beside model/variant in the dispatch options. */
+  reasoningEffort?: string
 }
 
 type OptionsParse =
@@ -99,6 +101,18 @@ function parseOpencodeOptions(raw: Record<string, unknown>): ParsedOptions {
       }
     } else {
       options.variant = value
+    }
+  }
+  if ("reasoningEffort" in raw) {
+    const value = raw["reasoningEffort"]
+    if (value === null || value === undefined) {
+    } else if (typeof value !== "string") {
+      return {
+        kind: "failure",
+        result: fail("invalid-input", "mohist/opencode 'options.reasoningEffort' must be a string when present"),
+      }
+    } else {
+      options.reasoningEffort = value
     }
   }
   return { kind: "ok", options }

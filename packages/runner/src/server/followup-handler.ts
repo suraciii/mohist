@@ -248,6 +248,7 @@ async function handleFollowup(
     ...(definition ? { options: {
       model: definition.model ?? null,
       variant: definition.variant ?? null,
+      reasoningEffort: definition.reasoningEffort ?? null,
       ...(skills.length > 0 ? { skills } : {}),
     } } : {}),
   }

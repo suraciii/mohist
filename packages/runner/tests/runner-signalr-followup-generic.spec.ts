@@ -199,6 +199,81 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     })
   })
 
+  followupIt("GenericFollowup_ForwardsFrozenDefinitionEffortIntoFollowupOptions", async ({ runtime, recording }) => {
+    // Issue-557 T-002: the follow-up options carry the frozen
+    // reasoning effort from the session definition beside model and
+    // variant; the runtime applies it, the handler only forwards it.
+    // The resolver mirrors the host's production resolver: it projects
+    // the wire definition onto the FollowupTarget for generic sessions.
+    const resolver = vi.fn((target: { kind: string; definition?: unknown }) => ({
+      runtimeSessionId: "runtime-1",
+      workDir: "/work/project",
+      projectId: "proj-1",
+      ...(target.kind === "generic" && target.definition ? { definition: target.definition } : {}),
+    }))
+    buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
+
+    await expect(invokeFollowup(lastBuilder(), {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "gen-session-1",
+        definition: {
+          instructions: "be terse",
+          runtime: "opencode",
+          model: "openai/gpt-5.5",
+          variant: "balanced",
+          reasoningEffort: "high",
+          skills: [],
+        },
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+      },
+      text: "continue with effort",
+      turnId: "turn-effort",
+    })).resolves.toEqual({ accepted: true })
+
+    expect(runtime.followupCalls).toHaveLength(1)
+    expect(runtime.followupCalls[0].options).toMatchObject({
+      model: { providerID: "openai", modelID: "gpt-5.5" },
+      variant: "balanced",
+      reasoningEffort: "high",
+    })
+  })
+
+  followupIt("GenericFollowup_LeavesEffortNull_WhenDefinitionCarriesNone", async ({ runtime, recording }) => {
+    // Absent effort is forwarded as null — never synthesized into a
+    // default — and a definition without effort still produces options.
+    const resolver = vi.fn((target: { kind: string; definition?: unknown }) => ({
+      runtimeSessionId: "runtime-1",
+      workDir: "/work/project",
+      projectId: "proj-1",
+      ...(target.kind === "generic" && target.definition ? { definition: target.definition } : {}),
+    }))
+    buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
+
+    await expect(invokeFollowup(lastBuilder(), {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "gen-session-1",
+        definition: {
+          instructions: "be terse",
+          runtime: "opencode",
+          model: "openai/gpt-5.5",
+          skills: [],
+        },
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+      },
+      text: "continue without effort",
+      turnId: "turn-no-effort",
+    })).resolves.toEqual({ accepted: true })
+
+    expect(runtime.followupCalls).toHaveLength(1)
+    expect(runtime.followupCalls[0].options).toMatchObject({
+      reasoningEffort: null,
+    })
+  })
+
   followupIt("WorkflowFollowup_PreservesWorkflowResolverContextWhileRoutingByExactSession", async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string; workflowRunId?: string; sessionName?: string }) => {
       expect(target.kind).toBe("workflow")

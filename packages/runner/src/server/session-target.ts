@@ -19,6 +19,12 @@ export interface AgentExecutionDefinition {
   readonly runtime?: string | null
   readonly model?: string | null
   readonly variant?: string | null
+  /**
+   * Canonical reasoning effort frozen onto the execution tuple at
+   * launch time (beside model and variant). Absent on legacy wire
+   * payloads — treated as unset, never synthesized into a default.
+   */
+  readonly reasoningEffort?: string | null
   readonly skills?: readonly string[] | null
 }
 

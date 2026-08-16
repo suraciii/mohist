@@ -84,6 +84,13 @@ export interface AgentExecutionDefinition {
   runtime: string
   model?: string | null
   variant?: string | null
+  /**
+   * Canonical reasoning effort frozen onto the execution tuple beside
+   * model and variant at launch time. Absent/null means unset; it is
+   * never synthesized into a default. Mirrors
+   * `AgentExecutionDefinition.ReasoningEffort` on the server.
+   */
+  reasoningEffort?: string | null
   skills: readonly string[]
 }
 

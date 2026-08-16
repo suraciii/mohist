@@ -114,6 +114,12 @@ export interface RuntimeTurnObserver {
 export interface RuntimeTurnOptions {
   readonly model?: { providerID: string; modelID: string } | null
   readonly variant?: string | null
+  /**
+   * Canonical reasoning effort frozen onto the execution tuple beside
+   * model and variant. Absent/null means unset — no effort is applied
+   * and no default is synthesized.
+   */
+  readonly reasoningEffort?: string | null
   readonly unknownKeys?: readonly string[]
   readonly skills?: readonly { readonly name: string; readonly instructions: string }[]
 }

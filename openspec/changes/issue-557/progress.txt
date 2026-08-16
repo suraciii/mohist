@@ -50,3 +50,54 @@
   the surrounding file.
 - Web editor effort control is T-008, snapshot freezing T-002 — nothing here
   touches runner/launch paths.
+
+## T-002 (freeze effort tuple across all launch paths)
+
+- Done: `AgentLauncher.ResolveReasoningEffort` (+ `ResolveExecutionDefinition`
+  and `AgentExecutionSnapshotResolver` carry it); append-only fields
+  `AgentExecutionDefinition.ReasoningEffort` (Id 6),
+  `AgentJobInput.ReasoningEffort` (Id 25, after WorkspaceName 23 /
+  WorkspaceRepositories 24), `RoutedAgentLaunchPlan.ReasoningEffort` (Id 22),
+  plus the plumbing-only envelopes `PrepareManualLaunchCommand` (Id 24),
+  `AgentLaunchCoordinatorCommandEnvelope` (Id 38), `AgentLaunchCoordinatorPlan`
+  (Id 51). `AgentJobGrain.BuildDispatchAsync` writes `with["reasoningEffort"]`
+  only when non-empty; `EquivalentInput`/`EquivalentCommand` compare it
+  (post-edit redelivery of a different effort throws instead of rewriting —
+  first plan wins, covered by specs).
+- Launch paths freezing the effort: manual HTTP (coordinator plan →
+  PrepareManualLaunchCommand), trigger/subscription routed
+  (`AgentLauncher.LaunchAsync` + `RoutingDispatchHandler` → RoutedAgentLaunchPlan),
+  Slack connection/mention (`LaunchConnectionAsync` envelope), workflow task
+  (`WorkflowItemTranslator` stamps the snapshot's effort onto
+  `WorkDispatch.AgentDefinition`; `vars.agent.reasoningEffort` reaches the
+  runner action `with.options` via the existing `${{ vars.agent }}` whole-object
+  template rendering — no translator change needed for that half).
+- Runner: `session-target.ts`/`followup-handler.ts`/`command-runtime.ts`
+  forward `definition.reasoningEffort ?? null`; `agent-job-executor.ts` reads
+  `readOptionalString(payload,'reasoningEffort')` into both turn executors
+  (`collectUnknownKeys` now knows the key); workflow-task actions
+  `actions/pi.ts` + `actions/opencode.ts` parse `options.reasoningEffort`
+  (definition wins over caller option, exactly like model/variant);
+  `AgentTurnRequest.options` + `executor-capabilities.ts` turn path forward
+  it; test-support `call-action.ts` fake mirrors production.
+- GOTCHA (test isolation): `RunnerRegistryGrain.ListEligibleRunnersAsync`
+  IGNORES the project argument (returns all runners), and AgentJob admission
+  assigns the first online runner with free slots. A spec that registers a
+  runner and never unregisters leaves an online runner that STEALS admission
+  for later specs' jobs (their own-runner polls then never claim; job stays
+  Pending). Fix: always `UnregisterAsync` in finally (see
+  AgentLauncherSpecs / AgentEffortSnapshotFreezeSpecs). Symptom was
+  `Launch_TriggerReplayAfterJobDeactivation_ReusesDurableWork` failing only
+  in full-suite runs.
+- No Orleans serializer round-trip test infra exists in the repo; the
+  append-only/deserialize-as-null guarantee is covered by id assignment +
+  wire-level absent-field specs (dispatch envelope without effort, runner
+  legacy definitions without the key).
+- Pi adapter still maps `variant`→thinking level until T-004; T-002 only
+  plumbs the canonical `reasoningEffort` field through (opencode tolerates
+  unknown option keys, so no behavior change there until T-004's explicit
+  rejection).
+- Verification: server unit 2697, SpecTests 3927 (full suite, 2.5 min),
+  arch 68, wf 178, cli 1858, runner 1656, web 4724, typecheck all green;
+  `npm run test:fast` passes. SpecTests are NOT in test:fast — run the
+  project directly for integration coverage.

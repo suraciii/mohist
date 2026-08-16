@@ -164,6 +164,32 @@ describe("parseOpencodeInput — input validation", () => {
     expect(result.options?.model).toBe("openai/gpt-5")
     expect(result.options?.variant).toBe("high")
   })
+
+  it("Accepts the frozen reasoning effort beside model and variant", () => {
+    // Issue-557 T-002: `vars.agent.reasoningEffort` is bound into the
+    // dispatch `options` object beside model and variant; the parser
+    // accepts it verbatim (the effort is a known tuple member, not an
+    // unknown legacy key).
+    const result = parseOpencodeInput({
+      options: { model: "openai/gpt-5", variant: "balanced", reasoningEffort: "high" },
+    })
+    expect(result.kind).toBe("ok")
+    if (result.kind !== "ok") return
+    expect(result.options?.model).toBe("openai/gpt-5")
+    expect(result.options?.variant).toBe("balanced")
+    expect(result.options?.reasoningEffort).toBe("high")
+  })
+
+  it("Leaves the reasoning effort unset when absent and rejects a non-string value", () => {
+    const absent = parseOpencodeInput({ options: { model: "openai/gpt-5" } })
+    expect(absent.kind).toBe("ok")
+    if (absent.kind === "ok") expect(absent.options?.reasoningEffort).toBeUndefined()
+
+    const invalid = parseOpencodeInput({ options: { reasoningEffort: 42 as never } })
+    expect(invalid.kind).toBe("failure")
+    if (invalid.kind === "failure")
+      expect(invalid.result.error?.message).toMatch(/options\.reasoningEffort.*must be a string/)
+  })
 })
 
 describe("opencodeAction — happy path + turn fact", () => {
@@ -343,6 +369,29 @@ describe("opencodeAction — happy path + turn fact", () => {
     expect(result.error).toBeUndefined()
     const arg = client.sessionPrompt.mock.calls[0]?.[0] as { model?: unknown }
     expect(arg.model).toEqual({ providerID: "openrouter", modelID: "vendor/family/model" })
+  })
+
+  it("Action forwards the frozen reasoning effort into the runtime turn options", async () => {
+    // Issue-557 T-002: the workflow-task dispatch `options` carries the
+    // issue-profile / Agent-frozen effort; the runtime turn request
+    // receives it beside model and variant, exactly as the production
+    // executor-capabilities turn path forwards it.
+    const { runtime } = buildRuntime()
+    await ensureReady(runtime)
+    const runTurn = vi.spyOn(runtime, "runTurn")
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      with: {
+        prompt: "do",
+        options: { model: "openai/gpt-5", variant: "balanced", reasoningEffort: "high" },
+      } as never,
+    })
+    const result = await callAction(opencodeAction, context)
+    expect(result.error).toBeUndefined()
+    expect(runTurn).toHaveBeenCalledTimes(1)
+    const request = runTurn.mock.calls[0]?.[0] as { options?: { variant?: string | null; reasoningEffort?: string | null } }
+    expect(request.options?.variant).toBe("balanced")
+    expect(request.options?.reasoningEffort).toBe("high")
   })
 
   it("Rejects unknown option keys with a diagnostic in the runtime, not a failure", async () => {

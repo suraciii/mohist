@@ -259,6 +259,67 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task EnsurePreparedAsync_FreezesReasoningEffort_FirstPlanWinsOverRedelivery()
+    {
+        // Issue-557 T-002: the canonical effort member of the frozen
+        // execution tuple is persisted on the routed plan; a redelivery
+        // that resolved a different (e.g. post-edit) effort cannot
+        // rewrite the first delivery's frozen value.
+        var projectId = $"routed-effort-freeze-{Guid.NewGuid():N}";
+        var eventId = "evt-routed-effort-freeze";
+        var ruleId = "rule-routed-effort-freeze";
+        var first = BuildExecutablePlan(projectId, eventId, ruleId, "/tmp/routed-effort-freeze")
+            with { ReasoningEffort = "high" };
+
+        var job = JobGrain(first.JobKey);
+        var canonicalFirst = await job.EnsurePreparedAsync(first);
+        Assert.Equal("high", canonicalFirst.ReasoningEffort);
+
+        var redelivery = BuildExecutablePlan(projectId, eventId, ruleId, "/tmp/routed-effort-freeze")
+            with { ReasoningEffort = "low" };
+        var canonicalSecond = await job.EnsurePreparedAsync(redelivery);
+
+        Assert.Equal("high", canonicalSecond.ReasoningEffort);
+    }
+
+    [Fact]
+    public async Task AdvancePreparedLaunchAsync_DeliversFrozenReasoningEffort_OnSessionDefinitionAndDispatch()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"routed-effort-dispatch-runner-{Guid.NewGuid():N}");
+        var eventId = "evt-routed-effort-dispatch";
+        var ruleId = "rule-routed-effort-dispatch";
+        var plan = BuildExecutablePlan(projectId, eventId, ruleId, "/tmp/routed-effort-dispatch")
+            with { Model = "openai/gpt-test", Variant = "balanced", ReasoningEffort = "high" };
+
+        var job = JobGrain(plan.JobKey);
+        await job.EnsurePreparedAsync(plan);
+        await job.AdvancePreparedLaunchAsync();
+
+        // The AgentSession opened from the canonical plan carries the
+        // frozen effort on its durable definition — the same snapshot
+        // the follow-up path later forwards to the runner.
+        var session = Grains.GetGrain<IAgentSessionGrain>(plan.SessionId);
+        var info = await session.GetAsync();
+        Assert.NotNull(info);
+        Assert.Equal("opencode", info!.Runtime);
+
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal("high", snapshot.ExecutionDefinition?.ReasoningEffort);
+        Assert.Equal("balanced", snapshot.ExecutionDefinition?.Variant);
+
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId)
+            .PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
+        Assert.NotNull(polled);
+        var with = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(polled!.With!);
+        Assert.Equal("openai/gpt-test", with.GetProperty("model").GetString());
+        Assert.Equal("balanced", with.GetProperty("variant").GetString());
+        Assert.Equal("high", with.GetProperty("reasoningEffort").GetString());
+    }
+
+    [Fact]
     public async Task AdvancePreparedLaunchAsync_PreflightFailed_EntersTerminalDeliveryWithReasonAndCategory()
     {
         var projectId = $"routed-preflight-{Guid.NewGuid():N}";

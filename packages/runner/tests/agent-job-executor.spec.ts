@@ -630,6 +630,53 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
     expect(runtime.runTurnCalls).toHaveLength(1)
     expect(runtime.runTurnCalls[0].options?.unknownKeys ?? []).toEqual([])
   })
+
+  it("reads the frozen reasoning effort from the dispatch payload and passes it to the turn", async () => {
+    // Issue-557 T-002: `reasoningEffort` is a member of the frozen
+    // execution tuple the server writes into the dispatch `with`
+    // payload. The executor reads it exactly like `variant` — from the
+    // frozen payload, never from a re-read Agent definition.
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+
+    const work = buildAgentJobWork({
+      with: {
+        prompt: "audit with effort",
+        model: "openai/gpt-5.5",
+        variant: "balanced",
+        reasoningEffort: "high",
+        runtime: "opencode",
+      },
+    })
+    await executor.execute(work, new AbortController().signal)
+
+    expect(runtime.runTurnCalls).toHaveLength(1)
+    const options = runtime.runTurnCalls[0].options
+    expect(options?.model).toEqual({ providerID: "openai", modelID: "gpt-5.5" })
+    expect(options?.variant).toBe("balanced")
+    expect(options?.reasoningEffort).toBe("high")
+    // The effort is a known dispatch key, not an unknown-key diagnostic.
+    expect(options?.unknownKeys ?? []).toEqual([])
+  })
+
+  it("passes a null effort when the dispatch payload carries none", async () => {
+    // Absent effort is unset — it must not be synthesized into a default
+    // and must not surface as an unknown dispatch option key.
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+
+    const work = buildAgentJobWork({
+      with: { prompt: "audit without effort", model: "openai/gpt-5.5", runtime: "opencode" },
+    })
+    await executor.execute(work, new AbortController().signal)
+
+    expect(runtime.runTurnCalls).toHaveLength(1)
+    const options = runtime.runTurnCalls[0].options
+    expect(options?.reasoningEffort).toBeNull()
+    expect(options?.unknownKeys ?? []).toEqual([])
+  })
 })
 
 describe("AgentJobExecutor surfaces a missing-session turn as a Reset hint", () => {

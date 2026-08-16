@@ -26,7 +26,7 @@ export function capabilitySet(manifest: ActionManifest): ActionCapabilitySet {
 export interface AgentTurnRequest {
   prompt: string
   session?: string
-  options?: { model?: string; variant?: string }
+  options?: { model?: string; variant?: string; reasoningEffort?: string }
   deadlineMs?: number
 }
 

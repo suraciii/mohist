@@ -43,6 +43,68 @@ describe("resolveSessionTarget", () => {
     })
   })
 
+  it("CarriesTheFrozenDefinition_IncludingReasoningEffort_WhenPresent", () => {
+    // Issue-557 T-002: the server freezes the execution tuple — including
+    // the canonical reasoning effort — onto the session definition the
+    // follow-up target carries on the wire. The resolver must preserve
+    // the effort verbatim beside model and variant.
+    const payload: ReceiveFollowupPayload = {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "gen-1",
+        definition: {
+          instructions: "be terse",
+          runtime: "opencode",
+          model: "openai/gpt-5.5",
+          variant: "balanced",
+          reasoningEffort: "high",
+          skills: [],
+        },
+        binding: {
+          runtime: "opencode",
+          runtimeSessionId: "runtime-1",
+          runnerId: "runner-1",
+          workDir: "/work/project",
+        },
+      },
+      text: "continue",
+    }
+
+    const resolved = resolveSessionTarget(payload)
+    expect(resolved).not.toBeNull()
+    expect(resolved!.kind).toBe("generic")
+    expect(resolved!.definition?.model).toBe("openai/gpt-5.5")
+    expect(resolved!.definition?.variant).toBe("balanced")
+    expect(resolved!.definition?.reasoningEffort).toBe("high")
+  })
+
+  it("KeepsAnAbsentDefinitionEffortUnset_WithoutSynthesizingADefault", () => {
+    const payload: ReceiveFollowupPayload = {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "gen-1",
+        definition: {
+          instructions: "be terse",
+          runtime: "opencode",
+          model: "openai/gpt-5.5",
+          skills: [],
+        },
+        binding: {
+          runtime: "opencode",
+          runtimeSessionId: "runtime-1",
+          runnerId: "runner-1",
+          workDir: "/work/project",
+        },
+      },
+      text: "continue",
+    }
+
+    const resolved = resolveSessionTarget(payload)
+    expect(resolved?.definition?.reasoningEffort).toBeUndefined()
+  })
+
   it("ReturnsNull_WhenGenericTargetMissingSessionId", () => {
     const payload: ReceiveFollowupPayload = {
       target: { kind: "generic", projectId: "proj-1" },

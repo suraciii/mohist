@@ -105,6 +105,7 @@ function buildAgentTurnCapability(
       )
       const modelName = definition?.model ?? request.options?.model
       const variant = definition?.variant ?? request.options?.variant
+      const reasoningEffort = definition?.reasoningEffort ?? request.options?.reasoningEffort
 
       const runtime = self.openCodeRuntime
       const sessionName = request.session ?? work.workId
@@ -455,6 +456,7 @@ function buildAgentTurnCapability(
               ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID }
               : null,
           variant: variant ?? null,
+          reasoningEffort: reasoningEffort ?? null,
           ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
           unknownKeys: undefined as readonly string[] | undefined,
         },
