@@ -9,6 +9,7 @@ import type {
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
   AgentTaskLaunchInput,
+  AgentTaskPreflightResponse,
 } from '../../src/entities/agent'
 import {
   AgentSessionComposerPage,
@@ -21,6 +22,8 @@ export const state = {
   availabilityData: [] as AgentAvailabilitySummaryEntry[],
   launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
   taskCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
+  preflightCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
+  enablePreflight: false,
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
@@ -71,12 +74,33 @@ const dataHook: AgentSessionComposerDataHook = () => {
       } as AgentSessionLaunchResponse
     },
   })
+  const preflightTaskMutation = useMutation<
+    AgentTaskPreflightResponse,
+    Error,
+    AgentTaskLaunchInput & { idempotencyKey: string }
+  >({
+    mutationFn: async ({ idempotencyKey, ...input }) => {
+      state.preflightCalls.push({ body: input, idempotencyKey })
+      return {
+        scopeFingerprint: 'scope-test',
+        agentName: 'Task Agent',
+        execution: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
+        repository: 'org/repo',
+        workspace: 'review-workspace',
+        workspaceRepositories: ['org/repo'],
+        issueNumber: 42,
+        epicNumber: null,
+        permissionScope: 'project-workspace-write',
+        expectedImpact: 'Creates one Agent and starts one AgentJob and AgentSession.',
+      }
+    },
+  })
   const startTaskMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
     AgentTaskLaunchInput & { idempotencyKey?: string }
   >({
-    mutationFn: async ({ idempotencyKey, ...input }) => {
+    mutationFn: async ({ idempotencyKey, preflightFingerprint: _ignored, ...input }) => {
       state.taskCalls.push({ body: input, idempotencyKey })
       if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
@@ -98,6 +122,7 @@ const dataHook: AgentSessionComposerDataHook = () => {
     availability: state.availabilityData,
     availabilityLoading: false,
     launchMutation,
+    preflightTaskMutation: state.enablePreflight ? preflightTaskMutation : undefined,
     startTaskMutation,
   }
 }

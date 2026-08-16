@@ -16,6 +16,8 @@ describe("AgentSessionComposerPage", () => {
     state.availabilityData = [];
     state.launchCalls.length = 0;
     state.taskCalls.length = 0;
+    state.preflightCalls.length = 0;
+    state.enablePreflight = false;
     state.defaultExecutionConfig = {
       runtime: "opencode",
       model: "openai/gpt-4o",
@@ -138,6 +140,31 @@ describe("AgentSessionComposerPage", () => {
   });
 
   /* ── Launch call + navigation ─────────────────────────── */
+
+  it("confirms the server-resolved scope before task-first launch", async () => {
+    state.enablePreflight = true;
+    renderPage();
+    fireEvent.change(screen.getByTestId("prompt-textarea"), {
+      target: { value: "Review the current change" },
+    });
+    fireEvent.click(screen.getByTestId("launch-button"));
+
+    await waitFor(() => expect(state.preflightCalls).toHaveLength(1));
+    expect(state.taskCalls).toHaveLength(0);
+    expect(
+      await screen.findByTestId("agent-task-preflight-dialog"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("agent-task-preflight-scope")).toHaveTextContent(
+      "review-workspace",
+    );
+
+    fireEvent.click(screen.getByTestId("confirm-agent-task-launch"));
+    await waitFor(() => expect(state.taskCalls).toHaveLength(1));
+    expect(state.taskCalls[0].body).not.toHaveProperty("preflightFingerprint");
+    expect(await screen.findByTestId("current-path")).toHaveTextContent(
+      "/Test/sessions/sess-123",
+    );
+  });
 
   it("launches a task without an Agent selection through the task-first mutation", async () => {
     renderPage();
