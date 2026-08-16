@@ -1,88 +1,53 @@
 # Issue 621 Plan Self-Review
 
-Review round: first review. No previous `self-review.md` existed. The issue was read with `mo issue view 621 --project proj_f6c141d63b6243bfbb481737b2243b87 --json body` before reviewing the plan artifacts.
+Review round: second review (re-review). I re-read the canonical issue with `mo issue view 621 --project proj_f6c141d63b6243bfbb481737b2243b87` before reviewing the updated artifacts. The issue body supplies the Product Shape, four acceptance criteria, and the Server/liveness non-goals.
 
 ## Verdict
 
-FAIL. The plan is not ready to build because it implements a different publication contract from issue 621 and adds a Server-side change that the issue explicitly excludes.
+PASS. No must-fix problem remains; the plan is ready to build.
 
-## Must-Fix Findings
+## Previous Findings Disposition
 
-### F-001: The plan violates the issue's Runner-only boundary
-
-Evidence:
-
-- Issue 621 Product Shape says the corresponding guard is added on the Runner side, the detection logic must not enter Server, and Server must never write a missing reply.
-- Issue 621 Non-Goals explicitly exclude Server-side unpublished detection and say Server-side changes are out of scope.
-- `design.md:44-56` chooses a Runner-authenticated ServerConnection publication probe backed by `SlackOutboxStore`.
-- `tasks.json:6-24` makes that probe, its Server implementation, and Server tests the first task.
-
-This is not merely an implementation detail. Leaving it in the plan guarantees a forbidden Server API/outbox-read change and makes the plan incomplete relative to the issue's scope. Remove the Server probe and Server matching/tests from the plan and define the detection entirely at the Runner turn/action-observation boundary.
-
-Violates: issue 621 Product Shape and Non-Goals (no Server-side unpublished detection; Runner-only scope).
-
-### F-002: Publication is detected by the wrong fact, so failed reply-action calls trigger an advisory
-
-The issue defines the guard condition as the absence of a reply action call. It also explicitly says to recognize an attempted publication rather than publication success: a failed send already returns non-zero feedback to the model. Acceptance Criterion 3 requires a Turn with an existing reply action call to be unaffected.
-
-The plan instead defines publication as successful Server outbox acceptance:
-
-- `design.md:18-24` and `design.md:44-56` make outbox acceptance the authoritative predicate.
-- `specs/runner-reply-guard/spec.md:1-28` and `tasks.json:32-38` suppress the advisory only for an accepted outbox row.
-
-Failure case: the Agent invokes `mo slack message send`, the endpoint rejects it or no live Connection accepts it, and the turn then terminates. There is no accepted outbox row, so this plan issues the advisory even though the reply action was attempted. That directly violates the issue's acceptance criterion that an existing reply action call has no effect from the guard, and changes the intended feedback loop from "the Agent already tried" to "the Server later accepted it". A Server probe cannot repair this semantic mismatch; the plan must observe the Runner-local reply-action invocation/attempt and test rejected-send attempts explicitly.
-
-Violates: issue 621 Product Shape constraint (recognize an attempted publication, not success) and Acceptance Criterion 3 (existing reply action call is unaffected).
-
-### F-003: The plan hard-codes one advisory while the issue specifies a default budget of two
-
-`proposal.md:7-11`, `design.md:20`, `design.md:66-72`, and `tasks.json:34-36` all specify at most one advisory per turn. Issue 621's Product Shape says the advisory may be issued a finite number of times with a default of two before the Turn ends normally. The plan therefore cannot deliver the stated default reminder budget; a model that needs the second bounded reminder is terminated after only one opportunity.
-
-The plan must define the bounded reminder count in accordance with the issue (default two), make the count explicit in the coordinator state, and verify that the configured/default count cannot loop. This is separate from the requirement that the reminder text license silence.
-
-Violates: issue 621 Product Shape constraint (finite reminders, default two) and the related bounded-reminder goal.
-
-### F-004: T-003 evaluates Pi follow-ups at admission, not at the Turn's terminal point
-
-The proposed follow-up integration says to run the guard after the original follow-up result and observer facts but before `recordFollowupActivity` (`tasks.json:52-73`; `design.md:74-80`). That result is not always a terminal result in the current Pi implementation:
-
-- `packages/runner/src/runtime/pi/runtime.ts:454-458` handles an already-streaming Session by calling `session.steer(request.prompt)` and returning a successful follow-up result immediately.
-- `packages/runner/src/server/followup-handler.ts:256-317` attaches the completion callback to that result and then records terminal activity.
-
-Consequently, a Slack Pi follow-up received while the Session is streaming can cause the proposed guard to run while the original model turn is still active. The advisory may be injected before the Turn has ended, and the existing activity closeout may be emitted before the actual model stream reaches its terminal state. That fails the issue's requirement that the reminder be issued when a Slack-source Turn ends, and can also violate the bounded single-advisory behavior through premature/duplicate terminal handling.
-
-T-003 must specify and test the actual terminal boundary for both Pi follow-up branches, including the streaming/steer branch. It cannot use follow-up admission as the terminal signal.
-
-Violates: issue 621 Acceptance Criterion 1 (reminder when the Slack Turn ends) and Acceptance Criterion 2 (no reminder loop/early duplicate behavior).
+- F-001, Runner-only boundary: fixed. `proposal.md:20-23` and `design.md:29-33,65` explicitly keep unpublished detection in the Runner, remove Server/outbox queries, and preserve the existing Server reply action. `tasks.json:T-001` explicitly forbids a `ServerConnection` probe, endpoint, `SlackOutboxStore` query, delivery lookup, persistence schema, and Server test dependency.
+- F-002, attempted action versus successful publication: fixed. `design.md:59-67` makes the Runner-local normalized `tool_call.started` observation authoritative and records the attempt before completion. `spec.md:1-6` and `tasks.json:T-001/T-002` explicitly cover accepted, rejected, non-zero, and interrupted sends, while excluding final text, unrelated tools, liveness, outbox, and provider state.
+- F-003, reminder budget: fixed. `proposal.md:9-10`, `design.md:47-53`, `spec.md:41`, and `tasks.json:T-001` define `DEFAULT_REPLY_GUARD_REMINDER_BUDGET` as two, increment the count before each advisory, and test exhaustion without a third opportunity.
+- F-004, Pi follow-up admission versus terminal completion: fixed. `design.md:95-105`, `spec.md:97-112`, and `tasks.json:T-003` distinguish SignalR acknowledgement, Pi `preflight(true)`, and Pi `steer` from actual model completion. The revised plan requires completion handling for both Pi branches and tests the streaming case against the current `PiRuntime.followup` behavior.
 
 ## Dimension Review
 
-### Issue goals and acceptance criteria: FAIL
+### Issue Goals And Acceptance Criteria
 
-The issue was re-read before the artifacts. The plan covers Slack eligibility, a reminder, bounded processing, and non-Slack bypass at a high level, but it fails the issue's Runner-only scope, uses accepted delivery instead of attempted reply-action calls, omits the stated default reminder count of two, and does not establish a true Pi follow-up terminal boundary.
+Checked, no issue. The plan covers every criterion:
 
-### Coverage: FAIL
+- A valid Slack execution context and reply anchor make the initial and follow-up turns eligible. The shared coordinator evaluates them at the actual terminal boundary and the advisory explicitly permits deliberate silence (`spec.md:1-25,40-58`).
+- The reminder budget is finite and defaults to two. State is claimed before asynchronous advisory work, and duplicate or late terminal signals cannot open another opportunity (`design.md:41-55,107-111`; `spec.md:61-75`).
+- An existing reply action invocation suppresses the guard immediately, including a send that later fails or is interrupted (`design.md:59-67`; `spec.md:26-38,121-123`).
+- Turns without valid Slack context bypass the guard and retain their existing behavior (`design.md:18-25`; `spec.md:114-126`).
 
-The plan has scenarios for accepted outbox rows, explicit silence, one-shot state, and both runtime families, but it has no scenario for "reply action invoked and rejected" even though that is the issue's defining distinction. It also has no scenario for two bounded reminders or for a streaming Pi follow-up whose `steer` result precedes turn termination. T-001 covers behavior explicitly outside the issue instead of covering the missing Runner-local attempt signal.
+The non-goals are also covered: no Server-side unpublished detection or fallback reply is planned, and the original outcome, terminal activity, and liveness sequence remain unchanged apart from a bounded best-effort wait (`proposal.md:11-12,20-23`; `design.md:85-93`).
 
-### Correctness: FAIL
+### Coverage
 
-The concrete failure cases above produce the wrong behavior: a failed-but-attempted reply receives an advisory, the plan introduces an excluded Server dependency, and a streaming Pi follow-up can be guarded before completion. The proposal/spec agreement is internal to the plan but does not make that behavior correct against issue 621.
+Checked, no issue. The spec has requirements for eligibility and action observation, advisory behavior, loop prevention, failure/interruption preservation, actual follow-up completion, and non-Slack/liveness independence. T-001 covers the shared predicate and coordinator cases; T-002 covers initial Pi/OpenCode AgentJob turns; T-003 covers OpenCode follow-ups plus Pi idle and streaming follow-ups. The task acceptance criteria include rejected sends, explicit silence, default-two exhaustion, duplicate signals, timeout/failure/unavailable/interrupted paths, and unchanged reporting.
 
-### Current codebase and conventions: FAIL
+### Correctness
 
-The valid Slack context and existing Pi/OpenCode observer surfaces are compatible with a Runner-local guard. However, the plan crosses the explicit Runner/Server ownership boundary and assumes the result of `PiRuntime.followup` is a terminal result in a branch where the current runtime contract says it is only prompt admission. Those are codebase-inconsistent assumptions, not cosmetic differences.
+Checked, no issue. The approach uses the only local fact that matches the issue's contract: the reply action invocation starts. It does not substitute successful delivery, assistant text, or liveness for an attempt. Advisory calls reuse the current runtime session and Slack context, preserve Agent-owned content, stop on an attempt, and retain the original execution result on all guard failures. Separating follow-up admission from terminal completion prevents the known Pi `steer` and `preflight` early-return behavior from causing premature advisories or terminal activity.
 
-### Task breakdown, ordering, and verifiability: FAIL
+### Current Codebase And Conventions
 
-The task graph itself is structurally sound: `tasks.json` parses, all three dependencies name existing tasks, and the graph is acyclic (`T-001 -> T-002 -> T-003`). The breakdown is nevertheless incomplete relative to the issue: T-001 implements the forbidden Server probe, no task owns local reply-action-attempt detection or rejected-send tests, no task implements the default-two reminder budget, and T-003 does not define how actual Pi terminal completion is observed. The listed tests would verify the plan's alternate contract rather than the issue's acceptance criteria.
+Checked, no issue. The plan follows the existing split between the Runner orchestration layer and the Pi/OpenCode deep runtime modules, reuses `SlackExecutionContext`, `inlineSlackCollaborationSkill`, `buildExecutionEnvelope`, normalized runtime observers, and the existing follow-up handler/outbox. It explicitly accounts for the current `PiRuntime.followup` branches in `packages/runner/src/runtime/pi/runtime.ts` and the fire-and-forget completion flow in `packages/runner/src/server/followup-handler.ts`. The proposed runtime completion and abort extensions are internal; no new Server wire contract or persistence schema is introduced.
+
+### Task Breakdown And Verifiability
+
+Checked, no issue. `tasks.json` parses, its dependency graph is acyclic and ordered `T-001 -> T-002 -> T-003`, and all spec anchors resolve to requirements in `specs/runner-reply-guard/spec.md`. The ordering establishes the shared state and observation contract before initial-turn integration, then applies the same coordinator to follow-up terminal handling. Each task has concrete acceptance criteria and focused Runner typecheck/test-suite verification.
 
 ## Observations
 
-- `design.md:74-80` deliberately delays follow-up `session.activity` closeout until guard processing completes. This preserves the eventual status and payload but can leave the session visibly working for the advisory timeout; the issue's liveness non-goal says terminal closeout should continue as usual. The timing impact should be resolved when the must-fix lifecycle boundary is redesigned, but it is not a separate verdict-driving finding here.
-- `design.md:82-86` scopes guard state to the active Runner operation. A Runner restart before any reply attempt is accepted would lose the one-shot state, so a later duplicate/reconciliation signal could issue another advisory. The issue does not explicitly require cross-restart persistence, but the implementation should document whether the at-most-bounded reminder guarantee is process-scoped or turn-scoped and test the chosen boundary.
-- `design.md:104-108` leaves the timeout and diagnostic naming open. A finite code-level timeout is sufficient for the issue, so these are implementation decisions rather than must-fix plan defects.
+- `design.md:61-63` leaves the exact normalized input forms for `mo slack message send` as an implementation open question. The current runtime projections expose tool names and raw inputs, and the plan requires tests for both Pi and OpenCode shapes; implementation should verify the actual shell-command representation rather than match only a literal tool name. This is not a must-fix plan defect because the task acceptance criteria already make the predicate and its tests explicit.
+- `design.md:89-93` intentionally delays follow-up terminal activity until bounded advisory processing completes. The final status and payload remain unchanged, satisfying the issue's liveness semantic, but the implementation should keep the delay within the stated finite bound and preserve exactly-once activity emission.
+- `design.md:107-111` scopes guard state to the active Runner operation and explicitly excludes cross-restart reminder persistence. That is consistent with the issue scope; reconciliation must continue to require a live terminal operation and fresh local observations as specified.
 
-No product files were modified. Only this review artifact was written.
+No product files or plan artifacts were modified. Only this review artifact was updated.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
