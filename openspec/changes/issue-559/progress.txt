@@ -405,3 +405,10 @@
 - T-001 remains implemented in commit `d7e9d99d3`; the current branch also contains the later issue-559 slices, so no duplicate production edit was made during this task revalidation.
 - Focused handoff coverage passed 26/26 across `WorkflowAgentHandoffGrainSpecs`, `WorkflowAgentHandoffActivationSpecs`, `WorkflowAgentHandoffPreflightSpecs`, and `WorkflowAgentJobAdmissionSpecs`.
 - `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and concurrent-build file-lock retries were non-failing.
+
+## T-002 verification on current branch (final)
+
+- The existing T-002 implementation remains present in commit `66d7cb02e`: workflow-originated jobs use the unchanged Agent readiness, workspace, shared concurrency permit, admission, and AgentJob ledger-poll claim path; the frozen `Expect` and workflow lineage reach `WorkDispatch`; and the frozen per-invocation timeout overrides the global backstop.
+- Focused admission coverage passed 6/6. Existing direct/routed regressions also passed: `AgentJobGrainSpecs` 20/20, `AgentJobDispatchEnvelopeSpecs` 7/7, `AgentJobGrainRoutedLaunchSpecs` 11/11, `AgentConcurrencyReconciliationSpecs` 3/3, and `AgentSessionFollowupConcurrencySpecs` 15/15.
+- `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and transient concurrent-build copy retries were non-failing.
+- No additional production edit was required during this revalidation; this commit records the final T-002 verification on the workflow branch.
