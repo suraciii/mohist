@@ -106,10 +106,10 @@
       "id": "T-006",
       "title": "Document and prove the built-in full verification contract",
       "spec": "specs/workflow-resource-budgeting/spec.md#budget-selection-and-verification-evidence-are-operationally-auditable",
-      "description": "Update the workflow definition reference, core/script action reference, Runner deployment and self-hosting guidance, and operational diagnostics for host capacity and all budget outcomes. Run deterministic fake resource/process coverage plus focused evidence using the current complete ci.verify command in an isolated workspace, record the selected finite profile values and resolved budget context, and verify the two built-in profiles remain equivalent without retrying or mutating the blocked issue 622 runs.",
+      "description": "Update the workflow definition reference, core/script action reference, Runner deployment and self-hosting guidance, and operational diagnostics for host capacity and all budget outcomes. Treat the current 4096 MiB profile constant and one-hour ordinary wall-clock default as pre-evidence candidates only. Run deterministic fake resource/process coverage plus focused evidence using the current complete ci.verify command in an isolated workspace, select and record the final finite profile values and resolved budget context, and verify the two built-in profiles remain equivalent without retrying or mutating the blocked issue 622 runs.",
       "acceptanceCriteria": [
         "Documentation explains the task declaration, how cgroup or WORK_RESOURCE_HOST_MEMORY_MB supplies enforceable host capacity, how WORK_RESOURCE_MEMORY_MB and WORK_RESOURCE_WALL_CLOCK_MS remain ordinary-work defaults, how the effective budget is recorded, and the corrective action for invalid, unavailable, and insufficient outcomes.",
-        "The focused complete ci.verify evidence exercises npm ci, server tests, Web checks, and Runner checks far enough to demonstrate the resolved task identity/source/bounds, successful bounded execution or meaningful failure output, and the final checked-in finite budget values are justified by the supported host contract.",
+        "The focused complete ci.verify evidence exercises npm ci, server tests, Web checks, and Runner checks far enough to demonstrate the resolved task identity/source/bounds, successful bounded execution or meaningful failure output, and the final checked-in finite budget values are justified by the supported host contract rather than the old 4096 MiB profile value or one-hour default.",
         "The evidence suite covers resolution, missing host capacity, insufficient reservations, successful bounded execution, actual memory/duration containment, false-positive exits, ordinary script failure, report settlement, sibling isolation, and Runner liveness using deterministic fakes where appropriate.",
         "Built-in profile golden/assertion tests compare both profile budget declarations and resolution semantics, and documentation/tests confirm no partitioning or global containment disablement was introduced.",
         "All focused Definition, server, Runner, process, and integration checks pass, and the evidence procedure performs no retry, replay, or mutation of the currently blocked issue 622 workflow runs."
@@ -120,7 +120,7 @@
       "output": "Updated resource-budget operational documentation and isolated full-ci.verify evidence with passing focused verification reports.",
       "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
       "passes": false,
-      "notes": "This task may adjust the checked-in finite budget values only when the isolated complete ci.verify evidence demonstrates that the original values do not fit the supported workload envelope; keep both profiles synchronized."
+      "notes": "The old 4096 MiB profile constant and one-hour default are provisional candidates only. This task may retain or adjust the checked-in finite budget values only when isolated complete ci.verify evidence demonstrates that the selected values fit the supported workload envelope; keep both profiles synchronized."
     }
   ]
 }

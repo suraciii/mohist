@@ -1,6 +1,6 @@
 ## Context
 
-Issue 622 covers the P1 failure mode where the built-in `verify` task runs the complete `ci.verify` command under an ordinary per-work limit and is reported as an opaque `resource-containment` failure. The current implementation uses `core/script` input `resourceProfile: full-verify` to replace the ordinary memory limit with a hard-coded 4096 MiB value. That value is not part of the Workflow Definition, is not checked against Runner capacity, and cannot be audited from the dispatched task.
+Issue 622 covers the P1 failure mode where the built-in `verify` task runs the complete `ci.verify` command under an ordinary per-work limit and is reported as an opaque `resource-containment` failure. On current master, ordinary work defaults are defined in `packages/runner/src/runtime/resource-containment.ts`, while `packages/server/src/Mohist.Server/Workflow/Services/Profiles/mohist-local.workflow.yaml` and `packages/server/src/Mohist.Server/Workflow/Services/Profiles/mohist-github-pr.workflow.yaml` activate a separate `with.resourceProfile: full-verify` input on `build.verify`. `packages/runner/src/runtime/resource-containment.ts` defines that profile's `FULL_VERIFY_MEMORY_MB` as 4096, and `packages/runner/src/actions/built-in-core.ts` calls `resolveActionResourceProfile` and applies the value to the `core/script` command. The `vars.ci.verify` project variable supplies only the command body; it has no 4 GiB override. Thus 4096 MiB is the current profile-level code path for these built-in tasks, not a calibrated or auditable Workflow Definition baseline. The new declaration must make the source explicit and select the final value only after focused complete-verification evidence.
 
 The Runner already owns process-group execution, Linux `prlimit` support, aggregate RSS watchdog enforcement, per-work wall-clock protection, sibling isolation, and durable result/report retry. `WorkItemResult` currently carries only an error code and message, while `WorkflowItemTranslator` maps that result into the normal `TaskReport` protocol. The existing containment path also treats some signals, exit codes, and resource-like output as evidence of containment even when no enforcement event was observed.
 
@@ -31,16 +31,16 @@ The change affects the shared Workflow Definition model and validator, task disp
 
 ### 1. Represent the verification budget as a first-class task declaration
 
-Add an optional `resourceBudget` field to the semantic `TaskDefinition` rather than keeping a named profile inside Action input. Its initial shape is:
+Add an optional `resourceBudget` field to the semantic `TaskDefinition` rather than keeping a named profile inside Action input. Its declaration shape is:
 
 ```yaml
 resourceBudget:
   source: workflow.ci.verify
-  memoryMb: 4096
-  wallClockMs: 3600000
+  memoryMb: 4096    # provisional pre-evidence candidate only
+  wallClockMs: 3600000 # provisional pre-evidence candidate only
 ```
 
-The checked-in values must be confirmed by focused full-verification evidence and host-capacity validation. The important contract is that the values are explicit finite numbers in the profile; they are not looked up from `full-verify` or silently replaced by Runner defaults. `source` is a validated source identifier and is part of the diagnostic context. The declaration applies to the complete process tree of the task. The watchdog interval remains deployment configuration because it controls sampling rather than workload capacity.
+The numbers shown above are candidates, not the selected budget. `4096` is the current profile-level constant described in Context, while `3600000` matches the existing one-hour ordinary wall-clock default; neither is evidence that the complete command fits the supported host. T-006 must run the isolated complete `ci.verify` command, record its resolved host capacity and workload envelope, and select the final finite values from that evidence before the profile change is considered complete. The final checked-in values may retain or replace these candidates, but they must never be treated as calibrated merely because they were present in the old profile/default path. The important contract is that the final values are explicit finite numbers in the profile; they are not looked up from `full-verify` or silently replaced by Runner defaults. `source` is a validated source identifier and is part of the diagnostic context. The declaration applies to the complete process tree of the task. The watchdog interval remains deployment configuration because it controls sampling rather than workload capacity.
 
 `resourceBudget` is distinct from the existing Stage `resources` lock declaration. The Definition parser accepts it only on tasks, validates positive finite integer values and a supported source, and reports the exact task path for malformed declarations. The built-in profile validator additionally asserts that the build-stage `verify` task uses `core/script`, declares the `workflow.ci.verify` source, and has the same budget shape in both profiles. A budget declaration on an unsupported action or on a task that is not a validated verification task is rejected.
 
@@ -56,7 +56,9 @@ Extend the shared Workflow Definition record, YAML parser/renderer, Orleans surr
 
 Runner resolution happens after dispatch context rendering has established the effective `run` command and before `core/script` writes or invokes its shell. The resolver receives the budget declaration, effective work identity (`workflowRunId`, `taskRunId`, `workId`, stage, and task title), normalized ordinary deployment settings, host capacity, and the current admission ledger. It returns either a fully resolved budget or a typed admission/configuration failure. The resolved record contains declared and effective values, source, host-capacity input, and the reservation decision so the same context is available to enforcement and diagnostics.
 
-The existing `resourceProfile` Action input is removed from the built-in profiles and the `core/script` manifest. The Runner keeps a compatibility reader only for the migration window, and it never converts a legacy profile into a new auditable budget for newly validated definitions. A legacy-only dispatch is reported as a budget-configuration outcome or held behind the capability gate described in the Migration Plan.
+For a newly validated declared verification task, `resourceBudget.wallClockMs` is the sole task execution deadline passed to process-tree enforcement. Both built-in profiles remove their independent `with.timeout: 300000` Action input, and validation rejects a separate Action timeout on this validated task rather than choosing a hidden minimum or precedence rule. External work cancellation may still stop the command earlier. Ordinary tasks without `resourceBudget` retain the existing `with.timeout` and ordinary-work resource behavior.
+
+The existing `resourceProfile` Action input is removed from the built-in profiles and the `core/script` manifest. The built-in `verify` task also removes its independent `with.timeout: 300000` input; `resourceBudget.wallClockMs` is the only declared verification deadline. The Runner keeps a compatibility reader only for the migration window, and it never converts a legacy profile into a new auditable budget for newly validated definitions. A legacy-only dispatch is reported as a budget-configuration outcome or held behind the capability gate described in the Migration Plan.
 
 Alternatives considered:
 
@@ -132,7 +134,7 @@ Alternatives considered:
 
 ### 6. Validate and document the full verification contract as one built-in invariant
 
-Both built-in profile definitions declare the same explicit `resourceBudget` on `build.verify`, retain the complete `${{ vars.ci.verify }}` command, and use the same finite command deadline policy. The profile validation/golden tests compare the task identity, source, dimensions, and resolution rule; command-input differences elsewhere in the profiles cannot make the budgets diverge.
+Both built-in profile definitions declare the same explicit `resourceBudget` on `build.verify`, retain the complete `${{ vars.ci.verify }}` command, and omit the independent Action `with.timeout`. For declared verification, the resolved `resourceBudget.wallClockMs` is the sole finite execution deadline; ordinary tasks keep their existing Action timeout policy. The profile validation/golden tests compare the task identity, source, dimensions, deadline rule, and resolution rule; command-input differences elsewhere in the profiles cannot make the budgets diverge.
 
 Update the workflow definition reference, core Action reference, Runner deployment documentation, and self-hosting guidance. Documentation will explain that `WORK_RESOURCE_MEMORY_MB` and `WORK_RESOURCE_WALL_CLOCK_MS` remain ordinary-work defaults, the host-capacity setting/cgroup limit is an admission input, the effective budget is recorded in the result, and each of the three configuration outcomes has a concrete corrective action.
 
@@ -153,7 +155,7 @@ The focused evidence suite will cover declaration parsing, profile parity, resol
 
 1. Add the semantic `resourceBudget` field, wire fields, Runner resolver, admission ledger, diagnostics, and compatibility tests while the old profiles remain valid. New Runners advertise a `workflow-resource-budget-v1` capability.
 2. Deploy the new Runner build and verify that its host-capacity source is readable. Runners without the capability are excluded from claiming declared-budget verification work; this prevents a new profile from silently running under an old ordinary-work limit.
-3. Update both built-in profiles and the shared profile assertions to replace `with.resourceProfile: full-verify` with the explicit task declaration. Remove the legacy resource-profile input from newly validated workflow definitions and update recovery handlers to match explicit ordinary failure codes.
+3. Update both built-in profiles and the shared profile assertions to replace `with.resourceProfile: full-verify` with the explicit task declaration, remove `with.timeout: 300000` from each built-in `verify` task, and make `resourceBudget.wallClockMs` the sole deadline for that task. Remove the legacy resource-profile input from newly validated workflow definitions and update recovery handlers to match explicit ordinary failure codes.
 4. Run Definition validation, fake resource/process suites, and focused `ci.verify` evidence on an isolated workspace. Record the resolved budget and diagnostic payload. Do not retry or replay the currently blocked issue 622 runs.
 5. Enable the updated profiles for new or rerun workflow attempts after all target Runners report the capability. Existing attempts containing only the legacy profile are either completed under the compatibility window or fail with an actionable budget-configuration result and require a manual rerun.
 
@@ -161,6 +163,6 @@ Rollback is configuration-first: disable the new built-in profile revision and s
 
 ## Open Questions
 
-- What exact memory and wall-clock values does the isolated complete `ci.verify` evidence justify for the built-in declaration? The design fixes the shape and resolution rules; implementation evidence must select values that fit the supported Runner deployment without relying on the old opaque profile.
+- What exact memory and wall-clock values does the isolated complete `ci.verify` evidence justify for the built-in declaration? The old 4096 MiB profile constant and one-hour ordinary default are only pre-evidence candidates. The design fixes the shape and resolution rules; implementation evidence must select final values that fit the supported Runner deployment and complete workload without relying on the old opaque profile or its five-minute Action timeout.
 - Should the first release require `WORK_RESOURCE_HOST_MEMORY_MB` on every non-cgroup platform, or should a later platform adapter provide another enforceable capacity source? The fail-closed behavior is fixed either way.
 - Does the existing Runner capability registration have a preferred field for `workflow-resource-budget-v1`, or should the capability be represented by the existing build/version metadata and dispatch compatibility check? The rollout must retain the same safety property regardless of the transport choice.
