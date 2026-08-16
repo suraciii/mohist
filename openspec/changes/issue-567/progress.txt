@@ -391,6 +391,15 @@ Channel decision (grounded in live source):
 - Verification: Runner typecheck and the focused host recovery suite pass
   (4/4).
 
+## Re-review MF-3 Increment
+
+- The non-managed `mo update runner` command now emits complete success only
+  after Runner identity verification and bounded recovery reporting succeed.
+  Unresolved work therefore produces only the recovery failure outcome.
+- Added a CLI regression assertion that unresolved recovery output does not
+  contain the complete-success message.
+- Verification: the full CLI test suite passes (1855/1855).
+
 ## Final Gate Preparation
 
 - Reduced the Runner connection client implementation to 998 lines while

@@ -319,6 +319,7 @@ public class UpdateRunnerSpecs
         Assert.Equal(1, exitCode);
         Assert.Contains("workId=job-1", f.Stderr.ToString());
         Assert.Contains("status=unresolved", f.Stderr.ToString());
+        Assert.DoesNotContain("Runner updated successfully.", f.Stdout.ToString());
         Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
     }
 

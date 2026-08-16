@@ -171,7 +171,6 @@ internal sealed class UpdateOperations
 
         _out.WriteLine(
             $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
-        _out.WriteLine("Runner updated successfully.");
 
         try
         {
@@ -202,6 +201,7 @@ internal sealed class UpdateOperations
                 return recovery.ExitCode;
             }
 
+            _out.WriteLine("Runner updated successfully.");
             return 0;
         }
         catch
