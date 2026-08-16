@@ -200,3 +200,13 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   and workspace builds, 178 Workflow Definition tests, 2,700 Server unit tests,
   3,944 Server spec tests, 68 architecture tests, 1,859 CLI tests, 4,734 Web
   tests, 1,639 Runner tests, and 70 Slack tests.
+
+## T-002 follow-up verification
+
+- Re-ran the Server unit project after inspecting the existing T-002 slice:
+  2,701 tests passed, including the new Unicode sentence-boundary case. The
+  parallel full spec run had one unrelated dispatch-poll timing failure in
+  `AgentSessionLaunchRuntimeResolutionSpecs`; its exact test rerun passed, and
+  the prior T-002 baseline remains 3,944/3,944 specs. Japanese full stops now
+  derive only the first sentence, preserving deterministic task naming for
+  non-ASCII prompts.

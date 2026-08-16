@@ -206,7 +206,7 @@ public sealed class AgentTaskDefinitionFactory : IScopedService
         if (prompt.Length == 0)
             return string.Empty;
 
-        var end = prompt.IndexOfAny(['.', '!', '?', '\n', '\r']);
+        var end = prompt.IndexOfAny(['.', '!', '?', '\n', '\r', '\u2028', '\u2029', '\u3002', '\uFF01', '\uFF1F']);
         return end < 0 ? prompt : prompt[..end];
     }
 
