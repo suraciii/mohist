@@ -632,7 +632,7 @@ export function projectTurnToWorkItemResult(
     return {
       status: 'failed',
       message: error.message,
-      error: { code: error.kind, message: error.message },
+      error: { code: mapOpenCodeErrorKind(error.kind), message: error.message },
       output,
       exitCode: 1,
     }
@@ -707,5 +707,16 @@ export function projectPiTurnToWorkItemResult(
 function mapPiErrorKind(kind: string): string {
   if (kind === 'deadline-exceeded') return 'timeout'
   if (kind === 'missing-session') return 'runtime-session-missing'
+  return kind
+}
+
+/**
+ * OpenCode error kind → AgentJob failure category. The
+ * `unsupported-execution-configuration` rejection carries the
+ * capability contract's `unsupported_execution_configuration`
+ * category verbatim; every other kind keeps its existing code.
+ */
+function mapOpenCodeErrorKind(kind: string): string {
+  if (kind === 'unsupported-execution-configuration') return 'unsupported_execution_configuration'
   return kind
 }

@@ -387,7 +387,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       } as never,
     })
     const result = await callAction(opencodeAction, context)
-    expect(result.error).toBeUndefined()
+    expect(result.error).toEqual(expect.objectContaining({ code: "unsupported_execution_configuration" }))
     expect(runTurn).toHaveBeenCalledTimes(1)
     const request = runTurn.mock.calls[0]?.[0] as { options?: { variant?: string | null; reasoningEffort?: string | null } }
     expect(request.options?.variant).toBe("balanced")

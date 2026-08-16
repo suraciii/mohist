@@ -215,6 +215,7 @@ export type RuntimeErrorKind =
   | 'unavailable-runtime'
   | 'missing-session'
   | 'incompatible-runtime'
+  | 'unsupported-execution-configuration'
   | 'permission-required'
   | 'deadline-exceeded'
   | 'interrupted'

@@ -16,7 +16,18 @@ interface ToolProjection {
   readonly status: string
 }
 
-export function createPiProjector(runtimeSessionId: string, workDir: string, masker = new CredentialMasker()): PiProjector {
+export function createPiProjector(
+  runtimeSessionId: string,
+  workDir: string,
+  masker = new CredentialMasker(),
+  /**
+   * Canonical reasoning effort applied to this turn's thinking
+   * level, or null when none was frozen. Reported on the resolved
+   * model payload as `appliedReasoningEffort` — the canonical
+   * (product) value, never a runtime-native level.
+   */
+  appliedEffort: string | null = null,
+): PiProjector {
   const seen = new Set<string>()
   const textByPart = new Map<string, string>()
   const toolByCall = new Map<string, ToolProjection>()
@@ -159,7 +170,7 @@ export function createPiProjector(runtimeSessionId: string, workDir: string, mas
         case "compaction_end": return emitOnce("compaction", eventId(event, "compaction-end"), { phase: "completed", error: event.errorMessage })
         case "auto_retry_start": return emitOnce("provider.retry", eventId(event, "retry-start"), { phase: "started", attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, message: stringValue(event.errorMessage) })
         case "auto_retry_end": return emitOnce("provider.retry", eventId(event, "retry-end"), { phase: "ended", attempt: event.attempt, success: event.success, message: event.finalError })
-        case "model_change": return emitResolvedModel(eventId(event, "model"), event, emitOnce)
+        case "model_change": return emitResolvedModel(eventId(event, "model"), event, emitOnce, appliedEffort)
         case "thinking_level_changed": case "thinking_level_select": case "turn_start": case "turn_end": case "agent_start": case "agent_end": case "agent_settled":
           return []
         default:
@@ -211,6 +222,7 @@ function emitResolvedModel(
   id: string,
   event: Record<string, unknown>,
   emit: (type: string, key: string, payload: Record<string, unknown>) => PiRuntimeEvent[],
+  appliedEffort: string | null = null,
 ): PiRuntimeEvent[] {
   const model = event.model
   const fromObject = recordValue(model)
@@ -232,6 +244,10 @@ function emitResolvedModel(
   const payload: Record<string, unknown> = { resolvedModel }
   if (provider) payload["providerId"] = provider
   if (modelId) payload["modelId"] = modelId
+  // Execution evidence: the applied effort is recorded only when an
+  // effort was frozen onto this turn — an absent effort is never
+  // synthesized into a default.
+  if (appliedEffort !== null) payload["appliedReasoningEffort"] = appliedEffort
   return emit("model.resolved", id, payload)
 }
 

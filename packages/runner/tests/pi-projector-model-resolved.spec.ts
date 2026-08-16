@@ -2,6 +2,24 @@ import { describe, expect, it } from "vitest"
 import { createPiProjector } from "../src/runtime/pi/projector.js"
 
 describe("Pi runtime projector model.resolved", () => {
+  it("reports the frozen canonical effort beside the resolved model", () => {
+    const projector = createPiProjector("/virtual/session", "/workspace", undefined, "high")
+    const facts = projector.project({
+      type: "model_change",
+      id: "model-effort",
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-20250514",
+    })
+
+    expect(facts).toHaveLength(1)
+    expect(facts[0]?.payload).toEqual({
+      resolvedModel: "anthropic/claude-sonnet-4-20250514",
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4-20250514",
+      appliedReasoningEffort: "high",
+    })
+  })
+
   it("emits a model.resolved event with resolvedModel for a provider+modelId change", () => {
     const projector = createPiProjector("/virtual/session", "/workspace")
     const facts = projector.project({

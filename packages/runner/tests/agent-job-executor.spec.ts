@@ -745,4 +745,24 @@ describe("AgentJobExecutor work-result projection", () => {
     expect(parsed.status).toBe("failure")
     expect(parsed.error).toBe("boom")
   })
+
+  it("preserves OpenCode's explicit unsupported-effort category", () => {
+    const result: RuntimeResult<RuntimeTurnResult> = {
+      ok: false,
+      error: {
+        kind: "unsupported-execution-configuration",
+        message: "OpenCode does not support a reasoning effort",
+        diagnostics: [{ severity: "error", code: "unsupported_execution_configuration", message: "unsupported" }],
+      },
+      diagnostics: [{ severity: "error", code: "unsupported_execution_configuration", message: "unsupported" }],
+    }
+    const workResult = projectTurnToWorkItemResult(result, "opencode", "openai/gpt-5", "high")
+
+    expect(workResult.status).toBe("failed")
+    expect(workResult.error).toEqual({
+      code: "unsupported_execution_configuration",
+      message: "OpenCode does not support a reasoning effort",
+    })
+    expect((workResult.output as Record<string, unknown>).error).toBe("OpenCode does not support a reasoning effort")
+  })
 })

@@ -47,6 +47,7 @@ function runtimeModel(options: { model?: string; variant?: string; reasoningEffo
 function runtimeErrorCode(kind: string): string {
   if (kind === "deadline-exceeded") return "timeout"
   if (kind === "missing-session") return "runtime-session-missing"
+  if (kind === "unsupported-execution-configuration") return "unsupported_execution_configuration"
   return kind
 }
 

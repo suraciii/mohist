@@ -175,6 +175,33 @@ describe("OpenCodeRuntime.runTurn — input validation", () => {
     expect(client.sessionCreate).not.toHaveBeenCalled()
     expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
+
+  it("rejects an explicit reasoning effort before it can reach model or variant fields", async () => {
+    const { deps, client } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "do",
+      options: {
+        model: { providerID: "openai", modelID: "gpt-5" },
+        variant: "high",
+        reasoningEffort: "high",
+      },
+    }, new AbortController().signal)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.kind).toBe("unsupported-execution-configuration")
+    expect(result.error.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "unsupported_execution_configuration" }),
+    ]))
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "unsupported_execution_configuration" }),
+    ]))
+    expect(client.sessionCreate).not.toHaveBeenCalled()
+    expect(client.sessionPrompt).not.toHaveBeenCalled()
+  })
 })
 
 describe("OpenCodeRuntime.runTurn — unrestorable binding", () => {

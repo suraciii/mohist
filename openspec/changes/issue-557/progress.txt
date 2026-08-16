@@ -184,3 +184,30 @@ Plan skeleton for next run (est. half a day):
    OpencodeRoutes response field + web client/queries plumbing.
 5. Tests both sides per the AC list. Run: runner vitest, server unit + SpecTests,
    web vitest, npm run test:fast.
+
+## T-004 (native adapter translation + Pi smuggling removal)
+
+- Pi runtime no longer reads `options.variant` as a thinking level at either
+  turn site. A private `PI_THINKING_LEVEL_BY_EFFORT` map translates only the
+  canonical `reasoningEffort`; absent/null/empty effort leaves the session's
+  thinking level untouched. Follow-ups on cached sessions reapply only the
+  effort-derived level, and reset carry-over therefore preserves the physical
+  session state without creating a level from a variant.
+- Pi projector instances receive the frozen canonical effort and add
+  `appliedReasoningEffort` to `model.resolved` payloads only when non-null;
+  native Pi thinking-level values never cross the projector evidence boundary.
+- OpenCode now rejects explicit non-empty `reasoningEffort` before session
+  acquisition/provider calls in both run and follow-up entry points. The
+  internal hyphenated runtime error is projected as the required
+  `unsupported_execution_configuration` category for AgentJob and Workflow
+  action results; the option is never folded into model or variant.
+- Updated stale T-002 action expectations to assert both option delivery and
+  explicit OpenCode rejection. Coverage now includes Pi effort mapping,
+  variant isolation on new and reused/reset sessions, applied-effort
+  projection, OpenCode no-SDK-call rejection, and AgentJob category mapping.
+- Verification: focused adapter suites 109 tests passed; full Runner suite
+  153 files / 1662 tests passed; `npm run typecheck -w packages/runner`
+  passed. `npm run typecheck:tests -w packages/runner` still reports the
+  pre-existing T-002 test typing issues in `executor-capabilities-effort.spec.ts`
+  and `runner-signalr-followup-target.spec.ts`; source typecheck and Vitest are
+  green.
