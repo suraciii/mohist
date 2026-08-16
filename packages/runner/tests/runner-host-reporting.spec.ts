@@ -276,7 +276,13 @@ describe('RunnerHost', () => {
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
     await journal.load()
     await journal.begin(work)
-    const receipt = createInterruptedRecoveryReceipt(work, binding, 'runner-test', 'runner-update:restart', 'receipt-restart')
+    const receipt = createInterruptedRecoveryReceipt(
+      work,
+      binding,
+      'runner-test',
+      'runner-update:restart',
+      'receipt-restart',
+    )
     expect(receipt).not.toBeNull()
     await journal.interrupt(work, receipt!)
 

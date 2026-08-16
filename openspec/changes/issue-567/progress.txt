@@ -366,6 +366,13 @@ Channel decision (grounded in live source):
   Web passed 4727/4727; CLI passed 1855/1855. Runner/Web typechecks and Server
   test build pass.
 
+## Final Gate Preparation
+
+- Reduced the Runner connection client implementation to 998 lines while
+  retaining the stop-failure transport; format and file-size ratchets pass.
+- Runner production/tests and Web typechecks pass after the final formatting
+  normalization.
+
 ## Fix-CI Verification Repair
 
 - The persisted `verify.1` output showed one deterministic Server unit failure

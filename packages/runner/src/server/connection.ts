@@ -19,12 +19,7 @@ import type {
   RecoveryReceiptAcknowledgement,
   RuntimeRecoveryReceipt,
 } from '../runtime/recovery-receipt.js'
-import {
-  fetchPendingUpdateOperation as fetchPendingUpdateOperationRequest,
-  sendRecoveryReceipt as sendRecoveryReceiptRequest,
-  reportRecoveryStopFailure as reportRecoveryStopFailureRequest,
-  type RecoveryStopFailure,
-} from './connection.update-recovery.js'
+import * as recoveryRequests from './connection.update-recovery.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
 import { extractErrorMessage } from './connection-errors.js'
@@ -111,19 +106,21 @@ export class ServerConnection {
   }
 
   async fetchPendingUpdateOperation(signal: AbortSignal): Promise<PendingUpdateOperation | null> {
-    return fetchPendingUpdateOperationRequest(this.fetchWithAuth.bind(this), this.url.bind(this), signal)
+    return recoveryRequests.fetchPendingUpdateOperation(this.fetchWithAuth.bind(this), this.url.bind(this), signal)
   }
 
   async sendRecoveryReceipt(
     receipt: RuntimeRecoveryReceipt,
     signal: AbortSignal,
   ): Promise<RecoveryReceiptAcknowledgement> {
-    return sendRecoveryReceiptRequest(this.fetchWithAuth.bind(this), this.url.bind(this), receipt, signal)
+    return recoveryRequests.sendRecoveryReceipt(this.fetchWithAuth.bind(this), this.url.bind(this), receipt, signal)
   }
 
-  async reportRecoveryStopFailure(failure: RecoveryStopFailure, signal: AbortSignal): Promise<void> {
-    return reportRecoveryStopFailureRequest(this.fetchWithAuth.bind(this), this.url.bind(this), failure, signal)
-  }
+  readonly reportRecoveryStopFailure = (
+    failure: recoveryRequests.RecoveryStopFailure,
+    signal: AbortSignal,
+  ): Promise<void> =>
+    recoveryRequests.reportRecoveryStopFailure(this.fetchWithAuth.bind(this), this.url.bind(this), failure, signal)
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
     const response = await this.fetchWithAuth(this.url('config'), { method: 'GET', signal })

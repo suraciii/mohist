@@ -29,10 +29,7 @@ const item: TimelineItem = {
   isTerminal: true,
 }
 
-function makeData(
-  interruption?: AgentWorkInterruption,
-  failureReason: string | null = null,
-): SessionDataSourceResult {
+function makeData(interruption?: AgentWorkInterruption, failureReason: string | null = null): SessionDataSourceResult {
   const meta: SessionMetadata = {
     sessionId: 'session-1',
     sessionName: 'Session one',
@@ -179,17 +176,20 @@ describe('SessionDetailShell timeline integration', () => {
     render(
       <MemoryRouter>
         <SessionDetailShell
-          data={makeData({
-            state: 'interrupted',
-            updateOperationId: 'update-567',
-            workId: 'work-old',
-            recoveryGeneration: 0,
-            originalTurnId: 'turn-old',
-            replacementTurnId: 'turn-recovery',
-            expectedRecoveryPath: 'The replacement dispatch will resume this work.',
-            stopFailure: 'Stop confirmation is pending; recovery remains durable and will be retried.',
-            recordedAt: '2026-08-15T00:00:00.000Z',
-          }, 'session.abort fetch failed')}
+          data={makeData(
+            {
+              state: 'interrupted',
+              updateOperationId: 'update-567',
+              workId: 'work-old',
+              recoveryGeneration: 0,
+              originalTurnId: 'turn-old',
+              replacementTurnId: 'turn-recovery',
+              expectedRecoveryPath: 'The replacement dispatch will resume this work.',
+              stopFailure: 'Stop confirmation is pending; recovery remains durable and will be retried.',
+              recordedAt: '2026-08-15T00:00:00.000Z',
+            },
+            'session.abort fetch failed',
+          )}
           components={makeComponents()}
         />
       </MemoryRouter>,
