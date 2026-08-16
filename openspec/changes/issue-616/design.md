@@ -22,7 +22,7 @@ The affected boundaries are `packages/mohist-slack/`, the Slack adapter transpor
 - Evaluate managed-Bot admission before disabled-Connection auditing, owner/access checks, Manager actor authentication, claim consumption, conversation/session lookup, follow-up routing, and inbox admission.
 - Preserve the existing target-specific behavior for a Bot classification that does not match a managed Mohist App identity.
 - Return `ignored` to the adapter so Socket Mode acknowledges the event without posting a Slack message.
-- Guarantee that ignored bot events create no inbox row, SessionInput, AgentJob, AgentSession, session mapping, follow-up, outbox row, or stored work text.
+- Guarantee that ignored managed-Bot events create no inbox row, SessionInput, AgentJob, AgentSession, session mapping, follow-up, outbox row, or stored work text.
 - Preserve existing human routing and target-specific unknown-sender behavior for DMs, mentions, and bound-thread follow-ups.
 - Add focused adapter, transport, Manager ingress, Agent Connection ingress, disabled-Connection, follow-up, and no-side-effects regression coverage.
 
@@ -55,7 +55,7 @@ Server-side parsing must preserve an explicit `unknown` value and must never pro
 
 **Alternative considered: let the adapter drop Bot events locally.** Rejected because the Server must own the managed-Bot admission contract after lease validation, direct Server calls still need protection, third-party Bot behavior must remain target-specific, and the adapter needs a definitive Server result to decide when it is safe to acknowledge the Socket event.
 
-### 2. Apply bot admission before target-specific work admission
+### 2. Apply managed-Bot admission before target-specific work admission
 
 Use the same ordering at both ingress boundaries:
 

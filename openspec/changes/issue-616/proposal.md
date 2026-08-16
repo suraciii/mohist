@@ -14,7 +14,7 @@ Slack events authored by Mohist-managed Bots must never become new work, but the
 
 ## Capabilities
 
-- `slack-bot-message-admission`: The cross-target Slack ingress contract for identifying Bot-authored events, acknowledging and ignoring them before durable input admission, preventing self-triggering and Bot-to-Bot triggering, and preserving normal human ingress behavior across Agent Connections and the Mohist App Manager.
+- `slack-bot-message-admission`: The cross-target Slack ingress contract for identifying Bot-authored events, acknowledging and ignoring Mohist-managed ones before durable input admission, preventing self-triggering and Bot-to-Bot triggering, and preserving normal human and third-party Bot ingress behavior across Agent Connections and the Mohist App Manager.
 
 ## Impact
 

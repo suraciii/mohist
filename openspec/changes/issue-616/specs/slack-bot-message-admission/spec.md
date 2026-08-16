@@ -21,7 +21,7 @@ The Slack adapter SHALL normalize every Slack text message event into a sender c
 - **THEN** the normalized envelope SHALL contain `senderKind = unknown` and `senderSlackUserId = null`
 - **AND** the event SHALL not acquire a managed-Bot author identity merely because the receiving App is Mohist-managed
 
-### Requirement: Bot events are acknowledged as ignored Slack deliveries
+### Requirement: Managed Bot events are acknowledged as ignored Slack deliveries
 For a valid normalized Slack text event whose sender classification is `bot` and whose author identity matches a Mohist-managed Manager App or Agent App in the workspace, the adapter SHALL obtain a definite ignored ingress result and SHALL acknowledge the Socket Mode event. Managed Bot events MUST NOT remain unacknowledged merely because they have no `user` field, and the adapter MUST NOT retry them as malformed human messages. Ignoring a managed Bot event SHALL not produce a user-facing Slack response. A Bot event without a matching managed identity SHALL retain the existing target-specific ingress outcome and is not covered by this new ignored-delivery rule.
 
 #### Scenario: A Bot message without a user field is acknowledged
@@ -40,7 +40,7 @@ For a valid normalized Slack text event whose sender classification is `bot` and
 - **THEN** the adapter SHALL preserve the `senderKind = bot` envelope and submit it to the target ingress
 - **AND** the target SHALL retain its pre-616 Bot behavior rather than applying the managed-Bot ignored rule
 
-### Requirement: Bot admission precedes human identity and ingress authorization
+### Requirement: Managed Bot admission precedes human identity and ingress authorization
 After transport authentication and the current runtime lease have been accepted, both the Agent Connection ingress and the Mohist App Manager ingress SHALL resolve the workspace's Mohist-managed Manager and Agent App identities and evaluate the normalized sender classification before requiring a human Slack sender identifier or invoking ingress-specific authorization and conversation logic. A `bot` event with a valid Slack message identity SHALL be accepted as ignored when its author App or supplied Bot user identity matches that managed set, even when `senderSlackUserId` is absent. Managed-Bot admission SHALL occur before owner or access-policy checks, Manager actor authentication or claim handling, conversation/session lookup, follow-up routing, disabled-Connection auditing, and durable input admission. A `bot` event without a managed-identity match SHALL retain its existing target-specific behavior.
 
 #### Scenario: Manager Bot ingress bypasses the required human sender field
@@ -58,7 +58,7 @@ After transport authentication and the current runtime lease have been accepted,
 - **THEN** the managed-Bot admission rule SHALL return ignored before disabled-event auditing
 - **AND** the event MUST NOT create a disabled-discarded inbox record
 
-### Requirement: Ignored Bot events have no durable work or user-facing side effects
+### Requirement: Ignored managed Bot events have no durable work or user-facing side effects
 Ignoring a Mohist-managed Bot-authored Slack text event SHALL create no provider inbox entry, SessionInput, AgentJob, Agent Session, Agent follow-up, thread or DM session binding, outbox response, or other durable work admission. The system MUST NOT persist or log the managed Bot message text as work input, and it MUST NOT emit a user-facing Slack acknowledgement or rejection. The Socket protocol acknowledgement required by Slack is not a user-facing response and SHALL remain permitted.
 
 #### Scenario: Manager Bot message creates no work
