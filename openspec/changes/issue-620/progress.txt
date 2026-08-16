@@ -5,4 +5,5 @@
 - Addressed MF-002 in design, both capability specs, proposal, and T-001/T-002/T-003: committed pending Retry and selection operations are resumed by a fixed-key durable action-recovery reminder; interaction replay re-enters pending operations and provider-inbox ordering is explicit.
 - Addressed MF-003 in design, retry spec, proposal, and T-002: retryability is an exact authoritative category allowlist with text-only behavior for unknown, missing, legacy, and non-allowlisted failures; the category-to-control matrix is required in tests.
 - First artifact set committed as 5efd67194 after JSON and diff validation.
-- Tightened MF-001 after that commit with the explicit `IAgentLauncher.LaunchConnectionRetryAsync` contract, exact `slack-retry:{projectId}:{actionKey}` key, and deterministic root identity derivation/adoption. Final must-fix disposition audit remains.
+- Tightened MF-001 after that commit with the explicit `IAgentLauncher.LaunchConnectionRetryAsync` contract, exact `slack-retry:{projectId}:{actionKey}` key, and deterministic root identity derivation/adoption.
+- Final audit passed: `tasks.json` parses, `git diff --check` is clean, the allowlist matches across design/spec/tasks, T-003 depends on the shared recovery owner T-002, and both commits leave `self-review.md` unchanged.
