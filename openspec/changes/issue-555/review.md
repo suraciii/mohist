@@ -1,45 +1,35 @@
 # Review
 
-This is a re-review of the current change. The issue details were read with `mo issue view 555 --project proj_f6c141d63b6243bfbb481737b2243b87`; its rendered body is empty, so the acceptance contract was re-read from `proposal.md`, `design.md`, and all five capability specs under this change. Product files were reviewed against those requirements; the files under `openspec/changes/issue-555/` are workflow artifacts.
+This is the first review of the current change. The issue details were read with `mo issue view 555 --project proj_f6c141d63b6243bfbb481737b2243b87`; the issue body is empty, so the acceptance contract was re-read from `proposal.md`, `design.md`, and all five capability specs under this change.
 
 ## Must-fix Findings
 
-### MF-1: Follow-up replay bypasses canonical Project membership
+### MF-1: The public event stream drops durable lifecycle transitions
 
-**Where:** `packages/server/src/Mohist.Server/Api/DirectApi/DirectApiRoutes.cs:242-277`, especially the existing-mapping branch at `:246-277`.
+**Where:** `packages/server/src/Mohist.Server/Infrastructure/PublicApi/PublicApiProjectionEngine.cs:325` and `:423`; `packages/server/src/Mohist.Server/Infrastructure/PublicApi/PublicExecutionAggregator.cs:495` and `:523`.
 
-The follow-up scope is `(sessionId, Idempotency-Key)`, so a mapping created while the route selected Project A can also be found when a caller selects Project B. The route validates the body and then calls `idempotency.FindAsync` before resolving the canonical Session. When `existing` is non-null, it constructs the claim directly and never calls `sessions.ResolveCanonicalFollowupTargetAsync`; the canonical Project-membership check exists only in the `existing is null` branch at `:251-263`.
+`ProjectSessionAsync` builds `PublicProjectionFacts` from one current `AgentSession` ledger row. `DeriveTransitions` then emits a turn event only for the turn's current status. The loaded `AgentSessionEventRow` journal is used for runtime-binding/context-reset facts, not for the input/turn lifecycle transitions, and the AgentJob journal contents are used only to make a target dirty. Consequently, if a turn is durably queued, then running, then terminal before a projector batch observes it, the public journal can contain `input.accepted` and `turn.terminal` but no `turn.queued` or `turn.running`. The checkpoint still advances past the consumed source state, so a later sweep cannot recover the missing events. The fixed `session:unknown` identity also suppresses later distinct unknown episodes.
 
-A caller whose PAT is authorized for both Projects can therefore reuse a known Session ID and key through Project B and hit Project A's existing mapping. For a completed mapping this can return a rejection observation using the selected Project ID without proving that the Session belongs to it. For a pending mapping it can call `AcceptFollowupAsync` on the canonical Session without a Project-membership check, potentially admitting work into a Session owned by another Project. A different body can also be classified as `idempotency_key_reused` from the other Project's mapping rather than as `session_not_found`.
+This makes the durable per-Session event stream incomplete and violates the `public-execution-projection` requirement that the projection commit the corresponding public Session event journal for consumed canonical facts, as well as the issue proposal's acceptance of durable cursor-based Session event reads. A client resuming the stream cannot observe all lifecycle transitions that occurred. Lifecycle transitions need durable source identities/history that the projector consumes, rather than being inferred solely from the latest mutable aggregate state.
 
-This violates the `external-agent-caller-auth` requirement that canonical resource Project membership match the selected Project and the `external-write-idempotency`/T-005 acceptance criterion that a Session absent from or not belonging to the authorized Project returns `404 session_not_found` after the grant passes. It also violates the required ordering that resource ownership is checked before the idempotency mapping is used. The replay fix must retain the ability to replay after mutable target invalidation, but it still needs a membership-only canonical check on every request (or an equivalent durable binding check) before consuming the existing mapping; a foreign or missing Session must not reach replay or admission.
+### MF-2: Production Session deletion never creates a closed-stream tombstone
 
-## Previous Findings
+**Where:** `packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionStore.cs:161`; `packages/server/src/Mohist.Server/Infrastructure/Data/PublicApi/PublicProjectionRows.cs:173`; `packages/server/src/Mohist.Server/Infrastructure/PublicApi/PublicSessionEventStreamQuerier.cs:61`.
 
-The four findings from the previous review were checked against the current tree:
+`AgentSessionStore.DeleteAsync` deletes only the canonical `AgentSessions` row. `PublicStreamStateRow.Closed` is declared and the event route has a branch for it, but no production deletion path sets `Closed = true` or otherwise creates/retains a tombstone. The current stream specs set `Closed` directly through test-only database setup, so they do not verify the actual deletion behavior. After a real Session deletion, a valid current-generation cursor reaches the canonical Project lookup and returns `session_not_found` at `PublicSessionEventStreamQuerier.cs:70-75`, instead of the required `410 cursor_expired` with `earliestSequence=null` and the last safe `latestSequence`.
 
-- The projection-lag freshness gap for compressed Session lifecycle transitions is fixed. `PublicExecutionReadQuerier.AddSessionFeedsAsync` now compares the `AgentSessionLifecycle` head at `:291-326`, and `PublicExecutionProjectionSpecs.LifecycleHistoryHead_MakesACompressedCycleReadAsProjectionLag` covers the regression.
-- Retryable queued dispatch states now expose `queue_full` as both a safe reason and error. `PublicExecutionAggregator` sets these fields at `:218-222`, `:264-266`, `:304-306`, and `:347-349`, with the public projection regression covered by `RetryableDispatchBlock_ProjectsSafeQueueFullReasonAndError`.
-- A matching retry while a stop remains unresolved now returns `stop_pending` at `DirectApiStopRoutes.cs:127-133` instead of treating a current public snapshot as a completed command. The stop spec asserts the `503` response and no replacement delivery.
-- Replay after an Agent archive and after follow-up target invalidation now finds the durable mapping before the mutable write-target lookup. The launch path does this at `DirectApiRoutes.cs:481-508`, and the focused replay specs cover both intended recovery cases. That fix is behaviorally correct for those cases, but its follow-up branch introduced the Project-membership bypass reported above.
-
-The earlier lifecycle-history compression and deleted-Session tombstone findings were also rechecked: lifecycle transitions are persisted by `AgentSessionStore`, and deletion closes the public stream while purge removes the tombstone only through the retention operation. No additional must-fix regression was found there.
+This violates the `public-session-event-stream` retention requirement and T-007's acceptance criterion: a deleted Session must retain a minimal tombstone during the cursor-retention window, return 410 for a valid cursor, return 404 without a valid cursor, and become `cursor_invalid` only after physical purge. The deletion path must close the public stream and preserve its safe bounds transactionally with the deletion/retention operation, and the purge path must be explicit.
 
 ## Dimension Checks
 
-- **Issue contract and acceptance criteria:** FAIL. The direct boundary, projection, reads, keyed writes, stop fencing, event cursors, and shipped documentation are present, but MF-1 violates the follow-up ownership and replay criteria.
-- **Coverage:** FAIL. The current suites cover follow-up replay after target invalidation, but no test exercises an existing `(sessionId, key)` mapping replayed through a different authorized Project. That case can admit or expose the wrong Project's mapping.
-- **Correctness:** FAIL for MF-1. The valid replay path and the cross-Project replay path are indistinguishable once `FindAsync` returns a row because the route skips canonical ownership resolution.
-- **Consistency with the surrounding codebase:** checked, no additional issue found. The middleware, projection, persistence, public serialization, and canonical stop composition follow the local conventions; the ownership omission is described above.
-- **Tests and verification:** checked. `npm run test:fast` passed all seven lanes, the focused follow-up suite passed all 8 tests, and `npm run verify` passed docs, file-size, format, build, 3,984 Server SpecTests, 2,676 Server unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70 Slack tests. The green suite does not cover MF-1's cross-Project replay scenario.
+- **Acceptance coverage:** must-fix gaps found above in the durable Session event stream and deleted-Session tombstone behavior; the other route, auth, idempotency, projection-read, cursor-validation, and documentation criteria have corresponding implementation and test coverage.
+- **Correctness:** must-fix gaps found above. The auth ordering, public allowlist, projection lag response, keyed replay/conflict paths, stop fencing, cursor binding, and generation sequencing were inspected against their failure cases.
+- **Consistency:** checked, no issue found in the changed code's use of the existing middleware, grain, EF, event-store, and public JSON patterns. The public API remains separated from control-plane read shapes.
+- **Tests and verification:** the repository gate is green (`npm run verify`): docs and format checks, solution build, 3,977 Server SpecTests, 2,676 Server unit tests, 69 architecture tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70 Slack tests. However, the suite does not cover the two failure cases above: it tests public event rows from manually seeded/current facts and manually toggles `Closed` in the database rather than exercising lifecycle compression and the production deletion path.
 
 ## Observations
 
-- `20260909000000_AddPublicApiCursorSecret.cs` rebuilds the existing `StoredSecrets` table to extend its check constraints for the persisted cursor key. It copies existing rows, but this migration deserves deployment testing against populated secret stores. This does not add another must-fix finding here.
-- The queued projection maps several retryable internal wait reasons (`capacity-full`, `concurrency-limit`, and `no-online-runner`) to the single safe public reason `queue_full`. That is consistent with the current public vocabulary and is recorded only as an implementation detail, not a release blocker.
-
-## Verdict
-
-**FAIL** — MF-1 remains a must-fix ownership and idempotency correctness problem relative to the issue acceptance criteria.
+- `20260909000000_AddPublicApiCursorSecret.cs` rebuilds the existing `StoredSecrets` table to extend its check constraints for the persisted cursor key. It copies existing rows, but this is broader migration work than the additive public projection tables and deserves deployment testing against populated secret stores. It is recorded as an observation, not an additional must-fix finding.
+- The worktree was clean after verification; no product file was modified during this review.
 
 <promise>FAIL</promise>
