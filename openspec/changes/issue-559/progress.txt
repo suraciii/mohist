@@ -365,3 +365,8 @@
 - T-001 remains fully implemented in commit `d7e9d99d3`; later issue-559 slices are layered above it, so no duplicate production edit was necessary for this run.
 - Focused verification passed: `WorkflowAgentHandoffActivationSpecs` 11/11, `WorkflowAgentHandoffGrainSpecs` 8/8, `WorkflowAgentHandoffPreflightSpecs` 1/1, and `WorkflowAgentJobAdmissionSpecs` 6/6.
 - `npm test -w packages/runner` passed 1646/1646 in isolation. The first two concurrent `npm run test:fast` attempts encountered the known MSBuild file-lock and Runner cleanup-config timing flakes; the subsequent complete gate passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646.
+
+## T-002 verification on current workflow branch
+
+- The existing T-002 implementation was revalidated without additional production edits: `WorkflowAgentJobAdmissionSpecs` passed 6/6, covering shared per-Agent permit waiting and grant, admitted no-runner waiting, AgentJob ledger-poll claim with workflow lineage and frozen `expect`, explicit short deadline, 60-minute default, and the unchanged direct global backstop.
+- `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646. Preview SDK notices and concurrent build-copy retries were non-failing.
