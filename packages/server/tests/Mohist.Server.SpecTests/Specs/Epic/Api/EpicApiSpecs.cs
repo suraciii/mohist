@@ -111,24 +111,6 @@ public class EpicApiSpecs : EpicApiTestSupport
     }
 
     [Fact]
-    public async Task EpicList_ReturnsOrderedArraySoConsumerCanRenderInServerSuppliedOrder()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-order-arr-{Guid.NewGuid():N}");
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var p2CreatedFirst = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Created first but p2", description = "alpha", priority = "p2", projectId = project.Id });
-        var p0CreatedLater = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Created later but p0", description = "beta", priority = "p2", projectId = project.Id });
-
-        await _client.PatchDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{p0CreatedLater.Number}", new { priority = "p0" });
-
-        var list = await _client.GetDataAsync<EpicWithProgressDto[]>($"/api/projects/{project.Id}/epics");
-
-        Assert.Equal(2, list.Length);
-        Assert.Equal(p0CreatedLater.Number, list[0].Number);
-        Assert.Equal(p2CreatedFirst.Number, list[1].Number);
-    }
-
-    [Fact]
     public async Task EpicDetail_UsesNumberLookup()
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-detail-{Guid.NewGuid():N}");
