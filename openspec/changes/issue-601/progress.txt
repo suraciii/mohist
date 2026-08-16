@@ -2,4 +2,7 @@
 
 - 2026-08-14: Read the first self-review and repository lifecycle code. All five must-fix findings are accepted for correction; `self-review.md` remains untouched.
 - Completed design/spec/task updates: the migration is fail-closed, dirty/unconfirmed state and actions are concrete, WorkspaceVerification is separate from CommitReceipt, operator-fenced source adoption is defined, and all Workflow task terminal paths are covered.
-- In progress: run consistency checks, review the five findings one by one against the final artifacts, and commit the spec/task checkpoint.
+- Consistency checks passed: tasks JSON parses, all spec anchors resolve, dependencies are present and acyclic, and `git diff --check` is clean.
+- Final clarification added: clean stage/run transitions and the tracked/declared source-path distinction are explicit.
+- Verification: `npm run verify` was attempted but stopped at `tsx scripts/test-duration/canonical.ts` because `tsx` is not installed (`command 127`).
+- Final audit pending only: confirm `self-review.md` is unchanged since the first review and commit this note.
