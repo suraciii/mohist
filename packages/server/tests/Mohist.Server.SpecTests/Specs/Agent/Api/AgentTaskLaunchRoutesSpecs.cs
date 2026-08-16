@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
@@ -160,6 +162,176 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
+    public async Task TaskLaunch_TerminalRejectionArchivesDefinitionAndReplaysRecordedRejection()
+    {
+        var projectId = await CreateProjectAsync("task-terminal-rejection");
+        const string key = "task-terminal-rejection-key";
+        var body = new { prompt = "Terminal rejection task", model = "provider/task" };
+
+        try
+        {
+            _fixture.LaunchFaults.RejectNext(
+                LaunchParticipantGate.EnsureInitialLaunch,
+                "simulated_terminal_rejection");
+
+            using var first = await PostTaskAsync(projectId, body, key);
+            Assert.Equal(HttpStatusCode.Conflict, first.StatusCode);
+            var firstPayload = await first.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("launch_rejected", firstPayload.GetProperty("code").GetString());
+            Assert.Equal(
+                "simulated_terminal_rejection",
+                firstPayload.GetProperty("details").GetProperty("reason").GetString());
+
+            var entries = await AgentEntriesAsync(projectId);
+            var archived = Assert.Single(entries.EnumerateArray());
+            Assert.Equal("archived", archived.GetProperty("status").GetString());
+            var archivedName = archived.GetProperty("name").GetString();
+            Assert.Equal("Terminal rejection task", archivedName);
+
+            using var replay = await PostTaskAsync(projectId, body, key);
+            Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+            var replayPayload = await replay.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("launch_rejected", replayPayload.GetProperty("code").GetString());
+            Assert.Equal(
+                "simulated_terminal_rejection",
+                replayPayload.GetProperty("details").GetProperty("reason").GetString());
+            Assert.Single((await AgentEntriesAsync(projectId)).EnumerateArray());
+
+            using var namedRetry = await PostTaskAsync(
+                projectId,
+                new { prompt = "retry the task", name = archivedName, model = "provider/task" },
+                "task-terminal-rejection-name-retry");
+            Assert.Equal(HttpStatusCode.Conflict, namedRetry.StatusCode);
+            Assert.Equal(
+                "AGENT_NAME_CONFLICT",
+                (await namedRetry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+
+            using var derivedRetry = await PostTaskAsync(
+                projectId,
+                body,
+                "task-terminal-rejection-derived-retry");
+            Assert.Equal(HttpStatusCode.Created, derivedRetry.StatusCode);
+            var derivedData = (await derivedRetry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal("Terminal rejection task 2", derivedData.GetProperty("agentName").GetString());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.StopRejecting(LaunchParticipantGate.EnsureInitialLaunch);
+        }
+    }
+
+    [Fact]
+    public async Task TaskLaunch_ArchiveFailureIsRepairedByReminderBeforeReplayedRejection()
+    {
+        var projectId = await CreateProjectAsync("task-archive-recovery");
+        const string key = "task-archive-recovery-key";
+        var body = new { prompt = "Archive recovery task", model = "provider/task" };
+
+        try
+        {
+            _fixture.LaunchFaults.RejectNext(
+                LaunchParticipantGate.EnsureInitialLaunch,
+                "simulated_terminal_rejection");
+            _fixture.LaunchFaults.FailNext(LaunchParticipantGate.ArchiveDefinition);
+
+            using var crashed = await PostTaskAsync(projectId, body, key);
+            Assert.True(
+                (int)crashed.StatusCode >= 500,
+                $"unexpected status {crashed.StatusCode}; archive probes={_fixture.LaunchFaults.CommandIds(LaunchParticipantGate.ArchiveDefinition).Count}");
+
+            _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.ArchiveDefinition);
+            var coordinator = _fixture.Grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+                AgentLaunchCoordinatorCodec.KeyFor(projectId, key));
+            await coordinator.ReceiveReminder(AgentLaunchCoordinatorGrain.RecoveryReminderName, default);
+            Assert.True(
+                _fixture.LaunchFaults.CommandIds(LaunchParticipantGate.ArchiveDefinition).Count >= 2,
+                "the reminder must retry the archive participant after the injected failure");
+
+            var entries = await AgentEntriesAsync(projectId);
+            Assert.Equal("archived", Assert.Single(entries.EnumerateArray()).GetProperty("status").GetString());
+
+            using var replay = await PostTaskAsync(projectId, body, key);
+            Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+            Assert.Equal(
+                "launch_rejected",
+                (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.StopRejecting(LaunchParticipantGate.EnsureInitialLaunch);
+            _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.ArchiveDefinition);
+        }
+    }
+
+    [Fact]
+    public async Task TaskLaunch_SetupPendingDoesNotArchiveCreatedDefinition()
+    {
+        var projectId = await CreateProjectAsync("task-setup-pending");
+        const string key = "task-setup-pending-key";
+        var body = new { prompt = "Setup pending task", model = "provider/task" };
+
+        try
+        {
+            _fixture.LaunchFaults.FailNext(LaunchParticipantGate.EnsureInitialLaunch);
+            using var pending = await PostTaskAsync(projectId, body, key);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, pending.StatusCode);
+            Assert.Equal(
+                "launch_setup_pending",
+                (await pending.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+
+            var pendingAgent = Assert.Single((await AgentEntriesAsync(projectId)).EnumerateArray());
+            Assert.Equal("active", pendingAgent.GetProperty("status").GetString());
+
+            _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.EnsureInitialLaunch);
+            using var recovered = await PostTaskAsync(projectId, body, key);
+            Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
+            var recoveredAgent = Assert.Single((await AgentEntriesAsync(projectId)).EnumerateArray());
+            Assert.Equal("active", recoveredAgent.GetProperty("status").GetString());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.EnsureInitialLaunch);
+        }
+    }
+
+    [Fact]
+    public async Task DefinitionFirst_TerminalRejectionDoesNotArchiveExistingDefinition()
+    {
+        var projectId = await CreateProjectAsync("definition-first-rejection");
+        var agent = await CreateAgentAsync(projectId, "definition-first-agent");
+        const string key = "definition-first-rejection-key";
+
+        try
+        {
+            _fixture.LaunchFaults.RejectNext(
+                LaunchParticipantGate.EnsureInitialLaunch,
+                "simulated_terminal_rejection");
+
+            using var rejected = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "definition-first rejection" },
+                key);
+            Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+            Assert.Equal(
+                "launch_rejected",
+                (await rejected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+
+            using var shown = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}");
+            shown.EnsureSuccessStatusCode();
+            Assert.Equal(
+                "active",
+                (await shown.Content.ReadFromJsonAsync<JsonElement>())
+                    .GetProperty("data").GetProperty("status").GetString());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.StopRejecting(LaunchParticipantGate.EnsureInitialLaunch);
+        }
+    }
+
+    [Fact]
     public async Task TaskLaunch_UnknownContextMatchesDefinitionFirstNotFoundBoundary()
     {
         var projectId = await CreateProjectAsync("task-context");
@@ -189,8 +361,14 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
 
     private async Task<int> AgentCountAsync(string projectId)
     {
+        return (await AgentEntriesAsync(projectId)).GetArrayLength();
+    }
+
+    private async Task<JsonElement> AgentEntriesAsync(string projectId)
+    {
         using var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents?all=true");
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetArrayLength();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return payload.GetProperty("data").Clone();
     }
 }

@@ -166,7 +166,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         CancellationToken ct = default,
-        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null) =>
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        bool definitionCreatedByLaunch = false) =>
         LaunchIdempotentCoreAsync(
             agent,
             prompt,
@@ -180,7 +181,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ct: ct,
             definitionOverride: null,
             skipLaunchability: false,
-            attachmentResults: attachmentResults);
+            attachmentResults: attachmentResults,
+            definitionCreatedByLaunch: definitionCreatedByLaunch);
 
     private async Task<AgentLaunchResult> LaunchIdempotentCoreAsync(
         AgentInfo agent,
@@ -204,7 +206,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? pinnedRunnerId = null,
         AgentExecutionDefinition? definitionOverride = null,
         bool skipLaunchability = false,
-        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null)
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        bool definitionCreatedByLaunch = false)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(context);
@@ -328,7 +331,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentLinkEdgeId: parentLinkEdgeId,
             SpawnRequestFingerprint: spawnRequestFingerprint,
             WorkspaceRepositories: request.WorkspaceRepositories,
-            AttachmentResults: attachmentResults));
+            AttachmentResults: attachmentResults,
+            DefinitionCreatedByLaunch: definitionCreatedByLaunch));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,

@@ -154,6 +154,14 @@ public static class AgentTaskRoutes
             {
                 return AgentSessionLaunchRoutes.LaunchSetupPending(ex);
             }
+            catch (AgentSpawnPreplanRejectedException ex)
+            {
+                return AgentSessionLaunchRoutes.LaunchRejected(ex);
+            }
+            catch (AgentSpawnPostPlanRejectedException ex)
+            {
+                return AgentSessionLaunchRoutes.LaunchRejected(ex);
+            }
             catch (AgentExecutabilityException ex)
             {
                 return AgentSessionLaunchRoutes.ExecutabilityRejected(ex);
@@ -409,7 +417,8 @@ public static class AgentTaskRoutes
                     preMintedInputId,
                     preMintedTurnId,
                     ct,
-                    attachmentResults: attachmentBatch.Results);
+                    attachmentResults: attachmentBatch.Results,
+                    definitionCreatedByLaunch: true);
                 retainNewlyBoundAttachments = true;
                 return AgentSessionLaunchRoutes.AcceptedLaunch(
                     project.Id,
@@ -432,6 +441,14 @@ public static class AgentTaskRoutes
             {
                 retainNewlyBoundAttachments = true;
                 return AgentSessionLaunchRoutes.LaunchSetupPending(ex);
+            }
+            catch (AgentSpawnPreplanRejectedException ex)
+            {
+                return AgentSessionLaunchRoutes.LaunchRejected(ex);
+            }
+            catch (AgentSpawnPostPlanRejectedException ex)
+            {
+                return AgentSessionLaunchRoutes.LaunchRejected(ex);
             }
             catch (AgentExecutabilityException ex)
             {
