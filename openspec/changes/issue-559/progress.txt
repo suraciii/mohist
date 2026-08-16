@@ -473,3 +473,11 @@
 - Focused finalizer coverage passed: `AgentInvocationSettlementSpecs` 11/11 and `AgentInvocationSettlementInterruptionSpecs` 4/4.
 - `npm run test:fast` passed all lanes: scripts/Web/Runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and transient concurrent-build copy retries were non-failing.
 - No production edit was required during this run; this entry records the T-004 verification on the mandated workflow branch.
+
+## T-005 verification on current run
+
+- The T-005 cutover is present in commit `458079469`: `WorkflowItemTranslator` returns a delegated handoff outcome for `mohist/agent`, the handoff client binds the immutable TaskRun invocation linkage before activation, and `DispatchService` leaves the AgentJob ledger as the sole Runner work owner without a Workflow dispatch snapshot.
+- The named-session decision is per-attempt lineage: `session` is preserved as the logical session label (defaulting to the work id), while each attempt receives its own minted AgentSession, SessionInput, and AgentTurn and does not continue an earlier invocation.
+- Regression coverage passed: `WorkflowItemTranslatorSpecs` 47/47, `DispatchServiceReconciliationSpecs` 14/14, `WorkflowAgentDispatchCutoverSpecs` 1/1, handoff activation 11/11, shared AgentJob admission 6/6, terminal finalization 11/11 plus interruption 4/4, and workflow terminal delivery 7/7.
+- Full Server SpecTests passed 3960/3960. `npm run test:fast` passed all lanes: scripts/web/runner typechecks, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET notices and concurrent build-copy retry warnings were non-failing.
+- No duplicate production edit was required on this run; this entry records the T-005 verification on `mohist/run-wr_9e0b77984fdc4ed195c9403e53cbf393`.
