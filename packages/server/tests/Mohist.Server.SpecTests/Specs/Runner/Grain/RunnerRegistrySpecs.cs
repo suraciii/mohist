@@ -192,13 +192,9 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         {
             ["pi"] = new(
                 Models: ["openai/model"],
-                Variants: new Dictionary<string, string[]>
-                {
-                    ["openai/model"] = ["balanced"],
-                },
-                ReasoningEfforts: new Dictionary<string, string[]>
-                {
-                    ["openai/model"] = ["high"],
+                    Variants: new Dictionary<string, string[]>
+                    {
+                        ["openai/model"] = ["balanced", "high"],
                 },
                 SupportsReasoningEffort: true,
                 Complete: true,
@@ -216,8 +212,7 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         var entry = Assert.Single(info!.RuntimeCatalogs!, pair => pair.Key == "pi").Value;
         Assert.NotNull(entry.Models);
         Assert.Equal(["openai/model"], entry.Models);
-        Assert.Equal(["balanced"], entry.Variants!["openai/model"]);
-        Assert.Equal(["high"], entry.ReasoningEfforts!["openai/model"]);
+        Assert.Equal(["balanced", "high"], entry.Variants!["openai/model"]);
         Assert.True(entry.SupportsReasoningEffort);
         Assert.True(entry.Complete);
         Assert.Equal("catalog-rev-1", entry.CapabilityRevision);

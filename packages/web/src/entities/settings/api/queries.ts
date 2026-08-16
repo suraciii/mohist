@@ -139,12 +139,11 @@ export function availableModelIdsQueryOptions(
   return {
     queryKey: ['opencode-model-ids', normalized, projectId],
     queryFn: async () => {
-      if (normalized === null) return { models: [], modelVariants: {}, reasoningEfforts: {} }
+      if (normalized === null) return { models: [], modelVariants: {} }
       const response = await getModels(projectId, normalized)
       return {
         models: response.models,
         modelVariants: response.modelVariants ?? {},
-        reasoningEfforts: response.reasoningEfforts ?? {},
       }
     },
     enabled: !!projectId && normalized !== null,
@@ -156,7 +155,6 @@ export function useAvailableModelIds(runtime: AgentRuntime | string | null = DEF
   return useQuery<{
     models: string[]
     modelVariants: OpencodeModelVariants
-    reasoningEfforts: import('./client').ModelReasoningEfforts
   }>(availableModelIdsQueryOptions(projectId, runtime))
 }
 

@@ -141,10 +141,9 @@ public sealed record ActionCatalogTombstone(
 public sealed record RuntimeCatalogEntry(
     [property: Id(0)] string[]? Models = null,
     [property: Id(1)] Dictionary<string, string[]>? Variants = null,
-    [property: Id(2)] Dictionary<string, string[]>? ReasoningEfforts = null,
-    [property: Id(3)] bool? SupportsReasoningEffort = null,
-    [property: Id(4)] bool? Complete = null,
-    [property: Id(5)] string? CapabilityRevision = null);
+    [property: Id(2)] bool? SupportsReasoningEffort = null,
+    [property: Id(3)] bool? Complete = null,
+    [property: Id(4)] string? CapabilityRevision = null);
 
 /// <summary>
 /// Immutable evidence used at the Runner-to-owner claim boundary. The

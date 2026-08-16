@@ -45,11 +45,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
                     Models: ["openai/gpt-5.5"],
                     Variants: new Dictionary<string, string[]>
                     {
-                        ["openai/gpt-5.5"] = ["balanced"],
-                    },
-                    ReasoningEfforts: new Dictionary<string, string[]>
-                    {
-                        ["openai/gpt-5.5"] = ["high"],
+                        ["openai/gpt-5.5"] = ["balanced", "high"],
                     },
                     SupportsReasoningEffort: true,
                     Complete: true,

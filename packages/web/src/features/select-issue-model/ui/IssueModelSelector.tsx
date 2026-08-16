@@ -80,6 +80,13 @@ function agentVariant(vars?: Record<string, unknown> | null): string | null {
   return typeof variant === 'string' && variant.length > 0 ? variant : null
 }
 
+function agentReasoningEffort(vars?: Record<string, unknown> | null): string | null {
+  const agent = vars?.agent
+  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return null
+  const effort = (agent as Record<string, unknown>).reasoningEffort
+  return typeof effort === 'string' && effort.length > 0 ? effort : null
+}
+
 function stageModelMap(
   stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null,
 ): Record<string, string> {
@@ -100,6 +107,18 @@ function stageVariantMap(
   for (const [stage, stageVars] of Object.entries(stages)) {
     const variant = agentVariant(stageVars?.vars)
     if (variant) result[stage] = variant
+  }
+  return result
+}
+
+function stageReasoningEffortMap(
+  stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null,
+): Record<string, string> {
+  const result: Record<string, string> = {}
+  if (!stages) return result
+  for (const [stage, stageVars] of Object.entries(stages)) {
+    const effort = agentReasoningEffort(stageVars?.vars)
+    if (effort) result[stage] = effort
   }
   return result
 }
@@ -204,13 +223,16 @@ export function IssueModelSelector({
   const { data: availableModels, isLoading, error } = catalog
   const { data: opencodeModelData } = useOpencodeModel()
   const modelVariantsMap = availableModels?.modelVariants ?? {}
+  const levelMap = modelVariantsMap
   const [searchQuery, setSearchQuery] = useState('')
   const chipRefs = useRef<Record<string, Array<HTMLButtonElement | null>>>({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
   const [localStageVariants, setLocalStageVariants] = useState<Record<string, string>>({})
+  const [localStageReasoningEfforts, setLocalStageReasoningEfforts] = useState<Record<string, string>>({})
   const [localWorkflowModel, setLocalWorkflowModel] = useState<string | null>(null)
   const [localWorkflowVariant, setLocalWorkflowVariant] = useState<string | null>(null)
+  const [localWorkflowReasoningEffort, setLocalWorkflowReasoningEffort] = useState<string | null>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
 
   useEffect(() => {
@@ -218,8 +240,10 @@ export function IssueModelSelector({
     if (!projectId) {
       setLocalWorkflowModel(null)
       setLocalWorkflowVariant(null)
+      setLocalWorkflowReasoningEffort(null)
       setLocalStageModels(currentStageModels ?? {})
       setLocalStageVariants({})
+      setLocalStageReasoningEfforts({})
       return
     }
 
@@ -228,14 +252,17 @@ export function IssueModelSelector({
         if (cancelled) return
         setLocalWorkflowModel(agentModel(variables.vars))
         setLocalWorkflowVariant(agentVariant(variables.vars))
+        setLocalWorkflowReasoningEffort(agentReasoningEffort(variables.vars))
         setLocalStageModels(stageModelMap(variables.stages))
         setLocalStageVariants(stageVariantMap(variables.stages))
+        setLocalStageReasoningEfforts(stageReasoningEffortMap(variables.stages))
       })
       .catch((err) => {
         if (cancelled) return
         console.error('Failed to load issue workflow variables:', err)
         setLocalStageModels(currentStageModels ?? {})
         setLocalStageVariants({})
+        setLocalStageReasoningEfforts({})
       })
 
     return () => {
@@ -265,9 +292,15 @@ export function IssueModelSelector({
     async (modelId: string) => {
       try {
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: modelId, variant: null }, projectId)
+        await patchIssueWorkflowDefinitionVar(
+          issueNumber,
+          'agent',
+          { model: modelId, variant: null, ...(localWorkflowReasoningEffort ? { reasoningEffort: null } : {}) },
+          projectId,
+        )
         setLocalWorkflowModel(modelId)
         setLocalWorkflowVariant(null)
+        setLocalWorkflowReasoningEffort(null)
         addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
         queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
@@ -283,9 +316,15 @@ export function IssueModelSelector({
     async (modelId: string, variant: string) => {
       try {
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: modelId, variant }, projectId)
+        await patchIssueWorkflowDefinitionVar(
+          issueNumber,
+          'agent',
+          { model: modelId, variant, ...(localWorkflowReasoningEffort ? { reasoningEffort: null } : {}) },
+          projectId,
+        )
         setLocalWorkflowModel(modelId)
         setLocalWorkflowVariant(variant)
+        setLocalWorkflowReasoningEffort(null)
         addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
         queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
@@ -297,12 +336,53 @@ export function IssueModelSelector({
     [issueNumber, projectId, queryClient],
   )
 
+  const handleSelectWithReasoningEffort = useCallback(
+    async (modelId: string, effort: string) => {
+      try {
+        if (!projectId) throw new Error('Project is required')
+        await patchIssueWorkflowDefinitionVar(
+          issueNumber,
+          'agent',
+          { model: modelId, variant: null, reasoningEffort: effort },
+          projectId,
+        )
+        setLocalWorkflowModel(modelId)
+        setLocalWorkflowVariant(null)
+        setLocalWorkflowReasoningEffort(effort)
+        addRecent(modelId)
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+        setPopoverOpen(false)
+      } catch (err) {
+        console.error('Failed to update issue model reasoning effort:', err)
+      }
+    },
+    [issueNumber, projectId, queryClient],
+  )
+
+  const handleSelectLevel = useCallback(
+    (modelId: string, level: string | null) => {
+      if (selectedRuntime === 'pi') {
+        void handleSelectWithReasoningEffort(modelId, level!)
+      } else {
+        void handleSelectWithVariant(modelId, level ?? '')
+      }
+    },
+    [handleSelectWithReasoningEffort, handleSelectWithVariant, selectedRuntime],
+  )
+
   const handleClear = useCallback(async () => {
     try {
       if (!projectId) throw new Error('Project is required')
-      await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null, variant: null }, projectId)
+      await patchIssueWorkflowDefinitionVar(
+        issueNumber,
+        'agent',
+        { model: null, variant: null, ...(localWorkflowReasoningEffort ? { reasoningEffort: null } : {}) },
+        projectId,
+      )
       setLocalWorkflowModel(null)
       setLocalWorkflowVariant(null)
+      setLocalWorkflowReasoningEffort(null)
       queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
       queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       setPopoverOpen(false)
@@ -320,11 +400,16 @@ export function IssueModelSelector({
           issueNumber,
           stage,
           'agent',
-          { model: modelId, variant: null },
+          { model: modelId, variant: null, ...(localStageReasoningEfforts[stage] ? { reasoningEffort: null } : {}) },
           projectId,
         )
         setLocalStageModels(updated)
         setLocalStageVariants((prev) => {
+          const next = { ...prev }
+          delete next[stage]
+          return next
+        })
+        setLocalStageReasoningEfforts((prev) => {
           const next = { ...prev }
           delete next[stage]
           return next
@@ -348,11 +433,16 @@ export function IssueModelSelector({
           issueNumber,
           stage,
           'agent',
-          { model: null, variant: null },
+          { model: null, variant: null, ...(localStageReasoningEfforts[stage] ? { reasoningEffort: null } : {}) },
           projectId,
         )
         setLocalStageModels(updated)
         setLocalStageVariants((prev) => {
+          const next = { ...prev }
+          delete next[stage]
+          return next
+        })
+        setLocalStageReasoningEfforts((prev) => {
           const next = { ...prev }
           delete next[stage]
           return next
@@ -375,7 +465,7 @@ export function IssueModelSelector({
             issueNumber,
             stage,
             'agent',
-            { model: modelId, variant },
+            { model: modelId, variant, ...(localStageReasoningEfforts[stage] ? { reasoningEffort: null } : {}) },
             projectId,
           )
         } else {
@@ -383,7 +473,7 @@ export function IssueModelSelector({
             issueNumber,
             stage,
             'agent',
-            { model: modelId, variant: null },
+            { model: modelId, variant: null, ...(localStageReasoningEfforts[stage] ? { reasoningEffort: null } : {}) },
             projectId,
           )
         }
@@ -394,10 +484,47 @@ export function IssueModelSelector({
           else delete next[stage]
           return next
         })
+        setLocalStageReasoningEfforts((prev) => {
+          const next = { ...prev }
+          delete next[stage]
+          return next
+        })
         queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
         queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       } catch (err) {
         console.error('Failed to update stage model variant:', err)
+      }
+    },
+    [issueNumber, localStageReasoningEfforts, projectId, queryClient],
+  )
+
+  const handleSetStageReasoningEffort = useCallback(
+    async (stage: string, modelId: string, effort: string | null) => {
+      try {
+        if (!projectId) throw new Error('Project is required')
+        await patchIssueWorkflowStageDefinitionVar(
+          issueNumber,
+          stage,
+          'agent',
+          { model: modelId, variant: null, reasoningEffort: effort },
+          projectId,
+        )
+        setLocalStageModels((prev) => ({ ...prev, [stage]: modelId }))
+        setLocalStageVariants((prev) => {
+          const next = { ...prev }
+          delete next[stage]
+          return next
+        })
+        setLocalStageReasoningEfforts((prev) => {
+          const next = { ...prev }
+          if (effort) next[stage] = effort
+          else delete next[stage]
+          return next
+        })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      } catch (err) {
+        console.error('Failed to update stage model reasoning effort:', err)
       }
     },
     [issueNumber, projectId, queryClient],
@@ -405,7 +532,7 @@ export function IssueModelSelector({
 
   const handleChipKeyDown = useCallback(
     (event: React.KeyboardEvent, modelId: string, chipIndex: number) => {
-      const variants = variantListFor(modelId, modelVariantsMap)
+      const variants = variantListFor(modelId, levelMap)
       if (variants.length === 0) return
 
       if (event.key === 'ArrowLeft') {
@@ -423,10 +550,10 @@ export function IssueModelSelector({
         }
       } else if (event.key === 'Enter') {
         event.preventDefault()
-        handleSelectWithVariant(modelId, variants[chipIndex])
+        handleSelectLevel(modelId, variants[chipIndex])
       }
     },
-    [modelVariantsMap, handleSelectWithVariant],
+    [levelMap, handleSelectLevel],
   )
 
   const handleCommandKeyDown = useCallback(
@@ -444,13 +571,13 @@ export function IssueModelSelector({
       const activeModelId = activeItem.getAttribute('data-model-id')
       if (!activeModelId) return
 
-      const variants = variantListFor(activeModelId, modelVariantsMap)
+      const variants = variantListFor(activeModelId, levelMap)
       if (variants.length === 0) return
 
       event.preventDefault()
       chipRefs.current[activeModelId]?.[0]?.focus()
     },
-    [modelVariantsMap],
+    [levelMap],
   )
 
   const groupedModels = useMemo(() => {
@@ -493,7 +620,11 @@ export function IssueModelSelector({
               models={[]}
               onChange={() => undefined}
               modelVariants={resolvedVariant ? { [resolvedModelId]: [resolvedVariant] } : {}}
+              modelReasoningEfforts={
+                localWorkflowReasoningEffort ? { [resolvedModelId]: [localWorkflowReasoningEffort] } : {}
+              }
               valueVariant={resolvedVariant}
+              valueReasoningEffort={localWorkflowReasoningEffort}
               disabled
             />
           </div>
@@ -517,7 +648,11 @@ export function IssueModelSelector({
                         onChange={() => undefined}
                         size="compact"
                         modelVariants={stageVariant ? { [stageModel]: [stageVariant] } : {}}
+                        modelReasoningEfforts={
+                          localStageReasoningEfforts[stage] ? { [stageModel]: [localStageReasoningEfforts[stage]] } : {}
+                        }
                         valueVariant={stageVariant}
+                        valueReasoningEffort={localStageReasoningEfforts[stage] ?? null}
                         disabled
                       />
                     </div>
@@ -616,7 +751,7 @@ export function IssueModelSelector({
                 >
                   {recentModels.map((modelId) => {
                     if (!chipRefs.current[modelId]) chipRefs.current[modelId] = []
-                    const variants = variantListFor(modelId, modelVariantsMap)
+                    const variants = variantListFor(modelId, levelMap)
                     const isSelected = modelId === configuredModel
                     return (
                       <CommandRoot.Item
@@ -636,12 +771,12 @@ export function IssueModelSelector({
                         {variants.length > 0 && (
                           <ModelVariantChips
                             modelId={modelId}
-                            modelVariants={modelVariantsMap}
-                            activeVariant={isSelected ? localWorkflowVariant : null}
+                            modelVariants={levelMap}
+                            activeVariant={isSelected ? (localWorkflowReasoningEffort ?? localWorkflowVariant) : null}
                             baseTestId={`issue-coder-model-variant-${modelId}`}
                             chipRefs={chipRefs.current[modelId]}
                             onChipKeyDown={(e, idx) => handleChipKeyDown(e, modelId, idx)}
-                            onSelect={(id, variant) => handleSelectWithVariant(id, variant ?? '')}
+                            onSelect={handleSelectLevel}
                           />
                         )}
                       </CommandRoot.Item>
@@ -665,7 +800,7 @@ export function IssueModelSelector({
                   >
                     {models.map((modelId) => {
                       if (!chipRefs.current[modelId]) chipRefs.current[modelId] = []
-                      const variants = variantListFor(modelId, modelVariantsMap)
+                      const variants = variantListFor(modelId, levelMap)
                       const isSelected = modelId === configuredModel
                       return (
                         <CommandRoot.Item
@@ -685,12 +820,12 @@ export function IssueModelSelector({
                           {variants.length > 0 && (
                             <ModelVariantChips
                               modelId={modelId}
-                              modelVariants={modelVariantsMap}
-                              activeVariant={isSelected ? localWorkflowVariant : null}
+                              modelVariants={levelMap}
+                              activeVariant={isSelected ? (localWorkflowReasoningEffort ?? localWorkflowVariant) : null}
                               baseTestId={`issue-coder-model-variant-${modelId}`}
                               chipRefs={chipRefs.current[modelId]}
                               onChipKeyDown={(e, idx) => handleChipKeyDown(e, modelId, idx)}
-                              onSelect={(id, variant) => handleSelectWithVariant(id, variant ?? '')}
+                              onSelect={handleSelectLevel}
                             />
                           )}
                         </CommandRoot.Item>
@@ -747,8 +882,13 @@ export function IssueModelSelector({
                       allowClear={!!stageModel}
                       size="compact"
                       modelVariants={stageVariants}
+                      modelReasoningEfforts={selectedRuntime === 'pi' ? stageVariants : undefined}
                       valueVariant={stageVariant}
+                      valueReasoningEffort={localStageReasoningEfforts[stage] ?? null}
                       onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, modelId, variant)}
+                      onChangeModelReasoningEffort={(modelId, effort) =>
+                        handleSetStageReasoningEffort(stage, modelId, effort)
+                      }
                     />
                   </div>
                 </div>

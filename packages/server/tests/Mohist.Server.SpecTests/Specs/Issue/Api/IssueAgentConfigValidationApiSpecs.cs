@@ -62,7 +62,7 @@ public class IssueAgentConfigValidationApiSpecs
         Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
         var error = body.GetProperty("error").GetString() ?? string.Empty;
         Assert.Contains($"agentConfig.{forbiddenKey}", error);
-        Assert.Contains("model, variant", error);
+        Assert.Contains("model, reasoningEffort, variant", error);
     }
 
     [Fact]
