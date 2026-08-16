@@ -133,6 +133,22 @@ describe('AgentSessionComposerPage', () => {
     expect(state.taskCalls[0].idempotencyKey).toBeTruthy()
   })
 
+  it('retains the task-first idempotency key when a failed launch is retried', async () => {
+    state.launchError = { error: 'response lost' }
+    state.launchFailuresRemaining = 1
+    renderPage()
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Retry this task' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
+
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => expect(state.taskCalls).toHaveLength(2))
+
+    expect(state.taskCalls[0].idempotencyKey).toBeTruthy()
+    expect(state.taskCalls[1].idempotencyKey).toBe(state.taskCalls[0].idempotencyKey)
+  })
+
   it('requires catalog-backed Runtime and Model when the Project has no default', async () => {
     state.defaultExecutionConfig = null
     server.use(

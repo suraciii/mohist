@@ -27,6 +27,7 @@ import {
   type AgentRuntime,
 } from '../../../entities/settings'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
 import {
   AttachmentResults,
@@ -398,7 +399,7 @@ export function AgentSessionComposerPage({
       else if (ref.type === 'workspace') context.workspacePath = ref.value
     }
     const hasContext = Object.keys(context).length > 0
-    const idempotencyKey = (launchKeyRef.current ??= crypto.randomUUID())
+    const idempotencyKey = (launchKeyRef.current ??= createIdempotencyKey())
     const onSuccess = (data: AgentSessionLaunchResponse) => {
       const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
       const sessionPath =

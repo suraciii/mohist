@@ -237,3 +237,11 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   Server unit tests, 68 architecture tests, 178 workflow tests, 1,859 CLI
   tests, 4,734 Web tests, and 1,639 Runner tests); the complete Server spec
   assembly passed 3,948/3,948 and `npm run format:check` passed.
+
+## T-004 follow-up verification
+
+- Replaced the composer’s direct `crypto.randomUUID()` call with the shared
+  fallback-safe `createIdempotencyKey()` helper; task-only retry coverage now
+  proves the same caller key is retained after a failed response.
+- Web typecheck, FSD boundaries, and test-boundary checks pass. Focused T-004
+  coverage passes 153 tests; the full Web suite passes 4,735 tests.
