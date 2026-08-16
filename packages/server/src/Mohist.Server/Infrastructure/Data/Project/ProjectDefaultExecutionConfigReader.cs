@@ -18,7 +18,9 @@ public sealed class ProjectDefaultExecutionConfigReader : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
-    private readonly Dictionary<string, ExecutionConfigHint?> _cache = new(StringComparer.Ordinal);
+    private string? _cachedProjectId;
+    private ExecutionConfigHint? _cached;
+    private bool _read;
 
     public ProjectDefaultExecutionConfigReader(IDbContextFactory<MohistDbContext> dbFactory)
     {
@@ -29,8 +31,8 @@ public sealed class ProjectDefaultExecutionConfigReader : IScopedService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
 
-        if (_cache.TryGetValue(projectId, out var cached))
-            return cached;
+        if (_read && string.Equals(_cachedProjectId, projectId, StringComparison.Ordinal))
+            return _cached;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var json = await db.Projects.AsNoTracking()
@@ -38,8 +40,9 @@ public sealed class ProjectDefaultExecutionConfigReader : IScopedService
             .Select(p => p.DefaultExecutionConfigJson)
             .FirstOrDefaultAsync(ct);
 
-        var result = ExecutionConfigJson.Deserialize(json);
-        _cache[projectId] = result;
-        return result;
+        _cachedProjectId = projectId;
+        _cached = ExecutionConfigJson.Deserialize(json);
+        _read = true;
+        return _cached;
     }
 }
