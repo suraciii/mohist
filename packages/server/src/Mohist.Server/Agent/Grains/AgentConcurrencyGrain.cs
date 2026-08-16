@@ -244,17 +244,11 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
     }
 
     /// <summary>
-    /// Fires the pending permit-grant notifications without blocking the
-    /// current gate turn. A notified job owner re-enters the gate during
-    /// its admission (<c>AcquireAsync</c> / <c>MarkDispatchedAsync</c>), so
-    /// delivering inline from inside the gate's own turn would queue that
-    /// re-entry behind the delivery call and deadlock the whole release
-    /// chain. The delivery task starts on the gate's execution context,
-    /// suspends at the first owner call, and its continuation — the durable
-    /// notification removal — resumes on the same context after the owner
-    /// acknowledges, so every state mutation stays serialized on the grain
-    /// scheduler. A failed delivery keeps the notification persisted; the
-    /// reconciliation reminder re-drains it.
+    /// Fires pending permit-grant notifications without blocking the current
+    /// gate turn. A notified owner re-enters the gate during admission, so
+    /// delivering inline would deadlock the release chain. The callback is
+    /// deferred, and its completion is sent back as a normal grain command so
+    /// persistent state is updated by a serialized gate turn.
     /// </summary>
     private void SchedulePendingNotificationDelivery()
     {
@@ -357,9 +351,42 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         return waiters;
     }
 
+    public async Task AcknowledgePendingNotificationAsync(AgentConcurrencyPendingNotification pending)
+    {
+        var removed = _state.State.PendingNotifications.RemoveAll(notification =>
+            string.Equals(notification.WaiterId, pending.WaiterId, StringComparison.Ordinal)
+            && notification.Generation == pending.Generation
+            && string.Equals(notification.PermitId, pending.PermitId, StringComparison.Ordinal));
+        if (removed == 0)
+            return;
+
+        await _state.WriteStateAsync();
+    }
+
+    public async Task RecordPendingNotificationFailureAsync(AgentConcurrencyPendingNotification pending)
+    {
+        var index = _state.State.PendingNotifications.FindIndex(notification =>
+            string.Equals(notification.WaiterId, pending.WaiterId, StringComparison.Ordinal)
+            && notification.Generation == pending.Generation
+            && string.Equals(notification.PermitId, pending.PermitId, StringComparison.Ordinal));
+        if (index < 0)
+            return;
+
+        _state.State.PendingNotifications[index] = _state.State.PendingNotifications[index] with
+        {
+            Attempts = _state.State.PendingNotifications[index].Attempts + 1,
+            LastAttemptAt = _timeProvider.GetUtcNow(),
+        };
+        await _state.WriteStateAsync();
+    }
+
     private async Task ProcessPendingNotificationsAsync()
     {
-        foreach (var pending in _state.State.PendingNotifications.ToArray())
+        // Snapshot before the first await. All later state changes go through
+        // grain commands so this deferred task never writes persistent state
+        // concurrently with another gate turn.
+        var pendingNotifications = _state.State.PendingNotifications.ToArray();
+        foreach (var pending in pendingNotifications)
         {
             try
             {
@@ -374,33 +401,30 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
                         .ConcurrencyPermitGrantedAsync(pending.Token, pending.PermitId, pending.DispatchId);
                 }
 
-                _state.State.PendingNotifications.RemoveAll(notification =>
-                    string.Equals(notification.WaiterId, pending.WaiterId, StringComparison.Ordinal)
-                    && notification.Generation == pending.Generation
-                    && string.Equals(notification.PermitId, pending.PermitId, StringComparison.Ordinal));
-                await _state.WriteStateAsync();
+                await _grains.GetGrain<IAgentConcurrencyGrain>(Key)
+                    .AcknowledgePendingNotificationAsync(pending);
             }
             catch (Exception ex)
             {
-                var current = _state.State.PendingNotifications.FirstOrDefault(notification =>
-                    string.Equals(notification.WaiterId, pending.WaiterId, StringComparison.Ordinal)
-                    && notification.Generation == pending.Generation);
-                if (current is null)
-                    continue;
-
-                _state.State.PendingNotifications.Remove(current);
-                _state.State.PendingNotifications.Add(current with
+                try
                 {
-                    Attempts = current.Attempts + 1,
-                    LastAttemptAt = _timeProvider.GetUtcNow(),
-                });
+                    await _grains.GetGrain<IAgentConcurrencyGrain>(Key)
+                        .RecordPendingNotificationFailureAsync(pending);
+                }
+                catch (Exception persistenceException)
+                {
+                    _log.LogWarning(
+                        persistenceException,
+                        "Agent concurrency gate {Key} could not persist a pending notification failure",
+                        Key);
+                }
+
                 _log.LogWarning(
                     ex,
                     "Agent concurrency permit grant notification failed for {OwnerKind} {OwnerId}, permit {PermitId}; durable retry retained",
                     pending.OwnerKind,
                     pending.OwnerId,
                     pending.PermitId);
-                await _state.WriteStateAsync();
             }
         }
     }

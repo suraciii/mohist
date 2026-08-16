@@ -83,6 +83,8 @@ public interface IAgentConcurrencyGrain : IGrainWithStringKey, IRemindable
     Task ReleaseAsync(string projectId, string agentId, string token, string? permitId = null, long? generation = null, string? waiterId = null);
     Task<AgentConcurrencyPermit?> GetPermitAsync(string token);
     Task<AgentConcurrencySnapshot> GetSnapshotAsync();
+    Task AcknowledgePendingNotificationAsync(AgentConcurrencyPendingNotification pending);
+    Task RecordPendingNotificationFailureAsync(AgentConcurrencyPendingNotification pending);
     Task ConfirmDispatchPendingAsync(string projectId, string agentId, string token, string permitId, string dispatchId);
     Task MarkDispatchedAsync(string projectId, string agentId, string token, string permitId, string dispatchId);
     Task MarkExecutingAsync(string projectId, string agentId, string token, string permitId, string dispatchId);
