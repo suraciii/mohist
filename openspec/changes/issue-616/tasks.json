@@ -1,0 +1,70 @@
+{
+  "project": "mohist-local",
+  "description": "Apply authoritative Slack Bot-message admission across the adapter, Agent Connection ingress, and Mohist App Manager ingress without durable or user-facing side effects.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Propagate authoritative Slack sender classification through adapter transports",
+      "spec": "specs/slack-bot-message-admission/spec.md#slack-text-events-carry-an-authoritative-sender-classification",
+      "description": "Make Slack adapter normalization the source of truth for the lower-case human, bot, and unknown sender classifications, with Bot markers taking precedence over a supplied user ID. Preserve the classification in the complete Connection envelope and the reduced Manager transport envelope, and make Socket Mode treat a successful ignored result as an acknowledged, non-user-facing delivery. Add adapter normalization, event-flow, and transport serialization regression coverage.",
+      "acceptanceCriteria": [
+        "`normalizeSocketEvent` classifies events with `bot_id` or `subtype = bot_message` as `bot` even when `user` is present, classifies a non-empty user without Bot markers as `human`, and classifies missing user and missing Bot markers as `unknown` with `senderSlackUserId = null`.",
+        "Every normalized Slack text envelope includes `senderKind`; Connection requests retain it unchanged, and Manager transport requests include the same `senderKind` while retaining a null sender ID for a Bot event without `user`.",
+        "When target ingress returns `{ kind: \"ignored\" }`, `SlackAdapter.handleEvent` acknowledges the Socket Mode event and emits no Web-client rejection or acknowledgement; transport and Server failures retain the existing unacknowledged behavior.",
+        "Adapter tests cover a Mohist Manager App Bot without `user`, a Mohist Agent App Bot including another Bot's message, human classification, explicit unknown classification, ignored-result acknowledgement, and no user-facing Slack post.",
+        "Transport tests assert the serialized Manager request body preserves the source envelope's `senderKind`, and the focused Slack adapter test suite passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Slack adapter normalization, envelope/transport contracts, Socket acknowledgement flow, and passing adapter and transport regression tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the wire values exactly `human`, `bot`, and `unknown`. The Server contract and adapter should be released together; do not locally drop Bot events before Server admission."
+    },
+    {
+      "id": "T-002",
+      "title": "Ignore Bot-authored events before Agent Connection work admission",
+      "spec": "specs/slack-bot-message-admission/spec.md#bot-admission-precedes-human-identity-and-ingress-authorization",
+      "description": "Update the Agent Connection ingress boundary to admit a valid Bot-classified Slack event as an ignored result immediately after operator authentication, lease validation, and non-side-effecting message identity validation. Return before disabled-Connection auditing, owner or access checks, routing, claim handling, session lookup, attachment binding, inbox admission, and outbox creation while preserving existing human and unknown-sender behavior.",
+      "acceptanceCriteria": [
+        "A valid Bot-classified channel mention or DM returns `{ kind: \"ignored\" }` without requiring a human sender ID and without evaluating owner/access policy, channel or DM routing, claims, session state, attachments, or durable input admission.",
+        "A Bot event received for a disabled Connection is ignored before disabled-event auditing, and a Bot follow-up in an already-bound thread or existing DM session leaves session mappings, SessionInput history, pending outbox state, and all other baseline work state unchanged.",
+        "Agent Connection ingress creates no provider inbox row, SessionInput, AgentJob, Agent Session, follow-up, thread or DM binding, disabled-discarded audit row, outbox row, or user-facing Slack response for an ignored Bot event; a unique sentinel message is not persisted or logged as work input.",
+        "Existing human channel mentions, DMs, and bound-thread follow-ups retain their current authorization and routing behavior, while explicit `unknown` events retain their current ignored or rejected non-work behavior and are not promoted to human.",
+        "Focused Agent Connection specs cover an Agent App Bot mention from another Bot, a Bot DM, a disabled Connection, a bound-thread or existing-session follow-up, no-side-effects assertions, and human/unknown regression cases; the Slack Server test suite passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Agent Connection Slack ingress with early Bot admission and passing ingress, disabled-Connection, follow-up, human, unknown, and no-side-effects regression tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep the Bot guard before disabled-Connection auditing and every operation that can mutate work state. A valid Bot event still passes transport authentication, lease validation, and stable message identity validation."
+    },
+    {
+      "id": "T-003",
+      "title": "Ignore Manager Bot events before actor and conversation admission",
+      "spec": "specs/slack-bot-message-admission/spec.md#bot-admission-precedes-human-identity-and-ingress-authorization",
+      "description": "Carry sender classification through the Manager HTTP route and ingress service so a valid Bot-classified direct message without `senderSlackUserId` returns an ignored result before Manager actor authentication, enrollment or access checks, claim consumption, inbox admission, session processing, and outbox delivery. Preserve explicit unknown semantics and all existing human Manager conversation behavior, with focused no-side-effects coverage.",
+      "acceptanceCriteria": [
+        "The Manager route does not reject a valid Bot-classified message merely because `senderSlackUserId` is absent; after transport authentication, lease validation, and stable identity validation it returns an ignored result without authenticating a Manager actor or consuming a claim.",
+        "Manager Bot admission occurs before enrollment or access authorization, actor lookup, claim handling, conversation or session processing, provider inbox insertion, SessionInput, AgentJob, Agent Session, follow-up, session mapping, or outbox creation, and `SlackManagerIngressResult.Ignored()` contains no inbox identifier or delivery-intent flag.",
+        "A Manager App Bot message with a unique sentinel text creates no inbox or work records and does not persist or log the text as work input; it produces no user-facing Slack response, while repeated delivery remains harmless.",
+        "Human Manager messages with `senderKind = human` retain existing claim, authorization, conversation, SessionInput, and response-delivery behavior, and explicit `unknown` messages retain their existing non-human rejection or ignore behavior rather than being inferred as human from an ID.",
+        "Focused Manager route and service specs cover a Bot direct message without sender ID, explicit unknown handling, human routing, no actor or claim interaction, no-side-effects assertions, and the ignored result shape; the Slack Server test suite passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Manager Slack ingress contract, route, and service with early Bot admission plus passing Manager ingress and no-side-effects regression tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "The shared Server-side sender-kind parser may be used to keep route semantics identical. Any compatibility fallback for omitted senderKind must never override an explicit `unknown` value."
+    }
+  ]
+}
