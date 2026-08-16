@@ -970,7 +970,7 @@ export class RunnerHost {
     }
   }
 
-  private async persistInterrupted(entry: InFlightEntry, operationId: string): Promise<boolean> {
+  private async persistInterrupted(entry: InFlightEntry, operationId: string, deliveryBudgetMs?: number): Promise<boolean> {
     if (entry.terminalPersisted) return true
     const key = workKey(entry.work)
     const binding = this.runtimeTurnRegistry.get(key)
@@ -1003,7 +1003,11 @@ export class RunnerHost {
     })
     this.syncOpenCodeWorkOwners()
     try {
-      await this.reportOnce(key)
+      if (deliveryBudgetMs === undefined) {
+        await this.reportOnce(key)
+      } else {
+        await this.reportWithinBudget(key, deliveryBudgetMs)
+      }
     } catch (error) {
       this.scheduleReportRetry(key)
       log.warn('update interruption receipt delivery failed; will retry', {
@@ -1034,7 +1038,7 @@ export class RunnerHost {
     // terminal record.
     for (const entry of entries) {
       if (entry.shutdown?.stopConfirmed && entry.shutdown.operationId && this.inFlight.has(workKey(entry.work))) {
-        await this.persistInterrupted(entry, entry.shutdown.operationId)
+        await this.persistInterrupted(entry, entry.shutdown.operationId, Math.max(0, deadline - Date.now()))
       }
       if (this.inFlight.has(workKey(entry.work))) {
         entry.controller.abort()
@@ -1124,14 +1128,30 @@ export class RunnerHost {
    * durable acknowledgements. An untracked response leaves the original
    * result in place for reconciliation rather than silently dropping it.
    */
-  private async reportOnce(key: string): Promise<void> {
+  private async reportWithinBudget(key: string, budgetMs: number): Promise<void> {
+    if (budgetMs <= 0) throw new Error('shutdown receipt delivery budget expired')
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(new Error(`shutdown receipt delivery timed out after ${budgetMs}ms`)),
+      budgetMs,
+    )
+    timer.unref?.()
+    try {
+      const completed = await withTimeout(this.reportOnce(key, controller.signal), budgetMs)
+      if (completed === null) throw new Error('shutdown receipt delivery budget expired')
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private async reportOnce(key: string, signal: AbortSignal = new AbortController().signal): Promise<void> {
     const held = this.awaitingAck.get(key)
     if (!held) return
     held.entry.attempts += 1
     if (held.entry.receipt) {
       const acknowledgement = await this.connection.sendRecoveryReceipt(
         held.entry.receipt,
-        new AbortController().signal,
+        signal,
       )
       if (acknowledgement.appliedReceiptId !== held.entry.receipt.receiptId)
         throw new Error('recovery receipt acknowledgement identity mismatch')

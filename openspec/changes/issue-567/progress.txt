@@ -379,6 +379,18 @@ Channel decision (grounded in live source):
   passed in the full run. The full invocation also reproduced two unrelated
   existing dispatch timing/runtime-resolution failures.
 
+## Re-review MF-2 Increment
+
+- Shutdown-time interruption receipt delivery now uses the remaining stop
+  budget, aborts the HTTP request at the budget boundary, and races the
+  delivery promise so a transport that ignores abort cannot hold Runner
+  shutdown. The durable journal and awaiting-ack entry remain intact for the
+  normal retry loop.
+- Added a hanging-delivery Runner spec that asserts bounded shutdown, no
+  acknowledgement, exact receipt retention, and retry scheduling.
+- Verification: Runner typecheck and the focused host recovery suite pass
+  (4/4).
+
 ## Final Gate Preparation
 
 - Reduced the Runner connection client implementation to 998 lines while
