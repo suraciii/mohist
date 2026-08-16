@@ -359,3 +359,14 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   empty state, Agent detail, session, and profile editor suites. Web typecheck,
   FSD boundaries, and test-boundary checks passed. The complete Web suite passed
   4,736 tests in 378 files.
+
+## T-005 completion verification
+
+- Re-ran `npm run test:fast:cli`: all 1,860 CLI tests passed, including the
+  task-first flag matrix, generated-key ordering, raw JSON, launch identities,
+  replay-key, and actionable rejection guidance cases.
+- Re-ran `npm run docs:check`: all 92 active Markdown files passed.
+- Re-ran the complete `npm run verify` gate: docs, file-size, format, solution
+  and workspace builds, 178 Workflow Definition tests, 2,701 Server unit
+  tests, 3,950 Server spec tests, 68 architecture tests, 1,860 CLI tests,
+  4,736 Web tests, 1,639 Runner tests, and 70 Slack tests passed.
