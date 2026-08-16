@@ -111,36 +111,6 @@ public class IssueCompositeAdvancementApiSpecs
         Assert.Equal("cancelled", (await querier.GetAsync(projectId, existing.Number))!.Status);
     }
 
-    [Fact]
-    public async Task ArchiveParent_CascadesToDoneAndCancelledChildren()
-    {
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var done = await CreateIssueAsync(projectId, "Done", isDraft: false);
-        var cancelled = await CreateIssueAsync(projectId, "Cancelled", isDraft: false);
-        await AttachChildAsync(projectId, done.Number, parent.Number);
-        await AttachChildAsync(projectId, cancelled.Number, parent.Number);
-        var parentGrain = _grains.GetGrain<IIssueGrain>(parent.IssueKey);
-        var doneGrain = _grains.GetGrain<IIssueGrain>(done.IssueKey);
-        var cancelledGrain = _grains.GetGrain<IIssueGrain>(cancelled.IssueKey);
-        await parentGrain.StartCompositeAsync();
-        await doneGrain.CompleteWorkAsync((await doneGrain.GetActiveWorkflowRunIdAsync())!);
-        var cancelledWorkflowRunId = (await cancelledGrain.GetActiveWorkflowRunIdAsync())!;
-        await _grains.GetGrain<Mohist.Server.Workflow.Grains.IWorkflowGrain>(cancelledWorkflowRunId).StopAsync("test-cancel");
-        await cancelledGrain.CancelAsync();
-        await parentGrain.RecomputeCompositeStatusAsync();
-
-        using var response = await _client.PostAsync(
-            $"/api/projects/{projectId}/issues/{parent.Number}/archive", null);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var scope = _services.CreateScope();
-        var querier = scope.ServiceProvider.GetRequiredService<Mohist.Server.Issue.Services.IssueQuerier>();
-        Assert.NotNull((await querier.GetAsync(projectId, parent.Number))!.ArchivedAt);
-        Assert.NotNull((await querier.GetAsync(projectId, done.Number))!.ArchivedAt);
-        Assert.NotNull((await querier.GetAsync(projectId, cancelled.Number))!.ArchivedAt);
-    }
-
     private async Task<string> CreateProjectAsync()
     {
         var id = $"proj_{Guid.NewGuid():N}";

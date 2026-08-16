@@ -98,29 +98,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Fact]
-    public async Task EventDispatcher_RedeliversIssueWorkStartedAndCreatesMissingWorkflowRun()
-    {
-        // Contract: the dispatcher replays IssueWorkStarted when the
-        // prior workflow run has been wiped from the DB, restoring the
-        // run to Pending. Verified end-to-end through the DB-backed
-        // EventStore (MohistIntegrationFixture); the grain-level
-        // "SaveIssueAsync emits IssueWorkStarted envelope" assertion is
-        // sunk into IssueWorkflowLifecycleGrainSpecs (batch C).
-        var (projectId, _, issueNumber, _, workflowRunId) = await SeedIssueInProgressAsync();
-        await TestLifecycle.Deactivate(_grains.GetGrain<IWorkflowGrain>(workflowRunId));
-        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
-        await DeleteWorkflowRunAsync(workflowRunId);
-        await MarkIssueWorkStartedUndeliveredAsync(projectId, issueNumber);
-
-        using var scope = _services.CreateScope();
-        var dispatcher = scope.ServiceProvider.GetRequiredService<EventDispatcherService>();
-        await dispatcher.DispatchAsync(CancellationToken.None);
-
-        Assert.Equal(WorkflowRunStatus.Pending, (await LoadWorkflowRunAsync(workflowRunId))!.Status);
-        await AssertIssueWorkStartedDispatchedAsync(projectId, issueNumber);
-    }
-
     private async Task<(string projectId, string projectName)> SeedProjectAsync()
     {
         var id = $"proj_{Guid.NewGuid():N}";

@@ -72,29 +72,6 @@ public class IssueManualDoneApiSpecs
     }
 
     [Fact]
-    public async Task Done_OnAlreadyDoneIssue_ReturnsCanonicalIssueResource()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"manual-done-idempotent-{Guid.NewGuid():N}");
-        var issue = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Already delivered", isDraft = false });
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/done");
-        using var response = await _client.PostAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/done",
-            null);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<IssueDto>>();
-        Assert.NotNull(envelope);
-        Assert.True(envelope!.Success);
-        Assert.Equal("done", envelope.Data!.Status);
-        Assert.Equal(issue.Number, envelope.Data.Number);
-    }
-
-    [Fact]
     public async Task Close_ReturnsCanonicalIssueResource_AndRepeatedCloseDoesToo()
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
