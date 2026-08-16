@@ -3674,8 +3674,13 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             throw new ArgumentException("Input id is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.TurnId))
             throw new ArgumentException("Turn id is required.", nameof(command));
-        if (string.IsNullOrWhiteSpace(command.Prompt))
-            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Prompt)
+            && (command.Attachments is null || command.Attachments.Count == 0))
+        {
+            throw new ArgumentException(
+                "Prompt is required unless at least one attachment is accepted.",
+                nameof(command));
+        }
         if (string.IsNullOrWhiteSpace(command.Source))
             throw new ArgumentException("Source is required.", nameof(command));
 

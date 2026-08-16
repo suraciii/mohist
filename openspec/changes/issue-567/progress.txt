@@ -540,3 +540,23 @@ Channel decision (grounded in live source):
   passed all functional suites and typechecks; it remains non-zero only for
   the pre-existing `SpecUnitMigrationLedgerRules` / `FailIfMarkerSpecs`
   migration-ledger digest drift (67/68).
+
+## T-005 Attachment-Only Recovery Hardening
+
+- AgentJob recovery now creates the fresh Session input/turn envelope when
+  the immutable launch snapshot has accepted attachments but an empty prompt;
+  the replacement reuses the prompt and attachment descriptors as-is while
+  still allocating new coordinator identities.
+- Session follow-up validation now matches initial-input semantics: non-empty
+  text or at least one accepted attachment is sufficient. This prevents an
+  attachment-only replacement from being acknowledged without turn
+  bookkeeping.
+- Added `AgentJobRecoveryReceiptSpecs.AttachmentOnlyJobRecoveryCreatesFreshSessionInputAndTurn`.
+  The Server build passed with 0 warnings/errors; focused recovery (8),
+  Session follow-up (37), and AgentJob grain (21) classes passed. Format check
+  passed with no changes.
+- `npm run test:fast` passed typecheck, Server Unit 2667, CLI 1855, Workflow
+  Definition 178, Runner 1657, and Web 4727. It exited non-zero only for the
+  existing Server ArchTests migration-ledger ratchet
+  (`SpecUnitMigrationLedgerRules` / `FailIfMarkerSpecs`, 67/68); the reported
+  source and closure digest mismatch is unrelated to this recovery change.

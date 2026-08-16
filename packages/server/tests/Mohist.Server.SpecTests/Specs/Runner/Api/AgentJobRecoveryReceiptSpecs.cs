@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Runner.Grains;
@@ -75,6 +76,30 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
         Assert.Equal(first.GetProperty("status").GetString(), duplicate.GetProperty("status").GetString());
         Assert.Equal(first.GetProperty("appliedReceiptId").GetString(), duplicate.GetProperty("appliedReceiptId").GetString());
         Assert.Equal(replacement.WorkId, (await setup.Job.GetRuntimeSnapshotAsync()).CurrentWorkId);
+    }
+
+    [Fact]
+    public async Task AttachmentOnlyJobRecoveryCreatesFreshSessionInputAndTurn()
+    {
+        var setup = await CreateRunningJobAsync("attachments-only", attachmentsOnly: true);
+        var operation = await FenceAsync(setup);
+        var receipt = CreateInterruptedReceipt(setup, operation.OperationId, "job-receipt-attachments-only");
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/{setup.RunnerId}/recovery-receipt",
+            receipt);
+        var responseText = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, responseText);
+
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(setup.SessionId);
+        var turns = await session.ListTurnsAsync();
+        var replacement = Assert.Single(turns, turn => turn.Id != setup.TurnId);
+        Assert.Equal(AgentTurnStatus.Queued, replacement.Status);
+        Assert.Contains(replacement.InputIds, inputId => inputId.StartsWith("recovery-input:", StringComparison.Ordinal));
+
+        var snapshot = await setup.Job.GetRuntimeSnapshotAsync();
+        Assert.Equal(1, snapshot.RecoveryGeneration);
+        Assert.Equal(replacement.Id, snapshot.InitialTurnId);
     }
 
     [Fact]
@@ -264,7 +289,7 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
         Assert.Equal(body.GetProperty("status").GetString(), duplicate.GetProperty("status").GetString());
     }
 
-    private async Task<JobSetup> CreateRunningJobAsync(string name)
+    private async Task<JobSetup> CreateRunningJobAsync(string name, bool attachmentsOnly = false)
     {
         var projectId = $"agent-job-recovery-{name}-{Guid.NewGuid():N}";
         var runnerId = await _fixture.RegisterRunnerAsync(projectId, maxWorkflowSlots: 2);
@@ -285,23 +310,37 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
                 ["mohist.io/source-kind"] = "agent-launch",
                 ["mohist.io/agent-id"] = "agent-test",
             })));
+        var prompt = attachmentsOnly ? string.Empty : "resume this job";
+        var attachments = attachmentsOnly
+            ? new[]
+            {
+                new AgentSessionInputAttachmentDescriptor(
+                    "attachment-1",
+                    "context.txt",
+                    "text/plain",
+                    12,
+                    _fixture.TimeProvider.GetUtcNow()),
+            }
+            : null;
         await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
             inputId,
             turnId,
-            "resume this job",
+            prompt,
             "agent-job",
             jobId,
-            Runtime: "opencode"));
+            Runtime: "opencode",
+            Attachments: attachments));
 
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.SubmitAsync(new AgentJobInput(
-            "resume this job",
+            prompt,
             ProjectId: projectId,
             Runtime: "opencode",
             AgentId: "agent-test",
             AgentSessionId: sessionId,
             InitialInputId: inputId,
             InitialTurnId: turnId,
+            Attachments: attachments,
             PinnedRunnerId: runnerId));
         var claim = await runner.TryClaimAgentJobAsync(jobId, projectId);
         Assert.NotNull(claim);
