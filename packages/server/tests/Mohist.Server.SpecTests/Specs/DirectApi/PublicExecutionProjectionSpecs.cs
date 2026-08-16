@@ -275,6 +275,7 @@ public sealed class PublicExecutionProjectionSpecs : IAsyncDisposable
             .Where(row => row.Type == PublicSessionEventTypes.TurnTerminal)
             .ToList();
         var fencedSequence = Assert.Single(terminalEvents).Sequence;
+        Assert.Equal(fencedSequence, (await _harness.SnapshotAsync("turn", "turn_fence_1"))!.TerminalSequence);
 
         // A delayed, conflicting Runner result arrives later: the same
         // turn now claims a failed outcome with different output. The

@@ -470,6 +470,14 @@ public sealed partial class PublicApiProjectionEngine
         long? latestSequence = newEvents.Count > 0
             ? newEvents[^1].Sequence
             : existingEvents.Count > 0 ? existingEvents.Max(e => e.Sequence) : stream.LatestSequence;
+        var terminalSequences = existingEvents
+            .Concat(newEvents)
+            .Where(eventRow => IsTerminalTransition(eventRow.Type))
+            .GroupBy(eventRow => eventRow.SourceTransition, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First().Sequence,
+                StringComparer.Ordinal);
         if (newEvents.Count > 0 && rebuildGeneration is null)
         {
             stream.LatestSequence = latestSequence;
@@ -477,7 +485,7 @@ public sealed partial class PublicApiProjectionEngine
         }
 
         // --- snapshot upserts behind the same fences ---
-        UpsertAnchors(db, facts, observedAt, latestSequence, fences);
+        UpsertAnchors(db, facts, observedAt, latestSequence, fences, terminalSequences);
 
         if (created || newEvents.Count > 0)
         {
@@ -609,7 +617,8 @@ public sealed partial class PublicApiProjectionEngine
         PublicProjectionFacts facts,
         DateTimeOffset observedAt,
         long? latestSequence,
-        Dictionary<string, PublicExecutionSnapshotRow> fences)
+        Dictionary<string, PublicExecutionSnapshotRow> fences,
+        IReadOnlyDictionary<string, long> terminalSequences)
     {
         foreach (var job in facts.Jobs)
         {
@@ -624,7 +633,8 @@ public sealed partial class PublicApiProjectionEngine
                 components,
                 observedAt,
                 latestSequence,
-                fences);
+                fences,
+                terminalSequences);
         }
 
         foreach (var input in facts.Inputs)
@@ -640,7 +650,8 @@ public sealed partial class PublicApiProjectionEngine
                 components,
                 observedAt,
                 latestSequence,
-                fences);
+                fences,
+                terminalSequences);
         }
 
         foreach (var turn in facts.Turns)
@@ -656,7 +667,8 @@ public sealed partial class PublicApiProjectionEngine
                 components,
                 observedAt,
                 latestSequence,
-                fences);
+                fences,
+                terminalSequences);
         }
     }
 
@@ -668,7 +680,8 @@ public sealed partial class PublicApiProjectionEngine
         PublicAnchorComponents components,
         DateTimeOffset observedAt,
         long? latestSequence,
-        Dictionary<string, PublicExecutionSnapshotRow> fences)
+        Dictionary<string, PublicExecutionSnapshotRow> fences,
+        IReadOnlyDictionary<string, long> terminalSequences)
     {
         var status = PublicExecutionAggregator.ComputeStatus(components, sessionExists: true);
         var existing = db.PublicExecutionSnapshots.Local.FirstOrDefault(
@@ -686,7 +699,7 @@ public sealed partial class PublicApiProjectionEngine
                 TerminalFact = components.TerminalFact,
                 TerminalOutcome = components.Outcome,
                 TerminalAt = FormatNullableTimestamp(components.TerminalAt),
-                TerminalSequence = null,
+                TerminalSequence = ResolveTerminalSequence(components, terminalSequences),
                 LastSequence = latestSequence,
                 UpdatedAt = observedAt,
             });
@@ -711,10 +724,18 @@ public sealed partial class PublicApiProjectionEngine
         existing.TerminalFact = components.TerminalFact;
         existing.TerminalOutcome = components.Outcome;
         existing.TerminalAt = FormatNullableTimestamp(components.TerminalAt);
-        existing.TerminalSequence = null;
+        existing.TerminalSequence = ResolveTerminalSequence(components, terminalSequences);
         existing.LastSequence = latestSequence;
         existing.UpdatedAt = observedAt;
     }
+
+    private static long? ResolveTerminalSequence(
+        PublicAnchorComponents components,
+        IReadOnlyDictionary<string, long> terminalSequences) =>
+        components.TerminalFact is { } terminalFact
+        && terminalSequences.TryGetValue(terminalFact, out var sequence)
+            ? sequence
+            : null;
 
     private string SerializeSnapshot(
         string projectId,

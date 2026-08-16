@@ -763,3 +763,20 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   constant to ExternalAgentApiMiddleware.PathPrefix, preventing auth and
   boundary routing from drifting. The added tests pin caller facts in
   HttpContext.Items and cookie rejection on unmatched /api/v1 paths.
+
+## T-002 completion (current workflow)
+
+- Audited the projection implementation against the binding projection and
+  read requirements. The additive public projection migration, isolated rows,
+  single hosted writer, checkpointed transactions, strict DTO, five-state
+  mapping, terminal fences, crash recovery, and generation switching remain
+  present and model-consistent.
+- Corrected terminal fence bookkeeping so `TerminalSequence` is populated
+  from the normalized terminal journal transition for every affected
+  Job/Input/Turn anchor. Later fenced passes preserve that value with the
+  terminal output, error, and public sequence; added a regression assertion
+  to the terminal-fence SpecTest.
+- Focused projection (14), hosted projector (1), DTO contract (6), and EF
+  model-diff (1) tests passed. `npm run test:fast` passed all lanes: 2,676
+  server unit, 69 architecture, 178 workflow, 1,848 CLI, 4,724 Web, and
+  1,639 Runner tests, plus typechecks.
