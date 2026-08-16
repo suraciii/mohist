@@ -6,7 +6,6 @@ import { arrayInput, numberInput, stringInput } from '../core/json.js'
 import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from '../system/process.js'
 import { resolveActionPath } from './expectations.js'
 import { fail, succeed } from './action-result.js'
-import { resolveActionResourceProfile } from '../runtime/resource-containment.js'
 
 export async function processAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const command = stringInput(inputs, 'command')
@@ -19,9 +18,6 @@ export async function processAction(inputs: JsonObject, host: ActionHost): Promi
     undefined,
     commandOptions(host, 'action:process'),
   )
-  if (result.resourceContainment) {
-    return fail('resource-containment', 'Process exceeded its per-work resource bound', { exitCode: result.exitCode })
-  }
   if (result.exitCode === 0) {
     const output: JsonObject = {
       stdout: result.stdout.trim(),
@@ -37,23 +33,19 @@ export async function processAction(inputs: JsonObject, host: ActionHost): Promi
 export async function scriptAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const run = stringInput(inputs, 'run')
   if (!run?.trim()) return fail('invalid-input', "Script action requires 'run'")
-  const resourceProfile = resolveActionResourceProfile(stringInput(inputs, 'resourceProfile'), host.resourceLimits)
-  if (!resourceProfile.ok) return fail('invalid-input', resourceProfile.message)
   const shell = stringInput(inputs, 'shell') || (process.platform === 'win32' ? 'pwsh' : 'bash')
   const file = join(host.workDir, `_${randomUUID().replace(/-/g, '')}${process.platform === 'win32' ? '.ps1' : '.sh'}`)
   await writeText(file, run)
   try {
     const timeoutMs = numberInput(inputs, 'timeout')
     const result = await runCommand(shell, [file], host.workDir, host.signal, undefined, {
-      ...commandOptions(host, 'action:script', resourceProfile.resourceLimits),
+      ...commandOptions(host, 'action:script'),
       timeoutMs,
     })
     if (result.exitCode !== 0) {
       return fail(
-        result.resourceContainment ? 'resource-containment' : result.status === 'timeout' ? 'timeout' : 'script-failed',
-        result.resourceContainment
-          ? 'Script exceeded its per-work resource bound'
-          : scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr),
+        result.status === 'timeout' ? 'timeout' : 'script-failed',
+        scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr),
         { exitCode: result.exitCode },
       )
     }
@@ -133,15 +125,7 @@ function trim(value: string) {
   return value.length <= 20_000 ? value : value.slice(0, 20_000)
 }
 
-function commandOptions(
-  host: ActionHost,
-  source: string,
-  resourceLimits: CommandLineOptions['resourceLimits'] = host.resourceLimits,
-): CommandLineOptions | undefined {
+function commandOptions(host: ActionHost, source: string): CommandLineOptions | undefined {
   const onLine = host.log ? (line: string) => host.log!.write(source, line) : undefined
-  if (!onLine && !resourceLimits) return undefined
-  return {
-    ...(onLine ? { onLine } : {}),
-    ...(resourceLimits ? { resourceLimits } : {}),
-  }
+  return onLine ? { onLine } : undefined
 }

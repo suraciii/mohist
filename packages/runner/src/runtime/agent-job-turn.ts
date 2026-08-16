@@ -127,9 +127,6 @@ export async function executeOpenCodeTurn(
       ...(skills.length > 0 ? { skills } : {}),
       unknownKeys: collectUnknownKeys(payload),
     },
-    ...(deps.options.workResourceLimits?.turnBudgetMs !== undefined
-      ? { resourceBudgetMs: deps.options.workResourceLimits.turnBudgetMs }
-      : {}),
   }
 
   const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId)
@@ -283,9 +280,6 @@ export async function executePiTurn(
       ...(skills.length > 0 ? { skills } : {}),
       unknownKeys: collectUnknownKeys(payload),
     },
-    ...(deps.options.workResourceLimits?.turnBudgetMs !== undefined
-      ? { resourceBudgetMs: deps.options.workResourceLimits.turnBudgetMs }
-      : {}),
   }
   const observer: PiTurnObserver | undefined = binding.agentSessionId
     ? {

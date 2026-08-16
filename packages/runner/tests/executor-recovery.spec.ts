@@ -17,7 +17,7 @@ function work(recovery: DispatchWorkItem['recovery']): DispatchWorkItem {
 }
 
 describe('recovery action error protocol', () => {
-  it('leaves resource containment as a bounded diagnostic failure', () => {
+  it('recovers ordinary script failures through the configured handler', () => {
     const result = tryRecovery(
       work({
         budget: 2,
@@ -25,11 +25,11 @@ describe('recovery action error protocol', () => {
       }),
       {
         status: 'failed',
-        error: { code: 'resource-containment', message: 'Script exceeded its per-work resource bound' },
+        error: { code: 'script-failed', message: 'Script exited with code 1' },
       },
     )
 
-    expect(result).toBeNull()
+    expect(result).toMatchObject({ status: 'completed' })
   })
 
   it('matches an Action error by error.code and preserves the error', () => {

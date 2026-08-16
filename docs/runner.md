@@ -172,43 +172,14 @@ the service manager. Configurable values include:
 Dispatch slots are control-plane state and are changed from the Runner detail
 page, not through Runner startup options.
 
-### Per-work containment
+### Execution boundaries
 
-The runner resolves the optional `workResourceLimits` configuration block at
-startup. The TypeScript shape is:
-
-```ts
-{
-  memoryMb?: number | null
-  wallClockMs?: number | null
-  watchdogIntervalMs?: number | null
-  turnBudgetMs?: number | null
-}
-```
-
-Omitted values use the defaults `memoryMb=1024`, `wallClockMs=3600000`,
-`watchdogIntervalMs=250`, and `turnBudgetMs=3600000`. Set a field to `null` to
-disable that bound. The `mohist-runner` process reads deployment overrides from
-`WORK_RESOURCE_MEMORY_MB`, `WORK_RESOURCE_WALL_CLOCK_MS`,
-`WORK_RESOURCE_WATCHDOG_INTERVAL_MS`, and `WORK_RESOURCE_TURN_BUDGET_MS`.
-
-Action subprocesses use Linux `prlimit` when util-linux is available, with
-aggregate RSS sampling and a wall-clock kill as a second line of defense. On
-macOS or minimal containers, RSS and wall-clock watchdog enforcement is used
-without `prlimit`; detection occurs on the next watchdog sample. A contained
-work is reported as a definite failure with reason `resource-containment`.
-The `core/script` action also accepts `resourceProfile: full-verify`, which the
-built-in full verification workflow uses to select a finite 4096 MiB
-command-tree memory bound while preserving the Runner's other per-work limits.
-Resource exhaustion remains a diagnostic terminal failure and does not enter
-automatic recovery retries.
-Runtime-backed turns use `turnBudgetMs`; expiry aborts the turn, quarantines the
-runtime generation, and lets the runner recreate it. Completed results already
-waiting for acknowledgement remain journaled under their original identities.
-
-After `mo install runner`, set these variables in the managed Runner service
-environment before starting it, for example with `systemctl --user edit
-mohist-runner.service`, or export them when running `npm run dev:runner`.
+The Runner does not impose a hidden per-work memory, RSS, wall-clock, or turn
+budget. Actions use only the timeout explicitly declared by the action or
+workflow, and every command still honours explicit cancellation by terminating
+its process group. Host-level service protection remains the deployment
+owner's responsibility; a host may use systemd, a container limit, or an
+equivalent supervisor without changing workflow semantics.
 
 Runner does not select a global Runtime backend through `type`. A Workflow
 task's `uses` value selects an execution-backend Action such as

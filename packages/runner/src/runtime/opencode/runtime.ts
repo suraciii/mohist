@@ -45,7 +45,6 @@ import {
   hasUnconfirmedCleanup,
   normalizeGenerationDrainTimeout,
   normalizeInvalidInput,
-  normalizeResourceContainment,
   normalizeMissingSession,
   normalizeTurnFailed,
   normalizeUnavailableRuntime,
@@ -53,7 +52,6 @@ import {
 import type { OpencodeServerFactory, OpencodeServerHandle } from './server-process.js'
 import { DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS } from './server-process.js'
 import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
-import { createTimeoutSignal } from '../../system/timeout-signal.js'
 import type { RuntimeEventSubscription } from './event-subscription.js'
 import type { WorkspaceRemovalFenceResult } from '../workspace-removal-fence.js'
 import {
@@ -72,7 +70,6 @@ import {
   combineAbortSignals,
   errorMessage,
   newRuntimeGeneration,
-  positiveDuration,
   toDiagnostic,
   toRawError,
   validateFollowupInput,
@@ -501,9 +498,7 @@ export class OpenCodeRuntime {
       forcedFailure: false,
     }
     generation.activeTurns.add(activeTurn)
-    const budgetMs = positiveDuration(request.resourceBudgetMs)
-    const budget = budgetMs === undefined ? null : createTimeoutSignal(signal, budgetMs)
-    const combined = combineAbortSignals(budget?.signal ?? signal, activeTurn.abortController.signal)
+    const combined = combineAbortSignals(signal, activeTurn.abortController.signal)
     try {
       return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
         const server = generation.server
@@ -528,15 +523,6 @@ export class OpenCodeRuntime {
         }
         if (turnOutcome.kind === 'error') throw turnOutcome.cause
         const result = turnOutcome.result
-        if (budget?.timedOut()) {
-          this.triggerRebuild(server, {
-            severity: 'error',
-            code: 'resource-containment',
-            message: 'OpenCode turn exceeded its per-work resource budget; quarantining the runtime generation',
-          })
-          const error = normalizeResourceContainment(budgetMs!)
-          return { ok: false, error, diagnostics: error.diagnostics }
-        }
         if (activeTurn.forcedFailure) {
           const error = normalizeGenerationDrainTimeout(
             this.quarantineDrainTimeoutMs,
@@ -561,7 +547,6 @@ export class OpenCodeRuntime {
       })
     } finally {
       combined.dispose()
-      budget?.dispose()
       generation.activeTurns.delete(activeTurn)
       inFlight.end(sessionKey)
       this.releaseGeneration(generation)
