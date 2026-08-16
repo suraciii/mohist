@@ -20,9 +20,12 @@ The asset already requires explicit Slack reply actions, self-contained result
 messages, no empty acknowledgements, delegator mentions, and use of the
 Server-provided destination. Its silence rule does not yet make a direct human
 question an exception, and its recovery rule is not explicit enough about
-rebuilding state without interruption or recovery narration. The change is
-therefore an embedded contract update with contract-test coverage, not a new
-Slack delivery or persistence subsystem.
+rebuilding state without interruption or recovery narration. It also does not
+preserve every qualifier in the documented collaboration-rules section: the
+restriction to mention people only when they need to act or notice the result,
+and the rule that fine-grained progress belongs in the Web session timeline.
+The change is therefore an embedded contract update with contract-test coverage,
+not a new Slack delivery or persistence subsystem.
 
 ## Goals / Non-Goals
 
@@ -40,6 +43,10 @@ Slack delivery or persistence subsystem.
   compaction. An unanswered direct question still requires a reply.
 - Keep reply authorship with the Agent's explicit Slack reply action and keep
   destination selection with the Server-provided anchor.
+- Keep the injected Skill in one-to-one correspondence with all six ordered
+  rules in `docs/slack.md#slack-collaboration-rules-for-agents`, including the
+  audience-appropriate mention restriction and the Web-session-timeline rule
+  for fine-grained progress.
 - Version the changed Skill, publish its recomputed content hash, and verify
   the asset identity, body, and hash at the Server/Runner contract boundary.
 - Keep the collaboration Skill scoped to Slack and preserve existing non-Slack
@@ -76,12 +83,16 @@ will state the response priority explicitly:
 4. Recovery is internal: reconstruct state first, then apply the rules above;
    recovery itself never creates a status announcement.
 
-This keeps the contract inspectable and evolvable while ensuring every Slack
-execution receives the same rules. Hard-coding the rules in the Runner or
-copying them into the Slack adapter was rejected because it would duplicate
-behavior, bypass normal Skill injection, and make the two execution paths drift.
-Updating only documentation was rejected because it would not change Agent
-behavior.
+The updated asset will retain all six documented rules as six corresponding
+instruction blocks in the same order, without dropping qualifiers. In
+particular, it will say that a person is mentioned only when they need to act or
+notice the result, that a narrative reference needs no mention, and that
+fine-grained progress belongs in the Web session timeline. This keeps the
+contract inspectable and evolvable while ensuring every Slack execution receives
+the same rules. Hard-coding the rules in the Runner or copying them into the
+Slack adapter was rejected because it would duplicate behavior, bypass normal
+Skill injection, and make the two execution paths drift. Updating only
+documentation was rejected because it would not change Agent behavior.
 
 ### 2. Treat direct-question and recovery rules as ordered exceptions to silence
 
@@ -141,7 +152,15 @@ Server contract tests will continue deriving the expected hash from the
 resolved embedded asset and will assert the new version and required language
 for direct questions, useful no-additional-information replies, recovery
 silence, explicit reply action, anchor use, self-contained results, and no
-empty acknowledgements. The tests must not assert one exact prose answer.
+empty acknowledgements. In addition, the asset test will use an explicit,
+ordered six-entry rule checklist matching every bullet in
+`docs/slack.md#slack-collaboration-rules-for-agents`: speaker/useful conclusion
+or valid silence; no empty acknowledgements with the direct-question exception;
+delegated-result callback plus mention only when someone needs to act or notice
+the result; self-contained/proportionate replies with fine-grained progress in
+the Web session timeline; the Server-provided reply anchor; and silent resume
+from durable state and the thread. The checklist must fail if any documented
+rule or qualifier is absent. The tests must not assert one exact prose answer.
 
 Runner tests will cover a valid v1 context with the updated Skill, mismatched
 hash, wrong Skill name, incomplete anchor/Skill metadata, and rejection before
@@ -187,8 +206,9 @@ altered.
    `1.1.0`. Build the Server so the new resource is embedded and its hash is
    recomputed from the final bytes.
 2. Add/update Server contract tests and Runner context/envelope tests, including
-   malformed-context rejection and non-Slack invariance. Run the focused Server
-   and Runner suites before deployment.
+   the six-rule docs-parity checklist, malformed-context rejection, and
+   non-Slack invariance. Run the focused Server and Runner suites before
+   deployment.
 3. Deploy the Server and Runner normally. The context wire version stays at v1,
    so old and new binaries can exchange the same shape during a rolling
    deployment. The Skill version and hash travel with each Slack dispatch;
@@ -196,7 +216,9 @@ altered.
 4. Verify a known-answer direct question, a direct question with no additional
    information, a non-question acknowledgement, and a recovered Slack turn.
    Confirm that the first, second, and recovered question produce Agent-authored
-   replies, while the non-informational acknowledgement remains silent.
+   replies, while the non-informational acknowledgement remains silent. For the
+   recovered question, confirm the first reply contains no interruption or
+   recovery narration.
 5. Roll back by redeploying the previous embedded asset and catalog version.
    No database rollback is needed. Existing v1 contexts remain structurally
    compatible, and any newly dispatched context uses whichever asset the

@@ -52,7 +52,7 @@ A Slack turn that is not a direct human question SHALL be allowed to end without
 - **AND** the Agent SHALL NOT replace the result with an empty acknowledgement
 
 ### Requirement: Slack reply authorship SHALL remain with the Agent and the Server-provided anchor
-The Agent SHALL author a Slack response only through the explicit Mohist Slack reply action, using the conversation and thread target from the injected reply anchor. The Agent SHALL NOT infer a destination from memory, target another conversation, or echo internal anchor fields in the reply body. A reply that reports completed work, failure, or required human action SHALL be self-contained and SHALL include the applicable conclusion, evidence summary, and next step. When delegated work completes, the result reply SHALL mention the delegator.
+The Agent SHALL author a Slack response only through the explicit Mohist Slack reply action, using the conversation and thread target from the injected reply anchor. The Agent SHALL NOT infer a destination from memory, target another conversation, or echo internal anchor fields in the reply body. A reply that reports completed work, failure, or required human action SHALL be self-contained and SHALL include the applicable conclusion, evidence summary, and next step. Fine-grained progress SHALL remain in the Web session timeline rather than the Slack reply. When delegated work completes, the result reply SHALL mention the delegator. The Agent SHALL mention a person only when that person needs to act or notice the result; a narrative reference SHALL NOT require a mention.
 
 #### Scenario: A completed turn sends its result
 - **WHEN** an Agent turn reaches a conclusion or produces a result
@@ -69,6 +69,11 @@ The Agent SHALL author a Slack response only through the explicit Mohist Slack r
 - **WHEN** the Agent sends a Slack reply using the injected anchor
 - **THEN** the reply destination SHALL be the anchor's Server-selected conversation and thread target
 - **AND** the reply body SHALL NOT contain connection identifiers, Session identifiers, tokens, or member identifiers from the anchor
+
+#### Scenario: A result does not require a person to act or notice it
+- **WHEN** a result mentions a person only as narrative context and no person needs to act or notice the result
+- **THEN** the Agent SHALL not mention that person
+- **AND** fine-grained progress SHALL remain in the Web session timeline rather than the Slack reply
 
 ### Requirement: Recovery SHALL continue silently from durable collaboration state
 After a process restart, Session recovery, or context compaction, the Agent SHALL reconstruct the active collaboration state from durable records and the Slack thread before continuing. Recovery SHALL preserve the existing Session and reply context. The Agent SHALL NOT announce the interruption, announce the recovery, or ask the human how to proceed solely because recovery occurred. Recovery silence SHALL NOT override the requirement to answer an outstanding direct human question.
