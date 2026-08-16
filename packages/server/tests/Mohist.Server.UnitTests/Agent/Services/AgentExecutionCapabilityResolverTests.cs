@@ -36,6 +36,20 @@ public sealed class AgentExecutionCapabilityResolverTests
     }
 
     [Fact]
+    public void AbsentCatalogOnKnownReadyRunner_ReturnsPendingNeedsSetup()
+    {
+        var result = Resolve([
+            new AgentExecutionCapabilitySnapshot(
+                "runner-a",
+                Runtime,
+                Catalog: null)]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.NeedsSetup, result.Disposition);
+        Assert.True(result.IsPending);
+        Assert.Equal(new AgentExecutionCapabilityTuple(Runtime, Model, Effort, Variant), result.FrozenTuple);
+    }
+
+    [Fact]
     public void IncompleteCatalog_ReturnsPendingNeedsSetup()
     {
         var result = Resolve([
@@ -150,6 +164,48 @@ public sealed class AgentExecutionCapabilityResolverTests
         Assert.Equal(first, second);
         Assert.Equal(beforeModels, catalog.Models);
         Assert.Equal(beforeVariants, catalog.Variants![Model]);
+    }
+
+    [Fact]
+    public void AuthoritativeCompatibleRunnerWinsOverLegacyPeer()
+    {
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            Runtime,
+            Model,
+            Effort,
+            Variant,
+            [
+                new AgentExecutionCapabilitySnapshot(
+                    "runner-a",
+                    Runtime,
+                    CompleteCatalogEntry() with { CapabilityRevision = null }),
+                new AgentExecutionCapabilitySnapshot("runner-z", Runtime, CompleteCatalogEntry()),
+            ]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.Supported, result.Disposition);
+        Assert.Equal("runner-z", result.RunnerId);
+        Assert.Equal("revision-1", result.CapabilityRevision);
+    }
+
+    [Fact]
+    public void ExplicitRejectionIsDeterministicAndPreservesFrozenTuple()
+    {
+        var catalog = CompleteCatalogEntry() with
+        {
+            SupportsReasoningEffort = false,
+            ReasoningEfforts = null,
+        };
+        IReadOnlyList<AgentExecutionCapabilitySnapshot> snapshot = [
+            new AgentExecutionCapabilitySnapshot("runner-a", Runtime, catalog),
+        ];
+
+        var first = Resolve(snapshot);
+        var second = Resolve(snapshot);
+
+        Assert.Equal(first, second);
+        Assert.Equal(
+            new AgentExecutionCapabilityTuple(Runtime, Model, Effort, Variant),
+            first.FailureEvidence!.FrozenTuple);
     }
 
     [Fact]

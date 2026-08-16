@@ -324,3 +324,17 @@ Plan skeleton for next run (est. half a day):
   passed (3941 tests), Runner/Web typechecks passed, and `git diff --check`
   passed. `npm run format:check` still reports pre-existing formatter errors
   in unrelated earlier-task files; the T-003 Web files were formatted.
+
+## T-005 Verification (current run)
+
+- Re-reviewed the pure resolver against the runtime-reasoning-capability
+  decision table. It preserves the frozen tuple in explicit rejection
+  evidence, leaves absent/incomplete/revisionless catalogs pending, exempts
+  null effort on effort-unsupported runtimes, and selects a compatible
+  authoritative runner deterministically.
+- Added unit coverage for an absent catalog on a known ready runner,
+  authoritative-compatible selection over a legacy peer, and deterministic
+  explicit rejection evidence. The resolver remains static and read-only;
+  no owner grain, claim, or execution dependency is present.
+- Server UnitTests passed after the additions: 2722 tests. `git diff --check`
+  also passes.
