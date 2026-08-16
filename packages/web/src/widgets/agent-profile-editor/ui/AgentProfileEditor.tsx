@@ -100,6 +100,12 @@ export function AgentProfileEditor({
   const [runtime, setRuntime] = useState<AgentRuntime>(
     initialModelVariant.runtime,
   );
+  const [allowedSubagentAgentIds, setAllowedSubagentAgentIds] = useState<
+    string[]
+  >(agent?.allowedSubagentAgentIds ?? []);
+  const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState(
+    agent?.maxConcurrentRuns == null ? "" : String(agent.maxConcurrentRuns),
+  );
   const [errors, setErrors] = useState<FormErrors>({});
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
 
@@ -141,6 +147,20 @@ export function AgentProfileEditor({
       runtime,
       reasoningEffort,
     );
+    const maxConcurrentRuns = maxConcurrentRunsText.trim()
+      ? Number(maxConcurrentRunsText)
+      : null;
+    if (
+      maxConcurrentRuns !== null &&
+      (!Number.isInteger(maxConcurrentRuns) || maxConcurrentRuns <= 0)
+    ) {
+      setErrors({
+        api: "Max concurrent runs must be a positive whole number or empty.",
+      });
+      return;
+    }
+    const collaborators =
+      allowedSubagentAgentIds.length > 0 ? allowedSubagentAgentIds : null;
 
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
@@ -151,6 +171,8 @@ export function AgentProfileEditor({
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
         agentConfig,
+        allowedSubagentAgentIds: collaborators,
+        maxConcurrentRuns,
       };
       updateAgent.mutate(
         { agentRef: agent.id, data: payload },
@@ -173,6 +195,8 @@ export function AgentProfileEditor({
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
         agentConfig,
+        allowedSubagentAgentIds: collaborators,
+        maxConcurrentRuns,
       };
       createAgent.mutate(payload, {
         onSuccess: (created) => {
@@ -381,6 +405,48 @@ export function AgentProfileEditor({
               <p className="text-[10px] text-muted-foreground">
                 Comma-separated list of skills.
               </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-collaborators">
+                  Allowed collaborators
+                </Label>
+                <Input
+                  id="agent-collaborators"
+                  value={allowedSubagentAgentIds.join(", ")}
+                  onChange={(event) =>
+                    setAllowedSubagentAgentIds(
+                      event.target.value
+                        .split(",")
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                    )
+                  }
+                  placeholder="agent-id-1, agent-id-2"
+                  data-testid="editor-collaborators"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Comma-separated Agent ids from this Project.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-max-concurrent-runs">
+                  Max concurrent runs
+                </Label>
+                <Input
+                  id="agent-max-concurrent-runs"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={maxConcurrentRunsText}
+                  onChange={(event) =>
+                    setMaxConcurrentRunsText(event.target.value)
+                  }
+                  placeholder="Unlimited"
+                  data-testid="editor-max-concurrent-runs"
+                />
+              </div>
             </div>
           </div>
 

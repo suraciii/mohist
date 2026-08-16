@@ -8,6 +8,7 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
@@ -32,6 +33,8 @@ public static class AgentTaskRoutes
         "runtime",
         "model",
         "variant",
+        "allowedSubagentAgentIds",
+        "maxConcurrentRuns",
     };
 
     private const int MaxNameRaceRetries = 3;
@@ -40,6 +43,128 @@ public static class AgentTaskRoutes
     {
         var group = app.MapGroup("/api/projects/{projectRef}/agent-tasks")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
+
+        group.MapPost("/preflight", async (
+            HttpContext context,
+            AgentTaskBody body,
+            AgentQuerier agentQuerier,
+            IssueQuerier issueQuerier,
+            EpicQuerier epicQuerier,
+            AgentTaskDefinitionFactory definitions,
+            ProjectDefaultExecutionConfigReader defaults,
+            IGrainFactory grains,
+            InteractionWorkspaceProvisioner provisioner,
+            CancellationToken ct) =>
+        {
+            if (body is null)
+                return ApiResults.BadRequest("request body is required", "body_required");
+            if (body.BindingError is not null)
+                return ApiResults.BadRequest(body.BindingError, "validation_failed");
+            if (body.UndeclaredFields.Count > 0)
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}",
+                    "unsupported_field",
+                    new { fields = body.UndeclaredFields.ToArray() });
+
+            var idempotencyKey = AgentSessionLaunchRoutes.ReadIdempotencyKey(context.Request);
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                return ApiResults.BadRequest(
+                    "Idempotency-Key is required for task-first Agent preflight",
+                    "idempotency_key_required");
+
+            var hintError = ValidateHints(body);
+            if (hintError is not null)
+                return ApiResults.BadRequest(hintError.Value.Message, "validation_failed", new { fields = new[] { hintError.Value.Field } });
+
+            var hasText = !string.IsNullOrWhiteSpace(body.Prompt);
+            if (!hasText && body.Attachments is not { Count: > 0 })
+                return ApiResults.BadRequest(
+                    "input requires non-empty prompt or at least one attachment",
+                    "input_required",
+                    new { fields = new[] { "prompt", "attachments" } });
+
+            var project = context.GetResolvedProject();
+            var contextError = await AgentSessionLaunchRoutes.ValidateContextAsync(
+                body.Context, project.Id, issueQuerier, epicQuerier, grains);
+            if (contextError is not null)
+                return contextError;
+
+            if (!string.IsNullOrWhiteSpace(body.Context?.Repository)
+                && !project.Repositories.Any(repository =>
+                    string.Equals(repository.Name, body.Context.Repository.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                return ApiResults.BadRequest(
+                    $"Repository '{body.Context.Repository.Trim()}' is not registered in Project '{project.Name}'.",
+                    "repository_not_found");
+            }
+
+            var collaboratorError = await ValidateTaskCollaboratorsAsync(body, project.Id, agentQuerier, ct);
+            if (collaboratorError is not null)
+                return collaboratorError;
+
+            var ownershipIdentity = $"{project.Id}\n{idempotencyKey}";
+            var preMintedSessionId = $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}";
+            var launchOrigin = AgentSessionLaunchRoutes.ReadLaunchOrigin(context.Request);
+            var suppliedWorkspace = body.Context?.Workspace?.Trim();
+            var hasExplicitWorkspace = suppliedWorkspace is { Length: > 0 };
+            var workspaceName = hasExplicitWorkspace
+                ? suppliedWorkspace!
+                : launchOrigin == "cli"
+                    ? await provisioner.ResolveCliWorkspaceNameAsync(project.Id)
+                    : await provisioner.ResolveWebWorkspaceNameAsync(project.Id, preMintedSessionId);
+            var workspaceRepositories = await ResolveWorkspaceRepositoriesAsync(project, workspaceName, grains);
+            var launchRequest = BuildCoordinatorRequest(body, workspaceName, launchOrigin, workspaceRepositories);
+            var callerHint = new ExecutionConfigHint(
+                NormalizeOptional(body.Runtime),
+                NormalizeOptional(body.Model),
+                NormalizeOptional(body.Variant));
+            var projectDefault = await defaults.GetAsync(project.Id, ct);
+            var resolved = ExecutionConfigResolver.Resolve(callerHint, null, projectDefault);
+            if (string.IsNullOrWhiteSpace(resolved.Model))
+                return ExecutionConfigUnresolvable();
+
+            AgentTaskDefinition definition;
+            try
+            {
+                definition = await definitions.CreateAsync(
+                    project.Id,
+                    body.Prompt,
+                    body.Attachments is { Count: > 0 },
+                    NormalizeOptional(body.Name),
+                    callerHint,
+                    idempotencyKey,
+                    ct);
+            }
+            catch (AgentTaskDefinitionExecutionConfigException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "execution_config_unresolvable",
+                    new { repairs = ExecutionConfigRepairs });
+            }
+
+            if (!string.IsNullOrWhiteSpace(body.Name)
+                && (BuiltInAgentCatalog.IsReservedName(body.Name)
+                    || await agentQuerier.GetByNameAsync(project.Id, body.Name.Trim()) is not null))
+            {
+                return ApiResults.Conflict(
+                    $"Agent name '{body.Name.Trim()}' is already used",
+                    "AGENT_NAME_CONFLICT",
+                    new { name = body.Name.Trim() });
+            }
+
+            return ApiResults.Ok(new AgentTaskPreflightResponse(
+                ScopeFingerprint: BuildScopeFingerprint(launchRequest, resolved, workspaceRepositories),
+                AgentName: definition.Name,
+                Execution: new AgentEffectiveExecutionConfig(resolved.Runtime, resolved.Model, resolved.Variant),
+                Repository: body.Context?.Repository?.Trim(),
+                Workspace: workspaceName,
+                WorkspaceRepositories: workspaceRepositories?.Select(repository => repository.Name).ToArray() ?? [],
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                PermissionScope: "project-workspace-write",
+                ExpectedImpact: "Creates one Agent and starts one AgentJob and AgentSession with write access to the selected workspace."));
+        });
 
         group.MapPost("", async (
             HttpContext context,
@@ -50,6 +175,7 @@ public static class AgentTaskRoutes
             IAgentLauncher launcher,
             AttachmentService attachments,
             AgentTaskDefinitionFactory definitions,
+            ProjectDefaultExecutionConfigReader defaults,
             IGrainFactory grains,
             InteractionWorkspaceProvisioner provisioner,
             TimeProvider timeProvider,
@@ -65,7 +191,7 @@ public static class AgentTaskRoutes
             {
                 return ApiResults.BadRequest(
                     $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; "
-                    + "the task body accepts only prompt, attachments, context, name, runtime, model, and variant.",
+                    + "the task body accepts prompt, attachments, context, name, runtime, model, variant, allowedSubagentAgentIds, and maxConcurrentRuns.",
                     "unsupported_field",
                     new { fields = body.UndeclaredFields.ToArray() });
             }
@@ -101,25 +227,28 @@ public static class AgentTaskRoutes
 
             // AgentRef is deliberately the caller's name hint only. The
             // derived Agent id/name are envelope data, not replay inputs.
-            var requestedTargetId = body.Context?.TargetId?.Trim() is { Length: > 0 } targetId
-                ? targetId
-                : null;
-            var launchRequest = new AgentLaunchCoordinatorRequest(
-                Prompt: body.Prompt?.Trim() ?? string.Empty,
-                AgentRef: NormalizeOptional(body.Name),
-                Runtime: NormalizeOptional(body.Runtime),
-                WorkspacePath: body.Context?.WorkspacePath,
-                IssueNumber: body.Context?.IssueNumber,
-                EpicNumber: body.Context?.EpicNumber,
-                Repository: body.Context?.Repository,
-                Title: null,
-                AttachmentIds: body.Attachments?.ToArray(),
-                WorkspaceName: workspaceName,
-                Origin: launchOrigin,
-                TargetId: requestedTargetId,
-                Model: NormalizeOptional(body.Model),
-                Variant: NormalizeOptional(body.Variant),
-                WorkspaceRepositories: workspaceRepositories);
+            var launchRequest = BuildCoordinatorRequest(body, workspaceName, launchOrigin, workspaceRepositories);
+            var requestFingerprint = AgentLaunchCoordinatorCodec.Fingerprint(launchRequest);
+            var preflightFingerprint = context.Request.Headers["X-Mohist-Agent-Preflight"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(preflightFingerprint))
+            {
+                var projectDefault = await defaults.GetAsync(project.Id, ct);
+                var resolved = ExecutionConfigResolver.Resolve(
+                    new ExecutionConfigHint(
+                        NormalizeOptional(body.Runtime),
+                        NormalizeOptional(body.Model),
+                        NormalizeOptional(body.Variant)),
+                    null,
+                    projectDefault);
+                var actualScopeFingerprint = BuildScopeFingerprint(launchRequest, resolved, workspaceRepositories);
+                if (!string.Equals(preflightFingerprint.Trim(), actualScopeFingerprint, StringComparison.Ordinal))
+                {
+                    return ApiResults.Conflict(
+                        "The confirmed execution scope changed before launch. Run preflight again and confirm the new scope.",
+                        "launch_scope_changed",
+                        new { preflightFingerprint = actualScopeFingerprint });
+                }
+            }
 
             // Resume before any determinable validation. A changed malformed
             // request under an existing key must be a fingerprint conflict,
@@ -189,6 +318,19 @@ public static class AgentTaskRoutes
             if (contextError is not null)
                 return contextError;
 
+            if (!string.IsNullOrWhiteSpace(body.Context?.Repository)
+                && !project.Repositories.Any(repository =>
+                    string.Equals(repository.Name, body.Context.Repository.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                return ApiResults.BadRequest(
+                    $"Repository '{body.Context.Repository.Trim()}' is not registered in Project '{project.Name}'.",
+                    "repository_not_found");
+            }
+
+            var collaboratorError = await ValidateTaskCollaboratorsAsync(body, project.Id, agentQuerier, ct);
+            if (collaboratorError is not null)
+                return collaboratorError;
+
             AgentInputAttachmentAcceptanceBatch attachmentBatch;
             try
             {
@@ -241,9 +383,8 @@ public static class AgentTaskRoutes
 
             if (adopted is not null)
             {
-                // A process crash after Agent creation but before the
-                // coordinator plan is persisted leaves this deterministic
-                // grain behind. It is the only Agent this key may adopt.
+                // The definition carries the first request's durable facts.
+                // Adoption therefore never re-reads mutable Project defaults.
                 if (adopted.Status == AgentStatus.Archived)
                 {
                     await RollbackAttachmentsAsync();
@@ -253,36 +394,12 @@ public static class AgentTaskRoutes
                         new { name = adopted.Name });
                 }
 
-                AgentTaskDefinition adoptedDefinition;
                 try
                 {
-                    adoptedDefinition = await definitions.CreateAsync(
-                        project.Id,
-                        body.Prompt,
-                        attachmentBatch.AcceptedCount > 0,
-                        NormalizeOptional(body.Name),
-                        callerHint,
-                        idempotencyKey,
-                        ct,
-                        occupiedNameToIgnore: adopted.Name);
+                    agent = await agentGrain.AdoptTaskFirstAsync(idempotencyKey, requestFingerprint)
+                        ?? throw new AgentTaskIdempotencyConflictException(project.Id, preMintedAgentId);
                 }
-                catch (AgentTaskDefinitionExecutionConfigException ex)
-                {
-                    await RollbackAttachmentsAsync();
-                    return ApiResults.Conflict(
-                        ex.Message,
-                        "execution_config_unresolvable",
-                        new
-                        {
-                            repairs = new[]
-                            {
-                                "supply runtime/model/variant hints",
-                                "configure the Project default execution configuration",
-                            },
-                        });
-                }
-
-                if (!DefinitionMatches(adopted, adoptedDefinition))
+                catch (AgentTaskIdempotencyConflictException)
                 {
                     await RollbackAttachmentsAsync();
                     return ApiResults.Conflict(
@@ -290,8 +407,6 @@ public static class AgentTaskRoutes
                         "launch_idempotency_conflict",
                         new { idempotencyKey });
                 }
-
-                agent = adopted;
             }
             else
             {
@@ -346,8 +461,25 @@ public static class AgentTaskRoutes
                             definition.Instructions,
                             definition.AgentConfig,
                             Skills: [],
-                            MaxConcurrentRuns: null));
+                            MaxConcurrentRuns: body.MaxConcurrentRuns,
+                            AllowedSubagentAgentIds: body.AllowedSubagentAgentIds,
+                            TaskFirstIdempotencyKey: idempotencyKey,
+                            TaskFirstRequestFingerprint: requestFingerprint));
                         break;
+                    }
+                    catch (AgentTaskIdempotencyConflictException)
+                    {
+                        agent = await agentGrain.AdoptTaskFirstAsync(idempotencyKey, requestFingerprint)
+                            ?? throw new InvalidOperationException("Task-first Agent disappeared during concurrent creation.");
+                        break;
+                    }
+                    catch (AgentAlreadyExistsException)
+                    {
+                        await RollbackAttachmentsAsync();
+                        return ApiResults.Conflict(
+                            "The deterministic Agent already belongs to a different launch.",
+                            "launch_idempotency_conflict",
+                            new { idempotencyKey });
                     }
                     catch (AgentNameConflictException) when (string.IsNullOrWhiteSpace(body.Name) && attempt + 1 < MaxNameRaceRetries)
                     {
@@ -389,7 +521,7 @@ public static class AgentTaskRoutes
                 };
             }
 
-            var effectiveTargetId = requestedTargetId ?? agent.Id;
+            var effectiveTargetId = NormalizeOptional(body.Context?.TargetId) ?? agent.Id;
             var launchContext = new AgentLaunchContext(
                 ProjectId: project.Id,
                 IssueNumber: body.Context?.IssueNumber,
@@ -467,6 +599,12 @@ public static class AgentTaskRoutes
 
     private static (string Field, string Message)? ValidateHints(AgentTaskBody body)
     {
+        if (HasNonNullProperty(body.Raw, "maxConcurrentRuns")
+            && (body.MaxConcurrentRuns is null || body.MaxConcurrentRuns <= 0))
+            return ("maxConcurrentRuns", "maxConcurrentRuns must be a positive integer or null.");
+        if (HasNonNullProperty(body.Raw, "allowedSubagentAgentIds")
+            && (body.AllowedSubagentAgentIds is null || body.AllowedSubagentAgentIds.Any(string.IsNullOrWhiteSpace)))
+            return ("allowedSubagentAgentIds", "allowedSubagentAgentIds must contain non-empty Agent ids.");
         if (HasNonNullProperty(body.Raw, "runtime")
             && string.IsNullOrWhiteSpace(body.Runtime))
             return ("runtime", "runtime must be one of opencode, pi.");
@@ -493,14 +631,75 @@ public static class AgentTaskRoutes
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static bool DefinitionMatches(AgentInfo agent, AgentTaskDefinition expected) =>
-        string.Equals(agent.Name, expected.Name, StringComparison.Ordinal)
-        && string.Equals(agent.Description, expected.Description, StringComparison.Ordinal)
-        && string.Equals(agent.Instructions, expected.Instructions, StringComparison.Ordinal)
-        && string.Equals(
-            agent.AgentConfig?.GetRawText(),
-            expected.AgentConfig.GetRawText(),
-            StringComparison.Ordinal);
+    private static readonly string[] ExecutionConfigRepairs =
+    [
+        "supply runtime/model/variant hints",
+        "configure the Project default execution configuration",
+    ];
+
+    private static IResult ExecutionConfigUnresolvable() => ApiResults.Conflict(
+        "Execution configuration is unresolved. Supply runtime/model/variant hints or configure the Project default execution configuration.",
+        "execution_config_unresolvable",
+        new { repairs = ExecutionConfigRepairs });
+
+    private static AgentLaunchCoordinatorRequest BuildCoordinatorRequest(
+        AgentTaskBody body,
+        string? workspaceName,
+        string origin,
+        IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories) =>
+        new(
+            Prompt: body.Prompt?.Trim() ?? string.Empty,
+            AgentRef: NormalizeOptional(body.Name),
+            Runtime: NormalizeOptional(body.Runtime),
+            WorkspacePath: body.Context?.WorkspacePath,
+            IssueNumber: body.Context?.IssueNumber,
+            EpicNumber: body.Context?.EpicNumber,
+            Repository: body.Context?.Repository,
+            Title: null,
+            AttachmentIds: body.Attachments?.ToArray(),
+            WorkspaceName: workspaceName,
+            Origin: origin,
+            TargetId: NormalizeOptional(body.Context?.TargetId),
+            Model: NormalizeOptional(body.Model),
+            Variant: NormalizeOptional(body.Variant),
+            WorkspaceRepositories: workspaceRepositories,
+            AllowedSubagentAgentIds: body.AllowedSubagentAgentIds,
+            MaxConcurrentRuns: body.MaxConcurrentRuns);
+
+    private static string BuildScopeFingerprint(
+        AgentLaunchCoordinatorRequest request,
+        ResolvedExecutionConfig execution,
+        IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories) =>
+        AgentLaunchCoordinatorCodec.StableToken(string.Join(
+            '\u001f',
+            AgentLaunchCoordinatorCodec.Fingerprint(request),
+            execution.Runtime,
+            execution.Model ?? string.Empty,
+            execution.Variant ?? string.Empty,
+            string.Join('\u001e', workspaceRepositories?.Select(repository => repository.Name) ?? [])));
+
+    private static async Task<IResult?> ValidateTaskCollaboratorsAsync(
+        AgentTaskBody body,
+        string projectId,
+        AgentQuerier agents,
+        CancellationToken ct)
+    {
+        if (body.AllowedSubagentAgentIds is not { Count: > 0 })
+            return null;
+
+        foreach (var id in body.AllowedSubagentAgentIds.Select(value => value.Trim()).Distinct(StringComparer.Ordinal))
+        {
+            if (await agents.GetByIdAsync(projectId, id, ct) is null)
+            {
+                return ApiResults.BadRequest(
+                    $"Allowed collaborator Agent '{id}' was not found in this Project.",
+                    "agent_collaborator_not_found",
+                    new { agentId = id });
+            }
+        }
+
+        return null;
+    }
 
     private static async Task<IReadOnlyList<WorkspaceRepositorySnapshot>?> ResolveWorkspaceRepositoriesAsync(
         ProjectInfo project,
@@ -527,6 +726,18 @@ public static class AgentTaskRoutes
     }
 }
 
+public sealed record AgentTaskPreflightResponse(
+    string ScopeFingerprint,
+    string AgentName,
+    AgentEffectiveExecutionConfig Execution,
+    string? Repository,
+    string Workspace,
+    IReadOnlyList<string> WorkspaceRepositories,
+    int? IssueNumber,
+    int? EpicNumber,
+    string PermissionScope,
+    string ExpectedImpact);
+
 /// <summary>
 /// Raw-JSON presence-bound request for the task-first route. The raw
 /// property set is kept alongside typed values so validation can distinguish
@@ -540,6 +751,8 @@ public sealed record AgentTaskBody(
     string? Runtime,
     string? Model,
     string? Variant,
+    IReadOnlyList<string>? AllowedSubagentAgentIds,
+    int? MaxConcurrentRuns,
     IReadOnlyList<string> UndeclaredFields,
     JsonElement Raw,
     string? BindingError = null)
@@ -552,6 +765,8 @@ public sealed record AgentTaskBody(
             if (raw.ValueKind != JsonValueKind.Object)
             {
                 return new AgentTaskBody(
+                    null,
+                    null,
                     null,
                     null,
                     null,
@@ -585,12 +800,14 @@ public sealed record AgentTaskBody(
                 StringValue(raw, "runtime"),
                 StringValue(raw, "model"),
                 StringValue(raw, "variant"),
+                StringListValue(raw, "allowedSubagentAgentIds"),
+                IntValue(raw, "maxConcurrentRuns"),
                 undeclared,
                 raw);
         }
         catch (JsonException ex)
         {
-            return new AgentTaskBody(null, null, null, null, null, null, null, [], default, ex.Message);
+            return new AgentTaskBody(null, null, null, null, null, null, null, null, null, [], default, ex.Message);
         }
     }
 
@@ -601,5 +818,28 @@ public sealed record AgentTaskBody(
         if (value.ValueKind != JsonValueKind.String)
             throw new JsonException($"{name} must be a string");
         return value.GetString();
+    }
+
+    private static IReadOnlyList<string>? StringListValue(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        if (value.ValueKind != JsonValueKind.Array)
+            throw new JsonException($"{name} must be an array of Agent ids");
+        return value.EnumerateArray().Select(item =>
+        {
+            if (item.ValueKind != JsonValueKind.String)
+                throw new JsonException($"{name} must be an array of Agent ids");
+            return item.GetString() ?? string.Empty;
+        }).ToArray();
+    }
+
+    private static int? IntValue(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var result))
+            throw new JsonException($"{name} must be a positive integer or null");
+        return result;
     }
 }

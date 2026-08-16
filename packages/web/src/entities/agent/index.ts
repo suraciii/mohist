@@ -82,6 +82,7 @@ export {
   launchObservationQueryOptions,
   getAgentLaunchObservationMeaning,
   launchAgentSession,
+  preflightAgentTask,
   startAgentTask,
   postGenericFollowup,
   useGenericTurnControl,
@@ -89,12 +90,14 @@ export {
   useGenericSessionSummary,
   useGenericSessionTranscript,
   useLaunchAgentSession,
+  usePreflightAgentTask,
   useStartAgentTask,
 } from './api/agent-sessions'
 export type {
   AgentSessionLaunchContext,
   AgentSessionLaunchInput,
   AgentTaskLaunchInput,
+  AgentTaskPreflightResponse,
   AgentSessionLaunchResponse,
   AgentSessionAttachment,
   AgentSessionAttachmentRejection,

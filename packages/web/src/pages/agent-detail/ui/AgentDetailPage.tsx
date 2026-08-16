@@ -1,5 +1,10 @@
-import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import {
+  useMemo,
+  useState,
+  type ComponentProps,
+  type ComponentType,
+} from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   BotIcon,
   PencilIcon,
@@ -13,7 +18,7 @@ import {
   Loader2Icon,
   RotateCcwIcon,
   HourglassIcon,
-} from 'lucide-react'
+} from "lucide-react";
 import {
   useAgent,
   useAgentDetailStatus,
@@ -22,7 +27,7 @@ import {
   useUnarchiveAgent,
   readAgentModelAndVariant,
   getAgentAvailabilityFeedback,
-} from '../../../entities/agent'
+} from "../../../entities/agent";
 import type {
   AgentAvailabilityResponse,
   AgentExecutabilityResult,
@@ -30,40 +35,61 @@ import type {
   AgentSessionListItemDto,
   AgentStatusDetailResponse,
   AgentWaitingWorkItem,
-} from '../../../entities/agent'
-import { useProjectPath } from '../../../entities/project'
-import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { Button } from '@/shared/ui/components/button'
-import { Badge } from '@/shared/ui/components/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
-import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor'
-import { SubscriptionsSection as DefaultSubscriptionsSection } from '../../../widgets/agent-subscriptions'
-import { ConnectionsSection as DefaultConnectionsSection } from '../../../widgets/agent-connections'
+} from "../../../entities/agent";
+import { useProjectPath } from "../../../entities/project";
+import { useDocumentTitle } from "../../../shared/lib/useDocumentTitle";
+import { Button } from "@/shared/ui/components/button";
+import { Badge } from "@/shared/ui/components/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/shared/ui/components/dialog";
+import { AgentProfileEditor as DefaultAgentProfileEditor } from "../../../widgets/agent-profile-editor";
+import { SubscriptionsSection as DefaultSubscriptionsSection } from "../../../widgets/agent-subscriptions";
+import { ConnectionsSection as DefaultConnectionsSection } from "../../../widgets/agent-connections";
 
 export interface AgentDetailPageComponents {
-  AgentProfileEditor: ComponentType<ComponentProps<typeof DefaultAgentProfileEditor>>
-  SubscriptionsSection: ComponentType<ComponentProps<typeof DefaultSubscriptionsSection>>
-  ConnectionsSection: ComponentType<ComponentProps<typeof DefaultConnectionsSection>>
+  AgentProfileEditor: ComponentType<
+    ComponentProps<typeof DefaultAgentProfileEditor>
+  >;
+  SubscriptionsSection: ComponentType<
+    ComponentProps<typeof DefaultSubscriptionsSection>
+  >;
+  ConnectionsSection: ComponentType<
+    ComponentProps<typeof DefaultConnectionsSection>
+  >;
 }
 
 export interface AgentDetailPageData {
-  agent: AgentInfo | undefined
-  isLoading: boolean
-  isError: boolean
-  sessions: AgentSessionListItemDto[]
-  sessionsLoading: boolean
-  archiveAgent: Pick<ReturnType<typeof useArchiveAgent>, 'mutate' | 'isPending'>
-  unarchiveAgent: Pick<ReturnType<typeof useUnarchiveAgent>, 'mutate' | 'isPending'>
-  detailStatus: AgentStatusDetailResponse | undefined
-  detailStatusLoading: boolean
+  agent: AgentInfo | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  sessions: AgentSessionListItemDto[];
+  sessionsLoading: boolean;
+  archiveAgent: Pick<
+    ReturnType<typeof useArchiveAgent>,
+    "mutate" | "isPending"
+  >;
+  unarchiveAgent: Pick<
+    ReturnType<typeof useUnarchiveAgent>,
+    "mutate" | "isPending"
+  >;
+  detailStatus: AgentStatusDetailResponse | undefined;
+  detailStatusLoading: boolean;
 }
 
-export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
+export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData;
 
 const useDefaultData: AgentDetailPageDataHook = (agentId) => {
-  const { data: agent, isLoading, isError } = useAgent(agentId)
-  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId })
-  const { data: detailStatus, isLoading: detailStatusLoading } = useAgentDetailStatus(agentId)
+  const { data: agent, isLoading, isError } = useAgent(agentId);
+  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({
+    agentRef: agentId,
+  });
+  const { data: detailStatus, isLoading: detailStatusLoading } =
+    useAgentDetailStatus(agentId);
   return {
     agent,
     isLoading,
@@ -74,55 +100,55 @@ const useDefaultData: AgentDetailPageDataHook = (agentId) => {
     unarchiveAgent: useUnarchiveAgent(),
     detailStatus,
     detailStatusLoading,
-  }
-}
+  };
+};
 
 const defaultComponents: AgentDetailPageComponents = {
   AgentProfileEditor: DefaultAgentProfileEditor,
   SubscriptionsSection: DefaultSubscriptionsSection,
   ConnectionsSection: DefaultConnectionsSection,
-}
+};
 
 function formatTime(iso: string | null | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  if (diffDay < 7) return `${diffDay}d ago`
-  return d.toLocaleDateString()
+  if (!iso) return "";
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return d.toLocaleDateString();
 }
 
 function statusIcon(activity: string) {
   switch (activity) {
-    case 'active':
-      return <ClockIcon className="size-3.5 text-blue-500" />
-    case 'unknown':
-      return <XCircleIcon className="size-3.5 text-red-500" />
-    case 'idle':
-      return <CheckCircleIcon className="size-3.5 text-emerald-500" />
+    case "active":
+      return <ClockIcon className="size-3.5 text-blue-500" />;
+    case "unknown":
+      return <XCircleIcon className="size-3.5 text-red-500" />;
+    case "idle":
+      return <CheckCircleIcon className="size-3.5 text-emerald-500" />;
     default:
-      return <AlertCircleIcon className="size-3.5 text-muted-foreground" />
+      return <AlertCircleIcon className="size-3.5 text-muted-foreground" />;
   }
 }
 
 function describeWaitingReason(reason: string | null | undefined): string {
   switch (reason) {
-    case 'no-online-runner':
-      return 'No runner is online'
-    case 'capacity-full':
-      return 'Runner slots are full'
-    case 'concurrency-limit':
-      return 'Agent is at its concurrency limit'
-    case 'dispatch-pending':
-      return 'Waiting for dispatch'
+    case "no-online-runner":
+      return "No runner is online";
+    case "capacity-full":
+      return "Runner slots are full";
+    case "concurrency-limit":
+      return "Agent is at its concurrency limit";
+    case "dispatch-pending":
+      return "Waiting for dispatch";
     default:
-      return 'Waiting'
+      return "Waiting";
   }
 }
 
@@ -130,36 +156,36 @@ function ExecutabilityCard({
   executability,
   toProjectPath,
 }: {
-  executability: AgentExecutabilityResult | undefined
-  toProjectPath: (path: string) => string
+  executability: AgentExecutabilityResult | undefined;
+  toProjectPath: (path: string) => string;
 }) {
-  const state = executability?.state ?? 'unknown'
-  const gaps = executability?.gaps ?? []
+  const state = executability?.state ?? "unknown";
+  const gaps = executability?.gaps ?? [];
 
   const tone =
-    state === 'executable'
+    state === "executable"
       ? {
-          borderClass: 'border-emerald-200',
-          iconBg: 'bg-emerald-100',
-          iconClass: 'text-emerald-600',
+          borderClass: "border-emerald-200",
+          iconBg: "bg-emerald-100",
+          iconClass: "text-emerald-600",
           icon: <CheckCircleIcon className="size-4" />,
-          labelClass: 'text-emerald-700',
+          labelClass: "text-emerald-700",
         }
-      : state === 'not-configured' || state === 'not-executable'
+      : state === "not-configured" || state === "not-executable"
         ? {
-            borderClass: 'border-red-200',
-            iconBg: 'bg-red-100',
-            iconClass: 'text-red-600',
+            borderClass: "border-red-200",
+            iconBg: "bg-red-100",
+            iconClass: "text-red-600",
             icon: <AlertTriangleIcon className="size-4" />,
-            labelClass: 'text-red-700',
+            labelClass: "text-red-700",
           }
         : {
-            borderClass: 'border-amber-200',
-            iconBg: 'bg-amber-100',
-            iconClass: 'text-amber-600',
+            borderClass: "border-amber-200",
+            iconBg: "bg-amber-100",
+            iconClass: "text-amber-600",
             icon: <AlertCircleIcon className="size-4" />,
-            labelClass: 'text-amber-700',
-          }
+            labelClass: "text-amber-700",
+          };
 
   return (
     <div
@@ -174,8 +200,13 @@ function ExecutabilityCard({
           {tone.icon}
         </span>
         <div className="flex flex-col">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Executability</span>
-          <span data-testid="agent-detail-executability-state" className={`text-sm font-semibold ${tone.labelClass}`}>
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Executability
+          </span>
+          <span
+            data-testid="agent-detail-executability-state"
+            className={`text-sm font-semibold ${tone.labelClass}`}
+          >
             {state}
           </span>
         </div>
@@ -191,23 +222,29 @@ function ExecutabilityCard({
               <p className="font-medium">{gap.message}</p>
               <p className="text-red-700/80 mt-0.5">{gap.nextAction}</p>
               <p className="text-red-700/80 mt-0.5">
-                Fix in{' '}
-                <a className="font-medium underline" href={toProjectPath(gap.fixEntryPoint.path)}>
+                Fix in{" "}
+                <a
+                  className="font-medium underline"
+                  href={toProjectPath(gap.fixEntryPoint.path)}
+                >
                   {gap.fixEntryPoint.label}
-                </a>{' '}
+                </a>{" "}
                 ({gap.fixEntryPoint.command}).
               </p>
             </li>
           ))}
         </ul>
       )}
-      {state === 'unknown' && executability?.pendingLaunchNote && (
-        <p data-testid="agent-detail-executability-pending-note" className="text-xs text-muted-foreground">
+      {state === "unknown" && executability?.pendingLaunchNote && (
+        <p
+          data-testid="agent-detail-executability-pending-note"
+          className="text-xs text-muted-foreground"
+        >
           {executability.pendingLaunchNote}
         </p>
       )}
     </div>
-  )
+  );
 }
 
 function AvailabilityCard({
@@ -215,9 +252,9 @@ function AvailabilityCard({
   waitingWork,
   loading,
 }: {
-  availability: AgentAvailabilityResponse | undefined
-  waitingWork: AgentWaitingWorkItem[]
-  loading: boolean
+  availability: AgentAvailabilityResponse | undefined;
+  waitingWork: AgentWaitingWorkItem[];
+  loading: boolean;
 }) {
   if (loading && !availability) {
     return (
@@ -228,7 +265,7 @@ function AvailabilityCard({
       >
         Loading availability…
       </div>
-    )
+    );
   }
   if (!availability) {
     return (
@@ -239,36 +276,52 @@ function AvailabilityCard({
       >
         Availability not yet reported by the server.
       </div>
-    )
+    );
   }
-  const canStartNow = availability.canStartNow
-  const reasonText = describeWaitingReason(availability.waitingReason)
-  const feedback = canStartNow ? null : getAgentAvailabilityFeedback(availability.waitingReason)
+  const canStartNow = availability.canStartNow;
+  const reasonText = describeWaitingReason(availability.waitingReason);
+  const feedback = canStartNow
+    ? null
+    : getAgentAvailabilityFeedback(availability.waitingReason);
   return (
     <div
       data-testid="agent-detail-availability"
-      data-state={canStartNow ? 'ready' : 'waiting'}
-      data-waiting-reason={availability.waitingReason ?? ''}
-      className={`rounded-lg border ${canStartNow ? 'border-emerald-200' : 'border-amber-200'} bg-card p-4 space-y-2`}
+      data-state={canStartNow ? "ready" : "waiting"}
+      data-waiting-reason={availability.waitingReason ?? ""}
+      className={`rounded-lg border ${canStartNow ? "border-emerald-200" : "border-amber-200"} bg-card p-4 space-y-2`}
     >
       <div className="flex items-center gap-2">
         <span
-          className={`inline-flex items-center justify-center size-6 rounded-full ${canStartNow ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}
+          className={`inline-flex items-center justify-center size-6 rounded-full ${canStartNow ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"}`}
         >
-          {canStartNow ? <CheckCircleIcon className="size-4" /> : <HourglassIcon className="size-4" />}
+          {canStartNow ? (
+            <CheckCircleIcon className="size-4" />
+          ) : (
+            <HourglassIcon className="size-4" />
+          )}
         </span>
         <div className="flex flex-col">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Availability</span>
-          <span data-testid="agent-detail-availability-conclusion" className="text-sm font-semibold text-foreground">
-            {canStartNow ? 'Can start now' : `Waiting — ${reasonText}`}
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Availability
+          </span>
+          <span
+            data-testid="agent-detail-availability-conclusion"
+            className="text-sm font-semibold text-foreground"
+          >
+            {canStartNow ? "Can start now" : `Waiting — ${reasonText}`}
           </span>
         </div>
       </div>
-      <p data-testid="agent-detail-availability-detail" className="text-xs text-muted-foreground">
+      <p
+        data-testid="agent-detail-availability-detail"
+        className="text-xs text-muted-foreground"
+      >
         Active runs: {availability.activeRuns}
-        {availability.maxConcurrentRuns != null && ` / ${availability.maxConcurrentRuns}`}
-        {' · '}
-        Runner slots: {availability.capacity.usedSlots}/{availability.capacity.totalSlots}
+        {availability.maxConcurrentRuns != null &&
+          ` / ${availability.maxConcurrentRuns}`}
+        {" · "}
+        Runner slots: {availability.capacity.usedSlots}/
+        {availability.capacity.totalSlots}
       </p>
       {feedback && (
         <p
@@ -276,7 +329,8 @@ function AvailabilityCard({
           data-feedback-kind={feedback.kind}
           className="text-xs text-amber-800"
         >
-          <span className="font-medium">{feedback.title}.</span> {feedback.message} {feedback.nextAction}
+          <span className="font-medium">{feedback.title}.</span>{" "}
+          {feedback.message} {feedback.nextAction}
         </p>
       )}
       {waitingWork.length > 0 && (
@@ -293,15 +347,19 @@ function AvailabilityCard({
                 className="flex items-center gap-2 rounded-md border border-amber-100 bg-amber-50/50 px-2 py-1.5 text-xs"
               >
                 <HourglassIcon className="size-3 text-amber-600 shrink-0" />
-                <span className="font-medium text-amber-900 truncate min-w-0 flex-1">{item.jobId}</span>
-                <span className="text-amber-700/80 shrink-0">{describeWaitingReason(item.waitingReason)}</span>
+                <span className="font-medium text-amber-900 truncate min-w-0 flex-1">
+                  {item.jobId}
+                </span>
+                <span className="text-amber-700/80 shrink-0">
+                  {describeWaitingReason(item.waitingReason)}
+                </span>
               </li>
             ))}
           </ul>
         </div>
       )}
     </div>
-  )
+  );
 }
 
 function SessionSection({
@@ -309,14 +367,16 @@ function SessionSection({
   sessions,
   toProjectPath,
 }: {
-  title: string
-  sessions: AgentSessionListItemDto[]
-  toProjectPath: (path: string) => string
+  title: string;
+  sessions: AgentSessionListItemDto[];
+  toProjectPath: (path: string) => string;
 }) {
-  if (sessions.length === 0) return null
+  if (sessions.length === 0) return null;
   return (
     <div className="space-y-1">
-      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-1">{title}</h4>
+      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-1">
+        {title}
+      </h4>
       {sessions.map((s) => (
         <a
           key={s.sessionId}
@@ -324,29 +384,36 @@ function SessionSection({
           data-testid={`session-row-${s.sessionId}`}
           className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
         >
-          {statusIcon(s.activity ?? 'unknown')}
-          <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">{s.agentName}</span>
-          <span className="text-xs text-muted-foreground shrink-0">{s.resolvedModel ?? 'unknown'}</span>
+          {statusIcon(s.activity ?? "unknown")}
+          <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">
+            {s.agentName}
+          </span>
+          <span className="text-xs text-muted-foreground shrink-0">
+            {s.resolvedModel ?? "unknown"}
+          </span>
           <span className="text-[10px] text-muted-foreground/60 shrink-0">
             {formatTime(s.lastActivityAt ?? s.createdAt)}
           </span>
         </a>
       ))}
     </div>
-  )
+  );
 }
 
 export function AgentDetailPage({
   components,
   dataHook = useDefaultData,
 }: {
-  components?: Partial<AgentDetailPageComponents>
-  dataHook?: AgentDetailPageDataHook
+  components?: Partial<AgentDetailPageComponents>;
+  dataHook?: AgentDetailPageDataHook;
 } = {}) {
-  const { AgentProfileEditor, SubscriptionsSection, ConnectionsSection } = { ...defaultComponents, ...components }
-  const { agentId } = useParams<{ agentId: string }>()
-  const navigate = useNavigate()
-  const toProjectPath = useProjectPath()
+  const { AgentProfileEditor, SubscriptionsSection, ConnectionsSection } = {
+    ...defaultComponents,
+    ...components,
+  };
+  const { agentId } = useParams<{ agentId: string }>();
+  const navigate = useNavigate();
+  const toProjectPath = useProjectPath();
   const {
     agent,
     isLoading,
@@ -357,46 +424,59 @@ export function AgentDetailPage({
     unarchiveAgent,
     detailStatus,
     detailStatusLoading,
-  } = dataHook(agentId ?? '')
-  const [editorOpen, setEditorOpen] = useState(false)
-  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
+  } = dataHook(agentId ?? "");
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
 
-  useDocumentTitle(agent ? `${agent.name} — Mohist` : 'Agent — Mohist')
+  useDocumentTitle(agent ? `${agent.name} — Mohist` : "Agent — Mohist");
 
-  const { model, variant, runtime } = useMemo(() => readAgentModelAndVariant(agent), [agent])
-  const isArchived = agent?.status === 'archived'
-  const executability = agent?.executability
-  const executabilityState = executability?.state ?? 'unknown'
+  const { model, variant, runtime } = useMemo(
+    () => readAgentModelAndVariant(agent),
+    [agent],
+  );
+  const isArchived = agent?.status === "archived";
+  const executability = agent?.executability;
+  const executabilityState = executability?.state ?? "unknown";
   const launchBlockedByExecutability =
-    executabilityState === 'not-configured' || executabilityState === 'not-executable'
+    executabilityState === "not-configured" ||
+    executabilityState === "not-executable";
 
-  const runningSessions = useMemo(() => allSessions.filter((s) => s.activity === 'active'), [allSessions])
-  const failedSessions = useMemo(() => allSessions.filter((s) => s.activity === 'unknown'), [allSessions])
-  const endedSessions = useMemo(() => allSessions.filter((s) => s.activity === 'idle'), [allSessions])
+  const runningSessions = useMemo(
+    () => allSessions.filter((s) => s.activity === "active"),
+    [allSessions],
+  );
+  const failedSessions = useMemo(
+    () => allSessions.filter((s) => s.activity === "unknown"),
+    [allSessions],
+  );
+  const endedSessions = useMemo(
+    () => allSessions.filter((s) => s.activity === "idle"),
+    [allSessions],
+  );
   const recentSessions = useMemo(
     () =>
       [...allSessions]
         .sort((a, b) => {
-          const aTime = a.lastActivityAt ?? a.createdAt
-          const bTime = b.lastActivityAt ?? b.createdAt
-          return new Date(bTime).getTime() - new Date(aTime).getTime()
+          const aTime = a.lastActivityAt ?? a.createdAt;
+          const bTime = b.lastActivityAt ?? b.createdAt;
+          return new Date(bTime).getTime() - new Date(aTime).getTime();
         })
         .slice(0, 5),
     [allSessions],
-  )
+  );
 
   function handleArchive() {
-    if (!agent) return
+    if (!agent) return;
     archiveAgent.mutate(agent.id, {
       onSuccess: () => {
-        setArchiveConfirmOpen(false)
+        setArchiveConfirmOpen(false);
       },
-    })
+    });
   }
 
   function handleUnarchive() {
-    if (!agent) return
-    unarchiveAgent.mutate(agent.id)
+    if (!agent) return;
+    unarchiveAgent.mutate(agent.id);
   }
 
   if (isLoading) {
@@ -404,7 +484,7 @@ export function AgentDetailPage({
       <div className="flex-1 flex items-center justify-center">
         <div className="text-sm text-muted-foreground">Loading agent...</div>
       </div>
-    )
+    );
   }
 
   if (isError || !agent) {
@@ -412,29 +492,37 @@ export function AgentDetailPage({
       <div className="flex-1 flex items-center justify-center">
         <div className="text-sm text-red-500">Failed to load agent.</div>
       </div>
-    )
+    );
   }
 
   return (
-    <div data-testid="agent-detail-page" data-agent-id={agent.id} className="flex-1 overflow-y-auto bg-background">
+    <div
+      data-testid="agent-detail-page"
+      data-agent-id={agent.id}
+      className="flex-1 overflow-y-auto bg-background"
+    >
       <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-4 min-w-0">
             <div
-              className={`flex items-center justify-center size-12 rounded-xl shrink-0 ${isArchived ? 'bg-muted' : 'bg-blue-50'}`}
+              className={`flex items-center justify-center size-12 rounded-xl shrink-0 ${isArchived ? "bg-muted" : "bg-blue-50"}`}
             >
-              <BotIcon className={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
+              <BotIcon
+                className={`size-6 ${isArchived ? "text-muted-foreground" : "text-blue-600"}`}
+              />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-semibold text-foreground truncate">{agent.name}</h1>
+                <h1 className="text-lg font-semibold text-foreground truncate">
+                  {agent.name}
+                </h1>
                 <Badge
                   data-testid="agent-detail-lifecycle"
                   variant="outline"
                   className={
                     isArchived
-                      ? 'text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30'
-                      : 'text-[10px] px-1.5 py-0 h-4 text-emerald-700 border-emerald-300'
+                      ? "text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30"
+                      : "text-[10px] px-1.5 py-0 h-4 text-emerald-700 border-emerald-300"
                   }
                 >
                   {isArchived ? (
@@ -443,36 +531,57 @@ export function AgentDetailPage({
                       Archived
                     </>
                   ) : (
-                    'Active'
+                    "Active"
                   )}
                 </Badge>
               </div>
-              <p data-testid="agent-detail-purpose" className="mt-0.5 text-xs text-muted-foreground">
-                {agent.purpose?.trim() || 'No purpose set'}
+              <p
+                data-testid="agent-detail-purpose"
+                className="mt-0.5 text-xs text-muted-foreground"
+              >
+                {agent.purpose?.trim() || "No purpose set"}
               </p>
               {agent.description.trim() && (
-                <p data-testid="agent-detail-description" className="mt-0.5 text-xs text-muted-foreground">
+                <p
+                  data-testid="agent-detail-description"
+                  className="mt-0.5 text-xs text-muted-foreground"
+                >
                   {agent.description}
                 </p>
               )}
               <p className="text-xs text-muted-foreground mt-0.5">
-                {model ? `Model · ${model}` : 'Model · Default'}
+                {model ? `Model · ${model}` : "Model · Default"}
                 {variant && ` · ${variant}`}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)} data-testid="agent-detail-edit">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditorOpen(true)}
+              data-testid="agent-detail-edit"
+            >
               <PencilIcon />
               Edit
             </Button>
             {!isArchived ? (
               <Button
                 size="sm"
-                onClick={() => navigate(toProjectPath(`/agent-sessions/new?agent=${encodeURIComponent(agent.id)}`))}
+                onClick={() =>
+                  navigate(
+                    toProjectPath(
+                      `/agent-sessions/new?agent=${encodeURIComponent(agent.id)}`,
+                    ),
+                  )
+                }
                 data-testid="agent-detail-new-session"
                 disabled={launchBlockedByExecutability}
-                title={launchBlockedByExecutability ? 'Executability is blocked — fix the gaps first.' : undefined}
+                title={
+                  launchBlockedByExecutability
+                    ? "Executability is blocked — fix the gaps first."
+                    : undefined
+                }
               >
                 <PlayIcon />
                 New Session
@@ -494,22 +603,35 @@ export function AgentDetailPage({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
-            <ExecutabilityCard executability={executability ?? undefined} toProjectPath={toProjectPath} />
+            <ExecutabilityCard
+              executability={executability ?? undefined}
+              toProjectPath={toProjectPath}
+            />
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3">Instructions</h3>
+              <h3 className="text-sm font-medium text-foreground mb-3">
+                Instructions
+              </h3>
               <div
                 data-testid="agent-detail-instructions"
                 className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed"
               >
-                {agent.instructions || <span className="italic text-muted-foreground/50">No instructions set</span>}
+                {agent.instructions || (
+                  <span className="italic text-muted-foreground/50">
+                    No instructions set
+                  </span>
+                )}
               </div>
             </div>
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3">Sessions</h3>
+              <h3 className="text-sm font-medium text-foreground mb-3">
+                Sessions
+              </h3>
               {sessionsLoading ? (
-                <div className="text-xs text-muted-foreground py-4 text-center">Loading sessions...</div>
+                <div className="text-xs text-muted-foreground py-4 text-center">
+                  Loading sessions...
+                </div>
               ) : allSessions.length === 0 ? (
                 <div className="text-xs text-muted-foreground py-4 text-center">
                   No sessions yet. Start a new session to get started.
@@ -517,16 +639,32 @@ export function AgentDetailPage({
               ) : (
                 <div className="space-y-4" data-testid="agent-detail-sessions">
                   {runningSessions.length > 0 && (
-                    <SessionSection title="Running" sessions={runningSessions} toProjectPath={toProjectPath} />
+                    <SessionSection
+                      title="Running"
+                      sessions={runningSessions}
+                      toProjectPath={toProjectPath}
+                    />
                   )}
                   {failedSessions.length > 0 && (
-                    <SessionSection title="Failed" sessions={failedSessions} toProjectPath={toProjectPath} />
+                    <SessionSection
+                      title="Failed"
+                      sessions={failedSessions}
+                      toProjectPath={toProjectPath}
+                    />
                   )}
                   {endedSessions.length > 0 && (
-                    <SessionSection title="Ended" sessions={endedSessions} toProjectPath={toProjectPath} />
+                    <SessionSection
+                      title="Ended"
+                      sessions={endedSessions}
+                      toProjectPath={toProjectPath}
+                    />
                   )}
                   {recentSessions.length > 0 && (
-                    <SessionSection title="Recent" sessions={recentSessions} toProjectPath={toProjectPath} />
+                    <SessionSection
+                      title="Recent"
+                      sessions={recentSessions}
+                      toProjectPath={toProjectPath}
+                    />
                   )}
                 </div>
               )}
@@ -541,65 +679,117 @@ export function AgentDetailPage({
             />
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3">Agent Config</h3>
+              <h3 className="text-sm font-medium text-foreground mb-3">
+                Agent Config
+              </h3>
               <div className="space-y-2" data-testid="agent-detail-config">
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Runtime</span>
-                  <span data-testid="agent-detail-runtime" className="text-xs font-medium text-foreground">
-                    {runtime === 'opencode' ? 'OpenCode' : 'Pi'}
+                  <span
+                    data-testid="agent-detail-runtime"
+                    className="text-xs font-medium text-foreground"
+                  >
+                    {runtime === "opencode" ? "OpenCode" : "Pi"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Model</span>
-                  <span className="text-xs font-medium text-foreground">{model ?? 'Default'}</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {model ?? "Default"}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Variant</span>
-                  <span className="text-xs font-medium text-foreground">{variant ?? 'Default'}</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {variant ?? "Default"}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-muted-foreground">Max concurrent runs</span>
-                  <span data-testid="agent-detail-max-concurrent-runs" className="text-xs font-medium text-foreground">
-                    {agent.maxConcurrentRuns ?? 'Unlimited'}
+                  <span className="text-xs text-muted-foreground">
+                    Max concurrent runs
+                  </span>
+                  <span
+                    data-testid="agent-detail-max-concurrent-runs"
+                    className="text-xs font-medium text-foreground"
+                  >
+                    {agent.maxConcurrentRuns ?? "Unlimited"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="text-xs text-muted-foreground">
+                    Allowed collaborators
+                  </span>
+                  <span
+                    data-testid="agent-detail-collaborators"
+                    className="text-right text-xs font-medium text-foreground"
+                  >
+                    {agent.allowedSubagentAgentIds?.length
+                      ? agent.allowedSubagentAgentIds.join(", ")
+                      : "None"}
                   </span>
                 </div>
                 <p
                   data-testid="agent-detail-edit-timing"
                   className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground"
                 >
-                  Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills edits apply only to Jobs
-                  created after saving. Executions already in progress keep the configuration from launch.
+                  Purpose, Instructions, Permissions, Runtime, Model, Variant,
+                  and Skills edits apply only to Jobs created after saving.
+                  Executions already in progress keep the configuration from
+                  launch.
                 </p>
               </div>
             </div>
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3">Skills</h3>
+              <h3 className="text-sm font-medium text-foreground mb-3">
+                Skills
+              </h3>
               {agent.skills && agent.skills.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5" data-testid="agent-detail-skills">
+                <div
+                  className="flex flex-wrap gap-1.5"
+                  data-testid="agent-detail-skills"
+                >
                   {agent.skills.map((skill) => (
-                    <Badge key={skill} variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                    <Badge
+                      key={skill}
+                      variant="secondary"
+                      className="text-[10px] px-1.5 py-0 h-4"
+                    >
                       {skill}
                     </Badge>
                   ))}
                 </div>
               ) : (
-                <span className="text-xs text-muted-foreground/50 italic">No skills configured</span>
+                <span className="text-xs text-muted-foreground/50 italic">
+                  No skills configured
+                </span>
               )}
             </div>
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3">Declared permissions</h3>
+              <h3 className="text-sm font-medium text-foreground mb-3">
+                Declared permissions
+              </h3>
               {agent.permissions.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5" data-testid="agent-detail-permissions">
+                <div
+                  className="flex flex-wrap gap-1.5"
+                  data-testid="agent-detail-permissions"
+                >
                   {agent.permissions.map((permission) => (
-                    <Badge key={permission} variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                    <Badge
+                      key={permission}
+                      variant="secondary"
+                      className="text-[10px] px-1.5 py-0 h-4"
+                    >
                       {permission}
                     </Badge>
                   ))}
                 </div>
               ) : (
-                <span data-testid="agent-detail-permissions" className="text-xs text-muted-foreground/50 italic">
+                <span
+                  data-testid="agent-detail-permissions"
+                  className="text-xs text-muted-foreground/50 italic"
+                >
                   No permissions declared
                 </span>
               )}
@@ -610,7 +800,9 @@ export function AgentDetailPage({
             <ConnectionsSection agent={agent} />
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3">Actions</h3>
+              <h3 className="text-sm font-medium text-foreground mb-3">
+                Actions
+              </h3>
               <div className="space-y-2">
                 {!isArchived ? (
                   <Button
@@ -633,7 +825,11 @@ export function AgentDetailPage({
                     data-testid="agent-detail-unarchive-btn"
                     disabled={unarchiveAgent.isPending}
                   >
-                    {unarchiveAgent.isPending ? <Loader2Icon className="size-4 animate-spin" /> : <RotateCcwIcon />}
+                    {unarchiveAgent.isPending ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCcwIcon />
+                    )}
                     Unarchive
                   </Button>
                 )}
@@ -649,18 +845,22 @@ export function AgentDetailPage({
           open={editorOpen}
           onClose={() => setEditorOpen(false)}
           onSaved={() => {
-            setEditorOpen(false)
+            setEditorOpen(false);
           }}
         />
       )}
 
       <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
-        <DialogContent className="sm:max-w-sm" data-testid="agent-detail-archive-confirm-dialog">
+        <DialogContent
+          className="sm:max-w-sm"
+          data-testid="agent-detail-archive-confirm-dialog"
+        >
           <DialogHeader>
             <DialogTitle>Archive Agent</DialogTitle>
             <DialogDescription>
-              This agent will leave the Active group and will not be launchable for new sessions. It remains visible in
-              the Archived group and can be restored from this page.
+              This agent will leave the Active group and will not be launchable
+              for new sessions. It remains visible in the Archived group and can
+              be restored from this page.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 pt-2">
@@ -678,12 +878,14 @@ export function AgentDetailPage({
               disabled={archiveAgent.isPending}
               data-testid="agent-detail-archive-confirm"
             >
-              {archiveAgent.isPending && <Loader2Icon className="size-4 animate-spin" />}
+              {archiveAgent.isPending && (
+                <Loader2Icon className="size-4 animate-spin" />
+              )}
               Archive
             </Button>
           </div>
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

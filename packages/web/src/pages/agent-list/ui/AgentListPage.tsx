@@ -39,11 +39,8 @@ const defaultComponents: AgentListPageComponents = {
 };
 
 function getAgentType(agent: AgentInfo): string {
-  const config = agent.agentConfig;
-  if (config && typeof config === "object" && "type" in config) {
-    return String(config.type);
-  }
-  return "opencode";
+  const { runtime } = readAgentModelAndVariant(agent);
+  return runtime === "pi" ? "pi" : "opencode";
 }
 
 function getLifecycleStatus(agent: AgentInfo): {
