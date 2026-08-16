@@ -85,15 +85,15 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   is the base for launch specs; collection "MohistIntegration".
 
 ### Decisions
-- MatchesCurrentDefinition now compares resolved tuples on BOTH sides under
-  the same current default: current side resolves agent.AgentConfig, history
-  side resolves input.AgentConfig (launch-time definition snapshot; null
-  snapshot = empty definition). This is what makes "a default change does not
-  flip a completed execution" true — dispatch values (input.Model) are NOT
-  compared anymore. Unit-test History helper updated to snapshot AgentConfig
-  (mirrors production: coordinator snapshots AgentConfigJson into
-  AgentJobInput.AgentConfig). Config-less agents only ever launched via
-  default → their null snapshot + empty definition is correct.
+- MatchesCurrentDefinition compares resolved tuples on both sides under the
+  same current default when the launch-time AgentConfig snapshot exists.
+  Legacy AgentJobInput records without that snapshot use the persisted
+  dispatch values only for fields explicitly supplied by the current Agent
+  definition; default-resolved fields remain free so a Project-default change
+  cannot flip a completed conclusion. New launches still snapshot
+  AgentConfigJson, and config-less agents launched via a default keep their
+  null snapshot semantics. Unit-test History helper snapshots AgentConfig for
+  new-launch cases and covers the legacy fallback.
 - Readiness StructuralGaps non-object AgentConfig now yields model-missing
   when no default (previously a corrupt string config produced no gap) —
   unreachable via write surfaces, acceptable tightening.
@@ -106,3 +106,17 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   AgentReadinessDeriver, a separate static helper unaffected by this change.
 - Route write surface: PUT and PATCH /default-execution-config both map to
   replace-on-set (same closed field set); no clear operation in v1.
+- Final refinement: `ProjectInfo.DefaultExecutionConfig` is explicitly
+  serialized as `defaultExecutionConfig: null` when unset, matching the
+  shared GET read contract instead of relying on the global null omission
+  policy. Readiness uses resolved-tuple matching for snapshot-backed jobs and
+  the documented legacy dispatch fallback for pre-snapshot jobs.
+- Verification so far: focused server unit tests, the server build, and the
+  server architecture/integration suites passed on the .NET 11 preview SDK.
+- Compatibility follow-up: the first rebuilt full-spec run exposed that
+  manually seeded/pre-feature AgentJobInput values may lack AgentConfig. The
+  readiness matcher now uses the exact resolved tuple for new snapshots and a
+  definition-field-only dispatch fallback for legacy snapshots. This keeps
+  existing completed Agents Ready while Project-default-only fields remain
+  unaffected by default changes. Full server specs pass 3938/3938 after the
+  rebuild.

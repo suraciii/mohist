@@ -31,7 +31,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
         var agent = await CreateModellessAgentAsync(projectId, "gap-agent");
 
         var readiness = await GetReadinessAsync(projectId, agent.Id);
-        Assert.Equal("not-configured", readiness.Conclusion);
+        Assert.Equal("Needs setup", readiness.Conclusion);
         Assert.Contains("model-missing", readiness.Gaps);
 
         using var response = await _fixture.Client.LaunchAgentSessionAsync(
@@ -41,7 +41,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("agent_not_configured", body.GetProperty("code").GetString());
+        Assert.Equal("agent_needs_setup", body.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -56,9 +56,9 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
         try
         {
             // The default resolved the gap: Readiness is no longer
-            // Not needs setup even though the definition carries no model.
+            // Needs setup even though the definition carries no model.
             var readiness = await GetReadinessAsync(projectId, agent.Id);
-            Assert.Equal("unknown", readiness.Conclusion);
+            Assert.Equal("Unknown", readiness.Conclusion);
             Assert.DoesNotContain("model-missing", readiness.Gaps);
 
             using var response = await _fixture.Client.LaunchAgentSessionAsync(
@@ -163,7 +163,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
         await SetDefaultAsync(projectId, "opencode", "openai/gpt-5.6", null);
 
         var readiness = await GetReadinessAsync(projectId, agent.Id);
-        Assert.Equal("not-configured", readiness.Conclusion);
+        Assert.Equal("Needs setup", readiness.Conclusion);
         Assert.Contains("model-reference-malformed", readiness.Gaps);
 
         using var response = await _fixture.Client.LaunchAgentSessionAsync(
@@ -198,7 +198,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
                 Fields: new HashSet<string>([nameof(AgentUpdateData.AgentConfig)], StringComparer.Ordinal)));
 
         var readiness = await GetReadinessAsync(projectId, agent.Id);
-        Assert.Equal("not-configured", readiness.Conclusion);
+        Assert.Equal("Needs setup", readiness.Conclusion);
         Assert.Contains("runtime-invalid", readiness.Gaps);
     }
 
@@ -217,7 +217,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
         try
         {
             var readiness = await GetReadinessAsync(projectId, agent.Id);
-            Assert.Equal("unknown", readiness.Conclusion);
+            Assert.Equal("Unknown", readiness.Conclusion);
             Assert.Empty(readiness.Gaps);
 
             using var response = await _fixture.Client.LaunchAgentSessionAsync(
@@ -286,9 +286,9 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
         using var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agentId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var readiness = body.GetProperty("data").GetProperty("executability");
+        var readiness = body.GetProperty("data").GetProperty("readiness");
         return new AgentReadinessAssertion(
-            readiness.GetProperty("state").GetString()!,
+            readiness.GetProperty("conclusion").GetString()!,
             readiness.GetProperty("gaps").EnumerateArray()
                 .Select(gap => gap.GetProperty("code").GetString()!)
                 .ToArray());

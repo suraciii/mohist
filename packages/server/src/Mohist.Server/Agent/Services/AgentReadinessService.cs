@@ -118,29 +118,50 @@ public sealed class AgentReadinessService : IScopedService
     /// default — against the last execution's launch-time definition
     /// snapshot, with both sides resolved under the same (current) default.
     /// A Project-default change therefore cannot flip a completed
-    /// execution: an Agent whose definition is unchanged still matches. An
-    /// Agent definition edit still breaks the match (Unknown) because the
-    /// launch-time snapshot differs from the current definition.
+    /// execution: an Agent whose definition is unchanged still matches.
+    ///
+    /// Older AgentJobInput records predate the AgentConfig snapshot and have
+    /// only the already-resolved dispatch fields. For those records, compare
+    /// fields the current definition explicitly supplies and leave
+    /// default-resolved fields free, preserving the pre-feature readiness
+    /// result while retaining the full tuple comparison for new launches.
     /// </summary>
     private static bool MatchesCurrentDefinition(
         AgentInfo agent,
         AgentJobInput input,
         ExecutionConfigHint? projectDefault)
     {
-        var current = ExecutionConfigResolver.Resolve(
-            callerHint: null,
-            definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
-            projectDefault: projectDefault);
-        var atLaunch = ExecutionConfigResolver.Resolve(
-            callerHint: null,
-            definition: ExecutionConfigResolver.FromAgentConfig(input.AgentConfig),
-            projectDefault: projectDefault);
+        var definition = ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig);
+        var current = ExecutionConfigResolver.Resolve(null, definition, projectDefault);
+        var launchDefinition = ExecutionConfigResolver.FromAgentConfig(input.AgentConfig);
+        var matchesExecution = launchDefinition is not null
+            ? MatchesResolvedTuple(
+                current,
+                ExecutionConfigResolver.Resolve(null, launchDefinition, projectDefault))
+            : MatchesLegacyDispatch(definition, current, input);
+
         return string.Equals(agent.Instructions, input.AgentInstructions ?? string.Empty, StringComparison.Ordinal)
-            && string.Equals(current.Runtime, atLaunch.Runtime, StringComparison.Ordinal)
-            && string.Equals(current.Model, atLaunch.Model, StringComparison.Ordinal)
-            && string.Equals(current.Variant, atLaunch.Variant, StringComparison.Ordinal)
+            && matchesExecution
             && agent.Skills.SequenceEqual(input.Skills ?? [], StringComparer.Ordinal);
     }
+
+    private static bool MatchesResolvedTuple(
+        ResolvedExecutionConfig current,
+        ResolvedExecutionConfig atLaunch) =>
+        string.Equals(current.Runtime, atLaunch.Runtime, StringComparison.Ordinal)
+        && string.Equals(current.Model, atLaunch.Model, StringComparison.Ordinal)
+        && string.Equals(current.Variant, atLaunch.Variant, StringComparison.Ordinal);
+
+    private static bool MatchesLegacyDispatch(
+        ExecutionConfigHint? definition,
+        ResolvedExecutionConfig current,
+        AgentJobInput input) =>
+        (definition?.Runtime is null
+            || string.Equals(current.Runtime, input.Runtime ?? AgentConfigSchema.OpenCodeRuntime, StringComparison.Ordinal))
+        && (definition?.Model is null
+            || string.Equals(current.Model, input.Model, StringComparison.Ordinal))
+        && (definition?.Variant is null
+            || string.Equals(current.Variant, input.Variant, StringComparison.Ordinal));
 
     private static bool IsConfigurationFailure(string? category)
     {

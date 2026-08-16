@@ -449,6 +449,17 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
+    public void LegacyHistoryWithoutConfig_UsesPersistedDispatchForDefinitionFields()
+    {
+        var agent = Agent(config: "{\"model\":\"provider/model\"}");
+        var history = History(AgentJobStatus.Completed, model: "provider/model", config: null);
+
+        var result = AgentReadinessService.Evaluate(agent, history);
+
+        Assert.Equal(AgentReadinessConclusions.Ready, result.Conclusion);
+    }
+
+    [Fact]
     public void DefaultRuntime_FillsADefinitionWithoutRuntime()
     {
         var result = AgentReadinessService.Evaluate(
