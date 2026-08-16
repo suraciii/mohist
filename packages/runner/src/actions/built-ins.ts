@@ -35,10 +35,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { name: 'stdout', description: 'Trimmed command stdout' },
         { name: 'exitCode', description: 'Process exit code' },
       ],
-      errors: [
-        { code: 'process-failed', description: 'Process exited with a non-zero status' },
-        { code: 'resource-containment', description: 'Process exceeded its per-work resource bound' },
-      ],
+      errors: [{ code: 'process-failed', description: 'Process exited with a non-zero status' }],
     },
     run: processAction,
   }),
@@ -50,11 +47,6 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         run: { types: ['string'], required: true, description: 'Script body' },
         shell: { types: ['string'], description: 'Shell executable; defaults to bash or pwsh based on platform' },
         timeout: { types: ['number'], description: 'Script execution timeout in milliseconds' },
-        resourceProfile: {
-          types: ['string'],
-          description:
-            "Named command resource profile; 'full-verify' raises the finite memory budget for full verification",
-        },
       },
       outputs: [
         { name: 'kind', description: 'Output kind discriminator' },
@@ -64,10 +56,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { name: 'stdout', description: 'Truncated stdout' },
         { name: 'stderr', description: 'Truncated stderr' },
       ],
-      errors: [
-        { code: 'script-failed', description: 'Script exited with a non-zero status' },
-        { code: 'resource-containment', description: 'Script exceeded its per-work resource bound' },
-      ],
+      errors: [{ code: 'script-failed', description: 'Script exited with a non-zero status' }],
     },
     run: scriptAction,
   }),

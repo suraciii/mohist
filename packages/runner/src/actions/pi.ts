@@ -13,7 +13,6 @@ import type { PromptLoaderContext } from '../core/prompt.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import type { AgentExecutionDefinition } from '../core/types.js'
-import { minPositive, type ResolvedWorkResourceLimits } from '../runtime/resource-containment.js'
 import { WorkflowAgentSessionReporter } from './workflow-agent-session-reporter.js'
 import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
 
@@ -42,7 +41,6 @@ interface ActionInvocationContext {
   runtimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   runtimeEventRecordId?: () => string
   cleanupAttempt?: number | null
-  workResourceLimits?: ResolvedWorkResourceLimits
   preparedPrompt?: string
   preparedOptions?: PiOptions
   agentRecovery?: AgentRecoveryBinding | null
@@ -230,10 +228,7 @@ export async function piAction(
   const request: PiTurnRequest = {
     target: { runtime: 'pi', runtimeSessionId, workDir: context.workDir },
     prompt: executionPrompt,
-    durationMs: minPositive(options.timeoutMs, context.workResourceLimits?.turnBudgetMs) ?? PI_TURN_DURATION_MS,
-    ...(context.workResourceLimits?.turnBudgetMs !== undefined
-      ? { resourceBudgetMs: context.workResourceLimits.turnBudgetMs }
-      : {}),
+    durationMs: options.timeoutMs ?? PI_TURN_DURATION_MS,
     options: {
       model: model ?? null,
       variant: variant ?? null,

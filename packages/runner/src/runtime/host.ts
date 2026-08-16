@@ -40,8 +40,6 @@ import { currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
 import { SkillResolver } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
-import { probePrlimit } from '../system/process.js'
-import { normalizeWorkResourceLimits, type ResolvedWorkResourceLimits } from './resource-containment.js'
 import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
 import { boundedSignal, delay, raceInterval, isAgentRecoveryDispatch, usesOpenCode } from './host-helpers.js'
 import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
@@ -150,7 +148,6 @@ export class RunnerHost {
   private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
-  private readonly workResourceLimits: ResolvedWorkResourceLimits
 
   // Lets an out-of-loop reconnect callback bound its immediate heartbeat.
   private activeSignal: AbortSignal | null = null
@@ -176,7 +173,6 @@ export class RunnerHost {
   ) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
-    this.workResourceLimits = normalizeWorkResourceLimits(options.workResourceLimits)
     const build = loadBuildInfo()
     this.buildInfo = build
     this.buildGitHash = build.gitHash
@@ -316,9 +312,6 @@ export class RunnerHost {
         log.warn('terminal task-log delivery store unavailable; runner admission gated')
       }
       await this.loadWorkResultJournal()
-      // Probe once before any work can be admitted. Hosts without util-linux
-      // remain protected by the aggregate-RSS and wall-clock watchdog.
-      await probePrlimit()
       // Load the AgentSession runtime-event outbox BEFORE accepting
       // SignalR commands or claiming work. An unreadable snapshot is
       // never replaced with empty state — the outbox loads itself once
@@ -455,7 +448,6 @@ export class RunnerHost {
         process.cwd(),
         this.skillResolver,
         this.namedWorkspaceManager,
-        { workResourceLimits: this.workResourceLimits },
       ),
       this.agentSessionRuntimeEventOutbox,
       undefined,
@@ -463,7 +455,6 @@ export class RunnerHost {
       this.bindingRecoveryCoordinator,
       this.skillResolver,
       this.namedWorkspaceManager,
-      this.workResourceLimits,
     )
   }
 

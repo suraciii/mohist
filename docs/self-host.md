@@ -297,42 +297,22 @@ the Runner service's own process limits configured separately; for example,
 use systemd `MemoryMax` on the Runner unit to protect the host from aggregate
 runtime memory growth.
 
-### Per-work resource containment
+### Host-level resource protection
 
-The Runner accepts the following deployment-backed `workResourceLimits` fields:
-
-```bash
-WORK_RESOURCE_MEMORY_MB=1024
-WORK_RESOURCE_WALL_CLOCK_MS=3600000
-WORK_RESOURCE_WATCHDOG_INTERVAL_MS=250
-WORK_RESOURCE_TURN_BUDGET_MS=3600000
-```
-
-These are the defaults and may be overridden in the Runner service environment.
-`memoryMb` and `wallClockMs` bound action subprocesses; `turnBudgetMs` bounds an
-OpenCode or Pi turn; and the watchdog interval controls aggregate RSS sampling
-when the Linux `prlimit` binary is unavailable. A bound work is reported with
-the definite `resource-containment` reason, while sibling work and the Runner
-process remain alive. Set an individual typed field to `null` when embedding a
-`workResourceLimits` object programmatically to disable that bound.
-
-`mo install runner` creates the managed unit but does not guess host-specific
-memory capacity. Configure the variables with `systemctl --user edit
-mohist-runner.service` before starting or restarting the service. On Linux,
-also cap the aggregate Runner unit so a shared runtime or a watchdog-only
-container cannot exhaust the host. The recommended unit override is:
+The Runner does not apply per-work memory, RSS, wall-clock, or turn budgets.
+Action and workflow timeouts remain explicit contract fields, and cancellation
+still terminates the command process group. `mo install runner` does not guess
+host capacity; configure aggregate protection on the service or container
+instead. On Linux, the recommended unit override is:
 
 ```ini
 [Service]
 MemoryMax=4G
 ```
 
-Choose `MemoryMax` above the sum of the Runner baseline, the configured
-per-work action limits, and the shared OpenCode/Pi runtime headroom. The
-per-work `memoryMb` bound is not a substitute for this unit-level aggregate
-limit. On macOS, `prlimit` is unavailable and containment detection is bounded
-by the watchdog sampling interval; the runner unit recommendation applies to
-Linux systemd deployments.
+Choose `MemoryMax` above the Runner baseline and the shared OpenCode/Pi runtime
+headroom. This unit-level aggregate limit applies to the service as a whole and
+does not change individual workflow outcomes.
 
 ## Remote Access
 
