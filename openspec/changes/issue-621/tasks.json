@@ -1,76 +1,80 @@
 {
   "project": "mohist-local",
-  "description": "Add a bounded, Agent-owned Slack reply guard for Runner turns that finish without an accepted reply publication.",
+  "description": "Add a bounded, Agent-owned Slack reply guard in the Runner for turns that finish without a Runner-observed reply action attempt.",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Expose the Server-owned Slack publication probe and outbox matching predicate",
-      "spec": "specs/runner-reply-guard/spec.md#detect-unpublished-replies-only-for-eligible-slack-turns",
-      "description": "Add a Runner-authenticated, read-only ServerConnection operation that reports only whether the current Slack reply has been accepted by the Server-owned outbox. Centralize matching in SlackOutboxStore across the anchor dispatch reference, canonical progress reference, and conversation/thread fallback paths, treating accepted rows as published regardless of adapter delivery state and without changing the outbox schema or reply action.",
+      "title": "Add Runner-local reply-action observation and bounded guard coordinator",
+      "spec": "specs/runner-reply-guard/spec.md#detect-missing-reply-action-attempts-only-for-eligible-slack-turns",
+      "description": "Add the shared Runner reply-guard coordinator and its per-turn observation state. Detect the existing mo slack message send invocation from the normalized Pi/OpenCode tool_call.started observation and mark it attempted before the action can return success or failure. Keep the predicate, reminder count, timeout, and error containment in Runner code; do not add a ServerConnection probe, Server endpoint, SlackOutboxStore query, delivery lookup, persistence schema, or Server test dependency.",
       "acceptanceCriteria": [
-        "ServerConnection can query the current Slack turn publication status through an authenticated read-only endpoint, and the response contains only an accepted boolean.",
-        "SlackOutboxStore matches the validated reply anchor using its direct dispatch reference, canonical workspace/conversation/trigger progress reference, or existing conversation/thread fallback as applicable, without broad unrelated delivery reads.",
-        "An accepted, pending, promoted, merged, or otherwise not-yet-delivered outbox row returns accepted=true; missing, rejected, or non-matching rows return accepted=false.",
-        "The probe never returns reply text or provider details, never waits for adapter delivery confirmation, and introduces no persistence migration or external dependency.",
-        "Server and Runner tests cover direct-anchor, progress-promotion, fallback-thread, pending-delivery, non-match, and authenticated response-shape cases.",
-        "The focused Server test suite and Runner connection tests pass."
+        "A valid Slack execution context and reply anchor make a turn eligible; absent or malformed context bypasses the coordinator.",
+        "The Runner-local predicate recognizes the existing mo slack message send invocation in the normalized Pi and OpenCode tool-call start shapes, and the attempt marker is set before action completion is known.",
+        "A reply action that later returns non-zero, is rejected, or is interrupted still counts as an attempt; final text, unrelated tool output, terminal facts, liveness, Server outbox state, and provider delivery do not count.",
+        "Coordinator state explicitly contains replyActionAttempted, remindersIssued, and a closed/evaluating/advisory-running phase, with a default reminder budget of exactly two.",
+        "The coordinator increments remindersIssued before each advisory, stops on an attempt, stops after two completed silent opportunities, and cannot open a third opportunity through duplicate or late signals.",
+        "The advisory prompt reuses the existing Slack context, reply anchor, collaboration skill, runtime session, and work directory; it permits deliberate silence and never creates reply content or publishes through the Server on the Agent's behalf.",
+        "Each advisory has a finite abortable bound. Timeout, failure, unavailable runtime, interruption, and late completion preserve the original result and never retry the advisory or original turn.",
+        "Runner unit tests cover Pi and OpenCode attempt observation, rejected-send attempts, final-output-only turns, default-two budgeting, explicit silence, duplicate terminal signals, timeout/failure/unavailable/interrupted paths, and non-Slack bypass.",
+        "The focused Runner typecheck and reply-guard/runtime test suites pass."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "A tested ServerConnection publication probe backed by SlackOutboxStore matching logic, with no schema changes.",
+      "output": "A tested Runner-local reply-action observation tracker and shared two-reminder reply-guard coordinator with bounded abortable advisory behavior.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep publication acceptance distinct from Slack adapter delivery and reuse the existing reply/outbox identity rules."
+      "notes": "The authoritative fact is a local action invocation attempt, not Server acceptance. Keep the normalized event predicate aligned with the existing Pi and OpenCode observer shapes."
     },
     {
       "id": "T-002",
-      "title": "Guard initial Pi and OpenCode AgentJob turns",
-      "spec": "specs/runner-reply-guard/spec.md#issue-one-bounded-advisory-using-the-existing-reply-context",
-      "description": "Implement the shared Runner reply-guard coordinator and integrate it at the initial AgentJob turn boundary after the original runtime result and observer work are captured. The coordinator must validate Slack eligibility, probe publication, claim one-shot state, issue a fixed advisory on the same Pi or OpenCode session with the existing execution envelope, Slack context, anchor, and collaboration skill, and preserve the original result under all advisory outcomes.",
+      "title": "Guard initial Pi and OpenCode AgentJob terminal turns",
+      "spec": "specs/runner-reply-guard/spec.md#issue-a-bounded-advisory-using-the-existing-reply-context",
+      "description": "Integrate the shared Runner reply guard into the initial AgentJob turn boundary after the original Pi or OpenCode runtime result and observer work are terminal and drained. Pass the same turn observation tracker into the coordinator, preserve the original WorkItemResult, and keep Slack liveness finalization independent.",
       "acceptanceCriteria": [
-        "Initial AgentJob turns with a valid Slack execution context and reply anchor are evaluated for both Pi and OpenCode, while non-Slack or malformed-context turns bypass the guard and retain existing behavior.",
-        "A terminal turn with an accepted outbox publication, including one pending provider delivery, receives no advisory; final assistant text, tool output, runtime events, and liveness facts alone do not count as publication.",
-        "An unpublished eligible turn receives at most one fixed advisory that asks the Agent to publish a self-contained conclusion through the existing reply action or deliberately remain silent, reuses the current runtime session and supplied anchor, and does not synthesize or send Server-authored content.",
-        "The advisory uses the existing Pi/OpenCode follow-up path with the original work directory and observer, combines the original cancellation signal with a finite code-level timeout, and claims one-shot state before awaiting runtime work so late or duplicate signals cannot start another advisory.",
-        "Timeout, invocation failure, runtime unavailability, interruption, or an accepted reply during the advisory preserves the original success, failure, cancellation, deadline, or unknown WorkItemResult and does not rerun the original turn, create a second session turn, or retry the advisory.",
-        "Initial AgentJob tests cover Pi and OpenCode publication detection, Agent-authored reply and explicit silence, duplicate terminal evaluation, timeout/failure/unavailable/interrupted paths, non-Slack bypass, and preservation of report output and liveness independence.",
+        "Initial AgentJob turns with a valid Slack execution context and reply anchor are evaluated for both Pi and OpenCode only after their runTurn result is terminal, while non-Slack and malformed-context turns retain existing behavior.",
+        "A terminal turn with an existing reply action invocation, including a send that later fails, receives no advisory; final assistant text, unrelated tools, runtime events, and liveness facts alone do not suppress or trigger the guard except through the reply-action start predicate.",
+        "An unpublished eligible turn receives up to the shared default-two bounded advisories that ask the Agent to publish a self-contained conclusion through the existing reply action or deliberately remain silent, reuse the current runtime session and supplied anchor, and do not synthesize Server-authored content.",
+        "The advisory uses the existing Pi/OpenCode follow-up path with the original work directory and shared observation tracker, combines the original cancellation signal with a finite timeout, and claims reminder state before awaiting runtime work.",
+        "Timeout, invocation failure, runtime unavailability, interruption, or an attempted reply during an advisory preserves the original success, failure, cancellation, deadline, or unknown WorkItemResult and does not rerun the original turn or retry the advisory.",
+        "Initial AgentJob tests cover Pi and OpenCode unpublished turns, accepted and rejected reply-action attempts, Agent-authored reply, explicit silence, two-reminder exhaustion, duplicate terminal evaluation, guard failures/timeouts, non-Slack bypass, and unchanged report/liveness output.",
         "The focused Runner typecheck and AgentJob/runtime test suites pass."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "A shared reply-guard coordinator with bounded abortable advisory behavior and working initial AgentJob integration for Pi and OpenCode.",
+      "output": "Initial AgentJob Pi/OpenCode integration with preserved WorkItemResult and Runner-local bounded reply reminders.",
       "dependsOn": [
         "T-001"
       ],
       "passes": false,
-      "notes": "Use the existing command-runtime helpers and runtime-specific interruption semantics; do not introduce a generic deep runtime interface or a second AgentJob/session input."
+      "notes": "Use existing command-runtime helpers and runtime-specific interruption semantics. The internal advisory is not a second user-originated session input or Agent turn."
     },
     {
       "id": "T-003",
-      "title": "Guard Slack follow-up turns before terminal activity closeout",
-      "spec": "specs/runner-reply-guard/spec.md#keep-liveness-and-non-slack-execution-independent",
-      "description": "Reuse the shared coordinator from the follow-up handler after the original Pi or OpenCode follow-up result and observer facts are captured, but before the existing terminal session.activity record is emitted. Preserve the follow-up result and closeout payload while making duplicate delivery and terminal notifications harmless and allowing an Agent reply accepted during the bounded advisory to suppress further guard work.",
+      "title": "Guard Slack follow-ups at actual terminal completion",
+      "spec": "specs/runner-reply-guard/spec.md#evaluate-follow-ups-at-their-actual-terminal-boundary",
+      "description": "Reuse the shared coordinator from the follow-up handler, but separate follow-up admission from terminal completion. Preserve the existing immediate admission acknowledgement and operation journal behavior, then wait for the runtime-specific terminal completion before flushing observer facts, running the guard, and recording terminal session.activity.",
       "acceptanceCriteria": [
-        "Slack follow-up turns with a valid context and anchor invoke the same guard for both Pi and OpenCode, and the guard runs before recordFollowupActivity without changing the original idle, unknown, cancellation, deadline, or output payload.",
-        "Follow-up turns with no valid Slack context remain unchanged, and no advisory is started for non-Slack or unusable-runtime operations.",
-        "Existing in-flight operation de-duplication plus guard state prevents duplicate follow-up delivery, repeated terminal signals, or reconciliation from issuing a second advisory; an accepted outbox row found before or during the advisory ends further guard pursuit.",
-        "The follow-up advisory uses the current runtime session, work directory, observer, Slack context, anchor, and collaboration instructions, invokes no second session.input or AgentTurn, and leaves silence valid without creating a fallback reply.",
-        "Advisory timeout, failure, unavailable runtime, interruption, and late completion preserve the original follow-up outcome and still emit the existing terminal activity/liveness closeout exactly once, without retrying the advisory or original turn.",
-        "Follow-up handler tests cover Pi and OpenCode unpublished turns, accepted/pending replies, Agent-authored reply, explicit silence, duplicate delivery and terminal signals, publication during advisory, guard failures and timeout, non-Slack bypass, and unchanged activity/liveness reporting.",
+        "Slack follow-up turns with a valid context and anchor invoke the same guard for OpenCode and both Pi branches, and the guard runs only after actual terminal completion rather than after follow-up admission.",
+        "Pi idle preflight(true) is treated as admission only; its completion handle settles after the background prompt continuation and terminal event reconciliation finish.",
+        "Pi streaming steer success is treated as admission only; its completion handle waits for the already-active Session turn to become terminal, and the shared observation tracker includes reply-action attempts made after steer.",
+        "OpenCode follow-up completion remains the terminal signal. Duplicate delivery, repeated terminal callbacks, and reconciliation cannot issue a second advisory or a second terminal activity record.",
+        "The follow-up advisory uses the current runtime session, work directory, observer, Slack context, anchor, and collaboration instructions, invokes no second user-originated session.input or AgentTurn, and leaves silence valid without creating a fallback reply.",
+        "Advisory timeout, failure, unavailable runtime, interruption, and late completion preserve the original follow-up outcome and still emit the existing terminal activity/liveness closeout exactly once with its original status and output payload.",
+        "Follow-up handler and runtime tests cover OpenCode completion, Pi idle/preflight completion, Pi streaming/steer completion, unpublished turns, successful and rejected reply-action attempts, Agent-authored reply, explicit silence, default-two exhaustion, duplicate delivery/terminal signals, publication during advisory, guard failures/timeouts, non-Slack bypass, and unchanged activity/liveness reporting.",
         "The focused follow-up, runtime, and Runner integration test suites pass."
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Slack follow-up orchestration wired to the shared reply guard with preserved terminal activity and liveness behavior, plus passing regression coverage.",
+      "output": "Slack follow-up orchestration wired to the shared Runner reply guard through real terminal completion for Pi and OpenCode, with preserved terminal activity and liveness behavior.",
       "dependsOn": [
         "T-001",
         "T-002"
       ],
       "passes": false,
-      "notes": "Keep the guard before follow-up terminal activity publication so the existing closeout remains one coherent turn; do not change Slack delivery APIs."
+      "notes": "Do not use Pi steer or preflight admission as the terminal signal. Keep the existing Slack delivery APIs and Server liveness semantics unchanged."
     }
   ]
 }
