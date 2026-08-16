@@ -263,12 +263,17 @@ public record WorkDispatch(
     [property: Id(26)] string? TaskRunId = null,
     [property: Id(27)] CapabilityClaimExpectation? CapabilityClaim = null,
     /// <summary>
+    /// Monotonic recovery generation for this dispatch. The explicit field
+    /// keeps replacement identity independent from the task's retry policy.
+    /// </summary>
+    [property: Id(28)] int RecoveryGeneration = 0,
+    /// <summary>
     /// Runtime binding recorded on the attempt's agent result settlement.
     /// Present only on re-delivered dispatches for still-unresolved agent
     /// work: the runner must reconcile against the bound execution instead
     /// of submitting a new prompt. Null on fresh dispatches.
     /// </summary>
-    [property: Id(28)] AgentRecoveryBinding? AgentRecovery = null)
+    [property: Id(29)] AgentRecoveryBinding? AgentRecovery = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

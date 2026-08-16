@@ -699,3 +699,25 @@ Channel decision (grounded in live source):
 - `npm run test:fast` passed all configured tracks: typechecks, Workflow
   Definition 178, CLI 1,856, Server Unit 2,667, Server Arch 68, Runner
   1,660, and Web 4,727.
+
+## T-006 Recovery Generation Wire Fence
+
+- The existing T-006 recovery path persisted Workflow replacement generation
+  on `TaskRun` and `AgentResultSettlement`, but Workflow `WorkDispatch` did
+  not carry that generation. The Runner would therefore create a replacement
+  receipt at generation zero unless the task's unrelated retry policy happened
+  to contain a `generation` property, causing the Server to reject the result.
+- Added an additive explicit `recoveryGeneration` field to the Server
+  dispatch/domain/API envelope and Runner dispatch type/parser. Workflow
+  translation reads the persisted running `TaskRun` generation; AgentJob
+  dispatches expose their owner-ledger generation. Runner receipt identity
+  prefers the explicit field while retaining the legacy recovery-object
+  fallback.
+- Added focused Server DTO and reconnect assertions plus Runner receipt
+  coverage. Runner recovery/host/journal tests passed 28/28, Server dispatch
+  DTO tests passed 7/7, and the affected Server recovery classes passed 26/26.
+- Final verification passed: full Server SpecTests 3,946/3,946; `npm run
+  test:fast` passed typechecks, Workflow Definition 178, CLI 1,856, Server
+  Unit 2,668, Server Arch 68, Runner 1,661, and Web 4,727. The repository
+  format check still reports only pre-existing unrelated Runner formatting
+  drift; the changed TypeScript files pass targeted Biome checks.

@@ -179,6 +179,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var replacementPoll = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
         var replacementDispatch = Assert.Single(replacementPoll.Dispatches);
         Assert.Equal(_workflowId, replacementDispatch.WorkflowRunId);
+        Assert.Equal(1, replacementDispatch.RecoveryGeneration);
         Assert.NotEqual(originalDispatch.WorkId, replacementDispatch.WorkId);
         Assert.DoesNotContain(replacementPoll.Dispatches, dispatch => dispatch.WorkId == originalDispatch.WorkId);
 

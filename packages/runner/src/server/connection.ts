@@ -895,6 +895,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     agentJobId: dispatch.agentJobId ?? undefined,
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
+    recoveryGeneration: dispatch.recoveryGeneration ?? undefined,
     agentDefinition: dispatch.agentDefinition ?? undefined,
     agentSessionStartup: dispatch.agentSessionStartup ?? undefined,
     agentRecovery: dispatch.agentRecovery ?? undefined,

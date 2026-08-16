@@ -114,6 +114,8 @@ export function workResultFingerprint(result: WorkItemResult): string {
 }
 
 export function recoveryGeneration(work: DispatchWorkItem): number {
+  const explicit = work.recoveryGeneration
+  if (typeof explicit === 'number' && Number.isInteger(explicit) && explicit >= 0) return explicit
   const value = work.recovery?.['generation']
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0
 }

@@ -56,6 +56,22 @@ describe('runtime recovery receipts', () => {
     expect(interrupted && 'result' in interrupted.payload).toBe(false)
   })
 
+  it('preservesExplicitReplacementGenerationInTheReceiptIdentity', () => {
+    const replacement = createInterruptedRecoveryReceipt(
+      { ...work, workId: 'work-1.recovery.1', recoveryGeneration: 1 },
+      { ...binding, agentTurnId: 'turn-recovery-1' },
+      'runner-1',
+      'runner-update:1',
+      'receipt-recovery-1',
+    )
+
+    expect(replacement).toMatchObject({
+      workId: 'work-1.recovery.1',
+      agentTurnId: 'turn-recovery-1',
+      recoveryGeneration: 1,
+    })
+  })
+
   it('refusesReceiptsWithoutACompletePhysicalBinding', () => {
     expect(
       createInterruptedRecoveryReceipt(work, { ...binding, agentTurnId: null }, 'runner-1', 'op-1', 'r-1'),
