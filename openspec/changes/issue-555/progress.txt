@@ -867,3 +867,28 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   all seven lanes: typecheck, 2,676 Server unit tests, 69 architecture tests,
   178 workflow tests, 1,848 CLI tests, 4,724 Web tests, and 1,639 Runner
   tests. No source correction was necessary on this clean workflow branch.
+
+## T-007 completion audit (current workflow)
+
+- Re-read `public-session-event-stream/spec.md` and audited the existing
+  implementation: `GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events`
+  reads only the active-generation persisted public journal after validating
+  the HMAC cursor binding and the shared Session projection checkpoint. It
+  does not use event-bus, SignalR, Runner, transcript, or UI data for cursor,
+  ordering, generation, or payload behavior.
+- Confirmed default and capped limits, exclusive-after paging, ascending
+  sequences, deterministic duplicate page content, high-water empty-page
+  cursors, wrong-generation/cross-binding/tampered cursor rejection, safe
+  expiry bounds, closed-stream tombstones, and physical-purge invalidation.
+  Persisted event payloads are deserialized into the strict public DTOs and
+  reserialized through `JSON.PublicApi`, preventing private projection fields
+  from crossing the route boundary.
+- Confirmed the deployment-wide 32-byte HMAC key is created at startup and
+  persisted through the encrypted server secret store; each request reloads
+  it, so replacing the persisted key invalidates existing cursors.
+- Focused `PublicSessionEventStreamRouteSpecs` passed all 5 tests and the
+  cursor codec coverage passed within the complete 2,676-test unit assembly.
+  `npm run test:fast` passed all seven lanes: typecheck, 2,676 Server unit
+  tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724
+  Web tests, and 1,639 Runner tests. No source correction was necessary on
+  this clean workflow branch.
