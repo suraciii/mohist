@@ -27,7 +27,7 @@
       "id": "T-002",
       "title": "Implement bounded Provider rate-limit retry",
       "spec": "specs/provider-rate-limit-retry/spec.md#rate-limit-waiting-is-bounded-and-expires-distinctly",
-      "description": "Replace threshold-only 429 handling at the shared runtime request boundary with a normalized ProviderRateLimitSignal and an independent bounded retry coordinator. Update the Pi and OpenCode adapters to expose one Provider attempt at a time, honor valid Retry-After values or configured fallback backoff, emit waiting facts, preserve cancellation semantics, and return structured provider-rate-limited results on deadline expiry.",
+      "description": "Replace threshold-only 429 handling at the shared runtime request boundary with a normalized ProviderRateLimitSignal and an independent bounded retry coordinator. Use a fixed ProviderAttemptExecutor contract: Pi disables AgentSession auto-retry and wraps every ModelRuntime stream/streamSimple call, while OpenCode requires a pinned server/SDK single-attempt capability. The runtime fails closed with provider-attempt-boundary-unsupported when that capability is absent; it never falls back to opaque session.prompt replay or raw promptAsync. Honor valid Retry-After values or configured fallback backoff, emit waiting facts, preserve cancellation semantics, and return structured provider-rate-limited results on deadline expiry.",
       "acceptanceCriteria": [
         "Pi and OpenCode recognize HTTP 429 and documented equivalent structured or configured-pattern signals, retain the canonical Provider and throttling facts, and do not classify the first recognized signal as turn-failed.",
         "Each rate-limit retry reacquires Provider admission and releases it after that attempt; the permit is not held during Retry-After or fallback backoff, and opaque SDK replay cannot bypass this attempt boundary.",
@@ -35,7 +35,9 @@
         "Rate-limit delays and attempts use a budget independent of the ordinary consecutive Provider retry budget, so a sequence that recovers after the ordinary threshold reports normal success while genuine non-rate-limit failures retain their existing classification.",
         "Persistent throttling returns status and error code provider-rate-limited with Provider identity, latest signal, first-throttled time, deadline, last and next attempt times, attempt count, and accumulated wait facts.",
         "Cancellation during admission or backoff interrupts promptly, prevents the next request, releases any held permit, and preserves the existing cancellation or interruption classification rather than becoming provider-rate-limited.",
-        "Deterministic Pi/OpenCode tests with fake Providers, fake clocks, queued requests, Retry-After variants, fallback backoff, ordinary retry failures, recovery, deadline expiry, SDK attempt boundaries, and cancellation verify all criteria."
+        "Pi tests verify setAutoRetryEnabled(false) and per-ModelRuntime-call admission; OpenCode tests verify the pinned single-attempt server/SDK capability and fail-closed startup when it is absent.",
+        "The deadline warning path emits a non-Provider runtime/session event and never invokes session.promptAsync or another raw model request outside the coordinator.",
+        "Deterministic Pi/OpenCode tests with fake Providers, fake clocks, queued requests, Retry-After variants, fallback backoff, ordinary retry failures, recovery, deadline expiry, SDK attempt boundaries, hidden-replay rejection, and cancellation verify all criteria."
       ],
       "priority": 2,
       "mode": "AFK",
@@ -45,20 +47,21 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Keep normal transport, deadline, cleanup, and generation-quarantine behavior unchanged. Rate-limit waiting must not consume the ordinary Provider retry counter."
+      "notes": "Keep normal transport, deadline, cleanup, and generation-quarantine behavior unchanged. Rate-limit waiting must not consume the ordinary Provider retry counter. Reattach/recovery never submits a new Provider request and therefore does not bypass the boundary."
     },
     {
       "id": "T-003",
       "title": "Publish durable Workflow rate-limit waiting state",
       "spec": "specs/workflow-rate-limit-outcomes/spec.md#workflow-status-distinguishes-waiting-expiry-and-ordinary-failure",
-      "description": "Carry typed Provider admission and backoff waiting events through the existing runtime observer, transcript allowlist, Runner outbox, AgentSession binding validation, and Session-to-Workflow observation path. Record the latest waiting facts on the active TaskRun and expose a nonterminal provider-rate-limit-waiting projection without advancing the stage, settling the task, or creating duplicate work.",
+      "description": "Carry typed Provider admission and backoff waiting events through the existing runtime observer, transcript allowlist, Runner outbox, AgentSession binding validation, and Session-to-Workflow observation path. Add the distinct turn.rate_limited terminal event and close status for bounded expiry, map it to a typed non-failing observation, and ensure the generic turn.failed close path is suppressed. Record the latest waiting facts on the active TaskRun and expose a nonterminal provider-rate-limit-waiting projection without advancing the stage, settling the task, or creating duplicate work.",
       "acceptanceCriteria": [
         "The runtime event payload distinguishes admission from backoff and carries Provider key, latest status/message, Retry-After when present, next-attempt time, wait deadline when applicable, remaining wait, and attempt count.",
         "WorkflowAgentSessionReporter, the runtime-event outbox, transcript allowlisting, AgentSessionGrain binding validation, and ISessionWorkPort preserve and deliver the typed waiting observation without encoding rate-limit facts in an error string.",
         "A waiting observation updates the current Agent execution's ProviderRateLimitState while the task remains unfinished and its result settlement remains AwaitingResult; repeated observations update latest facts without extending the absolute throttle deadline.",
         "Admission waiting remains cancellable and visible without a throttle expiry deadline until a Provider signal exists, and waiting does not dispatch a second attempt or duplicate work.",
         "Server status mapping exposes provider-rate-limit-waiting with the Provider and known timing facts, leaves task/stage/run nonterminal, does not advance the stage, and preserves existing success and genuine failure projections.",
-        "Deterministic Session and Workflow tests verify event persistence/replay and binding validation, admission versus backoff observations, deadline stability, cancellation visibility, nonterminal status, no stage advancement, and no duplicate dispatch."
+        "Provider expiry closes with turn.rate_limited plus idle activity, never turn.failed; AgentSessionGrain and WorkflowSessionWorkPort map it to a typed ProviderRateLimited observation that cannot emit TaskFailed or alter the AwaitingResult settlement into a generic failure.",
+        "Deterministic Session and Workflow tests verify event persistence/replay and binding validation, admission versus backoff observations, terminal-close ordering in either report/event order, deadline stability, cancellation visibility, nonterminal status, no stage advancement, and no duplicate dispatch."
       ],
       "priority": 3,
       "mode": "AFK",
@@ -74,14 +77,15 @@
       "id": "T-004",
       "title": "Add terminal Provider rate-limit Workflow recovery",
       "spec": "specs/workflow-rate-limit-outcomes/spec.md#workflow-reports-preserve-provider-rate-limit-outcomes",
-      "description": "Extend Runner result/report contracts, translation, Workflow lifecycle transitions, persistence, status mapping, and retry control so bounded throttling expiry remains a first-class provider-rate-limited outcome. Persist structured ProviderRateLimitState, keep it distinct from FailureDetails and TaskFailed, expose the recoverable retry target, and ensure retry re-enters normal Runner, Agent, and Provider admission.",
+      "description": "Extend Runner result/report contracts, translation, Workflow lifecycle transitions, persistence, status mapping, and retry control so bounded throttling expiry remains a first-class provider-rate-limited outcome. Preserve structured ProviderRateLimitState through the OpenCode executor-capabilities runtimeActionFailure/projectTaskOutput path and the Pi actions/pi runtimeFailure path, then persist it on the Server. Keep it distinct from FailureDetails and TaskFailed, expose the recoverable retry target, and ensure retry re-enters normal Runner, Agent, and Provider admission.",
       "acceptanceCriteria": [
         "A bounded Runner expiry is translated by WorkflowItemTranslator and the authoritative report path as provider-rate-limited with all structured Provider timing facts preserved; it is never reduced only to TaskReportStatus.Failed, FailureReason.TaskFailed, or turn-failed.",
         "Workflow task, stage, and run transitions represent provider-rate-limited as a recoverable explicit outcome, do not mark the run permanently terminal, do not emit Action/artifact/follow-up/TaskFailed outputs, and clear or retain ProviderRateLimitState according to successful recovery, ordinary failure, or expiry semantics.",
         "ProviderRateLimitState is additive and serializer-compatible: existing persisted success, genuine failure, cancellation, and in-flight records deserialize with unchanged meaning, while expired rate-limit facts survive persistence and reload without a database migration.",
         "The expired status projection exposes provider-rate-limited with Provider, latest signal, wait bound, and retry timing facts, while ordinary runtime, invalid-input, cancellation, quota, billing, and task failures retain their existing categories and details.",
         "An expired task or run exposes the existing run-scoped retry operation with a rate-limit-specific target; retry clears the expired state, creates the normal new attempt, and passes through Runner, Agent, and Provider admission without automatic resubmission during waiting or expiry.",
-        "Server contract, transition, persistence reload, report journal/retry, retry re-admission, and regression tests verify exact category/fact preservation, absence of generic failure events, recovery behavior, and unchanged genuine failure handling."
+        "Both Workflow Action paths are covered end to end: OpenCode runtimeActionFailure -> projectTaskOutput and Pi actions/pi runtimeFailure -> WorkItemResult -> WorkResult -> WorkflowItemTranslator -> TaskReport preserve the exact category and typed Provider facts.",
+        "Server contract, transition, persistence reload, report journal/retry, retry re-admission, terminal Session-close ordering, and regression tests verify exact category/fact preservation, absence of generic failure events, recovery behavior, and unchanged genuine failure handling."
       ],
       "priority": 4,
       "mode": "AFK",
@@ -92,7 +96,7 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Use append-only serializer IDs for new domain fields. The new status/category is a coordinated release contract for all consumers."
+      "notes": "Use append-only serializer IDs for new domain fields. Add ProviderRateLimitFacts fields to WorkItemResult/WorkResult and TaskReport, and validate them at WorkflowItemTranslator. The new status/category is a coordinated release contract for all consumers."
     },
     {
       "id": "T-005",

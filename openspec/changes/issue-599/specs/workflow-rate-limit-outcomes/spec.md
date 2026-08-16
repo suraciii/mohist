@@ -12,6 +12,35 @@ The Runner-to-Server Workflow report contract SHALL carry a bounded Provider thr
 - **THEN** the Workflow report SHALL preserve the existing genuine failure category and error details
 - **AND** SHALL NOT relabel the report as `provider-rate-limited`
 
+### Requirement: Workflow Action projections preserve structured Provider facts
+Both OpenCode and Pi Workflow Agent Action paths SHALL preserve `provider-rate-limited` and the typed `providerRateLimit` facts from the runtime error through `ActionResult`, `WorkItemResult`, the Runner report DTO, `TaskReport`, and the Workflow status view. The facts SHALL NOT be reduced to an error message, diagnostics-only data, or a generic failed status.
+
+#### Scenario: OpenCode Workflow Action preserves expiry facts
+- **WHEN** `executor-capabilities.ts` receives an OpenCode `provider-rate-limited` runtime result
+- **THEN** `runtimeActionFailure` and `projectTaskOutput` SHALL emit `WorkItemResult.status` and `error.code` as `provider-rate-limited`
+- **AND** SHALL preserve Provider identity, latest signal, wait deadline, attempt count, and timing facts
+- **AND** `WorkflowItemTranslator` SHALL produce a `ProviderRateLimited` report without `TaskReportStatus.Failed`
+
+#### Scenario: Pi Workflow Action preserves expiry facts
+- **WHEN** `actions/pi.ts` receives a Pi `provider-rate-limited` runtime result
+- **THEN** its `runtimeFailure` projection and the shared task projection SHALL preserve the same structured facts and exact category
+- **AND** the Server SHALL expose those facts unchanged after report translation and persistence reload
+
+### Requirement: AgentSession expiry close is not a generic failure
+The Workflow Agent Session close path SHALL distinguish Provider expiry from runtime failure. A `provider-rate-limited` close SHALL emit `turn.rate_limited` and idle activity, SHALL NOT emit `turn.failed`, and SHALL map through `AgentSessionGrain` and `WorkflowSessionWorkPort` to a typed Provider-rate-limit observation. That observation SHALL update waiting/expiry facts without invoking generic failure settlement; the authoritative Runner report remains responsible for the Workflow outcome transition. Replayed close events and reports SHALL be binding-validated and idempotent.
+
+#### Scenario: Provider expiry does not publish turn-failed
+- **WHEN** an OpenCode or Pi Workflow Agent turn reaches the bounded Provider wait deadline
+- **THEN** `enqueueTerminalClose` SHALL use the Provider-rate-limit close status
+- **AND** the Session transcript SHALL contain `turn.rate_limited` rather than `turn.failed`
+- **AND** the Workflow SHALL not emit `TaskFailed` or `FailureReason.TaskFailed` from that observation
+
+#### Scenario: Report and Session close arrive in either order
+- **WHEN** the `turn.rate_limited` observation and authoritative `provider-rate-limited` work report are delivered in either order
+- **THEN** the binding-scoped state SHALL retain the typed Provider facts
+- **AND** exactly one dedicated rate-limit transition SHALL be applied
+- **AND** neither order SHALL create a generic failure event or duplicate work
+
 ### Requirement: Workflow status distinguishes waiting, expiry, and ordinary failure
 While a Workflow Agent request is waiting for Provider admission or rate-limit backoff, the task and run projections SHALL expose the nonterminal state `provider-rate-limit-waiting`. The waiting state SHALL retain the task as unfinished, SHALL NOT advance the stage, and SHALL NOT mark the run as an ordinary failure. When the bounded wait expires, projections SHALL expose the terminal category `provider-rate-limited`. Ordinary runtime and task failures SHALL retain their existing status and category.
 

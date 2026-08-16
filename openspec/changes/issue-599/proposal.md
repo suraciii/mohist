@@ -9,7 +9,10 @@ When several Workflow runs use different Agents backed by the same model Provide
 - Treat 429 and equivalent Provider rate-limit responses as retryable capacity signals. Honor `Retry-After` when supplied and otherwise use the configured backoff policy; rate-limit backoff does not consume the normal consecutive Provider retry budget.
 - Bound the total rate-limit waiting period. If the Provider remains throttled beyond that window, return a distinct `provider-rate-limited` outcome with the Provider and throttling facts needed for an actionable retry, rather than reporting generic `turn-failed`.
 - Preserve the distinction between rate-limit waiting, rate-limit expiry, and genuine runtime or task failure in Workflow task reports and status projections. **BREAKING**: consumers of Workflow task/run outcomes must handle the new rate-limit state/category instead of treating every exhausted 429 sequence as an ordinary task failure.
-- Add deterministic coverage for shared-Provider concurrency, backoff recovery, `Retry-After`, bounded-wait expiry, and separation from genuine failures.
+- Make the Pi and OpenCode production adapters expose one Provider attempt at a time. Pi disables SDK auto-retry and wraps each ModelRuntime transport call; OpenCode requires a pinned single-attempt server/SDK capability and fails closed when it is unavailable. No opaque SDK replay or raw `promptAsync()` request may bypass Provider admission.
+- Keep Provider expiry out of the generic AgentSession close path: emit a typed `turn.rate_limited` event, map it to a non-failing Workflow observation, and let the durable Runner work-result report apply the authoritative outcome.
+- Preserve structured Provider timing and identity facts through both OpenCode and Pi Workflow Action projections, Runner `WorkItemResult`/`WorkResult`, Server `TaskReport`, and CLI/Web status views.
+- Add deterministic coverage for shared-Provider concurrency, backoff recovery, `Retry-After`, bounded-wait expiry, production SDK attempt boundaries, terminal-close ordering, structured fact preservation, and separation from genuine failures.
 
 ## Capabilities
 

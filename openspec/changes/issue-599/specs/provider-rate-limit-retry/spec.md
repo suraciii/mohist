@@ -13,6 +13,28 @@ The Pi and OpenCode execution paths SHALL recognize HTTP 429 and equivalent Prov
 - **AND** SHALL retain its Provider identity and throttling facts
 - **AND** SHALL NOT immediately return `turn-failed` solely because that signal occurred
 
+### Requirement: Production adapters expose one Provider attempt
+The Pi and OpenCode adapters SHALL expose a Mohist-owned single-attempt boundary to the rate-limit coordinator. The coordinator SHALL acquire/release Provider admission around each actual model transport call; an SDK/session operation that can replay or back off without returning control SHALL NOT be used as that boundary.
+
+Pi SHALL disable SDK auto-retry with `AgentSession.setAutoRetryEnabled(false)` and SHALL wrap the `ModelRuntime` stream/streamSimple transport so tool-loop model calls are individually admitted. OpenCode SHALL use a pinned `ProviderAttemptExecutor.executeOne` implementation whose typed request sets `retry: false`; the pinned server SHALL enforce that field by performing one Provider attempt and returning control without internal replay or delay. The current OpenCode SDK `session.prompt()` surface without that typed field and server behavior SHALL be rejected at runtime startup with `provider-attempt-boundary-unsupported`; it SHALL NOT be used as a fallback. The deadline warning path SHALL NOT call `session.promptAsync()` from a coordinated turn, because it would create an unadmitted model request.
+
+#### Scenario: SDK replay is disabled before a Pi turn
+- **WHEN** a Pi session is prepared for a Provider-coordinated turn
+- **THEN** the adapter SHALL disable SDK auto-retry
+- **AND** each ModelRuntime transport call SHALL be visible to the coordinator as one attempt
+- **AND** a rate-limit response SHALL NOT cause a hidden SDK replay while a lease is released or backoff is running
+
+#### Scenario: OpenCode lacks a single-attempt capability
+- **WHEN** the configured OpenCode server/SDK does not support the pinned single-attempt request
+- **THEN** the OpenCode runtime SHALL fail readiness with `provider-attempt-boundary-unsupported`
+- **AND** RunnerHost SHALL NOT admit OpenCode work through an opaque `session.prompt()` path
+- **AND** the runtime SHALL NOT claim Provider concurrency or bounded-retry support for that configuration
+
+#### Scenario: Deadline warning does not bypass Provider admission
+- **WHEN** a coordinated turn reaches its deadline-warning point
+- **THEN** the runtime SHALL emit the warning through a non-Provider session/runtime event
+- **AND** SHALL NOT invoke `session.promptAsync()` or any other raw model request outside the coordinator
+
 ### Requirement: Retry timing honors Retry-After or configured fallback backoff
 When a throttling response supplies a valid `Retry-After` value, the execution path SHALL wait at least that duration before the next attempt, subject to the remaining bounded rate-limit wait. When `Retry-After` is absent or unusable, the execution path SHALL use the configured rate-limit backoff policy. The execution path MUST NOT issue the next Provider request during the selected wait.
 
