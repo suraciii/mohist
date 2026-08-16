@@ -344,3 +344,63 @@ and return a retryable safe error.
   conflict, durable queue rejection, and readonly-scope fencing.
 - `npm run test:fast` passed all seven lanes: typecheck, unit, architecture,
   workflow, CLI, web, and runner.
+
+# T-007: Public session event stream route and HMAC cursors
+
+Status: IMPLEMENTED. Added the projection-only per-Session event route with
+exclusive-after paging, a default/max page size of 100, deterministic event
+cursors, cursor validity/expiry errors, closed-stream tombstones, and public
+payload allowlists. The HMAC-SHA256 key is stored through the encrypted server
+secret store under a dedicated deployment-wide server-secret address and is
+created during host startup; loading the key per request makes persisted key
+rotation immediately invalidate old cursors.
+
+## Codebase Patterns
+
+- `PublicSessionEventStreamQuerier` validates the signed cursor binding and
+  active generation before querying `public_session_events`. It reads only the
+  active generation's persisted rows, orders by sequence, and uses the shared
+  `PublicExecutionReadQuerier.IsSessionProjectionBehindAsync` gate before
+  serving an active stream.
+- `PublicSessionEventCursorCodec` signs a canonical JSON payload containing
+  projectId, sessionId, generation, afterPosition, and version, then appends
+  the 32-byte HMAC signature before unpadded base64url encoding. Malformed,
+  tampered, cross-bound, rotated-key, and wrong-generation tokens all return
+  the same `cursor_invalid` result without a fallback read.
+- Public event envelopes are built from the stored `PayloadJson`: execution
+  events expose the exact `PublicExecutionRead` object and
+  `session.context_reset` exposes only `PublicSessionEventPayload`. Null
+  sibling payload properties are omitted so the two allowlists cannot bleed
+  into one another.
+- `PublicStreamStateRow` remains the authority for active generation,
+  earliest/latest bounds, and closed tombstone behavior. No event-bus,
+  SignalR, Runner, transcript, or UI data participates in ordering or cursor
+  construction.
+
+## Gotchas
+
+- The encrypted secret-store table uses SQLite owner/kind check constraints;
+  adding a deployment-wide cursor key required a migration that rebuilds the
+  existing `StoredSecrets` table while copying all prior rows and preserving
+  its owner index.
+- Empty pages use the active stream's high-water sequence for `nextCursor`;
+  non-empty pages use the last returned sequence. Tombstone expiry returns
+  `earliestSequence=null` and the last safe latest bound, while a purged
+  stream state makes even a correctly signed old cursor invalid.
+- Synthetic event route specs use a canonical Session row plus public rows
+  and a matching checkpoint in one database write. This avoids competing
+  with the hosted projector while still exercising the real persistence-only
+  route and its lag comparison.
+
+## Verification
+
+- Existing T-003 `PublicExecutionReadRouteSpecs` passed after the shared lag
+  helper change.
+- New `PublicSessionEventCursorCodecTests` passed (3) and
+  `PublicSessionEventStreamRouteSpecs` passed (5), covering paging, cap,
+  empty positioning, payload allowlists, tamper/cross-binding/generation,
+  expiry, tombstones, purge, rotation, and projection lag.
+- Migration/model consistency, database initialization, direct auth pipeline,
+  and direct follow-up regression specs passed.
+- `npm run test:fast` passed all seven lanes after replacing the cursor JSON
+  options with the shared `JSON.PublicApi` facade required by ArchTests.

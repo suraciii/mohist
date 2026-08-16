@@ -235,6 +235,8 @@ public static class MohistServiceRegistration
         // projector after their commits; the hosted loop's timer sweep
         // is the safety net. Correctness never depends on the nudge.
         services.AddSingleton<PublicApiProjectionEngine>();
+        services.AddSingleton<PublicSessionEventCursorCodec>();
+        services.AddHostedService<PublicSessionEventCursorSecretInitializer>();
         services.AddSingleton<PublicProjectionNudge>();
         services.AddSingleton<IPublicProjectionNudge>(sp => sp.GetRequiredService<PublicProjectionNudge>());
         services.AddOptions<PublicProjectionOptions>();

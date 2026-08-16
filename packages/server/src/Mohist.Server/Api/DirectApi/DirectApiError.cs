@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Mohist.Server.Api.DirectApi;
 
 /// <summary>
@@ -40,6 +42,8 @@ public static class DirectApiErrorCodes
     public const string FollowupRejected = "followup_rejected";
     public const string AgentNotFound = "agent_not_found";
     public const string AgentNotReady = "agent_not_ready";
+    public const string CursorInvalid = "cursor_invalid";
+    public const string CursorExpired = "cursor_expired";
 }
 
 /// <summary>
@@ -48,7 +52,9 @@ public static class DirectApiErrorCodes
 /// from the control-plane <c>success</c> envelope: the two surfaces are
 /// different contracts and must never be conflated.
 /// </summary>
-public sealed record DirectApiError(string Code, string Message)
+public sealed record DirectApiError(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("message")] string Message)
 {
     public static DirectApiError Unauthenticated() =>
         new(DirectApiErrorCodes.Unauthenticated, "Authentication required.");
@@ -60,3 +66,9 @@ public sealed record DirectApiError(string Code, string Message)
 /// <summary>Envelope wrapper so the serialized shape is exactly one
 /// <c>error</c> object with <c>code</c> and <c>message</c>.</summary>
 public sealed record DirectApiErrorEnvelope(DirectApiError Error);
+
+/// <summary>Cursor-expiry error with safe retained-stream bounds.</summary>
+public sealed record DirectApiCursorExpiredEnvelope(
+    [property: JsonPropertyName("error")] DirectApiError Error,
+    [property: JsonPropertyName("earliestSequence")] long? EarliestSequence,
+    [property: JsonPropertyName("latestSequence")] long? LatestSequence);

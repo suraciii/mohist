@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.PublicApi;
 
 namespace Mohist.Server.Api.DirectApi;
 
@@ -53,6 +54,23 @@ public static class DirectApiResults
     /// </summary>
     public static IResult ProjectionLag() => new ProjectionLagResult();
 
+    public static IResult CursorInvalid() =>
+        Error(
+            StatusCodes.Status400BadRequest,
+            DirectApiErrorCodes.CursorInvalid,
+            "The event cursor is invalid or is not bound to this request.");
+
+    public static IResult CursorExpired(long? earliestSequence, long? latestSequence) =>
+        Results.Json(
+            new DirectApiCursorExpiredEnvelope(
+                new DirectApiError(
+                    DirectApiErrorCodes.CursorExpired,
+                    "The event cursor is older than the retained public stream."),
+                earliestSequence,
+                latestSequence),
+            statusCode: StatusCodes.Status410Gone,
+            options: JSON.PublicApi);
+
     /// <summary>
     /// The 503 projection-lag answer as a concrete result so the
     /// Retry-After hint rides on the same response as the error
@@ -92,6 +110,21 @@ public static class DirectApiResults
             PublicReadStatus.Found => Snapshot(outcome.SnapshotJson!),
             PublicReadStatus.NotFound => ResourceNotFound(resourceNotFoundCode),
             _ => ProjectionLag(),
+        };
+
+    public static IResult PublicEvents(PublicSessionEventReadOutcome outcome) =>
+        outcome.Status switch
+        {
+            PublicSessionEventReadStatus.Found => Results.Json(
+                outcome.Page!,
+                options: JSON.PublicApi),
+            PublicSessionEventReadStatus.NotFound => ResourceNotFound(DirectApiErrorCodes.SessionNotFound),
+            PublicSessionEventReadStatus.ProjectionLag => ProjectionLag(),
+            PublicSessionEventReadStatus.CursorInvalid => CursorInvalid(),
+            PublicSessionEventReadStatus.CursorExpired => CursorExpired(
+                outcome.EarliestSequence,
+                outcome.LatestSequence),
+            _ => throw new ArgumentOutOfRangeException(),
         };
 
     private static string ResourceNotFoundMessage(string code) => code switch

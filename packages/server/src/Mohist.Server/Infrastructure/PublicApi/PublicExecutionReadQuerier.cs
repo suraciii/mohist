@@ -132,6 +132,19 @@ public sealed class PublicExecutionReadQuerier : IScopedService
         CancellationToken ct = default) =>
         ReadSessionAnchorAsync(TurnAnchor, projectId, turnId, ct);
 
+    /// <summary>
+    /// Applies the same Session feed freshness comparison used by Input
+    /// and Turn reads. Event pages use it only as a transport gate; their
+    /// body remains exclusively the persisted public event journal.
+    /// </summary>
+    public async Task<bool> IsSessionProjectionBehindAsync(
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await IsBehindAsync(db, feeds: [], [sessionId], ct);
+    }
+
     private async Task<PublicReadOutcome> ReadSessionAnchorAsync(
         string anchorType,
         string projectId,

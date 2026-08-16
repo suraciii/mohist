@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -33,10 +34,10 @@ namespace Mohist.Server.Api.DirectApi;
 /// </para>
 /// <para>
 /// The read delegates are served only from the persisted public
-/// projection (the shared lag-checked read service). The write and
-/// event-stream templates still answer with the placeholder result
-/// until their endpoint delegates land; they replace it in place,
-/// without altering this registration's order or metadata.
+/// projection (the shared lag-checked read service). The Session event
+/// stream uses the same projection checkpoint gate and its persisted
+/// public journal; remaining write delegates replace their placeholders
+/// in place without altering this registration's order or metadata.
 /// </para>
 /// </summary>
 public static class DirectApiRoutes
@@ -95,7 +96,8 @@ public static class DirectApiRoutes
         // service: canonical Project membership answers the route's
         // 404 resource code, and a checkpoint that has not consumed
         // the anchor's durable source facts yet answers 503
-        // projection_lag instead of a stale snapshot.
+        // projection_lag instead of a stale snapshot. The event route
+        // applies the same gate before querying its public journal.
         group.MapGet("/agent-jobs/{jobId}", async (
             string projectId,
             string jobId,
@@ -123,10 +125,59 @@ public static class DirectApiRoutes
                 await publicReads.ReadTurnAsync(projectId, turnId, ct),
                 DirectApiErrorCodes.TurnNotFound))
             .RequireScopes(Scope.Readonly, Scope.Operator);
-        group.MapGet("/agent-sessions/{sessionId}/events", () => DirectApiResults.NotImplemented())
+        group.MapGet("/agent-sessions/{sessionId}/events", async (
+            HttpContext context,
+            string projectId,
+            string sessionId,
+            PublicSessionEventStreamQuerier eventStream,
+            CancellationToken ct) =>
+            await ReadEventsAsync(context, projectId, sessionId, eventStream, ct))
             .RequireScopes(Scope.Readonly, Scope.Operator);
 
         return app;
+    }
+
+    private static async Task<IResult> ReadEventsAsync(
+        HttpContext context,
+        string projectId,
+        string sessionId,
+        PublicSessionEventStreamQuerier eventStream,
+        CancellationToken ct)
+    {
+        var query = context.Request.Query;
+        string? after = null;
+        if (query.TryGetValue("after", out var afterValues))
+        {
+            if (afterValues.Count != 1 || string.IsNullOrEmpty(afterValues[0]))
+            {
+                return DirectApiResults.CursorInvalid();
+            }
+
+            after = afterValues[0];
+        }
+
+        var limit = PublicSessionEventStreamQuerier.DefaultLimit;
+        if (query.TryGetValue("limit", out var limitValues))
+        {
+            if (limitValues.Count != 1
+                || !int.TryParse(
+                    limitValues[0],
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var parsedLimit)
+                || parsedLimit < 1)
+            {
+                return DirectApiResults.Error(
+                    StatusCodes.Status400BadRequest,
+                    DirectApiErrorCodes.InvalidRequest,
+                    "The limit query parameter must be a positive integer.");
+            }
+
+            limit = parsedLimit;
+        }
+
+        return DirectApiResults.PublicEvents(
+            await eventStream.ReadAsync(projectId, sessionId, after, limit, ct));
     }
 
     private static async Task<IResult> FollowupAsync(

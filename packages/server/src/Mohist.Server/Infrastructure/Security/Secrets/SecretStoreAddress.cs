@@ -40,6 +40,13 @@ public abstract record SecretOwnerAddress
         internal override string OwnerScope => ProjectId;
         internal override string OwnerId => ConnectionId;
     }
+
+    public sealed record Server(string ServerId) : SecretOwnerAddress
+    {
+        internal override string OwnerKind => SecretOwnerKinds.Server;
+        internal override string OwnerScope => string.Empty;
+        internal override string OwnerId => ServerId;
+    }
 }
 
 public static class SecretOwnerKinds
@@ -49,6 +56,7 @@ public static class SecretOwnerKinds
     public const string SlackWorkspaceEnrollment = "slack_workspace_enrollment";
     public const string ManagedSlackAgentApp = "managed_slack_agent_app";
     public const string GitHubConnection = "github_connection";
+    public const string Server = "server";
 }
 
 public readonly record struct SecretStoreAddress
@@ -88,6 +96,9 @@ public readonly record struct SecretStoreAddress
     public static SecretStoreAddress ForManagedSlackAgentApp(string agentAppId, SecretKind kind) =>
         new(new SecretOwnerAddress.ManagedSlackAgentApp(agentAppId), kind);
 
+    public static SecretStoreAddress ForServer(SecretKind kind) =>
+        new(new SecretOwnerAddress.Server("mohist-server"), kind);
+
     private static void Validate(SecretOwnerAddress owner, SecretKind kind)
     {
         if (string.IsNullOrWhiteSpace(owner.OwnerId))
@@ -112,6 +123,7 @@ public readonly record struct SecretStoreAddress
                 or SecretKind.CandidateBotToken
                 or SecretKind.CandidateAppToken,
             SecretOwnerAddress.ManagedSlackAgentApp => kind is SecretKind.ClientSecret or SecretKind.SigningSecret or SecretKind.AppToken or SecretKind.BotToken or SecretKind.PreviousBotToken or SecretKind.PreviousAppToken or SecretKind.CandidateBotToken or SecretKind.CandidateAppToken,
+            SecretOwnerAddress.Server => kind is SecretKind.PublicApiCursorKey,
             _ => false,
         };
         if (!valid)
