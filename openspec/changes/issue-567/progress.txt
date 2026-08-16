@@ -863,3 +863,26 @@ Channel decision (grounded in live source):
 - Full Server SpecTests passed 3,947/3,947, and `npm run test:fast` passed all
   configured tracks: typechecks, Workflow Definition 178, CLI 1,856, Server
   Unit 2,674, Server Arch 68, Runner 1,661, and Web 4,727.
+
+## T-006 Current Task Verification
+
+- Revalidated the reconnect path: a committed Workflow replacement is the
+  only eligible dispatch, carries recovery generation 1 and a new work id, and
+  the original interrupted work id is absent from the poll response. A poll
+  reporting that replacement as `inFlight` receives no redelivery. The
+  existing AgentJob recovery path likewise excludes the fenced identity and
+  converges to an explicit `Interrupted` / `agent-result-unconfirmed` state at
+  its injectable deadline when no receipt arrives.
+- Added `RunnerHost.Restart_ReportsStartedJournalFenceAndRefusesRedelivery`.
+  It reloads a replacement dispatch journaled `started`, verifies the poll
+  body reports the held identity, supplies the same dispatch again, and proves
+  the Action is never invoked while the durable fence remains.
+- Focused Server recovery classes passed: reconciliation 15/15, AgentJob
+  recovery 8/8, and update fencing 3/3. Runner host reporting passed 8/8,
+  Runner recovery/journal/receipt suites passed 21/21, and the complete Runner
+  suite passed 1,662/1,662. Runner typecheck and node test-boundary checks pass.
+- `npm run test:fast` passed on the final tree: typechecks, Workflow 178, CLI
+  1,856, Server Unit 2,674, Server Arch 68, Runner 1,662, and Web 4,727.
+  One earlier concurrent attempt hit the repository's shared .NET build-output
+  race (`CS2012`) and was rerun successfully after the interrupted processes
+  exited.

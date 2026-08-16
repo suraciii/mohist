@@ -322,6 +322,53 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('Restart_ReportsStartedJournalFenceAndRefusesRedelivery', async () => {
+    const firstPoll = deferred<{ inFlight: string[] }>()
+    const work = {
+      workflowRunId: 'wr-started-restart',
+      workId: 'work-started-restart',
+      taskRunId: 'task-started-restart',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+
+    poll.mockImplementation(async (_signal: AbortSignal, body: { inFlight: string[] }) => {
+      firstPoll.resolve(body)
+      return [work]
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      await expect(firstPoll.promise).resolves.toMatchObject({
+        inFlight: expect.arrayContaining(['workflow:wr-started-restart:work-started-restart']),
+      })
+      expect(blockingAction).not.toHaveBeenCalled()
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+
+    const fenced = new WorkResultJournal('/virtual/mohist-runner-test')
+    await fenced.load()
+    expect(fenced.started()).toEqual([{ work, state: 'started' }])
+    expect(blockingAction).not.toHaveBeenCalled()
+  })
+
   it('AbortAfterReturnedResult_PersistsAndRedrivesTheReceiptWithoutReexecution', async () => {
     const executionStarted = deferred<void>()
     const receiptAcknowledged = deferred<void>()
