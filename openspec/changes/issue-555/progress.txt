@@ -712,19 +712,25 @@ Runner delivery, and reconstructs pending retries from that frozen target.
 
 ## Verification diagnosis (current task)
 
-- The initial worktree inspection found no tracked or untracked Git-visible
-  changes and no repository verification log. Ignored files were ordinary
-  build outputs only.
-- The historical incomplete verification was the earlier parallel
-  `npm run test:fast` interruption with ten Runner cleanup test timeouts;
-  the isolated Runner lane and subsequent full fast gate passed. This is a
-  transient test-runner failure, not a source or assertion defect.
-- Reproduced the exact `npm run verify` command on the current commit. It
-  passed docs, file-size, format, build, 3,975 Server SpecTests, 2,675 Server
-  unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70
-  Slack tests.
-- Focused Direct API checks also passed: auth (9), launch idempotency (7),
-  follow-up (6), stop (5), projection (14), public reads (7), event stream
-  (5), public execution contract (6), and cursor codec (3). No underlying
-  code, test, or build-configuration fix was warranted; verification created
-  no Git-visible changes.
+- The initial worktree inspection was clean; no failed verification output was
+  checked into the repository. Ignored build products were the only existing
+  verification artifacts.
+- Reproducing `npm run verify` exposed one real failure: 3,974 of 3,975
+  Server SpecTests passed. The generated MTP log identified
+  `PublicExecutionReadRouteSpecs.SessionCheckpointLag_GatesInputAndTurnReadsUntilCaughtUp`
+  at `PublicExecutionReadRouteSpecs.cs:290`, with expected `503 ServiceUnavailable`
+  and actual `200 OK`.
+- The failure was a test-harness race, not a stale-read implementation defect.
+  The test commits a deliberately rewound Session projection checkpoint, but
+  the shared integration host's five-second `PublicExecutionProjector` timer
+  can repair that checkpoint before the HTTP assertion. The route then
+  correctly serves `200` because the projection is current again.
+- Fixed the harness in `MohistIntegrationFixture` by using a one-hour test-only
+  sweep interval. Checkpoint-rewind specs now use their explicit projector
+  nudge for recovery, leaving the production five-second timer unchanged and
+  preventing it from racing the intended lag observation.
+- Focused read-route (7) and event-stream (5) suites passed after the fix.
+  The repaired `npm run verify` passed docs, file-size, format, build, 3,975
+  Server SpecTests, 2,675 Server unit tests, 1,848 CLI tests, 4,724 Web tests,
+  1,639 Runner tests, and 70 Slack tests. Verification produced only ignored
+  build outputs; no Git-visible side effects remained.
