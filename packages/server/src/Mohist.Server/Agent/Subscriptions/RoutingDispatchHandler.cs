@@ -327,8 +327,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             Prompt: prompt,
             Runtime: definition.Runtime,
             Skills: definition.Skills,
-            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId),
-            ReasoningEffort: definition.ReasoningEffort);
+            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
     }
@@ -403,8 +402,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             Prompt: outcome.RenderedPromptPreview,
             Runtime: definition.Runtime,
             Skills: definition.Skills,
-            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId),
-            ReasoningEffort: definition.ReasoningEffort);
+            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
     }

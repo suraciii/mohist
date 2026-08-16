@@ -192,6 +192,17 @@ public static class AgentConfigSchema
     }
 
     /// <summary>
+    /// The <c>provider/model</c> reference form shared by Agent definitions
+    /// (the Readiness <c>model-reference-malformed</c> gap) and the Project
+    /// default execution configuration (rejected at configuration time). A
+    /// null or whitespace model has no reference to check and is valid
+    /// here — missing-model gaps are a Readiness concern.
+    /// </summary>
+    public static bool HasProviderModelForm(string? model) =>
+        string.IsNullOrWhiteSpace(model)
+        || model.Contains('/', StringComparison.Ordinal);
+
+    /// <summary>
     /// Validate the <c>reasoningEffort</c> field when present. An absent
     /// or null key is valid (unset effort); a non-string, empty, or
     /// non-canonical value is rejected with an actionable message that

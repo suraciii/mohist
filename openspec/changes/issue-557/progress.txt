@@ -211,3 +211,23 @@ Plan skeleton for next run (est. half a day):
   pre-existing T-002 test typing issues in `executor-capabilities-effort.spec.ts`
   and `runner-signalr-followup-target.spec.ts`; source typecheck and Vitest are
   green.
+
+## T-005 (pure capability resolver)
+
+- Added the append-only Server catalog fields to `RuntimeCatalogEntry` at
+  Orleans ids 2-5: `ReasoningEfforts`, `SupportsReasoningEffort`, `Complete`,
+  and `CapabilityRevision`. `RunnerRoutes.NormalizeRuntimeCatalogs` preserves
+  these fields so authoritative catalog evidence is not discarded at the API
+  boundary; legacy fallback entries still omit completeness and revision and
+  remain non-authoritative.
+- Added the pure `AgentExecutionCapabilityResolver` with an immutable tuple,
+  per-runner catalog/readiness snapshots, typed five-way disposition, exact
+  disposition code, runner identity and revision on supported results, and
+  frozen tuple failure evidence for explicit rejections. It sorts runner ids,
+  prefers any ready authoritative compatible catalog, treats absent/incomplete
+  evidence as `needs-setup`, and treats only a null effort as unset.
+- Unit coverage exercises supported, absent/incomplete/revisionless,
+  unavailable, unsupported-effort, missing model/effort/variant,
+  effort-unsupported unset exemption, legacy non-authoritative entries,
+  deterministic runner selection/re-evaluation, and non-mutation.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passed, 2709 tests.
