@@ -536,6 +536,7 @@ public class RunnerConfigFixture : IAsyncLifetime
             capabilities = new[] { "spec/*" },
             hostname = "config-host",
             projectId,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         response.EnsureSuccessStatusCode();
         if (maxWorkflowSlots is not null)

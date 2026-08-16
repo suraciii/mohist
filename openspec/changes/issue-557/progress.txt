@@ -231,3 +231,13 @@ Plan skeleton for next run (est. half a day):
   effort-unsupported unset exemption, legacy non-authoritative entries,
   deterministic runner selection/re-evaluation, and non-mutation.
 - Verification: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passed, 2709 tests.
+
+## T-006 (resolver-gated admission and conditional capability fence)
+
+- Admission now reads immutable AgentJob and Workflow pending projections, resolves the frozen tuple against the runner catalog snapshot before claim, and passes a `RunnerCapabilityExpectation` through `IRunnerGrain`. Runner catalog/revision and readiness generation checks run under `_lifecycleGate`; a heartbeat catalog repair between resolution and claim therefore refuses the claim and leaves the owner pending.
+- AgentJob conditional claims write the capability revision into the owner-ledger `DispatchJson` before the Pending-to-Running store transition. Workflow claims stamp the revision before `StoreActiveWorkDispatchAsync`, which remains the durable first writer; a first-writer winner from another revision is re-pended instead of delivered.
+- Only supported capability resolutions claim work. Missing or incomplete/revisionless evidence remains pending, while explicit unsupported/incompatible results become deterministic preflight failures with the frozen tuple and registered EventCatalog failure categories. The AgentJob evidence is durable state/output; Workflow errors carry the same tuple and revision in their deterministic message.
+- Runner dispatches with a capability revision are checked before journal admission or runtime execution. Revision, model, effort, and variant mismatches produce `stale-capability-snapshot`, and the report protocol re-pends the owner. Workflow action model/variant values are read from nested `with.options`; AgentJob capability fields remain top-level.
+- Non-Agent `mohist/pi` and `mohist/opencode` tasks use the common fence when their action options name a model or true variant. Their Agent-owned reasoning-effort member is intentionally unset because those actions do not own an Agent profile snapshot; explicit adapter-level effort handling remains the runtime contract. This keeps the tuple shape uniform without inventing an effort value.
+- Added Server fence/admission coverage for absent catalogs, deterministic AgentJob and Workflow preflight failures, matching and changed catalog claims, first-writer snapshots, and the lifecycle-gate heartbeat race. Runner coverage verifies stale snapshots are rejected and requeued without entering execution.
+- Verification: Server SpecTests 3938 passed, Server UnitTests 2709 passed, Runner typecheck passed, and the full Runner suite 153 files / 1663 tests passed.

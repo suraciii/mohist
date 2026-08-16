@@ -140,7 +140,8 @@ public abstract class AgentJobGrainTestSupport
             runnerId,
             ["spec/*"],
             "agent-job-host",
-            pid));
+            pid,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
         {
             await runner.UpdateAsync(maxWorkflowSlots);

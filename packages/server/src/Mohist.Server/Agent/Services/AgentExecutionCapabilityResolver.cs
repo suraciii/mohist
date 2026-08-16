@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Orleans;
 
 namespace Mohist.Server.Agent.Services;
 
@@ -7,11 +8,12 @@ namespace Mohist.Server.Agent.Services;
 /// Null effort and variant values mean that the corresponding configuration
 /// member is unset; the values are otherwise preserved exactly as supplied.
 /// </summary>
+[GenerateSerializer]
 public sealed record AgentExecutionCapabilityTuple(
-    string Runtime,
-    string? Model,
-    string? ReasoningEffort,
-    string? Variant);
+    [property: Id(0)] string Runtime,
+    [property: Id(1)] string? Model,
+    [property: Id(2)] string? ReasoningEffort,
+    [property: Id(3)] string? Variant);
 
 /// <summary>
 /// The catalog and readiness witness for one runner at one point in time.
@@ -22,7 +24,9 @@ public sealed record AgentExecutionCapabilitySnapshot(
     string RunnerId,
     string Runtime,
     RuntimeCatalogEntry? Catalog,
-    bool RuntimeReady = true);
+    bool RuntimeReady = true,
+    long? RuntimeGeneration = null,
+    string? ConnectionGeneration = null);
 
 public enum AgentExecutionCapabilityDisposition
 {
@@ -37,10 +41,11 @@ public enum AgentExecutionCapabilityDisposition
 /// Evidence retained for a non-supported resolution. The tuple is always the
 /// frozen input, never a value reconstructed from the catalog.
 /// </summary>
+[GenerateSerializer]
 public sealed record AgentExecutionCapabilityFailureEvidence(
-    AgentExecutionCapabilityTuple FrozenTuple,
-    string? RunnerId,
-    string? CapabilityRevision);
+    [property: Id(0)] AgentExecutionCapabilityTuple FrozenTuple,
+    [property: Id(1)] string? RunnerId,
+    [property: Id(2)] string? CapabilityRevision);
 
 public sealed record AgentExecutionCapabilityResolution(
     AgentExecutionCapabilityDisposition Disposition,

@@ -184,7 +184,8 @@ public class AgentLauncherSpecs
             runnerId,
             ["spec/*"],
             "launcher-trigger-host",
-            projectId));
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
 
         try
         {

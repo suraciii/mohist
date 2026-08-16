@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Serialization;
@@ -112,6 +113,76 @@ public sealed class WorkflowItemTranslator : IScopedService
 
         var runtime = RuntimeForUses(item.Uses);
         return runtime is null ? [] : [runtime];
+    }
+
+    /// <summary>
+    /// Returns the capability tuple visible before a workflow claim. Agent
+    /// profile tasks use their immutable profile snapshot. Legacy direct
+    /// runtime actions may expose model/variant in literal options; their
+    /// effort is deliberately unset until the per-launch action contract is
+    /// made a first-class snapshot owner.
+    /// </summary>
+    public async Task<AgentExecutionCapabilityTuple?> ResolveCapabilityTupleAsync(
+        WorkItem item,
+        WorkflowRun run)
+    {
+        if (!item.IsTask)
+            return null;
+
+        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
+        {
+            var resolved = await ResolveAgentTaskAsync(item, run, item.Id ?? "unknown");
+            return new AgentExecutionCapabilityTuple(
+                resolved.Definition.Runtime,
+                resolved.Definition.Model,
+                resolved.Definition.ReasoningEffort,
+                resolved.Definition.Variant);
+        }
+
+        var runtime = RuntimeForUses(item.Uses);
+        if (runtime is null)
+            return null;
+
+        // Non-Agent actions keep their model and true variant in the action
+        // options, but they have no Agent-owned effort snapshot. They still
+        // use the same claim fence when those options name capabilities; the
+        // effort member is intentionally frozen as unset for uniformity.
+        var (model, variant) = await ResolveDirectActionOptionsAsync(item, run);
+        return new AgentExecutionCapabilityTuple(runtime, model, null, variant);
+    }
+
+    private async Task<(string? Model, string? Variant)> ResolveDirectActionOptionsAsync(
+        WorkItem item,
+        WorkflowRun run)
+    {
+        if (item.With is null || !item.With.TryGetValue("options", out var raw) || raw is null)
+            return (null, null);
+
+        var options = raw.Value.ValueKind == JsonValueKind.Object
+            ? raw.Value
+            : raw.Value.ValueKind == JsonValueKind.String
+                && string.Equals(raw.Value.GetString()?.Trim(), "${{ vars.agent }}", StringComparison.Ordinal)
+                ? (await _variableResolver.ResolveEffectiveVariableBundleAsync(run.Id, item.Stage)).ResolveStageVars(item.Stage) is { } vars
+                    && vars.ValueKind == JsonValueKind.Object
+                    && vars.TryGetProperty("agent", out var agent)
+                    && agent.ValueKind == JsonValueKind.Object
+                    ? agent
+                    : (JsonElement?)null
+                : null;
+        if (options is not { ValueKind: JsonValueKind.Object })
+            return (null, null);
+
+        return (
+            ReadString(options.Value, "model"),
+            ReadString(options.Value, "variant"));
+    }
+
+    private static string? ReadString(JsonElement value, string property)
+    {
+        return value.TryGetProperty(property, out var candidate)
+            && candidate.ValueKind == JsonValueKind.String
+            ? candidate.GetString()
+            : null;
     }
 
     private async Task<WorkDispatch> BuildTaskDispatchAsync(

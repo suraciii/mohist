@@ -22,14 +22,22 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task<string?> GetCurrentWorkIdAsync();
 
     /// <summary>
+    /// Read-only offer for poll-time capability resolution. The dispatch
+    /// remains pending until a conditional claim persists its capability
+    /// revision and transitions the owner ledger.
+    /// </summary>
+    Task<AgentJobPendingDispatch?> GetPendingDispatchAsync() =>
+        Task.FromResult<AgentJobPendingDispatch?>(null);
+
+    /// <summary>
     /// Owner-led poll-time claim. Atomically transitions a pending
     /// AgentJob assigned to <paramref name="runnerId"/> into Running and
-    /// returns the persisted dispatch snapshot. Returns <c>null</c>
-    /// when the job is not assigned to <paramref name="runnerId"/>,
-    /// not pending, or no longer exists. Revision-checked; concurrent
-    /// claims retry safely.
+    /// returns the persisted dispatch snapshot. When supplied, the
+    /// expectation is checked against the immutable pending tuple and its
+    /// capability revision is persisted before the claim becomes visible.
     /// </summary>
-    Task<ClaimResult?> ClaimNextAsync(string runnerId);
+    Task<ClaimResult?> ClaimNextAsync(string runnerId) =>
+        Task.FromResult<ClaimResult?>(null);
 
     Task<ClaimResult?> ClaimNextAsync(
         string runnerId,
@@ -139,6 +147,16 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
         string? token = null,
         string? permitId = null,
         string? dispatchId = null) => Task.CompletedTask;
+
+    /// <summary>
+    /// Records a deterministic capability preflight rejection. The frozen
+    /// tuple is retained as durable failure evidence and no runner dispatch
+    /// is created.
+    /// </summary>
+    Task FailPreflightAsync(AgentJobPreflightFailure failure) => Task.CompletedTask;
+
+    /// <summary>Returns a claimed AgentJob to pending after a stale dispatch.</summary>
+    Task RequeueAsync(string runnerId, string workId, string reason) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -154,6 +172,17 @@ public sealed record ClaimResult(
     [property: Id(1)] string RunnerId,
     [property: Id(2)] string WorkId,
     [property: Id(3)] WorkDispatch Dispatch);
+
+[GenerateSerializer]
+public sealed record AgentJobPendingDispatch(
+    [property: Id(0)] string AgentJobId,
+    [property: Id(1)] string WorkId,
+    [property: Id(2)] WorkDispatch Dispatch);
+
+[GenerateSerializer]
+public sealed record AgentJobPreflightFailure(
+    [property: Id(0)] string Category,
+    [property: Id(1)] AgentExecutionCapabilityFailureEvidence Evidence);
 
 [GenerateSerializer]
 public sealed record PrepareManualLaunchCommand(

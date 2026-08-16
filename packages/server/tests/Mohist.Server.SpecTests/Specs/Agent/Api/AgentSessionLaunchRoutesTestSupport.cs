@@ -434,7 +434,8 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             runnerId,
             ["spec/*"],
             $"{runnerId}-host",
-            projectId));
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         await runnerGrain.UpdateAsync(2);
     }
 
