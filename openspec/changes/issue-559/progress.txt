@@ -359,3 +359,9 @@
 - The T-004 implementation is already present in commit `92f8eef71`: Workflow-owned terminal finalization with durable per-effect receipts, typed subscription handling, reconciliation reminder, recovery decisions, and StopAsync AgentJob cancellation.
 - Focused verification passed: `AgentInvocationSettlementSpecs` 11/11, `AgentInvocationSettlementInterruptionSpecs` 4/4, `WorkflowGrainStateSaveFailureSpecs` 16/16, and `WorkflowGrainProductionContractSpecs` 2/2.
 - The full Server SpecTests passed 3960/3960 with zero errors, failures, or skips. `npm run test:fast` passed all lanes: scripts/web/Runner typecheck, Server Unit 2662, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646.
+
+## T-001 verification on current workflow branch
+
+- T-001 remains fully implemented in commit `d7e9d99d3`; later issue-559 slices are layered above it, so no duplicate production edit was necessary for this run.
+- Focused verification passed: `WorkflowAgentHandoffActivationSpecs` 11/11, `WorkflowAgentHandoffGrainSpecs` 8/8, `WorkflowAgentHandoffPreflightSpecs` 1/1, and `WorkflowAgentJobAdmissionSpecs` 6/6.
+- `npm test -w packages/runner` passed 1646/1646 in isolation. The first two concurrent `npm run test:fast` attempts encountered the known MSBuild file-lock and Runner cleanup-config timing flakes; the subsequent complete gate passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646.
