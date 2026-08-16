@@ -354,6 +354,18 @@ Channel decision (grounded in live source):
   race test's initial Orleans collection-expression fixture issue, which was
   corrected before the next run.
 
+## Review Regression Coverage
+
+- Added `RunnerHost` restart/reconnect coverage for an interrupted journal
+  entry: the exact receipt is redelivered after startup, acknowledged, retired,
+  and never executes the Action.
+- Added an HTTP AgentJob receipt test using the Runner's fixed error-result
+  fingerprint, plus chained update-operation and durable stop-failure specs.
+- Verification: full Server SpecTests passed 3939/3940 (the single failure is
+  the known unrelated AgentJob dispatch timing test); Runner passed 1651/1651;
+  Web passed 4727/4727; CLI passed 1855/1855. Runner/Web typechecks and Server
+  test build pass.
+
 ## Fix-CI Verification Repair
 
 - The persisted `verify.1` output showed one deterministic Server unit failure

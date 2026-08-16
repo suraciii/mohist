@@ -9,6 +9,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
@@ -107,6 +108,44 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
     }
 
     [Fact]
+    public async Task TerminalErrorReceiptUsesRunnerCanonicalFingerprint()
+    {
+        var setup = await CreateRunningJobAsync("error-fingerprint");
+        var result = new WorkResult(
+            "failed",
+            "runtime failed",
+            ExitCode: 1,
+            Error: new ExecutionError("turn-failed", "runtime failed"));
+        var receipt = new RuntimeRecoveryReceipt(
+            WorkflowRunId: string.Empty,
+            TaskRunId: string.Empty,
+            WorkId: setup.WorkId,
+            RunnerId: setup.RunnerId,
+            AgentSessionId: setup.SessionId,
+            AgentTurnId: setup.TurnId,
+            Runtime: "opencode",
+            RuntimeSessionId: setup.RuntimeSessionId,
+            RecoveryGeneration: 0,
+            ReceiptId: "job-error-fingerprint",
+            Payload: new RuntimeRecoveryReceiptPayload(
+                RuntimeRecoveryReceiptPayloadTypes.TerminalResult,
+                Result: result,
+                // This is the Runner's canonical JSON hash. The Server's
+                // computed WorkResult.ErrorCode must not affect it.
+                Fingerprint: "a18211e2c1e34c9fb72e67cc409ff8aca2e4f6122a37655a3456ce14cb33747b"),
+            OwnerKind: RuntimeRecoveryReceiptOwnerKinds.AgentJob,
+            AgentJobId: setup.JobId);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/{setup.RunnerId}/recovery-receipt",
+            receipt);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, body.GetProperty("status").GetString());
+        Assert.Equal(AgentJobStatus.Failed, await setup.Job.GetStatusAsync());
+    }
+
+    [Fact]
     public async Task OriginalWorkIsNotRedeliveredAfterReplacementClaim()
     {
         var setup = await CreateRunningJobAsync("redelivery");
@@ -148,6 +187,25 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
         var final = await setup.Job.GetRuntimeSnapshotAsync();
         Assert.Equal(setup.WorkId, final.CurrentWorkId);
         Assert.Null(final.UpdateInterruptionDeadlineAt);
+    }
+
+    [Fact]
+    public async Task UpdateStopFailurePersistsActionableInterruptionContext()
+    {
+        var setup = await CreateRunningJobAsync("stop-failure");
+        var operation = await FenceAsync(setup);
+
+        Assert.True(await setup.Job.MarkUpdateStopFailureAsync(
+            setup.RunnerId,
+            setup.WorkId,
+            operation.OperationId,
+            "session.abort fetch failed"));
+
+        var snapshot = await setup.Job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.RecoverablyInterrupted, snapshot.Status);
+        Assert.Equal(operation.OperationId, snapshot.Interruption!.UpdateOperationId);
+        Assert.Equal(setup.WorkId, snapshot.Interruption.WorkId);
+        Assert.Equal("session.abort fetch failed", snapshot.Interruption.StopFailure);
     }
 
     [Fact]

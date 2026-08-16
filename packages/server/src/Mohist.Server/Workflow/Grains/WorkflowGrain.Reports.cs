@@ -471,14 +471,16 @@ public partial class WorkflowGrain
         if (translated is not WorkflowItemTranslator.InboundReport.Task taskReport)
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "terminal-result-invalid");
 
-        var activeWork = settlement.State == AgentResultSettlementState.RecoverablyInterrupted
+        var wasUpdateInterrupted = settlement.State == AgentResultSettlementState.RecoverablyInterrupted;
+        var activeWork = wasUpdateInterrupted
             ? _run.FindRecoveryReceiptWork(receipt.TaskRunId, receipt.WorkId, receipt.RunnerId)
             : _run.FindReportableWork(receipt.TaskRunId, receipt.WorkId, receipt.RunnerId);
         if (activeWork is null || !activeWork.IsTask)
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "work-not-reportable");
 
-        var racedUpdateInterruption = settlement.State == AgentResultSettlementState.RecoverablyInterrupted
+        var racedUpdateInterruption = wasUpdateInterrupted
             ? task.AgentInterruption
+            : null;
             : null;
         var effectiveReport = taskReport.Value with { TaskRunId = receipt.TaskRunId };
         try
@@ -524,9 +526,10 @@ public partial class WorkflowGrain
             requestFingerprint,
             RuntimeRecoveryReceiptAckStatuses.Accepted));
         await CommitAsync(events);
-        if (racedUpdateInterruption is not null)
+        if (wasUpdateInterrupted)
         {
-            await ApplySessionInterruptionAsync(settlement.AgentSessionId, task.AgentInterruption!);
+            if (task.AgentInterruption is not null)
+                await ApplySessionInterruptionAsync(settlement.AgentSessionId, task.AgentInterruption!);
             await SettleUpdateOperationWorkAsync(receipt, settlement.UpdateOperationId!);
         }
         else

@@ -3,6 +3,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
 import { OpenCodeRuntime } from '../src/runtime/opencode/runtime.js'
 import { WorkResultJournal } from '../src/runtime/work-result-journal.js'
+import { createInterruptedRecoveryReceipt } from '../src/runtime/recovery-receipt.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import { deferred } from './support/deferred.js'
@@ -20,6 +21,7 @@ type ReportingMocks = Record<
   | 'disconnect'
   | 'poll'
   | 'report'
+  | 'sendRecoveryReceipt'
   | 'uploadTaskLog'
   | 'fetchConfig'
   | 'getWorkflowAgentSession'
@@ -72,6 +74,7 @@ const heartbeat = scopedMock('heartbeat')
 const disconnect = scopedMock('disconnect')
 const poll = scopedMock('poll')
 const report = scopedMock('report')
+const sendRecoveryReceipt = scopedMock('sendRecoveryReceipt')
 const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
 const getWorkflowAgentSession = scopedMock('getWorkflowAgentSession')
@@ -90,6 +93,10 @@ function createReportingMocks(): ReportingMocks {
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
     report: vi.fn(async () => ({ tracked: true })),
+    sendRecoveryReceipt: vi.fn(async (receipt: { receiptId: string }) => ({
+      appliedReceiptId: receipt.receiptId,
+      status: 'accepted',
+    })),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     getWorkflowAgentSession: vi.fn(async () => null),
@@ -122,6 +129,7 @@ vi.mock('../src/server/connection.js', () => ({
     disconnect = disconnect
     poll = poll
     report = report
+    sendRecoveryReceipt = sendRecoveryReceipt
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
     getWorkflowAgentSession = getWorkflowAgentSession
@@ -195,6 +203,224 @@ function it(name: string, body: () => Promise<void> | void): void {
 }
 
 describe('RunnerHost', () => {
+  it('Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain', async () => {
+    const redriven = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-restart',
+      workId: 'work-restart',
+      taskRunId: 'task-restart',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+    await journal.complete(work, { status: 'failed', message: 'result persisted before process exit' })
+
+    const controller = new AbortController()
+    report.mockImplementation(async (reportedWork: { workId?: string }) => {
+      if (reportedWork.workId === work.workId) redriven.resolve()
+      return { tracked: true, reason: 'accepted' }
+    })
+    poll.mockResolvedValue([])
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+
+    const run = host.run(controller.signal)
+    try {
+      await redriven.promise
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
+        expect.any(AbortSignal),
+      )
+      expect(blockingAction).not.toHaveBeenCalled()
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('Restart_RedrivesDurablyInterruptedReceiptWithoutExecutingTheWorkAgain', async () => {
+    const delivered = deferred<{ receiptId: string }>()
+    const work = {
+      workflowRunId: 'wr-interrupted-restart',
+      workId: 'work-interrupted-restart',
+      taskRunId: 'task-interrupted-restart',
+      workType: 'task',
+      uses: 'mohist/pi',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const binding = {
+      agentSessionId: 'session-interrupted-restart',
+      agentTurnId: 'turn-interrupted-restart',
+      runtime: 'pi' as const,
+      runtimeSessionId: 'runtime-interrupted-restart',
+      workDir: '/virtual/mohist-runner-test',
+    }
+    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
+    await journal.load()
+    await journal.begin(work)
+    const receipt = createInterruptedRecoveryReceipt(work, binding, 'runner-test', 'runner-update:restart', 'receipt-restart')
+    expect(receipt).not.toBeNull()
+    await journal.interrupt(work, receipt!)
+
+    sendRecoveryReceipt.mockImplementation(async (replayed: { receiptId: string }) => {
+      delivered.resolve(replayed)
+      return { appliedReceiptId: replayed.receiptId, status: 'accepted' }
+    })
+    poll.mockResolvedValue([])
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+
+    const run = host.run(controller.signal)
+    try {
+      await expect(delivered.promise).resolves.toMatchObject({ receiptId: 'receipt-restart' })
+      expect(sendRecoveryReceipt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          receiptId: 'receipt-restart',
+          payload: { type: 'update-interrupted', updateOperationId: 'runner-update:restart', stopConfirmed: true },
+        }),
+        expect.any(AbortSignal),
+      )
+      expect(blockingAction).not.toHaveBeenCalled()
+      const acknowledged = new WorkResultJournal('/virtual/mohist-runner-test')
+      await acknowledged.load()
+      expect(acknowledged.interrupted()).toEqual([])
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('AbortAfterReturnedResult_PersistsAndRedrivesTheReceiptWithoutReexecution', async () => {
+    const executionStarted = deferred<void>()
+    const receiptAcknowledged = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-abort-receipt',
+      workId: 'work-abort-receipt',
+      taskRunId: 'task-abort-receipt',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    let executions = 0
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (_work, signal, collector) => {
+        executions += 1
+        executionStarted.resolve()
+        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+        return {
+          result: {
+            status: 'failed',
+            message: 'runtime returned terminal failure after cancellation',
+            error: { code: 'action-failed', message: 'runtime returned terminal failure after cancellation' },
+            exitCode: 1,
+          },
+          collector: collector!,
+        }
+      })
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    report.mockRejectedValueOnce(new Error('first report transport failed'))
+
+    const firstController = new AbortController()
+    const firstHost = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const firstRun = firstHost.run(firstController.signal)
+    const originalAcknowledge = WorkResultJournal.prototype.acknowledge
+    const acknowledge = vi.spyOn(WorkResultJournal.prototype, 'acknowledge').mockImplementation(async function (
+      this: WorkResultJournal,
+      acknowledged,
+    ) {
+      await originalAcknowledge.call(this, acknowledged)
+      if (acknowledged.workId === work.workId) receiptAcknowledged.resolve()
+    })
+    let restarted: { controller: AbortController; run: Promise<void> } | null = null
+
+    try {
+      await executionStarted.promise
+      firstController.abort()
+      await expect(firstRun).resolves.toBeUndefined()
+
+      const persisted = new WorkResultJournal('/virtual/mohist-runner-test')
+      await persisted.load()
+      expect(persisted.completed()).toEqual([
+        expect.objectContaining({
+          work: expect.objectContaining({ workflowRunId: work.workflowRunId, workId: work.workId }),
+          state: 'completed',
+          result: expect.objectContaining({
+            status: 'failed',
+            message: 'runtime returned terminal failure after cancellation',
+          }),
+        }),
+      ])
+
+      report.mockResolvedValue({ tracked: true })
+      poll.mockResolvedValue([])
+      const controller = new AbortController()
+      const host = new RunnerHost({
+        serverUrl: 'https://runner.test',
+        runnerId: 'runner-test',
+        projectId: 'project-1',
+        runnerRoot: '/virtual/mohist-runner-test',
+        pollIntervalMs: QUIET_INTERVAL_MS,
+        heartbeatIntervalMs: QUIET_INTERVAL_MS,
+        dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+      })
+      restarted = { controller, run: host.run(controller.signal) }
+
+      await receiptAcknowledged.promise
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: work.workId }),
+        expect.objectContaining({ status: 'failed', message: 'runtime returned terminal failure after cancellation' }),
+        expect.any(AbortSignal),
+      )
+      expect(executions).toBe(1)
+      const acknowledged = new WorkResultJournal('/virtual/mohist-runner-test')
+      await acknowledged.load()
+      expect(acknowledged.completed()).toEqual([])
+    } finally {
+      firstController.abort()
+      await firstRun.catch(() => undefined)
+      restarted?.controller.abort()
+      await restarted?.run.catch(() => undefined)
+      acknowledge.mockRestore()
+      executeWithLog.mockRestore()
+    }
+  })
+
   it('PollBody_CarriesInFlightAndAwaitingAck_Keys', async () => {
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()

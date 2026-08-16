@@ -116,6 +116,47 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
     }
 
     [Fact]
+    public async Task ChainedUpdate_WithOlderUnresolvedOperationStartsFreshFenceForReplacementIdentity()
+    {
+        var runnerId = $"runner-chained-update-{Guid.NewGuid():N}";
+        var operationGrain = _fixture.Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId);
+        var first = await operationGrain.StartOrGetAsync(new RunnerUpdateOperation(
+            "runner-update:old",
+            runnerId,
+            _fixture.TimeProvider.GetUtcNow(),
+            new[]
+            {
+                new RunnerUpdateWork(
+                    WorkDispatchOwnerKinds.AgentJob,
+                    "job-old",
+                    "work-old",
+                    null,
+                    "agent-job")
+            },
+            ConnectionGeneration: "runner-connection:1"));
+
+        var second = await operationGrain.StartNewAsync(new RunnerUpdateOperation(
+            "runner-update:new",
+            runnerId,
+            _fixture.TimeProvider.GetUtcNow(),
+            new[]
+            {
+                new RunnerUpdateWork(
+                    WorkDispatchOwnerKinds.AgentJob,
+                    "job-replacement",
+                    "work-replacement",
+                    null,
+                    "agent-job")
+            },
+            ConnectionGeneration: "runner-connection:2"));
+
+        Assert.Equal("runner-update:old", first.OperationId);
+        Assert.Equal("runner-update:new", second.OperationId);
+        Assert.Equal("runner-connection:1", (await operationGrain.GetAsync(first.OperationId))!.ConnectionGeneration);
+        Assert.Equal(second.OperationId, (await operationGrain.GetPendingAsync())!.OperationId);
+    }
+
+    [Fact]
     public async Task RecoveryStatus_ProjectsReceiptAcknowledgedAndReplacementSettledPerWork()
     {
         var runnerId = $"runner-recovery-status-{Guid.NewGuid():N}";
