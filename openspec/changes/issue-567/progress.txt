@@ -474,3 +474,20 @@ Channel decision (grounded in live source):
 - Verification: Server SpecTests build passed; focused Workflow settlement
   passed 15/15, AgentJob grain recovery class passed 21/21, and AgentJob
   recovery API class passed 7/7. `review.md` remains untouched.
+
+## Current Verification
+
+- `npm run build` passes with 0 .NET build warnings/errors; Web, Runner, and
+  Slack production builds also pass.
+- Focused issue-567 Server classes pass: Workflow settlement `13/13`, replay
+  repair `2/2`, AgentJob grain `21/21`, and AgentJob recovery API `7/7`.
+- Full .NET tests pass for Workflow Definition `178/178`, CLI `1855/1855`, and
+  Server Unit `2667/2667`. Full Server SpecTests report one unrelated timing
+  failure in `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  (`3943/3944`); ArchTests report the pre-existing migration-ledger digest
+  drift for `FailIfMarkerSpecs` (`67/68`).
+- Web passes `4727/4727`, Slack passes `70/70`, and Runner passes `1652/1652`.
+  Runner CI boundary checks still flag the pre-existing elapsed-time assertion
+  in `host.recovery.test.ts`; global format check flags that test and
+  `host.recovery.ts`. No unrelated files were changed, and `review.md` remains
+  untouched.
