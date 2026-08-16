@@ -13,6 +13,20 @@ The Runner SHALL enforce a finite retention capacity over all logical runtime-ev
 - **AND** SHALL expose protected-capacity pressure and reject further protected admissions until capacity is available
 - **AND** SHALL NOT overwrite the snapshot with an empty or truncated protected-record state
 
+### Requirement: Runtime-event requests have one strict identity-complete contract
+Every workflow, generic, Session, and cleanup runtime-event request SHALL carry `runtimeEventContractVersion: 2`, one canonical `logicalTarget`, the physical `runtimeSessionId`, applicable runtime/AgentSession/Agent turn identity, and per-event `runtimeEventId`, type, and payload. Every acceptance SHALL carry `runtimeEventContractVersion`, `runtimeEventId`, type, logical target, physical runtime identity, and all applicable AgentSession/turn/input identities. Batch acceptance SHALL return exactly one positional receipt per submitted event. `runtimeEventId` SHALL be the durable Runner record ID; `InputDeliveryId` is equal to it for `session.input`, and `CleanupOperationId` is equal to it for `session.cleanup`. Missing, old, malformed, conflicting, or count-mismatched identity fails closed and retains the original record.
+
+#### Scenario: A replay returns the original acceptance
+- **WHEN** the same v2 `runtimeEventId` and identical fingerprint are posted again through a workflow, generic, Session, or cleanup route
+- **THEN** the AgentSession grain SHALL return the persisted receipt byte-for-byte equivalent in its identity fields
+- **AND** SHALL apply no second domain event, transcript event, binding operation, or follow-up dispatch
+
+#### Scenario: A duplicate and new record share one batch
+- **WHEN** a batch contains an already accepted record followed by a new record with valid identity
+- **THEN** the AgentSession grain SHALL return the stored receipt for the duplicate and apply the new record once in one atomic state commit
+- **AND** the response SHALL preserve one receipt per input position
+- **AND** a conflicting reuse of an existing ID SHALL reject the whole batch without applying the new record
+
 ### Requirement: Protected records remain exact and are not evicted by retention
 The outbox SHALL protect `session.input`, terminal `session.activity`, `turn.failed`, and any non-streaming tool-call, usage, model, or binding-reconciliation fact unless that record has passed an explicitly defined lossless compaction rule. A protected record MUST preserve its local record ID, logical target, physical `runtimeSessionId`, turn and work identity, event type, payload, acknowledgement policy, and sequence position until the Server positively settles it. Retention enforcement MUST NOT drop a protected record merely to make room for another record.
 
@@ -42,27 +56,43 @@ The outbox SHALL treat `session.input` and terminal `session.activity` records a
 - **AND** a later retry SHALL submit the original terminal activity unchanged
 
 ### Requirement: Compaction preserves Server-visible transcript invariants
-The outbox SHALL define a deterministic identity and equivalence rule before compacting any high-volume record. A compacted sequence SHALL be equivalent to the original sequence for every Server-visible transcript and domain invariant: turn boundaries and order, cumulative message and reasoning text for each part, tool-call count and final status for each `toolCallId`, usage and cost effects for each turn, model observations, binding identity, and terminal status and failure details. Compaction MUST NOT merge records across logical targets, physical runtime sessions, Agent turns, text parts, tool-call IDs, or sequence boundaries. Records that cannot be proven equivalent SHALL remain protected and consume capacity.
+The first release SHALL compact only adjacent `message.delta` or `reasoning.delta` records whose payload contains a non-empty `text`, `partId`, and `messageId`, and whose applicable `turnId`, logical target, physical `runtimeSessionId`, and sequence identity all match. The reducer SHALL concatenate text in original order, retain the earliest representative `runtimeEventId`, retain every replaced source ID and `compactedRawEventCount`, and preserve the Server transcript's cumulative text and raw-event count. The Server transcript accumulator SHALL interpret `compactedRawEventCount` as the number of source delta rows for its existing `RawEventCount` and flush thresholds.
 
-#### Scenario: Tool-call updates are compacted safely
-- **WHEN** several pending `tool_call.updated` records belong to one `toolCallId` and their intermediate states can be replaced by a later state
-- **THEN** the outbox SHALL retain a lossless compacted representation only if delivery preserves that call ID, its input, its final completed or failed status, and the Server-visible tool count
-- **AND** a call whose lifecycle or final state cannot be preserved SHALL remain as protected records
+Tool-call, usage, model, and binding-reconciliation records SHALL have no compaction reducer in this change. They remain protected, even when they share an ID or appear replaceable. A missing identity, unsupported payload shape, non-adjacent record, different physical runtime, different Agent turn, different text part, different logical target, or any protected event type SHALL consume capacity unchanged and emit an `unsafe-compaction` diagnostic. No compaction may alter turn boundaries, FIFO order, tool-call lifecycle/count, usage/cost accounting, model observations, binding identity, or terminal details.
 
-#### Scenario: Usage updates are compacted without changing accounting
+#### Scenario: Adjacent text deltas are compacted losslessly
+- **WHEN** adjacent pending text deltas share event type, target, runtime session, turn, sequence, `partId`, and `messageId`
+- **THEN** the outbox MAY replace them with one representative record whose text is their ordered concatenation
+- **AND** the representative SHALL retain all source IDs and their count
+- **AND** the Server transcript SHALL contain the same cumulative text and raw-event count as delivery of the source rows separately
+
+#### Scenario: Tool-call updates remain protected
+- **WHEN** several pending `tool_call.started`, `tool_call.updated`, or `tool_call.completed` records belong to one `toolCallId`
+- **THEN** the outbox SHALL retain each record as protected in this change
+- **AND** capacity pressure SHALL reject a new record rather than replace a lifecycle state
+- **AND** Server tests SHALL prove that cumulative tool count, input, and final status are unchanged when no compaction occurs
+
+#### Scenario: Usage updates remain protected
 - **WHEN** multiple `usage.updated` records for one turn are pending
-- **THEN** the outbox SHALL combine them only into a representation whose application produces the same token, reasoning, cache, and cost effects as the original ordered records
-- **AND** the compacted record SHALL retain the original turn and runtime identity
-- **AND** a usage sequence without a deterministic equivalent SHALL remain protected
+- **THEN** the outbox SHALL retain each record as protected in this change
+- **AND** capacity pressure SHALL reject a new record rather than sum, replace, or otherwise rewrite a usage payload
+- **AND** Server tests SHALL prove that `AgentSession.ApplyUsage` continues to add every token, reasoning, cache, and cost field exactly once
 
-#### Scenario: Binding reconciliation does not cross a physical identity
+#### Scenario: Binding reconciliation remains physical-identity fenced
 - **WHEN** multiple binding-reconciliation facts for one AgentSession are pending
-- **THEN** the outbox SHALL coalesce only facts for the same physical runtime binding and logical sequence
-- **AND** the resulting fact SHALL preserve the latest Server-visible activity state and its `runtimeSessionId`
+- **THEN** the outbox SHALL retain each record as protected in this change
 - **AND** facts for different runtime bindings SHALL remain separately protected and ordered
+- **AND** no retry or retention operation SHALL rewrite a record's `runtimeSessionId`
 
 ### Requirement: Producer and observer paths surface admission failures
 Durable enqueue, runtime-event reporting, synchronous runtime observers, and terminal settlement SHALL propagate protected-capacity admission failures as explicit awaitable outcomes. An observer callback MUST be able to record an admission failure without throwing synchronously into the runtime provider, and the owning action or command MUST observe the failure when its reporting boundary settles. The failure MUST NOT be silently converted into task success, task failure, a fabricated terminal event, or replacement of the runtime's actual result.
+
+#### Scenario: AgentJob input is admitted before runtime invocation
+- **WHEN** an AgentJob has an AgentSession and its OpenCode or Pi physical session has been resolved or created
+- **THEN** the Runner SHALL attach that physical session, durably enqueue `session.input`, and await a positive identity-matching receipt before calling `runTurn`
+- **AND** a protected-capacity rejection, persistence failure, attach failure, timeout, or mismatched receipt SHALL return `execution-unavailable`
+- **AND** the corresponding runtime's `runTurn` SHALL be called zero times
+- **AND** a later delivery retry SHALL reuse the same `runtimeEventId` and SHALL not invoke the runtime again
 
 #### Scenario: Workflow input cannot be admitted
 - **WHEN** protected capacity rejects the initial Workflow `session.input`
