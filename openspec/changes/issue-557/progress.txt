@@ -350,3 +350,16 @@ Plan skeleton for next run (est. half a day):
 - Added `StaleDispatchRequeue_PreservesPendingProjectionForReresolution` to
   cover the invariant. Server SpecTests passed: 3942; Server UnitTests passed:
   2722. Runner CI before this correction passed: 154 files / 1666 tests.
+
+## T-007 Verification (current run)
+
+- Revalidated the existing T-007 slice: readiness compares the frozen effort,
+  reports `effort-without-model`, normalizes both execution-configuration
+  failure categories, and names `reasoningEffort` in the re-entry guidance.
+  AgentJob terminal evidence retains model, true variant, and frozen effort;
+  session model projections retain adapter-reported `appliedReasoningEffort`
+  and clear it when the latest model fact omits the field.
+- Verification: Server UnitTests passed (2722), Server SpecTests passed
+  (3942), and Runner focused CI passed (typecheck, test-boundary check, and
+  8 Pi projector evidence tests). No default effort is synthesized in the
+  applied or absent evidence paths. `git diff --check` passed.
