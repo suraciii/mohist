@@ -412,3 +412,10 @@
 - Focused admission coverage passed 6/6. Existing direct/routed regressions also passed: `AgentJobGrainSpecs` 20/20, `AgentJobDispatchEnvelopeSpecs` 7/7, `AgentJobGrainRoutedLaunchSpecs` 11/11, `AgentConcurrencyReconciliationSpecs` 3/3, and `AgentSessionFollowupConcurrencySpecs` 15/15.
 - `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and transient concurrent-build copy retries were non-failing.
 - No additional production edit was required during this revalidation; this commit records the final T-002 verification on the workflow branch.
+
+## T-003 verification on current branch (final)
+
+- The T-003 implementation remains present in commit `97e2c1ca9`: discriminator-gated terminal-delivery obligations, stable typed workflow-terminal events with recovery retry, and Runner-side frozen `expect` evaluation carried through `WorkDispatch.Expect`.
+- Focused `AgentJobWorkflowTerminalDeliverySpecs` passed 7/7, and focused Runner transport/evaluation coverage passed 44/44.
+- `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. .NET preview SDK notices and concurrent-build copy retries were non-failing.
+- No additional production edit was required during this revalidation; this commit records the final T-003 verification on the workflow branch.
