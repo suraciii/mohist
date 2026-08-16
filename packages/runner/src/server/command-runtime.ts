@@ -307,7 +307,6 @@ function mapPiError(kind: PiErrorKind): SessionCommandError {
     case 'incompatible-runtime':
     case 'deadline-exceeded':
     case 'interrupted':
-    case 'resource-containment':
       return 'unavailable'
   }
 }

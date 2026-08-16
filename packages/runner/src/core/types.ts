@@ -333,17 +333,6 @@ export type ActionResult = ({ output: JsonObject | null; error?: never } | { out
   turnFact?: { finalAssistantText?: string | null } | null
 }
 
-export interface WorkResourceLimits {
-  /** Maximum aggregate child-process memory in MiB. Null disables the bound. */
-  memoryMb?: number | null
-  /** Maximum wall-clock duration for an action subprocess in milliseconds. */
-  wallClockMs?: number | null
-  /** Aggregate-RSS sampling interval for action subprocesses in milliseconds. */
-  watchdogIntervalMs?: number | null
-  /** Maximum runtime-backed turn duration in milliseconds. */
-  turnBudgetMs?: number | null
-}
-
 export interface RunnerOptions {
   serverUrl: string
   runnerId: string
@@ -381,9 +370,6 @@ export interface RunnerOptions {
 
   /** Maximum time runtime shutdown waits before abandoning cleanup. */
   runtimeShutdownTimeoutMs?: number
-
-  /** Deployment-backed per-work resource containment policy. */
-  workResourceLimits?: WorkResourceLimits | null
 
   /**
    * Optional override for the incremental task-log flush interval in

@@ -174,7 +174,6 @@ stages:
         with:
           run: ${{ vars.ci.verify }}
           timeout: 300000
-          resourceProfile: full-verify
         recovery:
           budget: 2
           handlers:

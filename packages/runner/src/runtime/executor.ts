@@ -37,7 +37,6 @@ import { capabilitySet } from '../actions/host.js'
 import type { BindingRecoveryCoordinator } from './binding-recovery.js'
 import { SkillResolver } from './skill-resolver.js'
 import { renderWithDeferred, buildActionHost, type ExecutorCapabilityDeps } from './executor-capabilities.js'
-import type { ResolvedWorkResourceLimits } from './resource-containment.js'
 
 const COMPLETED_STATUSES = new Set(['completed', 'success', 'succeeded', 'pass', 'passed'])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -65,7 +64,6 @@ export class WorkExecutor {
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
-    private readonly workResourceLimits?: ResolvedWorkResourceLimits,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -292,7 +290,6 @@ export class WorkExecutor {
       agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
       runtimeEventRecordId: this.runtimeEventRecordId,
       bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
-      workResourceLimits: this.workResourceLimits,
     }
   }
 

@@ -30,11 +30,6 @@ export function tryRecovery(
   result: WorkItemResult,
   variables?: JsonObject | null,
 ): WorkItemResult | null {
-  // Resource exhaustion is a terminal, diagnostic boundary. Repair handlers
-  // cannot make the same invocation fit a fixed process limit, and retrying
-  // here would create an unbounded recovery chain with the same failure.
-  if (result.error?.code === 'resource-containment') return null
-
   const recovery = readRecoveryConfig(work.recovery)
   if (!recovery) return null
 

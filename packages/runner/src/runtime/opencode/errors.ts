@@ -104,25 +104,6 @@ export function normalizeInterrupted(diagnostics: readonly RuntimeDiagnostic[] =
   }
 }
 
-export function normalizeResourceContainment(
-  timeoutMs: number,
-  diagnostics: readonly RuntimeDiagnostic[] = [],
-): RuntimeError {
-  return {
-    kind: 'resource-containment',
-    message: `OpenCode turn exceeded its per-work resource budget of ${timeoutMs}ms`,
-    diagnostics: [
-      ...diagnostics,
-      {
-        severity: 'error',
-        code: 'resource-containment',
-        message: 'The turn was aborted and its runtime generation was quarantined after exceeding the per-work budget',
-        details: { timeoutMs },
-      },
-    ],
-  }
-}
-
 export function normalizeGenerationDrainTimeout(
   timeoutMs: number,
   diagnostics: readonly RuntimeDiagnostic[] = [],

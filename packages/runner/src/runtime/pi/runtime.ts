@@ -233,24 +233,6 @@ export class PiRuntime {
     if (request.options?.variant) session.setThinkingLevel(request.options.variant)
     const clock = this.deps.clock ?? defaultClock
     const duration = request.durationMs ?? null
-    const resourceBudgetMs =
-      request.resourceBudgetMs !== undefined && request.resourceBudgetMs !== null && request.resourceBudgetMs > 0
-        ? request.resourceBudgetMs
-        : null
-    let resourceContainmentTriggered = false
-    const resourceBudget =
-      resourceBudgetMs === null
-        ? null
-        : clock.setTimeout(() => {
-            resourceContainmentTriggered = true
-            fixAndAbort(
-              this.finishFailure(
-                'resource-containment',
-                `Pi turn exceeded its per-work resource budget of ${resourceBudgetMs}ms`,
-                diagnostics,
-              ),
-            )
-          }, resourceBudgetMs)
     const deadline =
       duration !== null && duration >= 0
         ? clock.setTimeout(() => {
@@ -301,10 +283,8 @@ export class PiRuntime {
     } finally {
       signal.removeEventListener('abort', cancel)
       if (deadline !== null) clock.clearTimeout(deadline)
-      if (resourceBudget !== null) clock.clearTimeout(resourceBudget)
       if (warning !== null) clock.clearTimeout(warning)
       unsubscribe()
-      if (resourceContainmentTriggered) await this.shutdown()
     }
   }
 
@@ -881,7 +861,7 @@ export class PiRuntime {
     return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics }
   }
   private finishFailure(
-    kind: 'deadline-exceeded' | 'interrupted' | 'turn-failed' | 'resource-containment',
+    kind: 'deadline-exceeded' | 'interrupted' | 'turn-failed',
     messageText: string,
     diagnostics: PiDiagnostic[] = [],
   ): PiResult<PiTurnResult> {
