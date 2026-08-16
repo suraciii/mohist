@@ -491,3 +491,17 @@ Channel decision (grounded in live source):
   in `host.recovery.test.ts`; global format check flags that test and
   `host.recovery.ts`. No unrelated files were changed, and `review.md` remains
   untouched.
+
+## T-001 Verification On Current HEAD
+
+- The direct T-001 Server spec classes passed: `RunnerUpdateInterruptSpecs`
+  3/3 and `RunnerConfigApiSpecs` 10/10. The Server project build passed with
+  0 errors.
+- `npm run test:fast` passed the functional suites: Workflow Definition
+  178/178, CLI 1855/1855, Server Unit 2667/2667, Runner 1652/1652, and Web
+  4727/4727. Typecheck also passed.
+- The fast gate exited non-zero only for the pre-existing architecture
+  migration-ledger ratchet: `SpecUnitMigrationLedgerRules` reported the
+  `FailIfMarkerSpecs` source/closure digest mismatch (67/68). This failure is
+  unrelated to the runner update-operation fence and no ledger change was
+  made.
