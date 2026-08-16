@@ -91,7 +91,7 @@ public abstract class WorkflowGrainSpecs
     {
         runnerId ??= $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1], "test-host", projectId));
         if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
         {
             await runner.UpdateAsync(maxWorkflowSlots);
@@ -250,7 +250,7 @@ public abstract class WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1],
             "test-host",
             TestProjectId(_workflowId)));
     }

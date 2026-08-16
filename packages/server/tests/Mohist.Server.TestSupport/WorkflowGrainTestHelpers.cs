@@ -63,7 +63,11 @@ public static class WorkflowGrainTestHelpers
     {
         runnerId ??= $"runner-{Guid.NewGuid():N}";
         var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1],
+            "test-host",
+            projectId));
         if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
         {
             await runner.UpdateAsync(maxWorkflowSlots);

@@ -40,7 +40,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1],
             "test-host",
             projectId,
             ConnectionGeneration: "connection-current"));
@@ -142,15 +142,13 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], []))).Dispatches);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        await DispatchTestExtensions.ReportWorkflowDirectAsync(
+            Grains,
+            Services,
             runnerId,
+            _workflowId!,
             work.WorkId,
-            new TaskReport(
-                work.WorkId,
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: work.TaskRunId)));
+            new WorkResult("completed"));
 
         var recovered = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(recovered.CurrentStage().Tasks).Status);
@@ -238,15 +236,13 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.NotNull(redelivery.AgentRecovery);
         Assert.Equal(first.WorkId, redelivery.WorkId);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        await DispatchTestExtensions.ReportWorkflowDirectAsync(
+            Grains,
+            Services,
             runnerId,
+            _workflowId!,
             first.WorkId,
-            new TaskReport(
-                first.WorkId,
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: first.TaskRunId)));
+            new WorkResult("completed"));
 
         var recovered = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(recovered.CurrentStage().Tasks).Status);
@@ -403,7 +399,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
 
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1],
             "test-host",
             TestProjectId(_workflowId!)));
 
@@ -422,15 +418,13 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
             runnerId,
             new RunnerPollRequest([key], []))).Dispatches);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        await DispatchTestExtensions.ReportWorkflowDirectAsync(
+            Grains,
+            Services,
             runnerId,
+            _workflowId!,
             first.WorkId,
-            new TaskReport(
-                first.WorkId,
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: first.TaskRunId)));
+            new WorkResult("completed"));
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
     }
 

@@ -9,6 +9,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -39,7 +40,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         try
         {
             await SeedWorkflowAsync(projectId, workflowRunId, recovery);
-            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1], "test-host", projectId));
 
             var fresh = await PollAsync(runnerId);
             Assert.True(fresh.TryGetProperty("recoveryRemaining", out var freshState));
@@ -55,6 +56,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 workId = fresh.GetProperty("workId").GetString(),
                 taskRunId = fresh.GetProperty("taskRunId").GetString(),
                 status = "completed",
+                completionBoundary = BuildCleanBoundary(workflowRunId, runnerId, fresh),
                 addTasks = new[]
                 {
                     new
@@ -150,7 +152,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         try
         {
             await SeedWorkflowAsync(projectId, workflowRunId, recovery);
-            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1], "test-host", projectId));
 
             var fresh = await PollAsync(runnerId);
 
@@ -165,6 +167,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 workId = fresh.GetProperty("workId").GetString(),
                 taskRunId = fresh.GetProperty("taskRunId").GetString(),
                 status = "completed",
+                completionBoundary = BuildCleanBoundary(workflowRunId, runnerId, fresh),
                 addTasks = new[]
                 {
                     new
@@ -247,11 +250,59 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         }
 
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        await workflow.StartAsync(new WorkflowStartInput(Metadata: new(
-            Name: null,
-            CreatedAt: DateTimeOffset.UnixEpoch,
-             ProjectId: projectId,
-             IssueNumber: 1)));
+        await workflow.StartAsync(new WorkflowStartInput(
+            Metadata: new(
+                Name: null,
+                CreatedAt: DateTimeOffset.UnixEpoch,
+                ProjectId: projectId,
+                IssueNumber: 1),
+            Workspace: new WorkspaceIdentity(
+                "/virtual/workspace",
+                "main",
+                WorkspaceId: $"workspace-{workflowRunId}",
+                WorkspaceGeneration: JsonSerializer.SerializeToElement(1),
+                Head: "head-1",
+                Tree: "tree-1")));
+    }
+
+    private static WorkflowTaskCompletionBoundary BuildCleanBoundary(
+        string workflowRunId,
+        string runnerId,
+        JsonElement dispatch)
+    {
+        var identity = new WorkflowTaskExecutionIdentity(
+            workflowRunId,
+            dispatch.GetProperty("stage").GetString(),
+            dispatch.GetProperty("taskRunId").GetString()!,
+            dispatch.GetProperty("workId").GetString()!,
+            WorkDispatchOwnerKinds.Workflow,
+            workflowRunId,
+            runnerId,
+            dispatch.GetProperty("workspaceId").GetString(),
+            dispatch.GetProperty("workspaceGeneration").Clone());
+        var receipt = new CommitReceipt(
+            1,
+            identity,
+            "main",
+            "head-1",
+            "tree-1",
+            "main",
+            "head-1",
+            "tree-1",
+            [],
+            [],
+            [],
+            true,
+            null,
+            DateTimeOffset.UnixEpoch);
+        return new WorkflowTaskCompletionBoundary(
+            1,
+            identity,
+            new ActionCompletion(1, true, "succeeded", "action", null, null, [], null, DateTimeOffset.UnixEpoch),
+            receipt,
+            WorkflowTaskWorkspaceOutcomes.CommittedClean,
+            null,
+            $"api-boundary:{workflowRunId}:{identity.TaskAttemptId}");
     }
 
     private async Task<JsonElement> PollAsync(string runnerId)

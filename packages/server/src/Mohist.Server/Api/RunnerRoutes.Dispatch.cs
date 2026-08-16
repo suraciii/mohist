@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Runner.Grains;
 
@@ -35,4 +36,10 @@ public record WorkDispatchResponse(
     AgentExecutionDefinition? AgentDefinition = null,
     AgentSessionStartup? AgentSessionStartup = null,
     string? TaskRunId = null,
-    AgentRecoveryBinding? AgentRecovery = null);
+    AgentRecoveryBinding? AgentRecovery = null,
+    string? RunnerId = null,
+    string? WorkspaceId = null,
+    JsonElement? WorkspaceGeneration = null,
+    string? WorkspaceHead = null,
+    string? WorkspaceTree = null,
+    IReadOnlyList<string>? CleanupScope = null);

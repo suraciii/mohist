@@ -38,8 +38,10 @@ import { FollowupOperationJournal } from './followup-operation-journal.js'
 import { CancelOperationJournal } from './cancel-operation-journal.js'
 import { WorkResultJournal, workKey as journalWorkKey } from './work-result-journal.js'
 import { RecoveredStartedWork } from './recovered-started-work.js'
+import { LegacyWorkflowRecovery } from './legacy-workflow-recovery.js'
 import { loadBuildInfo } from './build-info.js'
 import type { DispatchWorkItem, WorkItemResult, WorkflowTaskCompletionBoundary } from '../core/types.js'
+import { isWorkflowTask } from './completion-boundary.js'
 import { currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
 import { SkillResolver } from './skill-resolver.js'
@@ -147,6 +149,7 @@ export class RunnerHost {
   private readonly cancelOperationJournal: CancelOperationJournal
   private readonly workResultJournal: WorkResultJournal
   private readonly recoveredStartedWork: RecoveredStartedWork
+  private readonly legacyWorkflowRecovery: LegacyWorkflowRecovery
   private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
@@ -227,6 +230,7 @@ export class RunnerHost {
     this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
     this.workResultJournal = new WorkResultJournal(options.runnerRoot)
     this.recoveredStartedWork = new RecoveredStartedWork(this.workResultJournal, this.connection)
+    this.legacyWorkflowRecovery = new LegacyWorkflowRecovery(this.workResultJournal, this.connection, options.runnerId)
     this.terminalTaskLogDelivery =
       dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? delay
@@ -489,6 +493,10 @@ export class RunnerHost {
       log.warn('work result journal unavailable; runner admission gated')
       return
     }
+    // Legacy Workflow task fences are converted to non-settling
+    // boundary-missing observations. They are intentionally excluded from
+    // ordinary completed-result promotion.
+    this.legacyWorkflowRecovery.recover()
     this.promoteDurableJournalResults(0)
     this.recoveredStartedWork.recover()
   }
@@ -521,6 +529,8 @@ export class RunnerHost {
     while (!signal.aborted) {
       void retryPendingTerminalTaskLogs(this.taskLogDeps(), this.terminalTaskLogDeliveryInFlight, signal)
       await this.retryDueReports()
+      await this.legacyWorkflowRecovery.retryDue(Date.now())
+      await this.recoveredStartedWork.retryDue(Date.now())
 
       // Runtime readiness is sent as a claim-time witness. Polling must stay
       // alive while a runtime is unhealthy so held work can be reconciled and
@@ -573,6 +583,18 @@ export class RunnerHost {
 
         const startupObserved = this.recoveredStartedWork.has(key)
         const recovery = isAgentRecoveryDispatch(work)
+        if (
+          isWorkflowTask(work) &&
+          this.workResultJournal.ready() &&
+          this.workResultJournal.legacyWorkflowState(work) !== null
+        ) {
+          // Check the durable fence before begin(): a post-upgrade server may
+          // enrich a legacy dispatch with fields that were absent locally.
+          // That payload difference must not turn the fence into an identity
+          // conflict or a fresh execution.
+          this.legacyWorkflowRecovery.enqueue(work)
+          continue
+        }
         let admission: Awaited<ReturnType<WorkResultJournal['begin']>>
         try {
           admission = recovery
@@ -634,6 +656,7 @@ export class RunnerHost {
         this.syncOpenCodeWorkOwners()
       }
 
+      await this.legacyWorkflowRecovery.retryDue(Date.now())
       await this.recoveredStartedWork.retryDue(Date.now())
       for (const key of startupRecoveryKeys) this.recoveredStartedWork.drop(key)
 
@@ -667,8 +690,16 @@ export class RunnerHost {
 
   private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
     const runtime = this.openCodeRuntime
-    const owners = works.filter((work) => usesOpenCode(work) && !isAgentRecoveryDispatch(work)).map(workKey)
-    if (!runtime || owners.length === 0) return
+    if (!runtime || !this.workResultJournal.ready()) return
+    const owners = works
+      .filter(
+        (work) =>
+          usesOpenCode(work) &&
+          !isAgentRecoveryDispatch(work) &&
+          !(isWorkflowTask(work) && this.workResultJournal.legacyWorkflowState(work) !== null),
+      )
+      .map(workKey)
+    if (owners.length === 0) return
     runtime.setWorkOwners([...this.openCodeOwners(), ...owners])
     if (!runtime.ready()) {
       const started = await runtime.start(signal)
@@ -838,6 +869,7 @@ export class RunnerHost {
     if (!this.workResultJournal.ready()) return []
     const promoted: string[] = []
     for (const entry of this.workResultJournal.completed()) {
+      if (this.workResultJournal.legacyWorkflowState(entry.work) !== null) continue
       const key = workKey(entry.work)
       if (this.awaitingAck.has(key)) continue
       this.inFlight.delete(key)
@@ -914,6 +946,7 @@ export class RunnerHost {
         earliestRetryAt = entry.retryAt
       }
     }
+    earliestRetryAt = this.legacyWorkflowRecovery.earlierRetryAt(earliestRetryAt)
     earliestRetryAt = this.recoveredStartedWork.earlierRetryAt(earliestRetryAt)
     if (earliestRetryAt === null) return this.options.pollIntervalMs
     return Math.min(this.options.pollIntervalMs, Math.max(0, earliestRetryAt - Date.now()))

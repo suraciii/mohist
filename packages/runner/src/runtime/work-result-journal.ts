@@ -193,6 +193,18 @@ export class WorkResultJournal {
     return [...this.entries.values()].filter((entry) => entry.state === 'started').map(cloneEntry)
   }
 
+  /**
+   * Returns the state of a Workflow task fence that has no v1 boundary.
+   * Legacy fences are handled by startup reconciliation and must never be
+   * promoted into normal execution or result delivery.
+   */
+  legacyWorkflowState(work: DispatchWorkItem): WorkResultJournalState | null {
+    this.ensureReady()
+    const entry = this.entries.get(workKey(work))
+    if (!entry || entry.boundary !== undefined || !isWorkflowTaskJournalEntry(entry)) return null
+    return entry.state
+  }
+
   async completeInterrupted(
     work: DispatchWorkItem,
     result: WorkItemResult,
@@ -370,6 +382,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function isWorkflowTaskJournalEntry(entry: WorkResultJournalEntry): boolean {
+  const ownerKind = (entry.work.ownerKind ?? 'workflow').trim().toLowerCase()
+  return ownerKind === 'workflow' && entry.work.workType === 'task'
+}
+
 function sameWork(left: DispatchWorkItem, right: DispatchWorkItem): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
@@ -420,7 +437,12 @@ function sameBoundary(
 
 function isBoundary(value: unknown): value is WorkflowTaskCompletionBoundary {
   if (!isRecord(value) || value.version !== 1 || typeof value.fingerprint !== 'string') return false
-  if (value.workspaceOutcome !== 'committed-clean' && value.workspaceOutcome !== 'dirty' && value.workspaceOutcome !== 'unconfirmed') return false
+  if (
+    value.workspaceOutcome !== 'committed-clean' &&
+    value.workspaceOutcome !== 'dirty' &&
+    value.workspaceOutcome !== 'unconfirmed'
+  )
+    return false
   const identity = value.identity
   const completion = value.actionCompletion
   const receipt = value.commitReceipt

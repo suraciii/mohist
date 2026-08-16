@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import type { RunnerOptions, RunnerRegistration } from '../core/types.js'
 import type { PiCatalog } from './pi/types.js'
 
+export const WORKFLOW_TASK_COMPLETION_BOUNDARY_V1 = 'workflow-task-completion-boundary-v1'
+
 export interface RegistrationPiCatalogSource {
   catalog: () => PiCatalog | null
 }
@@ -23,7 +25,7 @@ export function buildRegistrationState(
         .digest('hex')
     : null
   return {
-    capabilities: [],
+    capabilities: [WORKFLOW_TASK_COMPLETION_BOUNDARY_V1],
     actionCatalog: actionsCatalog,
     projectId: options.projectId,
     connectionId: getConnectionId(),

@@ -196,10 +196,18 @@ public static partial class RunnerRoutes
 
             // Workflow: report direct to the owning grain via the stateless
             // report service (the runner grain no longer relays workflow
-            // reports). Accepted and Stale are both acks.
+            // reports). A stale response is normally an idempotent ack, but
+            // legacy boundary-missing observations must remain locally fenced.
             var (ack, workflowStatus) = await workflowReport.ReportAsync(
                 runnerId, req.WorkflowRunId ?? string.Empty, req.WorkId, req.TaskRunId, result, ct);
-            var tracked = ack != "missing-workflow";
+            // A boundary-missing recovery observation must remain local when
+            // its exact identity is rejected. Accepted observations and exact
+            // replays are durable acknowledgements; a stale conflicting
+            // observation is not permission to retire the legacy fence.
+            var tracked = ack != "missing-workflow"
+                && !(string.Equals(ack, "stale", StringComparison.Ordinal)
+                    && (req.CompletionBoundary is null && req.TaskRunId is not null
+                        || string.Equals(req.WorkspaceReason ?? req.CompletionBoundary?.WorkspaceReason, "boundary-missing", StringComparison.Ordinal)));
             return Results.Ok(new RunnerReportResponse(
                 req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
         });
@@ -802,7 +810,13 @@ public static partial class RunnerRoutes
             AgentDefinition: work.AgentDefinition,
             AgentSessionStartup: work.AgentSessionStartup,
             TaskRunId: work.TaskRunId,
-            AgentRecovery: work.AgentRecovery);
+            AgentRecovery: work.AgentRecovery,
+            RunnerId: work.RunnerId,
+            WorkspaceId: work.WorkspaceId,
+            WorkspaceGeneration: work.WorkspaceGeneration,
+            WorkspaceHead: work.WorkspaceHead,
+            WorkspaceTree: work.WorkspaceTree,
+            CleanupScope: work.CleanupScope);
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>

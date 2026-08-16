@@ -449,7 +449,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (_draining
                 || _status != RunnerStatus.Online
                 || _info is null
-                || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
+                || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal)
+                || !RunnerCapabilities.SupportsWorkflowTaskCompletionBoundaryV1(_info))
             {
                 return null;
             }

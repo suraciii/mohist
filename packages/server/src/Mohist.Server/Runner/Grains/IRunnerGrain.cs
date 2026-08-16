@@ -100,6 +100,18 @@ public static class RunnerCapacity
     public const int DefaultMaxWorkflowSlots = 1;
 }
 
+public static class RunnerCapabilities
+{
+    /// <summary>
+    /// The runner can persist and report the v1 Workflow completion boundary.
+    /// This is an admission capability, not an Action capability.
+    /// </summary>
+    public const string WorkflowTaskCompletionBoundaryV1 = "workflow-task-completion-boundary-v1";
+
+    public static bool SupportsWorkflowTaskCompletionBoundaryV1(RunnerInfo? info) =>
+        info?.Capabilities?.Contains(WorkflowTaskCompletionBoundaryV1, StringComparer.OrdinalIgnoreCase) == true;
+}
+
 [GenerateSerializer]
 public sealed record ActionCatalog(
     [property: Id(0)] ActionCatalogEntry[] Actions,

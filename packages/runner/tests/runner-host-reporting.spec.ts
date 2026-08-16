@@ -443,11 +443,12 @@ describe('RunnerHost', () => {
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
     const work = {
-      workflowRunId: 'wr-unknown-replay',
+      workflowRunId: '',
       workId: 'work-unknown-replay',
-      workType: 'task',
+      workType: 'agent-job',
       uses: 'test/block',
-      ownerKind: 'workflow',
+      ownerKind: 'agent-job',
+      agentJobId: 'agent-job-unknown-replay',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
@@ -495,16 +496,22 @@ describe('RunnerHost', () => {
     }
   })
 
-  it('StartedFenceWithoutExecution_ReportsRunnerRestartedAndRetiresOnAck', async () => {
+  it('StartedLegacyWorkflowFence_ReportsBoundaryMissingAndRetiresOnAck', async () => {
     const reported = deferred<void>()
     const work = {
       workflowRunId: 'wr-restarted',
       workId: 'work-restarted',
       taskRunId: 'task-restarted',
       workType: 'task',
+      stage: 'build',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      runnerId: 'runner-test',
+      workspaceId: 'legacy-workspace-restarted',
+      workspaceGeneration: 1,
+      workspaceHead: 'legacy-head',
+      workspaceTree: 'legacy-tree',
+      variables: { workspace: { path: '/virtual/mohist-runner-test', branch: 'main' } },
     }
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
     await journal.load()
@@ -513,7 +520,7 @@ describe('RunnerHost', () => {
       reported.resolve()
       return { tracked: true, reason: 'accepted' }
     })
-    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    poll.mockResolvedValue([])
     const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: 'https://runner.test',
@@ -531,11 +538,14 @@ describe('RunnerHost', () => {
       expect(report).toHaveBeenCalledWith(
         expect.objectContaining({ workId: work.workId }),
         expect.objectContaining({
-          status: 'failed',
-          message: 'runner-restarted',
-          error: { code: 'runner-restarted', message: 'runner-restarted' },
+          status: 'unknown',
+          message: 'Legacy Workflow journal entry has no v1 completion boundary; operator reconciliation is required.',
+          error: expect.objectContaining({ code: 'boundary-missing' }),
+          workspaceOutcome: 'unconfirmed',
+          workspaceReason: 'boundary-missing',
         }),
         expect.any(AbortSignal),
+        expect.objectContaining({ workspaceReason: 'boundary-missing' }),
       )
       expect(blockingAction).not.toHaveBeenCalled()
       const after = new WorkResultJournal('/virtual/mohist-runner-test')
@@ -600,9 +610,15 @@ describe('RunnerHost', () => {
       workId: 'work-restarted-repeat',
       taskRunId: 'task-restarted-repeat',
       workType: 'task',
+      stage: 'build',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      runnerId: 'runner-test',
+      workspaceId: 'legacy-workspace-repeat',
+      workspaceGeneration: 1,
+      workspaceHead: 'legacy-head',
+      workspaceTree: 'legacy-tree',
+      variables: { workspace: { path: '/virtual/mohist-runner-test', branch: 'main' } },
     }
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
     await journal.load()
@@ -640,15 +656,21 @@ describe('RunnerHost', () => {
     }
   })
 
-  it('StartedFenceWithLiveWorkflowBinding_ReattachesWithoutExecutingAgain', async () => {
+  it('StartedLegacyWorkflowFenceUsesBoundaryMissingWithoutRuntimeReattachment', async () => {
     const reported = deferred<void>()
     const work = {
       workflowRunId: 'wr-restarted-live',
       workId: 'work-restarted-live',
       taskRunId: 'task-restarted-live',
       workType: 'task',
+      stage: 'build',
       uses: 'mohist/opencode',
       ownerKind: 'workflow',
+      runnerId: 'runner-test',
+      workspaceId: 'legacy-workspace-live',
+      workspaceGeneration: 1,
+      workspaceHead: 'legacy-head',
+      workspaceTree: 'legacy-tree',
       projectId: 'project-1',
       with: { prompt: 'continue' },
       agentDefinition: { instructions: '', runtime: 'opencode', skills: [] },
@@ -694,19 +716,23 @@ describe('RunnerHost', () => {
     const run = host.run(controller.signal)
     try {
       await reported.promise
-      expect(getWorkflowAgentSession).toHaveBeenCalledWith(
-        'project-1',
-        'wr-restarted-live',
-        'work-restarted-live',
-        expect.any(AbortSignal),
-      )
-      expect(resolveSession).toHaveBeenCalledTimes(1)
-      expect(reattachTurn).toHaveBeenCalledTimes(1)
+      expect(getWorkflowAgentSession).not.toHaveBeenCalled()
+      expect(resolveSession).not.toHaveBeenCalled()
+      expect(reattachTurn).not.toHaveBeenCalled()
       expect(blockingAction).not.toHaveBeenCalled()
       expect(report).toHaveBeenCalledWith(
         expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({ status: 'completed', output: expect.objectContaining({ text: 'recovered' }) }),
+        expect.objectContaining({
+          status: 'unknown',
+          output: null,
+          workspaceOutcome: 'unconfirmed',
+          workspaceReason: 'boundary-missing',
+        }),
         expect.any(AbortSignal),
+        expect.objectContaining({
+          workspaceOutcome: 'unconfirmed',
+          workspaceReason: 'boundary-missing',
+        }),
       )
     } finally {
       controller.abort()

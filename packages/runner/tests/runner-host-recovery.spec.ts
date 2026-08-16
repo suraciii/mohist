@@ -186,33 +186,49 @@ function it(name: string, body: () => Promise<void> | void): void {
 }
 
 describe('RunnerHost', () => {
-  it('Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain', async () => {
-    const redriven = deferred<void>()
+  it('Restart_ReconcilesCompletedLegacyWorkflowFenceWithoutReplayingItsPlainResult', async () => {
+    const firstObservation = deferred<void>()
+    const retired = deferred<void>()
     const work = {
-      workflowRunId: 'wr-restart',
-      workId: 'work-restart',
-      taskRunId: 'task-restart',
+      workflowRunId: 'wr-restart-legacy',
+      workId: 'work-restart-legacy',
+      taskRunId: 'task-restart-legacy',
       workType: 'task',
+      stage: 'build',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      runnerId: 'runner-test',
+      workspaceId: 'legacy-workspace-completed',
+      workspaceGeneration: 1,
+      workspaceHead: 'legacy-head',
+      workspaceTree: 'legacy-tree',
+      variables: { workspace: { path: '/virtual/mohist-runner-test', branch: 'main' } },
     }
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
     await journal.load()
     await journal.begin(work)
-    await journal.complete(work, { status: 'failed', message: 'result persisted before process exit' })
+    await journal.complete(work, { status: 'completed', output: { mustNotReplay: true } })
 
-    const controller = new AbortController()
-    report.mockImplementation(async (reportedWork: { workId?: string }) => {
-      if (reportedWork.workId === work.workId) redriven.resolve()
+    let attempts = 0
+    report.mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) {
+        firstObservation.resolve()
+        return { tracked: false, reason: 'ack-lost' }
+      }
       return { tracked: true, reason: 'accepted' }
     })
+    const originalAcknowledge = WorkResultJournal.prototype.acknowledge
+    const acknowledge = vi.spyOn(WorkResultJournal.prototype, 'acknowledge').mockImplementation(async function (
+      this: WorkResultJournal,
+      acknowledged,
+    ) {
+      await originalAcknowledge.call(this, acknowledged)
+      if (acknowledged.workId === work.workId) retired.resolve()
+    })
+
     poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    connect.mockResolvedValue(undefined)
-    heartbeat.mockResolvedValue(undefined)
-    disconnect.mockResolvedValue(undefined)
+    const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
@@ -225,16 +241,35 @@ describe('RunnerHost', () => {
 
     const run = host.run(controller.signal)
     try {
-      await redriven.promise
-      expect(report).toHaveBeenCalledWith(
+      await firstObservation.promise
+      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown'])
+      expect(report).toHaveBeenLastCalledWith(
         expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
+        expect.objectContaining({
+          status: 'unknown',
+          output: null,
+          workspaceOutcome: 'unconfirmed',
+          workspaceReason: 'boundary-missing',
+        }),
         expect.any(AbortSignal),
+        expect.objectContaining({ workspaceReason: 'boundary-missing' }),
       )
+      const retained = new WorkResultJournal('/virtual/mohist-runner-test')
+      await retained.load()
+      expect(retained.completed()[0]?.result).toEqual({ status: 'completed', output: { mustNotReplay: true } })
+
+      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
+      await retired.promise
+      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown', 'unknown'])
       expect(blockingAction).not.toHaveBeenCalled()
+
+      const cleared = new WorkResultJournal('/virtual/mohist-runner-test')
+      await cleared.load()
+      expect(cleared.completed()).toEqual([])
     } finally {
       controller.abort()
       await run.catch(() => undefined)
+      acknowledge.mockRestore()
     }
   })
 
@@ -245,9 +280,15 @@ describe('RunnerHost', () => {
       workId: 'work-recovered-agent-started',
       taskRunId: 'task-recovered-agent-started',
       workType: 'task',
+      stage: 'build',
       uses: 'mohist/pi',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      runnerId: 'runner-test',
+      workspaceId: 'legacy-workspace-1',
+      workspaceGeneration: 1,
+      workspaceHead: 'legacy-head',
+      workspaceTree: 'legacy-tree',
+      variables: { workspace: { path: '/virtual/mohist-runner-test', branch: 'main' } },
     }
     const ordinaryWork = {
       workflowRunId: 'wr-recovered-ordinary-started',
@@ -256,6 +297,8 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
+      // An incomplete legacy identity must remain fenced for operator
+      // reconciliation and must not be guessed by the runner.
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
@@ -296,9 +339,20 @@ describe('RunnerHost', () => {
         }),
         expect.objectContaining({
           status: 'unknown',
-          message: 'Runner restarted after a durable started fence without a completed result receipt.',
+          message: 'Legacy Workflow journal entry has no v1 completion boundary; operator reconciliation is required.',
+          workspaceOutcome: 'unconfirmed',
+          workspaceReason: 'boundary-missing',
         }),
         expect.any(AbortSignal),
+        expect.objectContaining({
+          workspaceOutcome: 'unconfirmed',
+          workspaceReason: 'boundary-missing',
+          actionCompletion: expect.objectContaining({
+            actionStarted: false,
+            outcome: 'unknown',
+            phase: 'legacy-reconciliation',
+          }),
+        }),
       )
       expect(blockingAction).not.toHaveBeenCalled()
 
@@ -384,9 +438,15 @@ describe('RunnerHost', () => {
       workId: 'work-recovered-started-retry',
       taskRunId: 'task-recovered-started-retry',
       workType: 'task',
+      stage: 'build',
       uses: 'mohist/opencode',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      runnerId: 'runner-test',
+      workspaceId: 'legacy-workspace-retry',
+      workspaceGeneration: 2,
+      workspaceHead: 'legacy-head',
+      workspaceTree: 'legacy-tree',
+      variables: { workspace: { path: '/virtual/mohist-runner-test', branch: 'main' } },
     }
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
     await journal.load()
@@ -441,20 +501,27 @@ describe('RunnerHost', () => {
     }
   })
 
-  it('RecoveryDispatch_RearmsTheStartedFenceAndReconcilesUnderTheOriginalIdentity', async () => {
+  it('RecoveryDispatch_ForALegacyFenceUsesBoundaryMissingWithoutExecuting', async () => {
+    const firstObservation = deferred<void>()
     const receiptAcknowledged = deferred<void>()
     const fencedWork = {
       workflowRunId: 'wr-recovery-rearm',
       workId: 'work-recovery-rearm',
       taskRunId: 'task-recovery-rearm',
       workType: 'task',
+      stage: 'build',
       uses: 'mohist/pi',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      runnerId: 'runner-test',
+      workspaceId: 'legacy-workspace-rearm',
+      workspaceGeneration: 1,
+      workspaceHead: 'legacy-head',
+      workspaceTree: 'legacy-tree',
+      variables: { workspace: { path: '/virtual/mohist-runner-test', branch: 'main' } },
     }
     const recoveryDispatch = {
       ...fencedWork,
-      variables: { workspace: { path: '/virtual/mohist-runner-test-2' } },
+      variables: { workspace: { path: '/virtual/mohist-runner-test-2', branch: 'main' } },
       agentRecovery: { runtime: 'pi', runtimeSessionId: '/virtual/mohist-runner-test/sessions/pi-1' },
     }
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
@@ -464,7 +531,10 @@ describe('RunnerHost', () => {
     let attempts = 0
     report.mockImplementation(async () => {
       attempts += 1
-      if (attempts === 1) return { tracked: false, reason: 'observation-not-durable' }
+      if (attempts === 1) {
+        firstObservation.resolve()
+        return { tracked: false, reason: 'observation-not-durable' }
+      }
       return { tracked: true, reason: 'accepted' }
     })
     poll.mockResolvedValueOnce([recoveryDispatch]).mockResolvedValue([])
@@ -480,14 +550,13 @@ describe('RunnerHost', () => {
           collector: collector!,
         }
       })
-    const originalAcknowledge = WorkResultJournal.prototype.acknowledge
-    const acknowledge = vi.spyOn(WorkResultJournal.prototype, 'acknowledge').mockImplementation(async function (
-      this: WorkResultJournal,
-      acknowledged,
-    ) {
-      await originalAcknowledge.call(this, acknowledged)
-      if (acknowledged.workId === fencedWork.workId) receiptAcknowledged.resolve()
-    })
+    const originalAcknowledgeUnconfirmed = WorkResultJournal.prototype.acknowledgeUnconfirmed
+    const acknowledgeUnconfirmed = vi
+      .spyOn(WorkResultJournal.prototype, 'acknowledgeUnconfirmed')
+      .mockImplementation(async function (this: WorkResultJournal, acknowledged) {
+        await originalAcknowledgeUnconfirmed.call(this, acknowledged)
+        if (acknowledged.workId === fencedWork.workId) receiptAcknowledged.resolve()
+      })
     const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: 'https://runner.test',
@@ -501,21 +570,20 @@ describe('RunnerHost', () => {
     const run = host.run(controller.signal)
 
     try {
-      await receiptAcknowledged.promise
-
-      expect(executions).toBe(1)
-      expect(executedWork).toEqual(recoveryDispatch)
-      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown', 'completed'])
+      await firstObservation.promise
+      expect(executions).toBe(0)
+      expect(executedWork).toBeNull()
+      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown'])
       expect(report).toHaveBeenLastCalledWith(
         expect.objectContaining({ workId: fencedWork.workId, taskRunId: fencedWork.taskRunId }),
-        expect.objectContaining({ status: 'completed' }),
+        expect.objectContaining({ workspaceOutcome: 'unconfirmed', workspaceReason: 'boundary-missing' }),
         expect.any(AbortSignal),
+        expect.objectContaining({ workspaceOutcome: 'unconfirmed', workspaceReason: 'boundary-missing' }),
       )
 
-      // The startup unknown observation must not fire again after the
-      // delivery-driven reconciliation took over its identity.
-      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS * 2)
-      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown', 'completed'])
+      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
+      await receiptAcknowledged.promise
+      expect(report.mock.calls.map((call) => call[1]?.status)).toEqual(['unknown', 'unknown'])
 
       const retired = new WorkResultJournal('/virtual/mohist-runner-test')
       await retired.load()
@@ -524,7 +592,7 @@ describe('RunnerHost', () => {
     } finally {
       controller.abort()
       await run.catch(() => undefined)
-      acknowledge.mockRestore()
+      acknowledgeUnconfirmed.mockRestore()
       executeWithLog.mockRestore()
     }
   })
@@ -599,12 +667,12 @@ describe('RunnerHost', () => {
     const executionStarted = deferred<void>()
     const receiptAcknowledged = deferred<void>()
     const work = {
-      workflowRunId: 'wr-abort-receipt',
+      workflowRunId: '',
       workId: 'work-abort-receipt',
-      taskRunId: 'task-abort-receipt',
-      workType: 'task',
+      workType: 'agent-job',
       uses: 'test/block',
-      ownerKind: 'workflow',
+      ownerKind: 'agent-job',
+      agentJobId: 'agent-job-abort-receipt',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     let executions = 0
@@ -705,12 +773,12 @@ describe('RunnerHost', () => {
     const pendingRedelivery = deferred<void>()
     const recoveredReport = deferred<void>()
     const work = {
-      workflowRunId: 'wr-pending-journal',
+      workflowRunId: '',
       workId: 'work-pending-journal',
-      taskRunId: 'task-pending-journal',
-      workType: 'task',
+      workType: 'agent-job',
       uses: 'test/block',
-      ownerKind: 'workflow',
+      ownerKind: 'agent-job',
+      agentJobId: 'agent-job-pending-journal',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     let executions = 0

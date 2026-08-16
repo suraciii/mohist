@@ -36,6 +36,32 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
     public RunnerPollSchedulingSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
+    public async Task LegacyRunnerWithoutBoundaryCapability_CannotClaimNewWorkflowTask()
+    {
+        await ClearBacklogAsync();
+        var projectId = $"runner-v1-capability-project-{Guid.NewGuid():N}";
+        var runnerId = $"runner-v1-legacy-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["legacy-work-result"], "legacy-host", projectId));
+
+        var workflowId = $"runner-v1-capability-workflow-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(tasks: [new("task-1", "Task 1", "spec/task")], checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
+
+        Assert.Null(await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true));
+        Assert.Null(await workflow.GetAssignedWorkerIdAsync());
+
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            [RunnerCapabilities.WorkflowTaskCompletionBoundaryV1],
+            "v1-host",
+            projectId));
+
+        Assert.NotNull(await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true));
+    }
+
+    [Fact]
     public async Task DrainFence_BlocksNewPollAndClaims_AndCancelRestoresAdmission()
     {
         await ClearBacklogAsync();

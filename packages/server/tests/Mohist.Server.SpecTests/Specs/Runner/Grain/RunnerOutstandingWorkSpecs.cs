@@ -122,7 +122,11 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Running, disconnected.Status);
         Assert.Null(disconnected.Failure);
 
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", TestProjectId(work.WorkflowRunId)));
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*", RunnerCapabilities.WorkflowTaskCompletionBoundaryV1],
+            "test-host",
+            TestProjectId(work.WorkflowRunId)));
         var dispatch = Services.GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
         var redelivery = Assert.Single((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         Assert.Equal(work.WorkId, redelivery.WorkId);
@@ -130,14 +134,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal(binding.Runtime, redelivery.AgentRecovery?.Runtime);
         Assert.Equal(binding.RuntimeSessionId, redelivery.AgentRecovery?.RuntimeSessionId);
 
-        var report = Services.GetRequiredService<Mohist.Server.Runner.Services.WorkflowReportService>();
-        var (ack, _) = await report.ReportAsync(
-            runnerId,
-            work.WorkflowRunId,
-            work.WorkId,
-            work.TaskRunId,
-            new WorkResult("completed"));
-        Assert.Equal("accepted", ack);
+        await ReportAsync(runnerId, work.WorkId, "completed");
 
         var completed = await LoadRunAsync(work.WorkflowRunId);
         var completedTask = Assert.Single(completed.CurrentStage().Tasks);
@@ -217,18 +214,9 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
 
         await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         var interrupted = await LoadRunAsync(work.WorkflowRunId);
-        var taskRunId = interrupted.Stages.Single().Tasks.Single().Id;
         var deadline = interrupted.Stages.Single().Tasks.Single().Interruption!.RecoveryDeadlineAt;
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
-            runnerId,
-            work.WorkId,
-            new TaskReport(
-                work.WorkId,
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: taskRunId)));
+        await ReportAsync(runnerId, work.WorkId, "completed");
 
         _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
         await workflow.ReceiveReminder(WorkflowGrain.RunnerLossRecoveryReminderName, default);

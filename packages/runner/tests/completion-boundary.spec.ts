@@ -46,23 +46,40 @@ function result(stdout: string) {
 function execute(action: ActionResult | Error, git: GitRunner, overrides: Partial<DispatchWorkItem> = {}) {
   return withTestRunnerResources(
     async () => {
-      const executor = new WorkExecutor(
-        defineTestActions({
-          'test/action': {
-            run: async () => {
-              if (action instanceof Error) throw action
-              return action
-            },
-            errors: [{ code: 'action-failed', description: 'test failure' }],
+      const selectedUses = overrides.uses ?? 'test/action'
+      const actionDefinitions = {
+        'test/action': {
+          run: async () => {
+            if (action instanceof Error) throw action
+            return action
           },
-        }),
+          errors: [{ code: 'action-failed', description: 'test failure' }],
+        },
+        ...(selectedUses !== 'test/action' && selectedUses !== 'removed/action'
+          ? {
+              [selectedUses]: {
+                run: async () => {
+                  if (action instanceof Error) throw action
+                  return action
+                },
+                errors: [{ code: 'action-failed', description: 'test failure' }],
+              },
+            }
+          : {}),
+      }
+      const executor = new WorkExecutor(
+        defineTestActions(actionDefinitions),
         verifyOnlyWorkspaceManager({
           path: workDir,
           branch: 'main',
           workspaceId: 'workspace-1',
           workspaceGeneration: 3,
         }),
-        { uploadArtifact: async () => { throw new Error('unexpected artifact upload') } } as never,
+        {
+          uploadArtifact: async () => {
+            throw new Error('unexpected artifact upload')
+          },
+        } as never,
         workDir,
         () => new Date('2026-08-16T00:00:00.000Z'),
         null,
@@ -76,7 +93,11 @@ function execute(action: ActionResult | Error, git: GitRunner, overrides: Partia
         undefined,
         'runner-1',
       )
-      return await executor.executeWithLog(work(overrides), new AbortController().signal, null)
+      return await executor.executeWithLog(
+        work({ ...overrides, uses: selectedUses }),
+        new AbortController().signal,
+        null,
+      )
     },
     { gitRunner: git },
   )
@@ -100,6 +121,20 @@ describe('workflow task completion boundary', () => {
       },
     })
   })
+
+  it.each(['test/action', 'mohist/pi', 'mohist/opencode'])(
+    'uses the same boundary path for %s Workflow execution',
+    async (uses) => {
+      const execution = await execute({ output: { runtime: uses } }, gitRunner(), { uses })
+
+      expect(execution.result).toMatchObject({ status: 'completed', workspaceOutcome: 'committed-clean' })
+      expect(execution.boundary).toMatchObject({
+        identity: { ownerKind: 'workflow', runnerId: 'runner-1', workspaceId: 'workspace-1', workspaceGeneration: 3 },
+        actionCompletion: { actionStarted: true, output: { runtime: uses } },
+        workspaceOutcome: 'committed-clean',
+      })
+    },
+  )
 
   it('classifies authoritative staged, unstaged, and untracked evidence as dirty without failing the Action', async () => {
     const staged = await execute({ output: { ok: true } }, gitRunner('M  staged.ts'))
