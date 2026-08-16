@@ -341,11 +341,11 @@ export interface AgentSessionComposerData {
   availabilityLoading: boolean;
   launchMutation: Pick<
     ReturnType<typeof useLaunchAgentSession>,
-    "mutate" | "isPending" | "error"
+    "mutate" | "isPending" | "error" | "reset"
   >;
   startTaskMutation: Pick<
     ReturnType<typeof useStartAgentTask>,
-    "mutate" | "isPending" | "error"
+    "mutate" | "isPending" | "error" | "reset"
   >;
 }
 
@@ -656,6 +656,22 @@ export function AgentSessionComposerPage({
             <p className="ml-6 text-xs">
               {launchFeedback.message} {launchFeedback.nextAction}
             </p>
+            {launchFeedback.kind === "launch-conflict" && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="reset-launch-key"
+                className="ml-6 w-fit"
+                onClick={() => {
+                  launchKeyRef.current = null;
+                  if (selectedAgentRef) launchMutation.reset();
+                  else startTaskMutation.reset();
+                }}
+              >
+                Start with a new launch key
+              </Button>
+            )}
             {isExecutabilityError &&
               gapsFromError &&
               gapsFromError.length > 0 && (
