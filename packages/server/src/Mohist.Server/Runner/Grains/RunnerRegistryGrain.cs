@@ -111,6 +111,32 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
         return Task.FromResult<IReadOnlyDictionary<string, string[]>>(materialized);
     }
 
+    public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelReasoningEffortsByRuntimeAsync(string runtime)
+    {
+        var aggregated = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var runner in _runners.Values)
+        {
+            var efforts = CatalogFor(runner, runtime)?.ReasoningEfforts;
+            if (efforts is null || efforts.Count == 0) continue;
+            foreach (var entry in efforts)
+            {
+                if (string.IsNullOrWhiteSpace(entry.Key)) continue;
+                var reported = (entry.Value ?? [])
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                if (reported.Length == 0) continue;
+                aggregated[entry.Key] = aggregated.TryGetValue(entry.Key, out var existing)
+                    ? existing.Concat(reported).Distinct(StringComparer.Ordinal).ToArray()
+                    : reported;
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, string[]>>(
+            aggregated.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase));
+    }
+
     private static RuntimeCatalogEntry? CatalogFor(RunnerInfo runner, string runtime)
     {
         if (runner.RuntimeCatalogs is not null)

@@ -17,6 +17,7 @@ public interface IRunnerRegistryGrain : IGrainWithStringKey
     /// </summary>
     Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsAsync();
     Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsByRuntimeAsync(string runtime);
+    Task<IReadOnlyDictionary<string, string[]>> ListCoderModelReasoningEffortsByRuntimeAsync(string runtime);
 
     /// <summary>
     /// Returns all registered runner info entries in this registry without filtering.
