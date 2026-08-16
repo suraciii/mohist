@@ -447,3 +447,9 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
 
 - Reproduced the affected Server launch-runtime verification after reading the recorded failure: the current `AgentSessionLaunchRuntimeResolutionSpecs` coverage passed, and the full Server SpecTests assembly passed 3,950/3,950. The earlier failure was the dispatch visibility race documented above; the shared test helper's bounded polling is the root-cause repair.
 - Re-ran `npm run verify` successfully: docs (92 files), file-size ratchet, format, solution/workspace builds (0 warnings/errors), 178 Workflow, 2,701 Server unit, 3,950 Server spec, 68 architecture, 1,860 CLI, 4,736 Web, 1,639 Runner, and 70 Slack tests passed. Verification created no Git-visible changes.
+
+## Verification repair confirmation
+
+- The initial worktree inspection for this repair was clean. The actual failure was the shared launch-spec helper polling the runner once immediately after the durable assignment-prepared signal; the dispatch visibility race is fixed by commit `52c4867a7` with bounded `TestWait.ForAsync` polling.
+- The supported focused apphost command ran `AgentSessionLaunchRuntimeResolutionSpecs` 10/10 with zero errors, failures, or skips. A `dotnet test --filter` attempt is not focused under the installed Microsoft Testing Platform because it ignores VSTest filters; the complete Server Spec assembly nevertheless passed 3,950/3,950.
+- A fresh full `npm run verify` passed all repository checks and test lanes. Post-verification `git status`, `git diff --check`, and `git diff` showed no Git-visible verification side effects.
