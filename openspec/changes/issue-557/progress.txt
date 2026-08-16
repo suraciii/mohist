@@ -425,6 +425,26 @@ Plan skeleton for next run (est. half a day):
 - `git diff --check` passed. No T-002 source regression was found; the
   append-only records continue to deserialize absent effort as null.
 
+## T-006 Final Verification (current run)
+
+- Audited the committed resolver-gated admission slice against the selected
+  task and both capability specs. AgentJob and Workflow expose read-only
+  pending projections, pass immutable tuple/revision/generation expectations
+  through `IRunnerGrain`, and validate the live catalog under
+  `_lifecycleGate`; AgentJob persists the revision before its ledger claim,
+  while Workflow retains `StoreActiveWorkDispatchAsync` as the durable first
+  writer. Stale Runner snapshots are rejected before execution and reported
+  with requeue semantics; AgentJob requeue preserves the stable work id and
+  dispatch snapshot for later re-resolution.
+- Confirmed the non-Agent workflow decision in code: `mohist/pi` and
+  `mohist/opencode` fence model/true-variant options with the common resolver,
+  but keep the Agent-owned effort member unset until those actions own a
+  first-class effort snapshot. This preserves uniform tuple shape without
+  inventing an effort value.
+- Verification: Server UnitTests passed (2722), Server SpecTests passed
+  (3942), and Runner CI passed (154 files, 1666 tests). `git diff --check`
+  passed.
+
 ## T-003 Completion Verification (latest run)
 
 - Reconfirmed the catalog wire is append-only: Server `RuntimeCatalogEntry`
