@@ -565,3 +565,19 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   hosting (1), and event stream (5). Verification created only ignored build
   outputs, and no implementation, test, or build-configuration defect was
   reproducible. No source fix was necessary.
+
+## T-001 verification rerun (current workflow)
+
+- Audited the existing direct boundary against
+  `external-agent-caller-auth/spec.md`: AuthResolutionMiddleware records the
+  carrier and PAT-derived ExternalAgentCaller once; ExternalAgentApiMiddleware
+  enforces bearer-only authentication, PAT grant presence, route scope, and
+  Project grant before endpoint delegates.
+- The focused direct auth pipeline suite passed all 9 SpecTests, and the
+  focused auth/unit regression command passed all 2,675 unit tests. The
+  seven-route registration remains centralized in DirectApiRoutes with the
+  expected RouteScopeRequirement metadata and the shared `{ error: { code,
+  message } }` envelope.
+- No source correction was necessary because the T-001 implementation is
+  already present and clean on the workflow branch; this entry records the
+  current-run verification before the required fast gate and commit.
