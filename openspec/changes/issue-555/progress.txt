@@ -301,3 +301,46 @@ the launch route on the existing canonical launcher/projection.
 - The direct exact-text path also required the canonical `AgentSessionGrain.EnsureInitialLaunchAsync` validation to use `IsNullOrEmpty`; Web launch callers remain normalized before reaching that boundary, while direct whitespace text is persisted byte-significantly.
 - Direct launch responses can briefly be `503 launch_pending` while the coordinator converges; repeated same-key requests complete the durable mapping without changing the canonical IDs. The whitespace spec accepts that documented window and asserts the mapping reaches `completed` with the exact fingerprint.
 - Re-ran T-004 three times, T-003 public-read routes, public projection specs, and `npm run test:fast`; all passed. The server/spec build was run with `-p:SkipWebBuild=true` for focused .NET verification because the server project’s default web-asset assertion expects a generated `packages/web/dist/index.html`.
+
+# T-005: Follow-up input command with session-derived targeting
+
+Status: IMPLEMENTED. The direct follow-up route now validates the shared
+write contract, resolves Project and Agent only from the canonical Session,
+creates a durable `(sessionId|Idempotency-Key)` mapping, pre-mints stable
+Input/Turn identities, admits through `IAgentSessionGrain`, and serves the
+projection-backed Input observation. Capacity admission failures become
+stable terminal rejection observations with null live IDs; transient runtime,
+recovery, stop, and unresolved activity conditions leave the mapping pending
+and return a retryable safe error.
+
+## Codebase Patterns
+
+- `CanonicalFollowupTarget` carries the canonical Session Project and Agent
+  labels alongside the existing delivery target; the direct route never accepts
+  derived identity in the body or fingerprint.
+- Follow-up fingerprints are fixed-order JSON containing only version,
+  `followup`, canonical `sessionId`, and the accepted body. Input identity is
+  `StableToken(sessionId|key|followup-input)`; Turn identity adds a `|turn`
+  discriminator while remaining deterministic for the mapping.
+- The existing grain idempotency key remains the canonical Session fence. The
+  direct relational mapping is completed before dispatch; a retry after a
+  response-loss window re-enters the grain with the same pre-minted IDs and
+  `AcceptFollowupAsync` returns the original pair without another Input.
+- `AgentSessionGrain` and the domain follow-up transition treat any non-empty
+  text, including whitespace-only text, as text. Existing Web routes reject
+  whitespace-only input at their own request boundary, while the direct API
+  preserves it byte-for-byte.
+- An accepted mapping whose Input snapshot has not appeared yet maps a
+  temporary projection miss to `503 projection_lag`; it cannot expose a
+  misleading `input_not_found` after the Session grain has durably accepted
+  the request.
+
+## Verification
+
+- Existing T-004 idempotency specs passed (7), auth pipeline specs passed (9),
+  and public execution read route specs passed (7) after the follow-up changes.
+- New `DirectApiFollowupSpecs` passed (5): Session membership 404 and no
+  mapping, Session-derived target plus deterministic replay, stable payload
+  conflict, durable queue rejection, and readonly-scope fencing.
+- `npm run test:fast` passed all seven lanes: typecheck, unit, architecture,
+  workflow, CLI, web, and runner.

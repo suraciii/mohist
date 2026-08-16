@@ -1100,7 +1100,7 @@ public static partial class AgentSessionExtensions
                 throw new ArgumentException("Source is required.", nameof(source));
 
             var normalizedAttachments = NormalizeAttachmentDescriptors(attachments);
-            var hasText = !string.IsNullOrWhiteSpace(text);
+            var hasText = !string.IsNullOrEmpty(text);
             var hasAttachments = normalizedAttachments is { Count: > 0 };
             if (!hasText && !hasAttachments)
             {

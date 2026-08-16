@@ -97,6 +97,7 @@ public static class DirectApiResults
     private static string ResourceNotFoundMessage(string code) => code switch
     {
         DirectApiErrorCodes.JobNotFound => "The requested agent job was not found in this project.",
+        DirectApiErrorCodes.SessionNotFound => "The requested agent session was not found in this project.",
         DirectApiErrorCodes.InputNotFound => "The requested agent input was not found in this project.",
         DirectApiErrorCodes.TurnNotFound => "The requested agent turn was not found in this project.",
         DirectApiErrorCodes.AgentNotFound => "The requested Agent was not found in this project.",

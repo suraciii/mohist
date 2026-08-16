@@ -496,7 +496,9 @@ public class AgentSessionQuerier : IScopedService
             session.Runtime.WorkDir,
             string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
                 ? session.Settings.Definition
-                : null);
+                : null,
+            record.Label(AgentSessionQueryMetadataKeys.ProjectId),
+            record.Label(GenericAgentSessionMetadata.AgentId));
     }
 
     public async Task<SessionStopTarget?> ResolveStopTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
@@ -1181,7 +1183,9 @@ public sealed record CanonicalFollowupTarget(
     string? Runtime,
     string? RuntimeSessionId,
     string? WorkDir,
-    AgentExecutionDefinition? Definition = null);
+    AgentExecutionDefinition? Definition = null,
+    string? ProjectId = null,
+    string? AgentId = null);
 
 public sealed record SessionStopTarget(
     string RunnerId,

@@ -53,4 +53,45 @@ public static class DirectApiPublicObservation
         };
         return System.Text.Json.JsonSerializer.Serialize(dto, JSON.PublicApi);
     }
+
+    public static string RejectedFollowup(
+        string projectId,
+        DirectApiFollowupOutcome outcome,
+        DateTimeOffset observedAt)
+    {
+        var reasonCode = outcome.RejectionCode ?? DirectApiErrorCodes.FollowupRejected;
+        var publicError = new PublicExecutionError
+        {
+            Code = reasonCode,
+            Message = reasonCode == PublicExecutionFieldValues.Reasons.QueueFull
+                ? "The follow-up was rejected because the execution queue is full."
+                : "The follow-up was rejected before execution could begin.",
+        };
+        var dto = new PublicExecutionRead
+        {
+            ProjectId = projectId,
+            AgentId = outcome.AgentId,
+            JobId = null,
+            SessionId = outcome.SessionId,
+            InputId = null,
+            TurnId = null,
+            Status = PublicExecutionFieldValues.StatusTerminal,
+            JobStatus = null,
+            SessionActivity = null,
+            Admission = null,
+            InputStatus = null,
+            TurnStatus = null,
+            Outcome = PublicExecutionFieldValues.OutcomeRejected,
+            ReasonCode = reasonCode,
+            Output = null,
+            Error = publicError,
+            AcceptedAt = null,
+            QueuedAt = null,
+            StartedAt = null,
+            TerminalAt = observedAt,
+            ObservedAt = observedAt,
+            Sequence = null,
+        };
+        return System.Text.Json.JsonSerializer.Serialize(dto, JSON.PublicApi);
+    }
 }

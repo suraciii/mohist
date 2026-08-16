@@ -33,6 +33,14 @@ public sealed record DirectApiLaunchOutcome(
     string? RejectionCode = null,
     string? RejectionReason = null);
 
+public sealed record DirectApiFollowupOutcome(
+    string SessionId,
+    string? AgentId,
+    string? InputId = null,
+    string? TurnId = null,
+    string? RejectionCode = null,
+    string? RejectionReason = null);
+
 /// <summary>
 /// Owns the relational request fence shared by the direct launch,
 /// follow-up, and stop commands. The insert is committed separately from

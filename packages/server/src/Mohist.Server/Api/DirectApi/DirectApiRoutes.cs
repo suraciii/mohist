@@ -4,11 +4,15 @@ using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Api;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.DirectApi;
 using Mohist.Server.Infrastructure.PublicApi;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api.DirectApi;
 
@@ -62,7 +66,26 @@ public static class DirectApiRoutes
                 publicReads,
                 ct))
             .RequireScopes(Scope.Operator);
-        group.MapPost("/agent-sessions/{sessionId}/inputs", () => DirectApiResults.NotImplemented())
+        group.MapPost("/agent-sessions/{sessionId}/inputs", async (
+            HttpContext context,
+            string projectId,
+            string sessionId,
+            AgentSessionQuerier sessions,
+            IGrainFactory grains,
+            AgentSessionFollowupDispatcher dispatcher,
+            DirectApiIdempotencyService idempotency,
+            PublicExecutionReadQuerier publicReads,
+            CancellationToken ct) =>
+            await FollowupAsync(
+                context,
+                projectId,
+                sessionId,
+                sessions,
+                grains,
+                dispatcher,
+                idempotency,
+                publicReads,
+                ct))
             .RequireScopes(Scope.Operator);
         group.MapPost("/agent-turns/{turnId}/stop", () => DirectApiResults.NotImplemented())
             .RequireScopes(Scope.Operator);
@@ -104,6 +127,228 @@ public static class DirectApiRoutes
             .RequireScopes(Scope.Readonly, Scope.Operator);
 
         return app;
+    }
+
+    private static async Task<IResult> FollowupAsync(
+        HttpContext context,
+        string projectId,
+        string sessionId,
+        AgentSessionQuerier sessions,
+        IGrainFactory grains,
+        AgentSessionFollowupDispatcher dispatcher,
+        DirectApiIdempotencyService idempotency,
+        PublicExecutionReadQuerier publicReads,
+        CancellationToken ct)
+    {
+        var key = DirectApiWriteValidation.ReadIdempotencyKey(context.Request.Headers);
+        if (key.Disposition == IdempotencyKeyDisposition.Required)
+        {
+            return DirectApiResults.Error(
+                StatusCodes.Status400BadRequest,
+                DirectApiErrorCodes.IdempotencyKeyRequired,
+                "The Idempotency-Key header is required.");
+        }
+        if (!key.IsValid)
+        {
+            return DirectApiResults.Error(
+                StatusCodes.Status400BadRequest,
+                DirectApiErrorCodes.IdempotencyKeyInvalid,
+                "The Idempotency-Key header must contain 1 to 128 printable ASCII characters.");
+        }
+
+        var body = await DirectApiWriteValidation.ReadTextBodyAsync(context.Request.Body, ct);
+        if (!body.IsValid)
+        {
+            return DirectApiResults.Error(
+                StatusCodes.Status400BadRequest,
+                DirectApiErrorCodes.InvalidRequest,
+                "The request body must be a JSON object containing only a non-empty text string.");
+        }
+
+        var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
+        if (target is null
+            || !string.Equals(target.ProjectId, projectId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(target.AgentId))
+        {
+            return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.SessionNotFound);
+        }
+
+        var publicKey = key.Value!;
+        var text = body.Text!;
+        var inputId = DirectApiWriteValidation.FollowupInputId(sessionId, publicKey);
+        var turnId = DirectApiWriteValidation.FollowupTurnId(sessionId, publicKey);
+        var fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text);
+        var scopeKey = $"{sessionId}|{publicKey}";
+        var initialOutcome = new DirectApiFollowupOutcome(
+            SessionId: sessionId,
+            AgentId: target.AgentId,
+            InputId: inputId,
+            TurnId: turnId);
+        var caller = context.Items[ExternalAgentCaller.HttpContextItemKey] as ExternalAgentCaller
+            ?? throw new InvalidOperationException("The direct API caller was not resolved.");
+        var claim = await idempotency.GetOrCreateAsync(
+            DirectApiCommands.Followup,
+            scopeKey,
+            caller.CallerKeyId,
+            fingerprint,
+            turnId: null,
+            JSON.Serialize(initialOutcome),
+            ct);
+
+        if (!string.Equals(claim.Mapping.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            return DirectApiResults.Error(
+                StatusCodes.Status409Conflict,
+                DirectApiErrorCodes.IdempotencyKeyReused,
+                "The Idempotency-Key has already been used for a different request.");
+        }
+
+        var outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(claim.Mapping);
+        if (claim.Mapping.State == DirectApiMappingStates.Pending)
+        {
+            try
+            {
+                var accepted = await grains.GetGrain<IAgentSessionGrain>(sessionId)
+                    .AcceptFollowupAsync(new AcceptFollowupCommand(
+                        Text: text,
+                        Source: "agent-session-followup",
+                        IdempotencyKey: publicKey,
+                        PreMintedInputId: outcome.InputId,
+                        PreMintedTurnId: outcome.TurnId));
+                outcome = outcome with
+                {
+                    InputId = accepted.InputId,
+                    TurnId = accepted.TurnId,
+                };
+                claim = claim with
+                {
+                    Mapping = await idempotency.CompleteAsync(
+                        DirectApiCommands.Followup,
+                        scopeKey,
+                        DirectApiMappingStates.Completed,
+                        JSON.Serialize(outcome),
+                        ct),
+                };
+
+                if (accepted.ShouldRedeliver)
+                    await dispatcher.DispatchNextAsync(projectId, sessionId, ct);
+            }
+            catch (AgentSessionFollowupCapacityExceededException)
+            {
+                outcome = outcome with
+                {
+                    InputId = null,
+                    TurnId = null,
+                    RejectionCode = PublicExecutionFieldValues.Reasons.QueueFull,
+                    RejectionReason = PublicExecutionFieldValues.Reasons.QueueFull,
+                };
+                claim = claim with
+                {
+                    Mapping = await idempotency.CompleteAsync(
+                        DirectApiCommands.Followup,
+                        scopeKey,
+                        DirectApiMappingStates.Rejected,
+                        JSON.Serialize(outcome),
+                        ct),
+                };
+            }
+            catch (FollowupConcurrencyLimitException)
+            {
+                outcome = outcome with
+                {
+                    InputId = null,
+                    TurnId = null,
+                    RejectionCode = PublicExecutionFieldValues.Reasons.QueueFull,
+                    RejectionReason = PublicExecutionFieldValues.Reasons.QueueFull,
+                };
+                claim = claim with
+                {
+                    Mapping = await idempotency.CompleteAsync(
+                        DirectApiCommands.Followup,
+                        scopeKey,
+                        DirectApiMappingStates.Rejected,
+                        JSON.Serialize(outcome),
+                        ct),
+                };
+            }
+            catch (RuntimeSessionMissingException)
+            {
+                return DirectApiResults.Error(
+                    StatusCodes.Status503ServiceUnavailable,
+                    DirectApiErrorCodes.FollowupPending,
+                    "The follow-up is waiting for the canonical Session runtime; retry with the same Idempotency-Key.");
+            }
+            catch (RecoveryOperationInProgressException)
+            {
+                return DirectApiResults.Error(
+                    StatusCodes.Status503ServiceUnavailable,
+                    DirectApiErrorCodes.FollowupPending,
+                    "The follow-up is waiting for a Session recovery operation; retry with the same Idempotency-Key.");
+            }
+            catch (SessionActivityUnknownException)
+            {
+                return DirectApiResults.Error(
+                    StatusCodes.Status503ServiceUnavailable,
+                    DirectApiErrorCodes.FollowupPending,
+                    "The Session activity state is unresolved; retry with the same Idempotency-Key.");
+            }
+            catch (StopOperationInProgressException)
+            {
+                return DirectApiResults.Error(
+                    StatusCodes.Status503ServiceUnavailable,
+                    DirectApiErrorCodes.FollowupPending,
+                    "The Session is resolving another operation; retry with the same Idempotency-Key.");
+            }
+            catch (FollowupOperationInProgressException)
+            {
+                return DirectApiResults.Error(
+                    StatusCodes.Status503ServiceUnavailable,
+                    DirectApiErrorCodes.FollowupPending,
+                    "Another follow-up is being admitted; retry with the same Idempotency-Key.");
+            }
+            catch (InvalidOperationException)
+            {
+                outcome = outcome with
+                {
+                    InputId = null,
+                    TurnId = null,
+                    RejectionCode = DirectApiErrorCodes.FollowupRejected,
+                    RejectionReason = DirectApiErrorCodes.FollowupRejected,
+                };
+                claim = claim with
+                {
+                    Mapping = await idempotency.CompleteAsync(
+                        DirectApiCommands.Followup,
+                        scopeKey,
+                        DirectApiMappingStates.Rejected,
+                        JSON.Serialize(outcome),
+                        ct),
+                };
+            }
+        }
+
+        outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(claim.Mapping);
+        if (claim.Mapping.State == DirectApiMappingStates.Rejected)
+        {
+            return DirectApiResults.Snapshot(
+                DirectApiPublicObservation.RejectedFollowup(
+                    projectId,
+                    outcome,
+                    claim.Mapping.CompletedAt ?? DateTimeOffset.UnixEpoch));
+        }
+
+        if (string.IsNullOrWhiteSpace(outcome.InputId))
+        {
+            return DirectApiResults.Error(
+                StatusCodes.Status503ServiceUnavailable,
+                DirectApiErrorCodes.FollowupPending,
+                "The follow-up is still being admitted; retry with the same Idempotency-Key.");
+        }
+
+        var observation = await publicReads.ReadInputAsync(projectId, outcome.InputId, ct);
+        return observation.Status == PublicReadStatus.NotFound
+            ? DirectApiResults.ProjectionLag()
+            : DirectApiResults.PublicRead(observation, DirectApiErrorCodes.InputNotFound);
     }
 
     private static async Task<IResult> LaunchAsync(

@@ -19,6 +19,7 @@ public static class DirectApiErrorCodes
     /// missing one.
     /// </summary>
     public const string JobNotFound = "job_not_found";
+    public const string SessionNotFound = "session_not_found";
     public const string InputNotFound = "input_not_found";
     public const string TurnNotFound = "turn_not_found";
 
@@ -35,6 +36,8 @@ public static class DirectApiErrorCodes
     public const string InvalidRequest = "invalid_request";
     public const string IdempotencyKeyReused = "idempotency_key_reused";
     public const string LaunchPending = "launch_pending";
+    public const string FollowupPending = "followup_pending";
+    public const string FollowupRejected = "followup_rejected";
     public const string AgentNotFound = "agent_not_found";
     public const string AgentNotReady = "agent_not_ready";
 }

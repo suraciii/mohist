@@ -10,6 +10,7 @@ public static class DirectApiWriteValidation
 {
     public const int FingerprintVersion = 1;
     public const string LaunchCommand = "launch";
+    public const string FollowupCommand = "followup";
 
     public static IdempotencyKeyValidation ReadIdempotencyKey(IHeaderDictionary headers)
     {
@@ -103,12 +104,43 @@ public static class DirectApiWriteValidation
         return Convert.ToHexString(SHA256.HashData(bytes.WrittenSpan)).ToLowerInvariant();
     }
 
+    public static string FollowupFingerprint(string sessionId, string text) =>
+        Fingerprint(FollowupCommand, sessionId, text);
+
+    public static string FollowupInputId(string sessionId, string publicKey) =>
+        AgentLaunchCoordinatorCodec.StableToken($"{sessionId}|{publicKey}|followup-input");
+
+    public static string FollowupTurnId(string sessionId, string publicKey) =>
+        AgentLaunchCoordinatorCodec.StableToken($"{sessionId}|{publicKey}|followup-input|turn");
+
     public static string DerivedLaunchCoordinatorKey(
         string projectId,
         string agentId,
         string publicKey) =>
         AgentLaunchCoordinatorCodec.StableToken(
             $"direct-api|launch|{projectId}|{agentId}|{publicKey}");
+
+    private static string Fingerprint(string command, string sessionId, string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(text);
+
+        var bytes = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(bytes))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("v", FingerprintVersion);
+            writer.WriteString("command", command);
+            writer.WriteString("sessionId", sessionId);
+            writer.WritePropertyName("body");
+            writer.WriteStartObject();
+            writer.WriteString("text", text);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        return Convert.ToHexString(SHA256.HashData(bytes.WrittenSpan)).ToLowerInvariant();
+    }
 }
 
 public enum IdempotencyKeyDisposition

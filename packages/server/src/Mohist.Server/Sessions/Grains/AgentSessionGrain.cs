@@ -577,7 +577,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (string.IsNullOrWhiteSpace(command.Source))
             throw new ArgumentException("Source is required.", nameof(command));
 
-        var hasText = !string.IsNullOrWhiteSpace(command.Text);
+        var hasText = !string.IsNullOrEmpty(command.Text);
         var hasAttachments = command.Attachments is { Count: > 0 };
         if (!hasText && !hasAttachments)
         {
