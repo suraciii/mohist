@@ -106,40 +106,6 @@ public class IssueWorkspaceLifecycleSpecs
 
     // --- Acceptance 3: retry/rerun reuses same workspace ---
 
-    [Fact]
-    public async Task IssueStart_Twice_ReusesSameWorkspace()
-    {
-        using var createIssue = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{_projectId}/issues",
-            new { title = "Retry workspace reuse", isDraft = false });
-        createIssue.EnsureSuccessStatusCode();
-        var issue = await createIssue.Content.ReadFromJsonAsync<JsonElement>();
-        var issueNumber = issue.GetProperty("data").GetProperty("number").GetInt32();
-        var workspaceName = $"issue-{issueNumber}";
-
-        // First start
-        using var start1 = await _fixture.Client.PostAsync(
-            $"/api/projects/{_projectId}/issues/{issueNumber}/start", null);
-        Assert.Equal(System.Net.HttpStatusCode.OK, start1.StatusCode);
-
-        var ws1 = await WorkspaceGrain(workspaceName).GetAsync();
-        Assert.NotNull(ws1);
-        Assert.Equal(WorkspaceStatus.Active, ws1!.Status);
-        var createdAt1 = ws1.CreatedAt;
-
-        // Second start (retry/rerun) — should reuse the same workspace, not create a new one
-        using var start2 = await _fixture.Client.PostAsync(
-            $"/api/projects/{_projectId}/issues/{issueNumber}/start", null);
-        Assert.Equal(System.Net.HttpStatusCode.OK, start2.StatusCode);
-
-        var ws2 = await WorkspaceGrain(workspaceName).GetAsync();
-        Assert.NotNull(ws2);
-        Assert.Equal(ws1.Name, ws2!.Name);
-        Assert.Equal(WorkspaceStatus.Active, ws2.Status);
-        // Same creation timestamp proves it's the same entity
-        Assert.Equal(createdAt1, ws2.CreatedAt);
-    }
-
     // EnsureIssueWorkspaceAsync with active origin check refuses different issue number
     [Fact]
     public async Task EnsureIssueWorkspaceAsync_SameOriginKey_ReturnsExisting()

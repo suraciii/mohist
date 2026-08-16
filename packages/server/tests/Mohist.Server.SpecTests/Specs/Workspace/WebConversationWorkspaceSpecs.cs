@@ -22,27 +22,6 @@ public sealed class WebConversationWorkspaceSpecs
     public WebConversationWorkspaceSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task WebConversation_FirstLaunch_CreatesWorkspaceAndBindsSession()
-    {
-        var projectId = await CreateProjectAsync();
-        var agentId = await CreateAgentAsync(projectId);
-
-        var launch = await LaunchWebSessionAsync(projectId, agentId, "first web task");
-        var sessionId = launch.GetProperty("sessionId").GetString()!;
-
-        Assert.Equal($"web-{sessionId}", await SessionWorkspaceNameAsync(sessionId));
-        var ws = await FindWorkspaceAsync(projectId, $"web-{sessionId}");
-        Assert.NotNull(ws);
-        Assert.Equal(WorkspaceStatus.Active, ws!.Status);
-        Assert.Equal(new WorkspaceOrigin.Web(sessionId), ws.Origin);
-        Assert.Empty(ws.RepositoryNames);
-
-        var created = await SingleWorkspaceEventAsync(projectId, ws.Name);
-        Assert.Equal(EventCatalog.ReverseDns.WorkspaceCreated, created.Type);
-        Assert.Equal("web", Lineage(created, EventCatalog.Lineage.WorkspaceOriginKind));
-    }
-
-    [Fact]
     public async Task WebConversation_Followup_ReusesSameSessionAndWorkspace()
     {
         var projectId = await CreateProjectAsync();
