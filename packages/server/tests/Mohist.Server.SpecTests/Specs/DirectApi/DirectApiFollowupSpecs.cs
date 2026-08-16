@@ -65,6 +65,39 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
+    public async Task DerivedTargetFieldsInBody_AreRejectedBeforeMappingOrAdmission()
+    {
+        var projectId = await SeedProjectAsync();
+        var sessionId = $"session-followup-body-{Guid.NewGuid():N}";
+        await SeedSessionAsync(sessionId, projectId, "agent-canonical", AgentSessionActivity.Active);
+        var token = await CreatePatAsync(projectId);
+        using var client = DirectClient(token);
+        var before = await MappingCountAsync();
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/v1/projects/{projectId}/agent-sessions/{sessionId}/inputs")
+        {
+            Content = new StringContent(
+                $$"""{"text":"continue","projectId":"attacker-project","agentId":"attacker-agent"}""",
+                Encoding.UTF8,
+                "application/json"),
+        };
+        request.Headers.Add("Idempotency-Key", "derived-target-body");
+        using var response = await client.SendAsync(request);
+
+        await AssertErrorAsync(response, HttpStatusCode.BadRequest, DirectApiErrorCodes.InvalidRequest);
+        Assert.Equal(before, await MappingCountAsync());
+
+        await using var db = await fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        var row = await db.AgentSessions.AsNoTracking().SingleAsync(item => item.Id == sessionId);
+        var session = AgentSessionJson.Deserialize(row)!;
+        Assert.Empty(session.Status.Inputs ?? []);
+    }
+
+    [Fact]
     public async Task SessionDerivedTarget_ReplaysOneInputTurnPairAndReturnsNoJobId()
     {
         var projectId = await SeedProjectAsync();
