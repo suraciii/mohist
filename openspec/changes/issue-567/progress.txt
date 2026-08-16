@@ -560,3 +560,22 @@ Channel decision (grounded in live source):
   existing Server ArchTests migration-ledger ratchet
   (`SpecUnitMigrationLedgerRules` / `FailIfMarkerSpecs`, 67/68); the reported
   source and closure digest mismatch is unrelated to this recovery change.
+
+## T-006 Current Verification
+
+- The integrated T-006 implementation is present in ancestor commit
+  `6136a2600`: reloaded `started` journal entries are reported as held
+  `inFlight`, replacement Workflow dispatches are the only eligible recovery
+  identities, and update-interrupted Workflow/AgentJob fences converge to
+  explicit `agent-result-unconfirmed` blocked or terminal states at their
+  injectable deadlines.
+- Focused Runner recovery/journal/receipt tests passed 19/19; Runner
+  typecheck passed. The serialized Server recovery run passed 3945/3946,
+  including the T-006 reconciliation, replacement, duplicate-delivery, and
+  no-receipt paths. The single failure was the existing unrelated
+  `AgentSessionLaunchRuntimeResolutionSpecs.Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode`
+  timing race; the other full Server runs passed 3946/3946.
+- `npm run test:fast` passed typecheck, Server Unit 2667, CLI 1855, Workflow
+  Definition 178, Runner 1657, and Web 4727. It remains non-zero only for
+  the pre-existing ArchTests migration-ledger digest drift in
+  `FailIfMarkerSpecs` (67/68); no unrelated ledger metadata was changed.
