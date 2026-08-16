@@ -615,3 +615,21 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   Web tests, and 1,639 Runner tests. No source correction was necessary;
   the T-003 implementation and coverage were already present and clean on
   the workflow branch.
+
+## T-004 verification rerun (current task)
+
+- Re-read the external-write-idempotency requirement and audited the existing
+  implementation: the additive mapping migration contains the composite
+  command/scope uniqueness and filtered pending-stop index; strict key/body
+  validation happens before mapping admission; fingerprints are versioned,
+  server-built SHA-256 values over canonical route IDs and the accepted text;
+  and direct launches use the namespaced StableToken coordinator key.
+- The launch SpecTests passed (7), including missing/invalid key and body
+  validation, exact-text conflict and whitespace preservation, pending-row
+  recovery, archived-Agent lookup, durable rejection replay, and one-mapping
+  replay uniqueness. The server unit assembly passed all 2,675 tests, and the
+  full `npm run test:fast` gate passed all seven lanes.
+- No source correction was necessary on this run: T-004 is already complete
+  on the workflow branch in the existing implementation commits, and the
+  required mapping, route, launcher, migration, and test coverage are present
+  and clean.
