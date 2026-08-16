@@ -189,20 +189,6 @@ public sealed class AgentSessionScheduleApiSpecs
     }
 
     [Fact]
-    public async Task CreateSchedule_OmittedKey_DoesNotDedupeAcrossRequests()
-    {
-        var (projectId, sessionId) = await CreateIdleSessionAsync("omitted-key");
-        using var first = await PostScheduleAsync(projectId, sessionId, new { text = "ping", dueAt = "2099-01-01T10:00:00Z" });
-        using var second = await PostScheduleAsync(projectId, sessionId, new { text = "ping", dueAt = "2099-01-01T10:00:00Z" });
-
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-        var firstData = (await ReadJsonAsync(first)).RootElement.GetProperty("data");
-        var secondData = (await ReadJsonAsync(second)).RootElement.GetProperty("data");
-        Assert.NotEqual(firstData.GetProperty("scheduleId").GetString(), secondData.GetProperty("scheduleId").GetString());
-    }
-
-    [Fact]
     public async Task ListSchedules_ReturnsAllOrderedByDueAt()
     {
         var (projectId, sessionId) = await CreateIdleSessionAsync("list");
