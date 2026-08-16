@@ -1,0 +1,4 @@
+## Review Rework
+
+- 2026-08-14: Read the first self-review and repository lifecycle code. All five must-fix findings are accepted for correction; `self-review.md` remains untouched.
+- In progress: make the fail-closed migration, recoverable Workflow state/action map, separate WorkspaceVerification operation, authorized task-source adoption path, and all-terminal-path boundary coverage explicit in the plan artifacts.
