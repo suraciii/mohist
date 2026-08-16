@@ -6,10 +6,11 @@ Workflow task completion currently makes a valid Action result depend on same-se
 
 - Persist an immutable `ActionCompletion` together with an exact branch/HEAD/tree/status `CommitReceipt` before the Workflow task is settled.
 - Define explicit committed-clean, dirty, and unconfirmed outcomes. Dirty or unconfirmed workspace state remains recoverable and is not converted into a business task failure.
+- Use a separate idempotent `WorkspaceVerification` operation for later evidence, including an authorized operator-fenced path to adopt legal uncommitted task-source changes without replacing the original receipt.
 - Replace same-session cleanup retries with an idempotent, bounded cleanup lease/fence tied to the task and workspace generation. Cleanup may remove only explicitly scoped generated artifacts and must not use broad reset/clean operations to discard task output.
 - On cleanup timeout or unverifiable workspace state, preserve the task and workspace for recovery or allocate a fresh workspace; do not blindly retry against an unverified dirty workspace.
 - Make receipt persistence, replay, report delivery, and settlement idempotent for the exact task/workspace identity, and reject conflicting receipts or completions.
-- **BREAKING**: Change workflow task settlement and status projections so cleanup-induced dirty or unconfirmed results are represented as recoverable outcomes rather than terminal business failures. Cover Pi, OpenCode, and generic Action execution paths with deterministic filesystem and time tests.
+- **BREAKING**: Change workflow task settlement and status projections so cleanup-induced dirty or unconfirmed results are represented as recoverable outcomes rather than terminal business failures. Enforce the boundary fail-closed in one v1 transition: legacy or invalid reports cannot use the old settlement path. Cover Pi, OpenCode, and generic Action execution paths with deterministic filesystem and time tests.
 
 ## Capabilities
 
