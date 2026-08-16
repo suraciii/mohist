@@ -506,6 +506,18 @@ Channel decision (grounded in live source):
   unrelated to the runner update-operation fence and no ledger change was
   made.
 
+## T-001 Current Verification
+
+- The current checkout's supported xUnit apphost runs passed
+  `RunnerUpdateInterruptSpecs` (3/3) and `RunnerConfigApiSpecs` (10/10).
+  The Server build passed with 0 warnings and 0 errors.
+- `npm run test:fast` passed all configured tracks: Workflow Definition
+  178/178, CLI 1856/1856, Server Unit 2667/2667, Server Arch 68/68, Runner
+  1657/1657, Web 4727/4727, and all fast typechecks.
+- Focused `dotnet test --filter` invocations remain unsuitable here because
+  Microsoft Testing Platform ignores VSTest filters; verification used the
+  compiled xUnit apphost as required by `design/testing.md`.
+
 ## T-003 Shutdown Handoff Hardening
 
 - Each bounded pending-operation request now has its own abort controller;
