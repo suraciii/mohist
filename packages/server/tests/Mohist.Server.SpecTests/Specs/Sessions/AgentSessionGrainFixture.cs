@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -169,7 +170,9 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         // State is keyed by session so a lingering grain (the test cluster is
         // shared across tests) flushing on its real-time persist timer cannot
         // clobber another session's persisted state and break reactivation.
-        private readonly Dictionary<string, AgentSession> _states = new(StringComparer.Ordinal);
+        // Concurrent: grains activate and flush on different threads, so a
+        // plain Dictionary corrupts under concurrent read/write.
+        private readonly ConcurrentDictionary<string, AgentSession> _states = new(StringComparer.Ordinal);
         private string? _lastSavedKey;
 
         // Most-recently-saved state, for synchronous test assertions. Kept as
@@ -256,7 +259,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
         public Task DeleteAsync(string key)
         {
-            _states.Remove(key);
+            _states.TryRemove(key, out _);
             if (string.Equals(_lastSavedKey, key, StringComparison.Ordinal))
                 _lastSavedKey = null;
             return Task.CompletedTask;
