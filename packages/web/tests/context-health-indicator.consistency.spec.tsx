@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import type { SessionCard as SessionCardType } from '@/entities/agent-ops'
-import { ActiveSessionCard } from '@/widgets/coder-session'
+import { ContextHealthIndicator } from '@/entities/coder-session'
 import { CompactSessionCard } from '@/widgets/dashboard-pulse'
 
 function makeListRow(overrides: Partial<SessionCardType> = {}): SessionCardType {
@@ -40,11 +40,14 @@ function makeListRow(overrides: Partial<SessionCardType> = {}): SessionCardType 
   }
 }
 
-function renderListRow(card: SessionCardType) {
+function renderIndicator(card: SessionCardType) {
   return render(
-    <MemoryRouter>
-      <ActiveSessionCard card={card} now={new Date('2026-01-01T00:10:00Z').getTime()} />
-    </MemoryRouter>,
+    <ContextHealthIndicator
+      contextWindowUsed={card.contextWindowUsed}
+      contextWindowSize={card.contextWindowSize}
+      contextUsagePercent={card.contextUsagePercent}
+      healthStatus={card.healthStatus}
+    />,
   )
 }
 
@@ -90,7 +93,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       healthStatus: 'green',
     }
 
-    const { unmount: unmountList } = renderListRow(makeListRow(usage))
+    const { unmount: unmountList } = renderIndicator(makeListRow(usage))
     const list = snapshotIndicator()
     unmountList()
 
@@ -108,7 +111,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       healthStatus: 'yellow',
     }
 
-    const { unmount: unmountList } = renderListRow(makeListRow(usage))
+    const { unmount: unmountList } = renderIndicator(makeListRow(usage))
     const list = snapshotIndicator()
     unmountList()
 
@@ -126,7 +129,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       healthStatus: 'red',
     }
 
-    const { unmount: unmountList } = renderListRow(makeListRow(usage))
+    const { unmount: unmountList } = renderIndicator(makeListRow(usage))
     const list = snapshotIndicator()
     unmountList()
 
@@ -143,7 +146,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       contextUsagePercent: null,
     }
 
-    const { unmount: unmountList } = renderListRow(makeListRow(usage))
+    const { unmount: unmountList } = renderIndicator(makeListRow(usage))
     expect(screen.queryByTestId('context-health-indicator')).toBeNull()
     unmountList()
 
@@ -159,7 +162,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       healthStatus: 'red',
     }
 
-    const { unmount: unmountList } = renderListRow(makeListRow(usage))
+    const { unmount: unmountList } = renderIndicator(makeListRow(usage))
     const list = snapshotIndicator()
     unmountList()
 
@@ -184,7 +187,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       healthStatus: 'yellow',
     }
 
-    const { unmount: unmountList } = renderListRow(makeListRow(usage))
+    const { unmount: unmountList } = renderIndicator(makeListRow(usage))
     const list = snapshotIndicator()
     unmountList()
 
@@ -209,7 +212,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       healthStatus: 'green',
     }
 
-    const { unmount: unmountList } = renderListRow(makeListRow(usage))
+    const { unmount: unmountList } = renderIndicator(makeListRow(usage))
     const list = snapshotIndicator()
     unmountList()
 
