@@ -13,4 +13,4 @@
 - F2 changes are limited to the terminal-close decision and its T-003/spec scenarios; those changes are committed in the second remediation commit.
 - F3 names `ProviderRateLimitFacts` at each Action/report boundary, requires malformed-fact rejection, and adds exact-fact preservation coverage for OpenCode and Pi.
 - Static verification passed: `git diff --check`, `tasks.json` parsing, and task-dependency resolution.
-- `npm run docs:check` could not start because `tsx` is unavailable in this workspace (`node_modules` is not installed).
+- Initial `npm run docs:check` was blocked by missing `tsx`; after `npm ci --ignore-scripts` restored locked dependencies, `npm run docs:check` passed for 92 active Markdown files. No tracked dependency files changed.
