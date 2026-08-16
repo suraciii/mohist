@@ -356,6 +356,13 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(EventCatalog.ReverseDns.StageFailed, eventTypes);
         Assert.DoesNotContain(EventCatalog.ReverseDns.WorkflowRunFailed, eventTypes);
 
+        var lateObservation = observation with { ReasonCode = "late-old-generation-observation", Message = "must not rewrite blocked settlement" };
+        Assert.Equal(ReportAck.Stale, await workflow.ObserveAgentExecutionAsync(lateObservation));
+        var afterLateObservation = await LoadRunAsync(_workflowId!);
+        var afterLateSettlement = Assert.Single(afterLateObservation.CurrentStage().Tasks).AgentResultSettlement;
+        Assert.Equal(AgentResultSettlementState.Blocked, afterLateSettlement!.State);
+        Assert.Equal("stop-unconfirmed", afterLateSettlement.ReasonCode);
+
         var report = new TaskReport(
             work.WorkId,
             TaskReportStatus.Succeeded,

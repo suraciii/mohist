@@ -1,20 +1,28 @@
 import { IssueHealth, WorkflowStage, type Issue } from './issue'
 
 export type IssueAttentionItem = {
-  kind: 'approval-needed' | 'integration-failed' | 'blocked'
+  kind: 'approval-needed' | 'integration-failed' | 'recoverable-interrupted' | 'blocked'
   issueNumber: number
   label: string
   detail?: string
 }
 
 function isIntegrateFailure(issue: Issue): boolean {
-  return (
-    issue.workflowStage === WorkflowStage.Integrate
-    && issue.health === IssueHealth.Blocked
-  )
+  return issue.workflowStage === WorkflowStage.Integrate && issue.health === IssueHealth.Blocked
 }
 
 function classifyIssueAttention(issue: Issue): IssueAttentionItem | null {
+  if (issue.attention?.reason === 'recoverable-interrupted') {
+    const reason = issue.attention.reasonCode ?? 'runner-lost'
+    const deadline = issue.attention.recoveryDeadlineAt
+    return {
+      kind: 'recoverable-interrupted',
+      issueNumber: issue.number,
+      label: 'Recoverable interruption',
+      detail: `${reason}${deadline ? `; recovery deadline ${deadline}` : ''}`,
+    }
+  }
+
   if (issue.approvalState?.status === 'awaiting') {
     return {
       kind: 'approval-needed',

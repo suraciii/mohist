@@ -8,7 +8,7 @@
  * inside the module.
  */
 
-export type RuntimeDiagnosticSeverity = "info" | "warning" | "error"
+export type RuntimeDiagnosticSeverity = 'info' | 'warning' | 'error'
 
 export interface RuntimeDiagnostic {
   readonly severity: RuntimeDiagnosticSeverity
@@ -18,7 +18,7 @@ export interface RuntimeDiagnostic {
 }
 
 export type RuntimeSessionTarget = {
-  readonly runtime: "opencode"
+  readonly runtime: 'opencode'
   readonly runtimeSessionId: string | null
   readonly workDir: string
 }
@@ -73,6 +73,8 @@ export interface RuntimeTurnRequest {
    * external signal for cancellation only.
    */
   readonly deadlineMs?: number | null
+  /** Per-work budget; expiry is a containment event that quarantines the generation. */
+  readonly resourceBudgetMs?: number | null
   readonly options?: RuntimeTurnOptions | null
   /**
    * Optional native file parts appended to the prompt body. The
@@ -205,14 +207,16 @@ export interface RuntimeProviderErrorPolicy {
 }
 
 export type RuntimeErrorKind =
-  | "invalid-input"
-  | "unavailable-runtime"
-  | "missing-session"
-  | "incompatible-runtime"
-  | "permission-required"
-  | "deadline-exceeded"
-  | "interrupted"
-  | "turn-failed"
+  | 'invalid-input'
+  | 'unavailable-runtime'
+  | 'missing-session'
+  | 'incompatible-runtime'
+  | 'permission-required'
+  | 'deadline-exceeded'
+  | 'interrupted'
+  | 'turn-failed'
+  | 'resource-containment'
+  | 'generation-drain-timeout'
 
 export interface RuntimeError {
   readonly kind: RuntimeErrorKind

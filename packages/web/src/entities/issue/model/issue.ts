@@ -36,6 +36,7 @@ export enum IssueHealth {
   Active = 'active',
   Paused = 'paused',
   Blocked = 'blocked',
+  Attention = 'attention',
   Cancelled = 'cancelled',
   Done = 'done',
 }
@@ -99,6 +100,16 @@ export type IssueStartBlocker =
   | { kind: 'draft' }
   | { kind: 'waiting-for'; issue: { number: number; title: string; stage?: string; status?: string } }
 
+export interface WorkflowAttention {
+  reason: string
+  state?: string
+  message?: string | null
+  reasonCode?: string | null
+  workId?: string | null
+  ownerId?: string | null
+  recoveryDeadlineAt?: string | null
+}
+
 export interface WorkflowStageProgress {
   stage: string
   total: number
@@ -152,12 +163,27 @@ export interface Issue {
   repositoryName?: string | null
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
+  attention?: WorkflowAttention | null
   feedback?: ApprovalFeedback[] | null
   watching?: IssueWatchEntry[] | null
   muted?: IssueWatchEntry[] | null
 }
 
-export interface IssueListItem extends Pick<Issue, 'number' | 'title' | 'status' | 'health' | 'projectId' | 'labels' | 'createdAt' | 'updatedAt' | 'isDraft' | 'canStart' | 'blocker'> {
+export interface IssueListItem
+  extends Pick<
+    Issue,
+    | 'number'
+    | 'title'
+    | 'status'
+    | 'health'
+    | 'projectId'
+    | 'labels'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'isDraft'
+    | 'canStart'
+    | 'blocker'
+  > {
   projectName?: string
   priority?: string | null
   risk?: string | null
@@ -166,6 +192,7 @@ export interface IssueListItem extends Pick<Issue, 'number' | 'title' | 'status'
   workflowStage?: WorkflowStage | null
   workflowStatus?: string | null
   workflowStageProgress?: WorkflowStageProgress | null
+  attention?: WorkflowAttention | null
   approvalState?: ApprovalState
   blockedReason?: string
   completedAt?: string

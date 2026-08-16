@@ -63,4 +63,20 @@ describe('IssueDecisionSurface', () => {
     expect(sendingBack).toHaveAttribute('aria-describedby', 'decision-action-send-back-reason')
     expect(screen.getByTestId('decision-action-send-back-reason')).toHaveTextContent(/another request is in progress/i)
   })
+
+  it('renders recoverable interruption as a warning recovery state', () => {
+    render(
+      <IssueDecisionSurface
+        actions={[]}
+        summary="recoverable-interrupted"
+        rationale="The runner was interrupted."
+        nextAction="Wait for recovery."
+        controller={pendingController}
+      />,
+    )
+
+    const surface = screen.getByTestId('issue-decision-surface')
+    expect(surface).toHaveAttribute('data-summary', 'recoverable-interrupted')
+    expect(surface).toHaveAttribute('data-tone', 'amber')
+  })
 })

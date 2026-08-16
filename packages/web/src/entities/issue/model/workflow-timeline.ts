@@ -5,6 +5,7 @@ import type {
   StageTaskStatus,
   WorkflowAgentResultAttention,
   WorkflowAgentResultSettlement,
+  WorkInterruption,
 } from './stage-state'
 import type { WorkflowTaskRequiredFile, WorkflowArtifactSummary } from './artifact'
 
@@ -33,6 +34,7 @@ export interface WorkflowTimelineTask {
   output?: Record<string, unknown> | null
   error?: import('./stage-state').WorkflowExecutionError | null
   agentResultSettlement?: WorkflowAgentResultSettlement | null
+  interruption?: WorkInterruption | null
 }
 
 export interface WorkflowTimelineCheck {
@@ -45,6 +47,7 @@ export interface WorkflowTimelineCheck {
   completedAt: string | null
   durationMs: number | null
   error?: import('./stage-state').WorkflowExecutionError | null
+  interruption?: WorkInterruption | null
 }
 
 export interface WorkflowTimelineStage {
@@ -57,6 +60,7 @@ export interface WorkflowTimelineStage {
   tasks: WorkflowTimelineTask[]
   checks: WorkflowTimelineCheck[]
   approval: StageApprovalState | null
+  interruption?: WorkInterruption | null
 }
 
 export interface WorkflowTimelineAction {
@@ -72,5 +76,6 @@ export interface WorkflowTimeline {
   pendingWork: WorkflowTimelinePendingWork | null
   stages: WorkflowTimelineStage[]
   availableActions: WorkflowTimelineAction[]
+  interruption?: WorkInterruption | null
   agentResultAttention?: WorkflowAgentResultAttention | null
 }

@@ -351,7 +351,8 @@ internal static class CommandPresentations
             ("model", "List available models for an Agent runtime"));
         AttachGroup(root, ["agent", "job"], CommandCapability.Automation, "Read AgentJobs",
             ("list", "List AgentJobs for an Agent profile"),
-            ("view", "Read an AgentJob's status and result"));
+            ("view", "Read an AgentJob's status and result"),
+            ("observation", "Read the composite Agent launch observation"));
         AttachGroup(root, ["agent", "subscription"], CommandCapability.Automation, "Manage an Agent's event subscriptions",
             ("list", "List an Agent's subscriptions"),
             ("create", "Create an Agent subscription"),

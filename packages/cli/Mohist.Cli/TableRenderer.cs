@@ -144,6 +144,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.AgentJobView:
                 RenderAgentJobView(data);
                 break;
+            case MohistCliApi.TableShape.AgentLaunchObservation:
+                RenderAgentLaunchObservation(data);
+                break;
             case MohistCliApi.TableShape.SessionList:
                 RenderSessionList(data);
                 break;

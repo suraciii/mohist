@@ -117,6 +117,10 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: 'incompatible-runtime', description: 'Runtime is incompatible with the request' },
         { code: 'permission-required', description: 'Permission is required to proceed' },
         { code: 'interrupted', description: 'The turn was interrupted' },
+        {
+          code: 'generation-drain-timeout',
+          description: 'The quarantined runtime generation did not drain before replacement',
+        },
         { code: 'turn-failed', description: 'OpenCode turn failed for an unspecified reason' },
       ],
       capabilities: ['agent-turn'],

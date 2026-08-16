@@ -27,6 +27,11 @@ public partial class WorkflowGrain
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
 
+        // Reconcile a due settlement before applying a late observation. The
+        // deadline owns the race, so an observation cannot update a result
+        // after the server has already decided it is blocked.
+        await ReconcileAgentResultSettlementIfDueAsync();
+
         var existing = _run.FindAgentResultSettlementTask(observation.Binding);
         var wasAwaitingResult = existing?.Task.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult;
         var update = _run.ObserveAgentExecution(observation, Now(), _agentResultSettlementTimeout);
@@ -59,6 +64,8 @@ public partial class WorkflowGrain
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
 
+        await ReconcileAgentResultSettlementIfDueAsync();
+
         var attempt = _run.FindReportableTaskAttempt(taskRunId, workId, workerId);
         var wasAwaitingResult = attempt?.SettlementState == AgentResultSettlementState.AwaitingResult;
         var observedAt = Now();
@@ -86,6 +93,8 @@ public partial class WorkflowGrain
     {
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
+
+        await ReconcileAgentResultSettlementIfDueAsync();
 
         var active = _run.CurrentActiveWorkFor(workerId);
         var taskRunId = active?.TaskRunId;
@@ -232,6 +241,12 @@ public partial class WorkflowGrain
     {
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
+
+        // A due runner-loss deadline is terminal for ordinary workflow work.
+        // Reconcile it in the report turn so a late generation cannot win a
+        // race against a reminder that has not executed yet.
+        await ReconcileRunnerLossRecoveryAsync();
+
         if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)) return ReportAck.Stale;
         if (string.IsNullOrWhiteSpace(report.TaskRunId)) return ReportAck.Stale;
         var activeWork = _run.FindReportableWork(report.TaskRunId, workId, workerId);
@@ -244,6 +259,7 @@ public partial class WorkflowGrain
             .SingleOrDefault(candidate => string.Equals(candidate.Id, activeWork.TaskRunId, StringComparison.Ordinal));
         if (task is null) return ReportAck.Stale;
         var hadAgentResultSettlement = task.AgentResultSettlement is not null;
+        var hadRunnerLossInterruption = task.Interruption is not null;
 
         _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
             GrainKey, activeWork.WorkId, report.Status, report.Detail ?? "(none)");
@@ -270,6 +286,7 @@ public partial class WorkflowGrain
         }
 
         effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
+        _run.ClearWorkInterruption(activeWork.WorkId, workerId);
 
         var events = await _workLifecycle.ApplyTaskReportAsync(
             _run,
@@ -282,6 +299,8 @@ public partial class WorkflowGrain
             await ReconcileAgentResultSettlementAsync();
         else
             await DeleteSnapshotBestEffortAsync(activeWork.WorkId);
+        if (hadRunnerLossInterruption)
+            await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
     }
 
@@ -331,7 +350,11 @@ public partial class WorkflowGrain
     public async Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
     {
         RejectIfRunReloadRequired();
-        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        if (_run is null) return ReportAck.Stale;
+
+        await ReconcileRunnerLossRecoveryAsync();
+
+        if (!_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null || !activeWork.IsChecks)
             return ReportAck.Stale;
@@ -339,10 +362,14 @@ public partial class WorkflowGrain
         _log.LogInformation("run {run} received check report for stage {Stage}: {Count} results",
             GrainKey, report.Stage, report.Results.Count);
 
+        var hadRunnerLossInterruption = _run.CurrentStage().Interruption is not null;
+        _run.ClearWorkInterruption(workId, workerId);
         var events = await _workLifecycle.ApplyCheckReportAsync(_run, report);
         _workLifecycle.RequeueRunningChecks(_run);
 
         await CommitAsync(events);
+        if (hadRunnerLossInterruption)
+            await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
     }
 

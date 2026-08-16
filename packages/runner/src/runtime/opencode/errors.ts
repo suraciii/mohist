@@ -11,7 +11,7 @@
  * Approval or changes saved OpenCode permission rules.
  */
 
-import type { RuntimeDiagnostic, RuntimeError, RuntimeErrorKind } from "./types.js"
+import type { RuntimeDiagnostic, RuntimeError, RuntimeErrorKind } from './types.js'
 
 export interface RawSdkError {
   readonly name?: string
@@ -39,20 +39,20 @@ const DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS: readonly RegExp[] = [
 ]
 
 const NON_RECOVERABLE_ACTION_REASONS = new Set([
-  "account_rate_limit",
-  "free_tier_limit",
-  "quota_exhausted",
-  "usage_limit",
+  'account_rate_limit',
+  'free_tier_limit',
+  'quota_exhausted',
+  'usage_limit',
 ])
 
 const TRANSPORT_ERROR_CODES = new Set([
-  "UND_ERR_HEADERS_TIMEOUT",
-  "UND_ERR_BODY_TIMEOUT",
-  "UND_ERR_SOCKET",
-  "UND_ERR_CONNECT_TIMEOUT",
-  "ECONNRESET",
-  "ECONNREFUSED",
-  "EPIPE",
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EPIPE',
 ])
 
 export const DEFAULT_PROVIDER_ERROR_POLICY = {
@@ -60,7 +60,10 @@ export const DEFAULT_PROVIDER_ERROR_POLICY = {
   consecutiveRetryThreshold: 5,
 } as const
 
-export function isNonRecoverableProviderMessage(message: string, patterns: readonly RegExp[] = DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS): boolean {
+export function isNonRecoverableProviderMessage(
+  message: string,
+  patterns: readonly RegExp[] = DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS,
+): boolean {
   return patterns.some((pattern) => pattern.test(message))
 }
 
@@ -69,20 +72,22 @@ export function isNonRecoverableProviderRetry(
   patterns: readonly RegExp[] = DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS,
 ): boolean {
   const reason = retry.action?.reason?.toLowerCase()
-  return (reason !== undefined && NON_RECOVERABLE_ACTION_REASONS.has(reason))
-    || isNonRecoverableProviderMessage(retry.message, patterns)
+  return (
+    (reason !== undefined && NON_RECOVERABLE_ACTION_REASONS.has(reason)) ||
+    isNonRecoverableProviderMessage(retry.message, patterns)
+  )
 }
 
 export function normalizePermissionRequired(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
-    kind: "permission-required",
-    message: "OpenCode permission request could not be answered by the headless runtime",
+    kind: 'permission-required',
+    message: 'OpenCode permission request could not be answered by the headless runtime',
     diagnostics: [
       ...diagnostics,
       {
-        severity: "error",
-        code: "permission-required",
-        message: "Restore OpenCode connectivity, then retry the task",
+        severity: 'error',
+        code: 'permission-required',
+        message: 'Restore OpenCode connectivity, then retry the task',
       },
     ],
   }
@@ -90,37 +95,79 @@ export function normalizePermissionRequired(diagnostics: readonly RuntimeDiagnos
 
 export function normalizeInterrupted(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
-    kind: "interrupted",
-    message: "OpenCode turn was interrupted before completion",
+    kind: 'interrupted',
+    message: 'OpenCode turn was interrupted before completion',
     diagnostics: [
       ...diagnostics,
-      { severity: "info", code: "interrupted", message: "The turn was aborted by a deadline or explicit cancel" },
+      { severity: 'info', code: 'interrupted', message: 'The turn was aborted by a deadline or explicit cancel' },
     ],
   }
 }
 
-export function normalizeDeadlineExceeded(deadlineMs: number, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
+export function normalizeResourceContainment(
+  timeoutMs: number,
+  diagnostics: readonly RuntimeDiagnostic[] = [],
+): RuntimeError {
+  return {
+    kind: 'resource-containment',
+    message: `OpenCode turn exceeded its per-work resource budget of ${timeoutMs}ms`,
+    diagnostics: [
+      ...diagnostics,
+      {
+        severity: 'error',
+        code: 'resource-containment',
+        message: 'The turn was aborted and its runtime generation was quarantined after exceeding the per-work budget',
+        details: { timeoutMs },
+      },
+    ],
+  }
+}
+
+export function normalizeGenerationDrainTimeout(
+  timeoutMs: number,
+  diagnostics: readonly RuntimeDiagnostic[] = [],
+): RuntimeError {
+  return {
+    kind: 'generation-drain-timeout',
+    message: `OpenCode runtime generation was forcibly released after the ${timeoutMs}ms drain deadline`,
+    diagnostics: [
+      ...diagnostics,
+      {
+        severity: 'error',
+        code: 'generation-drain-timeout',
+        message: 'The active turn was failed because its quarantined runtime generation did not drain in time',
+        details: { timeoutMs },
+      },
+    ],
+  }
+}
+
+export function normalizeDeadlineExceeded(
+  deadlineMs: number,
+  diagnostics: readonly RuntimeDiagnostic[] = [],
+): RuntimeError {
   const seconds = deadlineMs / 1000
   return {
-    kind: "deadline-exceeded",
+    kind: 'deadline-exceeded',
     message: `OpenCode turn timed out after ${seconds}s`,
     diagnostics: [
       ...diagnostics,
-      { severity: "error", code: "deadline-exceeded", message: `The runner deadline expired after ${seconds}s` },
+      { severity: 'error', code: 'deadline-exceeded', message: `The runner deadline expired after ${seconds}s` },
     ],
   }
 }
 
 export function normalizeMissingSession(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
-    kind: "missing-session",
-    message: "No current OpenCode Runtime Session is bound to this logical AgentSession — issue a Reset to establish a fresh Runtime Session, then retry",
+    kind: 'missing-session',
+    message:
+      'No current OpenCode Runtime Session is bound to this logical AgentSession — issue a Reset to establish a fresh Runtime Session, then retry',
     diagnostics: [
       ...diagnostics,
       {
-        severity: "error",
-        code: "missing-session",
-        message: "Issue a Reset to establish a fresh Runtime Session, then retry",
+        severity: 'error',
+        code: 'missing-session',
+        message: 'Issue a Reset to establish a fresh Runtime Session, then retry',
       },
     ],
   }
@@ -128,14 +175,14 @@ export function normalizeMissingSession(diagnostics: readonly RuntimeDiagnostic[
 
 export function normalizeUnavailableRuntime(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
-    kind: "unavailable-runtime",
-    message: "OpenCode runtime is not available",
+    kind: 'unavailable-runtime',
+    message: 'OpenCode runtime is not available',
     diagnostics: [
       ...diagnostics,
       {
-        severity: "error",
-        code: "unavailable-runtime",
-        message: "Wait for readiness to re-pass, or investigate the readiness diagnostic for recovery steps",
+        severity: 'error',
+        code: 'unavailable-runtime',
+        message: 'Wait for readiness to re-pass, or investigate the readiness diagnostic for recovery steps',
       },
     ],
   }
@@ -143,14 +190,14 @@ export function normalizeUnavailableRuntime(diagnostics: readonly RuntimeDiagnos
 
 export function normalizeIncompatibleRuntime(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
-    kind: "incompatible-runtime",
-    message: "Installed OpenCode is incompatible with the pinned SDK surface",
+    kind: 'incompatible-runtime',
+    message: 'Installed OpenCode is incompatible with the pinned SDK surface',
     diagnostics: [
       ...diagnostics,
       {
-        severity: "error",
-        code: "incompatible-runtime",
-        message: "Update OpenCode to a version that matches the pinned @opencode-ai/sdk package",
+        severity: 'error',
+        code: 'incompatible-runtime',
+        message: 'Update OpenCode to a version that matches the pinned @opencode-ai/sdk package',
       },
     ],
   }
@@ -158,45 +205,43 @@ export function normalizeIncompatibleRuntime(diagnostics: readonly RuntimeDiagno
 
 export function normalizeInvalidInput(message: string, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
-    kind: "invalid-input",
+    kind: 'invalid-input',
     message,
-    diagnostics: [
-      ...diagnostics,
-      { severity: "error", code: "invalid-input", message },
-    ],
+    diagnostics: [...diagnostics, { severity: 'error', code: 'invalid-input', message }],
   }
 }
 
-export function normalizeTurnFailed(raw: RawSdkError | string, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
-  const message = typeof raw === "string" ? raw : raw.message || "OpenCode turn failed"
+export function normalizeTurnFailed(
+  raw: RawSdkError | string,
+  diagnostics: readonly RuntimeDiagnostic[] = [],
+): RuntimeError {
+  const message = typeof raw === 'string' ? raw : raw.message || 'OpenCode turn failed'
   const transportCode = transportErrorCode(raw)
   return {
-    kind: "turn-failed",
+    kind: 'turn-failed',
     message: transportCode
       ? `OpenCode local transport failed (${transportCode}); confirm the local runtime is healthy, then retry`
       : message,
     diagnostics: [
       ...diagnostics,
       {
-        severity: "error",
-        code: transportCode ? "opencode-transport-failed" : "turn-failed",
+        severity: 'error',
+        code: transportCode ? 'opencode-transport-failed' : 'turn-failed',
         message: transportCode ? `OpenCode local transport failed with ${transportCode}: ${message}` : message,
-        details: typeof raw === "string" ? undefined : { ...raw },
+        details: typeof raw === 'string' ? undefined : { ...raw },
       },
     ],
   }
 }
 
 export function isTransportFailure(cause: unknown): boolean {
-  return transportErrorCode(cause) !== undefined
-    || (cause instanceof Error && /fetch failed|network error/i.test(cause.message))
+  return (
+    transportErrorCode(cause) !== undefined ||
+    (cause instanceof Error && /fetch failed|network error/i.test(cause.message))
+  )
 }
 
-const UNCONFIRMED_CLEANUP_CODES = new Set([
-  "abort-unconfirmed",
-  "abort-cleanup-timeout",
-  "status-cleanup-timeout",
-])
+const UNCONFIRMED_CLEANUP_CODES = new Set(['abort-unconfirmed', 'abort-cleanup-timeout', 'status-cleanup-timeout'])
 
 export function hasUnconfirmedCleanup(diagnostics: readonly RuntimeDiagnostic[] = []): boolean {
   return diagnostics.some((diagnostic) => UNCONFIRMED_CLEANUP_CODES.has(diagnostic.code))
@@ -204,9 +249,9 @@ export function hasUnconfirmedCleanup(diagnostics: readonly RuntimeDiagnostic[] 
 
 function transportErrorCode(value: unknown): string | undefined {
   let current = value
-  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth++) {
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth++) {
     const code = (current as { code?: unknown }).code
-    if (typeof code === "string" && TRANSPORT_ERROR_CODES.has(code)) return code
+    if (typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code)) return code
     current = (current as { cause?: unknown }).cause
   }
   return undefined
@@ -215,25 +260,22 @@ function transportErrorCode(value: unknown): string | undefined {
 export function normalizeAbortUnconfirmed(
   message: string,
   diagnostics: readonly RuntimeDiagnostic[] = [],
-  diagnosticCode: "abort-unconfirmed" | "abort-cleanup-timeout" | "status-cleanup-timeout" = "abort-unconfirmed",
+  diagnosticCode: 'abort-unconfirmed' | 'abort-cleanup-timeout' | 'status-cleanup-timeout' = 'abort-unconfirmed',
 ): RuntimeError {
   return {
-    kind: "turn-failed",
+    kind: 'turn-failed',
     message: `OpenCode turn could not be confirmed stopped: ${message}`,
-    diagnostics: [
-      ...diagnostics,
-      { severity: "error", code: diagnosticCode, message },
-    ],
+    diagnostics: [...diagnostics, { severity: 'error', code: diagnosticCode, message }],
   }
 }
 
 export function errorKindFor(raw: RawSdkError | string): RuntimeErrorKind {
-  if (typeof raw !== "string") {
-    if (raw.status === 404 || /not[ _-]?found/i.test(raw.message)) return "missing-session"
-    if (raw.status === 403 || /permission/i.test(raw.message)) return "permission-required"
-    if (raw.status === 400 || /invalid/i.test(raw.message)) return "invalid-input"
-    if (raw.code === "incompatible") return "incompatible-runtime"
-    if (raw.service === "opencode.health" || raw.code === "unavailable") return "unavailable-runtime"
+  if (typeof raw !== 'string') {
+    if (raw.status === 404 || /not[ _-]?found/i.test(raw.message)) return 'missing-session'
+    if (raw.status === 403 || /permission/i.test(raw.message)) return 'permission-required'
+    if (raw.status === 400 || /invalid/i.test(raw.message)) return 'invalid-input'
+    if (raw.code === 'incompatible') return 'incompatible-runtime'
+    if (raw.service === 'opencode.health' || raw.code === 'unavailable') return 'unavailable-runtime'
   }
-  return "turn-failed"
+  return 'turn-failed'
 }

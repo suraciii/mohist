@@ -34,72 +34,126 @@ const NO_AGENT = makeAgentStatus()
 
 describe('isIntegrateFailure', () => {
   it('returns true for an Integrate-stage Blocked issue', () => {
-    expect(isIntegrateFailure(makeIssue({
-      workflowStage: WorkflowStage.Integrate,
-      health: IssueHealth.Blocked,
-    }))).toBe(true)
+    expect(
+      isIntegrateFailure(
+        makeIssue({
+          workflowStage: WorkflowStage.Integrate,
+          health: IssueHealth.Blocked,
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('returns false for a Blocked issue in a non-integrate stage', () => {
-    expect(isIntegrateFailure(makeIssue({
-      workflowStage: WorkflowStage.Build,
-      health: IssueHealth.Blocked,
-    }))).toBe(false)
+    expect(
+      isIntegrateFailure(
+        makeIssue({
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Blocked,
+        }),
+      ),
+    ).toBe(false)
   })
 
   it('returns false for an Integrate-stage Active issue', () => {
-    expect(isIntegrateFailure(makeIssue({
-      workflowStage: WorkflowStage.Integrate,
-      health: IssueHealth.Active,
-    }))).toBe(false)
+    expect(
+      isIntegrateFailure(
+        makeIssue({
+          workflowStage: WorkflowStage.Integrate,
+          health: IssueHealth.Active,
+        }),
+      ),
+    ).toBe(false)
   })
 
   it('returns false for an Integrate-stage issue with no workflowStage (null)', () => {
-    expect(isIntegrateFailure(makeIssue({
-      workflowStage: null,
-      health: IssueHealth.Blocked,
-    }))).toBe(false)
+    expect(
+      isIntegrateFailure(
+        makeIssue({
+          workflowStage: null,
+          health: IssueHealth.Blocked,
+        }),
+      ),
+    ).toBe(false)
+  })
+})
+
+describe('deriveAttentionItems — recoverable interruption rule', () => {
+  it('surfaces a recoverable interruption with reason and deadline instead of failure treatment', () => {
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 17,
+          status: IssueStatus.InProgress,
+          workflowStage: WorkflowStage.Build,
+          attention: {
+            reason: 'recoverable-interrupted',
+            state: 'recoverable-interrupted',
+            reasonCode: 'runner-lost',
+            recoveryDeadlineAt: '2026-08-15T01:15:00Z',
+          },
+        }),
+      ],
+      NO_AGENT,
+    )
+
+    expect(items).toEqual([
+      {
+        kind: 'recoverable-interrupted',
+        issueNumber: 17,
+        label: 'Recoverable interruption',
+        detail: 'runner-lost; recovery deadline 2026-08-15T01:15:00Z',
+      },
+    ])
   })
 })
 
 describe('deriveAttentionItems — approval-pending rule', () => {
   it('surfaces an awaiting approval as "Approval needed" with title as detail', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 11,
-        title: 'Wait for review',
-        approvalState: {
-          status: 'awaiting',
-          requestedAt: '2026-06-18T00:00:00.000Z',
-        },
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 11,
+          title: 'Wait for review',
+          approvalState: {
+            status: 'awaiting',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+      ],
+      NO_AGENT,
+    )
 
-    expect(items).toEqual([{
-      kind: 'approval-needed',
-      issueNumber: 11,
-      label: 'Approval needed',
-      detail: 'Wait for review',
-    }])
+    expect(items).toEqual([
+      {
+        kind: 'approval-needed',
+        issueNumber: 11,
+        label: 'Approval needed',
+        detail: 'Wait for review',
+      },
+    ])
   })
 
   it('does not surface an approval with a status other than awaiting', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        approvalState: {
-          status: 'pending',
-          requestedAt: '2026-06-18T00:00:00.000Z',
-        },
-      }),
-      makeIssue({
-        health: IssueHealth.Active,
-        approvalState: {
-          status: 'approved',
-          requestedAt: '2026-06-18T00:00:00.000Z',
-          respondedAt: '2026-06-18T01:00:00.000Z',
-        },
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          approvalState: {
+            status: 'pending',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+        makeIssue({
+          health: IssueHealth.Active,
+          approvalState: {
+            status: 'approved',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+            respondedAt: '2026-06-18T01:00:00.000Z',
+          },
+        }),
+      ],
+      NO_AGENT,
+    )
 
     expect(items).toEqual([])
   })
@@ -107,78 +161,95 @@ describe('deriveAttentionItems — approval-pending rule', () => {
 
 describe('deriveAttentionItems — integrate-failure rule', () => {
   it('surfaces an Integrate-stage Blocked issue as "Integration failed"', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 21,
-        title: 'Failed merge',
-        workflowStage: WorkflowStage.Integrate,
-        health: IssueHealth.Blocked,
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 21,
+          title: 'Failed merge',
+          workflowStage: WorkflowStage.Integrate,
+          health: IssueHealth.Blocked,
+        }),
+      ],
+      NO_AGENT,
+    )
 
-    expect(items).toEqual([{
-      kind: 'integration-failed',
-      issueNumber: 21,
-      label: 'Integration failed',
-      detail: 'Failed merge',
-    }])
+    expect(items).toEqual([
+      {
+        kind: 'integration-failed',
+        issueNumber: 21,
+        label: 'Integration failed',
+        detail: 'Failed merge',
+      },
+    ])
   })
-
 })
 
 describe('deriveAttentionItems — blocked rule with blockedReason fallback', () => {
   it('uses blockedReason as detail when present on a non-integrate Blocked issue', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 41,
-        title: 'Stuck on auth bug',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Blocked,
-        blockedReason: 'Cannot reach auth provider',
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 41,
+          title: 'Stuck on auth bug',
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Blocked,
+          blockedReason: 'Cannot reach auth provider',
+        }),
+      ],
+      NO_AGENT,
+    )
 
-    expect(items).toEqual([{
-      kind: 'blocked',
-      issueNumber: 41,
-      label: 'Needs action',
-      detail: 'Cannot reach auth provider',
-    }])
+    expect(items).toEqual([
+      {
+        kind: 'blocked',
+        issueNumber: 41,
+        label: 'Needs action',
+        detail: 'Cannot reach auth provider',
+      },
+    ])
   })
 
   it('falls back to title when blockedReason is absent on a non-integrate Blocked issue', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 42,
-        title: 'Mystery blocker',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Blocked,
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 42,
+          title: 'Mystery blocker',
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Blocked,
+        }),
+      ],
+      NO_AGENT,
+    )
 
-    expect(items).toEqual([{
-      kind: 'blocked',
-      issueNumber: 42,
-      label: 'Needs action',
-      detail: 'Mystery blocker',
-    }])
+    expect(items).toEqual([
+      {
+        kind: 'blocked',
+        issueNumber: 42,
+        label: 'Needs action',
+        detail: 'Mystery blocker',
+      },
+    ])
   })
 })
 
 describe('deriveAttentionItems — first match wins', () => {
   it('uses the first matching rule when an issue satisfies multiple rules (approval before blocked)', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 51,
-        title: 'Both awaiting and blocked',
-        health: IssueHealth.Blocked,
-        blockedReason: 'some reason',
-        approvalState: {
-          status: 'awaiting',
-          requestedAt: '2026-06-18T00:00:00.000Z',
-        },
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 51,
+          title: 'Both awaiting and blocked',
+          health: IssueHealth.Blocked,
+          blockedReason: 'some reason',
+          approvalState: {
+            status: 'awaiting',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+      ],
+      NO_AGENT,
+    )
 
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({
@@ -189,15 +260,18 @@ describe('deriveAttentionItems — first match wins', () => {
   })
 
   it('uses the integrate-failure rule (over plain Blocked) when an issue is Integrate-stage Blocked', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 53,
-        title: 'Merge blocked',
-        workflowStage: WorkflowStage.Integrate,
-        health: IssueHealth.Blocked,
-        blockedReason: 'conflict on README',
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 53,
+          title: 'Merge blocked',
+          workflowStage: WorkflowStage.Integrate,
+          health: IssueHealth.Blocked,
+          blockedReason: 'conflict on README',
+        }),
+      ],
+      NO_AGENT,
+    )
 
     expect(items).toHaveLength(1)
     expect(items[0]?.label).toBe('Integration failed')
@@ -207,43 +281,49 @@ describe('deriveAttentionItems — first match wins', () => {
 
 describe('deriveAttentionItems — dedup by project and issue number', () => {
   it('emits a single AttentionItem when the same number appears more than once', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 61,
-        title: 'First sighting',
-        health: IssueHealth.Blocked,
-        blockedReason: 'a',
-      }),
-      makeIssue({
-        number: 61,
-        title: 'Second sighting',
-        health: IssueHealth.Blocked,
-        blockedReason: 'b',
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 61,
+          title: 'First sighting',
+          health: IssueHealth.Blocked,
+          blockedReason: 'a',
+        }),
+        makeIssue({
+          number: 61,
+          title: 'Second sighting',
+          health: IssueHealth.Blocked,
+          blockedReason: 'b',
+        }),
+      ],
+      NO_AGENT,
+    )
 
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ kind: 'blocked' })
   })
 
   it('emits a single AttentionItem when the same number appears more than once across different rule matches', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 62,
-        title: 'Earlier Blocked',
-        health: IssueHealth.Blocked,
-        blockedReason: 'first',
-      }),
-      makeIssue({
-        number: 62,
-        title: 'Later awaiting approval',
-        health: IssueHealth.Active,
-        approvalState: {
-          status: 'awaiting',
-          requestedAt: '2026-06-18T00:00:00.000Z',
-        },
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 62,
+          title: 'Earlier Blocked',
+          health: IssueHealth.Blocked,
+          blockedReason: 'first',
+        }),
+        makeIssue({
+          number: 62,
+          title: 'Later awaiting approval',
+          health: IssueHealth.Active,
+          approvalState: {
+            status: 'awaiting',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+      ],
+      NO_AGENT,
+    )
 
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ kind: 'blocked' })
@@ -252,32 +332,35 @@ describe('deriveAttentionItems — dedup by project and issue number', () => {
 
 describe('deriveAttentionItems — all-healthy input', () => {
   it('returns an empty array when no issue matches any rule', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 71,
-        title: 'Healthy build',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Active,
-      }),
-      makeIssue({
-        number: 72,
-        title: 'Healthy done',
-        workflowStage: WorkflowStage.Done,
-        health: IssueHealth.Done,
-      }),
-      makeIssue({
-        number: 73,
-        title: 'Healthy paused',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Paused,
-      }),
-      makeIssue({
-        number: 74,
-        title: 'Healthy cancelled',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Cancelled,
-      }),
-    ], NO_AGENT)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 71,
+          title: 'Healthy build',
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Active,
+        }),
+        makeIssue({
+          number: 72,
+          title: 'Healthy done',
+          workflowStage: WorkflowStage.Done,
+          health: IssueHealth.Done,
+        }),
+        makeIssue({
+          number: 73,
+          title: 'Healthy paused',
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Paused,
+        }),
+        makeIssue({
+          number: 74,
+          title: 'Healthy cancelled',
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Cancelled,
+        }),
+      ],
+      NO_AGENT,
+    )
 
     expect(items).toEqual([])
   })
@@ -289,14 +372,17 @@ describe('deriveAttentionItems — all-healthy input', () => {
 
 describe('deriveAttentionItems — output typing and signature', () => {
   it('returns an AttentionItem[]', () => {
-    const items: AttentionItem[] = deriveAttentionItems([
-      makeIssue({
-        number: 81,
-        title: 'Type check',
-        health: IssueHealth.Blocked,
-        blockedReason: 'reason',
-      }),
-    ], NO_AGENT)
+    const items: AttentionItem[] = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 81,
+          title: 'Type check',
+          health: IssueHealth.Blocked,
+          blockedReason: 'reason',
+        }),
+      ],
+      NO_AGENT,
+    )
 
     expect(Array.isArray(items)).toBe(true)
     expect(items[0]?.kind).toBe('blocked')
@@ -309,19 +395,22 @@ describe('deriveAttentionItems — output typing and signature', () => {
       capacity: { active: 0, max: 1 },
     })
 
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 82,
-        title: 'No longer ignored',
-        health: IssueHealth.Blocked,
-        blockedReason: 'reason',
-      }),
-      makeIssue({
-        number: 83,
-        status: IssueStatus.InProgress,
-        health: IssueHealth.Active,
-      }),
-    ], busyAgent)
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 82,
+          title: 'No longer ignored',
+          health: IssueHealth.Blocked,
+          blockedReason: 'reason',
+        }),
+        makeIssue({
+          number: 83,
+          status: IssueStatus.InProgress,
+          health: IssueHealth.Active,
+        }),
+      ],
+      busyAgent,
+    )
 
     expect(items).toHaveLength(2)
     expect(items[0]).toMatchObject({ kind: 'blocked' })
@@ -331,37 +420,52 @@ describe('deriveAttentionItems — output typing and signature', () => {
 
 describe('deriveAttentionItems — runner-unavailable rule', () => {
   it('does not emit runner-unavailable without an affected workflow', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
-      runnerAvailable: false,
-      runnerMessage: 'Embedded runner is offline',
-    }))
+    const items = deriveAttentionItems(
+      [],
+      makeAgentStatus({
+        runnerAvailable: false,
+        runnerMessage: 'Embedded runner is offline',
+      }),
+    )
 
     expect(items).toEqual([])
   })
 
   it('falls back to "No runner is connected." when runnerMessage is null', () => {
-    const items = deriveAttentionItems([makeIssue({
-      status: IssueStatus.InProgress,
-      health: IssueHealth.Active,
-    })], makeAgentStatus({
-      runnerAvailable: false,
-      runnerMessage: null,
-    }))
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          status: IssueStatus.InProgress,
+          health: IssueHealth.Active,
+        }),
+      ],
+      makeAgentStatus({
+        runnerAvailable: false,
+        runnerMessage: null,
+      }),
+    )
 
-    expect(items).toEqual([{
-      kind: 'runner-unavailable',
-      label: 'Runner unavailable',
-      detail: 'No runner is connected.',
-    }])
+    expect(items).toEqual([
+      {
+        kind: 'runner-unavailable',
+        label: 'Runner unavailable',
+        detail: 'No runner is connected.',
+      },
+    ])
   })
 
   it('falls back to "No runner is connected." when runnerMessage is undefined', () => {
-    const items = deriveAttentionItems([makeIssue({
-      status: IssueStatus.InProgress,
-      health: IssueHealth.Active,
-    })], makeAgentStatus({
-      runnerAvailable: false,
-    }))
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          status: IssueStatus.InProgress,
+          health: IssueHealth.Active,
+        }),
+      ],
+      makeAgentStatus({
+        runnerAvailable: false,
+      }),
+    )
 
     expect(items[0]).toMatchObject({
       kind: 'runner-unavailable',
@@ -380,16 +484,19 @@ describe('deriveAttentionItems — runner-unavailable rule', () => {
   })
 
   it('emits runner-unavailable after issue items, both present', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 11,
-        status: IssueStatus.InProgress,
-        approvalState: {
-          status: 'awaiting',
-          requestedAt: '2026-06-18T00:00:00.000Z',
-        },
-      }),
-    ], makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' }))
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 11,
+          status: IssueStatus.InProgress,
+          approvalState: {
+            status: 'awaiting',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+      ],
+      makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' }),
+    )
 
     expect(items).toHaveLength(2)
     expect(items[0]).toMatchObject({ kind: 'approval-needed' })
@@ -399,66 +506,86 @@ describe('deriveAttentionItems — runner-unavailable rule', () => {
 
 describe('deriveAttentionItems — runner-capacity-limited rule', () => {
   it('emits runner-capacity-limited when max > 0 and active >= max', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
-      runnerAvailable: true,
-      capacity: { active: 4, max: 4 },
-    }))
+    const items = deriveAttentionItems(
+      [],
+      makeAgentStatus({
+        runnerAvailable: true,
+        capacity: { active: 4, max: 4 },
+      }),
+    )
 
-    expect(items).toEqual([{
-      kind: 'runner-capacity-limited',
-      label: 'Runner at capacity',
-      detail: '4 of 4 slots in use',
-    }])
+    expect(items).toEqual([
+      {
+        kind: 'runner-capacity-limited',
+        label: 'Runner at capacity',
+        detail: '4 of 4 slots in use',
+      },
+    ])
   })
 
   it('emits runner-capacity-limited when active > max (overflow)', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
-      runnerAvailable: true,
-      capacity: { active: 5, max: 4 },
-    }))
+    const items = deriveAttentionItems(
+      [],
+      makeAgentStatus({
+        runnerAvailable: true,
+        capacity: { active: 5, max: 4 },
+      }),
+    )
 
     expect(items[0]).toMatchObject({ kind: 'runner-capacity-limited' })
   })
 
   it('does NOT emit runner-capacity-limited when active < max', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
-      runnerAvailable: true,
-      capacity: { active: 2, max: 4 },
-    }))
+    const items = deriveAttentionItems(
+      [],
+      makeAgentStatus({
+        runnerAvailable: true,
+        capacity: { active: 2, max: 4 },
+      }),
+    )
 
     expect(items).toEqual([])
   })
 
   it('does NOT emit runner-capacity-limited when max === 0', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
-      runnerAvailable: true,
-      capacity: { active: 0, max: 0 },
-    }))
+    const items = deriveAttentionItems(
+      [],
+      makeAgentStatus({
+        runnerAvailable: true,
+        capacity: { active: 0, max: 0 },
+      }),
+    )
 
     expect(items).toEqual([])
   })
 
   it('does NOT emit runner-capacity-limited when max > 0 but active === 0', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
-      runnerAvailable: true,
-      capacity: { active: 0, max: 2 },
-    }))
+    const items = deriveAttentionItems(
+      [],
+      makeAgentStatus({
+        runnerAvailable: true,
+        capacity: { active: 0, max: 2 },
+      }),
+    )
 
     expect(items).toEqual([])
   })
 
   it('emits runner-capacity-limited after issue items, both present', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        number: 20,
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Blocked,
-        blockedReason: 'r',
+    const items = deriveAttentionItems(
+      [
+        makeIssue({
+          number: 20,
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Blocked,
+          blockedReason: 'r',
+        }),
+      ],
+      makeAgentStatus({
+        runnerAvailable: true,
+        capacity: { active: 8, max: 8 },
       }),
-    ], makeAgentStatus({
-      runnerAvailable: true,
-      capacity: { active: 8, max: 8 },
-    }))
+    )
 
     expect(items).toHaveLength(2)
     expect(items[0]).toMatchObject({ kind: 'blocked' })
@@ -468,10 +595,13 @@ describe('deriveAttentionItems — runner-capacity-limited rule', () => {
 
 describe('deriveAttentionItems — runner-unavailable suppresses capacity-limited', () => {
   it('emits no infrastructure warning when no workflow is affected', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
-      runnerAvailable: false,
-      capacity: { active: 4, max: 4 },
-    }))
+    const items = deriveAttentionItems(
+      [],
+      makeAgentStatus({
+        runnerAvailable: false,
+        capacity: { active: 4, max: 4 },
+      }),
+    )
 
     expect(items).toEqual([])
   })
@@ -479,25 +609,20 @@ describe('deriveAttentionItems — runner-unavailable suppresses capacity-limite
 
 describe('deriveAttentionItems — union is exhaustive', () => {
   it('the kind set is exactly the union of issue and runner kinds (no others)', () => {
-    const issueKinds = new Set([
-      'approval-needed',
-      'integration-failed',
-      'blocked',
-    ])
-    const runnerKinds = new Set([
-      'runner-unavailable',
-      'runner-capacity-limited',
-    ])
+    const issueKinds = new Set(['approval-needed', 'integration-failed', 'recoverable-interrupted', 'blocked'])
+    const runnerKinds = new Set(['runner-unavailable', 'runner-capacity-limited'])
 
     const samples: Array<{ input: AttentionItem[]; expected: Set<string> }> = [
       { input: [], expected: new Set() },
       {
-        input: [{
-          kind: 'approval-needed',
-          issueNumber: 1,
-          label: 'A',
-          detail: 'd',
-        }],
+        input: [
+          {
+            kind: 'approval-needed',
+            issueNumber: 1,
+            label: 'A',
+            detail: 'd',
+          },
+        ],
         expected: new Set(['approval-needed']),
       },
       {
@@ -523,6 +648,7 @@ describe('deriveAttentionItems — union is exhaustive', () => {
       'approval-needed',
       'blocked',
       'integration-failed',
+      'recoverable-interrupted',
       'runner-capacity-limited',
       'runner-unavailable',
     ])
@@ -548,73 +674,105 @@ describe('isIssueAttentionItem', () => {
 
 describe('issueNeedsOwnerAction', () => {
   it('returns true for an awaiting-approval issue', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      approvalState: {
-        status: 'awaiting',
-        requestedAt: '2026-06-18T00:00:00.000Z',
-      },
-    }))).toBe(true)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          approvalState: {
+            status: 'awaiting',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('returns true for an Integrate-stage Blocked issue (integration-failed)', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      workflowStage: WorkflowStage.Integrate,
-      health: IssueHealth.Blocked,
-    }))).toBe(true)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          workflowStage: WorkflowStage.Integrate,
+          health: IssueHealth.Blocked,
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('returns true for a non-integrate Blocked issue', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      workflowStage: WorkflowStage.Build,
-      health: IssueHealth.Blocked,
-      blockedReason: 'stuck',
-    }))).toBe(true)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Blocked,
+          blockedReason: 'stuck',
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('returns false for a healthy in-progress issue', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: WorkflowStage.Build,
-      health: IssueHealth.Active,
-    }))).toBe(false)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          status: IssueStatus.InProgress,
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Active,
+        }),
+      ),
+    ).toBe(false)
   })
 
   it('returns false for a paused issue', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: WorkflowStage.Build,
-      health: IssueHealth.Paused,
-    }))).toBe(false)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          status: IssueStatus.InProgress,
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Paused,
+        }),
+      ),
+    ).toBe(false)
   })
 
   it('returns false for a pending or approved approval-state issue', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      approvalState: {
-        status: 'pending',
-        requestedAt: '2026-06-18T00:00:00.000Z',
-      },
-    }))).toBe(false)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          approvalState: {
+            status: 'pending',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+      ),
+    ).toBe(false)
 
-    expect(issueNeedsOwnerAction(makeIssue({
-      approvalState: {
-        status: 'approved',
-        requestedAt: '2026-06-18T00:00:00.000Z',
-        respondedAt: '2026-06-18T01:00:00.000Z',
-      },
-    }))).toBe(false)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          approvalState: {
+            status: 'approved',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+            respondedAt: '2026-06-18T01:00:00.000Z',
+          },
+        }),
+      ),
+    ).toBe(false)
   })
 
   it('returns true for an issue that is both awaiting approval and blocked (the cue must agree with attention classification)', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: WorkflowStage.Build,
-      health: IssueHealth.Blocked,
-      blockedReason: 'merge lock',
-      approvalState: {
-        status: 'awaiting',
-        requestedAt: '2026-06-18T00:00:00.000Z',
-      },
-    }))).toBe(true)
+    expect(
+      issueNeedsOwnerAction(
+        makeIssue({
+          status: IssueStatus.InProgress,
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Blocked,
+          blockedReason: 'merge lock',
+          approvalState: {
+            status: 'awaiting',
+            requestedAt: '2026-06-18T00:00:00.000Z',
+          },
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('uses the same issue classifier that feeds deriveAttentionItems', () => {
@@ -669,17 +827,12 @@ describe('issueNeedsOwnerAction', () => {
     ]
     const runnerOnlyAgent = makeAgentStatus({ runnerAvailable: true })
     const attentionItems = deriveAttentionItems(samples, runnerOnlyAgent)
-    const attentionIssueNumbers = new Set(
-      attentionItems
-        .filter(isIssueAttentionItem)
-        .map((item) => item.issueNumber),
-    )
+    const attentionIssueNumbers = new Set(attentionItems.filter(isIssueAttentionItem).map((item) => item.issueNumber))
 
     for (const sample of samples) {
       const flagged = issueNeedsOwnerAction(sample)
       const producesItem = attentionIssueNumbers.has(sample.number)
-      expect({ flagged, producesItem })
-        .toEqual({ flagged: true, producesItem: true })
+      expect({ flagged, producesItem }).toEqual({ flagged: true, producesItem: true })
     }
   })
 

@@ -12,5 +12,6 @@ public enum WorkflowAttentionReason
     [JsonStringEnumMemberName("approval_rejected")] ApprovalRejected,
     [JsonStringEnumMemberName("missing_prerequisite")] MissingPrerequisite,
     [JsonStringEnumMemberName("workflow_failed")] WorkflowFailed,
+    [JsonStringEnumMemberName("recoverable-interrupted")] RecoverableInterrupted,
     [JsonStringEnumMemberName("paused")] Paused,
 }

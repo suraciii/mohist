@@ -24,7 +24,7 @@ import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
 import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
-import { AWAITING_ACK_RETRY_INTERVAL_MS, boundedSignal, delay, POLL_TIMEOUT_MS, raceInterval } from './host-timing.js'
+import { AWAITING_ACK_RETRY_INTERVAL_MS, POLL_TIMEOUT_MS } from './host-timing.js'
 import { TerminalTaskLogDeliveryStoreImpl, type TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
@@ -40,7 +40,11 @@ import { currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
 import { SkillResolver } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
+import { probePrlimit } from '../system/process.js'
+import { normalizeWorkResourceLimits, type ResolvedWorkResourceLimits } from './resource-containment.js'
 import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
+import { boundedSignal, delay, raceInterval, isAgentRecoveryDispatch, usesOpenCode } from './host-helpers.js'
+import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
 
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
@@ -89,25 +93,6 @@ interface AwaitingAckEntry {
  * `workKey` convention.
  */
 const workKey = journalWorkKey
-
-function usesOpenCode(work: DispatchWorkItem): boolean {
-  if (work.ownerKind === 'agent-job') {
-    const runtime = typeof work.with?.runtime === 'string' ? work.with.runtime : work.agentDefinition?.runtime
-    return runtime?.toLowerCase() === 'opencode'
-  }
-  return work.uses?.trim().toLowerCase() === 'mohist/opencode'
-}
-
-/**
- * True when the dispatch is an unresolved-agent recovery probe: the
- * server recorded a runtime binding and re-delivered the work to the
- * runner that owns it. Such a dispatch is reconciled against the
- * recorded binding, never executed as a fresh prompt.
- */
-function isAgentRecoveryDispatch(work: DispatchWorkItem): boolean {
-  const recovery = work.agentRecovery
-  return Boolean(recovery && recovery.runtime.trim() && recovery.runtimeSessionId.trim())
-}
 
 /**
  * Resolves the runner's build git hash from the on-disk build manifest.
@@ -165,6 +150,7 @@ export class RunnerHost {
   private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
+  private readonly workResourceLimits: ResolvedWorkResourceLimits
 
   // Lets an out-of-loop reconnect callback bound its immediate heartbeat.
   private activeSignal: AbortSignal | null = null
@@ -190,6 +176,7 @@ export class RunnerHost {
   ) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
+    this.workResourceLimits = normalizeWorkResourceLimits(options.workResourceLimits)
     const build = loadBuildInfo()
     this.buildInfo = build
     this.buildGitHash = build.gitHash
@@ -329,6 +316,9 @@ export class RunnerHost {
         log.warn('terminal task-log delivery store unavailable; runner admission gated')
       }
       await this.loadWorkResultJournal()
+      // Probe once before any work can be admitted. Hosts without util-linux
+      // remain protected by the aggregate-RSS and wall-clock watchdog.
+      await probePrlimit()
       // Load the AgentSession runtime-event outbox BEFORE accepting
       // SignalR commands or claiming work. An unreadable snapshot is
       // never replaced with empty state — the outbox loads itself once
@@ -421,6 +411,12 @@ export class RunnerHost {
     this.openCodeRuntime = factory({
       directory: process.cwd(),
       ...(this.options.runtimeIdleGraceMs !== undefined ? { idleGraceMs: this.options.runtimeIdleGraceMs } : {}),
+      ...(this.options.quarantineDrainTimeoutMs !== undefined
+        ? { quarantineDrainTimeoutMs: this.options.quarantineDrainTimeoutMs }
+        : {}),
+      ...(this.options.runtimeShutdownTimeoutMs !== undefined
+        ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
+        : {}),
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const startResult = await this.openCodeRuntime.start(signal)
@@ -432,6 +428,9 @@ export class RunnerHost {
     this.syncOpenCodeWorkOwners()
     this.piRuntime = getPiRuntimeFactory()({
       agentDir: this.options.runnerRoot,
+      ...(this.options.runtimeShutdownTimeoutMs !== undefined
+        ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
+        : {}),
       ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const piStart = await this.piRuntime.start()
@@ -456,6 +455,7 @@ export class RunnerHost {
         process.cwd(),
         this.skillResolver,
         this.namedWorkspaceManager,
+        { workResourceLimits: this.workResourceLimits },
       ),
       this.agentSessionRuntimeEventOutbox,
       undefined,
@@ -463,6 +463,7 @@ export class RunnerHost {
       this.bindingRecoveryCoordinator,
       this.skillResolver,
       this.namedWorkspaceManager,
+      this.workResourceLimits,
     )
   }
 
@@ -565,6 +566,7 @@ export class RunnerHost {
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
       // already holds.
+      const startupRecoveryKeys = new Set<string>()
       for (const work of works) {
         if (signal.aborted) break
         const key = workKey(work)
@@ -575,6 +577,7 @@ export class RunnerHost {
         // better.
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
+        const startupObserved = this.recoveredStartedWork.has(key)
         const recovery = isAgentRecoveryDispatch(work)
         let admission: Awaited<ReturnType<WorkResultJournal['begin']>>
         try {
@@ -588,24 +591,38 @@ export class RunnerHost {
           })
           continue
         }
-        if (!recovery && admission !== 'new') {
-          log.warn('work dispatch has a durable unfinished result; refusing replay', {
+        if (!recovery && startupObserved && admission === 'new') {
+          // The startup observation may have retired the durable fence just
+          // before this same identity was redelivered. Re-arm it locally and
+          // reconcile the delivery instead of treating it as fresh work.
+          this.recoveredStartedWork.drop(key)
+          const done = reconcileStartedDispatch(this.recoveryContext(), work, signal, key)
+          this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
+          this.syncOpenCodeWorkOwners()
+          continue
+        }
+        if (admission === 'started' && !recovery) {
+          // A redelivered started fence can adopt a live bound turn or
+          // produce the runner-restarted observation; it never re-executes.
+          this.recoveredStartedWork.drop(key)
+          const done = reconcileStartedDispatch(this.recoveryContext(), work, signal, key)
+          this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
+          this.syncOpenCodeWorkOwners()
+          continue
+        }
+        if (admission !== 'new' && (!recovery || admission === 'completed')) {
+          log.warn('work dispatch has a durable unfinished result; retaining fence', {
             work: work.workId,
             state: admission,
           })
           continue
         }
         if (recovery) {
-          if (admission === 'completed') {
-            log.warn('recovery dispatch has a durable completed result; awaiting its report', {
-              work: work.workId,
-            })
-            continue
-          }
           // The delivery-driven reconciliation supersedes the startup
           // unknown-report sweep for this identity.
-          this.recoveredStartedWork.drop(key)
+          if (startupObserved) startupRecoveryKeys.add(key)
           if (work.agentRecovery!.runtime.trim().toLowerCase() !== 'pi') {
+            this.recoveredStartedWork.drop(key)
             // No turn-adoption API: the execution context is provably
             // gone, so surface unknown without executing anything.
             this.recoveredStartedWork.enqueue(work)
@@ -622,6 +639,9 @@ export class RunnerHost {
         this.inFlight.set(key, { done, work, awaitingResultPersistence: false })
         this.syncOpenCodeWorkOwners()
       }
+
+      await this.recoveredStartedWork.retryDue(Date.now())
+      for (const key of startupRecoveryKeys) this.recoveredStartedWork.drop(key)
 
       if (signal.aborted) break
       // Pace the next round. With nothing in flight, sleep one interval
@@ -722,6 +742,22 @@ export class RunnerHost {
   private isOpenCodeReadyForClaim(): boolean {
     const runtime = this.openCodeRuntime
     return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
+  }
+
+  private recoveryContext(): HostRecoveryContext {
+    return {
+      connection: this.connection,
+      runnerId: this.options.runnerId,
+      openCodeRuntime: this.openCodeRuntime,
+      piRuntime: this.piRuntime,
+      workResultJournal: this.workResultJournal,
+      removeInFlight: (key) => this.inFlight.delete(key),
+      queueAwaitingAck: (key, work, result) =>
+        this.awaitingAck.set(key, { work, entry: { result, attempts: 0, retryAt: null } }),
+      syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
+      reportOnce: (key) => this.reportOnce(key),
+      scheduleReportRetry: (key) => this.scheduleReportRetry(key),
+    }
   }
 
   /**
@@ -864,7 +900,6 @@ export class RunnerHost {
         }
       }),
     )
-    await this.recoveredStartedWork.retryDue(now)
   }
 
   private nextReconciliationInterval(): number {

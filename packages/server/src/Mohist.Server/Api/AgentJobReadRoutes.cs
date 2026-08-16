@@ -91,19 +91,33 @@ public static class AgentJobReadRoutes
             return ApiResults.NotFound($"Agent '{agentRef}' not found");
 
         HashSet<AgentJobStatus>? statusSet = null;
+        HashSet<string>? requestedStatuses = null;
         if (!string.IsNullOrWhiteSpace(status))
         {
+            requestedStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             statusSet = [];
             foreach (var token in status.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
+                if (string.Equals(token, "recovering", StringComparison.OrdinalIgnoreCase))
+                {
+                    requestedStatuses.Add("recovering");
+                    statusSet.Add(AgentJobStatus.Unknown);
+                    continue;
+                }
+
                 if (!Enum.TryParse<AgentJobStatus>(token, ignoreCase: true, out var parsed))
                     return ApiResults.BadRequest(
-                        $"Unknown status '{token}'. Valid values: pending, running, completed, failed, unknown.");
+                        $"Unknown status '{token}'. Valid values: pending, running, completed, failed, unknown, recovering.");
+                requestedStatuses.Add(parsed.ToString());
                 statusSet.Add(parsed);
             }
         }
 
         var items = await jobs.ListByAgentAsync(project.Id, agent.Id, statusSet, limit ?? 50, ct);
+        if (requestedStatuses is not null)
+            items = items
+                .Where(item => requestedStatuses.Contains(item.Status ?? string.Empty))
+                .ToList();
         var dtos = items
             .Select(item => new AgentJobListItemDto(
                 JobId: item.JobKey,
@@ -111,7 +125,9 @@ public static class AgentJobReadRoutes
                 AgentName: agent.Name,
                 Status: item.Status,
                 SubmittedAt: item.SubmittedAt,
-                TerminalAt: item.TerminalAt))
+                TerminalAt: item.TerminalAt,
+                FailureReason: item.FailureReason,
+                RecoveryDeadlineAt: item.RecoveryDeadlineAt))
             .ToList();
         return ApiResults.Ok(dtos);
     }
@@ -131,6 +147,7 @@ public static class AgentJobReadRoutes
             return ApiResults.NotFound("Job not found");
 
         var status = await grain.GetStatusAsync();
+        var isRecovering = status == AgentJobStatus.Unknown && snapshot.IsRecovering;
         var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled;
         // Unknown is nonterminal; surface it without
         // the terminal-result fields. Callers consume it as a
@@ -151,19 +168,27 @@ public static class AgentJobReadRoutes
             failureReason = terminal.FailureReason;
             exitCode = terminal.ExitCode;
         }
+        else if (status == AgentJobStatus.Unknown)
+        {
+            failureReason = snapshot.FailureReason;
+        }
 
         return ApiResults.Ok(new AgentJobViewDto(
             JobId: jobId,
-            Status: ToStatusString(status),
+            Status: ToStatusString(status, isRecovering),
             Message: message,
             Output: output,
             ArtifactUploadIds: artifactUploadIds,
             FailureReason: failureReason,
             ExitCode: exitCode,
-            ExecutionDefinition: snapshot.ExecutionDefinition));
+            ExecutionDefinition: snapshot.ExecutionDefinition,
+            RecoveryDeadlineAt: isRecovering ? snapshot.RecoveryDeadlineAt : null));
     }
 
-    private static string ToStatusString(AgentJobStatus status) => status switch
+    private static string ToStatusString(AgentJobStatus status, bool isRecovering = false) =>
+        isRecovering && status == AgentJobStatus.Unknown
+            ? "recovering"
+            : status switch
     {
         AgentJobStatus.Pending => "pending",
         AgentJobStatus.Running => "running",
@@ -187,7 +212,9 @@ public sealed record AgentJobListItemDto(
     string? AgentName,
     string? Status,
     string? SubmittedAt,
-    string? TerminalAt);
+    string? TerminalAt,
+    string? FailureReason = null,
+    DateTimeOffset? RecoveryDeadlineAt = null);
 
 public sealed record AgentStatusDetailResponse(
     string AgentId,
@@ -219,4 +246,5 @@ public sealed record AgentJobViewDto(
     IReadOnlyList<string>? ArtifactUploadIds,
     string? FailureReason,
     int? ExitCode,
-    AgentExecutionDefinition? ExecutionDefinition);
+    AgentExecutionDefinition? ExecutionDefinition,
+    DateTimeOffset? RecoveryDeadlineAt = null);

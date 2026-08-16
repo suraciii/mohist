@@ -18,6 +18,7 @@ public union WorkflowEvent(
     TaskStarted,
     TaskCompleted,
     TaskFailed,
+    TaskInterrupted,
     TaskCancelled,
     AgentTaskResultUnconfirmed,
     TaskBlocked,
@@ -26,6 +27,7 @@ public union WorkflowEvent(
     CheckPassed,
     CheckFailed,
     CheckPending,
+    ChecksInterrupted,
     WorkflowArtifactRecorded);
 
 public sealed record WorkflowRunStarted;
@@ -54,6 +56,12 @@ public sealed record FeedbackRequested(string Stage, string FeedbackId, string? 
 public sealed record TaskStarted(string Stage, string TaskId, string WorkerId);
 public sealed record TaskCompleted(string Stage, string TaskId);
 public sealed record TaskFailed(string Stage, string TaskId, string? Message);
+public sealed record TaskInterrupted(
+    string Stage,
+    string TaskId,
+    string WorkId,
+    string Reason,
+    DateTimeOffset RecoveryDeadlineAt);
 public sealed record TaskCancelled(string Stage, string TaskId);
 public sealed record AgentTaskResultUnconfirmed(
     string Stage,
@@ -68,3 +76,8 @@ public sealed record WorkflowRunBlocked(string Stage, string TaskId, string Reas
 public sealed record CheckPassed(string Stage, string CheckName, string? Message);
 public sealed record CheckFailed(string Stage, string CheckName, string? Message);
 public sealed record CheckPending(string Stage, string CheckName, string? Message);
+public sealed record ChecksInterrupted(
+    string Stage,
+    string WorkId,
+    string Reason,
+    DateTimeOffset RecoveryDeadlineAt);
