@@ -663,3 +663,20 @@ Channel decision (grounded in live source):
 - `npm run format:check` still reports the repository's existing formatting
   drift in legacy Runner files touched by this slice; no unrelated formatter
   churn was included.
+
+## T-004 Current Task Verification
+
+- The T-004 implementation is already present on this run branch in
+  `6cae889bf` and subsequent receipt-replay hardening commits. It records the
+  original `TaskRun` as immutable `Interrupted` history, allocates generation
+  plus one with a new logical AgentTurn and work delivery identity, and commits
+  the replacement and receipt ledger before settling the update fence.
+- Focused current Server spec verification passed 40/40: 16 Workflow receipt,
+  replacement, frozen-settlement, stale-ingress, and replay tests plus 24
+  update/reconciliation/API tests.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2,667, Server Arch 68, CLI 1,856, Runner 1,660, and Web 4,727.
+- No additional production change was necessary in this task run; the
+  required implementation and deterministic acceptance coverage were already
+  committed in the prepared branch. The worktree is clean apart from this
+  progress entry.
