@@ -163,14 +163,8 @@ public class WorkflowSessionTerminalConvergenceSpecs
         return (project, issue, workflowRunId);
     }
 
-    private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
-    {
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        return await db.AgentSessions
-            .Where(s => s.LabelSourceId == workflowRunId && s.LabelSessionName == sessionName)
-            .Select(s => s.Id)
-            .SingleAsync();
-    }
+    private Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName) =>
+        WorkflowApiTestSupport.ResolveSessionIdAsync(_fixture.Services, workflowRunId, sessionName);
 
     private static string RunnerAgentSessionAttachPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/attach";

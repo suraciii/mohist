@@ -202,71 +202,17 @@ public class WorkflowRunDetailApiSpecs
         return (id, name);
     }
 
-    private async Task<(string issueKey, int number)> CreateIssueInBacklogAsync(string projectId)
-    {
-        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueKey = GrainKey.Issue(new IssueKey(projectId, number));
-        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
-        await grain.CreateAsync(projectId, number, "Workflow control test", null, null, null, isDraft: false);
-        return (issueKey, number);
-    }
+    private Task<(string issueKey, int number)> CreateIssueInBacklogAsync(string projectId) =>
+        WorkflowApiTestSupport.CreateIssueInBacklogAsync(_grains, projectId);
 
     private Task DispatchEventsAsync() =>
-        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        WorkflowApiTestSupport.DispatchEventsAsync(_grains);
 
-    private async Task SeedWorkflowTemplateAsync(string projectId)
-    {
-        var definition = new WorkflowDefinition(
-        [
-            new StageDefinition("plan", [new("draft", "Draft", "spec/task")], []),
-            new StageDefinition("build", [new("compile", "Compile", "spec/task")], []),
-        ]);
+    private Task SeedWorkflowTemplateAsync(string projectId) =>
+        WorkflowApiTestSupport.SeedWorkflowTemplateAsync(_connectionString, projectId);
 
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        const string templateId = "spec/workflow";
-        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
-        if (existingTemplate is null)
-        {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = templateId,
-                Template = WorkflowGrainTestHelpers.SerializeProfile(definition),
-            });
-        }
-        else
-        {
-            existingTemplate.Template = WorkflowGrainTestHelpers.SerializeProfile(definition);
-            existingTemplate.UpdatedAt = TestTime.UtcNow;
-        }
-
-        var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
-        if (profile is null)
-        {
-            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
-            {
-                ProjectId = projectId,
-                DefaultTemplateId = templateId,
-            });
-        }
-        else
-        {
-            profile.DefaultTemplateId = templateId;
-            profile.UpdatedAt = TestTime.UtcNow;
-        }
-        await db.SaveChangesAsync();
-    }
-
-    private async Task<WorkflowRun> LoadRunAsync(string wrId)
-    {
-        using var scope = _services.CreateScope();
-        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
-        return await store.LoadAsync(wrId) ?? throw new InvalidOperationException($"Workflow run '{wrId}' not found");
-    }
+    private Task<WorkflowRun> LoadRunAsync(string wrId) =>
+        WorkflowApiTestSupport.LoadRunAsync(_services, wrId);
 
     /// <summary>
     /// Mark the in-progress issue bound to <paramref name="wrId"/> as
