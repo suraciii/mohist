@@ -1,41 +1,43 @@
-# Self-Review (round 1) — Issue 619
+# Self-Review (round 2) - Issue 619
 
-Reviewer stance: reviewer, not fixer. No prior `self-review.md` existed, so this is a first-review full sweep against the current Mohist issue record.
+Reviewer stance: reviewer, not fixer. This is a re-review against the current issue record read with `mo issue view 619 --project proj_f6c141d63b6243bfbb481737b2243b87 --json body,comments,attachments,feedback,updatedAt` and the current plan artifacts. The issue has four acceptance criteria: same-conversation unavailability guidance, privileged diagnostic detail with caller-safe redaction, deduplication across Slack redelivery, and no AgentJob/Session/SessionInput for an unready launch.
+
+## Prior Findings
+
+- **F1 fixed - non-disabled Connection unavailability is now in scope.** `proposal.md:7-12,20-23`, `design.md:13-19,40-44,66-68`, `spec.md:1-4,22-43,76-93,108-117`, and `tasks.json:T-001.acceptanceCriteria[1-3,8-9]` now define the enabled, non-disabled unavailable states: incomplete setup, unhealthy/degraded health including service-offline and backpressure, and `OfflineGapAt`. They specify Connection-gate precedence, the existing `backpressured` code, `connection_unavailable` for other covered states, the required safe nudge, deduplication, no executable resources, and the unchanged Disabled audited-discard path. The missing issue goal is covered and assigned to implementation and tests.
+
+- **F2 fixed - first mentions in unbound channel threads are now explicit new-launch paths.** `design.md:7,40,42,52,66`, `spec.md:16-20,35-38,90-101`, and `tasks.json:T-001.acceptanceCriteria[1,3-4,6,9]` identify the first mention for this Connection in an unbound thread as a new launch. The plan gates it before thread-history reads and executable side effects, preserves `body.ThreadTs` as the nudge target, and includes targeting, deduplication, resource-isolation, and normal-flow coverage. Bound-thread follow-ups remain exempt.
+
+No prior must-fix finding remains unaddressed. The amended sections are consistent with each other and do not regress the issue's Disabled exception or the existing-session distinction.
 
 ## Must-Fix Findings
 
-### F1 — The plan omits the issue's non-disabled Connection-unavailable goal
-
-**Must-fix.** The issue Product Shape says that admission must publish guidance when the Agent is not ready **or its Connection is unavailable**. The Non-Goals section excludes only `Connection Disabled`, which must retain its existing audited-discard behavior; it does not exclude unhealthy, offline, or other unavailable Connection states.
-
-The plan narrows the feature to Agent executability in `proposal.md:7` and `design.md:7`, then explicitly says in `design.md:58` and `tasks.json:T-002.acceptanceCriteria[4]` that disabled, unhealthy, offline, and backpressured Connections retain their existing responses. The spec only covers the existing disabled/backpressure response in `spec.md:85-88`; it defines no Server-authored setup/unavailability nudge, stable per-message delivery identity, or no-execution-resource behavior for the other unavailable states.
-
-Leaving this gap means a valid in-scope mention or DM can still receive no setup-mode guidance when the Connection is unavailable, violating the issue's Product Shape. The plan must define which non-disabled unavailable states are covered, add the corresponding nudge and side-effect/dedup contract, and assign implementation and tests while preserving Disabled's current semantics.
-
-### F2 — First mentions inside unbound channel threads are not covered as new-launch paths
-
-**Must-fix.** The issue scope says `mention` and DM admission paths, not only channel-root messages. The current state machine has an in-scope new-launch path for a first Bot mention inside an existing human discussion: `SlackConnectionRoutes.cs:1578-1613` reaches `ReadThreadHistoryIfAnyAsync` and then calls `LaunchChannelRootAsync` when there is no existing binding. This is a new Session launch, not an existing-session follow-up; the product documentation also describes it at `docs/slack.md:350-357`.
-
-The plan repeatedly limits the path to a “channel-root mention/launch” (`proposal.md:20`, `design.md:7,40`, `spec.md:2,9-12`, and `tasks.json:T-001.acceptanceCriteria[1,3]`). Its targeting rule says a channel-root nudge has no thread target (`design.md:50`), and its tests enumerate only DM and channel-root cases. As written, a builder can satisfy the plan while leaving this existing new-launch route with the generic rejection or posting guidance at the wrong root instead of the triggering thread. That fails the issue's mention-scope goal and the plan's own “triggering thread or root” goal.
-
-Add an explicit requirement/scenario and task acceptance coverage for an unbound-thread first mention: readiness must gate it before inbox/attachment/workspace/session effects, the nudge must target `body.ThreadTs`, and the same message identity must deduplicate it. Existing bound-thread follow-ups should remain exempt as the plan already intends.
+None.
 
 ## Observations
 
-- **O1 — The operator UI projection is underspecified.** `tasks.json:T-002` requires a richer Slack Connection diagnostic response, but the current Web diagnostic model and page expose only legacy `agentReadiness` (`packages/web/src/entities/agent-connection/model/types.ts:11-29` and `packages/web/src/pages/connection-diagnostic/ui/ConnectionDiagnosticPage.tsx:437-455`). The plan names Server/API specs but no Web model, page, or UI test changes. The existing Agent detail surface already has canonical executability, so this is not independently a must-fix; it should be clarified whether the API response itself is the intended authorized surface or the Connection diagnostic page must render the gaps and repair entry points.
-- **O2 — Final safe wording remains an open question.** `design.md:87` leaves localization and the not-configured/not-executable wording undecided. The safety and actionability contract is otherwise specified, so this is an implementation observation rather than a readiness blocker.
-- **O3 — Delivery uncertainty is correctly limited to the existing at-least-once contract.** `design.md:70` acknowledges that a manual resend after an uncertain provider result can duplicate a Slack message, while the normative requirement concerns reuse of one durable intent and automatic recovery. This is consistent with the existing outbox model and does not create a must-fix finding for this issue.
+- **O1 - Diagnostic API versus UI scope could be made more explicit.** `tasks.json:T-002` requires the authorized Slack Connection diagnostic/read response to expose the full canonical result, but it does not name changes to the Web diagnostic model or page. The current page renders legacy `agentReadiness` in `packages/web/src/pages/connection-diagnostic/ui/ConnectionDiagnosticPage.tsx:437-455`, while the Agent detail surface already renders canonical executability. This is not a must-fix for the issue because the existing privileged Agent surface and the planned authorized read response provide the required owner/operator view; the implementation should still clarify whether the Connection page is expected to render the new gaps and repair entry points.
 
-## Full-Sweep Dimension Verdicts
+- **O2 - Required-nudge backpressure has a state-side-effect edge case.** The live `SlackOutboxStore.EnqueueRequiredAsync` inserts a required `UserAction` even at capacity and then can flip `ConnectionHealth` to backpressured. The plan acknowledges this in `design.md:44,73`, while `design.md:60` and `tasks.json:T-002.acceptanceCriteria[4]` broadly say a Connection-unavailable admission does not mutate `ConnectionHealth`. The builder should define whether the backpressure transition is the intentional exception or whether the nudge path must avoid it. The issue does not require Connection state immutability, so this does not change the verdict.
 
-- **Issue goals and acceptance criteria — FAIL.** The four checkbox criteria are addressed for blocked DM/channel-root Agent readiness: visible same-conversation guidance, safe versus privileged detail, message-identity deduplication, and no AgentJob/Session/SessionInput. F1 and F2 show that the broader Product Shape and mention scope are not fully covered.
-- **Coverage — FAIL.** F1 leaves non-disabled Connection-unavailable admission uncovered; F2 leaves first mentions in unbound channel threads untested and ambiguously specified.
-- **Correctness — FAIL.** The canonical readiness gate, required `UserAction` outbox row, existing uniqueness constraint, and pre-admission resource ordering are coherent for the covered Agent-blocked paths. They do not establish the required behavior for the two omitted paths above.
-- **Consistency with the current codebase and conventions — PASS, checked with no convention issue.** The use of `AgentReadinessService`, `AgentInfo.Executability`, `SlackOutboxKinds.UserAction`, `EnqueueRequiredAsync`, the existing dispatch-reference uniqueness index, and the Disabled audit path matches current code. The findings are scope/coverage gaps rather than violations of those conventions.
-- **Task breakdown, ordering, completeness, and verifiability — FAIL.** The T-001 to T-002 dependency is acyclic and the covered paths have concrete acceptance tests, but no task/spec scenario owns F1 or F2, so a builder can complete every listed task without proving the full issue goal.
+- **O3 - Accepted-replay lookup is described as optional.** `design.md:40` says a read-only stable-identity replay lookup "may be used", but `design.md:75` and `tasks.json` notes rely on distinguishing previously accepted identities to preserve the existing route when readiness changes between deliveries. The implementation should make that lookup mandatory for accepted-replay preservation or explicitly narrow the preservation claim. The issue's four acceptance criteria concern blocked new admissions and do not independently require this state-transition behavior.
+
+- **O4 - Follow-up behavior under Connection backpressure needs an explicit boundary.** The plan says existing DM and bound-thread follow-ups remain usable when Connection availability is blocked (`design.md:40`, `tasks.json:T-001.acceptanceCriteria[7]`), while the current route deliberately rejects backpressured follow-ups in `HandleDmIngressAsync` and `DispatchChannelFollowupAsync`. This is a plan/codebase compatibility question outside the issue's stated acceptance criteria; the task should state whether the existing backpressure rejection remains the exception.
+
+## Dimension Verdicts
+
+- **Issue goals and acceptance criteria - PASS, checked with no must-fix issue.** The plan now provides a Server-authored same-conversation nudge for blocked Agent and covered non-disabled Connection cases, safe fixed caller text, canonical privileged detail, stable per-message outbox identity, and a pre-admission resource boundary. It preserves the issue's Disabled non-goal, excludes accepted execution failures and Manager conversations, and does not alter Agent readiness rules.
+
+- **Coverage - PASS, checked with no must-fix issue.** Coverage includes DM `Launch` and `NewTaskLaunch`, channel-root mentions, first mentions in unbound channel threads, bound-thread and DM follow-ups, Agent `not-configured` and `not-executable`, executable and unknown states, Disabled, setup-incomplete, unhealthy/degraded, service-offline, offline-gap, and backpressured Connections. It also covers root/thread targeting, redelivery, concurrency, uncertain delivery, diagnostics, documentation, and resource counts.
+
+- **Correctness - PASS, checked with no must-fix issue.** The proposed ordering classifies and validates before gating, checks Connection availability before Agent executability, avoids inbox/thread-history launch-context/attachment/workspace/session/liveness side effects in blocked branches, and routes normal and existing-session work through the current paths. The canonical `AgentReadinessService`, existing `UserAction` outbox kind, required-delivery uniqueness constraint, and existing retry/reconciliation lifecycle are used consistently.
+
+- **Consistency with the current codebase and conventions - PASS, checked with no must-fix issue.** The plan matches the existing `SlackConnectionRoutes` DM/channel split, `AgentReadinessService` and `AgentInfo.Executability` contracts, `SlackOutboxStore.EnqueueRequiredAsync`, `SlackMessageIdentity.AsKey()`, Disabled audit branch, and outbox uniqueness model. No new dependency, persistence kind, or adapter-owned state is introduced.
+
+- **Task breakdown, ordering, completeness, and verifiability - PASS, checked with no must-fix issue.** T-001 owns ingress gating, nudge production, documentation, resource isolation, delivery convergence, and ingress/outbox tests. T-002 depends on T-001 and owns the canonical diagnostic projection and authorization/state-independence tests. The spec anchors are current, the task graph is acyclic, and `jq empty openspec/changes/issue-619/tasks.json` passes.
 
 ## Overall Verdict
 
-FAIL — must-fix findings F1 and F2 remain; the plan is not ready to build.
+PASS - no must-fix problems; the plan is ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
