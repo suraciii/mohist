@@ -95,6 +95,26 @@ public class AgentActivityFeedAssemblerSpecs
     }
 
     [Fact]
+    public async Task GetActivityAsync_GenericSessionWithoutIssueRef_KeepsZeroIssueNumberAndAgentAttribution()
+    {
+        var project = await CreateProjectAsync();
+        var agentId = "agent_noIssueRef";
+        var agentName = "no-issue-ref-agent";
+        var sessionId = $"session-{Guid.NewGuid():N}";
+
+        await InsertGenericSessionAsync(project.Id, sessionId, agentId, agentName, issueNumber: null, isActive: true);
+
+        var assembler = ResolveAssembler();
+        var result = await assembler.GetActivityAsync(project.Id, limit: 10);
+
+        var card = Assert.Single(result.Sessions, c => c.SessionId == sessionId);
+        Assert.Equal(0, card.IssueNumber);
+        Assert.Equal("Issue #0", card.IssueTitle);
+        Assert.Equal(agentId, card.AgentId);
+        Assert.Equal(agentName, card.AgentName);
+    }
+
+    [Fact]
     public async Task GetActivityAsync_WaitingCardsForwardedAndCountedSeparately()
     {
         var project = await CreateProjectAsync();
