@@ -595,3 +595,22 @@ Plan skeleton for next run (est. half a day):
   The requested SpecTests filter is ignored by Microsoft Testing Platform,
   so the complete project ran successfully. The worktree remained clean
   before this progress entry.
+
+## T-004 Verification (current run)
+
+- Audited the existing adapter implementation against the native-translation
+  requirement: Pi maps only canonical `reasoningEffort` through its private
+  table, never applies `variant` as a thinking level, carries the physical
+  effort-derived level through reset, and projects `appliedReasoningEffort`
+  only for frozen effort. OpenCode rejects non-empty effort before session or
+  provider access and projects the required
+  `unsupported_execution_configuration` category through AgentJob and
+  Workflow action boundaries.
+- Added regression coverage for Pi effort-derived reset carry-over alongside
+  a model variant, and OpenCode follow-up rejection before session lookup.
+- Baseline focused adapter tests passed (108), the added adapter regressions
+  passed (29), Runner source/test typechecks passed, and full Runner CI passed
+  (155 files, 1668 tests). The first parallel `npm run test:fast` attempt hit
+  a shared .NET build artifact lock (`CS2012`); the retry passed all lanes:
+  Runner 1668, Web 4732, Server Unit 2722, Arch 68, Workflow 178, and CLI
+  1858.

@@ -244,6 +244,27 @@ describe('OpenCodeRuntime.runTurn — input validation', () => {
     expect(client.sessionCreate).not.toHaveBeenCalled()
     expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
+
+  it('rejects an explicit reasoning effort on follow-up before resolving the session', async () => {
+    const { deps, client } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.followup({
+      target: { runtime: 'opencode', runtimeSessionId: 'ses-existing', workDir: '/tmp/projA' },
+      prompt: 'continue',
+      options: { variant: 'balanced', reasoningEffort: 'high' },
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.kind).toBe('unsupported-execution-configuration')
+    expect(result.error.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'unsupported_execution_configuration' })]),
+    )
+    expect(client.sessionGet).not.toHaveBeenCalled()
+    expect(client.sessionCreate).not.toHaveBeenCalled()
+    expect(client.sessionPrompt).not.toHaveBeenCalled()
+  })
 })
 
 describe('OpenCodeRuntime.runTurn — unrestorable binding', () => {
