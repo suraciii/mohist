@@ -264,3 +264,14 @@ Plan skeleton for next run (est. half a day):
   coverage. Verification: Server UnitTests 2717 passed, Server SpecTests
   3938 passed, focused Pi projector tests 8 passed, and Runner source
   typecheck passed. `git diff --check` passed.
+
+## T-001 Verification (current run)
+
+- Confirmed the existing `869e9a83a` implementation covers the canonical
+  schema vocabulary, Agent and Issue allowed-key surfaces, issue `vars.agent`
+  forwarding, CLI create/edit/clear/view behavior, local validation, and
+  effort/variant independence.
+- Verification: Server UnitTests 2717 passed, Server SpecTests 3938 passed,
+  CLI tests 1858 passed, and `git diff --check` passed. The SpecTests runner
+  ignored the requested name filter under Microsoft.Testing.Platform and ran
+  the full project.
