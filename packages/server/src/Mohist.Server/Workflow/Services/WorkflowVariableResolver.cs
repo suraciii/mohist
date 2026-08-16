@@ -89,7 +89,23 @@ public class WorkflowVariableResolver : IScopedService
         return new WorkspaceIdentity(
             path.GetString()!,
             workspace.TryGetProperty("branch", out var branch) ? branch.GetString() : null,
-            workspace.TryGetProperty("changeDir", out var changeDir) ? changeDir.GetString() : null);
+            workspace.TryGetProperty("changeDir", out var changeDir) ? changeDir.GetString() : null,
+            workspace.TryGetProperty("workspaceId", out var workspaceId) && workspaceId.ValueKind == JsonValueKind.String
+                ? workspaceId.GetString()
+                : workspace.TryGetProperty("id", out var legacyId) && legacyId.ValueKind == JsonValueKind.String
+                    ? legacyId.GetString()
+                    : null,
+            workspace.TryGetProperty("workspaceGeneration", out var generation)
+                ? generation.Clone()
+                : workspace.TryGetProperty("generation", out var legacyGeneration)
+                    ? legacyGeneration.Clone()
+                    : null,
+            workspace.TryGetProperty("head", out var head) && head.ValueKind == JsonValueKind.String
+                ? head.GetString()
+                : null,
+            workspace.TryGetProperty("tree", out var tree) && tree.ValueKind == JsonValueKind.String
+                ? tree.GetString()
+                : null);
     }
 
     private async Task<RunContext> ResolveRunContextAsync(string runId)

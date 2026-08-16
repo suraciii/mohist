@@ -40,7 +40,11 @@ public sealed record WorkflowRunMetadata(
 public sealed record WorkspaceIdentity(
     [property: Id(0)] string Path,
     [property: Id(1)] string? Branch = null,
-    [property: Id(2)] string? ChangeDir = null);
+    [property: Id(2)] string? ChangeDir = null,
+    [property: Id(3)] string? WorkspaceId = null,
+    [property: Id(4)] JsonElement? WorkspaceGeneration = null,
+    [property: Id(5)] string? Head = null,
+    [property: Id(6)] string? Tree = null);
 
 /// <summary>
 /// authoritative, immutable repository

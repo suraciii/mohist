@@ -86,6 +86,8 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var task = current.RunningTask;
+            if (task?.WorkflowTaskRecovery is not null)
+                return [];
             if (task?.Interruption is { } taskInterruption
                 && taskInterruption.RecoveryDeadlineAt <= now)
             {

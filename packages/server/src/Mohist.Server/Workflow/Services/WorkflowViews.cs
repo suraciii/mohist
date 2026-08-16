@@ -22,7 +22,8 @@ public sealed record WorkflowStatusView(
     string? AssignedTo = null,
     MetadataView? Metadata = null,
     AgentResultAttentionView? AgentResultAttention = null,
-    WorkInterruptionView? Interruption = null);
+    WorkInterruptionView? Interruption = null,
+    WorkflowTaskRecoveryView? WorkflowTaskRecovery = null);
 
 /// <summary>
 /// Read-only projection of the durable interruption fact. The workflow and
@@ -79,6 +80,28 @@ public sealed record AgentResultSettlementView(
     string? StopOperationId = null,
     string? NextAction = null,
     IReadOnlyList<string>? RecoveryActions = null);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskRecoveryView(
+    string State,
+    string Reason,
+    DateTimeOffset? DeadlineAt,
+    string NextAction,
+    string BoundaryFingerprint,
+    string WorkflowRunId,
+    string? Stage,
+    string TaskRunId,
+    string WorkId,
+    string OwnerKind,
+    string OwnerId,
+    string RunnerId,
+    string? WorkspaceId,
+    JsonElement? WorkspaceGeneration,
+    JsonElement? Output,
+    IReadOnlyList<ArtifactRef>? Artifacts,
+    IReadOnlyList<string>? CleanupScope,
+    IReadOnlyList<string> RecoveryActions,
+    bool ProjectionApplied);
 
 [GenerateSerializer]
 public sealed record StageStatusView(
@@ -166,7 +189,8 @@ public sealed record TaskStatusView(
     JsonElement? Output = null,
     ExecutionError? Error = null,
     AgentResultSettlementView? AgentResultSettlement = null,
-    WorkInterruptionView? Interruption = null);
+    WorkInterruptionView? Interruption = null,
+    WorkflowTaskRecoveryView? WorkflowTaskRecovery = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

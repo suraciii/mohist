@@ -268,7 +268,16 @@ public record WorkDispatch(
     /// work: the runner must reconcile against the bound execution instead
     /// of submitting a new prompt. Null on fresh dispatches.
     /// </summary>
-    [property: Id(28)] AgentRecoveryBinding? AgentRecovery = null)
+    [property: Id(28)] AgentRecoveryBinding? AgentRecovery = null,
+    /// <summary>
+    /// Exact Workflow completion-boundary admission facts. These fields are
+    /// append-only and are absent for AgentJob dispatches.
+    /// </summary>
+    [property: Id(29)] string? RunnerId = null,
+    [property: Id(30)] string? WorkspaceId = null,
+    [property: Id(31)] JsonElement? WorkspaceGeneration = null,
+    [property: Id(32)] string? WorkspaceHead = null,
+    [property: Id(33)] string? WorkspaceTree = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }
@@ -369,7 +378,10 @@ public record WorkResult(
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
     [property: Id(5)] List<RuntimeTaskInput>? AddTasks = null,
-    [property: Id(6)] ExecutionError? Error = null)
+    [property: Id(6)] ExecutionError? Error = null,
+    [property: Id(7)] WorkflowTaskCompletionBoundary? CompletionBoundary = null,
+    [property: Id(8)] string? WorkspaceOutcome = null,
+    [property: Id(9)] string? WorkspaceReason = null)
 {
     /// <summary>
     /// Flattened <c>Error.Code</c> for cross-domain readers:

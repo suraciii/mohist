@@ -35,6 +35,25 @@ public sealed class TaskRun
     public TerminalLogOwnership? TerminalLogOwnership { get; set; }
     public AgentResultSettlement? AgentResultSettlement { get; set; }
     public WorkInterruption? Interruption { get; set; }
+    /// <summary>
+    /// The immutable runner completion boundary accepted for this attempt.
+    /// It remains on terminal tasks so exact report replays can be
+    /// acknowledged without reopening or re-projecting the attempt.
+    /// </summary>
+    public WorkflowTaskCompletionBoundary? CompletionBoundary { get; set; }
+    /// <summary>
+    /// Dispatch-time execution identity. This is the active admission fence
+    /// used when the run-level workspace snapshot is intentionally incomplete.
+    /// </summary>
+    public WorkflowTaskExecutionIdentity? ActiveExecutionIdentity { get; set; }
+    /// <summary>
+    /// Mutable recovery state for dirty and unconfirmed successful Actions.
+    /// Git evidence belongs here only for later observations; the initial
+    /// receipt remains in <see cref="CompletionBoundary"/>.
+    /// </summary>
+    public WorkflowTaskRecovery? WorkflowTaskRecovery { get; set; }
+    public WorkflowTaskReportProjection? PendingCompletionReport { get; set; }
+    public bool CompletionProjectionApplied { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
     public Dictionary<string, string>? SetVars { get; init; }

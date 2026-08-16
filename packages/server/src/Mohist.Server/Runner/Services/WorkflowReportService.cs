@@ -40,6 +40,12 @@ public sealed class WorkflowReportService : IScopedService
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        // Workflow task settlement is v1 fail-closed. A plain WorkResult can
+        // still be consumed by AgentJob, but it can never enter the legacy
+        // Workflow task settlement path.
+        if (item.IsTask && result.CompletionBoundary is null)
+            return (ReportAck.Stale.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+
         var report = _translator.TranslateResult(item, result, workflowRunId);
         if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && item.IsTask)
         {

@@ -63,6 +63,7 @@ public static class WorkflowStatusMapper
 
         var blocked = FindBlockedSettlement(run);
         var interruption = FindCurrentInterruption(run);
+        var recovery = run.FindWorkflowTaskRecovery();
 
         var stages = run.Stages.Select((s, i) =>
         {
@@ -79,7 +80,7 @@ public static class WorkflowStatusMapper
 
             return new StageStatusView(
                 s.Id,
-                DeriveStageStatus(s, blocked, stageInterruption),
+                DeriveStageStatus(s, blocked, recovery, stageInterruption, run.Status),
                 i,
                 MapTasks(s, definition),
                 MapChecks(s, definition),
@@ -107,12 +108,19 @@ public static class WorkflowStatusMapper
         var actions = BuildAvailableActions(run, effectiveFailure);
         if (blocked is not null)
             actions.Add(new AvailableActionView("stop", "Stop workflow", null));
+        if (recovery?.Task.WorkflowTaskRecovery is not null)
+        {
+            foreach (var action in WorkflowTaskRecoveryActions.All)
+                actions.Add(new AvailableActionView(action, action, null));
+        }
 
         return new WorkflowStatusView(
             run.Id,
-            blocked is not null
-                ? "blocked"
-                : interruption is not null ? "recoverable-interrupted" : WireStatus(run.Status),
+            recovery is { Task.WorkflowTaskRecovery: { } recoveryState }
+                ? RecoveryWireStatus(recoveryState.State)
+                : blocked is not null
+                    ? "blocked"
+                    : interruption is not null ? "recoverable-interrupted" : WireStatus(run.Status),
             run.CurrentStageId,
             stages,
             pending,
@@ -121,7 +129,10 @@ public static class WorkflowStatusMapper
             run.AssignedTo,
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt),
             MapAgentResultAttention(blocked),
-            MapInterruption(interruption));
+            MapInterruption(interruption),
+            recovery?.Task.WorkflowTaskRecovery is { } recoveryView
+                ? MapWorkflowTaskRecovery(recoveryView)
+                : null);
     }
 
     /// <summary>
@@ -146,21 +157,31 @@ public static class WorkflowStatusMapper
 
     private static string DeriveTaskStatus(TaskRun task) =>
         task.Status == TaskRunStatus.Running
-        && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked
-            ? "blocked"
-            : task.Status == TaskRunStatus.Running && task.Interruption is not null
-                ? "recoverable-interrupted"
-                : WireStatus(task.Status);
+        && task.WorkflowTaskRecovery is { Projection.Applied: false } recovery
+            ? RecoveryWireStatus(recovery.State)
+            : task.Status == TaskRunStatus.Running
+            && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked
+                ? "blocked"
+                : task.Status == TaskRunStatus.Running && task.Interruption is not null
+                    ? "recoverable-interrupted"
+                    : WireStatus(task.Status);
 
     private static string DeriveStageStatus(
         StageRun stage,
         WorkflowAgentResultSettlementTask? blocked,
-        WorkInterruption? interruption) =>
-        blocked is not null && blocked.Stage == stage.Id
-            ? "blocked"
-            : stage.Status == StageRunStatus.Running && interruption is not null
-                ? "recoverable-interrupted"
-                : WireStatus(stage.Status);
+        (StageRun Stage, TaskRun Task)? recovery,
+        WorkInterruption? interruption,
+        WorkflowRunStatus runStatus) =>
+        runStatus == WorkflowRunStatus.Stopped
+            ? "stopped"
+            : recovery is { } recovered && recovered.Stage.Id == stage.Id
+            && recovered.Task.WorkflowTaskRecovery is { Projection.Applied: false } recoveryState
+            ? RecoveryWireStatus(recoveryState.State)
+            : blocked is not null && blocked.Stage == stage.Id
+                ? "blocked"
+                : stage.Status == StageRunStatus.Running && interruption is not null
+                    ? "recoverable-interrupted"
+                    : WireStatus(stage.Status);
 
     private static WorkInterruption? FindCurrentInterruption(WorkflowRun run)
     {
@@ -278,10 +299,16 @@ public static class WorkflowStatusMapper
                     DurationMs: t.StartedAt is not null && t.FinishedAt is not null
                         ? (long)(t.FinishedAt.Value - t.StartedAt.Value).TotalMilliseconds
                         : null,
-                    Output: MapTaskOutput(t.Output),
+                    Output: t.Status == TaskRunStatus.Running
+                        && t.WorkflowTaskRecovery is { Projection.Applied: false } recoveryOutput
+                            ? recoveryOutput.Output
+                            : MapTaskOutput(t.Output),
                     Error: t.Error,
                     AgentResultSettlement: MapAgentResultSettlement(t),
-                    Interruption: MapInterruption(t.Interruption)))
+                    Interruption: MapInterruption(t.Interruption),
+                    WorkflowTaskRecovery: t.WorkflowTaskRecovery is { Projection.Applied: false } recovery
+                        ? MapWorkflowTaskRecovery(recovery)
+                        : null))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
@@ -377,6 +404,34 @@ public static class WorkflowStatusMapper
 
         return actions;
     }
+
+    private static string RecoveryWireStatus(WorkflowTaskRecoveryState state) => state switch
+    {
+        WorkflowTaskRecoveryState.Dirty => "recoverable-dirty",
+        WorkflowTaskRecoveryState.Unconfirmed => "recoverable-unconfirmed",
+        _ => throw new SwitchExpressionException($"No recovery wire mapping for {state}"),
+    };
+
+    private static WorkflowTaskRecoveryView MapWorkflowTaskRecovery(WorkflowTaskRecovery recovery) => new(
+        RecoveryWireStatus(recovery.State),
+        recovery.Reason,
+        recovery.DeadlineAt,
+        recovery.NextAction,
+        recovery.BoundaryFingerprint,
+        recovery.Identity.WorkflowRunId,
+        recovery.Identity.Stage,
+        recovery.Identity.TaskAttemptId,
+        recovery.Identity.WorkId,
+        recovery.Identity.OwnerKind,
+        recovery.Identity.OwnerId,
+        recovery.Identity.RunnerId,
+        recovery.Identity.WorkspaceId,
+        recovery.Identity.WorkspaceGeneration,
+        recovery.Output,
+        recovery.Artifacts,
+        recovery.CleanupScope,
+        WorkflowTaskRecoveryActions.All,
+        recovery.Projection.Applied);
 
     public static PendingWorkView? BuildPendingWork(WorkflowRun run)
     {

@@ -144,8 +144,10 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var task = current.RunningTask;
-            if (task?.AgentResultSettlement?.State is not
-                (AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked))
+            if (task is null
+                || (task.WorkflowTaskRecovery is null
+                    && task.AgentResultSettlement?.State is not
+                        (AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked)))
             {
                 return [];
             }

@@ -173,7 +173,12 @@ public sealed class WorkflowItemTranslator : IScopedService
             EpicNumber: ReadEpicNumber(run),
             Expect: expectStr,
             AgentDefinition: agentDefinition,
-            TaskRunId: taskRunId);
+            TaskRunId: taskRunId,
+            RunnerId: runnerId,
+            WorkspaceId: run.Workspace?.WorkspaceId,
+            WorkspaceGeneration: run.Workspace?.WorkspaceGeneration,
+            WorkspaceHead: run.Workspace?.Head,
+            WorkspaceTree: run.Workspace?.Tree);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -224,7 +229,12 @@ public sealed class WorkflowItemTranslator : IScopedService
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
             AgentJobId: null,
-            EpicNumber: ReadEpicNumber(run));
+            EpicNumber: ReadEpicNumber(run),
+            RunnerId: runnerId,
+            WorkspaceId: run.Workspace?.WorkspaceId,
+            WorkspaceGeneration: run.Workspace?.WorkspaceGeneration,
+            WorkspaceHead: run.Workspace?.Head,
+            WorkspaceTree: run.Workspace?.Tree);
     }
 
     private async Task<Dictionary<string, JsonElement?>>
@@ -496,7 +506,8 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         var workId = item.Id ?? throw new InvalidOperationException(
             $"Task work item for workflow '{workflowRunId}' is missing work id");
-        if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase)
+            && result.CompletionBoundary is null)
         {
             var unknownDetail = NormalizeUnknownDetail(result);
             return new InboundReport.Unknown(
@@ -507,7 +518,7 @@ public sealed class WorkflowItemTranslator : IScopedService
                     Artifacts: null,
                     Detail: unknownDetail,
                     Error: result.Error),
-                "agent-result-unconfirmed",
+                "boundary-missing",
                 unknownDetail);
         }
 
@@ -524,7 +535,10 @@ public sealed class WorkflowItemTranslator : IScopedService
                 Output: null,
                 Artifacts: null,
                 Detail: shapeError,
-                Error: new ExecutionError("unexpected-error", shapeError)));
+                Error: new ExecutionError("unexpected-error", shapeError),
+                CompletionBoundary: result.CompletionBoundary,
+                WorkspaceOutcome: result.WorkspaceOutcome,
+                WorkspaceReason: result.WorkspaceReason));
         }
 
         return new InboundReport.Task(new TaskReport(
@@ -537,7 +551,10 @@ public sealed class WorkflowItemTranslator : IScopedService
             Error: result.Error,
             ArtifactUploadIds: result.ArtifactUploadIds is { Length: > 0 }
                 ? result.ArtifactUploadIds.ToArray()
-                : null));
+                : null,
+            CompletionBoundary: result.CompletionBoundary,
+            WorkspaceOutcome: result.WorkspaceOutcome ?? result.CompletionBoundary?.WorkspaceOutcome,
+            WorkspaceReason: result.WorkspaceReason ?? result.CompletionBoundary?.WorkspaceReason));
     }
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
@@ -627,6 +644,7 @@ public sealed class WorkflowItemTranslator : IScopedService
     private static TaskReportStatus ResolveTaskReportStatus(WorkResult result) =>
         string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
             || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.CompletionBoundary?.ActionCompletion.Outcome, "unknown", StringComparison.Ordinal)
                 ? TaskReportStatus.Succeeded
                 : TaskReportStatus.Failed;
 

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -65,7 +66,11 @@ public static class DispatchTestExtensions
         string workId,
         WorkResult result)
     {
-        var active = await grains.GetGrain<IWorkflowGrain>(workflowRunId).GetActiveWorkAsync(workId);
+        var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        var active = await workflow.GetActiveWorkAsync(workId);
+        if (active?.WorkType == WorkItemTypes.Task && result.CompletionBoundary is null)
+            result = result with { CompletionBoundary = TestCompletionBoundary(workflowRunId, active, runnerId, result) };
+
         var report = ResolveScoped<WorkflowReportService>(serviceProvider);
         await report.ReportAsync(
             runnerId,
@@ -73,6 +78,65 @@ public static class DispatchTestExtensions
             workId,
             active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null,
             result);
+    }
+
+    private static WorkflowTaskCompletionBoundary TestCompletionBoundary(
+        string workflowRunId,
+        WorkflowActiveWorkView active,
+        string runnerId,
+        WorkResult result)
+    {
+        var failed = !string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
+        var unknown = string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase);
+        var outcome = unknown
+            ? WorkflowTaskWorkspaceOutcomes.Unconfirmed
+            : result.WorkspaceOutcome ?? WorkflowTaskWorkspaceOutcomes.CommittedClean;
+        var identity = new WorkflowTaskExecutionIdentity(
+            workflowRunId,
+            active.Stage,
+            active.TaskRunId,
+            active.WorkId,
+            WorkDispatchOwnerKinds.Workflow,
+            workflowRunId,
+            runnerId,
+            $"test-workspace:{workflowRunId}",
+            JsonSerializer.SerializeToElement(1));
+        var completion = new ActionCompletion(
+            1,
+            ActionStarted: !unknown,
+            failed ? "failed" : unknown ? "unknown" : "succeeded",
+            "test",
+            failed || unknown ? null : result.Output,
+            result.Error,
+            (result.ArtifactUploadIds ?? Array.Empty<string>()).ToList(),
+            null,
+            DateTimeOffset.UnixEpoch);
+        var receipt = new CommitReceipt(
+            1,
+            identity,
+            "test-branch",
+            "test-head",
+            "test-tree",
+            "test-branch",
+            "test-head",
+            "test-tree",
+            new List<string>(),
+            new List<string>(),
+            new List<string>(),
+            Authoritative: !unknown,
+            unknown ? "boundary-missing" : null,
+            DateTimeOffset.UnixEpoch);
+        return new WorkflowTaskCompletionBoundary(
+            1,
+            identity,
+            completion,
+            receipt,
+            outcome,
+            unknown ? "boundary-missing" : result.WorkspaceReason,
+            $"test-boundary:{workflowRunId}:{active.TaskRunId}:{result.Status}");
     }
 
     /// <summary>

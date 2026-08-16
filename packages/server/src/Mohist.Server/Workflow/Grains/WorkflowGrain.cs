@@ -117,6 +117,10 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
+        // A boundary is accepted in one run-store transaction before its
+        // projections. Activation resumes any clean or conclusive failure
+        // projection that was interrupted after that durable admission.
+        await ReconcileWorkflowTaskCompletionAsync();
         await ReconcileAgentResultSettlementAsync();
         await ReconcileRunnerLossRecoveryAsync();
 
@@ -529,6 +533,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         var task = _run.CurrentStage().RunningTask;
         if (task is null || !string.Equals(task.WorkId, workId, StringComparison.Ordinal)) return null;
+
+        var expectedIdentity = new WorkflowTaskExecutionIdentity(
+            GrainKey,
+            dispatch.Stage ?? active.Item.Stage,
+            task.Id,
+            workId,
+            WorkDispatchOwnerKinds.Workflow,
+            GrainKey,
+            dispatch.RunnerId ?? workerId,
+            dispatch.WorkspaceId,
+            dispatch.WorkspaceGeneration);
+        if (task.ActiveExecutionIdentity is { } existingIdentity
+            && !WorkflowTaskCompletionBoundaryRules.MatchesExpectedIdentity(existingIdentity, expectedIdentity))
+            return null;
+        if (task.ActiveExecutionIdentity is null)
+        {
+            task.ActiveExecutionIdentity = expectedIdentity;
+            await SaveRunAsync();
+        }
 
         var winnerJson = await _dispatchSnapshotStore.SaveFirstJsonAsync(
             GrainKey, workId, JSON.Serialize(dispatch));

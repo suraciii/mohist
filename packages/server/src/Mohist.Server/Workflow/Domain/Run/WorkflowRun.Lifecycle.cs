@@ -219,7 +219,11 @@ public static partial class WorkflowRunExtensions
             if (a is null || b is null) return false;
             return string.Equals(a.Path, b.Path, StringComparison.Ordinal)
                 && string.Equals(a.Branch ?? string.Empty, b.Branch ?? string.Empty, StringComparison.Ordinal)
-                && string.Equals(a.ChangeDir ?? string.Empty, b.ChangeDir ?? string.Empty, StringComparison.Ordinal);
+                && string.Equals(a.ChangeDir ?? string.Empty, b.ChangeDir ?? string.Empty, StringComparison.Ordinal)
+                && string.Equals(a.WorkspaceId ?? string.Empty, b.WorkspaceId ?? string.Empty, StringComparison.Ordinal)
+                && WorkflowTaskCompletionBoundaryRules.SameGeneration(a.WorkspaceGeneration, b.WorkspaceGeneration)
+                && string.Equals(a.Head ?? string.Empty, b.Head ?? string.Empty, StringComparison.Ordinal)
+                && string.Equals(a.Tree ?? string.Empty, b.Tree ?? string.Empty, StringComparison.Ordinal);
         }
 
         private static bool WorkflowMetadataIdentityEquals(WorkflowRunMetadata? a, WorkflowRunMetadata? b)

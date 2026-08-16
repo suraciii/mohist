@@ -206,9 +206,24 @@ public static partial class WorkflowRunExtensions
         /// decisions. Task and stage status enums intentionally do not mirror it.
         /// </summary>
         public bool HasUnresolvedAgentResult() =>
-            run.Stages.SelectMany(stage => stage.Tasks)
+            run.HasWorkflowTaskRecovery()
+            || run.Stages.SelectMany(stage => stage.Tasks)
                 .Any(task => task.Status == TaskRunStatus.Running
                     && task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
+
+        public bool HasWorkflowTaskRecovery() =>
+            run.Stages.SelectMany(stage => stage.Tasks)
+                .Any(task => task.Status == TaskRunStatus.Running
+                    && task.WorkflowTaskRecovery is not null);
+
+        public (StageRun Stage, TaskRun Task)? FindWorkflowTaskRecovery()
+        {
+            var found = run.Stages
+                .SelectMany(stage => stage.Tasks.Select(task => (Stage: stage, Task: task)))
+                .FirstOrDefault(candidate => candidate.Task.Status == TaskRunStatus.Running
+                    && candidate.Task.WorkflowTaskRecovery is not null);
+            return found.Task is null ? null : found;
+        }
 
         public bool HasBlockedAgentResult() =>
             run.Stages.SelectMany(stage => stage.Tasks)

@@ -183,7 +183,17 @@ public static partial class RunnerRoutes
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks, req.Error);
+            var result = new WorkResult(
+                req.Status,
+                req.Message,
+                req.Output,
+                req.ExitCode,
+                req.ArtifactUploadIds,
+                req.AddTasks,
+                req.Error,
+                req.CompletionBoundary,
+                req.WorkspaceOutcome,
+                req.WorkspaceReason);
 
             // AgentJob owns its report validation and terminal transition.
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
@@ -1013,7 +1023,10 @@ public record RunnerReportRequest(
     string? OwnerKind = null,
     string? AgentJobId = null,
     List<RuntimeTaskInput>? AddTasks = null,
-    ExecutionError? Error = null);
+    ExecutionError? Error = null,
+    WorkflowTaskCompletionBoundary? CompletionBoundary = null,
+    string? WorkspaceOutcome = null,
+    string? WorkspaceReason = null);
 public record RunnerReportResponse(
     string WorkflowRunId,
     string? WorkflowStatus,

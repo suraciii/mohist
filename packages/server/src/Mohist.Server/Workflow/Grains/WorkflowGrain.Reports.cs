@@ -242,13 +242,34 @@ public partial class WorkflowGrain
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
 
-        // A due runner-loss deadline is terminal for ordinary workflow work.
-        // Reconcile it in the report turn so a late generation cannot win a
-        // race against a reminder that has not executed yet.
+        // A due runner-loss deadline cannot convert a valid durable boundary
+        // into a business failure. Recovery state owns that hold.
         await ReconcileRunnerLossRecoveryAsync();
 
-        if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)) return ReportAck.Stale;
-        if (string.IsNullOrWhiteSpace(report.TaskRunId)) return ReportAck.Stale;
+        if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(report.TaskRunId))
+            return ReportAck.Stale;
+
+        // Exact replays are checked before the Running predicate. This is what
+        // lets a runner recover a lost acknowledgement after normal clean
+        // settlement or after a task was explicitly stopped.
+        var stored = _run.Stages
+            .SelectMany(stage => stage.Tasks.Select(task => (Stage: stage, Task: task)))
+            .SingleOrDefault(candidate => string.Equals(candidate.Task.Id, report.TaskRunId, StringComparison.Ordinal)
+                && string.Equals(candidate.Task.WorkId, workId, StringComparison.Ordinal)
+                && string.Equals(candidate.Task.WorkerId, workerId, StringComparison.Ordinal));
+        if (stored.Task is not null && stored.Task.CompletionBoundary is { } existingBoundary)
+        {
+            return report.CompletionBoundary is { } replay
+                && WorkflowTaskCompletionBoundaryRules.SameBoundary(existingBoundary, replay)
+                && WorkflowTaskCompletionBoundaryRules.MatchesReport(report, replay)
+                ? ReportAck.Accepted
+                : ReportAck.Stale;
+        }
+
+        if (report.CompletionBoundary is null)
+            return ReportAck.Stale;
+
         var activeWork = _run.FindReportableWork(report.TaskRunId, workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
@@ -257,51 +278,16 @@ public partial class WorkflowGrain
             .Where(stage => string.Equals(stage.Id, activeWork.Item.Stage, StringComparison.Ordinal))
             .SelectMany(stage => stage.Tasks)
             .SingleOrDefault(candidate => string.Equals(candidate.Id, activeWork.TaskRunId, StringComparison.Ordinal));
-        if (task is null) return ReportAck.Stale;
-        var hadAgentResultSettlement = task.AgentResultSettlement is not null;
-        var hadRunnerLossInterruption = task.Interruption is not null;
+        if (task is null)
+            return ReportAck.Stale;
 
-        _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
-            GrainKey, activeWork.WorkId, report.Status, report.Detail ?? "(none)");
+        _log.LogInformation("run {run} received task boundary for work {work}: {outcome} detail={detail}",
+            GrainKey,
+            activeWork.WorkId,
+            report.CompletionBoundary.WorkspaceOutcome,
+            report.Detail ?? "(none)");
 
-        TaskReport effectiveReport = report;
-        if (report.Status == TaskReportStatus.Succeeded)
-        {
-            try
-            {
-                RuntimeTaskFollowUps.Project(report.AddTasks);
-            }
-            catch (InvalidOperationException ex)
-            {
-                _log.LogError(
-                    "run {run} work {work} rejected recovery follow-up: {reason}",
-                    GrainKey, activeWork.WorkId, ex.Message);
-                effectiveReport = new TaskReport(
-                    activeWork.WorkId,
-                    TaskReportStatus.Failed,
-                    Output: null,
-                    Artifacts: null,
-                    Detail: $"Recovery follow-up rejected: {ex.Message}");
-            }
-        }
-
-        effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
-        _run.ClearWorkInterruption(activeWork.WorkId, workerId);
-
-        var events = await _workLifecycle.ApplyTaskReportAsync(
-            _run,
-            effectiveReport,
-            activeWork.Item.Stage,
-            activeWork.TaskRunId);
-
-        await CommitAsync(events);
-        if (hadAgentResultSettlement)
-            await ReconcileAgentResultSettlementAsync();
-        else
-            await DeleteSnapshotBestEffortAsync(activeWork.WorkId);
-        if (hadRunnerLossInterruption)
-            await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
-        return ReportAck.Accepted;
+        return await AcceptWorkflowTaskBoundaryAsync(workerId, workId, report, activeWork, task);
     }
 
     private async Task<TaskReport> BindTaskReportArtifactsAsync(
@@ -328,13 +314,13 @@ public partial class WorkflowGrain
             _log.LogWarning(
                 "run {run} work {work} artifact binding failed: {reason}",
                 GrainKey, activeWork.WorkId, bindResult.Error);
-            return new TaskReport(
-                activeWork.WorkId,
-                TaskReportStatus.Failed,
-                Output: null,
-                Artifacts: null,
-                Detail: bindResult.Error ?? "artifact binding failed",
-                Error: report.Error);
+            // The Action boundary is already durable. Artifact binding is a
+            // retryable projection concern and must not rewrite a successful
+            // Action into a business failure.
+            return report with
+            {
+                Detail = bindResult.Error ?? "artifact binding pending",
+            };
         }
 
         var boundArtifacts = bindResult.ArtifactRecordedEvents
