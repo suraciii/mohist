@@ -22,7 +22,8 @@ public static class DirectApiMappingStates
 
 public sealed record DirectApiMappingClaim(
     DirectApiIdempotencyMappingRow Mapping,
-    bool Created);
+    bool Created,
+    bool StopOutcomeUnknown = false);
 
 public sealed record DirectApiLaunchOutcome(
     string CoordinatorKey,
@@ -40,6 +41,31 @@ public sealed record DirectApiFollowupOutcome(
     string? TurnId = null,
     string? RejectionCode = null,
     string? RejectionReason = null);
+
+public sealed record DirectApiStopOutcome(
+    string ProjectId,
+    string SessionId,
+    string TurnId,
+    string OperationId);
+
+public sealed record DirectApiFrozenStopTarget(
+    string ProjectId,
+    string SessionId,
+    string TurnId,
+    long TurnRevision,
+    long ContextGeneration,
+    DirectApiFrozenStopBinding Binding,
+    DateTimeOffset? DeadlineAt,
+    string OperationId);
+
+public sealed record DirectApiFrozenStopBinding(
+    string? RunnerId,
+    string? SourceKind,
+    string? WorkflowRunId,
+    string? SessionName,
+    string? Runtime,
+    string? RuntimeSessionId,
+    string? WorkDir);
 
 /// <summary>
 /// Owns the relational request fence shared by the direct launch,
@@ -93,6 +119,33 @@ public sealed class DirectApiIdempotencyService : IScopedService
             await db.SaveChangesAsync(ct);
             return new DirectApiMappingClaim(mapping, Created: true);
         }
+        catch (DbUpdateException) when (command == DirectApiCommands.Stop && turnId is not null)
+        {
+            // The composite key conflict is the caller's own replay/reuse
+            // path. A missing composite winner for stop means the filtered
+            // pending-turn index won instead, so do not persist the losing
+            // caller's mapping or let the provider exception escape.
+            db.ChangeTracker.Clear();
+            existing = await db.DirectApiIdempotencyMappings
+                .FirstOrDefaultAsync(
+                    row => row.Command == command && row.ScopeKey == scopeKey,
+                    ct);
+            if (existing is not null)
+                return new DirectApiMappingClaim(existing, Created: false);
+
+            var pending = await db.DirectApiIdempotencyMappings
+                .FirstOrDefaultAsync(
+                    row => row.Command == DirectApiCommands.Stop
+                        && row.TurnId == turnId
+                        && row.State == DirectApiMappingStates.Pending,
+                    ct);
+            if (pending is not null)
+                return new DirectApiMappingClaim(
+                    pending,
+                    Created: false,
+                    StopOutcomeUnknown: true);
+            throw;
+        }
         catch (DbUpdateException)
         {
             // Another request can win the composite unique key between the
@@ -107,6 +160,41 @@ public sealed class DirectApiIdempotencyService : IScopedService
                 throw;
             return new DirectApiMappingClaim(existing, Created: false);
         }
+    }
+
+    public async Task<DirectApiIdempotencyMappingRow?> FindPendingStopAsync(
+        string turnId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.DirectApiIdempotencyMappings
+            .FirstOrDefaultAsync(
+                row => row.Command == DirectApiCommands.Stop
+                    && row.TurnId == turnId
+                    && row.State == DirectApiMappingStates.Pending,
+                ct);
+    }
+
+    public async Task<DirectApiIdempotencyMappingRow> FreezeStopTargetAsync(
+        string scopeKey,
+        string frozenTarget,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var mapping = await db.DirectApiIdempotencyMappings
+            .FirstOrDefaultAsync(
+                row => row.Command == DirectApiCommands.Stop && row.ScopeKey == scopeKey,
+                ct)
+            ?? throw new InvalidOperationException("The direct API stop mapping disappeared before freezing its target.");
+
+        if (mapping.State == DirectApiMappingStates.Pending
+            && string.IsNullOrWhiteSpace(mapping.FrozenTarget))
+        {
+            mapping.FrozenTarget = frozenTarget;
+            await db.SaveChangesAsync(ct);
+        }
+
+        return mapping;
     }
 
     public async Task<DirectApiIdempotencyMappingRow> CompleteAsync(

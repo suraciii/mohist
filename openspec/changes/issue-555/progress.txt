@@ -486,3 +486,40 @@ tests.
 - `npm run test:fast` passed all seven lanes: typechecks, 2,675 Server unit
   tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724
   Web tests, and 1,639 Runner tests.
+
+## T-006: Fenced direct stop command
+
+Status: IMPLEMENTED. The direct stop route now enforces an empty body,
+caller-bound stop scopes, filtered pending-stop supersession blocking, and
+projection-only public Turn responses. It resolves canonical Turn membership
+without accepting Session or binding data from the caller, freezes the Turn
+revision, Session binding epoch/context generation, complete delivery binding,
+deadline, and canonical stop operation in `FrozenTarget` before the first
+Runner delivery, and reconstructs pending retries from that frozen target.
+
+- Terminal Turns are durable no-ops; queued follow-up Turns cancel locally and
+  launch Turns continue through the canonical Job cancellation path. Existing
+  `AgentSessionStopOperations`, claim/apply fencing, and
+  `ISessionStopDelivery` were not modified.
+- A filtered-index insert conflict returns `409 stop_outcome_unknown` without
+  persisting the losing caller's mapping. Caller A and B have separate scope
+  rows after the Turn is resolved; a matching pending retry observes the
+  existing canonical claim and does not redeliver from the HTTP route.
+- Unknown and unavailable delivery outcomes leave the direct mapping pending.
+  Settled canonical terminal facts or stop dispositions reconcile that mapping
+  before a later caller can create its own operation. Responses are served only
+  from the public Turn projection and expose no frozen target or operation ID.
+- Added `DirectApiStopSpecs` covering empty-body validation, terminal no-op,
+  queued local cancellation, unknown pending blocking, caller binding, frozen
+  operation retry, and response privacy. Focused stop (5), launch (7),
+  follow-up (6), and canonical stop (18) suites pass.
+- The first full fast-gate run exposed the expected Direct API architecture
+  isolation check for `TurnControlResult`; completion classification was moved
+  to the root `Api` layer. Architecture then passed (69 tests), and the
+  remaining fast lanes passed: 2,675 unit, 178 workflow, 1,848 CLI, 4,724 Web,
+  and 1,639 Runner tests.
+- The file-size ratchet required moving the canonical Turn resolver and
+  `CanonicalTurnStopTarget` into `AgentSessionQuerier.StopTargets.cs`; the
+  behavior and public API surface are unchanged. `npm run check:filesizes`,
+  the server SpecTests build, and the focused T-006 suite pass after the
+  split.

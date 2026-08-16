@@ -88,7 +88,26 @@ public static class DirectApiRoutes
                 publicReads,
                 ct))
             .RequireScopes(Scope.Operator);
-        group.MapPost("/agent-turns/{turnId}/stop", () => DirectApiResults.NotImplemented())
+        group.MapPost("/agent-turns/{turnId}/stop", async (
+            HttpContext context,
+            string projectId,
+            string turnId,
+            AgentSessionQuerier sessions,
+            IGrainFactory grains,
+            ISessionStopDelivery stopDelivery,
+            DirectApiIdempotencyService idempotency,
+            PublicExecutionReadQuerier publicReads,
+            CancellationToken ct) =>
+            await DirectApiStopRoutes.ExecuteAsync(
+                context,
+                projectId,
+                turnId,
+                sessions,
+                grains,
+                stopDelivery,
+                idempotency,
+                publicReads,
+                ct))
             .RequireScopes(Scope.Operator);
 
         // Reads: readonly or operator. Each read is served only from
