@@ -316,3 +316,9 @@
 - Focused `WorkflowAgentJobAdmissionSpecs`: 6/6 passed, covering shared per-Agent concurrency waiting and grant, no-runner admitted waiting, ledger-poll claim with AgentJob owner kind/workflow lineage/expect, explicit 5-second timeout, 60-minute default timeout, and the unchanged direct global backstop.
 - `npm run test:fast` passed all lanes: typecheck, Server Unit 2662, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646.
 - The shared-gate notification delivery remains deferred off the gate turn with durable retry; this is required because a granted AgentJob re-enters the gate during admission and inline notification delivery deadlocks the permit release path.
+
+## T-003 verification on resumed workflow branch
+
+- The T-003 implementation is already present in commit `97e2c1ca9`: discriminator-gated `PendingWorkflowTerminalDelivery`, stable typed `com.mohist.agent.job.workflow-terminal` emission with recovery retry, and Runner-side frozen `expect` evaluation carried through `WorkDispatch.Expect`.
+- Focused verification passed: `AgentJobWorkflowTerminalDeliverySpecs` 7/7, Runner `agent-job-executor.spec.ts` plus `server-connection-report.spec.ts` 44/44, and `src/runtime/agent-job-executor.test.ts` 2/2.
+- `npm run test:fast` passed all lanes: scripts/web/Runner typecheck, Server Unit 2662, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646. The .NET SDK preview emitted only existing NETSDK1057 notices and concurrent build file-lock retries; all lanes completed successfully.
