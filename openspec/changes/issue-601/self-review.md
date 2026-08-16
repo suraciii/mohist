@@ -1,77 +1,37 @@
 # Self-Review - Issue 601
 
-Review round: first review
-Review basis: issue 601 via `mo issue view 601 --project proj_f6c141d63b6243bfbb481737b2243b87`, including the issue body and comments; `proposal.md`, `design.md`, `tasks.json`, and the complete spec were read before this review. No prior `self-review.md` exists.
+Review round: re-review.
+Review basis: issue 601 from `mo issue view 601 --project proj_f6c141d63b6243bfbb481737b2243b87`, including the issue body and all current comments; the current `proposal.md`, `design.md`, `tasks.json`, and complete capability spec; and the relevant runner/server lifecycle code. The existing review was a first-round FAIL with five must-fix findings. This review verifies those dispositions and checks for regressions.
 
 ## Verdict
 
-FAIL. The plan has must-fix problems relative to the issue contract and is not ready to build.
+PASS. No must-fix problems remain; the plan is ready to build.
 
-## Must-Fix Findings
+## Previous Findings
 
-### F-001: The migration plan contradicts the issue's fail-closed decision
+- **F-001, fail-closed migration: fixed properly.** The compatibility mode and legacy settlement path were removed. `design.md:83,90-94` defines one v1 transition with dispatch quiescence, capability admission, rejection of plain legacy settlement, and non-settling `boundary-missing` reconciliation. `tasks.json:94-98` makes those rules and their end-to-end tests owned by T-005. This satisfies the issue requirement that invalid or legacy reports cannot bypass the durable boundary or manufacture success/failure from session activity.
+- **F-002, concrete dirty/unconfirmed state and actions: fixed properly.** `design.md:61-70` maps `committed-clean`, `dirty`, and `unconfirmed` to persisted task/stage/run lifecycle values, wire states, dispatch behavior, recovery actions, clean-verification completion, and explicit stop behavior. The same contract is normative in `spec.md:76-92` and owned by T-003 at `tasks.json:49-56`. Dirty and unconfirmed valid Action results remain Running and recoverable, while conclusive Action failures retain the existing failed path.
+- **F-003, later verification versus immutable receipt: fixed properly.** `design.md:31-35` defines `WorkspaceVerification` as separate mutable evidence, and `spec.md:146-155` gives it its own identity, boundary fingerprint, idempotency, conflict, generation, and source-adoption rules. The recovery scenario no longer submits a replacement receipt (`spec.md:172-176`), and T-004 explicitly tests later verification without replacing the initial receipt (`tasks.json:77-78`).
+- **F-004, legal uncommitted task-source recovery: fixed properly.** `design.md:53` and `spec.md:118-138` define the authenticated operator, exact-generation fence, explicit source allowlist, path disjointness rules, path-limited commit, rejection behavior, and mandatory follow-up verification. T-004 owns the operation and preservation tests (`tasks.json:70-78`). Rejected or failed adoption preserves source, output, artifact, and unrelated files.
+- **F-005, early Workflow failure exits: fixed properly.** The boundary wrapper is placed at the outer Workflow-task adapter and covers workspace setup, Action resolution, input/dispatch validation, branch probes, Action throw/normalization, artifact/output/set-variable failures, and the outer catch (`design.md:74-76`). Pre-Action failures receive `actionStarted=false` and an unavailable-probe reason, while known Action results are retained for later capture/projection failures. T-002 lists every required exit and deterministic test (`tasks.json:29-35`), matching the complete-path requirement in `spec.md:1-25` and `spec.md:204-220`.
 
-**Issue criterion violated:** The latest issue review note explicitly requires removing compatibility mode and choosing one fail-closed migration. The required boundary contract also requires that a result without an authoritative completion boundary cannot be settled from session activity or legacy result semantics.
+## Regression Check
 
-**Evidence:** `design.md:77` proposes a negotiated compatibility mode; `design.md:85` deploys the server in compatibility mode; `design.md:90` requires keeping the compatibility server during rollback. `tasks.json:92-98` makes compatibility mode and legacy-report handling part of T-005.
-
-**Failure case:** The repository's current report path accepts a plain `WorkResult` in `WorkflowReportService` and sends it to the existing settlement path. A compatibility rollout leaves two settlement contracts active while the new receipt is supposedly authoritative. A legacy report can therefore continue through old success/failure behavior until an operator enables enforcement, which is exactly the cleanup-induced false failure the issue is fixing and explicitly rejects in its latest comment.
-
-**Required plan disposition:** Remove compatibility mode from the design and T-005. Define a single fail-closed v1 transition: missing or invalid boundaries are rejected or recorded as recoverable unconfirmed, never settled through the legacy task result path. Define how already-started legacy journal entries are reconciled under that one contract.
-
-### F-002: Dirty, unconfirmed, and committed-clean are not mapped to concrete Workflow states and actions
-
-**Issue criterion violated:** The required contract demands separate dirty, unconfirmed, and committed-clean outcomes, with dirty and unconfirmed recoverable and unable to produce task, stage, or run business failures. The latest issue review note specifically requires mapping those outcomes to concrete TaskRun/stage/run states and allowed actions.
-
-**Evidence:** The spec requires explicit recoverable outcomes at `spec.md:46-62`; `design.md:60-62` only says to add a dedicated settlement value analogous to Agent settlement; T-003 says only that the state is nonterminal at `tasks.json:53-55`. The current domain has only `TaskRunStatus.Pending/Running/Completed/Failed/Cancelled` (`TaskRun.cs:19`), `StageRunStatus.Pending/Running/AwaitingApproval/Completed/Failed` (`StageRun.cs:3`), and the existing status mapper only derives special wire states for Agent settlement (`WorkflowStatusMapper.cs:147-236`).
-
-**Failure case:** An implementation can store a new recovery object while leaving the task as ordinary `Running`, allowing normal dispatch or stop/failure paths to act on it; or it can add a wire status without changing `NextWork`, stage advancement, reminders, cancellation, and settlement transitions. The plan does not say which task/stage/run values represent each outcome, whether the task remains assigned, which recovery operations are legal after lease expiry, or exactly how a later clean verification transitions to normal completion. That leaves the central non-failure guarantee dependent on an unstated state-machine choice.
-
-**Required plan disposition:** Specify the concrete persisted and wire state for each outcome, the claim/advance/stop/cancel behavior while recoverable, the allowed lease and verification transitions, and the idempotent transition from dirty or unconfirmed to completed or explicit recovery. Keep conclusive Action failure on its existing failed path.
-
-### F-003: Later verification is described both as a new receipt and as separate mutable evidence
-
-**Issue criterion violated:** The immutable first `CommitReceipt` must remain unchanged while cleanup and later verification observations are recorded separately. Exact replay/conflict handling must reject a different receipt for the same execution identity, while the recovery scenario must still permit later clean verification.
-
-**Evidence:** `design.md:31` and `tasks.json:14,23` say later verification observations are separate mutable recovery data. However, the recovery scenario at `spec.md:129-132` says recovery obtains a "new authoritative receipt" for the same task and workspace identity, while the exact-conflict requirement at `spec.md:134-151` says a different branch, HEAD, tree, or status for that identity is a conflicting receipt and must be rejected. T-004 only calls this a "later-authoritative-verification recovery" (`tasks.json:70-78`) and defines no separate wire operation or value.
-
-**Failure case:** After an initial dirty receipt, cleanup produces a clean workspace. If the clean observation is submitted as another `CommitReceipt`, exact conflict handling rejects the legitimate recovery. If the original receipt is overwritten, the immutable-boundary requirement is violated and the receipt no longer records the action completion boundary.
-
-**Required plan disposition:** Name and define a separate `WorkspaceVerification` observation/operation, including its identity and generation checks, idempotency key, relationship to the immutable boundary fingerprint, and the precise settlement transition it can cause. Rewrite the recovery scenario so it never calls that later observation a replacement receipt.
-
-### F-004: No authorized recovery path exists for legal uncommitted task-source changes
-
-**Issue criterion violated:** Cleanup may remove only explicitly scoped generated artifacts and must preserve task source, task commits, declared outputs, recorded artifacts, and unrelated changes. The latest issue review note additionally requires an explicit authorized path for legal task-source changes that remain uncommitted.
-
-**Evidence:** `design.md:49` says an unscoped task change remains dirty and recovery may only inspect it, obtain verification, or allocate a fresh generation. The spec repeats that cleanup leaves task-source changes untouched at `spec.md:102-106`. T-004 explicitly refuses task-source deletion at `tasks.json:74-77`, but defines no operation that can authorize, preserve/adopt, or otherwise complete such a source change.
-
-**Failure case:** A valid Action writes tracked implementation files but does not commit them. Scoped cleanup correctly refuses to delete them, so the outcome remains dirty. The plan then has no defined actor or operation that can make the workspace eligible for a later clean verification without rerunning the Action or violating the no-source-deletion rule. A fresh workspace does not solve how the original valid implementation is settled or preserved as the task result.
-
-**Required plan disposition:** Define the authorized source-change recovery path and its owner/fence. State whether recovery may create a task commit, whether an operator or a new Action may do so, how source paths are distinguished from generated cleanup paths, and how the resulting verification and settlement remain receipt-immutable and idempotent. The path must preserve source and declared output files on every rejection.
-
-### F-005: The proposed boundary insertion does not cover all Workflow task failure exits
-
-**Issue criterion violated:** The durable-boundary requirement says every Workflow task attempt produces an immutable `ActionCompletion` and matching `CommitReceipt`; T-001 also requires successful and failed Workflow attempts to be representable. A failure report must not bypass the boundary before settlement.
-
-**Evidence:** T-002 places the common builder "after Action result normalization and artifact capture" (`tasks.json:29`) and its tests mention only conclusive Action failure (`tasks.json:35`). In the current runner, Workflow task execution returns before that point for workspace preparation failure (`executor.ts:93`), unknown or removed Action (`executor.ts:154-157`), unresolved or invalid input (`executor.ts:171-180`), start branch violation (`executor.ts:187-189`), and normalized Action failure (`executor.ts:227-231`). The outer catch also returns a plain failure (`executor.ts:282`). Artifact capture and `enforceCleanWorktree` begin only at `executor.ts:237-253`.
-
-**Failure case:** If the implementation follows the described post-normalization/post-artifact placement, any of those exits can still become a plain failed `WorkItemResult` with no ActionCompletion/CommitReceipt, and the server can settle it through the existing path. That violates the first requirement even if the valid-success path is durable.
-
-**Required plan disposition:** State which failure exits are included and route every in-scope Workflow task terminal result through the boundary builder, including an explicit representation for failures before an Action result exists. Add deterministic tests for workspace setup, input/dispatch validation, branch-probe failure, Action throw, and report/serialization failure, or explicitly narrow the requirement and issue scope (which would need issue approval).
+The fixes do not introduce a must-fix regression. The fail-closed migration is consistent with the issue's latest review note. The new recovery state is kept distinct from the existing Agent result settlement model rather than adding Git fields to it (`design.md:70`), while the plan still accounts for the current `WorkflowReportService`, `ReceiveTaskReportAsync`, `WorkResultJournal`, `WorkExecutor`, and Pi/OpenCode runtime paths. The plan also preserves the required distinction between valid Action failure and workspace uncertainty, so only cleanup-induced dirty or unconfirmed evidence is prevented from becoming a business failure.
 
 ## Dimension Verdicts
 
-- **Issue grounding: checked, no issue.** The issue body and current comments were read before interpreting the artifacts. The review used the P1 goal, the immutable receipt/cleanup/recovery contract, the exact replay requirement, and the four explicit contract-gap notes.
-- **Coverage: issues found.** The plan covers the named runner, server, cleanup, replay, and runtime paths, but it does not cover the concrete state machine, legal source-change recovery, fail-closed rollout, distinct later verification operation, or all failure exits. Findings F-001, F-002, F-003, F-004, and F-005 apply.
-- **Correctness: issues found.** The initial receipt and later-clean-verification requirements conflict as written, and the compatibility rollout preserves the old false-settlement path. Without the missing state and recovery rules, the plan cannot guarantee that dirty or unconfirmed evidence remains recoverable.
-- **Consistency with the current codebase: issues found.** The plan correctly identifies the current `enforceCleanWorktree` gate and existing `WorkResultJournal`, `WorkflowRunStore`, `TimeProvider`, and Agent settlement patterns. However, the current Workflow state enums, report admission path, artifact binding order, and executor early returns make the omitted state and boundary decisions behaviorally significant rather than documentation-only gaps.
-- **Task breakdown: ordering checked, no dependency cycle; completeness has issues.** T-001 -> T-002/T-003 -> T-004 -> T-005 is acyclic and broadly ordered, and tests are attached to implementation tasks. T-005 nevertheless encodes the rejected migration, and no task owns the concrete state/action map, source-change authorization, or separate verification contract identified above.
+- **Issue grounding: checked, no issue.** The P1 user goal, required durable boundary, three workspace outcomes, scoped cleanup, recovery/fresh-generation behavior, exact replay/conflict behavior, runtime coverage, and latest four contract-gap comments were read before judging the artifacts.
+- **Coverage: checked, no issue.** The proposal states each issue goal, the capability spec gives normative requirements and scenarios for each one, and T-001 through T-005 assign implementation and deterministic test coverage across runner, server, recovery, migration, generic Actions, Pi, and OpenCode.
+- **Correctness: checked, no issue.** The approach persists the immutable pair before cleanup/report settlement, makes dirty and unconfirmed nonterminal and fenced, permits only scoped recovery, separates later observations from the initial receipt, rejects conflicting identities, and keeps conclusive Action failures on the existing failure path.
+- **Consistency with the current codebase: checked, no issue.** The plan targets the existing journal atomic-write boundary, outer executor early returns, report translator/admission path, Workflow aggregate lifecycle, current status mapping, workspace registry/markers, and Agent settlement patterns. It identifies the required changes without treating runtime transcripts or the existing cleanup loop as authoritative.
+- **Task breakdown: checked, no issue.** T-001 establishes shared types and journal persistence; T-002 and T-003 independently build runner arbitration and server settlement; T-004 depends on both for fenced recovery; T-005 depends on the completed v1 contract for migration. The dependency graph is acyclic, and each task has acceptance criteria and deterministic tests tied to a spec anchor.
 
 ## Observations
 
-- The design leaves lease duration, cleanup budget, recovery deadline, status labels, and evidence retention as open questions (`design.md:92-96`). These are implementation/configuration decisions rather than must-fix problems as long as the final contract exposes a deadline or next action and bounds cleanup.
-- The stable fingerprint is required, but the artifacts do not specify canonical serialization or equality rules for JSON output, artifact references, path ordering, and diagnostic truncation. This should be pinned before implementation to avoid equivalent replays becoming conflicts; the exact-replay acceptance criteria at least make the required behavior testable.
-- T-002 through T-005 span runner, server, API/status, workspace, migration, and end-to-end behavior. The dependency ordering is sound, but each task will need implementation-level file ownership and an explicit cross-process test seam to remain verifiable.
-- The plan mentions Web and CLI status consumers in `proposal.md:18`, but the task list names server status/API projections and rollout documentation without a client task. The issue acceptance text does not independently require a particular UI label, so this remains an integration follow-up rather than a must-fix for this review.
+- The plan still leaves canonical serialization details for boundary fingerprints open: JSON property ordering, path ordering, artifact-reference normalization, and diagnostic truncation should be fixed before implementation. This is an implementation precision concern; the exact replay/conflict behavior and tests are already required.
+- Default lease duration, cleanup work budget, recovery deadline, clean-boundary cleanup timing, and evidence retention remain open in `design.md:96-100`. The issue requires them to be bounded and exposed, but does not require a particular configuration value or retention policy.
+- T-003 owns the Workflow recovery state/action map while T-004 owns the concrete verification and source-adoption operations. The dependency order is usable, but implementation ownership should be kept explicit so T-003 does not create a second verification contract.
+- The proposal mentions CLI/Web status consumers, while the task list explicitly requires server/API status projections and does not name a separate client task. The issue acceptance criteria require recoverable status exposure, not a specific client label or UI workflow, so this is a follow-up integration concern rather than a must-fix problem.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
