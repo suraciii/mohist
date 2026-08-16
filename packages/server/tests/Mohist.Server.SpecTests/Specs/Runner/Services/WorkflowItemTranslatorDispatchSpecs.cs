@@ -119,6 +119,40 @@ public partial class WorkflowItemTranslatorSpecs
     }
 
     [Fact]
+    public async Task TranslateToDispatch_AgentTask_ForwardsEffectiveAgentOptions()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-agent-effective-options";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        var factory = new TestDbContextFactory(_database.Options);
+        var issueVariables = new IssueVariableStore(factory);
+        await issueVariables.SetVariablesAsync(projectId, 42, new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new
+                {
+                    model = "issue-model",
+                    variant = "issue-variant",
+                    reasoningEffort = "high",
+                },
+            })));
+
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", "pi", null, null, []);
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        using var with = JsonDocument.Parse(dispatch.With!);
+        var options = with.RootElement.GetProperty("options");
+        Assert.Equal("issue-model", options.GetProperty("model").GetString());
+        Assert.Equal("issue-variant", options.GetProperty("variant").GetString());
+        Assert.Equal("high", options.GetProperty("reasoningEffort").GetString());
+        Assert.DoesNotContain("runtime", options.EnumerateObject().Select(property => property.Name));
+    }
+
+    [Fact]
     public async Task TranslateToDispatch_TaskItem_UsesOnlyClosedRootsAndDoesNotHoistVariables()
     {
         var runId = $"wr-{Guid.NewGuid():N}";

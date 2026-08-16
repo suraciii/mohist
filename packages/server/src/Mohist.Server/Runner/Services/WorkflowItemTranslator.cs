@@ -131,12 +131,14 @@ public sealed class WorkflowItemTranslator : IScopedService
 
         if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
         {
-            var resolved = await ResolveAgentTaskAsync(item, run, item.Id ?? "unknown");
+            var effective = await _variableResolver.ResolveEffectiveVariableBundleAsync(run.Id, item.Stage);
+            var agentOptions = ReadAgentOptions(effective.Vars);
+            var resolved = await ResolveAgentTaskAsync(item, run, item.Id ?? "unknown", agentOptions);
             return new AgentExecutionCapabilityTuple(
                 resolved.Definition.Runtime,
-                resolved.Definition.Model,
-                resolved.Definition.ReasoningEffort,
-                resolved.Definition.Variant);
+                resolved.Definition.Model ?? ReadOptionString(agentOptions, "model"),
+                resolved.Definition.ReasoningEffort ?? ReadOptionString(agentOptions, "reasoningEffort"),
+                resolved.Definition.Variant ?? ReadOptionString(agentOptions, "variant"));
         }
 
         var runtime = RuntimeForUses(item.Uses);
@@ -221,7 +223,10 @@ public sealed class WorkflowItemTranslator : IScopedService
         AgentExecutionDefinition? agentDefinition = null;
         if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
         {
-            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId);
+            var agentOptions = payload.TryGetValue("vars", out var effectiveVars)
+                ? ReadAgentOptions(effectiveVars)
+                : null;
+            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId, agentOptions);
         }
         var withStr = SerializeRaw(with);
         var expectStr = SerializeRaw(item.Expect);
@@ -381,7 +386,8 @@ public sealed class WorkflowItemTranslator : IScopedService
     private async Task<(string Uses, Dictionary<string, JsonElement?> With, AgentExecutionDefinition Definition)> ResolveAgentTaskAsync(
         WorkItem item,
         WorkflowRun run,
-        string workId)
+        string workId,
+        IReadOnlyDictionary<string, JsonElement?>? agentOptions = null)
     {
         if (_agentSnapshots is null)
             throw new WorkflowDispatchRejectedException(
@@ -425,6 +431,8 @@ public sealed class WorkflowItemTranslator : IScopedService
         };
         CopyIfPresent(with, transformed, "session");
         CopyIfPresent(with, transformed, "timeout");
+        if (agentOptions is { Count: > 0 })
+            transformed["options"] = JSON.SerializeToElement(agentOptions);
 
         return (snapshot.Runtime switch
         {
@@ -440,6 +448,38 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         if (source.TryGetValue(key, out var value))
             target[key] = value?.Clone();
+    }
+
+    private static Dictionary<string, JsonElement?>? ReadAgentOptions(JsonElement? vars)
+    {
+        if (vars is not { ValueKind: JsonValueKind.Object }
+            || !vars.Value.TryGetProperty("agent", out var agent)
+            || agent.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        foreach (var key in new[] { "model", "variant", "reasoningEffort" })
+        {
+            if (agent.TryGetProperty(key, out var value)
+                && (value.ValueKind == JsonValueKind.String || value.ValueKind == JsonValueKind.Null))
+            {
+                options[key] = value.Clone();
+            }
+        }
+
+        return options.Count > 0 ? options : null;
+    }
+
+    private static string? ReadOptionString(
+        IReadOnlyDictionary<string, JsonElement?>? options,
+        string key)
+    {
+        if (options is null
+            || !options.TryGetValue(key, out var value)
+            || value is null
+            || value.Value.ValueKind != JsonValueKind.String)
+            return null;
+        return value.Value.GetString();
     }
 
     private static string? RuntimeForUses(string? uses) => uses switch

@@ -563,3 +563,21 @@ Plan skeleton for next run (est. half a day):
 - Re-ran the focused regression suites: Server UnitTests passed 2722/2722 and
   CLI tests passed 1858/1858. `git diff --check` passed and the workflow
   branch remained clean before recording this note.
+
+## T-002 Verification (this run)
+
+- Closed the remaining workflow-task plumbing gap: `WorkflowItemTranslator`
+  now projects the effective issue/stage `vars.agent` model, true variant,
+  and `reasoningEffort` into the generated `mohist/agent` runtime Action
+  options. The frozen `AgentExecutionDefinition` remains authoritative when
+  it already carries a member; Agent-owned `runtime` is never copied from
+  issue variables. Capability-tuple resolution uses the same effective
+  option fallback so admission and execution observe the same tuple.
+- Added a Server SpecTest proving all three supported options reach the
+  generated dispatch and `runtime` does not. The existing T-002 snapshot,
+  dispatch-envelope, routed/manual/mention, Runner session-target,
+  follow-up, and executor plumbing coverage remains green.
+- Verification: Server SpecTests passed 3944 tests, and `npm run test:fast`
+  passed typecheck, Server UnitTests 2722, ArchTests 68, Workflow Definition
+  tests 178, CLI tests 1858, Web tests 4732, and Runner tests 1666.
+  `git diff --check` passed.
