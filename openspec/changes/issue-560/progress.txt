@@ -306,3 +306,16 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   isolation, and the subsequent complete `npm run verify` passed: 3,949 Server
   specs, 2,701 Server unit tests, 68 architecture tests, 1,860 CLI tests,
   4,736 Web tests, 1,639 Runner tests, 70 Slack tests, and 178 workflow tests.
+
+## T-001 audit follow-up
+
+- `ProjectDefaultExecutionConfigReader` now caches by Project ID within its
+  scoped lifetime, so a reused scope does not evict one Project's value when
+  another Project is read. The reader spec covers first/second/first access
+  and observes two SQL reads for two distinct Projects.
+- The focused T-001 spec classes passed 19/19 after the cache change. The
+  complete Server spec assembly passed 3,948/3,949; its only failure was the
+  known timing-sensitive OpenCode dispatch poll, and the exact method passed
+  in isolation. `npm run test:fast` passed with 2,701 Server unit tests, 68
+  architecture tests, 178 workflow tests, 1,860 CLI tests, 4,736 Web tests,
+  1,639 Runner tests, and all typechecks.
