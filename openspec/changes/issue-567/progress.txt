@@ -680,3 +680,22 @@ Channel decision (grounded in live source):
   required implementation and deterministic acceptance coverage were already
   committed in the prepared branch. The worktree is clean apart from this
   progress entry.
+
+## T-005 Recovery-History Hardening
+
+- Baseline `AgentJobRecoveryReceiptSpecs` passed 8/8 before this increment.
+- AgentJob recovery now records or updates the interrupted generation in
+  `RecoveryAttempts` for both fresh replacement allocation and explicit
+  `Interrupted` terminal fallback. This preserves the original work identity
+  in the durable runtime snapshot instead of only retaining it in scheduling
+  columns.
+- Recovery settlement resolves the update-operation grain from the matching
+  interrupted work attempt, so a later generation cannot accidentally use the
+  generation-zero Runner when a replacement was assigned elsewhere.
+- Extended the cannot-continue receipt spec to assert original-attempt history
+  and reject a new receipt after terminalization without changing identities.
+- Server spec build passed with zero warnings/errors; the AgentJob recovery
+  class passed 8/8 and related AgentJob/Runner classes passed 39/39.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow
+  Definition 178, CLI 1,856, Server Unit 2,667, Server Arch 68, Runner
+  1,660, and Web 4,727.

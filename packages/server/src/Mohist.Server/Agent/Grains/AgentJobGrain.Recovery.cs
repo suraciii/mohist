@@ -318,7 +318,8 @@ public sealed partial class AgentJobGrain
             || string.IsNullOrWhiteSpace(State.InterruptedWorkId))
             return;
 
-        var original = State.RecoveryAttempts.FirstOrDefault(attempt => attempt.RecoveryGeneration == 0);
+        var original = State.RecoveryAttempts.FirstOrDefault(attempt =>
+            string.Equals(attempt.WorkId, State.InterruptedWorkId, StringComparison.Ordinal));
         if (string.IsNullOrWhiteSpace(original?.RunnerId))
             return;
 
@@ -350,6 +351,32 @@ public sealed partial class AgentJobGrain
                 Key,
                 receipt.WorkId,
                 taskRunId: null);
+    }
+
+    private void RecordInterruptedAttempt(string? workId, DateTimeOffset recordedAt)
+    {
+        if (string.IsNullOrWhiteSpace(workId))
+            return;
+
+        State.RecoveryAttempts ??= [];
+        var index = State.RecoveryAttempts.FindIndex(attempt =>
+            attempt.RecoveryGeneration == State.RecoveryGeneration
+            && string.Equals(attempt.WorkId, workId, StringComparison.Ordinal));
+        var attempt = new AgentJobRecoveryAttempt(
+            State.RecoveryGeneration,
+            workId,
+            State.RunnerId,
+            State.Input?.AgentSessionId,
+            State.Input?.InitialInputId,
+            State.Input?.InitialTurnId,
+            State.Input?.Runtime,
+            State.RuntimeSessionId,
+            AgentJobStatus.RecoverablyInterrupted,
+            recordedAt);
+        if (index < 0)
+            State.RecoveryAttempts.Add(attempt);
+        else
+            State.RecoveryAttempts[index] = attempt;
     }
 
     private TimeSpan ResolveUpdateInterruptionTimeout() =>

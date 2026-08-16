@@ -280,6 +280,7 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
         var snapshot = await setup.Job.GetRuntimeSnapshotAsync();
         Assert.Equal(setup.RunnerId, snapshot.RunnerId);
         Assert.Equal(setup.WorkId, snapshot.CurrentWorkId);
+        Assert.Equal(setup.WorkId, snapshot.OriginalWorkId);
 
         using var duplicateResponse = await _fixture.Client.PostAsJsonAsync(
             $"/api/runner/{setup.RunnerId}/recovery-receipt",
@@ -287,6 +288,18 @@ public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFix
         Assert.Equal(HttpStatusCode.OK, duplicateResponse.StatusCode);
         var duplicate = await duplicateResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(body.GetProperty("status").GetString(), duplicate.GetProperty("status").GetString());
+
+        var lateReceipt = receipt with { ReceiptId = "job-receipt-terminal-late" };
+        using var lateResponse = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/{setup.RunnerId}/recovery-receipt",
+            lateReceipt);
+        Assert.Equal(HttpStatusCode.OK, lateResponse.StatusCode);
+        var late = await lateResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Stale, late.GetProperty("status").GetString());
+        Assert.Equal("job-terminal", late.GetProperty("reason").GetString());
+        var unchanged = await setup.Job.GetRuntimeSnapshotAsync();
+        Assert.Equal(setup.WorkId, unchanged.CurrentWorkId);
+        Assert.Equal(setup.WorkId, unchanged.OriginalWorkId);
     }
 
     private async Task<JobSetup> CreateRunningJobAsync(string name, bool attachmentsOnly = false)
