@@ -581,3 +581,17 @@ Plan skeleton for next run (est. half a day):
   passed typecheck, Server UnitTests 2722, ArchTests 68, Workflow Definition
   tests 178, CLI tests 1858, Web tests 4732, and Runner tests 1666.
   `git diff --check` passed.
+
+## T-003 Focused Verification (current run)
+
+- Re-audited the committed catalog slice: Server Orleans ids 2-5 remain
+  nullable and append-only, Runner revision hashing is order-independent,
+  Pi emits efforts only after catalog load, and OpenCode remains explicitly
+  effort-unsupported with an incomplete catalog because this Runner has no
+  authoritative OpenCode discovery source.
+- Verification: Runner CI for capability revision and host registration
+  passed (3 files, 28 tests); Web settings/editor CI passed (2 files, 48
+  tests); Server UnitTests passed (2722); Server SpecTests passed (3944).
+  The requested SpecTests filter is ignored by Microsoft Testing Platform,
+  so the complete project ran successfully. The worktree remained clean
+  before this progress entry.
