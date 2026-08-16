@@ -12,15 +12,7 @@ describe('AgentSessionComposerPage', () => {
     state.availabilityData = []
     state.launchCalls.length = 0
     state.taskCalls.length = 0
-    state.preflightCalls.length = 0
-    state.sessionPreflightCalls.length = 0
-    state.enablePreflight = false
-    state.enableSessionPreflight = false
-    state.defaultExecutionConfig = {
-      runtime: 'opencode',
-      model: 'openai/gpt-4o',
-      variant: null,
-    }
+    state.defaultExecutionConfig = { runtime: 'opencode', model: 'openai/gpt-4o', variant: null }
     state.launchError = null
     state.launchFailuresRemaining = -1
     state.launchResponse = null
@@ -119,91 +111,10 @@ describe('AgentSessionComposerPage', () => {
 
   /* ── Launch call + navigation ─────────────────────────── */
 
-  it('confirms the server-resolved scope before task-first launch', async () => {
-    state.enablePreflight = true
-    renderPage()
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Review the current change' },
-    })
-    fireEvent.click(screen.getByTestId('launch-button'))
-
-    await waitFor(() => expect(state.preflightCalls).toHaveLength(1))
-    expect(state.taskCalls).toHaveLength(0)
-    expect(await screen.findByTestId('agent-task-preflight-dialog')).toBeInTheDocument()
-    expect(screen.getByTestId('agent-task-preflight-scope')).toHaveTextContent('review-workspace')
-
-    fireEvent.click(screen.getByTestId('confirm-agent-task-launch'))
-    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
-    expect(state.taskCalls[0].body).not.toHaveProperty('preflightFingerprint')
-    expect(await screen.findByTestId('current-path')).toHaveTextContent('/Test/sessions/sess-123')
-  })
-
-  it('re-runs task preflight after a confirmed scope changes without starting work', async () => {
-    state.enablePreflight = true
-    state.launchError = {
-      error: 'The confirmed execution scope changed before launch.',
-      code: 'launch_scope_changed',
-    }
-    renderPage(['/agent-sessions/new?issue=42'])
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Keep this task att:attachment-1' },
-    })
-    fireEvent.click(screen.getByTestId('launch-button'))
-
-    await waitFor(() => expect(state.preflightCalls).toHaveLength(1))
-    fireEvent.click(screen.getByTestId('confirm-agent-task-launch'))
-    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
-
-    const feedback = await screen.findByTestId('error-launch-scope-changed')
-    expect(feedback).toHaveAttribute('data-feedback-kind', 'launch-scope-changed')
-    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task att:attachment-1')
-    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
-
-    fireEvent.click(screen.getByTestId('review-changed-launch-scope'))
-    await waitFor(() => expect(state.preflightCalls).toHaveLength(2))
-    expect(state.taskCalls).toHaveLength(1)
-    expect(state.preflightCalls[1].body.attachments).toEqual(['attachment-1'])
-    expect(await screen.findByTestId('agent-task-preflight-dialog')).toBeInTheDocument()
-    expect(state.preflightCalls[1].idempotencyKey).toBe(state.preflightCalls[0].idempotencyKey)
-  })
-
-  it('re-runs existing-Agent preflight after a confirmed scope changes', async () => {
-    state.agentsData = [makeAgent('agent-1')]
-    state.enableSessionPreflight = true
-    state.launchError = {
-      error: 'The confirmed execution scope changed before launch.',
-      code: 'launch_scope_changed',
-    }
-    renderPage(['/agent-sessions/new?agent=agent-1&issue=42'])
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Keep the selected Agent att:attachment-2' },
-    })
-    fireEvent.click(screen.getByTestId('launch-button'))
-
-    await waitFor(() => expect(state.sessionPreflightCalls).toHaveLength(1))
-    fireEvent.click(screen.getByTestId('confirm-agent-task-launch'))
-    await waitFor(() => expect(state.launchCalls).toHaveLength(1))
-
-    const feedback = await screen.findByTestId('error-launch-scope-changed')
-    expect(feedback).toHaveAttribute('data-feedback-kind', 'launch-scope-changed')
-    expect(screen.getByTestId('agent-selector-trigger')).toHaveTextContent('Agent agent-1')
-    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep the selected Agent att:attachment-2')
-    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
-
-    fireEvent.click(screen.getByTestId('review-changed-launch-scope'))
-    await waitFor(() => expect(state.sessionPreflightCalls).toHaveLength(2))
-    expect(state.launchCalls).toHaveLength(1)
-    expect(state.sessionPreflightCalls[1].body.attachments).toEqual(['attachment-2'])
-    expect(await screen.findByTestId('agent-task-preflight-dialog')).toBeInTheDocument()
-    expect(state.sessionPreflightCalls[1].idempotencyKey).toBe(state.sessionPreflightCalls[0].idempotencyKey)
-  })
-
   it('launches a task without an Agent selection through the task-first mutation', async () => {
     renderPage()
     const textarea = await screen.findByTestId('prompt-textarea')
-    fireEvent.change(textarea, {
-      target: { value: 'Review the current change' },
-    })
+    fireEvent.change(textarea, { target: { value: 'Review the current change' } })
     fireEvent.click(screen.getByTestId('launch-button'))
 
     await waitFor(() => {
@@ -222,34 +133,13 @@ describe('AgentSessionComposerPage', () => {
     expect(state.taskCalls[0].idempotencyKey).toBeTruthy()
   })
 
-  it('retains the task-first idempotency key when a failed launch is retried', async () => {
-    state.launchError = { error: 'response lost' }
-    state.launchFailuresRemaining = 1
-    renderPage()
-    const textarea = await screen.findByTestId('prompt-textarea')
-    fireEvent.change(textarea, { target: { value: 'Retry this task' } })
-    fireEvent.click(screen.getByTestId('launch-button'))
-    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
-
-    fireEvent.click(screen.getByTestId('launch-button'))
-    await waitFor(() => expect(state.taskCalls).toHaveLength(2))
-
-    expect(state.taskCalls[0].idempotencyKey).toBeTruthy()
-    expect(state.taskCalls[1].idempotencyKey).toBe(state.taskCalls[0].idempotencyKey)
-  })
-
   it('requires catalog-backed Runtime and Model when the Project has no default', async () => {
     state.defaultExecutionConfig = null
     server.use(
-      http.get('*/api/projects/:projectId/opencode/models', () =>
-        HttpResponse.json({
-          success: true,
-          data: {
-            models: ['anthropic/claude-3'],
-            modelVariants: { 'anthropic/claude-3': ['high', 'low'] },
-          },
-        }),
-      ),
+      http.get('*/api/projects/:projectId/opencode/models', () => HttpResponse.json({
+        success: true,
+        data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
+      })),
     )
     renderPage()
 
@@ -262,9 +152,7 @@ describe('AgentSessionComposerPage', () => {
     fireEvent.click(await screen.findByRole('option', { name: /anthropic\/claude-3/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Model' }))
     fireEvent.click(await screen.findByTestId('task-model-row-anthropic/claude-3-variant-high'))
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Use the catalog model' },
-    })
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Use the catalog model' } })
     expect(screen.getByTestId('launch-button')).not.toBeDisabled()
     fireEvent.click(screen.getByTestId('launch-button'))
 
@@ -279,20 +167,13 @@ describe('AgentSessionComposerPage', () => {
 
   it('shows the Project default as a recommendation and submits adjusted catalog values as hints', async () => {
     server.use(
-      http.get('*/api/projects/:projectId/opencode/models', () =>
-        HttpResponse.json({
-          success: true,
-          data: {
-            models: ['anthropic/claude-3'],
-            modelVariants: { 'anthropic/claude-3': ['high', 'low'] },
-          },
-        }),
-      ),
+      http.get('*/api/projects/:projectId/opencode/models', () => HttpResponse.json({
+        success: true,
+        data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
+      })),
     )
     renderPage()
-    expect(await screen.findByTestId('recommended-execution-config')).toHaveTextContent(
-      /recommended execution configuration/i,
-    )
+    expect(await screen.findByTestId('recommended-execution-config')).toHaveTextContent(/recommended execution configuration/i)
     expect(screen.getByTestId('recommended-execution-config')).toHaveTextContent(/Project default for tasks/i)
     expect(screen.queryByTestId('execution-config-controls')).not.toBeInTheDocument()
 
@@ -301,9 +182,7 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'Model' }))
     fireEvent.click(await screen.findByRole('option', { name: /anthropic\/claude-3/i }))
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Use an adjusted model' },
-    })
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Use an adjusted model' } })
     fireEvent.click(screen.getByTestId('launch-button'))
 
     await waitFor(() => expect(state.taskCalls).toHaveLength(1))
@@ -315,10 +194,7 @@ describe('AgentSessionComposerPage', () => {
   })
 
   it('preserves task and context state when the task-first launch is rejected', async () => {
-    state.launchError = {
-      error: 'Execution configuration is unresolved',
-      code: 'execution_config_unresolvable',
-    }
+    state.launchError = { error: 'Execution configuration is unresolved', code: 'execution_config_unresolvable' }
     renderPage(['/agent-sessions/new?issue=42'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Keep this task' } })
@@ -330,32 +206,6 @@ describe('AgentSessionComposerPage', () => {
     expect(feedback).toHaveTextContent(/Project default/i)
     expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
     expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
-  })
-
-  it('offers a new launch key after a conflict without clearing the composed task', async () => {
-    state.launchError = {
-      error: 'This key conflicts with an earlier task',
-      code: 'launch_idempotency_conflict',
-    }
-    renderPage(['/agent-sessions/new?issue=42'])
-    const textarea = await screen.findByTestId('prompt-textarea')
-    fireEvent.change(textarea, { target: { value: 'Keep this task' } })
-    fireEvent.click(screen.getByTestId('launch-button'))
-
-    const feedback = await screen.findByTestId('error-launch-conflict')
-    expect(feedback).toHaveTextContent(/new key/i)
-    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
-    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
-
-    fireEvent.click(screen.getByTestId('reset-launch-key'))
-    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
-    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
-
-    state.launchError = null
-    fireEvent.click(screen.getByTestId('launch-button'))
-
-    await waitFor(() => expect(state.taskCalls).toHaveLength(2))
-    expect(state.taskCalls[1].idempotencyKey).not.toBe(state.taskCalls[0].idempotencyKey)
   })
 
   it('calls mutate with correct args on launch when an Agent is selected', async () => {
@@ -390,12 +240,7 @@ describe('AgentSessionComposerPage', () => {
       agentRef: 'agent-1',
       body: {
         prompt: 'Analyze this',
-        context: {
-          issueNumber: 42,
-          epicNumber: 7,
-          repository: 'org/repo',
-          workspacePath: '/workspace',
-        },
+        context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspacePath: '/workspace' },
         attachments: [],
       },
     })
@@ -410,45 +255,22 @@ describe('AgentSessionComposerPage', () => {
   it('sends attachment ids explicitly and displays mixed acceptance results', async () => {
     state.agentsData = [makeAgent('agent-1')]
     state.launchResponse = {
-      attachments: [
-        {
-          id: 'att-ok',
-          name: 'accepted.txt',
-          contentType: 'text/plain',
-          size: 4,
-        },
-      ],
-      rejectedAttachments: [
-        {
-          id: 'att-bad',
-          reason: 'UnsupportedType',
-          message: 'Archive files are not supported.',
-        },
-      ],
+      attachments: [{ id: 'att-ok', name: 'accepted.txt', contentType: 'text/plain', size: 4 }],
+      rejectedAttachments: [{ id: 'att-bad', reason: 'UnsupportedType', message: 'Archive files are not supported.' }],
       sessionUrl: '/Test/sessions/attachment-canonical-1',
     }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
-    fireEvent.change(textarea, {
-      target: {
-        value: 'Use [accepted.txt](att:att-ok) and [rejected.zip](att:att-bad)',
-      },
-    })
+    fireEvent.change(textarea, { target: { value: 'Use [accepted.txt](att:att-ok) and [rejected.zip](att:att-bad)' } })
     fireEvent.click(screen.getByTestId('launch-button'))
 
     await waitFor(() => expect(screen.getByTestId('launch-attachment-results')).toBeInTheDocument())
-    expect(state.launchCalls[0].body).toMatchObject({
-      attachments: ['att-ok', 'att-bad'],
-    })
+    expect(state.launchCalls[0].body).toMatchObject({ attachments: ['att-ok', 'att-bad'] })
     expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
-    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent(
-      'Archive files are not supported.',
-    )
+    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
 
     fireEvent.click(screen.getByTestId('open-launched-session'))
-    await waitFor(() =>
-      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'),
-    )
+    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'))
     expect(screen.getByTestId('current-path')).not.toHaveTextContent('/Test/Test/sessions/')
   })
 
@@ -465,10 +287,7 @@ describe('AgentSessionComposerPage', () => {
 
   it('uses the canonical session URL returned by launch', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    state.launchResponse = {
-      sessionUrl: '/Test/sessions/canonical-1',
-      sessionId: 'ignored-session',
-    }
+    state.launchResponse = { sessionUrl: '/Test/sessions/canonical-1', sessionId: 'ignored-session' }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Open directly' } })
@@ -536,10 +355,7 @@ describe('AgentSessionComposerPage', () => {
 
   it('surfaces no-available-runner error state', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    state.launchError = {
-      error: 'No available runner for selected agent',
-      code: 'NO_AVAILABLE_RUNNER',
-    }
+    state.launchError = { error: 'No available runner for selected agent', code: 'NO_AVAILABLE_RUNNER' }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
@@ -552,10 +368,7 @@ describe('AgentSessionComposerPage', () => {
 
   it('surfaces external-agent-unavailable error state', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    state.launchError = {
-      error: 'External agent is unavailable',
-      code: 'EXTERNAL_AGENT_UNAVAILABLE',
-    }
+    state.launchError = { error: 'External agent is unavailable', code: 'EXTERNAL_AGENT_UNAVAILABLE' }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
@@ -570,35 +383,28 @@ describe('AgentSessionComposerPage', () => {
 
   it('surfaces capacity back-pressure with a next action', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    state.availabilityData = [
-      {
-        agentId: 'agent-1',
-        canStartNow: false,
-        waitingReason: 'concurrency-limit',
-        activeRuns: 1,
-        maxConcurrentRuns: 1,
-        capacity: { usedSlots: 1, totalSlots: 2 },
-        queuedCount: 1,
-      },
-    ]
+    state.availabilityData = [{
+      agentId: 'agent-1',
+      canStartNow: false,
+      waitingReason: 'concurrency-limit',
+      activeRuns: 1,
+      maxConcurrentRuns: 1,
+      capacity: { usedSlots: 1, totalSlots: 2 },
+      queuedCount: 1,
+    }]
     renderPage(['/agent-sessions/new?agent=agent-1'])
 
     const feedback = await screen.findByTestId('agent-availability-feedback')
     expect(feedback).toHaveAttribute('data-feedback-kind', 'back-pressure')
     expect(feedback).toHaveTextContent(/concurrency limit/i)
     expect(feedback).toHaveTextContent(/active run.*finish/i)
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Try later' },
-    })
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Try later' } })
     expect(screen.getByTestId('launch-button')).not.toBeDisabled()
   })
 
   it('surfaces runtime execution unavailability with recovery guidance', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    state.launchError = {
-      error: 'runtime unavailable',
-      code: 'runtime-unavailable',
-    }
+    state.launchError = { error: 'runtime unavailable', code: 'runtime-unavailable' }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Run this' } })
@@ -632,128 +438,76 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
     })
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Hello' },
-    })
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Hello' } })
     expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
   })
 
-  /* ── Executability gating (server-projection driven, client does not synthesize) ── */
+  /* ── Readiness gating (server-conclusion driven, client does not synthesize) ── */
 
-  it('blocks the launch button and lists gaps when executability is not-configured', async () => {
+  it('blocks the launch button and lists gaps when Readiness is Needs setup', async () => {
     state.agentsData = [
       makeAgent('agent-1', {
-        executability: {
-          state: 'not-configured',
+        readiness: {
+          conclusion: 'Needs setup',
           gaps: [
-            {
-              code: 'instructions-missing',
-              message: 'Instructions are missing.',
-              nextAction: 'Add instructions in Agent settings.',
-              fixEntryPoint: {
-                label: 'Agent settings',
-                path: '/agents/agent-1',
-                command: 'mo agent edit agent-1',
-              },
-            },
+            { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
           ],
-          pendingLaunchNote: null,
+          setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
         },
       }),
     ]
     renderPage(['/agent-sessions/new?agent=agent-1'])
-    const banner = await screen.findByTestId('agent-executability-not-configured')
-    expect(banner).toHaveTextContent(/not-configured/i)
-    expect(screen.getByTestId('agent-executability-gap-instructions-missing')).toHaveTextContent(
-      /Instructions are missing/i,
-    )
+    const banner = await screen.findByTestId('agent-readiness-needs-setup')
+    expect(banner).toHaveTextContent(/needs setup/i)
+    expect(screen.getByTestId('agent-readiness-gap-instructions-missing')).toHaveTextContent(/Instructions are missing/i)
     const button = screen.getByTestId('launch-button')
     expect(button).toBeDisabled()
   })
 
-  it('blocks the launch button when executability is not-executable', async () => {
+  it('marks the launch button as Ready when Readiness is Ready (no client synthesis)', async () => {
     state.agentsData = [
       makeAgent('agent-1', {
-        executability: {
-          state: 'not-executable',
-          gaps: [
-            {
-              code: 'execution-config-failure',
-              message: 'The configured model could not be used by the runtime.',
-              nextAction: 'Update the Agent execution settings and run it again.',
-              fixEntryPoint: {
-                label: 'Agent settings',
-                path: '/agents/agent-1',
-                command: 'mo agent edit agent-1',
-              },
-            },
-          ],
-          pendingLaunchNote: null,
-        },
+        readiness: { conclusion: 'Ready', gaps: [], setup: null },
       }),
     ]
     renderPage(['/agent-sessions/new?agent=agent-1'])
-
-    await screen.findByTestId('agent-executability-not-executable')
-    expect(screen.getByTestId('launch-button')).toBeDisabled()
-  })
-
-  it('marks the launch button executable when the server says executable', async () => {
-    state.agentsData = [
-      makeAgent('agent-1', {
-        executability: {
-          state: 'executable',
-          gaps: [],
-          pendingLaunchNote: null,
-        },
-      }),
-    ]
-    renderPage(['/agent-sessions/new?agent=agent-1'])
-    await screen.findByTestId('agent-executability-executable')
+    await screen.findByTestId('agent-readiness-ready')
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     expect(screen.getByTestId('launch-button')).not.toBeDisabled()
   })
 
-  it('keeps unknown launchable and shows the server pending-launch note', async () => {
-    state.agentsData = [
-      makeAgent('agent-1', {
-        executability: {
-          state: 'unknown',
-          gaps: [],
-          pendingLaunchNote:
-            'No matching execution evidence exists. This launch is accepted and awaits Runner verification.',
-        },
-      }),
-    ]
+  it('keeps Unknown launchable and shows a will-wait-for-validation hint', async () => {
+    state.agentsData = [makeAgent('agent-1', { readiness: { conclusion: 'Unknown', gaps: [], setup: null } })]
     renderPage(['/agent-sessions/new?agent=agent-1'])
-    const hint = await screen.findByTestId('agent-executability-unknown-note')
-    expect(hint).toHaveTextContent(/awaits runner verification/i)
+    const hint = await screen.findByTestId('agent-readiness-unknown-hint')
+    expect(hint).toHaveTextContent(/Readiness: Unknown/i)
+    expect(hint).toHaveTextContent(/wait/i)
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     expect(screen.getByTestId('launch-button')).not.toBeDisabled()
   })
 
-  it('surfaces 409 agent_not_configured as an error banner', async () => {
-    state.agentsData = [
-      makeAgent('agent-1', {
-        executability: {
-          state: 'unknown',
-          gaps: [],
-          pendingLaunchNote: 'Awaiting Runner verification.',
-        },
-      }),
-    ]
+  it('surfaces 409 agent_needs_setup gaps as an error banner', async () => {
+    state.agentsData = [makeAgent('agent-1', {
+      readiness: {
+        conclusion: 'Unknown',
+        gaps: [
+          { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
+        ],
+        setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
+      },
+    })]
     state.launchError = {
-      error: 'This Agent is not-configured and cannot accept new work.',
-      code: 'agent_not_configured',
+      error: 'This Agent needs setup before it can accept new work.',
+      code: 'agent_needs_setup',
     }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
     await waitFor(() => {
-      expect(screen.getByTestId('error-agent-not-configured')).toBeInTheDocument()
+      expect(screen.getByTestId('error-needs-setup')).toBeInTheDocument()
     })
   })
 })

@@ -30,10 +30,9 @@ const mocks = {
 
 useMswServer(
   http.get('*/api/projects/:projectId/opencode/models', ({ request }) => {
-    const models =
-      new URL(request.url).searchParams.get('runtime') === 'pi'
-        ? ['pi/anthropic/claude']
-        : ['openai/gpt-4', 'anthropic/claude']
+    const models = new URL(request.url).searchParams.get('runtime') === 'pi'
+      ? ['pi/anthropic/claude']
+      : ['openai/gpt-4', 'anthropic/claude']
     return HttpResponse.json({
       success: true,
       data: {
@@ -41,7 +40,6 @@ useMswServer(
         modelVariants: {
           'openai/gpt-4': ['standard'],
           'anthropic/claude': ['low', 'medium', 'high'],
-          'pi/anthropic/claude': ['low', 'medium', 'high'],
         },
       },
     })
@@ -53,6 +51,7 @@ const operationsHook: AgentProfileEditorOperationsHook = () => ({
   updateAgent: mocks.updateMutation,
   archiveAgent: mocks.archiveMutation,
 })
+
 
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -72,20 +71,17 @@ function renderEditor(overrides: Partial<Parameters<typeof AgentProfileEditor>[0
   const queryClient = createQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider
-        initialProjectId="proj-1"
-        initialProjects={[
-          {
-            id: 'proj-1',
-            name: 'Test',
-            createdAt: '2026-01-01T00:00:00.000Z',
-            updatedAt: '2026-01-01T00:00:00.000Z',
-            repositories: [],
-          },
-        ]}
-      >
+      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
+        id: 'proj-1', name: 'Test',
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+        repositories: [],
+      }]}>
         <MemoryRouter>
-          <AgentProfileEditor {...defaultProps} {...overrides} operationsHook={operationsHook} />
+          <AgentProfileEditor
+            {...defaultProps}
+            {...overrides}
+            operationsHook={operationsHook}
+          />
           <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
@@ -101,12 +97,8 @@ async function openAgentModelSelect() {
 }
 
 function fillRequiredFields() {
-  fireEvent.change(screen.getByTestId('editor-name'), {
-    target: { value: 'Variant Agent' },
-  })
-  fireEvent.change(screen.getByTestId('editor-instructions'), {
-    target: { value: 'Use the selected model' },
-  })
+  fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Variant Agent' } })
+  fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Use the selected model' } })
 }
 
 describe('AgentProfileEditor', () => {
@@ -144,15 +136,9 @@ describe('AgentProfileEditor', () => {
     it('calls createAgent with valid form data', async () => {
       renderEditor()
       await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-name'), {
-          target: { value: 'My New Agent' },
-        })
-        fireEvent.change(screen.getByTestId('editor-description'), {
-          target: { value: 'Handles task intake' },
-        })
-        fireEvent.change(screen.getByTestId('editor-instructions'), {
-          target: { value: 'Be helpful' },
-        })
+        fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'My New Agent' } })
+        fireEvent.change(screen.getByTestId('editor-description'), { target: { value: 'Handles task intake' } })
+        fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Be helpful' } })
       })
       await act(async () => {
         screen.getByTestId('editor-save').click()
@@ -162,32 +148,6 @@ describe('AgentProfileEditor', () => {
       expect(callArgs.name).toBe('My New Agent')
       expect(callArgs.description).toBe('Handles task intake')
       expect(callArgs.instructions).toBe('Be helpful')
-    })
-
-    it('creates the task purpose and declared permissions', async () => {
-      renderEditor()
-      await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-name'), {
-          target: { value: 'Reviewer' },
-        })
-        fireEvent.change(screen.getByTestId('editor-purpose'), {
-          target: { value: 'Review pull requests' },
-        })
-        fireEvent.change(screen.getByTestId('editor-instructions'), {
-          target: { value: 'Check every change' },
-        })
-        fireEvent.change(screen.getByTestId('editor-permissions'), {
-          target: { value: 'repo:read, artifact:publish' },
-        })
-      })
-
-      await act(async () => {
-        screen.getByTestId('editor-save').click()
-      })
-
-      const callArgs = (mocks.createMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(callArgs.purpose).toBe('Review pull requests')
-      expect(callArgs.permissions).toEqual(['repo:read', 'artifact:publish'])
     })
 
     it('renders model variant chips and persists model plus variant on create', async () => {
@@ -202,35 +162,7 @@ describe('AgentProfileEditor', () => {
 
       expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
         expect.objectContaining({
-          agentConfig: {
-            model: 'anthropic/claude',
-            variant: 'high',
-            runtime: 'opencode',
-          },
-        }),
-        expect.any(Object),
-      )
-    })
-
-    it('renders Pi reasoning efforts and persists the selected effort', async () => {
-      renderEditor()
-      fillRequiredFields()
-      fireEvent.change(screen.getByTestId('agent-runtime'), {
-        target: { value: 'pi' },
-      })
-      fireEvent.click(document.querySelector('#agent-model') as HTMLElement)
-
-      const effort = await waitFor(() => screen.getByTestId('agent-model-row-pi/anthropic/claude-variant-high'))
-      fireEvent.click(effort)
-      fireEvent.click(screen.getByTestId('editor-save'))
-
-      expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentConfig: {
-            model: 'pi/anthropic/claude',
-            reasoningEffort: 'high',
-            runtime: 'pi',
-          },
+          agentConfig: { model: 'anthropic/claude', variant: 'high', runtime: 'opencode' },
         }),
         expect.any(Object),
       )
@@ -240,12 +172,8 @@ describe('AgentProfileEditor', () => {
       const onClose = vi.fn()
       renderEditor({ onClose })
       await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-name'), {
-          target: { value: 'Agent X' },
-        })
-        fireEvent.change(screen.getByTestId('editor-instructions'), {
-          target: { value: 'Do things' },
-        })
+        fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Agent X' } })
+        fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Do things' } })
       })
       await act(async () => {
         screen.getByTestId('editor-save').click()
@@ -268,12 +196,10 @@ describe('AgentProfileEditor', () => {
       id: 'agent-1',
       projectId: 'proj-1',
       name: 'Existing Agent',
-      purpose: 'Review changes',
       description: 'Original purpose',
       instructions: 'Original instructions',
       agentConfig: { model: 'anthropic/claude', variant: 'high' },
       skills: ['code'],
-      permissions: ['repo:read'],
       maxConcurrentRuns: null,
       status: 'active',
       createdAt: '2026-06-01T00:00:00.000Z',
@@ -287,7 +213,6 @@ describe('AgentProfileEditor', () => {
       })
       const nameInput = screen.getByTestId('editor-name') as HTMLInputElement
       expect(nameInput.value).toBe('Existing Agent')
-      expect((screen.getByTestId('editor-purpose') as HTMLTextAreaElement).value).toBe('Review changes')
       expect((screen.getByTestId('editor-description') as HTMLTextAreaElement).value).toBe('Original purpose')
       const instructionsInput = screen.getByTestId('editor-instructions') as HTMLTextAreaElement
       expect(instructionsInput.value).toBe('Original instructions')
@@ -306,18 +231,10 @@ describe('AgentProfileEditor', () => {
     it('calls updateAgent with edited values', async () => {
       renderEditor({ agent: existingAgent })
       await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-name'), {
-          target: { value: 'Updated Name' },
-        })
-        fireEvent.change(screen.getByTestId('editor-description'), {
-          target: { value: 'Updated purpose' },
-        })
-        fireEvent.change(screen.getByTestId('editor-instructions'), {
-          target: { value: 'Updated instructions' },
-        })
-        fireEvent.change(screen.getByTestId('editor-skills'), {
-          target: { value: 'code, debug' },
-        })
+        fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Updated Name' } })
+        fireEvent.change(screen.getByTestId('editor-description'), { target: { value: 'Updated purpose' } })
+        fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Updated instructions' } })
+        fireEvent.change(screen.getByTestId('editor-skills'), { target: { value: 'code, debug' } })
       })
       await act(async () => {
         screen.getByTestId('editor-save').click()
@@ -331,98 +248,23 @@ describe('AgentProfileEditor', () => {
       expect(callArgs.data.skills).toEqual(['code', 'debug'])
     })
 
-    it('clears purpose and permissions explicitly', async () => {
-      renderEditor({ agent: existingAgent })
-      await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-purpose'), {
-          target: { value: '' },
-        })
-        fireEvent.change(screen.getByTestId('editor-permissions'), {
-          target: { value: '' },
-        })
-        screen.getByTestId('editor-save').click()
-      })
-
-      const callArgs = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(callArgs.data.purpose).toBeNull()
-      expect(callArgs.data.permissions).toEqual([])
-    })
-
-    it('preserves an effective default as unresolved when saving an unrelated edit', async () => {
-      const defaultResolvedAgent: AgentInfo = {
-        ...existingAgent,
-        agentConfig: null,
-        effectiveExecutionConfig: {
-          runtime: 'pi',
-          model: 'provider/default',
-          variant: 'balanced',
-        },
-      }
-      renderEditor({ agent: defaultResolvedAgent })
-      await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-description'), {
-          target: { value: 'Updated purpose' },
-        })
-        screen.getByTestId('editor-save').click()
-      })
-
-      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(updateCall.data.description).toBe('Updated purpose')
-      expect(updateCall.data.agentConfig).toBeNull()
-    })
-
-    it('preserves a variant-only definition when saving an unrelated edit', async () => {
-      const variantOnlyAgent: AgentInfo = {
-        ...existingAgent,
-        agentConfig: { variant: 'balanced' },
-        effectiveExecutionConfig: {
-          runtime: 'pi',
-          model: 'provider/default',
-          variant: 'balanced',
-        },
-      }
-      renderEditor({ agent: variantOnlyAgent })
-      await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-description'), {
-          target: { value: 'Updated purpose' },
-        })
-        screen.getByTestId('editor-save').click()
-      })
-
-      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(updateCall.data.description).toBe('Updated purpose')
-      expect(updateCall.data.agentConfig).toEqual({ variant: 'balanced' })
-    })
-
     it('persists an updated variant and restores its active state from stored agentConfig', async () => {
       renderEditor({ agent: existingAgent })
       await waitFor(() => {
         expect(document.querySelector('#agent-model')).toHaveTextContent('claude · high')
       })
       await openAgentModelSelect()
-      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-high')).toHaveAttribute(
-        'data-variant-active',
-        'true',
-      )
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-high')).toHaveAttribute('data-variant-active', 'true')
       fireEvent.click(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium'))
       fireEvent.click(screen.getByTestId('editor-save'))
 
       const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(updateCall.data.agentConfig).toEqual({
-        model: 'anthropic/claude',
-        variant: 'medium',
-        runtime: 'opencode',
-      })
+       expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', variant: 'medium', runtime: 'opencode' })
 
       cleanup()
-      renderEditor({
-        agent: { ...existingAgent, agentConfig: updateCall.data.agentConfig },
-      })
+      renderEditor({ agent: { ...existingAgent, agentConfig: updateCall.data.agentConfig } })
       await openAgentModelSelect()
-      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium')).toHaveAttribute(
-        'data-variant-active',
-        'true',
-      )
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium')).toHaveAttribute('data-variant-active', 'true')
     })
 
     it('selecting the model body clears only the stored variant', async () => {
@@ -432,10 +274,7 @@ describe('AgentProfileEditor', () => {
       fireEvent.click(screen.getByTestId('editor-save'))
 
       const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(updateCall.data.agentConfig).toEqual({
-        model: 'anthropic/claude',
-        runtime: 'opencode',
-      })
+       expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', runtime: 'opencode' })
     })
 
     it('clear selection clears both model and variant', async () => {
@@ -480,9 +319,7 @@ describe('AgentProfileEditor', () => {
       }
       renderEditor({ agent: legacyAgent })
       await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-name'), {
-          target: { value: 'Renamed' },
-        })
+        fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Renamed' } })
       })
       await act(async () => {
         screen.getByTestId('editor-save').click()
@@ -491,15 +328,13 @@ describe('AgentProfileEditor', () => {
       const callArgs = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
       const agentConfig = callArgs.data.agentConfig as Record<string, unknown> | null
       expect(agentConfig).not.toBeNull()
-      expect(Object.keys(agentConfig ?? {}).sort()).toEqual(['model', 'runtime', 'variant'])
+       expect(Object.keys(agentConfig ?? {}).sort()).toEqual(['model', 'runtime', 'variant'])
       AssertNoLegacyKey(agentConfig)
     })
 
     it('selecting Pi loads Pi models and persists the runtime', async () => {
       renderEditor()
-      fireEvent.change(screen.getByTestId('agent-runtime'), {
-        target: { value: 'pi' },
-      })
+      fireEvent.change(screen.getByTestId('agent-runtime'), { target: { value: 'pi' } })
       await waitFor(() => expect(document.querySelector('#agent-model')).toBeInTheDocument())
       fireEvent.click(document.querySelector('#agent-model') as HTMLElement)
       await waitFor(() => expect(document.querySelector('[data-model-id="pi/anthropic/claude"]')).toBeInTheDocument())
@@ -508,9 +343,7 @@ describe('AgentProfileEditor', () => {
       fillRequiredFields()
       fireEvent.click(screen.getByTestId('editor-save'))
       expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentConfig: expect.objectContaining({ runtime: 'pi' }),
-        }),
+        expect.objectContaining({ agentConfig: expect.objectContaining({ runtime: 'pi' }) }),
         expect.any(Object),
       )
     })
@@ -521,12 +354,10 @@ describe('AgentProfileEditor', () => {
       id: 'agent-1',
       projectId: 'proj-1',
       name: 'To Archive',
-      purpose: null,
       description: '',
       instructions: 'Do stuff',
       agentConfig: null,
       skills: [],
-      permissions: [],
       maxConcurrentRuns: null,
       status: 'active',
       createdAt: '2026-06-01T00:00:00.000Z',
@@ -604,12 +435,8 @@ describe('AgentProfileEditor', () => {
     it('shows inline API errors', async () => {
       renderEditor()
       await act(async () => {
-        fireEvent.change(screen.getByTestId('editor-name'), {
-          target: { value: 'Agent Name' },
-        })
-        fireEvent.change(screen.getByTestId('editor-instructions'), {
-          target: { value: 'Do stuff' },
-        })
+        fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Agent Name' } })
+        fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Do stuff' } })
       })
       await act(async () => {
         screen.getByTestId('editor-save').click()

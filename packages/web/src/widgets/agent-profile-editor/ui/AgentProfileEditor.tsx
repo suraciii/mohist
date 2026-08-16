@@ -1,21 +1,19 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BotIcon, Loader2Icon, ArchiveIcon } from 'lucide-react'
+import {
+  BotIcon,
+  Loader2Icon,
+  ArchiveIcon,
+} from 'lucide-react'
 import {
   useCreateAgent,
   useUpdateAgent,
   useArchiveAgent,
-  readAgentDefinitionModelAndVariant,
+  readAgentModelAndVariant,
   writeAgentModelAndVariant,
 } from '../../../entities/agent'
 import type { AgentInfo, AgentCreateRequest, AgentUpdateRequest } from '../../../entities/agent'
-import {
-  AGENT_RUNTIME_OPENCODE,
-  AGENT_RUNTIME_PI,
-  useAvailableModelIds,
-  useModelVariants,
-  type AgentRuntime,
-} from '../../../entities/settings'
+import { AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, useAvailableModelIds, useModelVariants, type AgentRuntime } from '../../../entities/settings'
 import { useProjectPath } from '../../../entities/project'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { Button } from '@/shared/ui/components/button'
@@ -52,27 +50,26 @@ interface FormErrors {
   api?: string
 }
 
-export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHook = useDefaultOperations }: Props) {
+export function AgentProfileEditor({
+  agent,
+  open,
+  onClose,
+  onSaved,
+  operationsHook = useDefaultOperations,
+}: Props) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { createAgent, updateAgent, archiveAgent } = operationsHook()
   const isEditing = !!agent
-  const initialModelVariant = useMemo(() => readAgentDefinitionModelAndVariant(agent), [agent])
+  const initialModelVariant = useMemo(() => readAgentModelAndVariant(agent), [agent])
 
   const [name, setName] = useState(agent?.name ?? '')
-  const [purpose, setPurpose] = useState(agent?.purpose ?? '')
   const [description, setDescription] = useState(agent?.description ?? '')
   const [instructions, setInstructions] = useState(agent?.instructions ?? '')
   const [skillsText, setSkillsText] = useState(agent?.skills?.join(', ') ?? '')
-  const [permissionsText, setPermissionsText] = useState(agent?.permissions?.join(', ') ?? '')
   const [model, setModel] = useState<string | null>(initialModelVariant.model)
   const [variant, setVariant] = useState<string | null>(initialModelVariant.variant)
-  const [reasoningEffort, setReasoningEffort] = useState<string | null>(initialModelVariant.reasoningEffort)
   const [runtime, setRuntime] = useState<AgentRuntime>(initialModelVariant.runtime)
-  const [allowedSubagentAgentIds, setAllowedSubagentAgentIds] = useState<string[]>(agent?.allowedSubagentAgentIds ?? [])
-  const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState(
-    agent?.maxConcurrentRuns == null ? '' : String(agent.maxConcurrentRuns),
-  )
   const [errors, setErrors] = useState<FormErrors>({})
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 
@@ -80,7 +77,6 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
 
   const { data: availableModels } = useAvailableModelIds(runtime)
   const modelVariantsMap = useModelVariants(runtime)
-  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? modelVariantsMap : undefined
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
@@ -91,39 +87,25 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
     return errs
   }
 
-  function commaSeparatedValues(value: string): string[] {
-    return value
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-  }
-
   async function handleSave() {
     const validation = validate()
     setErrors(validation)
     if (Object.keys(validation).length > 0) return
 
-    const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime, reasoningEffort)
-    const maxConcurrentRuns = maxConcurrentRunsText.trim() ? Number(maxConcurrentRunsText) : null
-    if (maxConcurrentRuns !== null && (!Number.isInteger(maxConcurrentRuns) || maxConcurrentRuns <= 0)) {
-      setErrors({
-        api: 'Max concurrent runs must be a positive whole number or empty.',
-      })
-      return
-    }
-    const collaborators = allowedSubagentAgentIds.length > 0 ? allowedSubagentAgentIds : null
+    const agentConfig = writeAgentModelAndVariant(
+      agent?.agentConfig ?? null,
+      model,
+      variant,
+      runtime,
+    )
 
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
         name: name.trim() || null,
-        purpose: purpose.trim() || null,
         description: description.trim() || null,
         instructions: instructions.trim() || null,
-        skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
-        permissions: commaSeparatedValues(permissionsText),
+        skills: skillsText.trim() ? skillsText.split(',').map((s) => s.trim()).filter(Boolean) : null,
         agentConfig,
-        allowedSubagentAgentIds: collaborators,
-        maxConcurrentRuns,
       }
       updateAgent.mutate(
         { agentRef: agent.id, data: payload },
@@ -140,14 +122,10 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
     } else {
       const payload: AgentCreateRequest = {
         name: name.trim(),
-        purpose: purpose.trim() || null,
         description: description.trim() || null,
         instructions: instructions.trim(),
-        skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
-        permissions: commaSeparatedValues(permissionsText),
+        skills: skillsText.trim() ? skillsText.split(',').map((s) => s.trim()).filter(Boolean) : null,
         agentConfig,
-        allowedSubagentAgentIds: collaborators,
-        maxConcurrentRuns,
       }
       createAgent.mutate(payload, {
         onSuccess: (created) => {
@@ -181,16 +159,8 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
 
   return (
     <>
-      <Dialog
-        open={open}
-        onOpenChange={(open) => {
-          if (!open) handleClose()
-        }}
-      >
-        <DialogContent
-          className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-lg"
-          data-testid="agent-profile-editor"
-        >
+      <Dialog open={open} onOpenChange={(open) => { if (!open) handleClose() }}>
+        <DialogContent className="sm:max-w-lg" data-testid="agent-profile-editor">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BotIcon className="size-4" />
@@ -198,8 +168,8 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
             </DialogTitle>
             <DialogDescription>
               {isEditing
-                ? 'Changes to Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch.'
-                : 'Create a task profile with purpose, instructions, permissions, and execution settings.'}
+                ? 'Changes to Instructions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch.'
+                : 'Create a new agent profile with instructions, model, and skills.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -214,6 +184,25 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
             )}
 
             <div className="space-y-1.5">
+              <Label htmlFor="agent-runtime">Execution backend</Label>
+              <select
+                id="agent-runtime"
+                aria-label="Execution backend"
+                data-testid="agent-runtime"
+                value={runtime}
+                onChange={(event) => {
+                  setRuntime(event.target.value as AgentRuntime)
+                  setModel(null)
+                  setVariant(null)
+                }}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+              >
+                <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+                <option value={AGENT_RUNTIME_PI}>Pi</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
               <Label htmlFor="agent-name">Name *</Label>
               <Input
                 id="agent-name"
@@ -224,22 +213,8 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 className={errors.name ? 'border-red-500' : ''}
               />
               {errors.name && (
-                <p data-testid="editor-name-error" className="text-xs text-red-500">
-                  {errors.name}
-                </p>
+                <p data-testid="editor-name-error" className="text-xs text-red-500">{errors.name}</p>
               )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-purpose">Purpose</Label>
-              <Textarea
-                id="agent-purpose"
-                value={purpose}
-                onChange={(event) => setPurpose(event.target.value)}
-                placeholder="Review pull requests before release"
-                rows={2}
-                data-testid="editor-purpose"
-              />
             </div>
 
             <div className="space-y-1.5">
@@ -266,42 +241,8 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 className={errors.instructions ? 'border-red-500' : ''}
               />
               {errors.instructions && (
-                <p data-testid="editor-instructions-error" className="text-xs text-red-500">
-                  {errors.instructions}
-                </p>
+                <p data-testid="editor-instructions-error" className="text-xs text-red-500">{errors.instructions}</p>
               )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-permissions">Declared permissions</Label>
-              <Input
-                id="agent-permissions"
-                value={permissionsText}
-                onChange={(event) => setPermissionsText(event.target.value)}
-                placeholder="repo:read, issue:write"
-                data-testid="editor-permissions"
-              />
-              <p className="text-[10px] text-muted-foreground">Comma-separated permission terms.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-runtime">Execution backend</Label>
-              <select
-                id="agent-runtime"
-                aria-label="Execution backend"
-                data-testid="agent-runtime"
-                value={runtime}
-                onChange={(event) => {
-                  setRuntime(event.target.value as AgentRuntime)
-                  setModel(null)
-                  setVariant(null)
-                  setReasoningEffort(null)
-                }}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-              >
-                <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
-                <option value={AGENT_RUNTIME_PI}>Pi</option>
-              </select>
             </div>
 
             <div className="space-y-1.5">
@@ -313,26 +254,11 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 models={allModels}
                 onChange={(m) => setModel(m)}
                 onChangeVariant={setVariant}
-                onClear={() => {
-                  setModel(null)
-                  setVariant(null)
-                  setReasoningEffort(null)
-                }}
+                onClear={() => { setModel(null); setVariant(null) }}
                 allowClear={!!model}
                 modelVariants={modelVariantsMap}
                 valueVariant={variant}
-                onChangeModelVariant={(m, v) => {
-                  setModel(m)
-                  setVariant(v)
-                  setReasoningEffort(null)
-                }}
-                modelReasoningEfforts={reasoningEffortsMap}
-                valueReasoningEffort={reasoningEffort}
-                onChangeModelReasoningEffort={(m, effort) => {
-                  setModel(m)
-                  setReasoningEffort(effort)
-                  setVariant(null)
-                }}
+                onChangeModelVariant={(m, v) => { setModel(m); setVariant(v) }}
               />
             </div>
 
@@ -346,40 +272,6 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 data-testid="editor-skills"
               />
               <p className="text-[10px] text-muted-foreground">Comma-separated list of skills.</p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="agent-collaborators">Allowed collaborators</Label>
-                <Input
-                  id="agent-collaborators"
-                  value={allowedSubagentAgentIds.join(', ')}
-                  onChange={(event) =>
-                    setAllowedSubagentAgentIds(
-                      event.target.value
-                        .split(',')
-                        .map((value) => value.trim())
-                        .filter(Boolean),
-                    )
-                  }
-                  placeholder="agent-id-1, agent-id-2"
-                  data-testid="editor-collaborators"
-                />
-                <p className="text-[10px] text-muted-foreground">Comma-separated Agent ids from this Project.</p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="agent-max-concurrent-runs">Max concurrent runs</Label>
-                <Input
-                  id="agent-max-concurrent-runs"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={maxConcurrentRunsText}
-                  onChange={(event) => setMaxConcurrentRunsText(event.target.value)}
-                  placeholder="Unlimited"
-                  data-testid="editor-max-concurrent-runs"
-                />
-              </div>
             </div>
           </div>
 
@@ -417,8 +309,9 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
           <DialogHeader>
             <DialogTitle>Archive Agent</DialogTitle>
             <DialogDescription>
-              This agent will be marked as archived. It will leave the Active group and cannot be used to start new
-              sessions. You can restore it from the agent detail page.
+              This agent will be marked as archived. It will leave the Active
+              group and cannot be used to start new sessions. You can restore
+              it from the agent detail page.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 pt-2">

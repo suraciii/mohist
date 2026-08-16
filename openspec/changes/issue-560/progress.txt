@@ -131,6 +131,15 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   branch; the pre-existing `SpecUnitMigrationLedger.json` worktree change
   remains intentionally unstaged.
 
+## T-004 progress notes
+
+- The Web Project model consumes the server Project read/list `defaultExecutionConfig` field directly through `ProjectProvider.currentProject`; no second Project endpoint is needed because the server read surface already projects the nullable default.
+- `startAgentTask` is an additive Agent entity client/mutation posting to `/agent-tasks` with `X-Mohist-Launch-Origin: web`; the composer owns one caller-generated idempotency key and keeps it across rejected/pending retries, clearing it only after accepted success.
+- The composer keeps definition-first launches unchanged when an Agent is selected. The new create-new path sends no execution hints when using the Project default, sends Runtime/Model/optional Variant only after opening Adjust, and uses the shared `ModelSelect` with `useAvailableModelIds`/`useModelVariants` for catalog-backed choices.
+- The existing profile editor displayed Agent descriptions but did not edit or persist them. T-004 adds the description field so the created Agent is fully refinable from the session/detail path; edits remain ordinary definition edits for later Jobs.
+- Session refinement is exposed by a direct Agent link in the session header and by the attachment-results launch interstitial. The Agents empty state routes its primary action to the project-scoped `agent-sessions/new` route while retaining the editor as a secondary action.
+- Focused verification after the slice: Web typecheck, FSD boundary check, test-boundary check, and 145 relevant tests passed.
+
 ## T-002 progress notes
 
 - The task-first route is registered beside the Agent definition route and

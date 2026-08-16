@@ -9,7 +9,6 @@ import type {
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
   AgentTaskLaunchInput,
-  AgentTaskPreflightResponse,
 } from '../../src/entities/agent'
 import {
   AgentSessionComposerPage,
@@ -22,22 +21,10 @@ export const state = {
   availabilityData: [] as AgentAvailabilitySummaryEntry[],
   launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
   taskCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
-  preflightCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
-  sessionPreflightCalls: [] as Array<{
-    agentRef: string
-    body: AgentTaskLaunchInput
-    idempotencyKey?: string
-  }>,
-  enablePreflight: false,
-  enableSessionPreflight: false,
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
-  defaultExecutionConfig: {
-    runtime: 'opencode' as const,
-    model: 'openai/gpt-4o',
-    variant: null,
-  } as ProjectDefaultExecutionConfig | null,
+  defaultExecutionConfig: { runtime: 'opencode' as const, model: 'openai/gpt-4o', variant: null } as ProjectDefaultExecutionConfig | null,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -56,16 +43,9 @@ const dataHook: AgentSessionComposerDataHook = () => {
   const launchMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
-    {
-      agentRef: string
-      prompt: string
-      context?: AgentSessionLaunchContext | null
-      attachments?: string[]
-      idempotencyKey?: string
-      preflightFingerprint?: string
-    }
+    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; attachments?: string[]; idempotencyKey?: string }
   >({
-    mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey, preflightFingerprint: _ignored }) => {
+    mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey }) => {
       state.launchCalls.push({ agentRef, body: { prompt, context, attachments }, idempotencyKey })
       if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
@@ -81,64 +61,12 @@ const dataHook: AgentSessionComposerDataHook = () => {
       } as AgentSessionLaunchResponse
     },
   })
-  const preflightSessionMutation = useMutation<
-    AgentTaskPreflightResponse,
-    Error,
-    {
-      agentRef: string
-      prompt: string
-      context?: AgentSessionLaunchContext | null
-      attachments?: string[]
-      idempotencyKey: string
-    }
-  >({
-    mutationFn: async ({ agentRef, idempotencyKey, ...input }) => {
-      state.sessionPreflightCalls.push({
-        agentRef,
-        body: input,
-        idempotencyKey,
-      })
-      return {
-        scopeFingerprint: 'scope-test',
-        agentName: `Agent ${agentRef}`,
-        execution: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
-        repository: 'org/repo',
-        workspace: 'review-workspace',
-        workspaceRepositories: ['org/repo'],
-        issueNumber: 42,
-        epicNumber: null,
-        permissionScope: 'project-workspace-write',
-        expectedImpact: 'Starts one AgentJob and AgentSession with write access to the selected workspace.',
-      }
-    },
-  })
-  const preflightTaskMutation = useMutation<
-    AgentTaskPreflightResponse,
-    Error,
-    AgentTaskLaunchInput & { idempotencyKey: string }
-  >({
-    mutationFn: async ({ idempotencyKey, ...input }) => {
-      state.preflightCalls.push({ body: input, idempotencyKey })
-      return {
-        scopeFingerprint: 'scope-test',
-        agentName: 'Task Agent',
-        execution: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
-        repository: 'org/repo',
-        workspace: 'review-workspace',
-        workspaceRepositories: ['org/repo'],
-        issueNumber: 42,
-        epicNumber: null,
-        permissionScope: 'project-workspace-write',
-        expectedImpact: 'Creates one Agent and starts one AgentJob and AgentSession.',
-      }
-    },
-  })
   const startTaskMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
     AgentTaskLaunchInput & { idempotencyKey?: string }
   >({
-    mutationFn: async ({ idempotencyKey, preflightFingerprint: _ignored, ...input }) => {
+    mutationFn: async ({ idempotencyKey, ...input }) => {
       state.taskCalls.push({ body: input, idempotencyKey })
       if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
@@ -160,8 +88,6 @@ const dataHook: AgentSessionComposerDataHook = () => {
     availability: state.availabilityData,
     availabilityLoading: false,
     launchMutation,
-    preflightSessionMutation: state.enableSessionPreflight ? preflightSessionMutation : undefined,
-    preflightTaskMutation: state.enablePreflight ? preflightTaskMutation : undefined,
     startTaskMutation,
   }
 }
@@ -175,12 +101,10 @@ export function makeAgent(id: string, overrides: Partial<AgentInfo> = {}): Agent
     id,
     projectId: 'proj-1',
     name: `Agent ${id}`,
-    purpose: null,
     description: '',
     instructions: '',
     agentConfig: null,
     skills: [],
-    permissions: [],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -200,16 +124,12 @@ export function renderPage(initialEntries = ['/agent-sessions/new']) {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider
         initialProjectId="proj-1"
-        initialProjects={[
-          {
-            id: 'proj-1',
-            name: 'Test',
-            createdAt: '2026-01-01T00:00:00.000Z',
-            updatedAt: '2026-01-01T00:00:00.000Z',
-            repositories: [],
-            defaultExecutionConfig: state.defaultExecutionConfig,
-          },
-        ]}
+        initialProjects={[{
+          id: 'proj-1', name: 'Test',
+          createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+          repositories: [],
+          defaultExecutionConfig: state.defaultExecutionConfig,
+        }]}
       >
         <MemoryRouter initialEntries={initialEntries}>
           <Routes>
@@ -222,6 +142,6 @@ export function renderPage(initialEntries = ['/agent-sessions/new']) {
           <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
 }
