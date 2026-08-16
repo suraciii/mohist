@@ -34,6 +34,21 @@ public sealed class TaskRun
     public string? WorkId { get; set; }
     public TerminalLogOwnership? TerminalLogOwnership { get; set; }
     public AgentResultSettlement? AgentResultSettlement { get; set; }
+
+    /// <summary>
+    /// Immutable Agent invocation linkage persisted at handoff time
+    /// (issue 559, design D9): the invocation id plus the minted
+    /// AgentJob/AgentSession/SessionInput/AgentTurn identifiers. Null for
+    /// every inline task attempt.
+    /// </summary>
+    public AgentInvocationLink? AgentInvocation { get; set; }
+
+    /// <summary>
+    /// Durable per-effect settlement receipt guarding the Workflow-owned
+    /// finalization of this attempt's AgentJob terminal (issue 559, design
+    /// D7). Null until a terminal delivery is accepted.
+    /// </summary>
+    public AgentInvocationSettlement? AgentInvocationSettlement { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
     public Dictionary<string, string>? SetVars { get; init; }

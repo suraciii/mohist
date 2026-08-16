@@ -98,6 +98,8 @@ public sealed class WorkflowGrainProductionContractSpecs
             definitionResolver,
             variableResolver,
             scope.ServiceProvider.GetRequiredService<IWorkflowArtifactBindService>(),
+            scope.ServiceProvider.GetRequiredService<WorkflowRunVariablesStore>(),
+            scope.ServiceProvider.GetRequiredService<WorkflowPromptResolver>(),
             Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);

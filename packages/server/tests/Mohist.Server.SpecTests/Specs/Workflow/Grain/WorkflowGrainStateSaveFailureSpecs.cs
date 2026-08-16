@@ -338,6 +338,8 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             resolver,
             services.GetRequiredService<WorkflowVariableResolver>(),
             services.GetRequiredService<IWorkflowArtifactBindService>(),
+            services.GetRequiredService<WorkflowRunVariablesStore>(),
+            services.GetRequiredService<WorkflowPromptResolver>(),
             Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
@@ -361,6 +363,8 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             resolver,
             services.GetRequiredService<WorkflowVariableResolver>(),
             services.GetRequiredService<IWorkflowArtifactBindService>(),
+            services.GetRequiredService<WorkflowRunVariablesStore>(),
+            services.GetRequiredService<WorkflowPromptResolver>(),
             Options.Create(new WorkflowOptions()),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance,
@@ -471,12 +475,14 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             WorkflowDefinitionResolver definitionResolver,
             WorkflowVariableResolver variableResolver,
             IWorkflowArtifactBindService artifactBindService,
+            WorkflowRunVariablesStore runVariablesStore,
+            WorkflowPromptResolver promptResolver,
             IOptions<WorkflowOptions> options,
             TimeProvider timeProvider,
             ILogger<WorkflowGrain> log,
             ReminderCalls calls)
             : base(context, runtime, runStore, dispatchSnapshotStore, definitionResolver, variableResolver, artifactBindService,
-                options, timeProvider, log)
+                runVariablesStore, promptResolver, options, timeProvider, log)
         {
             _calls = calls;
         }

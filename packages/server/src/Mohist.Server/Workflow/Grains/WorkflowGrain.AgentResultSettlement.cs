@@ -10,6 +10,16 @@ public partial class WorkflowGrain
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
+        if (string.Equals(reminderName, AgentInvocationSettlementReminderName, StringComparison.Ordinal))
+        {
+            RejectIfRunReloadRequired();
+            if (_run is null)
+                return;
+
+            await ReconcileAgentInvocationSettlementsAsync();
+            return;
+        }
+
         if (!string.Equals(reminderName, AgentResultSettlementReminderName, StringComparison.Ordinal))
             return;
 

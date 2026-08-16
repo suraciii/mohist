@@ -194,6 +194,10 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> BindAgentInvocationAsync(AgentInvocationLink link)
+            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<AgentInvocationSettlementAck> SettleAgentInvocationAsync(AgentInvocationTerminal terminal)
+            => Task.FromResult(AgentInvocationSettlementAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding) => Task.FromResult(false);

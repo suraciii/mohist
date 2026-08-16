@@ -38,6 +38,27 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 
+    /// <summary>
+    /// Binds the immutable Agent invocation linkage (invocation id plus the
+    /// minted AgentJob/AgentSession/SessionInput/AgentTurn ids) onto a
+    /// running task attempt — the handoff claim-time write (issue 559,
+    /// design D9). Idempotent under the same linkage; a conflicting
+    /// linkage or a non-running attempt is stale.
+    /// </summary>
+    Task<ReportAck> BindAgentInvocationAsync(AgentInvocationLink link);
+
+    /// <summary>
+    /// Workflow-owned finalization of a delegated Agent invocation
+    /// (issue 559, design D7): applies the task completion effects from
+    /// the AgentJob terminal — artifact binding, setVars extraction and
+    /// application, then the task outcome (settlement with advancement,
+    /// or the domain failure path with recovery decisions) — exactly
+    /// once, guarded by a durable per-effect receipt on the TaskRun.
+    /// Duplicate and stale terminals are acknowledged without
+    /// reapplying effects.
+    /// </summary>
+    Task<AgentInvocationSettlementAck> SettleAgentInvocationAsync(AgentInvocationTerminal terminal);
+
     Task ReleaseStageLocksAsync(string stage, string reason);
     Task<string?> GetRunStatusAsync();
     Task<bool> IsStoppedOrTerminalAsync();

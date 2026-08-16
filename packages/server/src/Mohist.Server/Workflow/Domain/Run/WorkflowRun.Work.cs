@@ -40,6 +40,10 @@ public sealed record WorkflowAgentResultSettlementTask(
     string Stage,
     TaskRun Task);
 
+public sealed record WorkflowAgentInvocationTask(
+    string Stage,
+    TaskRun Task);
+
 public static partial class WorkflowRunExtensions
 {
     public static string ChecksWorkIdFor(string stage) => $"checks-{stage}";
@@ -214,6 +218,63 @@ public static partial class WorkflowRunExtensions
             run.Stages.SelectMany(stage => stage.Tasks)
                 .Any(task => task.Status == TaskRunStatus.Running
                     && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked);
+
+        public WorkflowAgentInvocationTask? FindAgentInvocationTask(
+            string taskRunId,
+            string workId,
+            string? invocationId = null,
+            string? jobId = null) => FindInvocationTask(run, taskRunId, workId, invocationId, jobId);
+
+        /// <summary>
+        /// The single task attempt whose finalizer receipt is not settled —
+        /// the reconcile target for interrupted settlements.
+        /// </summary>
+        public WorkflowAgentInvocationTask? FindUnsettledAgentInvocationTask() =>
+            run.Stages
+                .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentInvocationTask(stage.Id, task)))
+                .FirstOrDefault(candidate => candidate.Task.AgentInvocationSettlement is { IsSettled: false });
+
+        /// <summary>
+        /// Binds the immutable invocation linkage onto a running task
+        /// attempt (the handoff claim-time write, design D9). A replay with
+        /// the same linkage is acknowledged unchanged; a conflicting
+        /// linkage or a non-running attempt is rejected. Binding also
+        /// clears an <see cref="AgentResultSettlementState.AwaitingResult"/>
+        /// settlement: a delegated invocation's authoritative channel is
+        /// the typed terminal transport, not the inline agent-result
+        /// report path, so it must not create an inline-style agent-result
+        /// settlement (issue 559 / issue 589 coordination note).
+        /// </summary>
+        public AgentExecutionUpdate BindAgentInvocation(AgentInvocationLink link)
+        {
+            if (string.IsNullOrWhiteSpace(link.InvocationId)
+                || string.IsNullOrWhiteSpace(link.TaskRunId)
+                || string.IsNullOrWhiteSpace(link.WorkId)
+                || string.IsNullOrWhiteSpace(link.JobId)
+                || string.IsNullOrWhiteSpace(link.SessionId)
+                || string.IsNullOrWhiteSpace(link.InputId)
+                || string.IsNullOrWhiteSpace(link.TurnId))
+            {
+                return AgentExecutionUpdate.Rejected;
+            }
+
+            var match = FindInvocationTask(run, link.TaskRunId, link.WorkId);
+            if (match is not { Task.Status: TaskRunStatus.Running })
+                return AgentExecutionUpdate.Rejected;
+
+            var task = match.Task;
+            if (task.AgentInvocation is { } existing)
+            {
+                return existing == link
+                    ? AgentExecutionUpdate.Unchanged
+                    : AgentExecutionUpdate.Rejected;
+            }
+
+            task.AgentInvocation = link;
+            if (task.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult)
+                task.AgentResultSettlement = null;
+            return AgentExecutionUpdate.Updated;
+        }
 
         public WorkflowAgentResultSettlementTask? FindAgentResultSettlementTask(
             AgentExecutionBinding binding)
@@ -589,6 +650,37 @@ public static partial class WorkflowRunExtensions
 
     private static TaskRun? NextUnclaimedTask(StageRun stage) =>
         stage.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Pending);
+
+    /// <summary>
+    /// Locates the task attempt a workflow Agent invocation terminal
+    /// addresses. The task run id is unique across the run, so the
+    /// persisted tuple (task run id, work id) identifies the attempt
+    /// without a runner identity — the AgentJob executes on a runner the
+    /// Workflow never tracked.
+    /// </summary>
+    private static WorkflowAgentInvocationTask? FindInvocationTask(
+        WorkflowRun run,
+        string taskRunId,
+        string workId,
+        string? invocationId = null,
+        string? jobId = null)
+    {
+        if (string.IsNullOrWhiteSpace(taskRunId) || string.IsNullOrWhiteSpace(workId))
+            return null;
+
+        foreach (var stage in run.Stages)
+        {
+            var task = stage.Tasks.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, taskRunId, StringComparison.Ordinal)
+                && string.Equals(candidate.WorkId, workId, StringComparison.Ordinal)
+                && (invocationId is null || string.Equals(candidate.AgentInvocation?.InvocationId, invocationId, StringComparison.Ordinal))
+                && (jobId is null || string.Equals(candidate.AgentInvocation?.JobId, jobId, StringComparison.Ordinal)));
+            if (task is not null)
+                return new WorkflowAgentInvocationTask(stage.Id, task);
+        }
+
+        return null;
+    }
 
     private static (StageRun Stage, TaskRun Task)? FindTaskAttempt(
         WorkflowRun run,

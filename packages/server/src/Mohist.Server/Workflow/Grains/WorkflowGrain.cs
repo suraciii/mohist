@@ -36,7 +36,10 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageLockCoordinator _stageLockCoordinator;
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
+    private readonly WorkflowRunVariablesStore _runVariablesStore;
+    private readonly WorkflowPromptResolver _promptResolver;
     private readonly TimeSpan _agentResultSettlementTimeout;
+    private readonly TimeSpan _agentInvocationSettlementReconcileInterval;
 
     internal WorkflowGrain(
         Orleans.Runtime.IGrainContext context,
@@ -46,6 +49,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
+        WorkflowRunVariablesStore runVariablesStore,
+        WorkflowPromptResolver promptResolver,
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
@@ -56,6 +61,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
         _artifactBindService = artifactBindService;
+        _runVariablesStore = runVariablesStore;
+        _promptResolver = promptResolver;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -63,6 +70,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
+        _agentInvocationSettlementReconcileInterval = ValidateSettlementTimeout(options.Value.AgentInvocationSettlementReconcileInterval);
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -73,6 +81,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
+        WorkflowRunVariablesStore runVariablesStore,
+        WorkflowPromptResolver promptResolver,
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
@@ -82,6 +92,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
         _artifactBindService = artifactBindService;
+        _runVariablesStore = runVariablesStore;
+        _promptResolver = promptResolver;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -89,6 +101,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
+        _agentInvocationSettlementReconcileInterval = ValidateSettlementTimeout(options.Value.AgentInvocationSettlementReconcileInterval);
     }
 
     WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
@@ -115,6 +128,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
         await ReconcileAgentResultSettlementAsync();
+        await ReconcileAgentInvocationSettlementsAsync();
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
     }
@@ -286,6 +300,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused or WorkflowRunStatus.Failed))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
+
+        // A delegated Agent invocation must not outlive its run: cascade
+        // cancellation to the running handoff invocation's AgentJob before
+        // the stop settles the task, so the Agent execution is released
+        // (best effort — the AgentJob's own timeout backstop covers a lost
+        // cascade) and the later cancelled terminal settles under the
+        // existing stop semantics as a stale delivery.
+        await CancelRunningAgentInvocationsAsync();
 
         var cancelled = _run.CancelUnresolvedAgentTaskForStop(Now());
         if (cancelled.Count > 0)
@@ -807,6 +829,38 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     }
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
+
+    /// <summary>
+    /// Best-effort stop cascade to the running delegated invocation's
+    /// AgentJob (issue 559, design D7). <c>CancelAsync</c> cancels a job
+    /// that has not started executing and is idempotent otherwise; the
+    /// cancelled terminal later reaches the finalizer and settles under
+    /// the existing stop semantics. A failed cascade never blocks the run
+    /// stop — the AgentJob's own timeout backstop reclaims the execution.
+    /// </summary>
+    private async Task CancelRunningAgentInvocationsAsync()
+    {
+        var running = _run?.CurrentStage().RunningTask;
+        var invocation = running?.AgentInvocation;
+        if (invocation is null)
+            return;
+
+        try
+        {
+            var result = await GrainFactory
+                .GetGrain<Agent.Grains.IAgentJobGrain>(invocation.JobId)
+                .CancelAsync();
+            _log.LogInformation(
+                "Workflow {Id} stop cascaded to AgentJob {JobId} for invocation {Invocation}: {Disposition}",
+                GrainKey, invocation.JobId, invocation.InvocationId, result.Disposition);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Workflow {Id} stop could not cascade to AgentJob {JobId}; the job's timeout backstop will reclaim it",
+                GrainKey, invocation.JobId);
+        }
+    }
 
     private static TimeSpan ValidateSettlementTimeout(TimeSpan timeout)
     {

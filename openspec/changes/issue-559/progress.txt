@@ -217,3 +217,48 @@
 - `npm run test:fast`: all lanes green (typecheck, unit, arch, wf 178, cli
   1848, web 4724, runner 1646 = 1639 + 7 new).
 - `npm run format:check`: clean (after `npm run format`).
+
+## T-004 decisions / gotchas
+
+- `WorkflowGrain.SettleAgentInvocationAsync` owns the terminal decision and
+  keeps the AgentJob execution verdict separate from Workflow task outcome.
+  It freezes the typed terminal on `TaskRun.AgentInvocationSettlement`, then
+  resumes artifact binding, setVars projection, and domain report settlement
+  from durable per-effect flags. Successful terminal facts project the inline
+  agent-turn promise output; unsatisfied expectations use the inline
+  `expectation-failed` code and message.
+- First-delivery eligibility uses `WorkflowRun.FindReportableWork` with the
+  persisted `(taskRunId, workId, workflow worker)` tuple. A task that is
+  terminal, stopped, deleted, or owned by another attempt is acknowledged as
+  stale before any artifact, variable, or outcome side effect.
+- AgentJob execution failures and unsatisfied expectations may use the normal
+  recovery matcher/budget path. Finalizer-side artifact binding and setVars
+  extraction/patch failures do not enter recovery, matching the inline
+  executor's ordering; they fail with the existing task messages.
+- The setVars patch is value-idempotent across a crash between the external
+  variable-store write and the receipt flag persistence: reconciliation reads
+  the current bundle and skips a patch whose requested values are already
+  present. Artifact binding already has upload-id replay protection.
+- The finalizer owns a one-second `workflow-agent-invocation-settlement`
+  reminder, reconciles on activation and reminder ticks, and tolerates direct
+  contract-test grains without an Orleans reminder registry during cleanup.
+  `StopAsync` calls the linked AgentJob `CancelAsync` before applying existing
+  Workflow stop semantics. Binding a real `mohist/agent` task clears the
+  inline `AgentResultSettlement` so the handoff has no second result channel.
+- The workflow-terminal subscription is explicitly registered in the spec
+  event dispatcher and covered for direct delivery, duplicate/dead-letter
+  redelivery, stale terminals, failed recovery, stop cancellation, and
+  interruption after receipt/artifact/setVars boundaries. Interruption resumes
+  from recorded flags and applies each task effect once.
+
+## Verification status (T-004)
+
+- Focused finalizer specs: `AgentInvocationSettlementSpecs` 11/11 and
+  `AgentInvocationSettlementInterruptionSpecs` 4/4; existing workflow
+  state-save and AgentResultSettlement suites pass.
+- Full Server SpecTests: 3959 total with one known pre-existing flaky
+  `AgentSessionLaunchRuntimeResolutionSpecs` poll miss on the first run; the
+  isolated class rerun passed 10/10.
+- `npm run test:fast`: all lanes green (typecheck, unit 2662, arch 68,
+  workflow 178, CLI 1848, web 4724, runner 1646).
+- `npm run format:check`: clean.

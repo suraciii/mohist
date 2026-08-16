@@ -292,9 +292,11 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton(eventStore);
         siloBuilder.Services.AddSingleton<IDeadLetterStore, NoopDeadLetterStore>();
         siloBuilder.Services.AddSingleton<WorkflowStageLockReleaseHandler>();
+        siloBuilder.Services.AddSingleton<Workflow.Subscriptions.AgentJobWorkflowTerminalHandler>();
         siloBuilder.Services.AddSingleton<IEnumerable<Subscription>>(services =>
         {
             var handler = services.GetRequiredService<WorkflowStageLockReleaseHandler>();
+            var workflowTerminal = services.GetRequiredService<Workflow.Subscriptions.AgentJobWorkflowTerminalHandler>();
             return
             [
                 new Subscription(
@@ -303,6 +305,12 @@ public static class GrainTestConfig
                     (instance, envelope, ct) =>
                         ((WorkflowStageLockReleaseHandler)instance).HandleAsync(envelope, ct),
                     "Mohist.Server.Events.Subscriptions.WorkflowStageLockReleaseHandler"),
+                new Subscription(
+                    EventCatalog.ReverseDns.AgentJobWorkflowTerminal,
+                    workflowTerminal,
+                    (instance, envelope, ct) =>
+                        ((Workflow.Subscriptions.AgentJobWorkflowTerminalHandler)instance).HandleAsync(envelope, ct),
+                    "Mohist.Server.Workflow.Subscriptions.AgentJobWorkflowTerminalHandler"),
             ];
         });
         siloBuilder.Services.Configure<EventDispatcherOptions>(options =>

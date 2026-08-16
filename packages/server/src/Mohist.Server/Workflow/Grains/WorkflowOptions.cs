@@ -13,4 +13,12 @@ public sealed class WorkflowOptions
     public const string SectionName = "Mohist:Workflow";
 
     public TimeSpan AgentResultSettlementTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Period of the finalizer reconcile reminder that resumes interrupted
+    /// Agent invocation settlements from the recorded per-effect receipt
+    /// flags (issue 559, design D7). Short by design — settlement must not
+    /// depend solely on event-delivery retries.
+    /// </summary>
+    public TimeSpan AgentInvocationSettlementReconcileInterval { get; set; } = TimeSpan.FromSeconds(1);
 }
