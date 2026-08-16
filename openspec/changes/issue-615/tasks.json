@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Bound runtime-event outbox retention, preserve exact protected facts, and keep independent Workflow delivery sequences live under overload and retry.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Bound runtime-event outbox admission and retention",
+      "spec": "specs/runtime-event-outbox-retention/spec.md#outbox-capacity-is-finite-and-admission-is-explicit",
+      "description": "Make the existing Runner runtime-event outbox the single bounded admission authority. Add protected and compactable retention metadata, deterministic lossless reducers for supported deltas/tool/usage/binding facts, atomic batch admission, typed awaitable outcomes, validated snapshot migration, and aggregated pressure diagnostics while preserving exact protected records.",
+      "acceptanceCriteria": [
+        "The outbox enforces a default capacity of 5,000 logical records across memory and the durable snapshot, accepts a deployment override, never appends past the limit, and returns an awaitable structured admission result containing status, record id or ids, reason, capacity, pending count, and retryability for pre-execution and produced-fact enqueue paths.",
+        "Protected-capacity rejection is observable to the caller, protected records are not evicted or silently replaced, storage failures retain typed context, and a produced-fact batch is atomic with no partial admission or partial snapshot write; pre-execution input rolls back only when its durable write did not succeed.",
+        "The centralized classifier protects session.input, terminal session.activity, turn.failed, and unsupported or non-streaming tool, usage, model, and binding facts by default; compaction is allowed only for records with the required same-target, physical-runtime, turn, text-part, tool-call, and sequence identities and a reducer that preserves all stated Server-visible invariants.",
+        "Snapshot load validates duplicate ids, sequence values, and retention metadata, seeds future sequences above the persisted maximum, and treats legacy or already-over-capacity snapshots as pressure states: every protected record retains its original id and payload, only safely compactable records may be reduced, and the snapshot is never emptied or blindly truncated.",
+        "Structured diagnostics distinguish protected-capacity pressure, unsafe or rejected compaction, receipt mismatch, transport failure, timeout, and persistence failure, aggregate repeated failures by logical sequence or bounded interval, include capacity and pending-count context, and exclude event payloads.",
+        "Focused Runner tests cover protected admission at capacity, atomic batch rejection, protected retention beside streaming pressure, safe and unsafe compaction, exact restart replay, legacy and over-capacity snapshots, sequence seeding, and bounded diagnostic aggregation; the relevant Runner test suite and npm run test:fast pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Bounded runtime-event outbox ports and implementation, retention/compaction reducers, validated snapshot migration, structured diagnostics, and passing outbox admission tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep retention policy centralized in the outbox so producers cannot mark protected facts as discardable. Preserve the recorded physical runtimeSessionId and event identity through compaction and restart."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement identity-complete runtime-event receipts",
+      "spec": "specs/runtime-event-delivery-liveness/spec.md#receipt-matching-is-identity-and-attempt-specific",
+      "description": "Update the Server AgentSession runtime-event contract and Runner ServerConnection/delivery adapter to carry and normalize durable runtime-event ids and all applicable logical and physical delivery identities. Make receipt arrays positionally complete and idempotent, with fail-closed behavior for protected input and terminal activity rather than relying on a generic successful response.",
+      "acceptanceCriteria": [
+        "The runtime-event request and acceptance DTOs carry the durable record id, event type, logical target, physical runtime session identity, and applicable AgentSession and Agent turn identity, and replaying an already accepted record id returns the same acceptance without invoking a second runtime turn.",
+        "ServerConnection rejects malformed or count-mismatched acceptance responses, and the delivery adapter preserves one normalized receipt slot per submitted record with the returned type and identity fields; a mixed-identity batch is rejected before it can settle any record.",
+        "session.input and terminal session.activity use positive matching receipts for event type, record identity, logical AgentSession/turn identity, and applicable physical identity; empty, non-success, malformed, stale, or mismatched responses cannot settle them or retarget their records.",
+        "Any receipt policy exception remains explicit and limited to a non-protected endpoint contract that proves acceptance without an event-specific receipt; the old successful-response shortcut is unavailable for input and terminal activity.",
+        "Runner connection and delivery tests plus affected Server endpoint/contract tests cover exact receipt fields, replay idempotency, empty and malformed responses, short acceptance arrays, mismatched event and turn identities, physical binding mismatches, and mixed batches; the relevant test suites and npm run test:fast pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Coordinated Server/Runner runtime-event receipt DTOs, strict ServerConnection normalization, identity-validating delivery adapter, and passing contract tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Coordinate the durable record-id field and compatible endpoint response shape across Server and Runner. Old or incomplete receipt shapes must fail closed rather than be interpreted as successful delivery."
+    },
+    {
+      "id": "T-003",
+      "title": "Schedule independent sequences with lease-safe FIFO settlement",
+      "spec": "specs/runtime-event-delivery-liveness/spec.md#delivery-scheduling-isolates-logical-sequences",
+      "description": "Implement per-logical-sequence delivery scheduling over the bounded outbox, preserving FIFO fences across target and binding changes while allowing bounded concurrent progress for unrelated sequences. Add attempt or lease identities, per-sequence timeout and backoff state, strict settlement serialization, safe late-response handling, and retry behavior that only replays durable records.",
+      "acceptanceCriteria": [
+        "Pending records are partitioned by a logical sequence containing producer family, logical target, and required physical identity; only one head attempt is active per sequence, a bounded number of independent sequences are selected with fair progress, and a blocked or mismatched sequence cannot stall an unrelated deliverable sequence.",
+        "Admission sequence order is preserved within each logical sequence: an unmatched session.input fences later facts, a batch response cannot skip its first unmatched record, and a later runtimeSessionId cannot overtake an older pending head or retarget it.",
+        "Every attempt has a unique lease identity, timeout, submitted record set, and immutable sequence positions; a matching late receipt can settle only the same still-pending record once, persistence of removal completes before the next record settles, and late or stale mismatched responses are idempotently ignored.",
+        "Per-sequence retry backoff and bounded round-robin scheduling allow a newly deliverable sequence to progress despite repeated failures in another sequence, while reconnect and outbox restart resume each eligible sequence from its own FIFO head.",
+        "Transport retry, timeout, receipt mismatch, reconnect, and restart never invoke a Workflow, follow-up, or Agent runtime again and never create a replacement logical turn; the original durable record remains the sole retry unit.",
+        "Focused Runner tests cover blocked-sequence isolation, fair retries, input and batch FIFO fences, old/new physical bindings, timeout and matching late receipts, mismatched late receipts, retry races, exactly-once removal, reconnect recovery, and no duplicate runtime invocation; the relevant delivery/outbox suites and npm run test:fast pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Per-sequence fair scheduler, FIFO and identity-fenced settlement, lease/late-response handling, and passing delivery liveness regressions.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Use the normalized receipts from T-002 and serialize snapshot removal against the delivery lane. A late response may settle the original still-pending record, but never a replacement, later position, or unrelated sequence."
+    },
+    {
+      "id": "T-004",
+      "title": "Propagate outbox outcomes through producers and Runner lifecycle",
+      "spec": "specs/runtime-event-outbox-retention/spec.md#producer-and-observer-paths-surface-admission-failures",
+      "description": "Route Workflow reporter and observer paths, follow-up handling, AgentJob event sinks, binding convergence, and terminal activity through the host-owned durable outbox. Make input admission and reporting outcomes awaitable at their existing action boundaries, preserve actual runtime results after post-start reporting failures, and load and health-gate the outbox before the Runner accepts work or follow-ups.",
+      "acceptanceCriteria": [
+        "A rejected initial or follow-up session.input returns an explicit unavailable or backpressured outcome, leaves no uncommitted input eligible for delivery, and never invokes the corresponding runtime turn; an admitted input remains the sole execution admission through delivery retries.",
+        "Synchronous OpenCode/Pi observers and AgentJob sinks record enqueue or persistence failures without throwing into the provider callback, and WorkflowAgentSessionReporter settlement exposes the first protected-capacity or persistence failure at the owning boundary while preserving the runtime's actual success or failure.",
+        "Terminal activity, follow-up completion, cleanup reporting, and binding convergence use durable outbox records and operation completion boundaries; reporting failure is observable and never fabricates a terminal result, silently succeeds, retargets a physical binding, or re-invokes runtime execution.",
+        "Durable runtime facts no longer use direct fire-and-forget ServerConnection.agentSessionRuntimeEvents calls outside the outbox path, and same-binding compaction is used only when its activity state is losslessly replaceable; different physical bindings remain protected and ordered.",
+        "RunnerHost loads and validates the outbox before SignalR command registration, work claims, or follow-up admission, passes the configured capacity and delivery limits, distinguishes protected-capacity pressure from unreadable or failed persistence in readiness/admission behavior, and continues local persistence and network recovery without accepting protected records when no capacity action exists.",
+        "Focused Workflow, OpenCode/Pi observer, AgentJob, follow-up, binding-convergence, and RunnerHost tests cover rejected input with no runtime invocation, post-start reporting failure, terminal closeout, direct-call removal, host startup ordering, configured capacity, pressure versus unhealthy state, and recovery; affected Server contract tests and npm run test:fast pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "End-to-end durable producer/reporting integration, explicit overload outcomes, host admission lifecycle wiring, and passing Runner/Server integration tests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Keep provider callbacks synchronous at their external boundary. The owning action, command, or terminal settlement boundary observes the asynchronous reporting result; post-start reporting failure must not rewrite the runtime result."
+    }
+  ]
+}
