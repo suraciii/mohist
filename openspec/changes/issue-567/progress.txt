@@ -886,3 +886,22 @@ Channel decision (grounded in live source):
   One earlier concurrent attempt hit the repository's shared .NET build-output
   race (`CS2012`) and was rerun successfully after the interrupted processes
   exited.
+
+## T-007 Current Task Completion
+
+- Revalidated the prepared T-007 slice: durable `interrupting`/`interrupted`,
+  generation-keyed `recovering`/`recovered` projections, original-attempt
+  history retention, additive session/turn/workflow-task/AgentJob DTO fields,
+  sanitized update stop-failure context, and session/workflow Web rendering.
+- The Server projection unit coverage passed 2,674/2,674, including replay
+  idempotence, unaffected-work isolation, canonical turn-status preservation,
+  and stop-failure sanitization. Focused Web lifecycle tests passed 35/35;
+  FSD and test-boundary checks plus Web typecheck passed; the targeted browser
+  workflow inspector passed 2/2.
+- Full verification passed: `npm run test:fast` passed typechecks, Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Arch 68, Runner 1,662, and Web
+  4,727. The full Server SpecTests apphost passed 3,947/3,947.
+- No additional production change was necessary in this task run because the
+  complete T-007 implementation and deterministic coverage are already present
+  in the prepared branch history; this entry records the current task's
+  verification checkpoint.
