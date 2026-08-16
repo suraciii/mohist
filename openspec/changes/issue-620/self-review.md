@@ -2,69 +2,72 @@
 
 ## Review Mode
 
-This is the first review. `self-review.md` did not exist before this review, so I performed the required full sweep. I re-read issue 620 with `mo issue view 620 --project proj_f6c141d63b6243bfbb481737b2243b87` before reviewing the artifacts.
-
-The issue acceptance criteria are:
+This is a re-review. I read the current issue with `mo issue view 620 --project proj_f6c141d63b6243bfbb481737b2243b87` before reviewing the artifacts. The issue goals and acceptance criteria are:
 
 1. A Retry button on a failed notification completes one retry with the clicker's permissions and CLI-equivalent effect.
 2. Expired, tampered, or other-operator buttons are rejected with a visible message.
 3. An ambiguous multi-Bot message gets an interactive choice, and selecting one Agent starts work only for that Agent.
 4. Button clicks do not cause duplicate execution under redelivery.
 
+The previous review reported MF-001 through MF-003. I verified those dispositions, then checked for regressions and for failures in the root/thread retry, authorization, selection, adapter, and task-boundary contracts.
+
 ## Must-Fix Findings
 
-### MF-001 — Root Retry has no defined fresh-attempt idempotency boundary
+### MF-004 - Threaded Retry does not guarantee a new follow-up turn
 
-`design.md:65` requires a fresh input/turn and a retry-specific idempotency key, while `specs/slack-failure-retry-action/spec.md:31-39` requires a new attempt for both root and threaded failures. The current root launch boundary cannot provide that as described: `packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs:413-444` hard-codes `LaunchConnectionAsync`'s coordinator key to `slack:{workspace}:{conversation}:{message}`. Reusing that path for Retry addresses the original launch coordinator and returns its existing failed plan/identities; it does not create a fresh attempt. Using a different key is not expressible through this method, and would also need an explicit decision about whether root Retry creates a new Session or a new input/turn in the existing Session, since the design says the latter.
+`design.md` Decision 2 and `specs/slack-failure-retry-action/spec.md` require a threaded Retry to create a new follow-up input and turn. T-002 repeats that requirement in its third acceptance criterion. The plan says to call the existing `AcceptFollowupAsync` and then `AgentSessionFollowupDispatcher`, but it does not add a force-new-turn or targeted-dispatch contract.
 
-T-002 requires a new root identity in its acceptance criteria (`tasks.json` T-002, criterion 3) but does not add or define a launcher/session contract that supplies it. The plan must specify the root Retry operation boundary, its idempotency key and identity adoption, and its Session/provenance behavior before implementation. Leaving this unresolved makes a valid root Retry fail the issue's first acceptance criterion.
+The current implementation makes the failure concrete. `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:574-628` rejects only unaccepted pending follow-ups. `packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.Transitions.cs:1258` then intentionally reuses an existing queued turn for a text-only follow-up. A failed turn can coexist with an already accepted, queued follow-up, so a Retry can be appended to that unrelated turn instead of getting its own turn. After that, `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:1031-1097` selects the first queued turn, and `packages/server/src/Mohist.Server/Api/AgentSessionFollowupDispatcher.cs:25-67` has no operation/turn target to override that selection.
 
-### MF-002 — Write-before-dispatch recovery is promised but has no executable mechanism
+Failure case: a failed threaded turn has an accepted queued follow-up; the Retry operation accepts its source text under the retry key; the session appends it to the existing queued turn; the dispatcher sends the combined or unrelated turn. The button therefore does not perform one isolated retry of the failed input and cannot guarantee the issue's first acceptance criterion or the plan's fresh-follow-up contract. T-002 must define either an atomic force-new-turn and operation-targeted dispatcher/resume path, or an explicit pre-accept rejection as unavailable when a queued follow-up would cause coalescing. The tests must cover this queued-follow-up case and verify the returned input and turn identities.
 
-`design.md:54-63` commits a `SlackRetryOperations` row before dispatch and says a later replay/recovery call will resume the same dispatch key. `design.md:126` and `specs/slack-failure-retry-action/spec.md:42-55` make that crash/failover behavior normative. However, neither T-001 nor T-002 defines a recovery worker, reminder, startup sweep, operation re-entry endpoint, or the exact route behavior that lets a committed `dispatch-pending` operation resume after the process dies before the dispatcher is called.
+This was a pre-existing problem missed in the first review: that review examined the root `LaunchConnectionAsync` identity boundary, but did not trace the follow-up assignment rule and the dispatcher’s first-queued-turn behavior.
 
-This is especially important because the existing provider inbox deduplicates an action identity at `SlackProviderInboxStore.AcceptAsync` (`packages/server/src/Mohist.Server/Infrastructure/Slack/SlackProviderInboxStore.cs:75-81`), and the current interaction route suppresses a replay presentation after a replayed result (`packages/server/src/Mohist.Server/Api/SlackInteractionRoutes.cs:62-79`). A redelivery can therefore stop at the receipt fence unless the new plan explicitly makes the operation recovery path reachable on replay. A persisted row alone cannot complete the Retry after the adapter has already acknowledged the interaction. Add the recovery mechanism, its ordering with provider-inbox receipt and operation claiming, and crash/restart verification. Without it, an accepted click can remain apparently accepted without starting work, violating issue acceptance criteria 1 and 4.
+### MF-005 - Retry authorization does not require the clicker's current Connection permission
 
-### MF-003 — Retryability is an unresolved product rule that controls acceptance criterion 1
+The issue explicitly requires the Retry to run with the clicker's permissions and says that another operator's button is rejected. The established Slack design says that every click revalidates actor authorization and that pressing an action performs the operation under the presser's authority (`design/slack.md`, Signed Action Buttons; `docs/slack.md:312`). The current access boundary at `packages/server/src/Mohist.Server/Slack/SlackConnectionAccessDecider.cs:46-66,95-155` reads the current access policy, allowlist, and live Slack member state on every invocation.
 
-The capability spec requires a Retry control only for a `retryable` failure and forbids it for a non-retryable result (`specs/slack-failure-retry-action/spec.md:1-10`), but `design.md:145` explicitly leaves the exact failure categories as an open question. The issue says the failed notification carries a Retry action; no final mapping is given for which failed terminal notifications qualify. The current system already carries `FailureCategory`, but the plan does not define an authoritative classification or precedence for initial launches, follow-ups, unknown/legacy events, and category-less failures.
+The plan binds the Retry payload to an actor and requires an authorization check, but `design.md` Decision 2 step 1 and T-002 acceptance criterion 2 never require re-evaluating that actor through the current Connection access policy/member boundary. They only establish the original Slack provenance and the bound actor. The concrete existing action-control predicate in `packages/server/src/Mohist.Server/Slack/Services/SlackTurnControlService.cs:240-242` is owner-or-session-initiator, which is not equivalent to current Connection invocation permission.
 
-This is not merely implementation detail: different answers change whether a failed notification satisfies the issue's first acceptance criterion, and they make T-002's rendering tests non-deterministic. Resolve the category policy in the plan/spec and add a category-to-control test matrix before the plan is build-ready.
+Failure case: an allowlisted sender starts work and is later removed from the allowlist, or the Connection owner changes while the old owner remains the session initiator. A Retry action still matches its bound actor, and an owner-or-initiator check accepts it even though the clicker's current Connection permission would deny the equivalent new invocation. This violates the issue's first criterion and the product's per-click authorization rule. T-002 must specify the action-specific current access check, including how the valid adapter lease is used for live-member checks, while preserving the bound-actor rejection for a different operator. Tests must cover access-policy changes, allowlist removal, owner transfer, and live-member denial after the failure notice was rendered.
+
+This was also missed in the first review: the first review credited the presence of actor/context checks and did not compare the planned Retry authorization to the repository's current `SlackConnectionAccessDecider` semantics or the presser-authority rule in `design/slack.md`.
+
+## Previous Finding Dispositions
+
+- **MF-001: fixed.** `design.md` Decision 2, `proposal.md`, the Retry spec, and T-002 now define `IAgentLauncher.LaunchConnectionRetryAsync`, the exact `slack-retry:{projectId}:{actionKey}` key, and persisted deterministic root Session/input/turn identities. The existing `AgentLaunchCoordinatorGrain` already accepts a distinct idempotency key and pre-minted identities, so the root boundary is implementable and no longer reuses the original Slack-message coordinator.
+- **MF-002: fixed.** `design.md` Decision 7, both capability specs, and T-001/T-002/T-003 now define the fixed-key `SlackActionRecoveryGrain`, its persistent reminder, conditional recovery leases, pending-operation resume, and interaction replay behavior. The plan also explicitly separates the source-message provider-inbox fence from the button operation receipt, so a replay is not stopped by the original message's inbox row.
+- **MF-003: fixed.** `design.md` Decision 3, `proposal.md`, the Retry spec, and T-002 agree on the exact retryability allowlist and require the category-to-control test matrix. Missing, legacy, unknown, and non-allowlisted categories are explicitly text-only. The earlier open policy question is resolved.
+
+No regression was found in the fixes for the root identity, recovery liveness, or retryability policy, and the existing signed Stop behavior remains explicitly preserved.
 
 ## Dimension Checks
 
 ### Issue Goals and Acceptance Criteria
 
-**Checked, issue found.** The issue was read before the artifacts. The plan maps all four criteria to capabilities and tasks, but MF-001 and MF-003 leave the Retry criterion incomplete, and MF-002 leaves its redelivery/crash behavior incomplete.
+**FAIL.** All four issue criteria have corresponding plan sections, but MF-004 leaves threaded Retry behavior unable to guarantee one CLI-equivalent retry, and MF-005 leaves the required current clicker authorization undefined.
 
 ### Coverage
 
-**FAIL due to the must-fix findings.** The mapping is otherwise present:
-
-| Issue criterion | Plan coverage | Review result |
-|---|---|---|
-| Retry has CLI-equivalent effect | Retry spec and T-002 | Root dispatch boundary and retryability policy are unresolved (MF-001, MF-003). |
-| Invalid/expired/unauthorized action is visibly rejected | Shared action boundary, Retry spec, selection spec, T-001/T-002/T-003 | Covered. |
-| One selected Bot alone starts work | Selection spec and T-003 | Covered in the intended state machine. |
-| Redelivery cannot duplicate execution | Retry/selection operation fences and T-002/T-003 tests | Recovery/re-entry after a pre-dispatch commit is unspecified (MF-002). |
+**FAIL due to MF-004 and MF-005.** Interactive multi-Bot selection, selected-Connection-only dispatch, visible invalid-action outcomes, durable operation identities, and redelivery recovery are covered. Retry coverage is incomplete at the threaded follow-up boundary and at current access-policy authorization.
 
 ### Correctness
 
-**FAIL.** The signing, actor/context checks, conditional single-winner selection, authoritative source snapshot, and outbox presentation approach are directionally correct and consistent with the issue. The root Retry path conflicts with the current launch idempotency contract, and the proposed pre-dispatch fence has no defined recovery executor, so the approach cannot guarantee a completed fresh retry in all stated failure cases.
+**FAIL.** The root retry identity contract and recovery state machine are now coherent with the current coordinator. The threaded path is not correct for an existing queued follow-up, and the authorization contract can accept a previously authorized initiator after current permissions have changed.
 
 ### Current-Code Consistency
 
-**FAIL due to MF-001 and MF-002.** The plan correctly identifies and reuses the existing Stop, inbox, session follow-up, thread mapping, status projection, outbox, and adapter boundaries. It does not yet define how the new Retry operation fits the current `LaunchConnectionAsync` coordinator key or how a durable operation is resumed after the interaction request is lost. The proposed shared signing and Block Kit pass-through changes otherwise follow local conventions and preserve the existing Stop behavior in the stated acceptance criteria.
+**FAIL due to MF-004 and MF-005.** The plan correctly reuses the launcher, session, outbox, and adapter boundaries, but its threaded Retry call does not match the session's coalescing semantics or the dispatcher’s first-queued-turn behavior. Its authorization wording does not identify the existing current-policy access service needed to match Slack's invocation rules.
 
 ### Task Breakdown, Ordering, and Verifiability
 
-**FAIL.** T-001 -> T-002/T-003 is a sensible high-level dependency graph, and the acceptance criteria include concurrency, migration, adapter, and presentation tests. T-002's root and threaded dispatch work is too underspecified to implement against the current launcher, and its crash-recovery test has no corresponding runtime mechanism. The open retryability question also prevents deterministic terminal-rendering tests. These are completeness defects, not merely task wording issues.
+**FAIL.** T-001 -> T-002 -> T-003 is a workable dependency order, and the previous recovery work is assigned to T-002 with T-003 integration. T-002 still needs an explicit force-new-turn/targeted-dispatch task and a current Connection authorization task. Its existing tests mention fresh follow-up identity and actor authorization but do not force the two failure cases above, so they cannot make the acceptance criteria verifiable.
 
 ## Observations
 
-- `design.md:147` leaves the candidate-count limit open even though Slack Block Kit imposes action-count limits. The text fallback is specified, so this is an operational boundary to settle rather than a must-fix against the issue's stated normal multi-Bot scenario.
-- `design.md:146` leaves the Retry/selection lifetime open. Reusing the existing five-minute Stop lifetime is a reasonable default and the issue only requires expiry, so this does not affect the verdict.
-- The candidate snapshot is described as bounded for source text and attachments (`design.md:91-95`, `design.md:130`), but no explicit maximum candidate count or serialized row budget is part of the migration/task acceptance criteria.
-- T-002 and T-003 both depend only on T-001 while likely changing shared interaction routing, action result presentation, and common persistence/composition code. The work is feasible, but the plan would benefit from explicit ownership or a serial integration step to avoid conflicting edits.
+- `design.md` leaves the Retry/selection lifetime and candidate-count limit open. The readable text fallback makes this an operational decision rather than a must-fix for the stated normal multi-Bot case.
+- T-003 requires an authoritative source snapshot with accepted attachments, but the current ambiguous ingress claims a prompt before a Session/input exists and the current Slack attachment binder only binds against a Session/input owner. The implementation needs an attachment ownership/lifecycle choice; text-only ambiguous messages are not blocked by this observation.
+- The issue describes accepted button clicks as durable provider interactions. The plan uses dedicated Retry/selection operation receipts instead of the existing source-message inbox. That is a reasonable way to keep button receipts separate from source-message deduplication, but the implementation should preserve equivalent auditability and capacity behavior.
+- The exact retryability allowlist is narrower than the issue's unqualified phrase "failed notification". The plan explicitly decides this policy and tests it; whether more failure categories should become retryable belongs to a follow-up product decision unless the issue is broadened.
 
 <promise>FAIL</promise>
