@@ -424,3 +424,25 @@ Plan skeleton for next run (est. half a day):
   `current-fail-if-marker-review` source/closure digest mismatch).
 - `git diff --check` passed. No T-002 source regression was found; the
   append-only records continue to deserialize absent effort as null.
+
+## T-003 Completion Verification (latest run)
+
+- Reconfirmed the catalog wire is append-only: Server `RuntimeCatalogEntry`
+  fields use Orleans Ids 2-5 and legacy JSON leaves them null, while the
+  Runner TypeScript fields remain optional. `RunnerRoutes` passes runtime
+  catalog dictionaries through unchanged and `RunnerRegistryGrain` retains
+  the entries in `RunnerInfo.RuntimeCatalogs`.
+- Reconfirmed Pi registration emits each discovered model's native
+  `thinkingLevels` under `reasoningEfforts`, keeps `variants` empty, and only
+  emits the authoritative `complete` plus content-derived SHA-256 revision
+  after `PiRuntime.catalog()` is available. OpenCode reports
+  `supportsReasoningEffort: false` without inventing effort values or
+  authoritative model evidence.
+- Reconfirmed revision canonicalization sorts model/map/value content and
+  removes duplicate collection values before hashing, so reconnects with
+  equivalent catalog content retain the revision while capability changes
+  produce a new one. Web metadata queries map the Server's per-model
+  reasoning-effort response beside true variants.
+- Verification: Runner CI passed (154 files, 1666 tests), Web CI passed
+  (377 files, 4732 tests), Server UnitTests passed (2722 tests), and Server
+  SpecTests passed (3942 tests). `git diff --check` passed.
