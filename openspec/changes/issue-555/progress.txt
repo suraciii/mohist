@@ -541,7 +541,11 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   the deployment-wide server address; the hosted initializer creates it on
   startup and each request reloads it, so persisted rotation invalidates old
   cursors immediately.
-- A repository-wide `npm run test:fast` rerun was interrupted by 10 unrelated
-  5-second timeouts in `packages/runner/tests/runner-host-cleanup-config.spec.ts`;
-  `concurrently` then terminated the other lanes. No Runner files were
-  changed. The T-007 server and focused verification above passed.
+- An initial repository-wide `npm run test:fast` rerun was interrupted by 10
+  unrelated 5-second timeouts in
+  `packages/runner/tests/runner-host-cleanup-config.spec.ts`; `concurrently`
+  then terminated the other lanes. No Runner files were changed. The isolated
+  Runner lane subsequently passed all 1,639 tests, and the final full
+  `npm run test:fast` rerun passed all seven lanes: typecheck, 2,675 unit,
+  69 architecture, 178 workflow, 1,848 CLI, 4,724 Web, and 1,639 Runner
+  tests.
