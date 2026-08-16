@@ -18,6 +18,88 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
     }
 
     [Fact]
+    public async Task Preview_WithNestedExecutionOverride_ResolvesWithoutCreatingSessionOrJob()
+    {
+        var projectId = await CreateProjectAsync("launch-preview-override");
+        var agent = await CreateAgentAsync(projectId, "preview-agent", runtime: "opencode");
+        var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
+        var jobsBefore = await CountAgentJobsAsync(projectId);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions/preview",
+            new
+            {
+                prompt = "preview only",
+                execution = new { runtime = "pi", reasoningEffort = "high" },
+            });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = body.GetProperty("data");
+        Assert.Equal("pi", data.GetProperty("runtime").GetString());
+        Assert.Equal("high", data.GetProperty("reasoningEffort").GetString());
+        Assert.Equal("unknown", data.GetProperty("capabilityState").GetString());
+        Assert.True(data.GetProperty("executability").GetProperty("state").GetString() is not null);
+        Assert.False(data.GetProperty("matchesSavedDefinition").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("requestFingerprint").GetString()));
+        Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
+        Assert.Equal(jobsBefore, await CountAgentJobsAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Launch_WithNestedNonMatchingExecutionOverride_FailsBeforeSideEffects()
+    {
+        var projectId = await CreateProjectAsync("launch-override-gate");
+        var agent = await CreateAgentAsync(projectId, "override-gate-agent", runtime: "opencode");
+        var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
+        var jobsBefore = await CountAgentJobsAsync(projectId);
+
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(
+            projectId,
+            agent.Id,
+            new
+            {
+                prompt = "must not create",
+                execution = new { runtime = "pi" },
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("execution_capability_unconfirmed", body.GetProperty("code").GetString());
+        Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
+        Assert.Equal(jobsBefore, await CountAgentJobsAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Preview_CanonicalizesExecutionObjectAndRejectsUnknownNestedFields()
+    {
+        var projectId = await CreateProjectAsync("launch-preview-canonical");
+        var agent = await CreateAgentAsync(projectId, "preview-canonical-agent");
+
+        using var first = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions/preview",
+            new { execution = new { runtime = "pi", reasoningEffort = "high" } });
+        using var second = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions/preview",
+            new { execution = new { reasoningEffort = "high", runtime = "pi" } });
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        var firstData = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        var secondData = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal(
+            firstData.GetProperty("requestFingerprint").GetString(),
+            secondData.GetProperty("requestFingerprint").GetString());
+
+        using var unsupported = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions/preview",
+            new { execution = new { runtime = "pi", provider = "custom" } });
+        Assert.Equal(HttpStatusCode.BadRequest, unsupported.StatusCode);
+        var unsupportedBody = await unsupported.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unsupported_field", unsupportedBody.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Launch_WithRuntimeOverride_IsRejectedBeforeAgentLookup()
     {
         var projectId = await CreateProjectAsync("launch-runtime-override");

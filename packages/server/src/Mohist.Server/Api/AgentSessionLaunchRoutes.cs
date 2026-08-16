@@ -50,12 +50,83 @@ public static class AgentSessionLaunchRoutes
         "prompt",
         "context",
         "attachments",
+        "execution",
     };
 
     public static WebApplication MapAgentSessionLaunchRoutes(this WebApplication app)
     {
         var group = app.MapGroup("/api/projects/{projectRef}/agents/{agentRef}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
+
+        group.MapPost("/sessions/preview", async (
+            HttpContext context,
+            string projectRef,
+            string agentRef,
+            AgentSessionLaunchBody body,
+            AgentQuerier agentQuerier,
+            AgentReadinessService readiness,
+            CancellationToken ct) =>
+        {
+            if (body is null)
+                return ApiResults.BadRequest("request body is required", "body_required");
+            if (body.UndeclaredFields.Count > 0)
+            {
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; " +
+                    "the launch body accepts only prompt, context, attachments, and execution.",
+                    "unsupported_field",
+                    new { fields = body.UndeclaredFields.ToArray() });
+            }
+
+            var project = context.GetResolvedProject();
+            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
+            if (agent is null)
+                return ApiResults.NotFound($"Agent '{agentRef}' not found");
+            if (string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
+                return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
+
+            AgentLaunchExecutionResolution resolution;
+            try
+            {
+                resolution = AgentLaunchExecutionResolver.Resolve(
+                    AgentLauncher.ResolveExecutionDefinition(agent),
+                    body.Execution);
+            }
+            catch (AgentLaunchExecutionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, ex.ErrorCode);
+            }
+            var executability = await readiness.GetAsync(project.Id, agent, ct);
+
+            var request = new AgentLaunchCoordinatorRequest(
+                Prompt: body.Prompt?.Trim() ?? string.Empty,
+                AgentRef: agentRef,
+                Runtime: null,
+                WorkspacePath: body.Context?.WorkspacePath,
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                Repository: body.Context?.Repository,
+                Title: null,
+                AttachmentIds: body.Attachments?.ToArray(),
+                Origin: "preview",
+                TargetId: body.Context?.TargetId?.Trim() is { Length: > 0 } targetId
+                    ? targetId
+                    : agentRef.Trim(),
+                ExecutionOverrideJson: body.ExecutionOverrideJson);
+
+            return ApiResults.Ok(new AgentSessionLaunchPreviewResponse(
+                AgentId: agent.Id,
+                AgentName: agent.Name,
+                Runtime: resolution.Definition.Runtime,
+                Model: resolution.Definition.Model,
+                Variant: resolution.Definition.Variant,
+                ReasoningEffort: resolution.Definition.ReasoningEffort,
+                Sources: resolution.Sources,
+                CapabilityState: resolution.CapabilityState,
+                MatchesSavedDefinition: resolution.MatchesSavedDefinition,
+                Executability: executability,
+                RequestFingerprint: AgentLaunchCoordinatorCodec.Fingerprint(request)));
+        });
 
         group.MapPost("/sessions", async (
             HttpContext context,
@@ -84,7 +155,7 @@ public static class AgentSessionLaunchRoutes
             {
                 return ApiResults.BadRequest(
                     $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; " +
-                    "the launch body accepts only prompt, context, and attachments.",
+                    "the launch body accepts only prompt, context, attachments, and execution.",
                     "unsupported_field",
                     new { fields = body.UndeclaredFields.ToArray() });
             }
@@ -154,7 +225,8 @@ public static class AgentSessionLaunchRoutes
                 Origin: launchOrigin,
                 TargetId: body.Context?.TargetId?.Trim() is { Length: > 0 } targetId
                     ? targetId
-                    : agentRef.Trim());
+                    : agentRef.Trim(),
+                ExecutionOverrideJson: body.ExecutionOverrideJson);
 
             // Resume first: a replay that conflicts on the existing
             // fingerprint (prompt, attachments, context) must surface as
@@ -202,6 +274,30 @@ public static class AgentSessionLaunchRoutes
             if (string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
             {
                 return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
+            }
+
+            AgentLaunchExecutionResolution executionResolution;
+            try
+            {
+                executionResolution = AgentLaunchExecutionResolver.Resolve(
+                    AgentLauncher.ResolveExecutionDefinition(agent),
+                    body.Execution);
+            }
+            catch (AgentLaunchExecutionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, ex.ErrorCode);
+            }
+            if (executionResolution.HasOverride && !executionResolution.MatchesSavedDefinition)
+            {
+                return ApiResults.Fail(
+                    "The requested execution tuple is not admitted by the current capability gate.",
+                    StatusCodes.Status409Conflict,
+                    "execution_capability_unconfirmed",
+                    new
+                    {
+                        state = executionResolution.CapabilityState,
+                        sources = executionResolution.Sources,
+                    });
             }
 
             var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier, grains);
@@ -490,7 +586,9 @@ public sealed record AgentSessionLaunchBody(
     AgentSessionLaunchContextRef? Context,
     IReadOnlyList<string>? Attachments,
     IReadOnlyList<string> UndeclaredFields,
-    JsonElement Raw)
+    JsonElement Raw,
+    AgentLaunchExecutionOverride? Execution = null,
+    string? ExecutionOverrideJson = null)
 {
     public static async ValueTask<AgentSessionLaunchBody?> BindAsync(HttpContext context)
     {
@@ -500,7 +598,7 @@ public sealed record AgentSessionLaunchBody(
         }
         catch (JsonException)
         {
-            return new AgentSessionLaunchBody(null, null, null, [], default);
+            return new AgentSessionLaunchBody(null, null, null, ["body"], default);
         }
     }
 
@@ -545,13 +643,19 @@ public sealed record AgentSessionLaunchBody(
         }
 
         var attachments = TryReadAttachments(raw);
+        var execution = TryReadExecution(raw);
+        var executionJson = raw.TryGetProperty("execution", out var executionElement)
+            ? AgentLaunchJsonCanonicalizer.Canonicalize(executionElement)
+            : null;
 
         return new AgentSessionLaunchBody(
             Prompt: prompt,
             Context: ctx,
             Attachments: attachments,
             UndeclaredFields: undeclared,
-            Raw: raw);
+            Raw: raw,
+            Execution: execution,
+            ExecutionOverrideJson: executionJson);
     }
 
     private static IReadOnlyList<string>? TryReadAttachments(JsonElement parent)
@@ -592,6 +696,49 @@ public sealed record AgentSessionLaunchBody(
                 ? value.GetString()
                 : throw new JsonException($"context.{name} must be a string");
 
+    private static AgentLaunchExecutionOverride? TryReadExecution(JsonElement parent)
+    {
+        if (!parent.TryGetProperty("execution", out var execution)
+            || execution.ValueKind == JsonValueKind.Null)
+            return null;
+        if (execution.ValueKind != JsonValueKind.Object)
+            throw new JsonException("execution must be an object or null");
+
+        var allowed = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "runtime",
+            "model",
+            "variant",
+            "reasoningEffort",
+        };
+        var unsupported = execution.EnumerateObject()
+            .Select(property => property.Name)
+            .Where(name => !allowed.Contains(name))
+            .ToArray();
+        if (unsupported.Length > 0)
+            throw new JsonException($"unsupported execution field(s): {string.Join(", ", unsupported)}");
+
+        return new AgentLaunchExecutionOverride(
+            RuntimeSpecified: execution.TryGetProperty("runtime", out var runtime),
+            Runtime: TryReadExecutionString(execution, "runtime"),
+            ModelSpecified: execution.TryGetProperty("model", out var model),
+            Model: TryReadExecutionString(execution, "model"),
+            VariantSpecified: execution.TryGetProperty("variant", out var variant),
+            Variant: TryReadExecutionString(execution, "variant"),
+            ReasoningEffortSpecified: execution.TryGetProperty("reasoningEffort", out var effort),
+            ReasoningEffort: TryReadExecutionString(execution, "reasoningEffort"),
+            CanonicalJson: AgentLaunchJsonCanonicalizer.Canonicalize(execution));
+    }
+
+    private static string? TryReadExecutionString(JsonElement parent, string name)
+    {
+        if (!parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        if (value.ValueKind != JsonValueKind.String)
+            throw new JsonException($"execution.{name} must be a string or null");
+        return value.GetString();
+    }
+
     private static int? TryReadPositiveInt(JsonElement parent, string name)
     {
         if (!parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
@@ -602,6 +749,56 @@ public sealed record AgentSessionLaunchBody(
     }
 }
 
+internal static class AgentLaunchJsonCanonicalizer
+{
+    public static string Canonicalize(JsonElement element)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            Write(element, writer);
+        }
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    private static void Write(JsonElement element, Utf8JsonWriter writer)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    Write(property.Value, writer);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                    Write(item, writer);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.String:
+                writer.WriteStringValue(element.GetString());
+                break;
+            case JsonValueKind.Number:
+                writer.WriteRawValue(element.GetRawText(), skipInputValidation: true);
+                break;
+            case JsonValueKind.True:
+                writer.WriteBooleanValue(true);
+                break;
+            case JsonValueKind.False:
+                writer.WriteBooleanValue(false);
+                break;
+            default:
+                writer.WriteNullValue();
+                break;
+        }
+    }
+}
+
 public sealed record AgentSessionLaunchContextRef(
     int? IssueNumber = null,
     int? EpicNumber = null,
@@ -609,6 +806,19 @@ public sealed record AgentSessionLaunchContextRef(
     string? Workspace = null,
     string? WorkspacePath = null,
     string? TargetId = null);
+
+public sealed record AgentSessionLaunchPreviewResponse(
+    string AgentId,
+    string AgentName,
+    string Runtime,
+    string? Model,
+    string? Variant,
+    string? ReasoningEffort,
+    IReadOnlyDictionary<string, string> Sources,
+    string CapabilityState,
+    bool MatchesSavedDefinition,
+    AgentExecutabilityResult Executability,
+    string RequestFingerprint);
 
 /// <summary>
 /// Response body for a successful generic AgentSession launch. A launch

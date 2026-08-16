@@ -317,7 +317,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentExpectedBindingEpoch: parentExpectedBindingEpoch,
             ParentLinkEdgeId: parentLinkEdgeId,
             SpawnRequestFingerprint: spawnRequestFingerprint,
-            WorkspaceRepositories: request.WorkspaceRepositories));
+            WorkspaceRepositories: request.WorkspaceRepositories,
+            ExecutionOverrideJson: request.ExecutionOverrideJson));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
