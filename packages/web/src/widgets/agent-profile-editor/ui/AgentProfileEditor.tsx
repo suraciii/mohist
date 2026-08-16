@@ -66,6 +66,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
   const [permissionsText, setPermissionsText] = useState(agent?.permissions?.join(', ') ?? '')
   const [model, setModel] = useState<string | null>(initialModelVariant.model)
   const [variant, setVariant] = useState<string | null>(initialModelVariant.variant)
+  const [reasoningEffort, setReasoningEffort] = useState<string | null>(initialModelVariant.reasoningEffort)
   const [runtime, setRuntime] = useState<AgentRuntime>(initialModelVariant.runtime)
   const [errors, setErrors] = useState<FormErrors>({})
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
@@ -74,6 +75,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
 
   const { data: availableModels } = useAvailableModelIds(runtime)
   const modelVariantsMap = useModelVariants(runtime)
+  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? availableModels?.reasoningEfforts : undefined
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
@@ -96,7 +98,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
     setErrors(validation)
     if (Object.keys(validation).length > 0) return
 
-    const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime)
+    const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime, reasoningEffort)
 
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
@@ -262,6 +264,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                   setRuntime(event.target.value as AgentRuntime)
                   setModel(null)
                   setVariant(null)
+                  setReasoningEffort(null)
                 }}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
               >
@@ -282,6 +285,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 onClear={() => {
                   setModel(null)
                   setVariant(null)
+                  setReasoningEffort(null)
                 }}
                 allowClear={!!model}
                 modelVariants={modelVariantsMap}
@@ -289,6 +293,14 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 onChangeModelVariant={(m, v) => {
                   setModel(m)
                   setVariant(v)
+                  setReasoningEffort(null)
+                }}
+                modelReasoningEfforts={reasoningEffortsMap}
+                valueReasoningEffort={reasoningEffort}
+                onChangeModelReasoningEffort={(m, effort) => {
+                  setModel(m)
+                  setReasoningEffort(effort)
+                  setVariant(null)
                 }}
               />
             </div>
