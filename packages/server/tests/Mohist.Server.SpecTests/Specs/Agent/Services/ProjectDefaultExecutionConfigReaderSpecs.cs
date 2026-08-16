@@ -60,6 +60,35 @@ public sealed class ProjectDefaultExecutionConfigReaderSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetAsync_CachesEachProjectWithinTheScope()
+    {
+        const string firstProjectId = "proj-default-exec-reader-first";
+        const string secondProjectId = "proj-default-exec-reader-second";
+        await SeedProjectAsync(firstProjectId, new ExecutionConfigHint("pi", "openai/gpt-5.6"));
+        await SeedProjectAsync(secondProjectId, new ExecutionConfigHint("opencode", "anthropic/sonnet-4.6"));
+
+        var commands = new SqlCommandCounter();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_database.ConnectionString)
+            .AddInterceptors(commands)
+            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
+            .Options;
+        var reader = new ProjectDefaultExecutionConfigReader(new TestDbContextFactory(options));
+
+        var first = await reader.GetAsync(firstProjectId);
+        var second = await reader.GetAsync(secondProjectId);
+        var firstAgain = await reader.GetAsync(firstProjectId);
+
+        Assert.Equal(new ExecutionConfigHint("pi", "openai/gpt-5.6"), first);
+        Assert.Equal(new ExecutionConfigHint("opencode", "anthropic/sonnet-4.6"), second);
+        Assert.Equal(first, firstAgain);
+        Assert.Equal(
+            2,
+            commands.CommandTexts.Count(command =>
+                command.Contains("FROM \"Projects\"", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
     public async Task GetAsync_ReturnsNullForAProjectWithoutADefault()
     {
         const string projectId = "proj-default-exec-reader-unset";
