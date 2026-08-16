@@ -824,3 +824,24 @@ Channel decision (grounded in live source):
   implementation and its deterministic acceptance coverage were already
   committed on the prepared workflow branch; this commit records the current
   task verification and preserves the existing implementation unchanged.
+
+## T-004 Current Task Revalidation
+
+- The prepared Workflow arbitration remains complete: a fence-matching
+  `update-interrupted` receipt records immutable interrupted history, allocates
+  recovery generation 1 with a new TaskRun, work delivery identity, and AgentTurn,
+  and exposes only the replacement through `WorkflowWorkLifecycle` after commit.
+- Exact receipt replay returns the durable acknowledgement without another
+  TaskRun, generation, or dispatch. The original settlement binding remains
+  unchanged; old-turn reports, observations, and receipts are stale after the
+  replacement. No-fence and operation/work/binding mismatches leave the run
+  unchanged.
+- Focused Server apphost verification passed Workflow settlement 13/13,
+  receipt-operation replay 3/3, and update/recovery API coverage 6/6. The full
+  Server SpecTests apphost passed 3947/3947.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2674, Server Arch 68, CLI 1856, Runner 1661, and Web 4727.
+- No additional production change was necessary in this task run because the
+  selected T-004 implementation and deterministic acceptance coverage were
+  already committed on the prepared workflow branch; this commit records the
+  current task verification and preserves the implementation unchanged.
