@@ -1,9 +1,19 @@
 import type { WorkResourceLimits } from '../core/types.js'
+import type { CommandResourceLimits } from '../system/process.js'
 
 export const DEFAULT_WORK_MEMORY_MB = 1024
 export const DEFAULT_WORK_WALL_CLOCK_MS = 60 * 60 * 1000
 export const DEFAULT_WORK_WATCHDOG_INTERVAL_MS = 250
 export const DEFAULT_WORK_TURN_BUDGET_MS = 60 * 60 * 1000
+
+/**
+ * Full verification runs the server test host and its child processes, so it
+ * needs a larger explicit command budget than the conservative default used
+ * for ordinary work. The bound remains finite and is applied only by
+ * `core/script` when the workflow opts into this profile.
+ */
+export const FULL_VERIFY_RESOURCE_PROFILE = 'full-verify'
+export const FULL_VERIFY_MEMORY_MB = 4096
 
 export interface ResolvedWorkResourceLimits {
   readonly memoryMb: number | null
@@ -38,4 +48,26 @@ export function minPositive(...values: readonly (number | null | undefined)[]): 
     (value): value is number => value !== null && value !== undefined && Number.isFinite(value) && value > 0,
   )
   return finite.length > 0 ? Math.min(...finite) : undefined
+}
+
+export type ActionResourceProfileResolution =
+  | { readonly ok: true; readonly resourceLimits?: CommandResourceLimits }
+  | { readonly ok: false; readonly message: string }
+
+export function resolveActionResourceProfile(
+  profile: string | undefined,
+  base: CommandResourceLimits | undefined,
+): ActionResourceProfileResolution {
+  if (profile === undefined) return { ok: true, resourceLimits: base }
+  if (profile !== FULL_VERIFY_RESOURCE_PROFILE) {
+    return {
+      ok: false,
+      message: `Unsupported resource profile '${profile}'. Supported profiles: ${FULL_VERIFY_RESOURCE_PROFILE}`,
+    }
+  }
+
+  return {
+    ok: true,
+    resourceLimits: { ...base, memoryMb: FULL_VERIFY_MEMORY_MB },
+  }
 }

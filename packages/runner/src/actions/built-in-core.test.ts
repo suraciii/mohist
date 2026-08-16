@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { processAction, scriptFailureMessage } from './built-in-core.js'
-import { setPrlimitAvailabilityForTests } from '../system/process.js'
+import { processAction, scriptAction, scriptFailureMessage } from './built-in-core.js'
+import { setPrlimitAvailabilityForTests, type CommandResourceLimits } from '../system/process.js'
 import { FakeProcessSpawner } from '../../tests/support/fake-process.js'
 import { withTestRunnerResources } from '../../tests/support/test-resources.js'
 import { makeHost } from '../../tests/support/action-host-test.js'
@@ -32,6 +32,29 @@ describe('core/resource containment', () => {
 })
 
 describe('core/script failure diagnostics', () => {
+  it('applies the full-verify profile to the command resource limits', async () => {
+    let captured: CommandResourceLimits | undefined
+    await withTestRunnerResources(
+      async () => {
+        const result = await scriptAction(
+          { run: 'echo ok', resourceProfile: 'full-verify' },
+          makeHost({ resourceLimits: { memoryMb: 1024, wallClockMs: 60_000, watchdogIntervalMs: 250 } }),
+        )
+
+        expect(result).toMatchObject({ output: { exitCode: 0 } })
+        expect(captured).toEqual({ memoryMb: 4096, wallClockMs: 60_000, watchdogIntervalMs: 250 })
+      },
+      {
+        commandRunner: {
+          run: async (_command, _args, _cwd, _signal, _env, options) => {
+            captured = (options as { resourceLimits?: CommandResourceLimits } | undefined)?.resourceLimits
+            return { exitCode: 0, stdout: '', stderr: '' }
+          },
+        },
+      },
+    )
+  })
+
   it('includes stdout failures when stderr only contains a warning', () => {
     const message = scriptFailureMessage(
       'set -e\nnpm ci\ndotnet test',
