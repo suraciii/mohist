@@ -268,3 +268,18 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   The parallel 3,949-test spec assembly had two unrelated timing failures;
   the task route class passed 11/11 and both flaky tests passed in exact
   single-test reruns.
+
+## T-003 verification follow-up
+
+- Re-audited the existing T-003 slice: task-first envelopes alone set the
+  append-only `DefinitionCreatedByLaunch` marker; terminal abort archives the
+  Agent before persisting the recorded rejection, while setup-pending recovery
+  leaves it active.
+- The focused `AgentTaskLaunchRoutesSpecs` class passed 11/11, including
+  terminal rejection replay, archived-name conflict/disambiguation, reminder
+  recovery after injected archive acknowledgement failure, 503 non-archival,
+  and definition-first non-archival.
+- `npm run test:fast` passed: 2,701 Server unit, 68 architecture, 178
+  workflow, 1,860 CLI, 4,735 Web, and 1,639 Runner tests plus typechecks.
+  The full 3,949-test server assembly had one timing-sensitive polling failure
+  in the unrelated runtime-resolution class; its exact rerun passed 10/10.
