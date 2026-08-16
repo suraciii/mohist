@@ -104,3 +104,8 @@ All three must-fix findings disposed of by fixing. No won't-fix dispositions.
 - Pruned the generic summary/transcript DTO, clients, query options, hooks, tests, and public exports in `entities/agent`; reduced the `@x/agent-session` boundary to the four types still consumed by `entities/agent`.
 - Inlined activity normalization into `deriveSessionStatusKind`, retained `canFollowupSession`, removed the recovery/activity helper tests, and renamed the unified data source's local stop callback to `stopCurrentTurn`.
 - Baseline focused coverage passed with 102 tests before the refactor. After cleanup, focused coverage passed with 85 tests; typecheck, FSD boundaries, test boundaries, and the full Vitest suite passed (363 files, 4,542 tests). The required word-boundary sweep is empty and all deleted files are absent.
+
+### T-003 implementation (2026-08-16)
+- Deleted `entities/session`'s legacy SessionEvent view family: `model/types.ts`, `model/view.ts`, the `model/view/` builders and tests, and `@x/session-view.ts`; pruned the slice index to the five timeline functions and `Timeline*` types.
+- The transcript widget had a separate local `SessionTimelineView` mode alias, but T-003's mandatory exact word-boundary sweep includes that token. Renamed only that alias to `SessionTranscriptViewMode`; timeline behavior and `model/timeline` sources remain unchanged.
+- Baseline legacy-view/timeline coverage passed with 49 tests before deletion. Post-change timeline/transcript coverage passed with 128 tests; the exact removed-family sweep is empty and `tsc -b` passes.

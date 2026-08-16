@@ -4,13 +4,13 @@ import { RawTimelineView } from './RawTimelineView'
 import { TimelineItemList } from './TimelineItemList'
 import type { TimelineReferenceResolver } from './TimelineItemRow'
 
-export type SessionTimelineView = 'summary' | 'raw'
+export type SessionTranscriptViewMode = 'summary' | 'raw'
 
 interface SessionTranscriptLayoutProps {
   entries: TimelineEntry[]
   facts: TimelineFact[]
   currentActivity: SessionTimelineCurrentActivity
-  viewMode?: SessionTimelineView
+  viewMode?: SessionTranscriptViewMode
   resolveReference?: TimelineReferenceResolver
 }
 
