@@ -553,3 +553,13 @@ Plan skeleton for next run (est. half a day):
   files/4732 tests), Runner CI (154 files/1666 tests), and Slack CI (7
   files/70 tests). `npm run test:fast` passed every lane, and verification
   left no Git-visible changes beyond the two intended files.
+
+## T-001 Verification (this run)
+
+- Re-audited the committed canonical write surface: all seven effort values
+  are accepted verbatim, invalid/wrong-type/empty values name the canonical
+  set, issue overrides accept effort while rejecting Agent-owned runtime, and
+  `Filter` forwards effort beside model/variant into `vars.agent`.
+- Re-ran the focused regression suites: Server UnitTests passed 2722/2722 and
+  CLI tests passed 1858/1858. `git diff --check` passed and the workflow
+  branch remained clean before recording this note.
