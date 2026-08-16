@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Sessions.Domain;
 
@@ -52,7 +51,7 @@ internal sealed record AgentSessionLifecycleTurn(
 
 internal sealed record AgentSessionLifecycleJob(
     string JobKey,
-    AgentJobStatus Status,
+    string Status,
     string? ProjectId,
     string? AgentId,
     string? SessionId,
@@ -63,7 +62,11 @@ internal sealed record AgentSessionLifecycleJob(
     DateTimeOffset? RunningSince,
     DateTimeOffset? TerminalAt,
     string? WaitingReason,
-    AgentJobTerminalResult? TerminalResult);
+    string? TerminalStatus,
+    string? TerminalMessage,
+    string? TerminalOutput,
+    string? TerminalFailureReason,
+    int? TerminalExitCode);
 
 internal sealed record AgentSessionLifecycleTransition(
     string SourceTransition,

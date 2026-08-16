@@ -115,20 +115,37 @@ public sealed partial class PublicApiProjectionEngine
         };
     }
 
-    private static PublicProjectionFacts.JobFacts ToJobFacts(AgentSessionLifecycleJob job) => new(
-        job.JobKey,
-        job.Status,
-        job.ProjectId,
-        job.AgentId,
-        job.SessionId,
-        job.InitialInputId,
-        job.InitialTurnId,
-        job.SubmittedAt,
-        job.ReadySince,
-        job.RunningSince,
-        job.TerminalAt,
-        job.WaitingReason,
-        job.TerminalResult);
+    private static PublicProjectionFacts.JobFacts ToJobFacts(AgentSessionLifecycleJob job)
+    {
+        var status = Enum.TryParse<AgentJobStatus>(job.Status, ignoreCase: true, out var parsedStatus)
+            ? parsedStatus
+            : AgentJobStatus.Unknown;
+        var terminalResult = job.TerminalStatus is null
+            ? null
+            : new AgentJobTerminalResult(
+                Enum.TryParse<AgentJobStatus>(job.TerminalStatus, ignoreCase: true, out var terminalStatus)
+                    ? terminalStatus
+                    : AgentJobStatus.Unknown,
+                job.TerminalMessage,
+                job.TerminalOutput,
+                null,
+                job.TerminalFailureReason,
+                job.TerminalExitCode);
+        return new PublicProjectionFacts.JobFacts(
+            job.JobKey,
+            status,
+            job.ProjectId,
+            job.AgentId,
+            job.SessionId,
+            job.InitialInputId,
+            job.InitialTurnId,
+            job.SubmittedAt,
+            job.ReadySince,
+            job.RunningSince,
+            job.TerminalAt,
+            job.WaitingReason,
+            terminalResult);
+    }
 
     private static PublicProjectionFacts.JobFacts ToJobFacts(AgentJobRow row, AgentJobState state) => new(
         row.JobKey,

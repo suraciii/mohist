@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
@@ -275,33 +274,51 @@ public class AgentSessionStore : IAgentSessionStore, IAgentSessionStreamRetentio
 
     private static AgentSessionLifecycleJob ToLifecycleJob(AgentJobRow row)
     {
-        var state = TryDeserializeJobState(row.State) ?? new AgentJobState();
+        using var document = JsonDocument.Parse(row.State);
+        var root = document.RootElement;
+        var input = Property(root, "input");
+        var terminal = Property(root, "terminalResult");
         return new AgentSessionLifecycleJob(
             row.JobKey,
-            state.Status,
-            state.Input?.ProjectId ?? row.ProjectId,
-            state.Input?.AgentId ?? row.AgentId,
+            StringProperty(root, "status") ?? string.Empty,
+            StringProperty(input, "projectId") ?? row.ProjectId,
+            StringProperty(input, "agentId") ?? row.AgentId,
             row.AgentSessionId,
             row.InitialInputId,
             row.InitialTurnId,
-            state.SubmittedAt,
+            TimestampProperty(root, "submittedAt"),
             ParseTimestamp(row.ReadySince),
-            state.RunningSince,
-            state.TerminalAt,
-            state.WaitingReason,
-            state.TerminalResult);
+            TimestampProperty(root, "runningSince"),
+            TimestampProperty(root, "terminalAt"),
+            StringProperty(root, "waitingReason"),
+            StringProperty(terminal, "status"),
+            StringProperty(terminal, "message"),
+            StringProperty(terminal, "output"),
+            StringProperty(terminal, "failureReason"),
+            IntProperty(terminal, "exitCode"));
     }
 
-    private static AgentJobState? TryDeserializeJobState(string stateJson)
+    private static JsonElement Property(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(name, out var value)
+                ? value
+                : default;
+
+    private static string? StringProperty(JsonElement element, string name)
     {
-        try
-        {
-            return JsonSerializer.Deserialize<AgentJobState>(stateJson, JSON.Options);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+        var value = Property(element, name);
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static DateTimeOffset? TimestampProperty(JsonElement element, string name) =>
+        ParseTimestamp(StringProperty(element, name));
+
+    private static int? IntProperty(JsonElement element, string name)
+    {
+        var value = Property(element, name);
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result)
+            ? result
+            : null;
     }
 
     private static DateTimeOffset? ParseTimestamp(string? text) =>
