@@ -440,3 +440,9 @@
 - The T-006 implementation remains present in commit `9b8b4be22`: derived invocation status from authoritative AgentJob and settlement facts, Workflow invocation identifiers and terminal result projection, reciprocal AgentJob/AgentSession lineage, sibling-path regression coverage, and the BREAKING/freeze/named-session documentation updates.
 - `npm run verify` passed completely: docs 92, file-size ratchet, format check, solution and workspace builds, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Server SpecTests 3960, Web 4724, Runner 1646, and Slack 70. Preview .NET SDK and existing Rollup chunk warnings were non-failing.
 - The worktree was clean before this progress entry; no duplicate production edit was made during this final task verification.
+
+## Verification repair final confirmation
+
+- The affected `Mohist.Server.SpecTests.Specs.Sessions.AgentSessionFollowupConcurrencySpecs` class passed 15/15 after the existing bounded wait for the deferred `dispatch-pending` lease update.
+- `npm run verify` passed: docs 92, file-size ratchet, format check, build, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Server SpecTests 3960, Web 4724, Runner 1646, and Slack 70.
+- Verification produced no Git-visible changes; the only generated outputs remain ignored build artifacts. The root cause was the test reading session state before the intentionally deferred grant callback persisted its permit, fixed by awaiting that durable state while retaining the original permit and status assertions.
