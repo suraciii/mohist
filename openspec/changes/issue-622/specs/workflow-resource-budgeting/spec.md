@@ -32,7 +32,7 @@ The Runner SHALL resolve an effective verification budget from the workflow decl
 - **AND** the failure identifies the unavailable capacity input and the configuration action required to continue
 
 ### Requirement: Full verification remains bounded without changing ordinary-work policy
-The complete verification command SHALL execute under a finite process-tree memory and execution-duration budget, whether it is represented as one task or validated partitions. The budget SHALL apply to the shell and all descendants, and SHALL preserve the configured watchdog and wall-clock protections. Ordinary work SHALL retain the existing default containment policy when no override is supplied, including the conservative per-work defaults.
+The complete verification command SHALL execute under a finite process-tree memory and execution-duration budget, whether it is represented as one task or validated partitions. The budget SHALL apply to the shell and all descendants, and SHALL preserve the configured watchdog and wall-clock protections. For a declared complete verification task, `resourceBudget.wallClockMs` SHALL be the sole task execution deadline: the built-in profiles MUST omit an independent `with.timeout`, and validation MUST reject a separate Action timeout on that task rather than allowing a hidden shorter deadline or precedence rule. External work cancellation may still stop the command earlier. Ordinary work SHALL retain the existing default containment policy when no override is supplied, including the conservative per-work defaults.
 
 #### Scenario: Full verification stays within its effective budget
 - **WHEN** the `npm ci`, server test, Web check, and Runner check phases complete within the resolved limits
@@ -51,7 +51,7 @@ The complete verification command SHALL execute under a finite process-tree memo
 - **AND** it does not inherit the full-verification budget
 
 ### Requirement: Budget and workflow configuration is validated before execution
-Workflow validation SHALL reject a verification declaration that is missing a required bounded dimension, uses a non-finite or non-positive value, names an unsupported budget source or partition, or cannot be reconciled with the host-capacity contract. Validation SHALL report the workflow path, task or partition identity, invalid field, and corrective reason. A rejected declaration MUST NOT invoke its verification command.
+Workflow validation SHALL reject a verification declaration that is missing a required bounded dimension, uses a non-finite or non-positive value, names an unsupported budget source or partition, contains an independent Action timeout, or cannot be reconciled with the host-capacity contract. Validation SHALL report the workflow path, task or partition identity, invalid field, and corrective reason. A rejected declaration MUST NOT invoke its verification command.
 
 #### Scenario: A profile contains an invalid verification budget
 - **WHEN** server validation loads a workflow profile whose verification budget is malformed, missing, or unsupported
@@ -73,12 +73,12 @@ The `mohist/local` and `mohist/github-pr` built-in profiles SHALL expose the sam
 - **AND** both resolve the same budget dimensions from the same declared source and host-capacity rules
 
 #### Scenario: One built-in profile drifts from the contract
-- **WHEN** either built-in profile omits the declaration, uses a different unsupported source, or supplies a different resolution rule for full verification
+- **WHEN** either built-in profile omits the declaration, uses a different unsupported source, supplies a different resolution rule, or retains an independent Action timeout for full verification
 - **THEN** profile validation fails and identifies the drifting profile and verification task
 - **AND** the profile is not treated as equivalent merely because its command input is `vars.ci.verify`
 
 ### Requirement: Budget selection and verification evidence are operationally auditable
-Runner documentation and deployment configuration guidance SHALL explain how the effective full-verification budget is selected, how `WORK_RESOURCE_*` settings interact with the workflow declaration and host capacity, and how each budget outcome is diagnosed. The implementation SHALL provide deterministic fake resource and process evidence for resolution, capacity rejection, bounded execution, and the current complete verification command. Evidence collection MUST NOT retry or mutate the currently blocked workflow runs.
+Runner documentation and deployment configuration guidance SHALL explain how the effective full-verification budget is selected, how `resourceBudget.wallClockMs` supersedes the removed built-in Action timeout while ordinary `with.timeout` behavior remains unchanged, how `WORK_RESOURCE_*` settings interact with the workflow declaration and host capacity, and how each budget outcome is diagnosed. The implementation SHALL provide deterministic fake resource and process evidence for resolution, capacity rejection, bounded execution, and the current complete verification command. Evidence collection MUST NOT retry or mutate the currently blocked workflow runs.
 
 #### Scenario: An operator audits a verification budget
 - **WHEN** an operator inspects the workflow task, Runner configuration, and Runner result for a full verification attempt

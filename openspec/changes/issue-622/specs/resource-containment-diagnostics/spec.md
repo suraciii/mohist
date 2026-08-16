@@ -53,6 +53,12 @@ The Runner SHALL mark a result as `resource-containment` only when the per-work 
 - **THEN** the command result records containment independently of the final exit code
 - **AND** the action maps that fact to the resource-overrun classification with the captured output preserved
 
+#### Scenario: A declared verification task has no shorter Action deadline
+- **WHEN** a built-in verification task is dispatched with a valid `resourceBudget.wallClockMs`
+- **THEN** process-tree enforcement uses that resolved wall-clock bound as the task deadline
+- **AND** the built-in task does not supply the legacy `with.timeout: 300000` deadline
+- **AND** an ordinary `with.timeout` value cannot preempt the declared verification budget
+
 ### Requirement: Resource-related failures settle through the normal result protocol
 A resource overrun or budget-configuration failure SHALL produce a definite failed `WorkItemResult` with its error classification and diagnostic context, and SHALL be durably reportable under the original work identity. The Runner MUST NOT leave the work pending, throw an opaque exception that bypasses settlement, or convert the outcome into an unknown result solely because containment or budget validation stopped execution.
 
