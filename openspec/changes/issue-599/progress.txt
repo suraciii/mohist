@@ -12,3 +12,5 @@
 - F1 changes are limited to `design.md`, `tasks.json`, and `specs/provider-rate-limit-retry/spec.md` in the first remediation commit.
 - F2 changes are limited to the terminal-close decision and its T-003/spec scenarios; those changes are committed in the second remediation commit.
 - F3 names `ProviderRateLimitFacts` at each Action/report boundary, requires malformed-fact rejection, and adds exact-fact preservation coverage for OpenCode and Pi.
+- Static verification passed: `git diff --check`, `tasks.json` parsing, and task-dependency resolution.
+- `npm run docs:check` could not start because `tsx` is unavailable in this workspace (`node_modules` is not installed).
