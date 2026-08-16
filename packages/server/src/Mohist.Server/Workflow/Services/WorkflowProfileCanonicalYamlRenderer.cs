@@ -58,6 +58,15 @@ internal static class WorkflowProfileCanonicalYamlRenderer
         };
         if (definition.Approval is not null)
             doc["approval"] = BuildApproval(definition.Approval);
+        if (definition.Recoveries is { Count: > 0 })
+        {
+            doc["recoveries"] = definition.Recoveries
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .ToDictionary(
+                    entry => entry.Key,
+                    entry => (object?)BuildRecovery(entry.Value),
+                    StringComparer.Ordinal);
+        }
         return doc;
     }
 
