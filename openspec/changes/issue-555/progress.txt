@@ -436,3 +436,20 @@ tests.
   architecture, workflow, CLI, web, and runner lanes all green.
 - The T-002 implementation remains contained in commit `85ff6bec2`; this
   rerun found no additional projection or migration changes necessary.
+
+## T-003 verification rerun (current workflow)
+
+- The existing T-003 implementation in commit `462449568` was audited against
+  the public-execution-read and public-execution-projection requirements. The
+  three GET routes use the persisted snapshot body, canonical membership is
+  checked before the snapshot/watermark path, and the shared `PublicRead`
+  mapper emits resource-specific 404s or the `projection_lag` envelope with
+  `Retry-After` and no stale body.
+- Focused `PublicExecutionReadRouteSpecs` (7),
+  `PublicExecutionReadQuerierSpecs` (1), the public DTO contract tests, and the
+  DirectApi internal-read architecture rule passed. The first parallel unit
+  invocation hit shared .NET `obj/bin` file contention only; its serial rerun
+  passed all 2,671 unit tests.
+- `npm run test:fast` passed all seven lanes: typecheck, unit, architecture,
+  workflow, CLI, web, and runner. No additional implementation changes were
+  needed on the current workflow branch.
