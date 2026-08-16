@@ -392,3 +392,9 @@ Plan skeleton for next run (est. half a day):
   `current-fail-if-marker-review`. `npm run verify` reached the file-size
   ratchet and stopped on eight over-limit files grown by earlier slices before
   build/test; no T-008 file is in that list. `git diff --check` passed.
+
+## T-001 follow-up verification (current run)
+
+- Tightened CLI edit validation so an invalid `--reasoning-effort` is rejected before project/agent resolution and before any HTTP request, matching the write-surface acceptance criterion. The existing create path already validated before resolution; update/edit now does the same while retaining the current-config merge after validation.
+- Updated the CLI regression test to assert zero requests for invalid edit effort input.
+- Verification: Server UnitTests passed (2722 tests), CLI tests passed (1858 tests), and `git diff --check` passed.

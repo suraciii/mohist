@@ -657,6 +657,22 @@ internal static partial class AgentCommands
                         if (agentConfig is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--agent-config is retired; use --runtime, --model, --reasoning-effort, and --variant");
 
+                        // Validate typed config locally before resolving the project or agent.
+                        // The current config is only needed after the input itself is known to be valid.
+                        var localConfig = ResolveTypedAgentConfig(
+                            current: null,
+                            agentConfig,
+                            runtime,
+                            model,
+                            variant,
+                            reasoningEffort,
+                            clearRuntime,
+                            clearModel,
+                            clearVariant,
+                            clearReasoningEffort);
+                        if (localConfig.Error is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, localConfig.Error);
+
                         var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                         if (resolveExit != 0) return resolveExit;
 
