@@ -40,6 +40,8 @@ export interface WorkspaceRegistryEntry {
   workspacePath: string
   binding?: WorkspaceBindingIdentity
   runBranch?: string | null
+  workspaceId?: string | null
+  workspaceGeneration?: string | number | null
   phase: WorkspaceRegistryPhase
   materializedAt: string
   terminalAt: string | null
@@ -58,6 +60,8 @@ export interface RegisterInput {
   workspacePath: string
   binding?: WorkspaceBindingIdentity
   runBranch?: string | null
+  workspaceId?: string | null
+  workspaceGeneration?: string | number | null
 }
 
 export interface WorkspaceRegistryOptions {
@@ -159,6 +163,8 @@ export class WorkspaceRegistry {
       workspacePath,
       ...(binding ? { binding: { ...binding, runnerRoot: resolve(binding.runnerRoot) } } : {}),
       runBranch: input.runBranch ?? null,
+      workspaceId: input.workspaceId ?? existing?.workspaceId ?? null,
+      workspaceGeneration: input.workspaceGeneration ?? existing?.workspaceGeneration ?? null,
       phase: "active",
       materializedAt,
       terminalAt: existing?.terminalAt ?? null,
@@ -348,6 +354,10 @@ export class WorkspaceRegistry {
         workspacePath,
         ...(binding ? { binding } : {}),
         runBranch: typeof entry.runBranch === "string" ? entry.runBranch : null,
+        workspaceId: typeof entry.workspaceId === "string" ? entry.workspaceId : null,
+        workspaceGeneration: typeof entry.workspaceGeneration === "string" || typeof entry.workspaceGeneration === "number"
+          ? entry.workspaceGeneration
+          : null,
         phase: entry.phase,
         materializedAt: entry.materializedAt,
         terminalAt: typeof entry.terminalAt === "string" ? entry.terminalAt : null,

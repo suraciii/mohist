@@ -51,17 +51,14 @@ import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recov
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
 const log = runnerLogger.child('host')
-
 export interface ReportResult {
   workflowRunId?: string | null
   workflowStatus?: string | null
 }
-
 export interface RunnerHostDependencies {
   terminalTaskLogDelivery?: TerminalTaskLogDeliveryStore
   waitForConnectionRetry?: (delayMs: number, signal: AbortSignal) => Promise<void>
 }
-
 /**
  * The runner-process reported set is PROCESS-LIFETIME state, not per-poll.
  * It tracks works the process is executing (`inFlight`) and works whose
@@ -89,7 +86,6 @@ interface AwaitingAckEntry {
   /** Earliest wall-clock time for the next bounded report attempt. */
   retryAt: number | null
 }
-
 /**
  * Builds the work key used to dedupe in-flight / awaiting-ack tracking.
  * `ownerKind:ownerId:workId`. The ownerId is the agentJobId for agent-job

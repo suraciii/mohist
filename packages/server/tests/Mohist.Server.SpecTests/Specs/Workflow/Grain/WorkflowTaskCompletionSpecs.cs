@@ -214,7 +214,15 @@ public sealed class WorkflowTaskCompletionSpecs : WorkflowGrainSpecs
         Assert.Equal(("accepted", "Running"), admission);
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-        var verification = CleanVerification(boundary, "verification-1");
+        var lease = await workflow.AcquireWorkflowTaskCleanupLeaseAsync(
+            new WorkflowTaskCleanupLeaseRequest(
+                "cleanup-for-verification",
+                boundary.Identity,
+                boundary.Fingerprint,
+                CleanupScope: [],
+                WorkBudget: 1));
+        Assert.True(lease.Accepted);
+        var verification = CleanVerification(boundary, "verification-1") with { Fence = lease.Lease!.Fence };
         var first = await workflow.ReceiveWorkspaceVerificationAsync(verification);
         Assert.Equal(ReportAck.Accepted, first);
         var eventCount = (await EventStore.ListAsync(work.WorkflowRunId)).Count;
@@ -327,6 +335,81 @@ public sealed class WorkflowTaskCompletionSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Completed, task.Status);
     }
 
+    [Fact]
+    public async Task CleanupLease_IsExclusiveReplaySafeAndExpiresByFence()
+    {
+        await StartWorkflowAsync(SingleStage(tasks: [new("task-1", "Task 1", "spec/task")], checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var boundary = Boundary(work, runnerId, WorkflowTaskWorkspaceOutcomes.Dirty, ["generated.tmp"], reason: "dirty");
+        var service = Services.GetRequiredService<Mohist.Server.Runner.Services.WorkflowReportService>();
+        await service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId,
+            new WorkResult("completed", CompletionBoundary: boundary, WorkspaceOutcome: "dirty", WorkspaceReason: "dirty"));
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        var request = new WorkflowTaskCleanupLeaseRequest("cleanup-1", boundary.Identity, boundary.Fingerprint, ["generated.tmp"], 2, TimeSpan.FromSeconds(1));
+        var first = await workflow.AcquireWorkflowTaskCleanupLeaseAsync(request);
+        var replay = await workflow.AcquireWorkflowTaskCleanupLeaseAsync(request);
+        Assert.True(first.Accepted);
+        Assert.True(replay.Replay);
+        Assert.Equal(first.Lease!.Fence, replay.Lease!.Fence);
+
+        var competing = await workflow.AcquireWorkflowTaskCleanupLeaseAsync(request with { OperationId = "cleanup-2" });
+        Assert.False(competing.Accepted);
+        Assert.Equal("cleanup-lease-active", competing.Reason);
+
+        var operation = new WorkflowTaskCleanupOperation(
+            "mutation-1", first.Lease.Fence, boundary.Identity, true, false, 1, ["generated.tmp"], "verification-required", _fixture.TimeProvider.GetUtcNow());
+        Assert.True((await workflow.RecordWorkflowTaskCleanupAsync(operation)).Accepted);
+        Assert.True((await workflow.RecordWorkflowTaskCleanupAsync(operation)).Replay);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(2));
+        var renewed = await workflow.AcquireWorkflowTaskCleanupLeaseAsync(request with { OperationId = "cleanup-2" });
+        Assert.True(renewed.Accepted);
+        Assert.NotEqual(first.Lease.Fence, renewed.Lease!.Fence);
+        var stale = await workflow.RecordWorkflowTaskCleanupAsync(operation with { OperationId = "mutation-stale" });
+        Assert.False(stale.Accepted);
+        Assert.Equal("cleanup-fence-stale", stale.Reason);
+    }
+
+    [Fact]
+    public async Task AuthorizedSourceAdoption_IsAllowlistedAndChangedHeadVerificationSettlesOnce()
+    {
+        await StartWorkflowAsync(SingleStage(tasks: [new("task-1", "Task 1", "spec/task")], checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var boundary = Boundary(work, runnerId, WorkflowTaskWorkspaceOutcomes.Dirty, ["generated.tmp"], reason: "source-dirty", cleanupScope: ["generated.tmp"]);
+        var service = Services.GetRequiredService<Mohist.Server.Runner.Services.WorkflowReportService>();
+        await service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId,
+            new WorkResult("completed", CompletionBoundary: boundary, WorkspaceOutcome: "dirty", WorkspaceReason: "source-dirty"));
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        var lease = await workflow.AcquireWorkflowTaskCleanupLeaseAsync(
+            new WorkflowTaskCleanupLeaseRequest("cleanup-1", boundary.Identity, boundary.Fingerprint, ["generated.tmp"], 2));
+        Assert.True(lease.Accepted);
+
+        var rejected = await workflow.AuthorizeTaskSourceAdoptionAsync(new WorkflowTaskSourceAdoptionRequest(
+            "adopt-rejected", boundary.Identity, boundary.Fingerprint, lease.Lease!.Fence,
+            "operator", Authenticated: false, HasWorkflowPermission: true, SourcePaths: ["source.cs"]));
+        Assert.False(rejected.Accepted);
+        Assert.Equal("recovery-operator-unauthorized", rejected.Reason);
+
+        var authorized = await workflow.AuthorizeTaskSourceAdoptionAsync(new WorkflowTaskSourceAdoptionRequest(
+            "adopt-1", boundary.Identity, boundary.Fingerprint, lease.Lease.Fence,
+            "operator", Authenticated: true, HasWorkflowPermission: true, SourcePaths: ["source.cs"]));
+        Assert.True(authorized.Accepted);
+        var completed = await workflow.RecordTaskSourceAdoptionAsync(
+            authorized.Operation! with { Completed = true, ResultingHead = "adopted-head" });
+        Assert.True(completed.Accepted);
+
+        var verification = CleanVerification(boundary, "verification-adopted") with
+        {
+            Fence = lease.Lease.Fence,
+            ObservedHead = "adopted-head",
+            ObservedTree = "adopted-tree",
+            SourceAdoptionOperationId = "adopt-1",
+        };
+        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveWorkspaceVerificationAsync(verification));
+        Assert.Equal("Completed", await workflow.GetRunStatusAsync());
+        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveWorkspaceVerificationAsync(verification));
+    }
+
     private static WorkflowTaskCompletionBoundary Boundary(
         WorkDispatch work,
         string runnerId,
@@ -336,7 +419,8 @@ public sealed class WorkflowTaskCompletionSpecs : WorkflowGrainSpecs
         string? reason = null,
         bool authoritative = true,
         JsonElement? output = null,
-        IReadOnlyList<string>? artifactUploadIds = null)
+        IReadOnlyList<string>? artifactUploadIds = null,
+        IReadOnlyList<string>? cleanupScope = null)
     {
         var identity = new WorkflowTaskExecutionIdentity(
             work.WorkflowRunId,
@@ -380,7 +464,8 @@ public sealed class WorkflowTaskCompletionSpecs : WorkflowGrainSpecs
             receipt,
             outcome,
             reason,
-            $"boundary:{work.WorkflowRunId}:{work.TaskRunId}:{outcome}:{actionOutcome}");
+            $"boundary:{work.WorkflowRunId}:{work.TaskRunId}:{outcome}:{actionOutcome}",
+            cleanupScope?.ToList());
     }
 
     private static WorkspaceVerification CleanVerification(

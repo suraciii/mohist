@@ -80,7 +80,7 @@ export class WorkspaceManager {
     }
 
     const runId = work.workflowRunId
-    const expected = workspaceIdentity(runId)
+    const expected = workspaceIdentity(runId, work.workspaceId, work.workspaceGeneration)
     const binding = workspaceBindingIdentity(this.runnerRoot, this.runnerId, runId, gitUrl, baseBranch)
     this.assertExistingBinding(binding)
     const runBranch = expected.runBranch
@@ -121,9 +121,16 @@ export class WorkspaceManager {
         workspacePath,
         binding,
         runBranch: expected.runBranch,
+        workspaceId: work.workspaceId,
+        workspaceGeneration: work.workspaceGeneration,
       })
     }
-    return { path: workspacePath, branch: runBranch }
+    return {
+      path: workspacePath,
+      branch: runBranch,
+      ...(work.workspaceId !== undefined ? { workspaceId: work.workspaceId } : {}),
+      ...(work.workspaceGeneration !== undefined ? { workspaceGeneration: work.workspaceGeneration } : {}),
+    }
   }
 
   async verify(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
@@ -135,7 +142,7 @@ export class WorkspaceManager {
     if (!gitUrl || !baseBranch || issueNumber === undefined) {
       throw new WorkspaceIdentityMismatchError('Issue workspace identity is incomplete')
     }
-    const expected = workspaceIdentity(runId)
+    const expected = workspaceIdentity(runId, work.workspaceId, work.workspaceGeneration)
     const binding = workspaceBindingIdentity(this.runnerRoot, this.runnerId, runId, gitUrl, baseBranch)
     this.assertExistingBinding(binding)
     const runBranch = expected.runBranch
@@ -170,6 +177,8 @@ export class WorkspaceManager {
     return {
       path: workspacePath,
       branch: runBranch,
+      ...(work.workspaceId !== undefined ? { workspaceId: work.workspaceId } : {}),
+      ...(work.workspaceGeneration !== undefined ? { workspaceGeneration: work.workspaceGeneration } : {}),
     }
   }
 
@@ -518,6 +527,8 @@ export async function validateWorkspaceIdentity(
     throw new WorkspaceCorruptError(`Workflow workspace ${displayPath} has no readable identity marker`, displayPath)
   }
   const fields: (keyof IssueWorkspaceMarker)[] = ['workflowRunId', 'runBranch']
+  if (expected.workspaceId !== undefined) fields.push('workspaceId')
+  if (expected.workspaceGeneration !== undefined) fields.push('workspaceGeneration')
   if (fields.some((field) => marker[field] !== expected[field])) {
     throw new WorkspaceIdentityMismatchError(
       `Workflow workspace ${displayPath} marker identity does not match the requested run`,

@@ -102,7 +102,8 @@ public sealed record WorkflowTaskCompletionBoundary(
     [property: Id(3)] CommitReceipt CommitReceipt,
     [property: Id(4)] string WorkspaceOutcome,
     [property: Id(5)] string? WorkspaceReason,
-    [property: Id(6)] string Fingerprint);
+    [property: Id(6)] string Fingerprint,
+    [property: Id(7)] List<string>? CleanupScope = null);
 
 /// <summary>
 /// The report payload retained between durable admission and projection. It
@@ -159,7 +160,8 @@ public sealed record WorkspaceVerification(
     [property: Id(10)] string? Reason,
     [property: Id(11)] string? Verifier,
     [property: Id(12)] string? Source,
-    [property: Id(13)] string? SourceAdoptionOperationId = null);
+    [property: Id(13)] string? SourceAdoptionOperationId = null,
+    [property: Id(14)] string? Fence = null);
 
 [GenerateSerializer]
 public sealed record WorkflowTaskProjectionProgress(
@@ -167,6 +169,93 @@ public sealed record WorkflowTaskProjectionProgress(
     [property: Id(1)] bool Applied,
     [property: Id(2)] DateTimeOffset? AcceptedAt,
     [property: Id(3)] DateTimeOffset? AppliedAt);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskCleanupLeaseRequest(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] WorkflowTaskExecutionIdentity Identity,
+    [property: Id(2)] string BoundaryFingerprint,
+    [property: Id(3)] List<string>? CleanupScope = null,
+    [property: Id(4)] int WorkBudget = 16,
+    [property: Id(5)] TimeSpan? LeaseDuration = null);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskCleanupLease(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string Fence,
+    [property: Id(2)] WorkflowTaskExecutionIdentity Identity,
+    [property: Id(3)] string BoundaryFingerprint,
+    [property: Id(4)] List<string> CleanupScope,
+    [property: Id(5)] DateTimeOffset ExpiresAt,
+    [property: Id(6)] int WorkBudget,
+    [property: Id(7)] DateTimeOffset GrantedAt);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskCleanupLeaseResult(
+    [property: Id(0)] bool Accepted,
+    [property: Id(1)] bool Replay,
+    [property: Id(2)] WorkflowTaskCleanupLease? Lease = null,
+    [property: Id(3)] string? Reason = null,
+    [property: Id(4)] WorkflowTaskCleanupOperation? Operation = null);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskCleanupOperation(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string Fence,
+    [property: Id(2)] WorkflowTaskExecutionIdentity Identity,
+    [property: Id(3)] bool Applied,
+    [property: Id(4)] bool Clean,
+    [property: Id(5)] int Mutations,
+    [property: Id(6)] List<string> RemovedPaths,
+    [property: Id(7)] string? Reason,
+    [property: Id(8)] DateTimeOffset RecordedAt);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskCleanupOperationResult(
+    [property: Id(0)] bool Accepted,
+    [property: Id(1)] bool Replay,
+    [property: Id(2)] WorkflowTaskCleanupOperation? Operation = null,
+    [property: Id(3)] string? Reason = null);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskSourceAdoptionRequest(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] WorkflowTaskExecutionIdentity Identity,
+    [property: Id(2)] string BoundaryFingerprint,
+    [property: Id(3)] string Fence,
+    [property: Id(4)] string OperatorId,
+    [property: Id(5)] bool Authenticated,
+    [property: Id(6)] bool HasWorkflowPermission,
+    [property: Id(7)] List<string> SourcePaths,
+    [property: Id(8)] List<string>? ProtectedPaths = null);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskSourceAdoption(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string Fence,
+    [property: Id(2)] WorkflowTaskExecutionIdentity Identity,
+    [property: Id(3)] string OperatorId,
+    [property: Id(4)] List<string> SourcePaths,
+    [property: Id(5)] bool Accepted,
+    [property: Id(6)] bool Completed,
+    [property: Id(7)] string? ResultingHead,
+    [property: Id(8)] string? Reason,
+    [property: Id(9)] DateTimeOffset RecordedAt);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskSourceAdoptionResult(
+    [property: Id(0)] bool Accepted,
+    [property: Id(1)] bool Replay,
+    [property: Id(2)] WorkflowTaskSourceAdoption? Operation = null,
+    [property: Id(3)] string? Reason = null);
+
+[GenerateSerializer]
+public sealed record WorkflowTaskFreshWorkspaceResult(
+    [property: Id(0)] bool Accepted,
+    [property: Id(1)] string? WorkspaceId,
+    [property: Id(2)] JsonElement? WorkspaceGeneration,
+    [property: Id(3)] string? Fence,
+    [property: Id(4)] string? Reason = null);
 
 /// <summary>
 /// Mutable recovery state for a dirty or unconfirmed completion. It owns
@@ -185,9 +274,16 @@ public sealed class WorkflowTaskRecovery
     [Id(6)] public JsonElement? Output { get; set; }
     [Id(7)] public IReadOnlyList<ArtifactRef>? Artifacts { get; set; }
     [Id(8)] public IReadOnlyList<string>? ArtifactUploadIds { get; set; }
-    [Id(9)] public IReadOnlyList<string>? CleanupScope { get; init; }
+    [Id(9)] public List<string>? CleanupScope { get; init; }
     [Id(10)] public WorkflowTaskProjectionProgress Projection { get; set; } = new(false, false, null, null);
     [Id(11)] public List<WorkspaceVerification> Verifications { get; set; } = [];
+    [Id(12)] public WorkflowTaskCleanupLease? CurrentCleanupLease { get; set; }
+    [Id(13)] public List<WorkflowTaskCleanupLease> CleanupLeases { get; set; } = [];
+    [Id(14)] public List<WorkflowTaskCleanupOperation> CleanupOperations { get; set; } = [];
+    [Id(15)] public List<WorkflowTaskSourceAdoption> SourceAdoptions { get; set; } = [];
+    [Id(16)] public string? FreshWorkspaceId { get; set; }
+    [Id(17)] public JsonElement? FreshWorkspaceGeneration { get; set; }
+    [Id(18)] public string? FreshWorkspaceFence { get; set; }
 
     public static WorkflowTaskRecovery Create(
         WorkflowTaskCompletionBoundary boundary,
@@ -205,17 +301,51 @@ public sealed class WorkflowTaskRecovery
                 ?? (state == WorkflowTaskRecoveryState.Dirty
                     ? "workspace-status-non-empty"
                     : "workspace-evidence-unavailable"),
+            DeadlineAt = acceptedAt.AddDays(1),
             NextAction = state == WorkflowTaskRecoveryState.Dirty
                 ? WorkflowTaskRecoveryActions.Inspect
                 : WorkflowTaskRecoveryActions.Verify,
             Output = boundary.ActionCompletion.Output,
             ArtifactUploadIds = boundary.ActionCompletion.ArtifactUploadIds,
+            CleanupScope = boundary.CleanupScope?.ToList() ?? [],
             Projection = new WorkflowTaskProjectionProgress(true, false, acceptedAt, null),
         };
     }
 
     public WorkspaceVerification? FindVerification(string idempotencyKey) =>
         Verifications.SingleOrDefault(v => string.Equals(v.IdempotencyKey, idempotencyKey, StringComparison.Ordinal));
+
+    public WorkflowTaskCleanupLease? FindCleanupLease(string operationId) =>
+        CleanupLeases.SingleOrDefault(lease => string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+
+    public WorkflowTaskCleanupOperation? FindCleanupOperation(string operationId) =>
+        CleanupOperations.SingleOrDefault(operation => string.Equals(operation.OperationId, operationId, StringComparison.Ordinal));
+
+    public WorkflowTaskSourceAdoption? FindSourceAdoption(string operationId) =>
+        SourceAdoptions.SingleOrDefault(operation => string.Equals(operation.OperationId, operationId, StringComparison.Ordinal));
+}
+
+public static class WorkflowRecoveryPathRules
+{
+    public static bool IsSafeRelativePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var normalized = path.Trim().Replace('\\', '/');
+        return normalized != "."
+            && !normalized.StartsWith('/')
+            && !normalized.Contains(':', StringComparison.Ordinal)
+            && normalized.Split('/', StringSplitOptions.RemoveEmptyEntries).All(part => part != "..")
+            && normalized.Split('/', StringSplitOptions.RemoveEmptyEntries).All(part => part != ".");
+    }
+
+    public static bool Overlaps(string left, string right)
+    {
+        var a = left.Trim().Replace('\\', '/').TrimEnd('/');
+        var b = right.Trim().Replace('\\', '/').TrimEnd('/');
+        return string.Equals(a, b, StringComparison.Ordinal)
+            || a.StartsWith(b + "/", StringComparison.Ordinal)
+            || b.StartsWith(a + "/", StringComparison.Ordinal);
+    }
 }
 
 public static class WorkflowTaskCompletionBoundaryRules
@@ -277,7 +407,8 @@ public static class WorkflowTaskCompletionBoundaryRules
         && SameCompletion(left.ActionCompletion, right.ActionCompletion)
         && SameReceipt(left.CommitReceipt, right.CommitReceipt)
         && string.Equals(left.WorkspaceOutcome, right.WorkspaceOutcome, StringComparison.Ordinal)
-        && string.Equals(left.WorkspaceReason, right.WorkspaceReason, StringComparison.Ordinal);
+        && string.Equals(left.WorkspaceReason, right.WorkspaceReason, StringComparison.Ordinal)
+        && (left.CleanupScope ?? []).SequenceEqual(right.CleanupScope ?? [], StringComparer.Ordinal);
 
     public static bool SameCompletion(ActionCompletion left, ActionCompletion right) =>
         left.Version == right.Version

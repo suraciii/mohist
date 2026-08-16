@@ -17,13 +17,12 @@ import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
-
+import { installWorkflowRecoveryMethods } from './workflow-recovery-connection.js'
 export class ServerConnection {
   private readonly buildGitHash: string | null
   private readonly buildInfo: BuildInfo | null
   private readonly credential: string | null
   readonly runnerId: string
-
   constructor(
     private readonly options: RunnerOptions,
     buildGitHash: string | null = null,
@@ -34,7 +33,6 @@ export class ServerConnection {
     this.credential = options.credential ?? null
     this.runnerId = options.runnerId
   }
-
   private async fetchWithAuth(input: string, init: RequestInit): Promise<Response> {
     const headers = new Headers(init.headers)
     if (this.credential) {
@@ -42,7 +40,6 @@ export class ServerConnection {
     }
     return currentRunnerTransport()(input, { ...init, headers })
   }
-
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
     await this.post('register', { hostname: hostname(), ...registration, ...this.identityPayload() }, signal)
   }
@@ -50,7 +47,6 @@ export class ServerConnection {
   async heartbeat(state: RunnerRegistration, signal: AbortSignal) {
     await this.post('heartbeat', { hostname: hostname(), ...state, ...this.identityPayload() }, signal)
   }
-
   private identityPayload(): Record<string, unknown> {
     return {
       buildGitHash: this.buildGitHash,
@@ -68,7 +64,6 @@ export class ServerConnection {
   async disconnect(signal: AbortSignal) {
     await this.post('unregister', undefined, signal)
   }
-
   /**
    * Polls the server for dispatches. The body carries the process's full level
    * state (`inFlight` + `awaitingAck` work keys) so the server can reconcile
@@ -98,14 +93,12 @@ export class ServerConnection {
     const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] }
     return (payload.dispatches ?? []).map(parseDispatchWorkItem)
   }
-
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
     const response = await this.fetchWithAuth(this.url('config'), { method: 'GET', signal })
     if (!response.ok) throw new Error(`fetchConfig failed: ${response.status} ${await response.text()}`)
     const payload = (await response.json()) as RunnerConfigResponse
     return payload.cleanupPolicy ?? null
   }
-
   async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
     if (workflowRunIds.length === 0) return {}
     const response = await this.fetchWithAuth(this.url('workflow-runs/status'), {
@@ -124,7 +117,6 @@ export class ServerConnection {
     }
     return result
   }
-
   async report(
     work: DispatchWorkItem,
     result: WorkItemResult,
@@ -170,7 +162,16 @@ export class ServerConnection {
       return {}
     }
   }
-
+  async postRecovery<T>(path: string, body: unknown, signal: AbortSignal): Promise<T> {
+    const response = await this.fetchWithAuth(this.url(path), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`workflow recovery operation failed: ${response.status} ${await response.text()}`)
+    return (await response.json()) as T
+  }
   /**
    * Upload a captured artifact to the internal multipart endpoint
    * (`POST /api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads`).
@@ -247,10 +248,8 @@ export class ServerConnection {
     if (ownerKind === 'agent-job') {
       return `${this.options.serverUrl.replace(/\/$/, '')}/api/agent-jobs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
     }
-
     return `${this.options.serverUrl.replace(/\/$/, '')}/api/workflow-runs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
   }
-
   /**
    * Upload a task-log terminal batch to the dedicated, independent
    * task-log channel. Mirrors {@link uploadArtifact}'s routing shape
@@ -322,15 +321,12 @@ export class ServerConnection {
       truncated: readBoolean(data, ['truncated']) ?? batch.truncated,
     }
   }
-
   private taskLogUrl(ownerId: string, workId: string, ownerKind: string) {
     if (ownerKind === 'agent-job') {
       return `${this.options.serverUrl.replace(/\/$/, '')}/api/agent-jobs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/task-log`
     }
-
     return `${this.options.serverUrl.replace(/\/$/, '')}/api/workflow-runs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/task-log`
   }
-
   async getWorkflowAgentSession(
     projectId: string,
     workflowRunId: string,
@@ -347,7 +343,6 @@ export class ServerConnection {
     if (!response.ok) throw new Error(`session lookup failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
   }
-
   async openWorkflowAgentSession(
     projectId: string,
     workflowRunId: string,
@@ -810,6 +805,8 @@ export class ServerConnection {
   }
 }
 
+installWorkflowRecoveryMethods(ServerConnection.prototype)
+
 export interface AgentSessionReconcileBinding {
   readonly sessionId: string
   readonly runtime: 'opencode' | 'pi'
@@ -883,6 +880,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     workspaceGeneration: dispatch.workspaceGeneration ?? undefined,
     workspaceHead: dispatch.workspaceHead ?? undefined,
     workspaceTree: dispatch.workspaceTree ?? undefined,
+    cleanupScope: dispatch.cleanupScope ?? undefined,
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
     agentDefinition: dispatch.agentDefinition ?? undefined,

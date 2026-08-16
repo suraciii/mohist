@@ -276,7 +276,24 @@ export function gitIndexLockFailure(
   }
 }
 
-export function formatDirtyWorktreeSummary(evidence: DirtyWorktreeEvidence): string {
+export function isWorkflowTask(work: Pick<DispatchWorkItem, 'workType' | 'ownerKind'>): boolean {
+  return work.workType === 'task' && (work.ownerKind ?? 'workflow').trim().toLowerCase() !== 'agent-job'
+}
+
+function scopedCleanupRequired(result: WorkItemResult, snapshot: WorktreeSnapshot): WorkItemResult {
+  return {
+    ...result,
+    workspaceOutcome: 'dirty',
+    workspaceReason: 'scoped-recovery-required',
+    cleanupAttempts: 0,
+    message: [result.message?.trim(), `scoped cleanup required; staged=[${snapshot.staged.join(', ')}]`, `unstaged=[${snapshot.unstaged.join(', ')}]`, `untracked=[${snapshot.untracked.join(', ')}]`]
+      .filter(Boolean)
+      .join('; ')
+      .slice(0, 4000),
+  }
+}
+
+function formatDirtyWorktreeSummary(evidence: DirtyWorktreeEvidence): string {
   const parts: string[] = []
   parts.push(`worktree dirty after ${evidence.cleanupAttempts} cleanup attempt(s)`)
   parts.push(`staged=[${evidence.staged.join(', ')}]`)
@@ -323,6 +340,24 @@ export async function enforceCleanWorktree(
   contextParts: ContextParts,
   log: TaskLogger | null = null,
 ): Promise<WorkItemResult> {
+  // Workflow task cleanup is a recovery operation authorized by the server.
+  // This legacy helper must never turn a valid Action into a failure or ask
+  // an agent to discard source/output files.
+  if (isWorkflowTask(work)) {
+    try {
+      const snapshot = await readWorktreeSnapshot(workDir, signal, log)
+      return snapshot.isClean
+        ? result
+        : scopedCleanupRequired(result, snapshot)
+    } catch (error) {
+      return {
+        ...result,
+        workspaceOutcome: 'unconfirmed',
+        workspaceReason: `cleanup-probe-failed:${errorMessage(error)}`,
+      }
+    }
+  }
+
   let attempts = 0
   try {
     const agentBacked = isAgentBackedTask(work)
@@ -389,6 +424,7 @@ export async function runAgentCleanupAttempt(
   contextParts: ContextParts,
   baseResult: WorkItemResult = { status: 'completed' },
 ): Promise<WorkItemResult | 'ok'> {
+  if (isWorkflowTask(work)) return scopedCleanupRequired(baseResult, snapshot)
   const cleanupWith = buildCleanupWith(work, renderedWith, snapshot, attempt)
   const host = contextParts.buildHost(work, signal, workDir, attempt)
 

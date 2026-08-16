@@ -145,6 +145,7 @@ export type WorkDispatchResponse = {
   workspaceGeneration?: string | number | null
   workspaceHead?: string | null
   workspaceTree?: string | null
+  cleanupScope?: string[] | null
   /**
    * Minted AgentSession id for agent-job dispatches whose launch
    * created a generic (non-workflow) AgentSession. The runner uses
@@ -237,6 +238,8 @@ export interface DispatchWorkItem {
   workspaceGeneration?: string | number | null
   workspaceHead?: string | null
   workspaceTree?: string | null
+  /** Explicit generated paths that a recovery cleanup lease may remove. */
+  cleanupScope?: string[] | null
   /**
    * Task-level completion contract, separate from `with`. The
    * executor applies this AFTER the Action returns; the Action
@@ -354,6 +357,104 @@ export interface WorkflowTaskCompletionBoundary {
   workspaceOutcome: WorkspaceOutcome
   workspaceReason: string | null
   fingerprint: string
+  cleanupScope?: string[] | null
+}
+
+export interface WorkflowTaskCleanupLease {
+  operationId: string
+  fence: string
+  identity: WorkflowTaskExecutionIdentity
+  boundaryFingerprint: string
+  cleanupScope: string[]
+  expiresAt: string
+  workBudget: number
+  grantedAt: string
+}
+
+export interface WorkflowTaskCleanupLeaseRequest {
+  operationId: string
+  identity: WorkflowTaskExecutionIdentity
+  boundaryFingerprint: string
+  cleanupScope?: string[] | null
+  workBudget?: number
+  leaseDurationMs?: number
+}
+
+export interface WorkflowTaskCleanupLeaseResult {
+  accepted: boolean
+  replay: boolean
+  lease?: WorkflowTaskCleanupLease | null
+  reason?: string | null
+  operation?: WorkflowTaskCleanupOperation | null
+}
+
+export interface WorkflowTaskCleanupOperation {
+  operationId: string
+  fence: string
+  identity: WorkflowTaskExecutionIdentity
+  applied: boolean
+  clean: boolean
+  mutations: number
+  removedPaths: string[]
+  reason?: string | null
+  recordedAt: string
+}
+
+export interface WorkflowTaskCleanupOperationResult {
+  accepted: boolean
+  replay: boolean
+  operation?: WorkflowTaskCleanupOperation | null
+  reason?: string | null
+}
+
+export interface WorkflowTaskSourceAdoptionRequest {
+  operationId: string
+  identity: WorkflowTaskExecutionIdentity
+  boundaryFingerprint: string
+  fence: string
+  operatorId: string
+  authenticated: boolean
+  hasWorkflowPermission: boolean
+  sourcePaths: string[]
+  protectedPaths?: string[] | null
+}
+
+export interface WorkflowTaskSourceAdoption {
+  operationId: string
+  fence: string
+  identity: WorkflowTaskExecutionIdentity
+  operatorId: string
+  sourcePaths: string[]
+  accepted: boolean
+  completed: boolean
+  resultingHead?: string | null
+  reason?: string | null
+  recordedAt: string
+}
+
+export interface WorkflowTaskSourceAdoptionResult {
+  accepted: boolean
+  replay: boolean
+  operation?: WorkflowTaskSourceAdoption | null
+  reason?: string | null
+}
+
+export interface WorkspaceVerification {
+  idempotencyKey: string
+  identity: WorkflowTaskExecutionIdentity
+  boundaryFingerprint: string
+  observedBranch: string | null
+  observedHead: string | null
+  observedTree: string | null
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
+  authoritative: boolean
+  reason: string | null
+  verifier: string | null
+  source: string | null
+  sourceAdoptionOperationId?: string | null
+  fence?: string | null
 }
 
 export interface WorkItemResult {

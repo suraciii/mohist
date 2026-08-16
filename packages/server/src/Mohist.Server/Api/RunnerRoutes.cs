@@ -18,13 +18,11 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
-
 public static partial class RunnerRoutes
 {
     public static WebApplication MapRunnerRoutes(this WebApplication app)
     {
         var group = app.MapGroup("/api/runner/{runnerId}").RequireScopes(Scope.Runner);
-
         group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
@@ -47,22 +45,19 @@ public static partial class RunnerRoutes
                 Generation: req.Generation > 0 ? req.Generation : null));
             return Results.Ok();
         });
-
         group.MapPost("/unregister", async (string runnerId, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.UnregisterAsync();
             return Results.Ok();
         });
-
         group.MapPost("/heartbeat", HandleHeartbeatAsync);
+        MapWorkflowTaskRecoveryRoutes(group);
         MapUpdateInterruptRoutes(group);
-
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
         {
             if (req is null || req.Slots <= 0)
                 return ApiResults.BadRequest("slots must be a positive integer");
-
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             try
             {
@@ -74,7 +69,6 @@ public static partial class RunnerRoutes
                 // the same 400 contract if a future caller bypasses the route guard.
                 return ApiResults.BadRequest("slots must be a positive integer");
             }
-
             return ApiResults.Ok(new RunnerSlotsPatchResponse(runnerId, req.Slots));
         });
 
@@ -107,7 +101,6 @@ public static partial class RunnerRoutes
                 ToWorkDispatchResponseAsync(work, issues.GetParentIssueContextAsync)));
             return Results.Ok(new RunnerPollResponseDto(dispatches.ToList()));
         });
-
         // Dedicated runner config channel. Separate from /poll so runner-side
         // configuration (e.g. cleanupPolicy) is reachable even when the
         // system is idle and /poll returns 204 No Content. Plain periodic
@@ -142,7 +135,6 @@ public static partial class RunnerRoutes
                 new RunnerConfigResponse(ToCleanupPolicyDto(cleanupPolicyOptions.Value)),
                 RunnerConfigJsonOptions);
         });
-
         // Reports go directly to the owning grain. Accepted and stale are
         // both terminal acknowledgements for runner retry purposes.
         group.MapPost("/report", async (
@@ -161,10 +153,8 @@ public static partial class RunnerRoutes
             {
                 return ApiResults.BadRequest("Invalid report body");
             }
-
             if (req is null)
                 return ApiResults.BadRequest("request body is required");
-
             var ownerKind = string.IsNullOrWhiteSpace(req.OwnerKind)
                 ? WorkDispatchOwnerKinds.Workflow
                 : req.OwnerKind.Trim().ToLowerInvariant();
@@ -182,7 +172,6 @@ public static partial class RunnerRoutes
             {
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
-
             var result = new WorkResult(
                 req.Status,
                 req.Message,
@@ -194,7 +183,6 @@ public static partial class RunnerRoutes
                 req.CompletionBoundary,
                 req.WorkspaceOutcome,
                 req.WorkspaceReason);
-
             // AgentJob owns its report validation and terminal transition.
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
@@ -215,7 +203,6 @@ public static partial class RunnerRoutes
             return Results.Ok(new RunnerReportResponse(
                 req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
         });
-
         // Batch status query for the runner's convergence backstop. The
         // runner only asks about workflow runs it still tracks in its local
         // active workspace registry; the server returns the current lifecycle

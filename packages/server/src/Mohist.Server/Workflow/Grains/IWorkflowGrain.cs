@@ -43,6 +43,11 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     /// immutable completion boundary.
     /// </summary>
     Task<ReportAck> ReceiveWorkspaceVerificationAsync(WorkspaceVerification verification);
+    Task<WorkflowTaskCleanupLeaseResult> AcquireWorkflowTaskCleanupLeaseAsync(WorkflowTaskCleanupLeaseRequest request);
+    Task<WorkflowTaskCleanupOperationResult> RecordWorkflowTaskCleanupAsync(WorkflowTaskCleanupOperation operation);
+    Task<WorkflowTaskSourceAdoptionResult> AuthorizeTaskSourceAdoptionAsync(WorkflowTaskSourceAdoptionRequest request);
+    Task<WorkflowTaskSourceAdoptionResult> RecordTaskSourceAdoptionAsync(WorkflowTaskSourceAdoption operation);
+    Task<WorkflowTaskFreshWorkspaceResult> AllocateFreshRecoveryWorkspaceAsync(WorkflowTaskExecutionIdentity identity, string boundaryFingerprint);
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 
     Task ReleaseStageLocksAsync(string stage, string reason);

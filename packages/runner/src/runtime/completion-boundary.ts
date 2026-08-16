@@ -210,6 +210,7 @@ export function buildCompletionBoundary(options: {
     commitReceipt: { ...options.receipt, identity: structuredClone(identity) },
     workspaceOutcome: arbitration.outcome,
     workspaceReason: arbitration.reason,
+    cleanupScope: options.work.cleanupScope ? [...options.work.cleanupScope] : cleanupScopeFromVariables(options.work),
   }
   return { ...unsigned, fingerprint: fingerprint(unsigned) }
 }
@@ -266,6 +267,13 @@ function parsePorcelainStatus(raw: string): { staged: string[]; unstaged: string
 function workspaceVariablesOf(work: DispatchWorkItem): JsonObject {
   const value = work.variables?.workspace
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {}
+}
+
+function cleanupScopeFromVariables(work: DispatchWorkItem): string[] | null {
+  const value = workspaceVariablesOf(work).cleanupScope
+  if (!Array.isArray(value)) return null
+  const paths = value.filter((path): path is string => typeof path === 'string' && path.trim().length > 0)
+  return paths.length > 0 ? [...new Set(paths)] : []
 }
 
 function stringField(value: JsonObject, key: string): string | null {

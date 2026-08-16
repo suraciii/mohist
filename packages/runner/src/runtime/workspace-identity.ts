@@ -16,12 +16,20 @@ function runBranchName(runId: string | null | undefined) {
 export interface IssueWorkspaceMarker {
   workflowRunId: string
   runBranch: string
+  workspaceId?: string
+  workspaceGeneration?: string | number
 }
 
-export function workspaceIdentity(workflowRunId: string): IssueWorkspaceMarker {
+export function workspaceIdentity(
+  workflowRunId: string,
+  workspaceId?: string | null,
+  workspaceGeneration?: string | number | null,
+): IssueWorkspaceMarker {
   return {
     workflowRunId,
     runBranch: runBranchName(workflowRunId),
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(workspaceGeneration !== null && workspaceGeneration !== undefined ? { workspaceGeneration } : {}),
   }
 }
 

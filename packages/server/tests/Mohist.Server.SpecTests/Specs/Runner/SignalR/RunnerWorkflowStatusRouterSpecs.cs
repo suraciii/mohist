@@ -211,6 +211,16 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveWorkspaceVerificationAsync(WorkspaceVerification verification)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<WorkflowTaskCleanupLeaseResult> AcquireWorkflowTaskCleanupLeaseAsync(WorkflowTaskCleanupLeaseRequest request)
+            => Task.FromResult(new WorkflowTaskCleanupLeaseResult(false, false, Reason: "stub"));
+        public Task<WorkflowTaskCleanupOperationResult> RecordWorkflowTaskCleanupAsync(WorkflowTaskCleanupOperation operation)
+            => Task.FromResult(new WorkflowTaskCleanupOperationResult(false, false, Reason: "stub"));
+        public Task<WorkflowTaskSourceAdoptionResult> AuthorizeTaskSourceAdoptionAsync(WorkflowTaskSourceAdoptionRequest request)
+            => Task.FromResult(new WorkflowTaskSourceAdoptionResult(false, false, Reason: "stub"));
+        public Task<WorkflowTaskSourceAdoptionResult> RecordTaskSourceAdoptionAsync(WorkflowTaskSourceAdoption operation)
+            => Task.FromResult(new WorkflowTaskSourceAdoptionResult(false, false, Reason: "stub"));
+        public Task<WorkflowTaskFreshWorkspaceResult> AllocateFreshRecoveryWorkspaceAsync(WorkflowTaskExecutionIdentity identity, string boundaryFingerprint)
+            => Task.FromResult(new WorkflowTaskFreshWorkspaceResult(false, null, null, null, "stub"));
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task ReleaseStageLocksAsync(string stage, string reason) => Task.CompletedTask;

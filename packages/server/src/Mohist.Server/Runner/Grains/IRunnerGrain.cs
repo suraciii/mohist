@@ -277,7 +277,8 @@ public record WorkDispatch(
     [property: Id(30)] string? WorkspaceId = null,
     [property: Id(31)] JsonElement? WorkspaceGeneration = null,
     [property: Id(32)] string? WorkspaceHead = null,
-    [property: Id(33)] string? WorkspaceTree = null)
+    [property: Id(33)] string? WorkspaceTree = null,
+    [property: Id(34)] IReadOnlyList<string>? CleanupScope = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

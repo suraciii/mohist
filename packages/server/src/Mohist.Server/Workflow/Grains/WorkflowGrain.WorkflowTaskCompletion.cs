@@ -120,7 +120,8 @@ public partial class WorkflowGrain
             || boundary.CommitReceipt.Unstaged is null
             || boundary.CommitReceipt.Untracked is null
             || string.IsNullOrWhiteSpace(boundary.ActionCompletion.Phase)
-            || boundary.CommitReceipt.ProbedAt == default)
+            || boundary.CommitReceipt.ProbedAt == default
+            || (boundary.CleanupScope ?? []).Any(path => !WorkflowRecoveryPathRules.IsSafeRelativePath(path)))
         {
             return false;
         }
@@ -308,7 +309,8 @@ public partial class WorkflowGrain
         && string.Equals(left.Reason, right.Reason, StringComparison.Ordinal)
         && string.Equals(left.Verifier, right.Verifier, StringComparison.Ordinal)
         && string.Equals(left.Source, right.Source, StringComparison.Ordinal)
-        && string.Equals(left.SourceAdoptionOperationId, right.SourceAdoptionOperationId, StringComparison.Ordinal);
+        && string.Equals(left.SourceAdoptionOperationId, right.SourceAdoptionOperationId, StringComparison.Ordinal)
+        && string.Equals(left.Fence, right.Fence, StringComparison.Ordinal);
 
     public async Task<ReportAck> ReceiveWorkspaceVerificationAsync(WorkspaceVerification verification)
     {
@@ -337,20 +339,29 @@ public partial class WorkflowGrain
         if (existing is not null)
             return SameVerification(existing, verification) ? ReportAck.Accepted : ReportAck.Stale;
 
-        if (task.Status != TaskRunStatus.Running || recovery.Projection.Applied)
+        if (task.Status != TaskRunStatus.Running
+            || recovery.Projection.Applied
+            || !HasCurrentRecoveryFence(recovery, verification.Identity, verification.BoundaryFingerprint, verification.Fence))
             return ReportAck.Stale;
 
-        if (verification.SourceAdoptionOperationId is not null)
+        var adoption = verification.SourceAdoptionOperationId is null
+            ? null
+            : recovery.FindSourceAdoption(verification.SourceAdoptionOperationId);
+        if (verification.SourceAdoptionOperationId is not null
+            && (adoption is null || !adoption.Accepted || !adoption.Completed || adoption.ResultingHead is null))
             return ReportAck.Stale;
 
         recovery.Verifications.Add(verification);
+        var sameOriginalTree = string.Equals(verification.ObservedHead, boundary.CommitReceipt.ExpectedHead, StringComparison.Ordinal)
+            && string.Equals(verification.ObservedTree, boundary.CommitReceipt.ExpectedTree, StringComparison.Ordinal);
+        var adoptedTree = adoption is not null
+            && string.Equals(verification.ObservedHead, adoption.ResultingHead, StringComparison.Ordinal);
         var clean = verification.Authoritative
             && verification.Staged.Count == 0
             && verification.Unstaged.Count == 0
             && verification.Untracked.Count == 0
             && string.Equals(verification.ObservedBranch, boundary.CommitReceipt.ExpectedBranch, StringComparison.Ordinal)
-            && string.Equals(verification.ObservedHead, boundary.CommitReceipt.ExpectedHead, StringComparison.Ordinal)
-            && string.Equals(verification.ObservedTree, boundary.CommitReceipt.ExpectedTree, StringComparison.Ordinal);
+            && (sameOriginalTree || adoptedTree);
         if (!clean)
         {
             recovery.Reason = verification.Reason ?? "workspace-verification-dirty";
@@ -366,6 +377,257 @@ public partial class WorkflowGrain
         await ProjectAcceptedWorkflowTaskAsync(activeWork, task);
         return ReportAck.Accepted;
     }
+
+    public async Task<WorkflowTaskCleanupLeaseResult> AcquireWorkflowTaskCleanupLeaseAsync(
+        WorkflowTaskCleanupLeaseRequest request)
+    {
+        RejectIfRunReloadRequired();
+        if (!TryFindRecovery(request.Identity, request.BoundaryFingerprint, out _, out var task, out var recovery, out _))
+            return new(false, false, Reason: "recovery-identity-mismatch");
+        if (string.IsNullOrWhiteSpace(request.OperationId))
+            return new(false, false, Reason: "cleanup-operation-id-required");
+
+        var requestedScope = NormalizePaths(request.CleanupScope ?? recovery.CleanupScope ?? []);
+        if (requestedScope is null)
+            return new(false, false, Reason: "cleanup-scope-invalid");
+        var protectedOutputPaths = (task.Artifacts?.Files.Select(file => file.Path) ?? [])
+            .Concat(task.PendingCompletionReport?.BoundArtifacts?.Select(artifact => artifact.Path) ?? [])
+            .ToArray();
+        if (requestedScope.Any(path => protectedOutputPaths.Any(protectedPath => WorkflowRecoveryPathRules.Overlaps(path, protectedPath))))
+            return new(false, false, Reason: "cleanup-scope-overlaps-protected-output");
+        var prior = recovery.FindCleanupLease(request.OperationId);
+        if (prior is not null)
+        {
+            var same = WorkflowTaskCompletionBoundaryRules.SameIdentity(prior.Identity, request.Identity)
+                && string.Equals(prior.BoundaryFingerprint, request.BoundaryFingerprint, StringComparison.Ordinal)
+                && prior.CleanupScope.SequenceEqual(requestedScope, StringComparer.Ordinal);
+            return same
+                ? new(true, true, prior, Operation: recovery.FindCleanupOperation(request.OperationId))
+                : new(false, false, Reason: "cleanup-operation-conflict");
+        }
+
+        var now = Now();
+        if (recovery.CurrentCleanupLease is { } current && current.ExpiresAt > now)
+            return new(false, false, Reason: "cleanup-lease-active");
+
+        var budget = Math.Clamp(request.WorkBudget, 1, 128);
+        var duration = request.LeaseDuration is { } requestedDuration
+            ? requestedDuration
+            : TimeSpan.FromMinutes(5);
+        duration = duration < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : duration;
+        duration = duration > TimeSpan.FromMinutes(30) ? TimeSpan.FromMinutes(30) : duration;
+        var lease = new WorkflowTaskCleanupLease(
+            request.OperationId,
+            $"cleanup-fence:{Guid.NewGuid():N}",
+            request.Identity,
+            request.BoundaryFingerprint,
+            requestedScope,
+            now.Add(duration),
+            budget,
+            now);
+        recovery.CleanupLeases.Add(lease);
+        recovery.CurrentCleanupLease = lease;
+        recovery.NextAction = WorkflowTaskRecoveryActions.Cleanup;
+        await SaveRunAsync();
+        return new(true, false, lease);
+    }
+
+    public async Task<WorkflowTaskCleanupOperationResult> RecordWorkflowTaskCleanupAsync(
+        WorkflowTaskCleanupOperation operation)
+    {
+        RejectIfRunReloadRequired();
+        if (!TryFindRecovery(operation.Identity, FindBoundaryFingerprint(operation.Identity), out _, out _, out var recovery, out _))
+            return new(false, false, Reason: "recovery-identity-mismatch");
+        var existing = recovery.FindCleanupOperation(operation.OperationId);
+        if (existing is not null)
+            return SameCleanupOperation(existing, operation)
+                ? new(true, true, existing)
+                : new(false, false, Reason: "cleanup-operation-conflict");
+        var lease = recovery.CurrentCleanupLease;
+        if (lease is null
+            || lease.ExpiresAt <= Now()
+            || !string.Equals(lease.Fence, operation.Fence, StringComparison.Ordinal)
+            || !WorkflowTaskCompletionBoundaryRules.SameIdentity(lease.Identity, operation.Identity))
+            return new(false, false, Reason: "cleanup-fence-stale");
+        if (operation.Mutations < 0 || operation.Mutations > lease.WorkBudget)
+            return new(false, false, Reason: "cleanup-work-budget-exceeded");
+        if (operation.RemovedPaths.Any(path => !lease.CleanupScope.Contains(path, StringComparer.Ordinal)))
+            return new(false, false, Reason: "cleanup-path-outside-scope");
+        recovery.CleanupOperations.Add(operation);
+        recovery.NextAction = operation.Clean ? WorkflowTaskRecoveryActions.Verify : WorkflowTaskRecoveryActions.Inspect;
+        await SaveRunAsync();
+        return new(true, false, operation);
+    }
+
+    public async Task<WorkflowTaskSourceAdoptionResult> AuthorizeTaskSourceAdoptionAsync(
+        WorkflowTaskSourceAdoptionRequest request)
+    {
+        RejectIfRunReloadRequired();
+        if (!TryFindRecovery(request.Identity, request.BoundaryFingerprint, out _, out var task, out var recovery, out _))
+            return new(false, false, Reason: "recovery-identity-mismatch");
+        if (string.IsNullOrWhiteSpace(request.OperationId)
+            || !request.Authenticated
+            || !request.HasWorkflowPermission
+            || string.IsNullOrWhiteSpace(request.OperatorId))
+            return new(false, false, Reason: "recovery-operator-unauthorized");
+        var existing = recovery.FindSourceAdoption(request.OperationId);
+        if (existing is not null)
+        {
+            var same = existing.Identity == request.Identity
+                && existing.SourcePaths.SequenceEqual(request.SourcePaths ?? [], StringComparer.Ordinal)
+                && string.Equals(existing.Fence, request.Fence, StringComparison.Ordinal);
+            return same ? new(true, true, existing) : new(false, false, Reason: "adoption-operation-conflict");
+        }
+        if (!HasCurrentRecoveryFence(recovery, request.Identity, request.BoundaryFingerprint, request.Fence))
+            return new(false, false, Reason: "cleanup-fence-stale");
+        var paths = NormalizePaths(request.SourcePaths);
+        if (paths is null || paths.Count == 0)
+            return new(false, false, Reason: "source-path-allowlist-invalid");
+        var declaredArtifactPaths = task.Artifacts?.Files.Select(file => file.Path).ToArray() ?? [];
+        var protectedPaths = (request.ProtectedPaths ?? [])
+            .Concat(declaredArtifactPaths)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (protectedPaths.Any(path => !WorkflowRecoveryPathRules.IsSafeRelativePath(path))
+            || paths.Any(path => (recovery.CleanupScope ?? []).Any(scope => WorkflowRecoveryPathRules.Overlaps(path, scope)))
+            || paths.Any(path => protectedPaths.Any(protectedPath => WorkflowRecoveryPathRules.Overlaps(path, protectedPath))))
+            return new(false, false, Reason: "source-path-overlaps-protected-scope");
+        var adoption = new WorkflowTaskSourceAdoption(
+            request.OperationId,
+            request.Fence,
+            request.Identity,
+            request.OperatorId,
+            paths,
+            true,
+            false,
+            null,
+            null,
+            Now());
+        recovery.SourceAdoptions.Add(adoption);
+        recovery.NextAction = WorkflowTaskRecoveryActions.Verify;
+        await SaveRunAsync();
+        return new(true, false, adoption);
+    }
+
+    public async Task<WorkflowTaskSourceAdoptionResult> RecordTaskSourceAdoptionAsync(
+        WorkflowTaskSourceAdoption operation)
+    {
+        RejectIfRunReloadRequired();
+        if (!TryFindRecovery(operation.Identity, FindBoundaryFingerprint(operation.Identity), out _, out _, out var recovery, out _))
+            return new(false, false, Reason: "recovery-identity-mismatch");
+        var existing = recovery.FindSourceAdoption(operation.OperationId);
+        if (existing is null || !existing.Accepted)
+            return new(false, false, Reason: "adoption-not-authorized");
+        if (!SameSourceAdoptionShape(existing, operation))
+            return new(false, false, Reason: "adoption-operation-conflict");
+        if (existing.Completed)
+            return new(true, true, existing);
+        if (!HasCurrentRecoveryFence(recovery, operation.Identity, FindBoundaryFingerprint(operation.Identity), operation.Fence))
+            return new(false, false, Reason: "cleanup-fence-stale");
+        var index = recovery.SourceAdoptions.IndexOf(existing);
+        recovery.SourceAdoptions[index] = operation;
+        recovery.NextAction = operation.Completed && operation.ResultingHead is not null
+            ? WorkflowTaskRecoveryActions.Verify
+            : WorkflowTaskRecoveryActions.AdoptTaskSourceChanges;
+        await SaveRunAsync();
+        return new(true, false, operation);
+    }
+
+    public async Task<WorkflowTaskFreshWorkspaceResult> AllocateFreshRecoveryWorkspaceAsync(
+        WorkflowTaskExecutionIdentity identity,
+        string boundaryFingerprint)
+    {
+        RejectIfRunReloadRequired();
+        if (!TryFindRecovery(identity, boundaryFingerprint, out _, out _, out var recovery, out _))
+            return new(false, null, null, null, "recovery-identity-mismatch");
+        if (recovery.FreshWorkspaceId is not null
+            && recovery.FreshWorkspaceGeneration is { } existingGeneration
+            && recovery.FreshWorkspaceFence is not null)
+            return new(true, recovery.FreshWorkspaceId, existingGeneration, recovery.FreshWorkspaceFence);
+        var workspaceId = $"recovery-{Guid.NewGuid():N}";
+        var generation = System.Text.Json.JsonSerializer.SerializeToElement($"generation-{Guid.NewGuid():N}");
+        var fence = $"fresh-fence:{Guid.NewGuid():N}";
+        recovery.FreshWorkspaceId = workspaceId;
+        recovery.FreshWorkspaceGeneration = generation;
+        recovery.FreshWorkspaceFence = fence;
+        recovery.CurrentCleanupLease = null;
+        recovery.NextAction = WorkflowTaskRecoveryActions.Inspect;
+        await SaveRunAsync();
+        return new(true, workspaceId, generation, fence);
+    }
+
+    private bool TryFindRecovery(
+        WorkflowTaskExecutionIdentity identity,
+        string boundaryFingerprint,
+        out StageRun stage,
+        out TaskRun task,
+        out WorkflowTaskRecovery recovery,
+        out WorkflowTaskCompletionBoundary boundary)
+    {
+        stage = null!;
+        task = null!;
+        recovery = null!;
+        boundary = null!;
+        if (_run is null) return false;
+        var found = _run.Stages
+            .SelectMany(candidate => candidate.Tasks.Select(item => (Stage: candidate, Task: item)))
+            .SingleOrDefault(candidate => candidate.Task.CompletionBoundary is not null
+                && candidate.Task.WorkflowTaskRecovery is not null
+                && string.Equals(candidate.Task.Id, identity.TaskAttemptId, StringComparison.Ordinal));
+        if (found.Task is null || found.Task.CompletionBoundary is null || found.Task.WorkflowTaskRecovery is null)
+            return false;
+        if (!WorkflowTaskCompletionBoundaryRules.SameIdentity(found.Task.CompletionBoundary.Identity, identity)
+            || !string.Equals(found.Task.CompletionBoundary.Fingerprint, boundaryFingerprint, StringComparison.Ordinal))
+            return false;
+        stage = found.Stage;
+        task = found.Task;
+        recovery = found.Task.WorkflowTaskRecovery;
+        boundary = found.Task.CompletionBoundary;
+        return found.Task.Status == TaskRunStatus.Running;
+    }
+
+    private bool HasCurrentRecoveryFence(
+        WorkflowTaskRecovery recovery,
+        WorkflowTaskExecutionIdentity identity,
+        string boundaryFingerprint,
+        string? fence) =>
+        !string.IsNullOrWhiteSpace(fence)
+        && recovery.CurrentCleanupLease is { } lease
+        && lease.ExpiresAt > Now()
+        && string.Equals(lease.Fence, fence, StringComparison.Ordinal)
+        && string.Equals(lease.BoundaryFingerprint, boundaryFingerprint, StringComparison.Ordinal)
+        && WorkflowTaskCompletionBoundaryRules.SameIdentity(lease.Identity, identity);
+
+    private string FindBoundaryFingerprint(WorkflowTaskExecutionIdentity identity) =>
+        _run?.Stages.SelectMany(stage => stage.Tasks)
+            .SingleOrDefault(task => string.Equals(task.Id, identity.TaskAttemptId, StringComparison.Ordinal))?
+            .CompletionBoundary?.Fingerprint ?? string.Empty;
+
+    private static List<string>? NormalizePaths(IReadOnlyList<string>? paths)
+    {
+        if (paths is null) return [];
+        var normalized = paths.Select(path => path.Trim().Replace('\\', '/')).ToArray();
+        if (normalized.Any(path => !WorkflowRecoveryPathRules.IsSafeRelativePath(path))) return null;
+        return normalized.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+    }
+
+    private static bool SameCleanupOperation(WorkflowTaskCleanupOperation left, WorkflowTaskCleanupOperation right) =>
+        left.OperationId == right.OperationId
+        && left.Fence == right.Fence
+        && WorkflowTaskCompletionBoundaryRules.SameIdentity(left.Identity, right.Identity)
+        && left.Applied == right.Applied
+        && left.Clean == right.Clean
+        && left.Mutations == right.Mutations
+        && left.RemovedPaths.SequenceEqual(right.RemovedPaths, StringComparer.Ordinal)
+        && left.Reason == right.Reason
+        && left.RecordedAt == right.RecordedAt;
+
+    private static bool SameSourceAdoptionShape(WorkflowTaskSourceAdoption left, WorkflowTaskSourceAdoption right) =>
+        left.OperationId == right.OperationId
+        && left.Fence == right.Fence
+        && WorkflowTaskCompletionBoundaryRules.SameIdentity(left.Identity, right.Identity)
+        && left.OperatorId == right.OperatorId
+        && left.SourcePaths.SequenceEqual(right.SourcePaths, StringComparer.Ordinal);
 
     private static WorkflowActiveWork WorkflowActiveWorkForTask(StageRun stage, TaskRun task) =>
         new(
