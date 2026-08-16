@@ -72,7 +72,8 @@ export function getAgentLaunchErrorFeedback(
       kind: 'execution-config-unresolvable',
       title: 'Execution configuration is required',
       message: 'This task does not have a resolvable execution configuration.',
-      nextAction: 'Choose a Runtime and Model here, or configure the Project default execution configuration, then retry.',
+      nextAction:
+        'Choose a Runtime and Model here, or configure the Project default execution configuration, then retry.',
     }
   }
 
@@ -98,27 +99,27 @@ export function getAgentLaunchErrorFeedback(
     return {
       kind: 'needs-setup',
       title: 'Configuration needs setup',
-      message: 'The server has not accepted this Agent\'s execution definition.',
+      message: "The server has not accepted this Agent's execution definition.",
       nextAction: 'Fix the listed gaps in Agent settings, then retry the launch.',
     }
   }
 
   if (
-    code === 'no_available_runner'
-    || code === 'no-online-runner'
-    || message.includes('no available runner')
-    || message.includes('no runner is online')
+    code === 'no_available_runner' ||
+    code === 'no-online-runner' ||
+    message.includes('no available runner') ||
+    message.includes('no runner is online')
   ) {
     return getAgentAvailabilityFeedback('no-online-runner')
   }
 
   if (
-    code === 'capacity-full'
-    || code === 'concurrency-limit'
-    || code === 'dispatch-pending'
-    || message.includes('capacity full')
-    || message.includes('concurrency limit')
-    || message.includes('dispatch pending')
+    code === 'capacity-full' ||
+    code === 'concurrency-limit' ||
+    code === 'dispatch-pending' ||
+    message.includes('capacity full') ||
+    message.includes('concurrency limit') ||
+    message.includes('dispatch pending')
   ) {
     return getAgentAvailabilityFeedback(
       code === 'concurrency-limit'
@@ -130,14 +131,14 @@ export function getAgentLaunchErrorFeedback(
   }
 
   if (
-    code === 'external_agent_unavailable'
-    || code === 'runtime-unavailable'
-    || code === 'execution-unavailable'
-    || message.includes('external agent unavailable')
-    || message.includes('external agent is unavailable')
-    || message.includes('runtime unavailable')
-    || message.includes('execution unavailable')
-    || (message.includes('backend') && message.includes('unavailable'))
+    code === 'external_agent_unavailable' ||
+    code === 'runtime-unavailable' ||
+    code === 'execution-unavailable' ||
+    message.includes('external agent unavailable') ||
+    message.includes('external agent is unavailable') ||
+    message.includes('runtime unavailable') ||
+    message.includes('execution unavailable') ||
+    (message.includes('backend') && message.includes('unavailable'))
   ) {
     return {
       kind: 'execution-unavailable',

@@ -24,7 +24,11 @@ export const state = {
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
-  defaultExecutionConfig: { runtime: 'opencode' as const, model: 'openai/gpt-4o', variant: null } as ProjectDefaultExecutionConfig | null,
+  defaultExecutionConfig: {
+    runtime: 'opencode' as const,
+    model: 'openai/gpt-4o',
+    variant: null,
+  } as ProjectDefaultExecutionConfig | null,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -43,7 +47,13 @@ const dataHook: AgentSessionComposerDataHook = () => {
   const launchMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
-    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; attachments?: string[]; idempotencyKey?: string }
+    {
+      agentRef: string
+      prompt: string
+      context?: AgentSessionLaunchContext | null
+      attachments?: string[]
+      idempotencyKey?: string
+    }
   >({
     mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey }) => {
       state.launchCalls.push({ agentRef, body: { prompt, context, attachments }, idempotencyKey })
@@ -124,12 +134,16 @@ export function renderPage(initialEntries = ['/agent-sessions/new']) {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider
         initialProjectId="proj-1"
-        initialProjects={[{
-          id: 'proj-1', name: 'Test',
-          createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-          repositories: [],
-          defaultExecutionConfig: state.defaultExecutionConfig,
-        }]}
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+            defaultExecutionConfig: state.defaultExecutionConfig,
+          },
+        ]}
       >
         <MemoryRouter initialEntries={initialEntries}>
           <Routes>
@@ -142,6 +156,6 @@ export function renderPage(initialEntries = ['/agent-sessions/new']) {
           <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   )
 }

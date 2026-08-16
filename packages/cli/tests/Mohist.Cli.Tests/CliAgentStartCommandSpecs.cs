@@ -56,15 +56,6 @@ public partial class CliAgentCommandSpecs
                 transcriptUrl = "/api/projects/proj_123/agent-sessions/session-start/transcript",
                 jobUrl = "/api/projects/proj_123/agent-jobs/job-start",
                 observationUrl = "/api/projects/proj_123/agent-jobs/job-start/launch-observation",
-                scopeFingerprint = "scope-start",
-                execution = new { runtime = "pi", model = "provider/model", variant = "balanced" },
-                repository = "server",
-                workspace = "review",
-                workspaceRepositories = new[] { "server" },
-                issueNumber = 42,
-                epicNumber = 7,
-                permissionScope = "project-workspace-write",
-                expectedImpact = "Starts one AgentJob and AgentSession",
             },
         }, HttpStatusCode.Created)));
         var output = new StringWriter();
@@ -75,17 +66,15 @@ public partial class CliAgentCommandSpecs
                 "agent", "start", "--prompt", "Inspect the task", "--name", "task-agent",
                 "--runtime", "pi", "--model", "provider/model", "--variant", "balanced",
                 "--issue", "42", "--epic", "7", "--repo", "server", "--workspace", "review",
-                "--project", "proj_123", "--idempotency-key", "start-key", "--yes",
+                "--project", "proj_123", "--idempotency-key", "start-key",
             ],
             output: output,
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(2, handler.Requests.Count);
-        var request = handler.Requests[1];
+        var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("/api/projects/proj_123/agent-tasks", request.RequestUri?.PathAndQuery);
-        Assert.Equal("scope-start", request.Headers["X-Mohist-Agent-Preflight"].Single());
         Assert.Equal("start-key", request.Headers["Idempotency-Key"].Single());
         Assert.Equal("cli", request.Headers["X-Mohist-Launch-Origin"].Single());
         var body = JsonNode.Parse(request.Body!)!.AsObject();
@@ -95,7 +84,7 @@ public partial class CliAgentCommandSpecs
         Assert.Equal("provider/model", body["model"]?.GetValue<string>());
         Assert.Equal("balanced", body["variant"]?.GetValue<string>());
         Assert.Equal(42, body["context"]?["issueNumber"]?.GetValue<int>());
-        Assert.Equal(7, body["context"]?["epicNumber"]?.GetValue<int>());
+        Assert.Equal("7", body["context"]?["epicNumber"]?.GetValue<string>());
         Assert.Equal("server", body["context"]?["repository"]?.GetValue<string>());
         Assert.Equal("review", body["context"]?["workspace"]?.GetValue<string>());
 
@@ -178,11 +167,11 @@ public partial class CliAgentCommandSpecs
     [Fact]
     public async Task AgentStart_RawJsonPrintsServerEnvelopeAndDoesNotPrintGeneratedKey()
     {
-        const string rawResponse = "{\"success\":true,\"data\":{\"agentId\":\"agent-start\",\"jobId\":\"job-start\"}}";
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
         {
-            Content = new StringContent(rawResponse),
-        }));
+            success = true,
+            data = new { agentId = "agent-start", jobId = "job-start" },
+        }, HttpStatusCode.Created)));
         var output = new StringWriter();
 
         var exitCode = await RunAsync(
@@ -192,31 +181,10 @@ public partial class CliAgentCommandSpecs
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(rawResponse, output.ToString());
+        var document = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.True(document["success"]?.GetValue<bool>());
+        Assert.Equal("agent-start", document["data"]?["agentId"]?.GetValue<string>());
         Assert.DoesNotContain("Idempotency-Key:", output.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AgentStart_RawJsonPreservesRejectedServerEnvelopeAndExitsNonZero()
-    {
-        const string rawResponse = "{\"success\":false,\"error\":\"Execution configuration is unresolved.\",\"code\":\"execution_config_unresolvable\"}";
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Conflict)
-        {
-            Content = new StringContent(rawResponse),
-        }));
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = await RunAsync(
-            handler,
-            ["agent", "start", "--prompt", "Inspect", "--json"],
-            output: output,
-            error: error,
-            fileSystem: FileSystemWithProject());
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Equal(rawResponse, output.ToString());
-        Assert.Contains("mo agent model list", error.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]

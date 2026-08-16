@@ -1,10 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  BotIcon,
-  Loader2Icon,
-  ArchiveIcon,
-} from 'lucide-react'
+import { BotIcon, Loader2Icon, ArchiveIcon } from 'lucide-react'
 import {
   useCreateAgent,
   useUpdateAgent,
@@ -13,7 +9,13 @@ import {
   writeAgentModelAndVariant,
 } from '../../../entities/agent'
 import type { AgentInfo, AgentCreateRequest, AgentUpdateRequest } from '../../../entities/agent'
-import { AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, useAvailableModelIds, useModelVariants, type AgentRuntime } from '../../../entities/settings'
+import {
+  AGENT_RUNTIME_OPENCODE,
+  AGENT_RUNTIME_PI,
+  useAvailableModelIds,
+  useModelVariants,
+  type AgentRuntime,
+} from '../../../entities/settings'
 import { useProjectPath } from '../../../entities/project'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { Button } from '@/shared/ui/components/button'
@@ -50,13 +52,7 @@ interface FormErrors {
   api?: string
 }
 
-export function AgentProfileEditor({
-  agent,
-  open,
-  onClose,
-  onSaved,
-  operationsHook = useDefaultOperations,
-}: Props) {
+export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHook = useDefaultOperations }: Props) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { createAgent, updateAgent, archiveAgent } = operationsHook()
@@ -92,19 +88,19 @@ export function AgentProfileEditor({
     setErrors(validation)
     if (Object.keys(validation).length > 0) return
 
-    const agentConfig = writeAgentModelAndVariant(
-      agent?.agentConfig ?? null,
-      model,
-      variant,
-      runtime,
-    )
+    const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime)
 
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
         name: name.trim() || null,
         description: description.trim() || null,
         instructions: instructions.trim() || null,
-        skills: skillsText.trim() ? skillsText.split(',').map((s) => s.trim()).filter(Boolean) : null,
+        skills: skillsText.trim()
+          ? skillsText
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : null,
         agentConfig,
       }
       updateAgent.mutate(
@@ -124,7 +120,12 @@ export function AgentProfileEditor({
         name: name.trim(),
         description: description.trim() || null,
         instructions: instructions.trim(),
-        skills: skillsText.trim() ? skillsText.split(',').map((s) => s.trim()).filter(Boolean) : null,
+        skills: skillsText.trim()
+          ? skillsText
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : null,
         agentConfig,
       }
       createAgent.mutate(payload, {
@@ -159,7 +160,12 @@ export function AgentProfileEditor({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(open) => { if (!open) handleClose() }}>
+      <Dialog
+        open={open}
+        onOpenChange={(open) => {
+          if (!open) handleClose()
+        }}
+      >
         <DialogContent className="sm:max-w-lg" data-testid="agent-profile-editor">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -213,7 +219,9 @@ export function AgentProfileEditor({
                 className={errors.name ? 'border-red-500' : ''}
               />
               {errors.name && (
-                <p data-testid="editor-name-error" className="text-xs text-red-500">{errors.name}</p>
+                <p data-testid="editor-name-error" className="text-xs text-red-500">
+                  {errors.name}
+                </p>
               )}
             </div>
 
@@ -241,7 +249,9 @@ export function AgentProfileEditor({
                 className={errors.instructions ? 'border-red-500' : ''}
               />
               {errors.instructions && (
-                <p data-testid="editor-instructions-error" className="text-xs text-red-500">{errors.instructions}</p>
+                <p data-testid="editor-instructions-error" className="text-xs text-red-500">
+                  {errors.instructions}
+                </p>
               )}
             </div>
 
@@ -254,11 +264,17 @@ export function AgentProfileEditor({
                 models={allModels}
                 onChange={(m) => setModel(m)}
                 onChangeVariant={setVariant}
-                onClear={() => { setModel(null); setVariant(null) }}
+                onClear={() => {
+                  setModel(null)
+                  setVariant(null)
+                }}
                 allowClear={!!model}
                 modelVariants={modelVariantsMap}
                 valueVariant={variant}
-                onChangeModelVariant={(m, v) => { setModel(m); setVariant(v) }}
+                onChangeModelVariant={(m, v) => {
+                  setModel(m)
+                  setVariant(v)
+                }}
               />
             </div>
 
@@ -309,9 +325,8 @@ export function AgentProfileEditor({
           <DialogHeader>
             <DialogTitle>Archive Agent</DialogTitle>
             <DialogDescription>
-              This agent will be marked as archived. It will leave the Active
-              group and cannot be used to start new sessions. You can restore
-              it from the agent detail page.
+              This agent will be marked as archived. It will leave the Active group and cannot be used to start new
+              sessions. You can restore it from the agent detail page.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 pt-2">

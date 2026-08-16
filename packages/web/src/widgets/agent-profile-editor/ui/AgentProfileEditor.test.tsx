@@ -30,9 +30,10 @@ const mocks = {
 
 useMswServer(
   http.get('*/api/projects/:projectId/opencode/models', ({ request }) => {
-    const models = new URL(request.url).searchParams.get('runtime') === 'pi'
-      ? ['pi/anthropic/claude']
-      : ['openai/gpt-4', 'anthropic/claude']
+    const models =
+      new URL(request.url).searchParams.get('runtime') === 'pi'
+        ? ['pi/anthropic/claude']
+        : ['openai/gpt-4', 'anthropic/claude']
     return HttpResponse.json({
       success: true,
       data: {
@@ -52,7 +53,6 @@ const operationsHook: AgentProfileEditorOperationsHook = () => ({
   archiveAgent: mocks.archiveMutation,
 })
 
-
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
@@ -71,17 +71,20 @@ function renderEditor(overrides: Partial<Parameters<typeof AgentProfileEditor>[0
   const queryClient = createQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1', name: 'Test',
-        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
         <MemoryRouter>
-          <AgentProfileEditor
-            {...defaultProps}
-            {...overrides}
-            operationsHook={operationsHook}
-          />
+          <AgentProfileEditor {...defaultProps} {...overrides} operationsHook={operationsHook} />
           <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
@@ -254,17 +257,23 @@ describe('AgentProfileEditor', () => {
         expect(document.querySelector('#agent-model')).toHaveTextContent('claude · high')
       })
       await openAgentModelSelect()
-      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-high')).toHaveAttribute('data-variant-active', 'true')
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-high')).toHaveAttribute(
+        'data-variant-active',
+        'true',
+      )
       fireEvent.click(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium'))
       fireEvent.click(screen.getByTestId('editor-save'))
 
       const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-       expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', variant: 'medium', runtime: 'opencode' })
+      expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', variant: 'medium', runtime: 'opencode' })
 
       cleanup()
       renderEditor({ agent: { ...existingAgent, agentConfig: updateCall.data.agentConfig } })
       await openAgentModelSelect()
-      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium')).toHaveAttribute('data-variant-active', 'true')
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium')).toHaveAttribute(
+        'data-variant-active',
+        'true',
+      )
     })
 
     it('selecting the model body clears only the stored variant', async () => {
@@ -274,7 +283,7 @@ describe('AgentProfileEditor', () => {
       fireEvent.click(screen.getByTestId('editor-save'))
 
       const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-       expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', runtime: 'opencode' })
+      expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', runtime: 'opencode' })
     })
 
     it('clear selection clears both model and variant', async () => {
@@ -328,7 +337,7 @@ describe('AgentProfileEditor', () => {
       const callArgs = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
       const agentConfig = callArgs.data.agentConfig as Record<string, unknown> | null
       expect(agentConfig).not.toBeNull()
-       expect(Object.keys(agentConfig ?? {}).sort()).toEqual(['model', 'runtime', 'variant'])
+      expect(Object.keys(agentConfig ?? {}).sort()).toEqual(['model', 'runtime', 'variant'])
       AssertNoLegacyKey(agentConfig)
     })
 

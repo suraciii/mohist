@@ -141,7 +141,9 @@ export interface AgentLaunchObservationDto {
 
 export type AgentLaunchObservationMeaning = 'observe' | 'result' | 'reconcile'
 
-export function getAgentLaunchObservationMeaning(observation: Pick<AgentLaunchObservationDto, 'turnStatus'>): AgentLaunchObservationMeaning {
+export function getAgentLaunchObservationMeaning(
+  observation: Pick<AgentLaunchObservationDto, 'turnStatus'>,
+): AgentLaunchObservationMeaning {
   const status = observation.turnStatus.toLowerCase()
   if (status === 'unknown') return 'reconcile'
   if (status === 'completed' || status === 'failed') return 'result'
@@ -188,22 +190,30 @@ export function getGenericSessionSummary(projectId: string, sessionId: string) {
 }
 
 export function getGenericSessionTranscript(projectId: string, sessionId: string, runtimeSessionId?: string | null) {
-  const search = runtimeSessionId
-    ? `?${new URLSearchParams({ runtimeSessionId }).toString()}`
-    : ''
+  const search = runtimeSessionId ? `?${new URLSearchParams({ runtimeSessionId }).toString()}` : ''
   return request<AgentSessionTranscriptResponse>(
     projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/transcript${search}`),
   )
 }
 
-export function agentInputAttachmentContentPath(projectId: string | null | undefined, sessionId: string, inputId: string, attachmentId: string) {
+export function agentInputAttachmentContentPath(
+  projectId: string | null | undefined,
+  sessionId: string,
+  inputId: string,
+  attachmentId: string,
+) {
   return projectApiPath(
     projectId,
     `/agent-sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
   )
 }
 
-export function launchAgentSession(projectId: string, agentRef: string, input: AgentSessionLaunchInput, idempotencyKey?: string) {
+export function launchAgentSession(
+  projectId: string,
+  agentRef: string,
+  input: AgentSessionLaunchInput,
+  idempotencyKey?: string,
+) {
   return request<AgentSessionLaunchResponse>(
     projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/sessions`),
     {
@@ -218,17 +228,14 @@ export function launchAgentSession(projectId: string, agentRef: string, input: A
 }
 
 export function startAgentTask(projectId: string, input: AgentTaskLaunchInput, idempotencyKey?: string) {
-  return request<AgentSessionLaunchResponse>(
-    projectApiPath(projectId, '/agent-tasks'),
-    {
-      method: 'POST',
-      body: JSON.stringify(input),
-      headers: {
-        'X-Mohist-Launch-Origin': 'web',
-        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-      },
+  return request<AgentSessionLaunchResponse>(projectApiPath(projectId, '/agent-tasks'), {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: {
+      'X-Mohist-Launch-Origin': 'web',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
-  )
+  })
 }
 
 export function getAgentLaunchObservation(projectId: string, jobId: string) {
@@ -246,7 +253,12 @@ export function launchObservationQueryOptions(projectId: string | null | undefin
   }
 }
 
-export function postGenericFollowup(projectId: string, sessionId: string, input: GenericFollowupInput, idempotencyKey?: string) {
+export function postGenericFollowup(
+  projectId: string,
+  sessionId: string,
+  input: GenericFollowupInput,
+  idempotencyKey?: string,
+) {
   const requestKey = idempotencyKey ?? createIdempotencyKey()
   return request<SessionFollowupResult>(
     projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/followup`),
@@ -306,7 +318,7 @@ export function genericSessionTranscriptQueryOptions(
     refetchInterval: (query: { state: { data: AgentSessionTranscriptResponse | undefined } }) => {
       const data = query.state.data
       if (!data || !data.turns) return 5000
-      const hasIncomplete = data.turns.some(t => t.incomplete)
+      const hasIncomplete = data.turns.some((t) => t.incomplete)
       return hasIncomplete ? 5000 : false
     },
   }
@@ -314,18 +326,42 @@ export function genericSessionTranscriptQueryOptions(
 
 export function useGenericSessionTranscript(sessionId: string, runtimeSessionId?: string | null) {
   const { projectId } = useProject()
-  return useQuery<AgentSessionTranscriptResponse>(genericSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId))
+  return useQuery<AgentSessionTranscriptResponse>(
+    genericSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId),
+  )
 }
 
 /* ── Mutation hooks ─────────────────────────────────────── */
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
-export function launchAgentSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+export function launchAgentSessionMutationOptions(
+  projectId: string | null | undefined,
+  queryClient: InvalidationClient,
+) {
   return {
-    mutationFn: ({ agentRef, prompt, context, attachments, idempotencyKey }: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; attachments?: string[]; idempotencyKey?: string }) =>
-      launchAgentSession(projectId!, agentRef, { prompt, context, attachments }, idempotencyKey),
-    onSuccess: (_data: AgentSessionLaunchResponse, variables: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; attachments?: string[] }) => {
+    mutationFn: ({
+      agentRef,
+      prompt,
+      context,
+      attachments,
+      idempotencyKey,
+    }: {
+      agentRef: string
+      prompt: string
+      context?: AgentSessionLaunchContext | null
+      attachments?: string[]
+      idempotencyKey?: string
+    }) => launchAgentSession(projectId!, agentRef, { prompt, context, attachments }, idempotencyKey),
+    onSuccess: (
+      _data: AgentSessionLaunchResponse,
+      variables: {
+        agentRef: string
+        prompt: string
+        context?: AgentSessionLaunchContext | null
+        attachments?: string[]
+      },
+    ) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-availability', projectId] })
@@ -369,9 +405,21 @@ export function useStartAgentTask() {
 
 export function genericFollowupMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
   return {
-    mutationFn: ({ sessionId, text, attachments, idempotencyKey }: { sessionId: string; text: string; attachments?: string[]; idempotencyKey?: string }) =>
-      postGenericFollowup(projectId!, sessionId, { text, attachments }, idempotencyKey),
-    onSuccess: (data: SessionFollowupResult, variables: { sessionId: string; text: string; attachments?: string[]; agentRef?: string }) => {
+    mutationFn: ({
+      sessionId,
+      text,
+      attachments,
+      idempotencyKey,
+    }: {
+      sessionId: string
+      text: string
+      attachments?: string[]
+      idempotencyKey?: string
+    }) => postGenericFollowup(projectId!, sessionId, { text, attachments }, idempotencyKey),
+    onSuccess: (
+      data: SessionFollowupResult,
+      variables: { sessionId: string; text: string; attachments?: string[]; agentRef?: string },
+    ) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
@@ -401,10 +449,21 @@ export function useGenericFollowup() {
   return useMutation(genericFollowupMutationOptions(projectId, queryClient))
 }
 
-export function stopGenericSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+export function stopGenericSessionMutationOptions(
+  projectId: string | null | undefined,
+  queryClient: InvalidationClient,
+) {
   return {
-    mutationFn: ({ sessionId, turnId, idempotencyKey }: { sessionId: string; turnId: string; idempotencyKey?: string; agentRef?: string }) =>
-      stopGenericSession(projectId!, sessionId, turnId, idempotencyKey),
+    mutationFn: ({
+      sessionId,
+      turnId,
+      idempotencyKey,
+    }: {
+      sessionId: string
+      turnId: string
+      idempotencyKey?: string
+      agentRef?: string
+    }) => stopGenericSession(projectId!, sessionId, turnId, idempotencyKey),
     onSuccess: (data: TurnControlResult, variables: { sessionId: string; turnId: string; agentRef?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })

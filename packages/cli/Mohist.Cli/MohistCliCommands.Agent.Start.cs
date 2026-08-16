@@ -24,12 +24,11 @@ internal static partial class AgentCommands
         var modelOpt = new Option<string?>("--model") { Description = "Model identifier in provider/model form" };
         var variantOpt = new Option<string?>("--variant") { Description = "Runtime-specific model variant" };
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
-        var epicRefOpt = new Option<int?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
+        var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
         var repositoryRefOpt = new Option<string?>("--repo") { Description = "Optional context reference: record the repository on the session metadata" };
         var workspaceOpt = new Option<string?>("--workspace") { Description = "Bind to a named workspace" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Reuse this key to safely retry after response loss" };
-        var yesOpt = new Option<bool>("--yes", "-y") { Description = "Confirm the server-resolved execution scope without prompting" };
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
 
         cmd.Options.Add(promptOpt);
@@ -44,7 +43,6 @@ internal static partial class AgentCommands
         cmd.Options.Add(repositoryRefOpt);
         cmd.Options.Add(workspaceOpt);
         cmd.Options.Add(idempotencyKeyOpt);
-        cmd.Options.Add(yesOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
@@ -61,7 +59,6 @@ internal static partial class AgentCommands
             var repositoryRef = ctx.GetValue(repositoryRefOpt);
             var workspace = ctx.GetValue(workspaceOpt);
             var suppliedIdempotencyKey = ctx.GetValue(idempotencyKeyOpt);
-            var confirmScope = ctx.GetValue(yesOpt);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
             var outputWasProvided = MohistCliCommands.OutputOptionState.Explicit;
@@ -135,53 +132,6 @@ internal static partial class AgentCommands
                 if (variant is not null)
                     body["variant"] = variant;
 
-                using var preflight = await api.SendAsync(
-                    HttpMethod.Post,
-                    ProjectAgentsPath(resolvedProjectId, "/agent-tasks/preflight"),
-                    body,
-                    printServerUnavailable: false,
-                    headers: new Dictionary<string, string>
-                    {
-                        ["Idempotency-Key"] = idempotencyKey,
-                        ["X-Mohist-Launch-Origin"] = "cli",
-                    },
-                    retries: 1);
-                if (preflight is null)
-                    return MohistCliApi.FailureExitCode(HttpStatusCode.ServiceUnavailable);
-
-                var preflightRaw = await preflight.Content.ReadAsStringAsync();
-                var preflightNode = string.IsNullOrWhiteSpace(preflightRaw) ? null : JsonNode.Parse(preflightRaw);
-                var preflightEnvelope = MohistCliApi.ExtractEnvelope(preflightNode, preflight);
-                var preflightData = preflightEnvelope.Data as JsonObject;
-                var scopeFingerprint = preflightData is null
-                    ? null
-                    : preflightData["scopeFingerprint"]?.GetValue<string>();
-
-                // Older servers did not expose preflight. Keep their response
-                // behavior deterministic while the current server always
-                // returns a scope fingerprint here.
-                if (scopeFingerprint is null)
-                {
-                    using var legacyResponse = new HttpResponseMessage(preflight.StatusCode)
-                    {
-                        Content = new StringContent(preflightRaw),
-                    };
-                    return await PrintTaskLaunchResponseAsync(api, legacyResponse, mode, idempotencyKey);
-                }
-
-                if (!preflightEnvelope.Success || !preflight.IsSuccessStatusCode)
-                {
-                    if (!string.IsNullOrWhiteSpace(preflightEnvelope.Error))
-                        api.Error.WriteLine($"{preflightEnvelope.Error} (code={preflightEnvelope.Code})");
-                    WriteTaskLaunchGuidance(api, preflightEnvelope.Code, idempotencyKey);
-                    return MohistCliApi.FailureExitCode(preflight.StatusCode);
-                }
-
-                if (mode == "table")
-                    RenderTaskPreflight(api, preflightData!);
-                if (!await ConfirmTaskPreflightAsync(api, confirmScope, mode))
-                    return CliExitCode.For(CliExitOutcome.Cancelled);
-
                 using var response = await api.SendAsync(
                     HttpMethod.Post,
                     ProjectAgentsPath(resolvedProjectId, "/agent-tasks"),
@@ -191,7 +141,6 @@ internal static partial class AgentCommands
                     {
                         ["Idempotency-Key"] = idempotencyKey,
                         ["X-Mohist-Launch-Origin"] = "cli",
-                        ["X-Mohist-Agent-Preflight"] = scopeFingerprint!,
                     },
                     retries: 1);
                 if (response is null)
@@ -202,51 +151,6 @@ internal static partial class AgentCommands
         });
         AddStartPromptInputValidation(cmd, promptOpt, promptFileOpt);
         return cmd;
-    }
-
-    private static void RenderTaskPreflight(MohistCliApi api, JsonObject data)
-    {
-        var execution = data["execution"] as JsonObject;
-        var repositories = data["workspaceRepositories"] as JsonArray;
-        api.Output.WriteLine("Preflight scope:");
-        api.Output.WriteLine($"  agent:              {Text(data, "agentName")}");
-        api.Output.WriteLine($"  execution:          {Text(execution, "runtime")} · {Text(execution, "model")}{(string.IsNullOrWhiteSpace(Text(execution, "variant")) ? "" : $" · {Text(execution, "variant")}")}");
-        api.Output.WriteLine($"  workspace:          {Text(data, "workspace")}");
-        api.Output.WriteLine($"  repository:         {Text(data, "repository", "workspace repositories")}");
-        api.Output.WriteLine($"  issue / epic:       {(Text(data, "issueNumber") is { Length: > 0 } issue ? $"#{issue}" : "none")}{(Text(data, "epicNumber") is { Length: > 0 } epic ? $" / #{epic}" : "")}");
-        api.Output.WriteLine($"  permission scope:   {Text(data, "permissionScope")}");
-        api.Output.WriteLine($"  expected impact:    {Text(data, "expectedImpact")}");
-        if (repositories is { Count: > 0 })
-            api.Output.WriteLine($"  workspace repos:    {string.Join(", ", repositories.Select(item => item?.GetValue<string>() ?? ""))}");
-    }
-
-    private static async Task<bool> ConfirmTaskPreflightAsync(MohistCliApi api, bool explicitConfirmation, string mode)
-    {
-        if (explicitConfirmation)
-            return true;
-        if (mode == "json")
-        {
-            await api.Error.WriteLineAsync("--yes is required with --json because the resolved execution scope cannot be prompted on the JSON stream.");
-            return false;
-        }
-        if (!api.Invocation.PromptsEnabled)
-        {
-            await api.Error.WriteLineAsync("--yes is required when input is non-interactive to confirm the resolved execution scope.");
-            return false;
-        }
-
-        await api.Output.WriteAsync("Launch with this scope? [y/N] ");
-        var answer = await api.Invocation.Input.ReadLineAsync(api.Invocation.CancellationToken);
-        await api.Output.WriteLineAsync();
-        return string.Equals(answer?.Trim(), "y", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(answer?.Trim(), "yes", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string Text(JsonObject? node, string property, string fallback = "")
-    {
-        if (node is null || node[property] is null)
-            return fallback;
-        return node[property]!.ToString();
     }
 
     private static string? ValidateStartExecutionHints(string? runtime, string? model, string? variant)
@@ -284,34 +188,15 @@ internal static partial class AgentCommands
         string mode,
         string idempotencyKey)
     {
-        if (mode == "json")
-        {
-            var rawResponse = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            try
-            {
-                var responseNode = string.IsNullOrWhiteSpace(rawResponse) ? null : JsonNode.Parse(rawResponse);
-                var envelope = MohistCliApi.ExtractEnvelope(responseNode, response);
-                api.Output.Write(rawResponse);
-                if (envelope.Success && response.IsSuccessStatusCode)
-                    return 0;
-
-                WriteTaskLaunchGuidance(api, envelope.Code, idempotencyKey);
-                return MohistCliApi.FailureExitCode(response);
-            }
-            catch (JsonException)
-            {
-                api.Output.Write(rawResponse);
-                return MohistCliApi.FailureExitCode(response);
-            }
-        }
-
         string? responseCode = null;
-        if (!response.IsSuccessStatusCode)
+        string? rawResponse = null;
+        JsonNode? responseNode = null;
+        if (mode == "json" || !response.IsSuccessStatusCode)
         {
-            var rawResponse = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            rawResponse = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             try
             {
-                var responseNode = string.IsNullOrWhiteSpace(rawResponse) ? null : JsonNode.Parse(rawResponse);
+                responseNode = string.IsNullOrWhiteSpace(rawResponse) ? null : JsonNode.Parse(rawResponse);
                 responseCode = MohistCliApi.ExtractEnvelope(responseNode, response).Code;
             }
             catch (JsonException)
@@ -321,16 +206,19 @@ internal static partial class AgentCommands
             }
         }
 
+        if (mode == "json" && responseNode is not null
+            && MohistCliApi.ExtractEnvelope(responseNode, response).Success)
+        {
+            api.Output.Write(rawResponse);
+            if (rawResponse is null || !rawResponse.EndsWith('\n', StringComparison.Ordinal))
+                api.Output.WriteLine();
+            return 0;
+        }
+
         var exit = await api.PrintServerResponseAsync(
             response,
             mode: mode,
             tableShape: nameof(MohistCliApi.TableShape.AgentSessionLaunch));
-        WriteTaskLaunchGuidance(api, responseCode, idempotencyKey);
-        return exit;
-    }
-
-    private static void WriteTaskLaunchGuidance(MohistCliApi api, string? responseCode, string idempotencyKey)
-    {
         if (responseCode == "execution_config_unresolvable")
         {
             api.Error.WriteLine(
@@ -341,5 +229,6 @@ internal static partial class AgentCommands
         {
             api.Error.WriteLine($"Hint: retry with the same --idempotency-key {idempotencyKey}.");
         }
+        return exit;
     }
 }

@@ -136,10 +136,12 @@ describe('AgentSessionComposerPage', () => {
   it('requires catalog-backed Runtime and Model when the Project has no default', async () => {
     state.defaultExecutionConfig = null
     server.use(
-      http.get('*/api/projects/:projectId/opencode/models', () => HttpResponse.json({
-        success: true,
-        data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
-      })),
+      http.get('*/api/projects/:projectId/opencode/models', () =>
+        HttpResponse.json({
+          success: true,
+          data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
+        }),
+      ),
     )
     renderPage()
 
@@ -167,13 +169,17 @@ describe('AgentSessionComposerPage', () => {
 
   it('shows the Project default as a recommendation and submits adjusted catalog values as hints', async () => {
     server.use(
-      http.get('*/api/projects/:projectId/opencode/models', () => HttpResponse.json({
-        success: true,
-        data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
-      })),
+      http.get('*/api/projects/:projectId/opencode/models', () =>
+        HttpResponse.json({
+          success: true,
+          data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
+        }),
+      ),
     )
     renderPage()
-    expect(await screen.findByTestId('recommended-execution-config')).toHaveTextContent(/recommended execution configuration/i)
+    expect(await screen.findByTestId('recommended-execution-config')).toHaveTextContent(
+      /recommended execution configuration/i,
+    )
     expect(screen.getByTestId('recommended-execution-config')).toHaveTextContent(/Project default for tasks/i)
     expect(screen.queryByTestId('execution-config-controls')).not.toBeInTheDocument()
 
@@ -267,10 +273,14 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => expect(screen.getByTestId('launch-attachment-results')).toBeInTheDocument())
     expect(state.launchCalls[0].body).toMatchObject({ attachments: ['att-ok', 'att-bad'] })
     expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
-    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
+    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent(
+      'Archive files are not supported.',
+    )
 
     fireEvent.click(screen.getByTestId('open-launched-session'))
-    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'))
+    await waitFor(() =>
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'),
+    )
     expect(screen.getByTestId('current-path')).not.toHaveTextContent('/Test/Test/sessions/')
   })
 
@@ -383,15 +393,17 @@ describe('AgentSessionComposerPage', () => {
 
   it('surfaces capacity back-pressure with a next action', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    state.availabilityData = [{
-      agentId: 'agent-1',
-      canStartNow: false,
-      waitingReason: 'concurrency-limit',
-      activeRuns: 1,
-      maxConcurrentRuns: 1,
-      capacity: { usedSlots: 1, totalSlots: 2 },
-      queuedCount: 1,
-    }]
+    state.availabilityData = [
+      {
+        agentId: 'agent-1',
+        canStartNow: false,
+        waitingReason: 'concurrency-limit',
+        activeRuns: 1,
+        maxConcurrentRuns: 1,
+        capacity: { usedSlots: 1, totalSlots: 2 },
+        queuedCount: 1,
+      },
+    ]
     renderPage(['/agent-sessions/new?agent=agent-1'])
 
     const feedback = await screen.findByTestId('agent-availability-feedback')
@@ -450,7 +462,11 @@ describe('AgentSessionComposerPage', () => {
         readiness: {
           conclusion: 'Needs setup',
           gaps: [
-            { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
+            {
+              code: 'instructions-missing',
+              message: 'Instructions are missing.',
+              action: 'Add instructions in Agent settings.',
+            },
           ],
           setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
         },
@@ -459,7 +475,9 @@ describe('AgentSessionComposerPage', () => {
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const banner = await screen.findByTestId('agent-readiness-needs-setup')
     expect(banner).toHaveTextContent(/needs setup/i)
-    expect(screen.getByTestId('agent-readiness-gap-instructions-missing')).toHaveTextContent(/Instructions are missing/i)
+    expect(screen.getByTestId('agent-readiness-gap-instructions-missing')).toHaveTextContent(
+      /Instructions are missing/i,
+    )
     const button = screen.getByTestId('launch-button')
     expect(button).toBeDisabled()
   })
@@ -489,15 +507,21 @@ describe('AgentSessionComposerPage', () => {
   })
 
   it('surfaces 409 agent_needs_setup gaps as an error banner', async () => {
-    state.agentsData = [makeAgent('agent-1', {
-      readiness: {
-        conclusion: 'Unknown',
-        gaps: [
-          { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
-        ],
-        setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
-      },
-    })]
+    state.agentsData = [
+      makeAgent('agent-1', {
+        readiness: {
+          conclusion: 'Unknown',
+          gaps: [
+            {
+              code: 'instructions-missing',
+              message: 'Instructions are missing.',
+              action: 'Add instructions in Agent settings.',
+            },
+          ],
+          setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
+        },
+      }),
+    ]
     state.launchError = {
       error: 'This Agent needs setup before it can accept new work.',
       code: 'agent_needs_setup',
