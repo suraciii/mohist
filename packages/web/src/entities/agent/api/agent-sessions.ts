@@ -228,17 +228,14 @@ export function launchAgentSession(
 }
 
 export function startAgentTask(projectId: string, input: AgentTaskLaunchInput, idempotencyKey?: string) {
-  return request<AgentSessionLaunchResponse>(
-    projectApiPath(projectId, '/agent-tasks'),
-    {
-      method: 'POST',
-      body: JSON.stringify(input),
-      headers: {
-        'X-Mohist-Launch-Origin': 'web',
-        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-      },
+  return request<AgentSessionLaunchResponse>(projectApiPath(projectId, '/agent-tasks'), {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: {
+      'X-Mohist-Launch-Origin': 'web',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
-  )
+  })
 }
 
 export function getAgentLaunchObservation(projectId: string, jobId: string) {

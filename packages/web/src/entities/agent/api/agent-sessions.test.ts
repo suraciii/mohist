@@ -110,7 +110,7 @@ describe('launchAgentSession (client fn)', () => {
 
     await launchAgentSession('proj-1', 'agent-foo', {
       prompt: 'Hello',
-      context: { issueNumber: 42, },
+      context: { issueNumber: 42 },
       attachments: ['att-1'],
     })
 
@@ -118,7 +118,7 @@ describe('launchAgentSession (client fn)', () => {
       {
         url: '/api/projects/proj-1/agents/agent-foo/sessions',
         method: 'POST',
-        body: { prompt: 'Hello', context: { issueNumber: 42, }, attachments: ['att-1'] },
+        body: { prompt: 'Hello', context: { issueNumber: 42 }, attachments: ['att-1'] },
       },
     ])
   })
@@ -173,18 +173,9 @@ describe('startAgentTask (client fn)', () => {
       }),
     )
 
-    await startAgentTask('proj-1', {
-      prompt: 'Start from this task',
-      context: { issueNumber: 42 },
-      attachments: ['att-1'],
-      runtime: 'pi',
-      model: 'provider/model',
-      variant: 'high',
-    }, 'task-key')
-
-    expect(captured).toEqual([{
-      url: '/api/projects/proj-1/agent-tasks',
-      body: {
+    await startAgentTask(
+      'proj-1',
+      {
         prompt: 'Start from this task',
         context: { issueNumber: 42 },
         attachments: ['att-1'],
@@ -192,9 +183,24 @@ describe('startAgentTask (client fn)', () => {
         model: 'provider/model',
         variant: 'high',
       },
-      key: 'task-key',
-      origin: 'web',
-    }])
+      'task-key',
+    )
+
+    expect(captured).toEqual([
+      {
+        url: '/api/projects/proj-1/agent-tasks',
+        body: {
+          prompt: 'Start from this task',
+          context: { issueNumber: 42 },
+          attachments: ['att-1'],
+          runtime: 'pi',
+          model: 'provider/model',
+          variant: 'high',
+        },
+        key: 'task-key',
+        origin: 'web',
+      },
+    ])
   })
 })
 
@@ -294,25 +300,28 @@ describe('genericSessionSummaryQueryOptions', () => {
   // state). `status` is no longer consulted.
   it('polls every 5s while activity is active', () => {
     const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
-    const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { activity: 'active' } as never } })
-      : opts.refetchInterval
+    const interval =
+      typeof opts.refetchInterval === 'function'
+        ? opts.refetchInterval({ state: { data: { activity: 'active' } as never } })
+        : opts.refetchInterval
     expect(interval).toBe(5000)
   })
 
   it('polls every 5s while activity is unknown (awaiting resolution)', () => {
     const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
-    const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { activity: 'unknown' } as never } })
-      : opts.refetchInterval
+    const interval =
+      typeof opts.refetchInterval === 'function'
+        ? opts.refetchInterval({ state: { data: { activity: 'unknown' } as never } })
+        : opts.refetchInterval
     expect(interval).toBe(5000)
   })
 
   it('stops polling when activity returns to idle', () => {
     const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
-    const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { activity: 'idle' } as never } })
-      : opts.refetchInterval
+    const interval =
+      typeof opts.refetchInterval === 'function'
+        ? opts.refetchInterval({ state: { data: { activity: 'idle' } as never } })
+        : opts.refetchInterval
     expect(interval).toBe(false)
   })
 
@@ -325,9 +334,10 @@ describe('genericSessionSummaryQueryOptions', () => {
     'does not stop polling based on a legacy status value (%s) — only activity=idle stops polling',
     (status) => {
       const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
-      const interval = typeof opts.refetchInterval === 'function'
-        ? opts.refetchInterval({ state: { data: { status, activity: 'active' } as never } })
-        : opts.refetchInterval
+      const interval =
+        typeof opts.refetchInterval === 'function'
+          ? opts.refetchInterval({ state: { data: { status, activity: 'active' } as never } })
+          : opts.refetchInterval
       expect(interval).toBe(5000)
     },
   )
@@ -352,17 +362,19 @@ describe('genericSessionTranscriptQueryOptions', () => {
 
   it('polls when there are incomplete turns', () => {
     const opts = genericSessionTranscriptQueryOptions('proj-1', 'sess-abc')
-    const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: true }] } as never } })
-      : opts.refetchInterval
+    const interval =
+      typeof opts.refetchInterval === 'function'
+        ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: true }] } as never } })
+        : opts.refetchInterval
     expect(interval).toBe(5000)
   })
 
   it('stops polling when no incomplete turns remain', () => {
     const opts = genericSessionTranscriptQueryOptions('proj-1', 'sess-abc')
-    const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: false }] } as never } })
-      : opts.refetchInterval
+    const interval =
+      typeof opts.refetchInterval === 'function'
+        ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: false }] } as never } })
+        : opts.refetchInterval
     expect(interval).toBe(false)
   })
 })
@@ -371,10 +383,10 @@ describe('genericSessionTranscriptQueryOptions', () => {
 describe('launchAgentSessionMutationOptions', () => {
   it('invalidates agent status, list Availability, and owning session list on success', () => {
     const qc = createInvalidationClient()
-    launchAgentSessionMutationOptions('proj-1', qc).onSuccess(
-      { sessionId: 's1' } as never,
-      { agentRef: 'agent-foo', prompt: 'Hi' },
-    )
+    launchAgentSessionMutationOptions('proj-1', qc).onSuccess({ sessionId: 's1' } as never, {
+      agentRef: 'agent-foo',
+      prompt: 'Hi',
+    })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-availability', 'proj-1'] })
@@ -382,10 +394,10 @@ describe('launchAgentSessionMutationOptions', () => {
   })
 
   it('shows success toast on launch', () => {
-    launchAgentSessionMutationOptions('proj-1', createInvalidationClient()).onSuccess(
-      {} as never,
-      { agentRef: 'a', prompt: 'p' },
-    )
+    launchAgentSessionMutationOptions('proj-1', createInvalidationClient()).onSuccess({} as never, {
+      agentRef: 'a',
+      prompt: 'p',
+    })
     expect(toast.success).toHaveBeenCalledWith('Session launched')
   })
 
@@ -399,11 +411,17 @@ describe('launchAgentSessionMutationOptions', () => {
 describe('genericFollowupMutationOptions', () => {
   it('invalidates agent-status, agent-activity, and session queries on success', () => {
     const qc = createInvalidationClient()
-    genericFollowupMutationOptions('proj-1', qc).onSuccess({} as never, { sessionId: 'sess-abc', text: 'go on', agentRef: 'agent-foo' })
+    genericFollowupMutationOptions('proj-1', qc).onSuccess({} as never, {
+      sessionId: 'sess-abc',
+      text: 'go on',
+      agentRef: 'agent-foo',
+    })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc', 'transcript'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['agent-session', 'proj-1', 'sess-abc', 'transcript'],
+    })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 
@@ -492,7 +510,10 @@ describe('stopGenericSessionMutationOptions', () => {
 
   it('skips agent sessions invalidation when agentRef is omitted', () => {
     const qc = createInvalidationClient()
-    stopGenericSessionMutationOptions('proj-1', qc).onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc', turnId: 'turn-1' })
+    stopGenericSessionMutationOptions('proj-1', qc).onSuccess(
+      { state: 'cancelled' },
+      { sessionId: 'sess-abc', turnId: 'turn-1' },
+    )
     const agentSessionsCalls = qc.invalidateQueries.mock.calls.filter(
       (c) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
     )

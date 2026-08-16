@@ -171,3 +171,32 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   `e0c4b9ac003ca8b91111d7c7197aff3962912da972fabf9130833cb57b9131e0`) and
   the stale FailIfMarker closure evidence; the architecture suite then passed
   68/68.
+
+## T-005 progress notes
+
+- `mo agent start` is registered beside definition-first `launch` and sends
+  `POST /api/projects/{project}/agent-tasks` with only task-route fields. It
+  preserves omitted execution hints so the Server can apply caller hint ->
+  definition -> Project default precedence, and always sends
+  `X-Mohist-Launch-Origin: cli`.
+- Startup uses the same BodyInputResolver and attachment uploader as launch.
+  Attachment-only tasks bypass the resolver's prompt-required branch and send
+  an empty prompt with the accepted attachment ids; prompt and prompt-file
+  conflicts, invalid runtime values, and malformed provider/model values fail
+  locally before project resolution or HTTP.
+- Table mode prints a generated idempotency key before the task request and
+  renders `TableShape.AgentSessionLaunch`. Bare `--json` is task-first's raw
+  Server-envelope mode; field subsets are rejected because this slice keeps
+  JSON raw-only. Server rejection codes retain nonzero exits, with explicit
+  guidance for unresolved execution configuration, model catalog discovery,
+  conflicts, and pending retry using the same key.
+- CLI coverage now includes help/flag matrix, context and hint forwarding,
+  CLI-origin headers, attachment-only input, generated-key ordering, raw JSON,
+  replay-key reuse, table identities, and actionable rejection guidance.
+- Verification before the full gate: `npm run test:fast:cli` passed 1,859 tests;
+  `npm run docs:check` passed. `npm run format` mechanically formatted 13
+  already-committed T-004 Web files so the repository format gate is clean.
+- Final `npm run verify` passed: docs and file-size checks, formatting, solution
+  and workspace builds, 178 Workflow Definition tests, 2,700 Server unit tests,
+  3,944 Server spec tests, 68 architecture tests, 1,859 CLI tests, 4,734 Web
+  tests, 1,639 Runner tests, and 70 Slack tests.

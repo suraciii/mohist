@@ -24,7 +24,11 @@ export const state = {
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
-  defaultExecutionConfig: { runtime: 'opencode' as const, model: 'openai/gpt-4o', variant: null } as ProjectDefaultExecutionConfig | null,
+  defaultExecutionConfig: {
+    runtime: 'opencode' as const,
+    model: 'openai/gpt-4o',
+    variant: null,
+  } as ProjectDefaultExecutionConfig | null,
 }
 
 const components: AgentSessionComposerPageComponents = {

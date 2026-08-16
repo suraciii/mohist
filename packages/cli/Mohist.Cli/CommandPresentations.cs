@@ -642,6 +642,9 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "launch"), new CommandPresentation(
                     CommandCapability.Automation, "Launch a generic AgentSession from an Agent profile",
                     Boundary: "Launch returns both the AgentJob id (work owner) and the AgentSession id (conversation owner)."));
+                CommandPresentationCatalog.Attach(Find(group, "start"), new CommandPresentation(
+                    CommandCapability.Automation, "Create an Agent from a task and launch its first AgentSession",
+                    Boundary: "Task-first startup derives the Agent definition and returns the AgentJob, AgentSession, Input, and Turn identities."));
                 CommandPresentationCatalog.Attach(Find(group, "job"), new CommandPresentation(
                     CommandCapability.Automation, "Read AgentJobs (the work result owner)"));
                 var job = Find(group, "job");

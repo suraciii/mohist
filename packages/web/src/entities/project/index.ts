@@ -1,4 +1,13 @@
-export { useCreateProject, useDeleteProject, useProjects, useRepositories, useAddRepository, useRemoveRepository, useSetDefaultRepository, useProjectEvents } from './api/queries'
+export {
+  useCreateProject,
+  useDeleteProject,
+  useProjects,
+  useRepositories,
+  useAddRepository,
+  useRemoveRepository,
+  useSetDefaultRepository,
+  useProjectEvents,
+} from './api/queries'
 export type { ProjectCreator } from './api/queries'
 export { getRepositories, addRepository, removeRepository, setDefaultRepository } from './api/client'
 export { getProjectEvents } from './api/projectEvents'

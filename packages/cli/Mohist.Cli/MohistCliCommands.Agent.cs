@@ -27,6 +27,7 @@ internal static partial class AgentCommands
         agent.Subcommands.Add(BuildEdit(api));
         agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildLaunch(api));
+        agent.Subcommands.Add(BuildStart(api));
         agent.Subcommands.Add(BuildSpawn(api));
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
@@ -885,7 +886,6 @@ internal static partial class AgentCommands
         });
         return cmd;
     }
-
     private static Command BuildSpawn(MohistCliApi api)
     {
         var cmd = new Command(

@@ -66,13 +66,17 @@ function makeDependencies(): UnifiedSessionPageDependencies {
         } as never
       },
       useGenericFollowup: () => ({ mutateAsync: vi.fn(), isPending: false }) as never,
-      useGenericTurnControl: () => ({
-        mutate: (input: { sessionId: string; turnId: string }, options?: { onSuccess?: (result: { state: string }) => void }) => {
-          turnControlCalls.push(input)
-          options?.onSuccess?.(turnControlState)
-        },
-        isPending: false,
-      }) as never,
+      useGenericTurnControl: () =>
+        ({
+          mutate: (
+            input: { sessionId: string; turnId: string },
+            options?: { onSuccess?: (result: { state: string }) => void },
+          ) => {
+            turnControlCalls.push(input)
+            options?.onSuccess?.(turnControlState)
+          },
+          isPending: false,
+        }) as never,
     },
     shellComponents: {
       SessionTranscriptLayout: (props: any) => (
@@ -82,7 +86,9 @@ function makeDependencies(): UnifiedSessionPageDependencies {
           data-timeline-view={props.viewMode ?? 'summary'}
         >
           {(props.entries ?? []).map((entry: any) => (
-            <div key={entry.id} data-timeline-entry={entry.id}>{entry.summary}</div>
+            <div key={entry.id} data-timeline-entry={entry.id}>
+              {entry.summary}
+            </div>
           ))}
         </div>
       ),
@@ -99,9 +105,18 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1', name: 'Test', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            repositories: [],
+          },
+        ]}
+      >
         <MemoryRouter initialEntries={['/sessions/session-1']}>
           <Routes>
             <Route path="/sessions/:sessionId" element={<UnifiedSessionPage dependencies={makeDependencies()} />} />
@@ -125,7 +140,19 @@ describe('UnifiedSessionPage', () => {
 
   it.each([
     ['agent-launch', baseSummary(), 'Agent Session', 'Reviewer'],
-    ['workflow', baseSummary({ source: 'workflow', agentId: null, agentName: null, workflowRunId: 'run-1', sessionName: 'build', contextRefs: { issueNumber: 42 } }), 'Workflow Session', 'Work: build'],
+    [
+      'workflow',
+      baseSummary({
+        source: 'workflow',
+        agentId: null,
+        agentName: null,
+        workflowRunId: 'run-1',
+        sessionName: 'build',
+        contextRefs: { issueNumber: 42 },
+      }),
+      'Workflow Session',
+      'Work: build',
+    ],
   ])('renders source context for %s sessions', (_source, value, contextLabel, detailLabel) => {
     summary = value
     renderPage()
@@ -165,11 +192,19 @@ describe('UnifiedSessionPage', () => {
   ])('keeps %s empty state distinct', (activity, stateKind) => {
     summary = baseSummary({ activity, recoveryAvailable: activity === 'idle' })
     renderPage()
-    expect(screen.getByTestId('transcript')).toHaveAttribute('data-activity-state', stateKind.replace('-no-content', ''))
+    expect(screen.getByTestId('transcript')).toHaveAttribute(
+      'data-activity-state',
+      stateKind.replace('-no-content', ''),
+    )
   })
 
   it('shows failure evidence and resolved model without inventing a terminal state', () => {
-    summary = baseSummary({ activity: 'unknown', failureCategory: 'timeout', failureReason: 'runner timed out', toolErrorCount: 1 })
+    summary = baseSummary({
+      activity: 'unknown',
+      failureCategory: 'timeout',
+      failureReason: 'runner timed out',
+      toolErrorCount: 1,
+    })
     renderPage()
     expect(screen.getByTestId('session-errors-region')).toHaveTextContent('Timed out')
     expect(screen.getByTestId('session-errors-region')).toHaveTextContent('runner timed out')
@@ -181,7 +216,11 @@ describe('UnifiedSessionPage', () => {
   it('passes the stable session and current runtime binding to transcript observation', () => {
     summary = baseSummary({ runtimeSessionId: 'runtime-current' })
     renderPage()
-    expect(transcriptOptions.some((value) => value.sessionId === 'session-1' && value.runtimeSessionId === 'runtime-current')).toBe(true)
+    expect(
+      transcriptOptions.some(
+        (value) => value.sessionId === 'session-1' && value.runtimeSessionId === 'runtime-current',
+      ),
+    ).toBe(true)
   })
 })
 
@@ -299,7 +338,7 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     expect(alert).toHaveTextContent('Stop this Turn?')
     expect(alert).toHaveTextContent(/may be unknown/i)
     act(() => {
-    fireEvent.click(screen.getByTestId('session-stop-alert-confirm'))
+      fireEvent.click(screen.getByTestId('session-stop-alert-confirm'))
     })
     expect(turnControlCalls).toEqual([{ sessionId: 'session-1', turnId: 'turn-running' }])
     expect(screen.getByTestId('session-stop-result')).toHaveTextContent(/stop-requested/i)
@@ -324,19 +363,21 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
 
   it('renders terminal turn results and persistent recovery boundaries in the timeline', () => {
     summary = baseSummary({
-      turns: [{
-        id: 'turn-1',
-        sequence: 1,
-        inputIds: ['input-1'],
-        status: 'failed',
-        result: {
-          message: 'The launch failed',
-          output: 'diagnostic output',
-          failureCategory: 'timeout',
-          failureReason: 'runner timed out',
-          exitCode: 1,
+      turns: [
+        {
+          id: 'turn-1',
+          sequence: 1,
+          inputIds: ['input-1'],
+          status: 'failed',
+          result: {
+            message: 'The launch failed',
+            output: 'diagnostic output',
+            failureCategory: 'timeout',
+            failureReason: 'runner timed out',
+            exitCode: 1,
+          },
         },
-      }],
+      ],
       recoveryHistory: [
         { type: 'reset', recordedAt: '2026-07-31T10:02:00.000Z', reason: 'reset', runtimeSessionId: 'runtime-2' },
         { type: 'compaction', recordedAt: '2026-07-31T10:03:00.000Z', strategy: 'summary' },
