@@ -135,7 +135,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
             Variant: definition.Variant,
-            ReasoningEffort: definition.ReasoningEffort,
             Skills: definition.Skills,
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber,
@@ -166,8 +165,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         CancellationToken ct = default,
-        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
-        bool definitionCreatedByLaunch = false) =>
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null) =>
         LaunchIdempotentCoreAsync(
             agent,
             prompt,
@@ -181,8 +179,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ct: ct,
             definitionOverride: null,
             skipLaunchability: false,
-            attachmentResults: attachmentResults,
-            definitionCreatedByLaunch: definitionCreatedByLaunch);
+            attachmentResults: attachmentResults);
 
     private async Task<AgentLaunchResult> LaunchIdempotentCoreAsync(
         AgentInfo agent,
@@ -206,8 +203,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? pinnedRunnerId = null,
         AgentExecutionDefinition? definitionOverride = null,
         bool skipLaunchability = false,
-        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
-        bool definitionCreatedByLaunch = false)
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(context);
@@ -256,10 +252,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         var hasAttachments = attachments is { Count: > 0 };
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
-        var hasText = string.Equals(request.Origin, "direct-api", StringComparison.Ordinal)
-            ? !string.IsNullOrEmpty(prompt)
-            : !string.IsNullOrWhiteSpace(trimmedPrompt);
-        if (!hasText && !hasAttachments)
+        if (string.IsNullOrWhiteSpace(trimmedPrompt) && !hasAttachments)
         {
             throw new ArgumentException(
                 "Prompt must not be empty or whitespace unless at least one attachment is accepted.",
@@ -273,7 +266,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var resolvedRuntime = definition.Runtime;
         var resolvedModel = definition.Model;
         var resolvedVariant = definition.Variant;
-        var resolvedReasoningEffort = definition.ReasoningEffort;
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
@@ -292,7 +284,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Model: resolvedModel,
             Variant: resolvedVariant,
             Runtime: resolvedRuntime,
-            ReasoningEffort: resolvedReasoningEffort,
             Prompt: request.ExactPromptFingerprint ? prompt! : trimmedPrompt,
             WorkspaceName: context.WorkspaceName,
             WorkspacePath: context.WorkspacePath,
@@ -331,8 +322,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentLinkEdgeId: parentLinkEdgeId,
             SpawnRequestFingerprint: spawnRequestFingerprint,
             WorkspaceRepositories: request.WorkspaceRepositories,
-            AttachmentResults: attachmentResults,
-            DefinitionCreatedByLaunch: definitionCreatedByLaunch));
+            AttachmentResults: attachmentResults));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
@@ -446,11 +436,10 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         ArgumentNullException.ThrowIfNull(origin);
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
 
-        await EnsureLaunchableAsync(agent, ct);
-
         var context = new AgentLaunchContext(agent.ProjectId);
         var key = $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
-        var definition = ResolveExecutionDefinition(agent);
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig);
+        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
@@ -463,10 +452,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentName: agent.Name,
             AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
             AgentConfigJson: agentConfigJson,
-            Model: definition.Model,
-            Variant: definition.Variant,
-            Runtime: definition.Runtime,
-            ReasoningEffort: definition.ReasoningEffort,
+            Model: resolvedModel,
+            Variant: resolvedVariant,
+            Runtime: resolvedRuntime,
             Prompt: trimmedPrompt,
             WorkspaceName: workspaceName,
             WorkspacePath: null,
@@ -612,8 +600,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Prompt: trimmedPrompt,
             Runtime: definition.Runtime,
             Skills: definition.Skills,
-            WorkflowRunId: executionContext.WorkflowRunId,
-            ReasoningEffort: definition.ReasoningEffort);
+            WorkflowRunId: executionContext.WorkflowRunId);
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         var canonical = await jobGrain.EnsurePreparedAsync(resolvedPlan);
@@ -713,7 +700,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
             Variant: definition.Variant,
-            ReasoningEffort: definition.ReasoningEffort,
             Skills: definition.Skills,
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber,
@@ -744,7 +730,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
     private async Task EnsureLaunchableAsync(AgentInfo agent, CancellationToken ct)
     {
-        await _readiness.EnsureLaunchableAsync(agent.ProjectId, agent, ct);
+        var readiness = await _readiness.GetAsync(agent.ProjectId, agent, ct);
+        if (readiness.Conclusion == AgentReadinessConclusions.NeedsSetup)
+            throw new AgentReadinessException(readiness);
     }
 
     private async Task<AgentExecutionDefinition> ResolveDefinitionAsync(AgentInfo agent)
@@ -847,15 +835,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return (model, variant);
     }
 
-    internal static string? ResolveReasoningEffort(JsonElement? agentConfig)
-    {
-        if (agentConfig is not { ValueKind: JsonValueKind.Object } config)
-            return null;
-
-        var effort = TryReadString(config, "reasoningEffort");
-        return ReasoningEfforts.Contains(effort) ? effort : null;
-    }
-
     /// <summary>
     /// Resolves the execution backend as
     /// <c>agentConfig.runtime ?? "opencode"</c>. Out-of-set values fall
@@ -902,8 +881,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Model: model,
             Variant: variant,
             Skills: skills,
-            AllowedSubagents: null,
-            ReasoningEffort: ResolveReasoningEffort(agent.AgentConfig));
+            AllowedSubagents: null);
     }
 
     private static string? TryReadString(JsonElement obj, string propertyName)

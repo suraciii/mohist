@@ -130,3 +130,35 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   assembly also passed. The implementation is committed on the workflow
   branch; the pre-existing `SpecUnitMigrationLedger.json` worktree change
   remains intentionally unstaged.
+
+## T-002 progress notes
+
+- The task-first route is registered beside the Agent definition route and
+  keeps the definition-first launcher as the only execution pipeline. It
+  pre-mints Agent, Session, Input, and Turn identities from the Project/key
+  ownership identity and adopts an existing active Agent at that deterministic
+  id after a process crash.
+- `AgentTaskDefinitionFactory.Build` is the pure derivation boundary. It
+  materializes runtime/model/variant, includes reserved built-in names and all
+  active/archived Agent names in case-insensitive disambiguation, and uses
+  Unicode-rune truncation for prompt-derived names. `CreateAsync` supports
+  excluding the deterministic adopted Agent from its occupied-name probe.
+- Task replay must return response metadata from the first accepted attempt,
+  not revalidate mutable attachments or recompute workspace defaults. The
+  coordinator plan/result and `AgentLaunchResult` therefore carry append-only
+  workspace/origin/target and full attachment verdict fields. No-hint
+  coordinator fingerprints remain byte-compatible because the model/variant
+  block is appended only when a hint is non-null.
+- Implicit Web/CLI workspace materialization is intentionally after all
+  determinable task validation and Agent definition adoption. The route still
+  resolves the candidate workspace name before replay so the existing
+  fingerprint contract is preserved, but a rejected task does not create a
+  workspace as a side effect.
+- Focused verification: full Server UnitTests passed (2,700/2,700); the new
+  `AgentTaskLaunchRoutesSpecs` passed 6/6; existing Agent API specs passed
+  138/138, including the 8 launch idempotency cases. Server and SpecTests
+  projects build cleanly. The architecture migration ledger was refreshed
+  for the current Server test-source tree (859 files, digest
+  `e0c4b9ac003ca8b91111d7c7197aff3962912da972fabf9130833cb57b9131e0`) and
+  the stale FailIfMarker closure evidence; the architecture suite then passed
+  68/68.

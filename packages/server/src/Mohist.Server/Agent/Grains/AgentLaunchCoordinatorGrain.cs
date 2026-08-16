@@ -1,6 +1,6 @@
+using System.Text.Json;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -17,7 +17,7 @@ namespace Mohist.Server.Agent.Grains;
 /// across the AgentJob and AgentSession participants. It does not
 /// mirror Job status, Session activity, transcript, or Runner state.
 /// </summary>
-public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinatorGrain
+public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinatorGrain
 {
     internal const string RecoveryReminderName = "agent-launch-coordinator-recovery";
 
@@ -78,7 +78,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             throw new ArgumentException("AgentId is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.AgentName))
             throw new ArgumentException("AgentName is required.", nameof(command));
-        if (string.IsNullOrEmpty(command.Prompt)
+        if (string.IsNullOrWhiteSpace(command.Prompt)
             && (command.Attachments is null || command.Attachments.Count == 0))
         {
             throw new ArgumentException(
@@ -131,7 +131,6 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 Model: command.Model,
                 Variant: command.Variant,
                 Runtime: command.Runtime,
-                ReasoningEffort: command.ReasoningEffort,
                 Prompt: command.Prompt,
                 WorkspaceName: command.WorkspaceName,
                 WorkspacePath: command.WorkspacePath,
@@ -159,8 +158,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 WorkspaceRepositories: command.WorkspaceRepositories,
                 Origin: command.Origin ?? command.Request.Origin,
                 TargetId: command.TargetId ?? command.Request.TargetId,
-                AttachmentResults: command.AttachmentResults,
-                DefinitionCreatedByLaunch: command.DefinitionCreatedByLaunch);
+                AttachmentResults: command.AttachmentResults);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -343,7 +341,6 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             AgentInstructions: plan.AgentInstructions,
             AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
             Variant: plan.Variant,
-            ReasoningEffort: plan.ReasoningEffort,
             IssueNumber: plan.IssueNumber,
             EpicNumber: plan.EpicNumber,
             WorkflowRunId: null,
@@ -394,10 +391,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
     {
         var abortPlan = plan with
         {
-            // A task-first rejection is not recorded as terminal until its
-            // created definition has been archived. The pending payload
-            // keeps the reason available to reminder recovery meanwhile.
-            RejectionReason = plan.DefinitionCreatedByLaunch ? null : reason,
+            RejectionReason = reason,
             PostPlanRejected = postPlan,
             Pending = new AgentLaunchCoordinatorPending(
                 Guid.NewGuid().ToString("N"),
@@ -578,8 +572,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 plan.Model,
                 plan.Variant,
                 [],
-                plan.AllowedSubagents,
-                plan.ReasoningEffort),
+                plan.AllowedSubagents),
             AgentSessionStartup: plan.AgentSessionStartup,
             LaunchVisibility: plan.ParentSessionId is null
                 ? AgentLaunchVisibility.Visible
@@ -769,9 +762,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
     private async Task BeginAbortLaunchAsync(AgentLaunchCoordinatorPlan plan)
     {
         var current = plan;
-        var reason = plan.RejectionReason
-            ?? plan.Pending?.Payload
-            ?? "spawn_rejected";
+        var reason = plan.RejectionReason ?? "spawn_rejected";
         var fence = _grains.GetGrain<ISessionTreeMutationFenceGrain>(plan.ProjectId);
 
         if (!current.AbortFenceAcknowledged)
@@ -832,23 +823,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             await SaveStateAsync();
         }
 
-        if (current.DefinitionCreatedByLaunch)
-        {
-            // Archiving is part of the durable abort convergence. If the
-            // process dies after this call but before the completed plan is
-            // persisted, the reminder repeats the idempotent archive before
-            // it records the terminal rejection as complete.
-            await _grains
-                .GetGrain<IAgentGrain>(GrainKey.Agent(current.ProjectId, current.AgentId))
-                .ArchiveAsync();
-            await _participantProbe.OnArchiveDefinitionAsync(
-                current.AgentId,
-                current.Pending?.CommandId ?? string.Empty);
-        }
-
         _state.State.Plan = current with
         {
-            RejectionReason = reason,
             Pending = null,
             Completed = true,
         };
@@ -898,8 +874,55 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
         await UnregisterReminderAsync();
     }
 
+    private async Task SaveStateAsync()
+    {
+        await _state.WriteStateAsync();
+    }
+
+    private async Task EnsureRecoveryReminderAsync()
+    {
+        await this.RegisterOrUpdateReminder(
+            RecoveryReminderName,
+            RecoveryReminderDue,
+            RecoveryReminderPeriod);
+    }
+
+    private static void ThrowRejection(AgentLaunchCoordinatorPlan plan)
+    {
+        if (plan.PostPlanRejected)
+            throw new AgentSpawnPostPlanRejectedException(plan.RejectionReason!);
+        throw new AgentSpawnPreplanRejectedException(plan.RejectionReason!);
+    }
+
+    private async Task UnregisterReminderAsync()
+    {
+        try
+        {
+            var reminder = await this.GetReminder(RecoveryReminderName);
+            if (reminder is not null)
+                await this.UnregisterReminder(reminder);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex,
+                "AgentLaunchCoordinatorGrain {Key} could not unregister orphan reminder",
+                PrimaryKeyString());
+        }
+    }
+
+    private string PrimaryKeyString() => this.GetPrimaryKeyString();
+
+    private static JsonElement? DeserializeAgentConfig(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? null
+            : JsonDocument.Parse(json).RootElement.Clone();
 }
 
+[GenerateSerializer]
+public sealed class AgentLaunchCoordinatorState
+{
+    [Id(0)] public AgentLaunchCoordinatorPlan? Plan { get; set; }
+}
 
 /// <summary>
 /// Public envelope the coordinator route forwards. Carries the
@@ -983,15 +1006,9 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(36)] string? Origin = null,
     [property: Id(37)] string? TargetId = null,
-    [property: Id(38)] string? ReasoningEffort = null,
     /// <summary>
     /// Response attachment verdicts captured before the coordinator plan
     /// was committed. This is append-only so older envelopes deserialize
     /// with no response metadata.
     /// </summary>
-    [property: Id(39)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
-    /// <summary>
-    /// Marks a task-first envelope whose definition was created before the
-    /// canonical launch plan. Append-only Orleans field id.
-    /// </summary>
-    [property: Id(40)] bool DefinitionCreatedByLaunch = false);
+    [property: Id(38)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);

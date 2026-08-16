@@ -103,8 +103,7 @@ public interface IAgentLauncher
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         CancellationToken ct = default,
-        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
-        bool definitionCreatedByLaunch = false);
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null);
 
     Task<AgentLaunchResult> LaunchSubagentAsync(
         string projectId,

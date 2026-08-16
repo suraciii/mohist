@@ -127,22 +127,13 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(49)] string? Origin = null,
     [property: Id(50)] string? TargetId = null,
-    [property: Id(51)] string? ReasoningEffort = null,
     /// <summary>
     /// The complete attachment verdict set returned by the first request.
     /// Persisting both accepted and rejected files makes a replay project
     /// the original response instead of re-validating mutable attachment
     /// state.
     /// </summary>
-    [property: Id(52)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
-    /// <summary>
-    /// True only for a task-first launch whose Agent definition was created
-    /// by the route before the canonical launch plan. The coordinator uses
-    /// this append-only marker to archive that definition when the launch
-    /// reaches a terminal rejection. Missing on older plans, and therefore
-    /// false for every definition-first launch.
-    /// </summary>
-    [property: Id(53)] bool DefinitionCreatedByLaunch = false);
+    [property: Id(51)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -213,10 +204,7 @@ public sealed record AgentLaunchCoordinatorRequest(
     /// the field is append-only so older coordinator plans deserialize
     /// unchanged.
     /// </summary>
-    [property: Id(16)] string? Variant = null,
-    /// <summary>Task-first collaborator and concurrency hints.</summary>
-    [property: Id(17)] IReadOnlyList<string>? AllowedSubagentAgentIds = null,
-    [property: Id(18)] int? MaxConcurrentRuns = null);
+    [property: Id(16)] string? Variant = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -358,40 +346,24 @@ public static class AgentLaunchCoordinatorCodec
         // hint is present, append a length-prefixed block so added, changed,
         // and removed values are all visible to replay comparison without
         // making older in-flight no-hint plans conflict after deployment.
-        if (request.Model is not null
-            || request.Variant is not null
-            || request.AllowedSubagentAgentIds is not null
-            || request.MaxConcurrentRuns is not null)
+        if (request.Model is not null || request.Variant is not null)
         {
-            canonical += '\u001f' + EncodeHintBlock(
-                request.Model,
-                request.Variant,
-                request.AllowedSubagentAgentIds,
-                request.MaxConcurrentRuns);
+            canonical += '\u001f' + EncodeHintBlock(request.Model, request.Variant);
         }
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static string EncodeHintBlock(
-        string? model,
-        string? variant,
-        IReadOnlyList<string>? allowedSubagentAgentIds,
-        int? maxConcurrentRuns)
-    {
-        var collaborators = allowedSubagentAgentIds is null
-            ? null
-            : string.Join('\u001e', allowedSubagentAgentIds.Select(id => id.Trim()));
-        return string.Concat(
-            EncodePart(model), ":",
-            EncodePart(variant), ":",
-            EncodePart(collaborators), ":",
-            maxConcurrentRuns?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-");
-    }
-
-    private static string EncodePart(string? value) =>
-        value?.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + (value ?? string.Empty);
+    private static string EncodeHintBlock(string? model, string? variant) =>
+        string.Concat(
+            model?.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-",
+            ":",
+            model ?? string.Empty,
+            ":",
+            variant?.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-",
+            ":",
+            variant ?? string.Empty);
 
     private static string Normalize(string idempotencyKey)
     {
