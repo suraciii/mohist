@@ -844,3 +844,26 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   4,724 Web tests, and 1,639 Runner tests. The first fast run encountered
   the known concurrent Runner cleanup timing race; the isolated Runner lane
   and full rerun both passed. Format and file-size checks are clean.
+
+## T-006 completion (current workflow)
+
+- Audited the existing fenced direct stop implementation against the binding
+  unresolved-stop requirement. Empty-body validation runs before canonical
+  Turn lookup and mapping admission; terminal Turns are durable no-ops;
+  queued follow-up Turns cancel locally; and queued launch Turns continue to
+  the canonical AgentJob cancellation branch without Runner delivery.
+- Verified that running stops persist the caller-bound mapping and its frozen
+  Turn revision, binding epoch/context generation, delivery binding, deadline,
+  and operation ID before the first Runner delivery. Matching pending retries
+  use the frozen target and canonical stop claim; unknown or unavailable
+  delivery remains pending, while the filtered pending-Turn index blocks other
+  keys and callers with `stop_outcome_unknown` without persisting the loser.
+- Confirmed response privacy: direct stop responses are projection-backed
+  public Turn observations only and do not expose the frozen target, binding,
+  deadline, owner, lease, fence, or operation ID. Caller B creates a separate
+  mapping after caller A's pending stop resolves and is classified against the
+  Turn's current state.
+- Focused `DirectApiStopSpecs` passed all 5 tests. `npm run test:fast` passed
+  all seven lanes: typecheck, 2,676 Server unit tests, 69 architecture tests,
+  178 workflow tests, 1,848 CLI tests, 4,724 Web tests, and 1,639 Runner
+  tests. No source correction was necessary on this clean workflow branch.
