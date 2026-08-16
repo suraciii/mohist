@@ -49,16 +49,11 @@ export function setLogLevel(level: string) {
 }
 
 export type OpencodeModelVariants = Record<string, string[]>
-export type OpencodeModelReasoningEfforts = Record<string, string[]>
-
-export interface RuntimeModelMetadata {
-  models: string[]
-  modelVariants?: OpencodeModelVariants
-  modelReasoningEfforts?: OpencodeModelReasoningEfforts
-}
 
 export function getOpencodeModels(projectId?: string | null) {
-  return request<RuntimeModelMetadata>(projectApiPath(projectId, '/opencode/models'))
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(
+    projectApiPath(projectId, '/opencode/models'),
+  )
 }
 
 export function getModels(
@@ -66,7 +61,9 @@ export function getModels(
   runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME,
 ) {
   const query = `?runtime=${encodeURIComponent(runtime)}`
-  return request<RuntimeModelMetadata>(projectApiPath(projectId, `/opencode/models${query}`))
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(
+    projectApiPath(projectId, `/opencode/models${query}`),
+  )
 }
 
 export function getOpencodeModelVariantsFor(

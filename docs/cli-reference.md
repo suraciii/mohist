@@ -360,6 +360,7 @@ addressable, continuing conversation. It contains messages, context, and usage.
 The CLI must not use Session state as the AgentJob result. It must not interpret
 Job completion as a closed conversation or a delivered user goal.
 
+<<<<<<< HEAD
 - `mo agent start --prompt <task>` is the default task-first path when you
   have work but do not need a preconfigured Agent. It creates the Agent and
   launches its first AgentJob, AgentSession, SessionInput, and AgentTurn in one
@@ -387,6 +388,18 @@ Job completion as a closed conversation or a delivered user goal.
 - `mo agent create/edit` remains the deliberate definition-first configuration
   path. It configures an Agent with typed `--runtime`, `--model`,
   `--variant`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
+=======
+- `mo agent launch <agent>` creates an AgentJob, AgentSession, first
+  SessionInput, and first AgentTurn. It returns stable Agent, Job, Session,
+  Input, Turn, Workspace, and target identities, plus the canonical Session URL,
+  transcript URL, and composite observation URL. `--workspace <name>` binds the
+  new Session to an existing Workspace. Without it, the command binds the
+  current Project default Workspace. See [Workspace](#workspace). The command
+  accepts `--idempotency-key`. When omitted, it prints a generated key before
+  the request. After a lost response, the caller must retry with that key.
+- `mo agent create/edit` configures an Agent with typed `--runtime`, `--model`,
+  `--variant`, `--reasoning-effort`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
+>>>>>>> f33dd4c57 (T-008: add catalog-driven effort Web surfaces and docs)
   supplies the avatar. Mutually exclusive `--instructions` or
   `--instructions-file` supplies Instructions. `--runtime` accepts only
   `opencode` or `pi`. `--skills` must contain at least one nonempty Skill name.
@@ -395,7 +408,7 @@ Job completion as a closed conversation or a delivered user goal.
   does not need to construct Agent config JSON. The `--agent-config`
   passthrough is retired, and the old entry point returns migration guidance.
   `edit` clears fields with `--clear-runtime`, `--clear-model`,
-  `--clear-variant`, `--clear-avatar`, `--clear-skills`, and
+  `--clear-variant`, `--clear-reasoning-effort`, `--clear-avatar`, `--clear-skills`, and
   `--clear-max-concurrent-runs`. Set and clear options are mutually exclusive.
   `mo agent view` shows unified Readiness, configuration gaps, and current
   execution availability. The concurrency limit constrains launch and

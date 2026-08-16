@@ -363,3 +363,32 @@ Plan skeleton for next run (est. half a day):
   (3942), and Runner focused CI passed (typecheck, test-boundary check, and
   8 Pi projector evidence tests). No default effort is synthesized in the
   applied or absent evidence paths. `git diff --check` passed.
+
+## T-008 (Web, docs, and final verification)
+
+- Added a separate AgentProfileEditor Reasoning Effort selector. Its values
+  come only from the selected runtime/model metadata `reasoningEfforts` map;
+  true variants remain owned by ModelSelect/model-variants. The selector is
+  omitted when the selected catalog has no effort values or explicitly reports
+  `supportsReasoningEffort=false`; save-time validation also drops any stale
+  effort state in those cases. Runtime/model changes clear effort while true
+  variant changes preserve it.
+- Extended `readAgentModelAndVariant` and its writer with an independent
+  `reasoningEffort` field. Agent list rows show model, effort, and true variant
+  separately; Agent detail shows a stored effort row and names Reasoning Effort
+  in the future-Jobs edit note. Existing readiness gap rendering is covered for
+  `effort-without-model` and execution-configuration failures with actionable
+  server-provided guidance.
+- Updated Pi/OpenCode runtime design contracts, Action docs, Agent/Web UI docs,
+  and CLI reference. Pi effort maps privately to native thinking levels; Pi
+  variant no longer does; OpenCode explicitly rejects effort; saved Pi
+  thinking-level variants require re-entry as Reasoning Effort with no
+  migration.
+- Verification: Web CI passed (377 files, 4731 tests), Web typecheck passed,
+  docs:check passed, Server UnitTests passed (2722), Server SpecTests passed
+  (3942), Runner CI passed (154 files, 1666 tests), Runner source and test
+  typechecks passed, and `npm run test:fast` passed every lane except the
+  pre-existing ArchTests migration-ledger digest mismatch for
+  `current-fail-if-marker-review`. `npm run verify` reached the file-size
+  ratchet and stopped on eight over-limit files grown by earlier slices before
+  build/test; no T-008 file is in that list. `git diff --check` passed.
