@@ -98,3 +98,9 @@ All three must-fix findings disposed of by fixing. No won't-fix dispositions.
 - Pruned `widgets/coder-session/index.ts` to activity events, usage snapshot, followup composer, recovery actions, context health bar, and usage snapshot label exports.
 - Deleted `tests/integrate-stage.spec.tsx`; changed the context-health consistency spec to compare the live `ContextHealthIndicator` with `CompactSessionCard`, removing its `ActiveSessionCard` dependency.
 - The requested word-boundary sweep for the removed presentation tokens is empty. Baseline survivor tests passed before deletion; post-change focused tests (130), typecheck, FSD/test-boundary checks, and the full Vitest suite (365 files, 4,573 tests) all pass.
+
+### T-002 implementation (2026-08-16)
+- Deleted the issue-scoped session list/followup/stop hooks and tests, plus the orphaned generic metadata helper; removed their client functions and orphaned model types while retaining unified, workflow-run, recovery, and generic operation clients.
+- Pruned the generic summary/transcript DTO, clients, query options, hooks, tests, and public exports in `entities/agent`; reduced the `@x/agent-session` boundary to the four types still consumed by `entities/agent`.
+- Inlined activity normalization into `deriveSessionStatusKind`, retained `canFollowupSession`, removed the recovery/activity helper tests, and renamed the unified data source's local stop callback to `stopCurrentTurn`.
+- Baseline focused coverage passed with 102 tests before the refactor. After cleanup, focused coverage passed with 85 tests; typecheck, FSD boundaries, test boundaries, and the full Vitest suite passed (363 files, 4,542 tests). The required word-boundary sweep is empty and all deleted files are absent.
