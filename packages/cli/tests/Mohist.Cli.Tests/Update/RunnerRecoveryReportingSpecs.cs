@@ -33,6 +33,26 @@ public sealed class RunnerRecoveryReportingSpecs
     }
 
     [Fact]
+    public async Task WaitForRecovery_DoesNotOutliveBoundWhenHttpIgnoresCancellation()
+    {
+        var time = new FakeTimeProvider(Start);
+        var handler = new HangingRecoveryStatusHandler();
+        var verifier = BuildVerifier(handler, time, timeout: TimeSpan.FromSeconds(2));
+        var interruption = Interrupt(new RunnerUpdateWorkIdentity(
+            "agent-job", "job-1", "job-work-1", null, "agent-job"));
+
+        var wait = verifier.WaitForRecoveryAsync(interruption);
+        await handler.RequestStarted.Task;
+        time.Advance(TimeSpan.FromSeconds(2));
+
+        var report = await wait.WaitAsync(TimeSpan.FromSeconds(1));
+        handler.Complete();
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.Equal("unresolved", Assert.Single(report.Works).Status);
+    }
+
+    [Fact]
     public async Task WaitForRecovery_ListsMixedRecoveredAndUnresolvedWithIdentityAndState()
     {
         var time = new FakeTimeProvider(Start);
@@ -182,4 +202,26 @@ public sealed class RunnerRecoveryReportingSpecs
     }
 
     private static IReadOnlyList<string> Statuses(params string[] statuses) => statuses;
+
+    private sealed class HangingRecoveryStatusHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource<HttpResponseMessage> _response =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> RequestStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Complete() => _response.TrySetResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{}"),
+        });
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestStarted.TrySetResult(true);
+            return _response.Task;
+        }
+    }
 }

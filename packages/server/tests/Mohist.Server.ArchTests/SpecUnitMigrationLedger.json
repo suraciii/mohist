@@ -2428,6 +2428,7 @@
           "Mohist.Server.TestSupport.NoopDeadLetterStore",
           "Mohist.Server.TestSupport.NullActionCatalogSource",
           "Mohist.Server.TestSupport.RecordingEventStore",
+          "Mohist.Server.TestSupport.RunnerUpdateOperationWriteFailureProbe",
           "Mohist.Server.TestSupport.TestLifecycle",
           "Mohist.Server.TestSupport.TestServices",
           "Mohist.Server.TestSupport.TestTime",

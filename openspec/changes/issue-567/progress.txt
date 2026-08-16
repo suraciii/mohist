@@ -595,3 +595,28 @@ Channel decision (grounded in live source):
   the unrelated pre-existing `SpecUnitMigrationLedgerRules` /
   `FailIfMarkerSpecs` digest drift (67/68); issue-567 visibility paths did not
   modify migration-ledger metadata.
+
+## T-008 Completion Hardening
+
+- Recovery-status polling now races the complete HTTP response parse against
+  the remaining injectable deadline, so a fake or transport handler that ignores
+  cancellation cannot make the CLI wait beyond the configured recovery bound.
+  Late poll tasks are observed and their response bodies are disposed; status
+  payloads for a different operation or Runner are ignored and leave the named
+  work unresolved.
+- Added deterministic CLI coverage for a cancellation-ignoring hanging HTTP
+  handler. The CLI suite passes 1,856 tests.
+- Split the already-over-limit AgentSession transition and grain files into
+  partial files without changing behavior; format and file-size ratchets pass.
+  Server build passes with zero warnings/errors.
+- The full Server suite run was 3,945/3,946; its only failure was the known
+  unrelated timing failure
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`.
+- Refreshed the architecture migration ledger's derived FailIfMarker closure
+  evidence for the existing `RunnerUpdateOperationWriteFailureProbe` helper;
+  ArchTests now pass 68/68 without disabling the rule.
+- Reworked the bounded hanging-receipt Runner test to use Vitest fake timers;
+  Runner test-boundary checks now pass and the Runner suite remains 1,657/1,657.
+- Final `npm run verify` passed end to end: build 0 warnings/errors, Workflow
+  178, CLI 1,856, Server Unit 2,667, Server Spec 3,946, Arch 68, Web 4,727,
+  Runner 1,657, and Slack 70.

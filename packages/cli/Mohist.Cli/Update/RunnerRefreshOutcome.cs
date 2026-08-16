@@ -621,43 +621,18 @@ internal sealed class RunnerRefreshVerifier
     {
         using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         using var timeoutTimer = StartTimeoutTimer(requestCts, timeout);
+        var readTask = ReadRecoveryStatusAsync(runnerId, operationId, requestCts.Token);
         try
         {
-            using var response = await _http.GetAsync(
-                $"/api/runner/{Uri.EscapeDataString(runnerId)}/update-operation/{Uri.EscapeDataString(operationId)}/recovery-status",
-                requestCts.Token);
-            if (!response.IsSuccessStatusCode)
-                return null;
-
-            await using var stream = await response.Content.ReadAsStreamAsync(requestCts.Token);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: requestCts.Token);
-            var data = document.RootElement.TryGetProperty("data", out var envelopeData)
-                ? envelopeData
-                : document.RootElement;
-            if (data.ValueKind != JsonValueKind.Object
-                || !data.TryGetProperty("affectedWorks", out var works)
-                || works.ValueKind != JsonValueKind.Array)
-                return null;
-
-            var parsed = new List<RunnerRecoveryWorkOutcome>();
-            foreach (var item in works.EnumerateArray())
-            {
-                var identity = new RunnerUpdateWorkIdentity(
-                    ReadString(item, "ownerKind") ?? "unknown",
-                    ReadString(item, "ownerId") ?? string.Empty,
-                    ReadString(item, "workId") ?? string.Empty,
-                    ReadString(item, "taskRunId"),
-                    ReadString(item, "workType") ?? string.Empty);
-                var status = ReadString(item, "status") ?? "unresolved";
-                parsed.Add(new RunnerRecoveryWorkOutcome(
-                    identity,
-                    status is "receipt-acked" or "replacement-settled" ? "recovered" : "unresolved",
-                    status));
-            }
-            return new RunnerRecoveryReport(parsed);
+            // WaitAsync keeps the CLI deadline authoritative even when a fake or
+            // transport handler does not observe cancellation promptly. The late
+            // task is observed below so a delayed response cannot become an
+            // unobserved failure or leak its response body.
+            return await readTask.WaitAsync(requestCts.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            _ = ObserveRecoveryStatusAsync(readTask);
             return null;
         }
         catch (HttpRequestException)
@@ -667,6 +642,59 @@ internal sealed class RunnerRefreshVerifier
         catch (JsonException)
         {
             return null;
+        }
+    }
+
+    private async Task<RunnerRecoveryReport?> ReadRecoveryStatusAsync(
+        string runnerId,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _http.GetAsync(
+            $"/api/runner/{Uri.EscapeDataString(runnerId)}/update-operation/{Uri.EscapeDataString(operationId)}/recovery-status",
+            cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var data = document.RootElement.TryGetProperty("data", out var envelopeData)
+            ? envelopeData
+            : document.RootElement;
+        if (data.ValueKind != JsonValueKind.Object
+            || !string.Equals(ReadString(data, "operationId"), operationId, StringComparison.Ordinal)
+            || !string.Equals(ReadString(data, "runnerId"), runnerId, StringComparison.Ordinal)
+            || !data.TryGetProperty("affectedWorks", out var works)
+            || works.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var parsed = new List<RunnerRecoveryWorkOutcome>();
+        foreach (var item in works.EnumerateArray())
+        {
+            var identity = new RunnerUpdateWorkIdentity(
+                ReadString(item, "ownerKind") ?? "unknown",
+                ReadString(item, "ownerId") ?? string.Empty,
+                ReadString(item, "workId") ?? string.Empty,
+                ReadString(item, "taskRunId"),
+                ReadString(item, "workType") ?? string.Empty);
+            var status = ReadString(item, "status") ?? "unresolved";
+            parsed.Add(new RunnerRecoveryWorkOutcome(
+                identity,
+                status is "receipt-acked" or "replacement-settled" ? "recovered" : "unresolved",
+                status));
+        }
+        return new RunnerRecoveryReport(parsed);
+    }
+
+    private static async Task ObserveRecoveryStatusAsync(Task<RunnerRecoveryReport?> readTask)
+    {
+        try
+        {
+            await readTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded caller has already classified this poll as unresolved.
         }
     }
 
