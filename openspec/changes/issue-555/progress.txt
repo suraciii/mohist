@@ -868,6 +868,8 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   178 workflow tests, 1,848 CLI tests, 4,724 Web tests, and 1,639 Runner
   tests. No source correction was necessary on this clean workflow branch.
 
+
+
 ## T-007 completion audit (current workflow)
 
 - Re-read `public-session-event-stream/spec.md` and audited the existing
@@ -892,3 +894,16 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724
   Web tests, and 1,639 Runner tests. No source correction was necessary on
   this clean workflow branch.
+
+## T-008 final verification (current workflow)
+
+- Confirmed the shipped documentation slice is present on the required run
+  branch: both design documents use `status: shipped`, the user API guide
+  documents all seven routes and the direct authentication, idempotency,
+  projection, five-state, lag, and cursor contracts, the auth guide documents
+  persisted Project grants and grant-before-lookup ordering, and README lists
+  the External Agent API as available.
+- `npm run docs:check` passed for 92 active Markdown files.
+- `npm run verify` passed: docs, file-size and format checks, solution and
+  workspace builds, 3,977 Server SpecTests, 2,676 Server unit tests, 1,848
+  CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70 Slack tests.
