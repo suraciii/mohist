@@ -446,3 +446,17 @@ Plan skeleton for next run (est. half a day):
 - Verification: Runner CI passed (154 files, 1666 tests), Web CI passed
   (377 files, 4732 tests), Server UnitTests passed (2722 tests), and Server
   SpecTests passed (3942 tests). `git diff --check` passed.
+
+## T-005 Completion Verification (current run)
+
+- Re-ran the Server UnitTests after reviewing the resolver against the full
+  `runtime-reasoning-capability` decision table. All 2722 tests passed,
+  including supported, pending, unavailable, explicit unsupported and
+  incompatible dispositions, legacy catalog handling, deterministic runner
+  selection, tuple-preserving rejection evidence, and the unset-effort
+  exemption.
+- Confirmed the resolver remains a static, read-only API over the frozen tuple
+  and catalog/readiness snapshots. It has no owner-grain, claim, or runtime
+  execution dependency; catalog inputs are only enumerated and read.
+- `git diff --check` passed. The Server build emitted only the existing
+  preview-.NET and frontend bundler warnings.
