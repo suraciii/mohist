@@ -54,3 +54,55 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   scenarios; no stale references to renamed scenario slugs.
 - Observations O-1..O-6 require no action per the task instructions.
 - self-review.md untouched.
+
+## T-001 progress notes
+
+### Codebase patterns (verified)
+- Domain arch rules (Mohist.Server.ArchTests/ArchitectureRules.cs): Agent
+  domain may NOT reference Project domain (only Agent→Runner/Sessions allowed).
+  Shared execution-config types therefore live in `Mohist.Server.Infrastructure`
+  (ExecutionConfigHint/ResolvedExecutionConfig/ExecutionConfigResolver/ExecutionConfigJson)
+  — same shared-kernel precedent as AgentConfigSchema/AgentExecutionSnapshot.
+- The scoped default reader lives in `Infrastructure/Data/Project/`
+  (DB-backed, no IProjectGrain call from Agent domain); DI via IScopedService
+  convention scan, no manual registration needed.
+- EF migrations: repo does NOT use raw dotnet-ef output. Recent migrations use
+  file-scoped namespace, doc comment, and a Designer that delegates to
+  `MohistDbContextModelSnapshot.BuildModelCore(modelBuilder)`. dotnet-ef
+  (11 preview, only runtime installed) rewrites the whole snapshot — restore
+  the snapshot from git and hand-add the column, hand-write migration+Designer.
+  Migration timestamps are hand-assigned future dates; latest was
+  20260907000000, so T-001's is 20260908000000_AddProjectDefaultExecutionConfig.
+  Run dotnet-ef with `SkipWebBuild=true` env var (MSBuild property via env).
+- CliFieldContractTests pins CLI ResourceOutputCatalog fields == server DTO
+  serialization fields: adding a serialized property to ProjectInfo requires
+  adding it to the ProjectList/Project field catalog in
+  packages/cli/Mohist.Cli/ResourceOutput.cs ("defaultExecutionConfig" added).
+- AuthResolutionTestSupport.cs has a hand-written raw Projects DDL that must
+  gain the new column manually.
+- SpecTests: `AgentSessionLaunchRoutesTestSupport` (CreateProjectAsync/
+  CreateAgentAsync/LaunchAsync/RegisterRunnerAndAwaitOnlineAsync/PollDispatch*)
+  is the base for launch specs; collection "MohistIntegration".
+
+### Decisions
+- MatchesCurrentDefinition now compares resolved tuples on BOTH sides under
+  the same current default: current side resolves agent.AgentConfig, history
+  side resolves input.AgentConfig (launch-time definition snapshot; null
+  snapshot = empty definition). This is what makes "a default change does not
+  flip a completed execution" true — dispatch values (input.Model) are NOT
+  compared anymore. Unit-test History helper updated to snapshot AgentConfig
+  (mirrors production: coordinator snapshots AgentConfigJson into
+  AgentJobInput.AgentConfig). Config-less agents only ever launched via
+  default → their null snapshot + empty definition is correct.
+- Readiness StructuralGaps non-object AgentConfig now yields model-missing
+  when no default (previously a corrupt string config produced no gap) —
+  unreachable via write surfaces, acceptable tightening.
+- AgentLauncher.ResolveDefinitionAsync folds the default ONLY when one is
+  configured (zero behavior change otherwise) and extracts the definition
+  hint from the launch's own `agent.AgentConfig` (raw runtime, variant kept
+  without model) — NOT from the snapshot resolver's opencode-fallback output,
+  so a default runtime can fill an absent definition runtime.
+- LaunchConnectionAsync (Slack) untouched: its dispatch gate is
+  AgentReadinessDeriver, a separate static helper unaffected by this change.
+- Route write surface: PUT and PATCH /default-execution-config both map to
+  replace-on-set (same closed field set); no clear operation in v1.
