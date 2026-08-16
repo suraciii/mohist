@@ -121,6 +121,11 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
         string runnerId,
         string workId,
         string updateOperationId) => Task.FromResult(false);
+    Task<bool> MarkUpdateStopFailureAsync(
+        string runnerId,
+        string workId,
+        string updateOperationId,
+        string failure) => Task.FromResult(false);
 
     /// <summary>
     /// Enters the existing Unknown arbitration with a durable runner-loss

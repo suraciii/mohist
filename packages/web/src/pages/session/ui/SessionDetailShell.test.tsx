@@ -29,7 +29,10 @@ const item: TimelineItem = {
   isTerminal: true,
 }
 
-function makeData(interruption?: AgentWorkInterruption): SessionDataSourceResult {
+function makeData(
+  interruption?: AgentWorkInterruption,
+  failureReason: string | null = null,
+): SessionDataSourceResult {
   const meta: SessionMetadata = {
     sessionId: 'session-1',
     sessionName: 'Session one',
@@ -47,7 +50,7 @@ function makeData(interruption?: AgentWorkInterruption): SessionDataSourceResult
     createdAt: '2026-08-03T09:00:00.000Z',
     completedAt: null,
     lastActivityAt: fact.occurredAt,
-    failureReason: null,
+    failureReason,
     inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
     turns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'completed' }],
     recoveryHistory: [{ type: 'reset', recordedAt: '2026-08-03T10:01:00.000Z', reason: 'reset' }],
@@ -186,7 +189,7 @@ describe('SessionDetailShell timeline integration', () => {
             expectedRecoveryPath: 'The replacement dispatch will resume this work.',
             stopFailure: 'Stop confirmation is pending; recovery remains durable and will be retried.',
             recordedAt: '2026-08-15T00:00:00.000Z',
-          })}
+          }, 'session.abort fetch failed')}
           components={makeComponents()}
         />
       </MemoryRouter>,
@@ -197,6 +200,8 @@ describe('SessionDetailShell timeline integration', () => {
     expect(banner).toHaveTextContent('work-old')
     expect(banner).toHaveTextContent('turn-recovery')
     expect(banner).not.toHaveTextContent('session.abort fetch failed')
+    expect(screen.queryByTestId('session-errors-region')).not.toBeInTheDocument()
+    expect(screen.queryByText('session.abort fetch failed')).not.toBeInTheDocument()
   })
 
   it('switches between summary and raw views on the same source anchor', () => {

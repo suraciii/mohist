@@ -332,6 +332,28 @@ Channel decision (grounded in live source):
   and terminal-result receipts.
 - Verification: Runner typecheck and Server build pass.
 
+## Review MF-2/MF-4/MF-6/MF-7 Increment
+
+- Workflow terminal receipts now win an update-fence race through the exact
+  frozen binding, settle the original task without allocating a replacement,
+  mark the operation receipt-acknowledged, and expose recovered visibility.
+- Pending update operations now carry Runner connection generation. Retries
+  reuse the same draining connection; a later registered connection creates a
+  fresh operation, so chained updates can fence replacement identities while
+  an older unresolved operation remains pending.
+- Update shutdown stop failures have a dedicated authenticated receipt path;
+  Workflow and AgentJob owners persist the update-scoped failure transition.
+  Session summaries and the Web shell suppress raw transcript transport
+  failures when durable interruption visibility is present.
+- Added deterministic `RunnerHostRecovery` coverage for confirmed Pi-style
+  interruption persistence-before-delivery, ordinary restart no-receipt
+  behavior, and update stop transport failure classification.
+- Verification: Server/Runner/Web typechecks/builds pass; host recovery and
+  session shell tests pass. The broad Server invocation ignored its filter and
+  reported the known unrelated AgentJob dispatch timing failure plus the new
+  race test's initial Orleans collection-expression fixture issue, which was
+  corrected before the next run.
+
 ## Fix-CI Verification Repair
 
 - The persisted `verify.1` output showed one deterministic Server unit failure

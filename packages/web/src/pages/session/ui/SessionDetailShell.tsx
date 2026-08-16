@@ -229,7 +229,7 @@ export function SessionDetailShell({
     : null
 
   // Errors evidence (region between usage summary and transcript)
-  const errorsEvidence = (
+  const errorsEvidence = meta?.interruption ? null : (
     <SessionErrorsEvidence
       failureCategory={meta?.eventSummary?.failureCategory ?? null}
       toolErrorCount={meta?.eventSummary?.toolErrorCount ?? null}

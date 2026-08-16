@@ -38,6 +38,12 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
         string updateOperationId,
         DateTimeOffset? interruptedAt = null,
         TimeSpan? settlementTimeout = null) => Task.FromResult(ReportAck.Stale);
+    Task<ReportAck> MarkUpdateStopFailureAsync(
+        string taskRunId,
+        string workId,
+        string runnerId,
+        string updateOperationId,
+        string failure) => Task.FromResult(ReportAck.Stale);
     Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding);
     Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
     Task<ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);

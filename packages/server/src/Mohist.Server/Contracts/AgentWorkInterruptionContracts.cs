@@ -67,8 +67,22 @@ public static class AgentWorkInterruptionProjection
         }
 
         var existing = result[index];
-        if (Rank(normalized.State) <= Rank(existing.State))
+        var rank = Rank(normalized.State);
+        var existingRank = Rank(existing.State);
+        if (rank < existingRank)
             return result;
+        if (rank == existingRank)
+        {
+            if (string.IsNullOrWhiteSpace(normalized.StopFailure)
+                || string.Equals(existing.StopFailure, normalized.StopFailure, StringComparison.Ordinal))
+                return result;
+            result[index] = existing with
+            {
+                StopFailure = normalized.StopFailure,
+                RecordedAt = normalized.RecordedAt,
+            };
+            return result;
+        }
 
         result[index] = normalized;
         return result;

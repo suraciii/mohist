@@ -53,6 +53,31 @@ export async function sendRecoveryReceipt(
   return acknowledgement
 }
 
+export interface RecoveryStopFailure {
+  readonly runnerId: string
+  readonly ownerKind: 'workflow' | 'agent-job'
+  readonly ownerId: string
+  readonly workId: string
+  readonly taskRunId?: string | null
+  readonly operationId: string
+  readonly message: string
+}
+
+export async function reportRecoveryStopFailure(
+  fetcher: Fetcher,
+  url: (path: string) => string,
+  failure: RecoveryStopFailure,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await fetcher(url('recovery-stop-failure'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(failure),
+    signal,
+  })
+  if (!response.ok) throw new Error(`recovery stop failure failed: ${response.status} ${await response.text()}`)
+}
+
 function parsePendingUpdateOperation(value: Record<string, unknown>): PendingUpdateOperation {
   const operationId = readString(value, 'operationId')
   const createdAt = readString(value, 'createdAt')

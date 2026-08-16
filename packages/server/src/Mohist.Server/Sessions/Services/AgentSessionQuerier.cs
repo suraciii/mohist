@@ -606,6 +606,7 @@ public partial class AgentSessionQuerier : IScopedService
                     PayloadJson: e.PayloadJson)));
 
         var activity = ResolveAgentSessionActivity(record);
+        var interruption = AgentSessionObservationMapper.Current(session.Status);
 
         var usage = AgentSessionJsonHelper.Usage(session);
 
@@ -619,8 +620,8 @@ public partial class AgentSessionQuerier : IScopedService
             session.Status.CreatedAt.ToString("o"),
             AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             summary.ResolvedModel,
-            summary.FailureCategory,
-            summary.FailureReason,
+            interruption is null ? summary.FailureCategory : null,
+            interruption is null ? summary.FailureReason : null,
             summary.ToolCallCount,
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
@@ -629,7 +630,7 @@ public partial class AgentSessionQuerier : IScopedService
             CurrentTurnId(session),
             AgentSessionObservationMapper.Inputs(session.Status),
             AgentSessionObservationMapper.Turns(session.Status),
-            Interruption: AgentSessionObservationMapper.Current(session.Status),
+            Interruption: interruption,
             InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
@@ -726,6 +727,7 @@ public partial class AgentSessionQuerier : IScopedService
         var transcriptSummary = await ResolveTranscriptSummaryAsync(db, session.Id, session, ct);
 
         var activity = ResolveAgentSessionActivity(record);
+        var interruption = AgentSessionObservationMapper.Current(session.Status);
         var usage = AgentSessionJsonHelper.Usage(session);
 
         return new UnifiedSessionSummaryDto(
@@ -738,8 +740,8 @@ public partial class AgentSessionQuerier : IScopedService
             LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             Model: session.Settings.Model,
             ResolvedModel: transcriptSummary.ResolvedModel,
-            FailureCategory: transcriptSummary.FailureCategory,
-            FailureReason: transcriptSummary.FailureReason,
+            FailureCategory: interruption is null ? transcriptSummary.FailureCategory : null,
+            FailureReason: interruption is null ? transcriptSummary.FailureReason : null,
             ToolCallCount: transcriptSummary.ToolCallCount,
             ToolErrorCount: transcriptSummary.ToolErrorCount,
             AgentId: isAgentSession ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
@@ -753,7 +755,7 @@ public partial class AgentSessionQuerier : IScopedService
             Inputs: AgentSessionObservationMapper.Inputs(session.Status),
             Turns: AgentSessionObservationMapper.Turns(session.Status),
             RecoveryHistory: transcriptSummary.RecoveryHistory,
-            Interruption: AgentSessionObservationMapper.Current(session.Status),
+            Interruption: interruption,
             InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId));

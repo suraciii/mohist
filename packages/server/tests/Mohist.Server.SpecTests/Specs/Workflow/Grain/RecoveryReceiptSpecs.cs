@@ -103,6 +103,70 @@ public sealed class RecoveryReceiptSpecs : WorkflowGrainSpecs
         Assert.Equal(eventsBefore, (await EventStore.ListAsync(_workflowId!)).Count);
     }
 
+    [Fact]
+    public async Task RecoveryReceipt_TerminalResultAfterUpdateFenceSettlesOriginalWorkWithoutReplacement()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var original = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            original.Id,
+            work.WorkId,
+            runnerId,
+            "race-session",
+            "race-turn",
+            "opencode",
+            "race-runtime-session");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+
+        var operationId = $"runner-update:race-{Guid.NewGuid():N}";
+        var operationGrain = Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId);
+        var operation = await operationGrain.StartOrGetAsync(new RunnerUpdateOperation(
+            operationId,
+            runnerId,
+            _fixture.TimeProvider.GetUtcNow(),
+            new[]
+            {
+                new RunnerUpdateWork(
+                    WorkDispatchOwnerKinds.Workflow,
+                    _workflowId!,
+                    work.WorkId,
+                    original.Id,
+                    WorkItemTypes.Task)
+            }));
+        await operationGrain.MarkWorkAsync(
+            operationId,
+            WorkDispatchOwnerKinds.Workflow,
+            _workflowId!,
+            work.WorkId,
+            original.Id,
+            RunnerUpdateWorkStatus.Marked);
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            original.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+
+        var receipt = TerminalReceipt(
+            binding,
+            _workflowId!,
+            new WorkResult("failed", "runtime returned after update fence", Error: new ExecutionError("turn-failed", "runtime returned after update fence")),
+            "race-terminal-result");
+        var acknowledgement = await workflow.ReceiveRecoveryReceiptAsync(receipt);
+
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, acknowledgement.Status);
+        var completed = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Failed, Assert.Single(completed.CurrentStage().Tasks).Status);
+        Assert.Single(completed.CurrentStage().Tasks);
+        Assert.False(completed.HasUnresolvedAgentResult());
+        var settledOperation = await operationGrain.GetAsync(operationId);
+        var settledWork = Assert.Single(settledOperation!.AffectedWorks);
+        Assert.Equal(RunnerUpdateWorkStatus.Settled, settledWork.Status);
+        Assert.Equal(RunnerUpdateRecoveryStatus.ReceiptAcked, settledWork.RecoveryStatus);
+    }
+
     private static RuntimeRecoveryReceipt TerminalReceipt(
         AgentExecutionBinding binding,
         string workflowRunId,

@@ -169,6 +169,24 @@ public static partial class WorkflowRunExtensions
         }
 
         /// <summary>
+        /// A terminal recovery receipt has already passed the frozen binding
+        /// check in the grain. It may therefore settle the original task even
+        /// after the update fence marked its settlement recoverably interrupted;
+        /// ordinary reports must remain blocked from that state.
+        /// </summary>
+        public WorkflowActiveWork? FindRecoveryReceiptWork(
+            string taskRunId,
+            string workId,
+            string workerId)
+        {
+            var found = FindTaskAttempt(run, taskRunId, workId, workerId);
+            return found is { } match
+                && match.Task.Status == TaskRunStatus.Running
+                ? ActiveTask(match.Stage, match.Task)
+                : null;
+        }
+
+        /// <summary>
         /// Reconstructs only the declared report shape for pure ingress
         /// translation. Eligibility and Runner ownership are deliberately not
         /// considered here; the serialized grain turn owns that decision.

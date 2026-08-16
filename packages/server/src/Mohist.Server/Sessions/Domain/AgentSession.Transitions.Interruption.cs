@@ -30,9 +30,15 @@ public static partial class AgentSessionExtensions
                     continue;
 
                 var current = turn.Interruption;
+                var transitionRank = AgentWorkInterruptionProjection.Rank(transition.State);
+                var currentRank = current is null
+                    ? 0
+                    : AgentWorkInterruptionProjection.Rank(current.State);
                 if (current is not null
-                    && AgentWorkInterruptionProjection.Rank(current.State)
-                        >= AgentWorkInterruptionProjection.Rank(transition.State))
+                    && (currentRank > transitionRank
+                        || (currentRank == transitionRank
+                            && (string.IsNullOrWhiteSpace(transition.StopFailure)
+                                || string.Equals(current.StopFailure, transition.StopFailure, StringComparison.Ordinal)))))
                     continue;
                 turns[index] = turn with { Interruption = transition };
                 turnChanged = true;
@@ -40,7 +46,10 @@ public static partial class AgentSessionExtensions
 
             var historyChanged = prior is null
                 || AgentWorkInterruptionProjection.Rank(transition.State)
-                    > AgentWorkInterruptionProjection.Rank(prior.State);
+                    > AgentWorkInterruptionProjection.Rank(prior.State)
+                || (prior is not null
+                    && !string.IsNullOrWhiteSpace(transition.StopFailure)
+                    && !string.Equals(prior.StopFailure, transition.StopFailure, StringComparison.Ordinal));
             if (!historyChanged && !turnChanged)
                 return [];
 

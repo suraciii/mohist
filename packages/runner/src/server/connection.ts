@@ -22,6 +22,8 @@ import type {
 import {
   fetchPendingUpdateOperation as fetchPendingUpdateOperationRequest,
   sendRecoveryReceipt as sendRecoveryReceiptRequest,
+  reportRecoveryStopFailure as reportRecoveryStopFailureRequest,
+  type RecoveryStopFailure,
 } from './connection.update-recovery.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
@@ -117,6 +119,10 @@ export class ServerConnection {
     signal: AbortSignal,
   ): Promise<RecoveryReceiptAcknowledgement> {
     return sendRecoveryReceiptRequest(this.fetchWithAuth.bind(this), this.url.bind(this), receipt, signal)
+  }
+
+  async reportRecoveryStopFailure(failure: RecoveryStopFailure, signal: AbortSignal): Promise<void> {
+    return reportRecoveryStopFailureRequest(this.fetchWithAuth.bind(this), this.url.bind(this), failure, signal)
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {

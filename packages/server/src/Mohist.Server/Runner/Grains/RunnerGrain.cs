@@ -602,7 +602,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _lastPresenceAt,
             activeWorks,
             _draining,
-            _state.State?.UpdateInterruptFence?.PendingId);
+            _state.State?.UpdateInterruptFence?.PendingId,
+            _info?.ConnectionGeneration);
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)

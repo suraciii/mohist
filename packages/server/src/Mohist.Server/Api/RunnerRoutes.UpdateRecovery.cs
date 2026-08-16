@@ -20,26 +20,53 @@ public static partial class RunnerRoutes
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var operationGrain = grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId);
-            var operation = await operationGrain.GetPendingAsync();
+            var existing = await operationGrain.GetPendingAsync();
+            var beforeInterrupt = await runner.GetRuntimeStateAsync();
+            RunnerUpdateOperation operation = null!;
             RunnerRuntimeState? runtime = null;
 
-            if (operation is null)
-            {
-                runtime = await runner.BeginUpdateInterruptAsync();
-                if (runtime is null)
-                    return ApiResults.NotFound($"Runner '{runnerId}' not found");
+            // A pending operation is a retry only while the same Runner
+            // connection is still draining. A newly registered connection may
+            // already be executing a replacement identity, so it must receive
+            // a fresh fence even when an older operation remains unresolved.
+            var sameConnection = existing is not null
+                && !string.IsNullOrWhiteSpace(existing.ConnectionGeneration)
+                && string.Equals(
+                    existing.ConnectionGeneration,
+                    beforeInterrupt.ConnectionGeneration,
+                    StringComparison.Ordinal);
+            var legacyRetry = existing is not null
+                && string.IsNullOrWhiteSpace(existing.ConnectionGeneration)
+                && beforeInterrupt.Draining;
+            var retryExisting = existing is not null
+                && (sameConnection || legacyRetry || beforeInterrupt.Status != RunnerStatus.Online);
 
-                operation = await operationGrain.StartOrGetAsync(new RunnerUpdateOperation(
-                    OperationId: $"runner-update:{Guid.NewGuid():N}",
-                    RunnerId: runnerId,
-                    CreatedAt: timeProvider.GetUtcNow(),
-                    AffectedWorks: BuildUpdateOperationWorks(runtime.ActiveWorks)));
-            }
-            else
+            if (retryExisting)
             {
+                operation = existing!;
                 // A retry after a server or owner crash must repair the
                 // existing operation even if the old Runner is already gone.
                 await runner.BeginDrainAsync();
+            }
+            else
+            {
+                runtime = await runner.BeginUpdateInterruptAsync();
+                if (runtime is null)
+                {
+                    if (existing is null)
+                        return ApiResults.NotFound($"Runner '{runnerId}' not found");
+                    operation = existing;
+                    await runner.BeginDrainAsync();
+                }
+                else
+                {
+                    operation = await operationGrain.StartNewAsync(new RunnerUpdateOperation(
+                        OperationId: $"runner-update:{Guid.NewGuid():N}",
+                        RunnerId: runnerId,
+                        CreatedAt: timeProvider.GetUtcNow(),
+                        AffectedWorks: BuildUpdateOperationWorks(runtime.ActiveWorks),
+                        ConnectionGeneration: runtime.ConnectionGeneration));
+                }
             }
 
             foreach (var work in operation.AffectedWorks
@@ -169,6 +196,54 @@ public static partial class RunnerRoutes
 
             return Results.Ok(acknowledgement);
         });
+
+        group.MapPost("/recovery-stop-failure", async (
+            string runnerId,
+            HttpRequest request,
+            IGrainFactory grains,
+            CancellationToken ct) =>
+        {
+            RunnerRecoveryStopFailureRequest? failure;
+            try
+            {
+                failure = await request.ReadFromJsonAsync<RunnerRecoveryStopFailureRequest>(JSON.Options, ct);
+            }
+            catch (JsonException)
+            {
+                return ApiResults.BadRequest("Invalid recovery stop failure body", "invalid_recovery_stop_failure");
+            }
+
+            if (failure is null
+                || string.IsNullOrWhiteSpace(failure.OperationId)
+                || string.IsNullOrWhiteSpace(failure.OwnerKind)
+                || string.IsNullOrWhiteSpace(failure.OwnerId)
+                || string.IsNullOrWhiteSpace(failure.WorkId)
+                || string.IsNullOrWhiteSpace(failure.Message))
+            {
+                return ApiResults.BadRequest("Recovery stop failure is incomplete", "invalid_recovery_stop_failure");
+            }
+
+            if (!string.Equals(failure.RunnerId, runnerId, StringComparison.Ordinal))
+            {
+                return Results.Ok(new RunnerRecoveryStopFailureResponse("stale"));
+            }
+
+            var ownerKind = failure.OwnerKind.Trim().ToLowerInvariant();
+            var accepted = ownerKind switch
+            {
+                WorkDispatchOwnerKinds.Workflow when !string.IsNullOrWhiteSpace(failure.TaskRunId) =>
+                    await grains.GetGrain<IWorkflowGrain>(failure.OwnerId).MarkUpdateStopFailureAsync(
+                        failure.TaskRunId!,
+                        failure.WorkId,
+                        runnerId,
+                        failure.OperationId,
+                        failure.Message) == ReportAck.Accepted,
+                WorkDispatchOwnerKinds.AgentJob => await grains.GetGrain<IAgentJobGrain>(failure.OwnerId)
+                    .MarkUpdateStopFailureAsync(runnerId, failure.WorkId, failure.OperationId, failure.Message),
+                _ => false,
+            };
+            return Results.Ok(new RunnerRecoveryStopFailureResponse(accepted ? "accepted" : "stale"));
+        });
     }
 
     private static IReadOnlyList<RunnerUpdateWork> BuildUpdateOperationWorks(
@@ -237,6 +312,17 @@ public record RunnerUpdateInterruptResponse(
 
 public record RunnerPendingUpdateOperationResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerUpdateOperation? Operation);
+
+public sealed record RunnerRecoveryStopFailureRequest(
+    string RunnerId,
+    string OwnerKind,
+    string OwnerId,
+    string WorkId,
+    string? TaskRunId,
+    string OperationId,
+    string Message);
+
+public sealed record RunnerRecoveryStopFailureResponse(string Status);
 
 public record RunnerUpdateRecoveryStatusResponse(
     string OperationId,

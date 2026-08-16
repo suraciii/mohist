@@ -390,6 +390,21 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 : null,
             result.ArtifactUploadIds,
             result.ExitCode);
+        if (State.Interruption is { } interruption)
+        {
+            var recovered = interruption with
+            {
+                State = AgentWorkInterruptionStates.Recovered,
+                RecordedAt = _timeProvider.GetUtcNow(),
+            };
+            State.InterruptionHistory = AgentWorkInterruptionProjection.Apply(
+                State.InterruptionHistory,
+                recovered).ToList();
+            State.Interruption = recovered;
+            await PersistAsync();
+            await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, recovered);
+            await MarkRecoverySettledAsync();
+        }
     }
 
     private async Task EnterRecoveryTerminalStateAsync(string reason)

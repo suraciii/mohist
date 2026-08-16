@@ -7,6 +7,7 @@ public interface IRunnerUpdateOperationGrain : IGrainWithStringKey
     Task<RunnerUpdateOperation?> GetPendingAsync();
     Task<RunnerUpdateOperation?> GetAsync(string operationId);
     Task<RunnerUpdateOperation> StartOrGetAsync(RunnerUpdateOperation candidate);
+    Task<RunnerUpdateOperation> StartNewAsync(RunnerUpdateOperation candidate);
     Task<RunnerUpdateOperation> MarkWorkAsync(
         string operationId,
         string ownerKind,
@@ -38,7 +39,8 @@ public sealed record RunnerUpdateOperation(
     [property: Id(1)] string RunnerId,
     [property: Id(2)] DateTimeOffset CreatedAt,
     [property: Id(3)] IReadOnlyList<RunnerUpdateWork> AffectedWorks,
-    [property: Id(4)] RunnerUpdateOperationStatus Status = RunnerUpdateOperationStatus.Pending);
+    [property: Id(4)] RunnerUpdateOperationStatus Status = RunnerUpdateOperationStatus.Pending,
+    [property: Id(5)] string? ConnectionGeneration = null);
 
 [GenerateSerializer]
 public sealed record RunnerUpdateWork(
@@ -116,21 +118,20 @@ public sealed class RunnerUpdateOperationGrain(
         if (duplicate is not null)
             return duplicate;
 
-        var affectedWorks = candidate.AffectedWorks
-            .Where(IsValidWork)
-            .GroupBy(work => work.Key, StringComparer.Ordinal)
-            .Select(group => group.First())
-            .ToArray();
-        var normalized = candidate with
-        {
-            AffectedWorks = affectedWorks,
-            Status = affectedWorks.Length == 0
-                ? RunnerUpdateOperationStatus.Settled
-                : candidate.Status,
-        };
-        state.State.Operations.Add(normalized);
-        await state.WriteStateAsync();
-        return normalized;
+        return await AddOperationAsync(candidate);
+    }
+
+    public async Task<RunnerUpdateOperation> StartNewAsync(RunnerUpdateOperation candidate)
+    {
+        ValidateCandidate(candidate);
+        await LoadAsync();
+
+        var duplicate = state.State.Operations.LastOrDefault(operation =>
+            string.Equals(operation.OperationId, candidate.OperationId, StringComparison.Ordinal));
+        if (duplicate is not null)
+            return duplicate;
+
+        return await AddOperationAsync(candidate);
     }
 
     public async Task<RunnerUpdateOperation> MarkWorkAsync(
@@ -262,6 +263,25 @@ public sealed class RunnerUpdateOperationGrain(
         state.State.Operations[operationIndex] = nextOperation;
         await state.WriteStateAsync();
         return nextOperation;
+    }
+
+    private async Task<RunnerUpdateOperation> AddOperationAsync(RunnerUpdateOperation candidate)
+    {
+        var affectedWorks = candidate.AffectedWorks
+            .Where(IsValidWork)
+            .GroupBy(work => work.Key, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        var normalized = candidate with
+        {
+            AffectedWorks = affectedWorks,
+            Status = affectedWorks.Length == 0
+                ? RunnerUpdateOperationStatus.Settled
+                : candidate.Status,
+        };
+        state.State.Operations.Add(normalized);
+        await state.WriteStateAsync();
+        return normalized;
     }
 
     private async Task LoadAsync()

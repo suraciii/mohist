@@ -389,7 +389,8 @@ public record RunnerRuntimeState(
     DateTimeOffset LastHeartbeatAt,
     IReadOnlyList<RunnerActiveWorkItem> ActiveWorks,
     bool Draining = false,
-    string? UpdateInterruptId = null);
+    string? UpdateInterruptId = null,
+    string? ConnectionGeneration = null);
 
 [GenerateSerializer]
 public enum RunnerUpdateInterruptCancelStatus

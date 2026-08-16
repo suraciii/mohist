@@ -81,6 +81,42 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public async Task<ReportAck> MarkUpdateStopFailureAsync(
+        string taskRunId,
+        string workId,
+        string runnerId,
+        string updateOperationId,
+        string failure)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null || string.IsNullOrWhiteSpace(failure))
+            return ReportAck.Stale;
+
+        var task = _run.FindTaskForRecoveryReceipt(taskRunId, workId);
+        var settlement = task?.AgentResultSettlement;
+        if (task is null
+            || task.Status != TaskRunStatus.Running
+            || settlement is null
+            || settlement.State != AgentResultSettlementState.RecoverablyInterrupted
+            || !string.Equals(settlement.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(settlement.TaskRunId, taskRunId, StringComparison.Ordinal)
+            || !string.Equals(settlement.RunnerId, runnerId, StringComparison.Ordinal)
+            || !string.Equals(settlement.UpdateOperationId, updateOperationId, StringComparison.Ordinal)
+            || task.AgentInterruption is null)
+        {
+            return ReportAck.Stale;
+        }
+
+        var transition = task.AgentInterruption with { StopFailure = failure, RecordedAt = Now() };
+        task.AgentInterruption = transition;
+        var stage = _run.Stages.Single(candidate => candidate.Tasks.Contains(task));
+        await CommitAsync([
+            new AgentTaskInterruptionLifecycleChanged(stage.Id, task.Id, transition)
+        ]);
+        await ApplySessionInterruptionAsync(settlement.AgentSessionId, transition);
+        return ReportAck.Accepted;
+    }
+
     public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding)
     {
         RejectIfRunReloadRequired();
@@ -423,9 +459,6 @@ public partial class WorkflowGrain
                 "replacement-created");
         }
 
-        if (settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
-            return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "execution-stopped");
-
         var terminalResult = payload.NormalizedTerminalResult!;
         if (!string.Equals(payload.Fingerprint, RuntimeRecoveryReceiptFingerprint.For(terminalResult), StringComparison.OrdinalIgnoreCase))
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "result-fingerprint-mismatch");
@@ -438,10 +471,15 @@ public partial class WorkflowGrain
         if (translated is not WorkflowItemTranslator.InboundReport.Task taskReport)
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "terminal-result-invalid");
 
-        var activeWork = _run.FindReportableWork(receipt.TaskRunId, receipt.WorkId, receipt.RunnerId);
+        var activeWork = settlement.State == AgentResultSettlementState.RecoverablyInterrupted
+            ? _run.FindRecoveryReceiptWork(receipt.TaskRunId, receipt.WorkId, receipt.RunnerId)
+            : _run.FindReportableWork(receipt.TaskRunId, receipt.WorkId, receipt.RunnerId);
         if (activeWork is null || !activeWork.IsTask)
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "work-not-reportable");
 
+        var racedUpdateInterruption = settlement.State == AgentResultSettlementState.RecoverablyInterrupted
+            ? task.AgentInterruption
+            : null;
         var effectiveReport = taskReport.Value with { TaskRunId = receipt.TaskRunId };
         try
         {
@@ -461,25 +499,47 @@ public partial class WorkflowGrain
         }
 
         effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
-        var events = await _workLifecycle.ApplyTaskReportAsync(
+        var events = (await _workLifecycle.ApplyTaskReportAsync(
             _run,
             effectiveReport,
             activeWork.Item.Stage,
-            receipt.TaskRunId);
+            receipt.TaskRunId)).ToList();
+
+        if (racedUpdateInterruption is not null)
+        {
+            var recovered = racedUpdateInterruption with
+            {
+                State = AgentWorkInterruptionStates.Recovered,
+                RecordedAt = Now(),
+            };
+            task.AgentInterruption = recovered;
+            events.Add(new AgentTaskInterruptionLifecycleChanged(
+                activeWork.Item.Stage,
+                receipt.TaskRunId,
+                recovered));
+        }
 
         _run.AppliedRecoveryReceipts.Add(new AppliedRuntimeRecoveryReceipt(
             receipt.ReceiptId,
             requestFingerprint,
             RuntimeRecoveryReceiptAckStatuses.Accepted));
         await CommitAsync(events);
-        await ReconcileAgentResultSettlementAsync();
-        await GrainFactory
-            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
-            .MarkReceiptAckedAsync(
-                WorkDispatchOwnerKinds.Workflow,
-                GrainKey,
-                receipt.WorkId,
-                receipt.TaskRunId);
+        if (racedUpdateInterruption is not null)
+        {
+            await ApplySessionInterruptionAsync(settlement.AgentSessionId, task.AgentInterruption!);
+            await SettleUpdateOperationWorkAsync(receipt, settlement.UpdateOperationId!);
+        }
+        else
+        {
+            await ReconcileAgentResultSettlementAsync();
+            await GrainFactory
+                .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+                .MarkReceiptAckedAsync(
+                    WorkDispatchOwnerKinds.Workflow,
+                    GrainKey,
+                    receipt.WorkId,
+                    receipt.TaskRunId);
+        }
         return new RuntimeRecoveryReceiptAcknowledgement(
             receipt.ReceiptId,
             RuntimeRecoveryReceiptAckStatuses.Accepted);
