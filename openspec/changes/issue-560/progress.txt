@@ -442,3 +442,8 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
 
 - Audited the committed `mo agent start` slice against the CLI requirement: it has no Agent positional argument, supports task/context/execution hints and attachments, preserves server-side execution precedence, sends the CLI launch origin, prints the canonical launch table, and keeps raw Server envelopes unchanged in JSON mode. The dedicated CLI coverage exercises generated-key ordering, replay keys, all participant identities, raw JSON, flag validation, and actionable rejection guidance.
 - `npm run test:fast:cli` passed 1,860 tests and `npm run docs:check` passed for 92 active Markdown files. The complete `npm run verify` gate passed: docs, file-size ratchet, format, solution/workspace builds, 178 Workflow tests, 2,701 Server unit tests, 3,950 Server specs, 68 architecture tests, 1,860 CLI tests, 4,736 Web tests, 1,639 Runner tests, and 70 Slack tests. No production repair was required; the worktree remained clean before this progress entry.
+
+## Verification completion
+
+- Reproduced the affected Server launch-runtime verification after reading the recorded failure: the current `AgentSessionLaunchRuntimeResolutionSpecs` coverage passed, and the full Server SpecTests assembly passed 3,950/3,950. The earlier failure was the dispatch visibility race documented above; the shared test helper's bounded polling is the root-cause repair.
+- Re-ran `npm run verify` successfully: docs (92 files), file-size ratchet, format, solution/workspace builds (0 warnings/errors), 178 Workflow, 2,701 Server unit, 3,950 Server spec, 68 architecture, 1,860 CLI, 4,736 Web, 1,639 Runner, and 70 Slack tests passed. Verification created no Git-visible changes.
