@@ -694,3 +694,18 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   `npm run test:fast` gate passed all seven lanes: typecheck, 2,675 Server unit
   tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724
   Web tests, and 1,639 Runner tests.
+
+## T-008 final verification (current workflow)
+
+- The existing T-008 documentation commit was rechecked against the selected
+  acceptance criteria: both design documents are `status: shipped`; the user
+  API document contains the seven routes, Bearer PAT and Project grant rules,
+  idempotency, the PublicExecutionRead allowlist and five-state aggregate,
+  projection lag, and cursor resume/error behavior; the auth guide documents
+  direct `/api/v1` PAT use and grant-before-lookup ordering; and README lists
+  the External Agent API as available.
+- `npm run docs:check` passed for 92 Markdown files.
+- `npm run verify` passed: docs, file-size, format, solution/workspace build,
+  3,975 Server SpecTests, 2,675 Server unit tests, 1,848 CLI tests, 4,724 Web
+  tests, 1,639 Runner tests, and 70 Slack tests. No source changes were needed
+  beyond this progress record.
