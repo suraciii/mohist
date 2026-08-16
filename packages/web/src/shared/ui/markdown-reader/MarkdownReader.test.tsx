@@ -93,7 +93,7 @@ describe('MarkdownReader default rendering', () => {
     expect(codeBlock.className).toContain('overflow-x-auto')
   })
 
-  it('preserves the inline-code visual styling from the previous MarkdownContent', () => {
+  it('preserves the inline-code visual styling', () => {
     render(<MarkdownReader content="use `inline` here" baseHeadingLevel={2} />)
 
     const inline = screen.getByText('inline')

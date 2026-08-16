@@ -5,7 +5,6 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage, type IssueDetailPageComponents } from './IssueDetailPage'
-import { RuntimeToastHost, useRuntimeToast } from '../../../shared/ui/toast'
 import { mockIssue, mockIssueCommits, mockIssueDiff, mockWorkflowTimeline, mockWorkspaceStatus, mountIssueDetail } from './_issueDetailMsw'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 
@@ -351,113 +350,6 @@ describe('IssueDetailPage icon-only controls', () => {
     expect(editButton).toHaveClass('size-8')
     expect(editButton).not.toHaveClass('size-7')
     expect(editButton).not.toHaveClass('size-6')
-  })
-})
-
-function TransportNoticeTrigger() {
-  const toast = useRuntimeToast()
-  return (
-    <button
-      type="button"
-      data-testid="trigger-disconnected-notice"
-      onClick={() => {
-        toast.push({
-          tone: 'transport',
-          title: 'Live events disconnected',
-          body: 'Connection dropped. Activity continues to update in the background.',
-          testId: 'runtime-toast-connection-disconnected',
-          ttlMs: 30_000,
-        })
-      }}
-    >
-      Disconnect
-    </button>
-  )
-}
-
-function renderPageWithToastHost() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/issues/14']}>
-        <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
-          <LocationProbe />
-          <RuntimeToastHost>
-            <Routes>
-              <Route path="/issues/:number" element={<IssueDetailPage components={components} />} />
-              <Route path="/:projectName/agent-sessions/new" element={<div>Agent Session Composer</div>} />
-            </Routes>
-            <TransportNoticeTrigger />
-          </RuntimeToastHost>
-        </ProjectProvider>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
-}
-
-describe('IssueDetailPage disconnected-runtime-notice routing', () => {
-  it('does not render transport-disconnect text inline between Description, Commits, or Comments when a runtime notice is dispatched', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      body: 'Issue description content for the test fixture.',
-      comments: [
-        {
-          id: 'c1',
-          author: 'tester',
-          body: 'A reviewer comment that should remain free of connection state messaging.',
-          createdAt: '2026-01-01T00:00:00Z',
-        },
-      ],
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
-
-    const { container } = renderPageWithToastHost()
-
-    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeTruthy())
-
-    fireEvent.click(screen.getByTestId('trigger-disconnected-notice'))
-
-    await waitFor(() => expect(screen.getByTestId('runtime-toast-connection-disconnected')).toBeTruthy())
-
-    const surface = screen.getByTestId('issue-decision-surface')
-    const description = Array.from(container.querySelectorAll('h2'))
-      .find((heading) => heading.textContent === 'Description')
-    const commitsHeading = Array.from(container.querySelectorAll('h2'))
-      .find((heading) => (heading.textContent ?? '').startsWith('Commits'))
-    const commentsHeading = Array.from(container.querySelectorAll('h2'))
-      .find((heading) => (heading.textContent ?? '').startsWith('Comments'))
-
-    expect(description).toBeTruthy()
-    expect(commitsHeading).toBeFalsy()
-    expect(commentsHeading).toBeTruthy()
-
-    const surfaceRegion = surface
-    const descriptionRegion = description!.closest('div')
-    const commentsRegion = commentsHeading!.closest('div')
-
-    const inlineTransportPhrases = [
-      'Live events disconnected',
-      'Connection dropped',
-      'connection-disconnect',
-      'reconnect',
-      'transport',
-    ]
-
-    for (const phrase of inlineTransportPhrases) {
-      expect(surfaceRegion.textContent ?? '').not.toContain(phrase)
-      expect(descriptionRegion?.textContent ?? '').not.toContain(phrase)
-      expect(commentsRegion?.textContent ?? '').not.toContain(phrase)
-    }
-
-    const toastHost = screen.getByTestId('runtime-toast-host')
-    expect(toastHost.textContent).toContain('Live events disconnected')
-    expect(toastHost.textContent).toContain('Connection dropped')
   })
 })
 
