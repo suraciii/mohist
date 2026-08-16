@@ -930,3 +930,18 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   Server unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests,
   70 Slack tests, builds, docs, format, and file-size checks. Verification
   created only ignored build/test outputs; no Git-visible side effects remain.
+
+## Review must-fix disposition work
+
+- MF-1 implementation committed as `a02d82d21`: `AgentSessionStore` now
+  appends normalized lifecycle history rows transactionally with Session state;
+  the public projector consumes those durable rows and reconstructs historical
+  execution payloads, preserving compressed queued/running/terminal transitions
+  and distinct unknown episodes.
+- MF-2 implementation is in the same commit: Session deletion closes the
+  existing public stream and preserves its safe bounds in the same transaction;
+  `IAgentSessionStreamRetention.PurgeDeletedAsync` is the explicit physical
+  purge path and removes the tombstone only after closure.
+- Focused projection (16) and event-stream (6) suites pass, as does the
+  server build and EF model consistency spec. Full repository verification is
+  running next.
