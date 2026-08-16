@@ -1,59 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, CheckIcon, CopyIcon } from 'lucide-react'
-import { SessionTranscriptLayout as DefaultSessionTranscriptLayout } from '../../../widgets/session-transcript'
+import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon, ListIcon, BracesIcon } from 'lucide-react'
 import {
-  SessionFollowupComposer as DefaultSessionFollowupComposer,
-  SessionRecoveryActions as DefaultSessionRecoveryActions,
-} from '../../../widgets/coder-session'
+  SessionTranscriptLayout as DefaultSessionTranscriptLayout,
+} from '../../../widgets/session-transcript'
+import { SessionFollowupComposer as DefaultSessionFollowupComposer, SessionRecoveryActions as DefaultSessionRecoveryActions } from '../../../widgets/coder-session'
 import { ContextHealthBar as DefaultContextHealthBar } from '../../../widgets/coder-session'
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
-import { useMediaQuery } from '@/shared/lib/use-media-query'
 import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
-import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
+import type { TimelineItem } from '../../../entities/session'
+import type { SessionStatusKind } from '../../../entities/coder-session'
+import type { UnifiedSessionDataSourceResult } from '../data/useUnifiedSessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
-import { SessionErrorsEvidence } from './SessionErrorsEvidence'
-import { TimelineViewToggle } from './TimelineViewToggle'
-import { StatusBadge } from './StatusBadge'
-import { getStageLabel, sessionTimeAnchorMs } from './sessionPresentation'
-import type { AgentWorkInterruption } from '../../../entities/coder-session'
-
-function SessionInterruptionBanner({ interruption }: { interruption: AgentWorkInterruption }) {
-  return (
-    <section
-      className="border-b border-warning-border bg-warning-subtle px-4 py-2.5 text-sm text-warning"
-      data-testid="session-interruption-banner"
-      role="status"
-    >
-      <div className="font-semibold">Runner update interruption: {interruption.state}</div>
-      <div className="mt-1 grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
-        <span>Update</span>
-        <span className="break-all font-mono">{interruption.updateOperationId}</span>
-        <span>Work</span>
-        <span className="break-all font-mono">{interruption.workId}</span>
-        <span>Recovery generation</span>
-        <span>{interruption.recoveryGeneration}</span>
-        {interruption.originalTurnId && (
-          <>
-            <span>Original turn</span>
-            <span className="break-all font-mono">{interruption.originalTurnId}</span>
-          </>
-        )}
-        {interruption.replacementTurnId && (
-          <>
-            <span>Replacement turn</span>
-            <span className="break-all font-mono">{interruption.replacementTurnId}</span>
-          </>
-        )}
-      </div>
-      <p className="mt-1 text-xs">{interruption.expectedRecoveryPath}</p>
-      {interruption.stopFailure && <p className="mt-1 text-xs">{interruption.stopFailure}</p>}
-    </section>
-  )
-}
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -70,17 +31,134 @@ const defaultComponents: SessionDetailShellComponents = {
   ContextHealthBar: DefaultContextHealthBar,
 }
 
+interface SessionErrorsEvidenceProps {
+  failureCategory: string | null | undefined
+  toolErrorCount: number | null | undefined
+  failureReason: string | null | undefined
+  failedItems: TimelineItem[]
+  locate: (sourceId: string) => void
+}
+const ERROR_SURFACE_CLASS = 'bg-danger-subtle text-danger border-danger-border'
+
+const FAILURE_CATEGORY_LABELS: Record<string, string> = {
+  cancelled: 'Cancelled',
+  compaction: 'Context compaction',
+  context_limit: 'Context limit',
+  timeout: 'Timed out',
+}
+
+function formatFailureCategory(category: string): string {
+  if (isExecutionUnavailableCategory(category)) return 'Execution unavailable'
+  return FAILURE_CATEGORY_LABELS[category.toLowerCase()] ?? 'Execution failure'
+}
+
+function isExecutionUnavailableCategory(category: string | null | undefined): boolean {
+  const normalized = category?.toLowerCase() ?? ''
+  return normalized === 'runtime-unavailable'
+    || normalized === 'execution-unavailable'
+    || normalized === 'external-agent-unavailable'
+}
+
+export function SessionErrorsEvidence({
+  failureCategory,
+  toolErrorCount,
+  failureReason,
+  failedItems,
+  locate,
+}: SessionErrorsEvidenceProps) {
+  const hasFailureCategory = failureCategory != null && failureCategory !== ''
+  const hasFailureReason = failureReason != null && failureReason !== ''
+  const effectiveToolErrorCount = Math.max(toolErrorCount ?? 0, failedItems.length)
+  const hasToolErrors = effectiveToolErrorCount > 0
+  const hasFailureEvidence = hasFailureCategory || hasFailureReason
+  const executionUnavailable = isExecutionUnavailableCategory(failureCategory)
+  const [currentIndex, setCurrentIndex] = useState(0)
+  if (!hasFailureEvidence && !hasToolErrors) return null
+
+  const activate = () => {
+    const item = failedItems[currentIndex]
+    if (item) locate(item.sourceIds[0] ?? item.id)
+  }
+  const next = () => {
+    if (failedItems.length === 0) return
+    const nextIndex = (currentIndex + 1) % failedItems.length
+    setCurrentIndex(nextIndex)
+    const item = failedItems[nextIndex]
+    locate(item.sourceIds[0] ?? item.id)
+  }
+
+  return (
+    <div
+      data-testid="session-errors-region"
+      data-failure-category={failureCategory ?? ''}
+      data-tool-error-count={String(effectiveToolErrorCount)}
+      className={`border-b border-border px-4 py-2 ${ERROR_SURFACE_CLASS}`}
+      onClick={activate}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          activate()
+        }
+      }}
+      tabIndex={failedItems.length > 0 ? 0 : undefined}
+      role={failedItems.length > 0 ? 'button' : hasFailureEvidence ? 'status' : undefined}
+      aria-live={failedItems.length > 0 ? undefined : 'polite'}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span className="inline-flex items-center gap-1 font-semibold">
+          <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          {executionUnavailable ? 'Execution unavailable' : hasFailureEvidence || failedItems.length > 0 ? 'Execution failed' : 'Tool errors detected'}
+        </span>
+        {hasFailureCategory && (
+          <span
+            className="inline-flex items-center rounded-full border border-danger-border bg-danger-subtle text-danger px-2 py-0.5 text-[10px] font-semibold"
+            data-testid="session-errors-region-category"
+          >
+            {formatFailureCategory(failureCategory)}
+          </span>
+        )}
+        {hasToolErrors && (
+          <span
+            className="inline-flex items-center gap-1"
+            data-testid="session-errors-region-tool-count"
+          >
+            <span className="text-danger font-medium">{effectiveToolErrorCount}</span>
+            <span>tool {effectiveToolErrorCount === 1 ? 'error' : 'errors'}</span>
+          </span>
+        )}
+        {failureReason && (
+          <span className="text-danger truncate max-w-[300px]" title={failureReason} data-testid="session-errors-region-reason">
+            {failureReason}
+          </span>
+        )}
+        {executionUnavailable && (
+          <span data-testid="session-errors-region-next-action" className="text-danger">
+            Wait for the configured runtime or provider to recover, then retry the launch from the Agent.
+          </span>
+        )}
+        {failedItems.length > 1 && (
+          <Button type="button" variant="link" size="sm" data-testid="session-errors-region-next-error" onClick={(event) => { event.stopPropagation(); next() }} className="h-auto p-0 text-xs text-danger">
+            Next error
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function SessionDetailShell({
   data,
   components,
 }: {
-  data: SessionDataSourceResult
+  data: UnifiedSessionDataSourceResult
   components?: Partial<SessionDetailShellComponents>
 }) {
-  const { SessionTranscriptLayout, SessionFollowupComposer, SessionRecoveryActions, ContextHealthBar } = {
-    ...defaultComponents,
-    ...components,
-  }
+  const {
+    SessionTranscriptLayout,
+    SessionFollowupComposer,
+    SessionRecoveryActions,
+    ContextHealthBar,
+  } = { ...defaultComponents, ...components }
   const {
     sessionKey,
     meta,
@@ -93,11 +171,8 @@ export function SessionDetailShell({
     entries,
     currentActivity,
     resolveTimelineReference,
-    siblingNav,
-    siblingSidebar,
     backPath,
     backLabel,
-    issueTitle,
     workflowContextPath,
     workflowContextLabel,
     newContentAvailable,
@@ -150,33 +225,29 @@ export function SessionDetailShell({
     const container = scrollContainerRef.current
     if (!container) return null
     const containerRect = container.getBoundingClientRect()
-    return (
-      Array.from(container.querySelectorAll<HTMLElement>('[data-timeline-source-id]')).find((element) => {
+    return Array.from(container.querySelectorAll<HTMLElement>('[data-timeline-source-id]'))
+      .find((element) => {
         if (element.classList.contains('sr-only')) return false
         const rect = element.getBoundingClientRect()
         return rect.bottom > containerRect.top && rect.top < containerRect.bottom
-      })?.dataset.timelineSourceId ?? null
-    )
+      })
+      ?.dataset.timelineSourceId ?? null
   }, [])
 
   const locateTimelineSource = useCallback((sourceId: string) => {
     const container = scrollContainerRef.current
     if (!container) return
-    const target = Array.from(container.querySelectorAll<HTMLElement>('[data-timeline-source-id]')).find(
-      (element) => element.dataset.timelineSourceId === sourceId,
-    )
+    const target = Array.from(container.querySelectorAll<HTMLElement>('[data-timeline-source-id]'))
+      .find((element) => element.dataset.timelineSourceId === sourceId)
     target?.scrollIntoView({ block: 'nearest' })
   }, [])
 
-  const changeTimelineView = useCallback(
-    (nextView: 'summary' | 'raw') => {
-      if (nextView === timelineView) return
-      pendingTimelineAnchorRef.current = findVisibleTimelineSourceId()
-      if (setTranscriptView) setTranscriptView(nextView === 'raw' ? 'raw' : 'public')
-      else setLocalTimelineView(nextView)
-    },
-    [findVisibleTimelineSourceId, setTranscriptView, timelineView],
-  )
+  const changeTimelineView = useCallback((nextView: 'summary' | 'raw') => {
+    if (nextView === timelineView) return
+    pendingTimelineAnchorRef.current = findVisibleTimelineSourceId()
+    if (setTranscriptView) setTranscriptView(nextView === 'raw' ? 'raw' : 'public')
+    else setLocalTimelineView(nextView)
+  }, [findVisibleTimelineSourceId, setTranscriptView, timelineView])
 
   useLayoutEffect(() => {
     const sourceId = pendingTimelineAnchorRef.current
@@ -217,19 +288,16 @@ export function SessionDetailShell({
     </div>
   ) : null
 
-  const observationIsRecovering = launchObservation?.jobStatus === 'recovering'
   const observationGuidance = launchObservation
-    ? observationIsRecovering
-      ? 'The AgentJob is recovering from an interrupted runner. The original work identity remains recoverable.'
-      : getAgentLaunchObservationMeaning(launchObservation) === 'reconcile'
-        ? 'Launch outcome is unresolved. Re-read this observation or retry with the original Idempotency-Key.'
-        : getAgentLaunchObservationMeaning(launchObservation) === 'result'
-          ? 'Initial launch is terminal. Read the result and transcript; this Session remains available.'
-          : 'Initial launch is accepted and still progressing. Continue observing the Job and transcript.'
+    ? getAgentLaunchObservationMeaning(launchObservation) === 'reconcile'
+      ? 'Launch outcome is unresolved. Re-read this observation or retry with the original Idempotency-Key.'
+      : getAgentLaunchObservationMeaning(launchObservation) === 'result'
+        ? 'Initial launch is terminal. Read the result and transcript; this Session remains available.'
+        : 'Initial launch is accepted and still progressing. Continue observing the Job and transcript.'
     : null
 
   // Errors evidence (region between usage summary and transcript)
-  const errorsEvidence = meta?.interruption ? null : (
+  const errorsEvidence = (
     <SessionErrorsEvidence
       failureCategory={meta?.eventSummary?.failureCategory ?? null}
       toolErrorCount={meta?.eventSummary?.toolErrorCount ?? null}
@@ -325,18 +393,15 @@ export function SessionDetailShell({
     }
   }, [queuedFollowup, sessionKey, transcriptVersion])
 
-  const handleFollowupSend = useCallback(
-    async (text: string, attachmentIds: string[] = []) => {
-      setQueuedFollowup({ sessionKey, transcriptVersion })
-      try {
-        return await sendFollowup(text, attachmentIds)
-      } catch (error) {
-        setQueuedFollowup((current) => (current?.sessionKey === sessionKey ? null : current))
-        throw error
-      }
-    },
-    [sendFollowup, sessionKey, transcriptVersion],
-  )
+  const handleFollowupSend = useCallback(async (text: string, attachmentIds: string[] = []) => {
+    setQueuedFollowup({ sessionKey, transcriptVersion })
+    try {
+      return await sendFollowup(text, attachmentIds)
+    } catch (error) {
+      setQueuedFollowup((current) => current?.sessionKey === sessionKey ? null : current)
+      throw error
+    }
+  }, [sendFollowup, sessionKey, transcriptVersion])
 
   useEffect(() => {
     if (!isRunning) return
@@ -345,10 +410,10 @@ export function SessionDetailShell({
 
     const handleResize = () => {
       if (
-        initializedAutoScrollSessionRef.current === sessionKey &&
-        isNearBottomRef.current &&
-        !isUserScrollingRef.current &&
-        !isSelectingTextRef.current
+        initializedAutoScrollSessionRef.current === sessionKey
+        && isNearBottomRef.current
+        && !isUserScrollingRef.current
+        && !isSelectingTextRef.current
       ) {
         container.scrollTop = container.scrollHeight
       }
@@ -390,13 +455,11 @@ export function SessionDetailShell({
     <SessionHeader
       backPath={backPath}
       backLabel={backLabel}
-      issueTitle={issueTitle}
       workflowContextPath={workflowContextPath}
       workflowContextLabel={workflowContextLabel}
       meta={meta}
       statusKind={statusKind}
       turnCount={displayTurnCount}
-      siblingNav={siblingNav}
       stop={stop}
       headerRef={headerRef}
     />
@@ -406,7 +469,7 @@ export function SessionDetailShell({
   const showFollowupComposer = hasTurns || canFollowup || !isRunning
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
+    <div className="flex flex-col flex-1 min-h-0 relative">
       <div className="flex flex-col flex-1 min-h-0">
         <div
           ref={scrollContainerRef}
@@ -422,37 +485,21 @@ export function SessionDetailShell({
             turnCount={displayTurnCount}
           />
           <SessionUsageSummary usage={meta.usage} />
-          {meta.interruption && <SessionInterruptionBanner interruption={meta.interruption} />}
-          {errorsEvidence}
-          {observationGuidance && (
-            <div
-              className="border-b border-border px-4 py-2 text-xs text-muted-foreground"
-              data-testid="launch-observation-guidance"
-            >
-              {observationGuidance}
-            </div>
-          )}
-          {observationIsRecovering && launchObservation && (
-            <div
-              data-testid="launch-observation-recovering"
-              className="border-b border-warning-border bg-warning-subtle px-4 py-2 text-xs text-warning"
-            >
-              <div className="font-semibold">Recovering</div>
-              {launchObservation.jobFailureReason && <div>Reason: {launchObservation.jobFailureReason}</div>}
-              {launchObservation.recoveryDeadlineAt && (
-                <div>Recovery deadline: {launchObservation.recoveryDeadlineAt}</div>
-              )}
-            </div>
-          )}
-          {recoveryBarContent && (
-            <div
-              data-testid="session-recovery-bar"
-              data-sticky="true"
-              className="sticky top-9 z-20 border-b border-border bg-background px-4 py-2 md:py-3"
-            >
-              {recoveryBarContent}
-            </div>
-          )}
+           {errorsEvidence}
+           {observationGuidance && (
+             <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground" data-testid="launch-observation-guidance">
+               {observationGuidance}
+             </div>
+           )}
+           {recoveryBarContent && (
+             <div
+               data-testid="session-recovery-bar"
+               data-sticky="true"
+               className="sticky top-9 z-20 border-b border-border bg-background px-4 py-2 md:py-3"
+             >
+               {recoveryBarContent}
+             </div>
+           )}
           <TimelineViewToggle value={timelineView} onChange={changeTimelineView} />
           <SessionTranscriptLayout
             entries={entries}
@@ -465,27 +512,96 @@ export function SessionDetailShell({
 
         {showFollowupComposer && (
           <div data-testid="session-followup-composer-region">
-            <SessionFollowupComposer
-              onSend={handleFollowupSend}
-              projectId={projectId}
-              allowAttachments={supportsInputAttachments}
-              isSending={followupIsPending}
-              disabled={!canFollowup}
-              hasQueuedFollowup={queuedFollowup?.sessionKey === sessionKey}
-              followupStatus={followupStatus}
-              className="py-0.5"
-            />
+              <SessionFollowupComposer
+                onSend={handleFollowupSend}
+                projectId={projectId}
+                allowAttachments={supportsInputAttachments}
+                isSending={followupIsPending}
+                disabled={!canFollowup}
+                hasQueuedFollowup={queuedFollowup?.sessionKey === sessionKey}
+                followupStatus={followupStatus}
+                className="py-0.5"
+              />
           </div>
         )}
 
         {hasTurns && newContentAvailable && <JumpToBottomButton onClick={handleScrollToBottom} />}
       </div>
-      {siblingSidebar}
+    </div>
+  )
+}
+
+function TimelineViewToggle({
+  value,
+  onChange,
+}: {
+  value: 'summary' | 'raw'
+  onChange: (value: 'summary' | 'raw') => void
+}) {
+  return (
+    <div
+      className="flex items-center justify-end gap-1 border-b border-border px-4 py-2"
+      data-testid="session-timeline-view-toggle"
+      role="group"
+      aria-label="Timeline view"
+    >
+      <Button
+        type="button"
+        size="sm"
+        variant={value === 'summary' ? 'secondary' : 'ghost'}
+        aria-pressed={value === 'summary'}
+        data-testid="session-timeline-summary-trigger"
+        onClick={() => onChange('summary')}
+      >
+        <ListIcon aria-hidden="true" />
+        Summary
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant={value === 'raw' ? 'secondary' : 'ghost'}
+        aria-pressed={value === 'raw'}
+        data-testid="session-timeline-raw-trigger"
+        onClick={() => onChange('raw')}
+      >
+        <BracesIcon aria-hidden="true" />
+        Raw
+      </Button>
     </div>
   )
 }
 
 // ── Sub-components ──
+
+function getStageLabel(stage: string | null): string {
+  if (!stage) return 'Session'
+  return stage.charAt(0).toUpperCase() + stage.slice(1)
+}
+
+function sessionTimeAnchorMs(
+  meta: import('../../../entities/coder-session').SessionMetadata,
+): number | null {
+  return meta.lastActivityAt ? new Date(meta.lastActivityAt).getTime() : null
+}
+
+const sessionStatusPresentation: Partial<Record<SessionStatusKind, { label: string; className: string; dotClassName?: string; withDot?: boolean }>> = {
+  active: {
+    label: 'Active',
+    className: 'bg-info-subtle text-info border-info-border',
+    dotClassName: 'bg-info',
+    withDot: true,
+  },
+  idle: {
+    label: 'Idle',
+    className: 'bg-muted text-muted-foreground border-border',
+    dotClassName: 'bg-muted-foreground/60',
+  },
+  unknown: {
+    label: 'Unknown',
+    className: 'bg-warning-subtle text-warning border-warning-border',
+    dotClassName: 'bg-warning',
+  },
+}
 
 const stageChipPresentation: Record<string, string> = {
   plan: 'bg-info-subtle text-info border-info-border',
@@ -494,29 +610,50 @@ const stageChipPresentation: Record<string, string> = {
   integrate: 'bg-muted text-muted-foreground border-border',
 }
 
+function StatusBadge({ kind }: { kind: SessionStatusKind }) {
+  const presentation = sessionStatusPresentation[kind] ?? sessionStatusPresentation.unknown!
+  const { label, className, dotClassName, withDot } = presentation
+  return (
+    <span
+      data-testid="session-status-badge"
+      data-status-kind={kind}
+      data-tone={className.startsWith('bg-danger') ? 'danger'
+        : className.startsWith('bg-warning') ? 'warning'
+        : className.startsWith('bg-success') ? 'success'
+        : className.startsWith('bg-info') ? 'info'
+        : 'neutral'}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${className}`}
+    >
+      {withDot && dotClassName && (
+        <span className="relative flex h-2 w-2">
+          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${dotClassName}`} />
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${dotClassName}`} />
+        </span>
+      )}
+      {label}
+    </span>
+  )
+}
+
 function SessionHeader({
   backPath,
   backLabel,
-  issueTitle,
   workflowContextPath,
   workflowContextLabel,
   meta,
   statusKind,
   turnCount,
-  siblingNav,
   stop,
   headerRef,
 }: {
   backPath: string
   backLabel: string
-  issueTitle?: string
   workflowContextPath?: string
   workflowContextLabel?: string
   meta: import('../../../entities/coder-session').SessionMetadata
-  statusKind: StatusKind
+  statusKind: SessionStatusKind
   turnCount: number
-  siblingNav?: React.ReactNode
-  stop: SessionDataSourceResult['stop']
+  stop: UnifiedSessionDataSourceResult['stop']
   headerRef: RefObject<HTMLDivElement | null>
 }) {
   const [stopDialogOpen, setStopDialogOpen] = useState(false)
@@ -525,30 +662,23 @@ function SessionHeader({
   const activeControlIsPending = stop?.isPending ?? false
 
   const changedFiles = meta?.changedFiles
-  const fileSummary =
-    changedFiles && changedFiles.length > 0
-      ? changedFiles.length === 1
-        ? '1 file changed'
-        : `${changedFiles.length} files changed`
-      : null
+  const fileSummary = changedFiles && changedFiles.length > 0
+    ? changedFiles.length === 1 ? '1 file changed' : `${changedFiles.length} files changed`
+    : null
 
   const eventSummary = meta?.eventSummary
 
   const stageLower = (meta?.stage ?? '').toLowerCase()
   const stageClassName = stageChipPresentation[stageLower] ?? 'bg-muted text-muted-foreground border-border'
 
-  const isWideViewport = useMediaQuery('(min-width: 1280px)')
   const toProjectPath = useProjectPath()
 
   const lastActivityAnchorMs = sessionTimeAnchorMs(meta)
-  const lastActivityTime =
-    lastActivityAnchorMs == null
-      ? null
-      : formatSessionTime({
-          date: lastActivityAnchorMs,
-          statusKind,
-          now: Date.now(),
-        })
+  const lastActivityTime = lastActivityAnchorMs == null ? null : formatSessionTime({
+    date: lastActivityAnchorMs,
+    statusKind,
+    now: Date.now(),
+  })
 
   return (
     <div
@@ -565,12 +695,6 @@ function SessionHeader({
           <ChevronLeftIcon className="h-4 w-4 shrink-0" />
           <span>{backLabel}</span>
         </Link>
-        {issueTitle && (
-          <>
-            <span className="hidden md:inline text-muted-foreground/40 shrink-0">/</span>
-            <span className="hidden md:inline text-muted-foreground truncate min-w-0">{issueTitle}</span>
-          </>
-        )}
         {workflowContextPath && workflowContextLabel && (
           <Link
             to={workflowContextPath}
@@ -582,15 +706,6 @@ function SessionHeader({
             <span>{workflowContextLabel}</span>
           </Link>
         )}
-        {siblingNav && !isWideViewport && (
-          <div
-            className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-1"
-            data-testid="session-sibling-navigation-slot"
-            data-viewport="narrow"
-          >
-            {siblingNav}
-          </div>
-        )}
       </div>
 
       <div
@@ -600,17 +715,7 @@ function SessionHeader({
         <span className="font-medium text-foreground">
           {meta.source === 'workflow' ? 'Workflow Session' : 'Agent Session'}
         </span>
-        {meta.agentName && meta.agentId ? (
-          <Link
-            to={toProjectPath(`/agents/${encodeURIComponent(meta.agentId)}`)}
-            data-testid="session-agent-link"
-            className="text-info hover:text-info/80 transition-colors"
-          >
-            Agent: {meta.agentName}
-          </Link>
-        ) : meta.agentName ? (
-          <span>Agent: {meta.agentName}</span>
-        ) : null}
+        {meta.agentName && <span>Agent: {meta.agentName}</span>}
         {meta.origin && <span data-testid="session-origin">Origin: {meta.origin}</span>}
         {meta.sessionName && meta.source === 'workflow' && <span>Work: {meta.sessionName}</span>}
         {meta.workflowRunId && <span>Workflow run: {meta.workflowRunId}</span>}
@@ -627,9 +732,13 @@ function SessionHeader({
 
       <div
         data-testid="session-header-metadata-row"
+
         className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground min-w-0"
       >
-        <h1 data-testid="session-header-name" className="text-lg font-semibold text-foreground truncate">
+        <h1
+          data-testid="session-header-name"
+          className="text-lg font-semibold text-foreground truncate"
+        >
           {meta.sessionName ?? 'Session'}
         </h1>
         <StatusBadge kind={statusKind} />
@@ -642,17 +751,27 @@ function SessionHeader({
         </span>
 
         {meta?.model && eventSummary?.resolvedModel && meta.model !== eventSummary.resolvedModel ? (
-          <span data-testid="session-header-model" data-model={meta.model} className="text-muted-foreground">
+          <span
+            data-testid="session-header-model"
+            data-model={meta.model}
+            className="text-muted-foreground"
+          >
             {meta.model} <span className="text-muted-foreground/40">→</span>{' '}
             <span className="text-info">{eventSummary.resolvedModel}</span>
           </span>
         ) : meta?.model ? (
-          <span data-testid="session-header-model" data-model={meta.model}>
+          <span
+            data-testid="session-header-model"
+            data-model={meta.model}
+          >
             {meta.model}
           </span>
         ) : null}
 
-        <span data-testid="session-header-turn-count" data-turn-count={turnCount}>
+        <span
+          data-testid="session-header-turn-count"
+          data-turn-count={turnCount}
+        >
           {turnCount} turn{turnCount !== 1 ? 's' : ''}
         </span>
 
@@ -665,12 +784,22 @@ function SessionHeader({
             {lastActivityTime.primary}
           </span>
         )}
-        {fileSummary && <span data-testid="session-header-file-summary">{fileSummary}</span>}
-        {meta?.sessionId && <SessionIdCopyButton sessionId={meta.sessionId} truncated={meta.sessionId.slice(0, 8)} />}
+        {fileSummary && (
+          <span data-testid="session-header-file-summary">{fileSummary}</span>
+        )}
+        {meta?.sessionId && (
+          <SessionIdCopyButton
+            sessionId={meta.sessionId}
+            truncated={meta.sessionId.slice(0, 8)}
+          />
+        )}
       </div>
 
       {showStopControl && (
-        <div data-testid="session-header-secondary-actions" className="mt-1 flex justify-end gap-1">
+        <div
+          data-testid="session-header-secondary-actions"
+          className="mt-1 flex justify-end gap-1"
+        >
           <Button
             variant="ghost"
             size="sm"
@@ -695,11 +824,9 @@ function SessionHeader({
             setStopDialogOpen(open)
           }}
           title="Stop this Turn?"
-          description={
-            stop.state === 'queued'
-              ? 'This records the queued Turn as cancelled.'
-              : 'This requests that the Runtime stop the executing Turn; the result may be unknown.'
-          }
+          description={stop.state === 'queued'
+            ? 'This records the queued Turn as cancelled.'
+            : 'This requests that the Runtime stop the executing Turn; the result may be unknown.'}
           confirmLabel="Stop Turn"
           cancelLabel="Keep running"
           tone="destructive"
@@ -720,11 +847,10 @@ function SessionHeader({
         <div className="px-4 pt-2 text-xs text-muted-foreground" role="status" data-testid="session-stop-result">
           Turn result: {stopState}
           {stopState === 'unknown' && <span> Verification: Session view</span>}
-          {stopState === 'stop-requested' && (
-            <span> Verification: Session view (Runtime will report terminal result)</span>
-          )}
+          {stopState === 'stop-requested' && <span> Verification: Session view (Runtime will report terminal result)</span>}
         </div>
       )}
+
     </div>
   )
 }
@@ -739,7 +865,7 @@ function ScrollEngagedStickyTitle({
   headerRef: RefObject<HTMLDivElement | null>
   scrollContainerRef: RefObject<HTMLDivElement | null>
   meta: import('../../../entities/coder-session').SessionMetadata
-  statusKind: StatusKind
+  statusKind: SessionStatusKind
   turnCount: number
 }) {
   const [engaged, setEngaged] = useState(false)
@@ -749,44 +875,38 @@ function ScrollEngagedStickyTitle({
     const scrollContainer = scrollContainerRef.current
     if (!header || !scrollContainer || typeof IntersectionObserver === 'undefined') return
 
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry) setEngaged(entry.intersectionRatio < 0.001)
-      },
-      {
-        root: scrollContainer,
-        threshold: 0,
-      },
-    )
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) setEngaged(entry.intersectionRatio < 0.001)
+    }, {
+      root: scrollContainer,
+      threshold: 0,
+    })
     observer.observe(header)
     return () => observer.disconnect()
   }, [headerRef, scrollContainerRef])
 
   if (!engaged) return null
 
-  return <StickySessionTitle meta={meta} statusKind={statusKind} turnCount={turnCount} />
+  return (
+    <StickySessionTitle
+      meta={meta}
+      statusKind={statusKind}
+      turnCount={turnCount}
+    />
+  )
 }
 
-function StickySessionTitle({
-  meta,
-  statusKind,
-  turnCount,
-}: {
+function StickySessionTitle({ meta, statusKind, turnCount }: {
   meta: import('../../../entities/coder-session').SessionMetadata
-  statusKind: StatusKind
+  statusKind: SessionStatusKind
   turnCount: number
 }) {
   return (
-    <div
-      className="sticky top-0 z-20 border-b border-border bg-background px-4 py-2"
-      data-testid="session-sticky-title"
-    >
+    <div className="sticky top-0 z-20 border-b border-border bg-background px-4 py-2" data-testid="session-sticky-title">
       <div className="flex items-center gap-2 text-sm">
         <span className="font-medium truncate">{meta?.sessionName ?? 'Session'}</span>
         <StatusBadge kind={statusKind} />
-        <span className="text-muted-foreground text-xs">
-          {turnCount} turn{turnCount !== 1 ? 's' : ''}
-        </span>
+        <span className="text-muted-foreground text-xs">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
       </div>
     </div>
   )
@@ -827,8 +947,14 @@ function SessionIdCopyButton({ sessionId, truncated }: { sessionId: string; trun
   }
 
   const showTooltip = tooltipPinnedOpen
-  const ariaLabel = copyState === 'copied' ? 'Copied!' : `Copy session id ${sessionId}`
-  const visibleLabel = copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy unavailable' : truncated
+  const ariaLabel = copyState === 'copied'
+    ? 'Copied!'
+    : `Copy session id ${sessionId}`
+  const visibleLabel = copyState === 'copied'
+    ? 'Copied!'
+    : copyState === 'failed'
+      ? 'Copy unavailable'
+      : truncated
 
   return (
     <span className="relative inline-flex items-center">
@@ -876,11 +1002,7 @@ function JumpToBottomButton({ onClick }: { onClick: () => void }) {
       className="absolute bottom-4 right-4 rounded-full bg-foreground text-xs text-background shadow-lg hover:bg-foreground/90"
     >
       <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-        <path
-          fillRule="evenodd"
-          d="M10 17a.75.75 0 01-.75-.75V5.612L5.29 9.77a.75.75 0 01-1.08-1.04l5.25-5.5a.75.75 0 011.08 0l5.25 5.5a.75.75 0 11-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0110 17z"
-          clipRule="evenodd"
-        />
+        <path fillRule="evenodd" d="M10 17a.75.75 0 01-.75-.75V5.612L5.29 9.77a.75.75 0 01-1.08-1.04l5.25-5.5a.75.75 0 011.08 0l5.25 5.5a.75.75 0 11-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0110 17z" clipRule="evenodd" />
       </svg>
       Jump to bottom
     </Button>

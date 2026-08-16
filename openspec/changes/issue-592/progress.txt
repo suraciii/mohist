@@ -109,3 +109,9 @@ All three must-fix findings disposed of by fixing. No won't-fix dispositions.
 - Deleted `entities/session`'s legacy SessionEvent view family: `model/types.ts`, `model/view.ts`, the `model/view/` builders and tests, and `@x/session-view.ts`; pruned the slice index to the five timeline functions and `Timeline*` types.
 - The transcript widget had a separate local `SessionTimelineView` mode alias, but T-003's mandatory exact word-boundary sweep includes that token. Renamed only that alias to `SessionTranscriptViewMode`; timeline behavior and `model/timeline` sources remain unchanged.
 - Baseline legacy-view/timeline coverage passed with 49 tests before deletion. Post-change timeline/transcript coverage passed with 128 tests; the exact removed-family sweep is empty and `tsc -b` passes.
+
+### T-004 implementation (2026-08-16)
+- Deleted `pages/session/data/SessionDataSource.ts` and exported `UnifiedSessionDataSourceResult` as `ReturnType<typeof useUnifiedSessionDataSource>`; the hook now infers its return and stop handle, with the stop options type inline and the queued/executing negative literal guard unchanged.
+- Removed the unread `emptyStateKind` and constant-empty `issueTitle`, `siblingNav`, and `siblingSidebar` fields from the hook and shell. Removed the shell's duplicate header/sidebar branches, viewport hook usage, and inert `xl:flex-row` class; deleted the sibling-nav-only shell spec.
+- Switched `SessionDetailShell` and both surviving shell fixtures to the inferred alias. Fixtures now include the hook's required literal query-key and state-setter fields; old runtime-lineage, sibling, issue-title, and empty-state fields are absent.
+- Baseline T-004 coverage passed with 25 tests before edits. Focused post-change coverage passed with 21 tests; `tsc -b`, `npm run test:ci` (357 files, 4,500 tests), `git diff --check`, and the `rg -w` sweep for T-001 through T-004 removed symbols are green.

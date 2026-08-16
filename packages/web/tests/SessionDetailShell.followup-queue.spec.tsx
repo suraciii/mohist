@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { SessionDetailShell } from '../src/pages/session/ui/SessionDetailShell'
-import type { SessionDataSourceResult } from '../src/pages/session/data/SessionDataSource'
+import type { UnifiedSessionDataSourceResult } from '../src/pages/session/data/useUnifiedSessionDataSource'
 
-function makeData(sessionKey: string): SessionDataSourceResult {
+function makeData(sessionKey: string): UnifiedSessionDataSourceResult {
   return {
     isLoading: false,
     isError: false,
@@ -17,8 +17,7 @@ function makeData(sessionKey: string): SessionDataSourceResult {
       runtimeSessionId: `runtime-${sessionKey}`,
       executionId: null,
       title: `${sessionKey} session`,
-      status: 'active',
-      statusKind: 'live',
+      source: 'agent-launch',
       model: 'model',
       stage: 'build',
       createdAt: '2026-06-15T10:00:00.000Z',
@@ -27,29 +26,36 @@ function makeData(sessionKey: string): SessionDataSourceResult {
       lastDataAt: '2026-06-15T11:30:00.000Z',
     },
     transcriptResponse: null,
+    transcriptView: 'public',
+    setTranscriptView: vi.fn(),
+    transcriptViewLoading: false,
+    launchObservation: null,
     initialTurns: [],
-    statusKind: 'live',
+    statusKind: 'active',
     isRunning: true,
     canFollowup: true,
+    supportsInputAttachments: true,
+    projectId: 'project-1',
     followupIsPending: false,
-    sendFollowup: vi.fn(async () => {}),
+    followupStatus: null,
+    sendFollowup: vi.fn(async () => ({ status: 'accepted' as const })),
     stop: null,
     contextWindowUsed: null,
     contextWindowSize: null,
     contextUsagePercent: null,
     healthStatus: null,
     hasRecoveryActions: false,
-    recoverySessionName: null,
-    runtimeSessionLineage: null,
-    viewedRuntimeSessionId: null,
-    buildLineageTargetPath: null,
-    metadataQueryKey: [],
-    transcriptQueryKey: [],
+    recoveryAvailable: false,
+    recoverySessionName: sessionKey,
+    recoverySessionId: sessionKey,
+    recoveryHistory: null,
+    metadataQueryKey: ['unified-session', 'project-1', `session-${sessionKey}`] as const,
+    transcriptQueryKey: ['unified-session', 'project-1', `session-${sessionKey}`, 'transcript', `runtime-${sessionKey}`, 'public'] as const,
     handleRecoverySuccess: () => {},
     backPath: '/issues/123',
     backLabel: 'Issue #123',
-    siblingNav: null,
-    siblingSidebar: null,
+    workflowContextPath: undefined,
+    workflowContextLabel: undefined,
     sessionTurns: [],
     transcriptVersion: 0,
     scrollToBottom: () => {},
@@ -62,14 +68,12 @@ function makeData(sessionKey: string): SessionDataSourceResult {
     items: [],
     entries: [],
     currentActivity: { state: 'unknown', label: '状态未知' },
-    emptyStateKind: null,
-    historicalRuntimeTarget: null,
-    historicalRuntimeId: null,
+    resolveTimelineReference: () => null,
     issueNumber: 123,
   }
 }
 
-function renderShell(data: SessionDataSourceResult) {
+function renderShell(data: UnifiedSessionDataSourceResult) {
   return render(
     <MemoryRouter>
       <SessionDetailShell
