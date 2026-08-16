@@ -116,7 +116,7 @@ public sealed class PublicSessionEventStreamQuerier : IScopedService
                 row.Generation,
                 row.Sequence,
                 PublicSessionEventCursorCodec.CurrentVersion));
-            var payload = ParsePayload(row.PayloadJson);
+            var payload = ParsePayload(row.Type, row.PayloadJson);
             if (row.Type == PublicSessionEventTypes.ContextReset)
             {
                 events.Add(new PublicSessionEvent
@@ -160,7 +160,7 @@ public sealed class PublicSessionEventStreamQuerier : IScopedService
         });
     }
 
-    private static JsonElement ParsePayload(string payloadJson)
+    private static JsonElement ParsePayload(string eventType, string payloadJson)
     {
         using var document = JsonDocument.Parse(payloadJson);
         if (document.RootElement.ValueKind != JsonValueKind.Object)
@@ -168,7 +168,25 @@ public sealed class PublicSessionEventStreamQuerier : IScopedService
             throw new InvalidOperationException("A public Session event payload must be a JSON object.");
         }
 
-        return document.RootElement.Clone();
+        if (eventType == PublicSessionEventTypes.ContextReset)
+        {
+            var session = JsonSerializer.Deserialize<PublicSessionEventPayload>(
+                document.RootElement,
+                JSON.PublicApi)
+                ?? throw new InvalidOperationException("A public Session context-reset payload is missing.");
+            return JsonSerializer.SerializeToElement(session, JSON.PublicApi);
+        }
+
+        if (!PublicSessionEventTypes.Execution.Contains(eventType))
+        {
+            throw new InvalidOperationException("A public Session event has an unsupported type.");
+        }
+
+        var execution = JsonSerializer.Deserialize<PublicExecutionRead>(
+            document.RootElement,
+            JSON.PublicApi)
+            ?? throw new InvalidOperationException("A public Session execution payload is missing.");
+        return JsonSerializer.SerializeToElement(execution, JSON.PublicApi);
     }
 }
 

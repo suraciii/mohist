@@ -675,3 +675,22 @@ Runner delivery, and reconstructs pending retries from that frozen target.
 - Added a caller-binding assertion to `DirectApiStopSpecs` and ran the focused
   suite successfully (5 tests). The full `npm run test:fast` gate remains the
   final verification for this task.
+
+## T-007 completion (current task)
+
+- Audited the public Session event route against
+  `public-session-event-stream/spec.md`: cursor verification and route binding
+  happen before projection reads; the stream state supplies generation,
+  retention bounds, tombstone status, and high-water positioning; and event
+  rows are read only from the persisted active-generation public journal.
+- Hardened response serialization so persisted event payloads are
+  deserialized into `PublicExecutionRead` or `PublicSessionEventPayload` and
+  reserialized through `JSON.PublicApi`. Unknown event types are rejected and
+  private fields accidentally present in a projection row cannot cross the
+  direct API boundary. Added a SpecTest that injects `prompt` and `runtime`
+  fields into persisted rows and verifies the response remains allowlisted.
+- Focused verification passed: `PublicSessionEventStreamRouteSpecs` (5),
+  `PublicSessionEventCursorCodecTests` (3), and the Server build. The complete
+  `npm run test:fast` gate passed all seven lanes: typecheck, 2,675 Server unit
+  tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724
+  Web tests, and 1,639 Runner tests.

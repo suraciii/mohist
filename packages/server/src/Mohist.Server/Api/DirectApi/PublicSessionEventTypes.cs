@@ -20,6 +20,18 @@ public static class PublicSessionEventTypes
     public const string SessionUnknown = "session.unknown";
     public const string ContextReset = "session.context_reset";
 
+    /// <summary>The execution event types that carry PublicExecutionRead.</summary>
+    public static readonly IReadOnlyList<string> Execution =
+    [
+        InputAccepted,
+        InputRejected,
+        TurnQueued,
+        TurnRunning,
+        TurnOutcomePending,
+        TurnTerminal,
+        SessionUnknown,
+    ];
+
     /// <summary>Every event type the public stream may contain, in stable order.</summary>
     public static readonly IReadOnlyList<string> All =
     [

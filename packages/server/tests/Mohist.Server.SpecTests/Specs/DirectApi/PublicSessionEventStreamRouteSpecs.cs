@@ -84,6 +84,8 @@ public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture 
     public async Task LimitIsCappedAndPayloadsStayAllowlisted()
     {
         var seeded = await SeedStreamAsync(additionalEvents: 102, addContextReset: true);
+        await AddPrivateFieldAsync(seeded.SessionId, PublicSessionEventTypes.InputAccepted, "prompt");
+        await AddPrivateFieldAsync(seeded.SessionId, PublicSessionEventTypes.ContextReset, "runtime");
         using var client = await CreateReaderAsync(seeded.ProjectId);
 
         using var response = await GetAsync(client, seeded.ProjectId, seeded.SessionId, "limit=500");
@@ -112,6 +114,7 @@ public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture 
             reset.GetProperty("session").EnumerateObject().Select(property => property.Name));
         Assert.DoesNotContain("execution", reset.EnumerateObject().Select(property => property.Name));
         Assert.DoesNotContain("jobId", reset.GetProperty("session").EnumerateObject().Select(property => property.Name));
+        Assert.DoesNotContain("runtime", reset.GetProperty("session").EnumerateObject().Select(property => property.Name));
     }
 
     [Fact]
@@ -559,6 +562,17 @@ public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture 
         Assert.True(signer.TryDecode(token, projectId, sessionId, out var payload));
         Assert.Equal(generation, payload!.Generation);
         return payload.AfterPosition;
+    }
+
+    private async Task AddPrivateFieldAsync(string sessionId, string eventType, string fieldName)
+    {
+        await using var db = await fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        var row = await db.PublicSessionEvents.SingleAsync(item =>
+            item.SessionId == sessionId && item.Type == eventType);
+        row.PayloadJson = row.PayloadJson[..^1] + $",\"{fieldName}\":\"private\"}}";
+        await db.SaveChangesAsync();
     }
 
     private async Task UpdateStreamAsync(string sessionId, Action<PublicStreamStateRow> update)
