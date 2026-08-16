@@ -2,8 +2,22 @@ import type { WorkflowStage } from './issue'
 import type { WorkflowArtifactSummary, WorkflowTaskRequiredFile } from './artifact'
 import type { BaseDriftInfo } from './drift'
 
-export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'blocked'
-export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 'failed' | 'error'
+export type StageTaskStatus =
+  | 'pending'
+  | 'running'
+  | 'recoverable-interrupted'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
+export type StageCheckStatus =
+  | 'pending'
+  | 'running'
+  | 'recoverable-interrupted'
+  | 'completed'
+  | 'passed'
+  | 'failed'
+  | 'error'
 
 /**
  * Tracks the wire status of a workflow stage as emitted by
@@ -14,6 +28,7 @@ export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 
 export type StageStateStatus =
   | 'pending'
   | 'running'
+  | 'recoverable-interrupted'
   | 'awaiting-approval'
   | 'completed'
   | 'passed'
@@ -53,6 +68,14 @@ export interface WorkflowFailureDetails {
 export interface WorkflowExecutionError {
   code: string
   message: string
+}
+
+export interface WorkInterruption {
+  reasonCode: string
+  workId: string
+  ownerId: string
+  recordedAt: string
+  recoveryDeadlineAt: string
 }
 
 export interface WorkflowAgentResultSettlement {
@@ -101,6 +124,7 @@ export interface StageTaskState {
   requiredFiles?: WorkflowTaskRequiredFile[]
   classification?: 'UserFacing' | 'Orchestration'
   agentResultSettlement?: WorkflowAgentResultSettlement | null
+  interruption?: WorkInterruption | null
 }
 
 export interface StageCheckState {
@@ -114,6 +138,7 @@ export interface StageCheckState {
   lastRunAt: string | null
   origin?: WorkItemOrigin | null
   updatedAt: string
+  interruption?: WorkInterruption | null
 }
 
 export interface StageApprovalState {
@@ -126,6 +151,7 @@ export interface StageApprovalState {
 export interface StageStateRead {
   stage: WorkflowStage
   status: StageStateStatus
+  interruption?: WorkInterruption | null
   tasks: StageTaskState[]
   checks: StageCheckState[]
   approval: StageApprovalState | null

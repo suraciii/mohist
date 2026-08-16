@@ -51,15 +51,12 @@ export type SessionTimeStatusKind =
   | 'live'
   | 'finalizing'
   | 'probing'
+  | 'recovering'
   | 'completed'
   | 'failed'
   | 'stale'
 
-const TERMINAL_STATUS_KINDS: ReadonlySet<SessionTimeStatusKind> = new Set([
-  'completed',
-  'failed',
-  'stale',
-])
+const TERMINAL_STATUS_KINDS: ReadonlySet<SessionTimeStatusKind> = new Set(['completed', 'failed', 'stale'])
 
 const ABSOLUTE_FORMAT = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -101,11 +98,7 @@ export interface FormatSessionTimeOutput {
  * through the `now` argument so unit tests can vary the branch without
  * `vi.useFakeTimers`.
  */
-export function formatSessionTime({
-  date,
-  statusKind,
-  now,
-}: FormatSessionTimeInput): FormatSessionTimeOutput {
+export function formatSessionTime({ date, statusKind, now }: FormatSessionTimeInput): FormatSessionTimeOutput {
   const dateMs = toEpochMs(date)
   const absolute = ABSOLUTE_FORMAT.format(new Date(dateMs))
   const relative = formatRelativeForSessionTime(dateMs, now)

@@ -33,14 +33,21 @@ interface SummaryPresentation {
 }
 
 const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
-  'running': {
+  'recoverable-interrupted': {
+    label: 'Recovering',
+    fillClassName: 'bg-warning-subtle',
+    borderClassName: 'border-warning-border',
+    iconClassName: 'text-warning',
+    icon: AlertCircleIcon,
+  },
+  running: {
     label: 'Running',
     fillClassName: 'bg-info-subtle',
     borderClassName: 'border-info-border',
     iconClassName: 'text-info',
     icon: ActivityIcon,
   },
-  'queued': {
+  queued: {
     label: 'Queued',
     fillClassName: 'bg-info-subtle',
     borderClassName: 'border-info-border',
@@ -54,28 +61,28 @@ const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
     iconClassName: 'text-warning',
     icon: PauseCircleIcon,
   },
-  'blocked': {
+  blocked: {
     label: 'Blocked',
     fillClassName: 'bg-warning-subtle',
     borderClassName: 'border-warning-border',
     iconClassName: 'text-warning',
     icon: AlertCircleIcon,
   },
-  'failed': {
+  failed: {
     label: 'Failed',
     fillClassName: 'bg-danger-subtle',
     borderClassName: 'border-danger-border',
     iconClassName: 'text-danger',
     icon: XCircleIcon,
   },
-  'done': {
+  done: {
     label: 'Done',
     fillClassName: 'bg-success-subtle',
     borderClassName: 'border-success-border',
     iconClassName: 'text-success',
     icon: CheckCircle2Icon,
   },
-  'cancelled': {
+  cancelled: {
     label: 'Cancelled',
     fillClassName: 'bg-muted/40',
     borderClassName: 'border-border',
@@ -91,11 +98,7 @@ function buildHeadlineText(headline: string, currentTask: RuntimeCurrentTask | n
   return `${headline} · ${label}: ${currentTask.title}`
 }
 
-function StageProgress({
-  stageProgress,
-}: {
-  stageProgress: StatusHeadlineStageProgress
-}) {
+function StageProgress({ stageProgress }: { stageProgress: StatusHeadlineStageProgress }) {
   const stage = stageProgress.stage ?? null
   const total = stageProgress.total ?? 0
   const completed = stageProgress.completed ?? 0
@@ -108,7 +111,9 @@ function StageProgress({
     >
       <span className="font-semibold">{stage}</span>
       <span aria-hidden="true">·</span>
-      <span>{completed}/{total}</span>
+      <span>
+        {completed}/{total}
+      </span>
     </span>
   )
 }
@@ -151,10 +156,7 @@ export function StatusHeadline({ decision, stageProgress }: StatusHeadlineProps)
       </div>
 
       {headlineText && (
-        <h2
-          data-testid="status-headline-headline"
-          className="text-sm font-semibold leading-tight text-card-foreground"
-        >
+        <h2 data-testid="status-headline-headline" className="text-sm font-semibold leading-tight text-card-foreground">
           {headlineText}
         </h2>
       )}

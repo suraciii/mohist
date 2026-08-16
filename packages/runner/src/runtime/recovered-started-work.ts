@@ -24,6 +24,7 @@ interface RecoveredStartedEntry {
  */
 export class RecoveredStartedWork {
   private readonly entries = new Map<string, RecoveredStartedEntry>()
+  private readonly observed = new Set<string>()
 
   constructor(
     private readonly journal: WorkResultJournal,
@@ -59,6 +60,11 @@ export class RecoveredStartedWork {
    */
   drop(key: string): void {
     this.entries.delete(key)
+    this.observed.delete(key)
+  }
+
+  has(key: string): boolean {
+    return this.entries.has(key) || this.observed.has(key)
   }
 
   async retryDue(now: number): Promise<void> {
@@ -103,6 +109,7 @@ export class RecoveredStartedWork {
     })
     await this.journal.acknowledgeUnconfirmed(entry.work)
     this.entries.delete(key)
+    this.observed.add(key)
   }
 
   private scheduleRetry(key: string, now: number): void {

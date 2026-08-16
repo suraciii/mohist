@@ -37,6 +37,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
     private readonly TimeSpan _agentResultSettlementTimeout;
+    private readonly TimeSpan _runnerLossRecoveryTimeout;
 
     internal WorkflowGrain(
         Orleans.Runtime.IGrainContext context,
@@ -63,6 +64,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
+        _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -89,6 +91,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
+        _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
 
     WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
@@ -115,6 +118,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
         await ReconcileAgentResultSettlementAsync();
+        await ReconcileRunnerLossRecoveryAsync();
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
     }
@@ -812,6 +816,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (timeout <= TimeSpan.Zero)
             throw new InvalidOperationException("Workflow AgentResultSettlementTimeout must be positive.");
+        return timeout;
+    }
+
+    private static TimeSpan ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.FromMinutes(2))
+            throw new InvalidOperationException(
+                "Workflow RunnerLossRecoveryTimeout must be longer than the two-minute runner presence timeout.");
         return timeout;
     }
 

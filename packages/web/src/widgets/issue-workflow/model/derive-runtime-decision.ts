@@ -5,10 +5,7 @@ import {
   findRunningCheck,
   findRunningTask,
 } from './runtime-query-helpers'
-import {
-  buildPresentationContext,
-  resolveSummaryPresentation,
-} from './runtime-presentations'
+import { buildPresentationContext, resolveSummaryPresentation } from './runtime-presentations'
 import type {
   RuntimeAvailableAction,
   RuntimeCurrentTask,
@@ -38,8 +35,7 @@ export function buildWaitReason(input: RuntimeDecisionInput): string | null {
   }
 
   if (input.agentStatus?.runnerAvailable === false) {
-    return input.agentStatus.runnerMessage
-      ?? 'No runner is connected. Start a runner before this issue can run.'
+    return input.agentStatus.runnerMessage ?? 'No runner is connected. Start a runner before this issue can run.'
   }
 
   const capacity = input.agentStatus?.capacity
@@ -61,19 +57,18 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
   const status = (issue.workflowStatus ?? '').toLowerCase()
   const health = issue.health
 
-  const isDone =
-    stage === WorkflowStage.Done
-    || status === 'done'
-    || health === IssueHealth.Done
+  const isDone = stage === WorkflowStage.Done || status === 'done' || health === IssueHealth.Done
   if (isDone) {
     return 'done'
   }
 
-  const isCancelled =
-    issue.status === IssueStatus.Cancelled
-    || health === IssueHealth.Cancelled
+  const isCancelled = issue.status === IssueStatus.Cancelled || health === IssueHealth.Cancelled
   if (isCancelled) {
     return 'cancelled'
+  }
+
+  if (status === 'recoverable-interrupted' || issue.attention?.reason === 'recoverable-interrupted') {
+    return 'recoverable-interrupted'
   }
 
   const recovery = issue.recovery
@@ -84,8 +79,8 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
   }
 
   if (
-    recovery?.latestAttemptState === 'failed'
-    || (failedScriptHealthCheck && recovery?.latestAttemptState !== 'running')
+    recovery?.latestAttemptState === 'failed' ||
+    (failedScriptHealthCheck && recovery?.latestAttemptState !== 'running')
   ) {
     return 'failed'
   }
@@ -94,11 +89,7 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return 'blocked'
   }
 
-  if (
-    recovery?.latestAttemptState === 'interrupted'
-    || status === 'interrupted'
-    || status === 'stopped'
-  ) {
+  if (recovery?.latestAttemptState === 'interrupted' || status === 'interrupted' || status === 'stopped') {
     return 'blocked'
   }
 
@@ -107,18 +98,17 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return 'approval-required'
   }
 
-  const hasUnresolvedConvergence = !!issue.convergence
-    && (issue.convergence.unresolvedItemIds?.length ?? 0) > 0
+  const hasUnresolvedConvergence = !!issue.convergence && (issue.convergence.unresolvedItemIds?.length ?? 0) > 0
   if (hasUnresolvedConvergence) {
     return 'blocked'
   }
 
   const waitReason = buildWaitReason(input)
   const hasExplicitQueueSignal =
-    !!input.issue?.blocker
-    || input.agentStatus?.runnerAvailable === false
-    || (!!input.agentStatus?.capacity?.max && (input.agentStatus.capacity.active >= input.agentStatus.capacity.max))
-    || input.hasActiveAgent === false
+    !!input.issue?.blocker ||
+    input.agentStatus?.runnerAvailable === false ||
+    (!!input.agentStatus?.capacity?.max && input.agentStatus.capacity.active >= input.agentStatus.capacity.max) ||
+    input.hasActiveAgent === false
   const isBacklog = issue.status === 'backlog'
 
   if (waitReason && (hasExplicitQueueSignal || isBacklog)) {
@@ -144,10 +134,7 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
   return 'running'
 }
 
-function pickCurrentTask(
-  input: RuntimeDecisionInput,
-  summary: RuntimeSummary,
-): RuntimeCurrentTask | null {
+function pickCurrentTask(input: RuntimeDecisionInput, summary: RuntimeSummary): RuntimeCurrentTask | null {
   const recovery = input.issue?.recovery
   if (recovery?.currentWorkItem?.title) {
     return {
@@ -188,9 +175,9 @@ function pickCurrentTask(
 
 function hasRecoverableStop(input: RuntimeDecisionInput): boolean {
   const recoveryActions = input.issue?.recovery?.allowedActions ?? []
-  return recoveryActions.includes('stop')
-    || recoveryActions.includes('force-stop')
-    || recoveryActions.includes('force_stop')
+  return (
+    recoveryActions.includes('stop') || recoveryActions.includes('force-stop') || recoveryActions.includes('force_stop')
+  )
 }
 
 function pickPrimaryAction(actions: RuntimeAvailableAction[]): RuntimeAvailableAction | null {
@@ -218,23 +205,18 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
   const currentTask = pickCurrentTask(input, summary)
   const computedWaitReason = buildWaitReason(input)
   const contextInput = buildPresentationContext(input)
-  const presentation = resolveSummaryPresentation(
-    contextInput,
-    currentTask,
-    summary,
-    computedWaitReason,
-  )
+  const presentation = resolveSummaryPresentation(contextInput, currentTask, summary, computedWaitReason)
   const waitReason = summary === 'queued' ? computedWaitReason : null
   const primary = pickPrimaryAction(presentation.actions)
   const hasStop = presentation.actions.some((action) => action.kind === 'stop')
   const stopRecoverable = hasStop ? hasRecoverableStop(input) : null
   const driftNote = buildDriftNote(input)
-  const blockedReason = summary === 'failed' || summary === 'blocked'
-    ? (issue?.blockedReason ?? issue?.convergence?.blockedReason ?? null)
-    : null
-  const approvalStage = summary === 'approval-required'
-    ? (issue?.approvalState?.stage ?? issue?.workflowStage ?? null)
-    : null
+  const blockedReason =
+    summary === 'failed' || summary === 'blocked'
+      ? (issue?.blockedReason ?? issue?.convergence?.blockedReason ?? null)
+      : null
+  const approvalStage =
+    summary === 'approval-required' ? (issue?.approvalState?.stage ?? issue?.workflowStage ?? null) : null
 
   return {
     summary,

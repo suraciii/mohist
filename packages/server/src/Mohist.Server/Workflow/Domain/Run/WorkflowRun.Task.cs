@@ -53,6 +53,7 @@ public static partial class WorkflowRunExtensions
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
             task.FinishedAt = now;
+            task.Interruption = null;
             task.Status = TaskRunStatus.Completed;
             task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             var events = new List<WorkflowEvent>
@@ -94,6 +95,7 @@ public static partial class WorkflowRunExtensions
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
             task.FinishedAt = now;
+            task.Interruption = null;
             task.Status = TaskRunStatus.Failed;
             task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: result.Reason, Error: result.Error);
@@ -130,6 +132,7 @@ public static partial class WorkflowRunExtensions
 
             var message = string.IsNullOrWhiteSpace(reason) ? "stopped" : reason;
             task.FinishedAt = now;
+            task.Interruption = null;
             task.Status = TaskRunStatus.Failed;
             task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: message);
@@ -148,6 +151,7 @@ public static partial class WorkflowRunExtensions
             }
 
             task.FinishedAt = now;
+            task.Interruption = null;
             task.Status = TaskRunStatus.Cancelled;
             task.TerminalLogOwnership = run.TerminalLogOwnershipFor(task);
             return [new TaskCancelled(current.Id, task.Id)];

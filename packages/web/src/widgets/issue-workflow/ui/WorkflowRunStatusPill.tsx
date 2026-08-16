@@ -1,4 +1,13 @@
-import { ActivityIcon, CheckCircle2Icon, CircleDashedIcon, ClockIcon, HourglassIcon, PauseCircleIcon, PlayCircleIcon, XCircleIcon } from 'lucide-react'
+import {
+  ActivityIcon,
+  CheckCircle2Icon,
+  CircleDashedIcon,
+  ClockIcon,
+  HourglassIcon,
+  PauseCircleIcon,
+  PlayCircleIcon,
+  XCircleIcon,
+} from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import type { WorkflowRunStatus } from '../../../entities/issue'
 
@@ -41,6 +50,15 @@ const RUNNING_PRESENTATION: StatusPresentation = {
   dot: 'bg-blue-500',
   icon: ActivityIcon,
   testId: 'workflow-run-status-running',
+}
+
+const RECOVERABLE_INTERRUPTED_PRESENTATION: StatusPresentation = {
+  label: 'Recoverable interruption',
+  bg: 'bg-amber-100',
+  text: 'text-amber-800',
+  dot: 'bg-amber-500',
+  icon: HourglassIcon,
+  testId: 'workflow-run-status-recoverable-interrupted',
 }
 
 const AWAITING_APPROVAL_PRESENTATION: StatusPresentation = {
@@ -120,6 +138,7 @@ const PRESENTATION_BY_STATUS: Record<WorkflowRunStatus, StatusPresentation> = {
   pending: PENDING_PRESENTATION,
   ready: READY_PRESENTATION,
   running: RUNNING_PRESENTATION,
+  'recoverable-interrupted': RECOVERABLE_INTERRUPTED_PRESENTATION,
   'awaiting-approval': AWAITING_APPROVAL_PRESENTATION,
   paused: PAUSED_PRESENTATION,
   stopped: STOPPED_PRESENTATION,
@@ -135,9 +154,7 @@ function isKnownRunStatus(value: string): value is WorkflowRunStatus {
 export function WorkflowRunStatusPill({ status, className }: WorkflowRunStatusPillProps) {
   if (!status) return null
 
-  const presentation = status && isKnownRunStatus(status)
-    ? PRESENTATION_BY_STATUS[status]
-    : UNKNOWN_PRESENTATION
+  const presentation = status && isKnownRunStatus(status) ? PRESENTATION_BY_STATUS[status] : UNKNOWN_PRESENTATION
   const Icon = presentation.icon
   const dataStatus = status && isKnownRunStatus(status) ? status : 'unknown'
 

@@ -19,6 +19,11 @@ const sessionStatusPresentation: Partial<
     className: 'bg-warning-subtle text-warning border-warning-border',
     dotClassName: 'bg-warning',
   },
+  recovering: {
+    label: 'Recovering',
+    className: 'bg-warning-subtle text-warning border-warning-border',
+    dotClassName: 'bg-warning',
+  },
 }
 
 export function StatusBadge({ kind }: { kind: StatusKind }) {

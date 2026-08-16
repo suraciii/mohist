@@ -1214,7 +1214,7 @@ internal sealed partial class MohistCliApi
         ActivityList,
         IssueWatchList,
         AgentJobList,
-        AgentJobView,
+        AgentJobView, AgentLaunchObservation,
         SessionList,
         SessionShow,
         SessionTree,

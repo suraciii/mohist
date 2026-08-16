@@ -25,6 +25,7 @@ internal static class WorkflowEventSerializer
         [typeof(TaskStarted)] = EventCatalog.ReverseDns.TaskStarted,
         [typeof(TaskCompleted)] = EventCatalog.ReverseDns.TaskCompleted,
         [typeof(TaskFailed)] = EventCatalog.ReverseDns.TaskFailed,
+        [typeof(TaskInterrupted)] = EventCatalog.ReverseDns.TaskInterrupted,
         [typeof(TaskCancelled)] = EventCatalog.ReverseDns.TaskCancelled,
         [typeof(AgentTaskResultUnconfirmed)] = EventCatalog.ReverseDns.AgentTaskResultUnconfirmed,
         [typeof(TaskBlocked)] = EventCatalog.ReverseDns.TaskBlocked,
@@ -33,6 +34,7 @@ internal static class WorkflowEventSerializer
         [typeof(CheckPassed)] = EventCatalog.ReverseDns.CheckPassed,
         [typeof(CheckFailed)] = EventCatalog.ReverseDns.CheckFailed,
         [typeof(CheckPending)] = EventCatalog.ReverseDns.CheckPending,
+        [typeof(ChecksInterrupted)] = EventCatalog.ReverseDns.ChecksInterrupted,
         [typeof(WorkflowArtifactRecorded)] = EventCatalog.ReverseDns.WorkflowArtifactRecorded,
     };
 
@@ -74,6 +76,7 @@ internal static class WorkflowEventSerializer
         nameof(TaskStarted) => data.Deserialize<TaskStarted>(JsonOptions)!,
         nameof(TaskCompleted) => data.Deserialize<TaskCompleted>(JsonOptions)!,
         nameof(TaskFailed) => data.Deserialize<TaskFailed>(JsonOptions)!,
+        nameof(TaskInterrupted) => data.Deserialize<TaskInterrupted>(JsonOptions)!,
         nameof(TaskCancelled) => data.Deserialize<TaskCancelled>(JsonOptions)!,
         nameof(AgentTaskResultUnconfirmed) => data.Deserialize<AgentTaskResultUnconfirmed>(JsonOptions)!,
         nameof(TaskBlocked) => data.Deserialize<TaskBlocked>(JsonOptions)!,
@@ -82,6 +85,7 @@ internal static class WorkflowEventSerializer
         nameof(CheckPassed) => data.Deserialize<CheckPassed>(JsonOptions)!,
         nameof(CheckFailed) => data.Deserialize<CheckFailed>(JsonOptions)!,
         nameof(CheckPending) => data.Deserialize<CheckPending>(JsonOptions)!,
+        nameof(ChecksInterrupted) => data.Deserialize<ChecksInterrupted>(JsonOptions)!,
         nameof(WorkflowArtifactRecorded) => data.Deserialize<WorkflowArtifactRecorded>(JsonOptions)!,
         _ => throw new InvalidOperationException($"Unknown workflow event '{type}'"),
     };
@@ -103,6 +107,7 @@ internal static class WorkflowEventSerializer
         TaskStarted x => x,
         TaskCompleted x => x,
         TaskFailed x => x,
+        TaskInterrupted x => x,
         TaskCancelled x => x,
         AgentTaskResultUnconfirmed x => x,
         TaskBlocked x => x,
@@ -111,6 +116,7 @@ internal static class WorkflowEventSerializer
         CheckPassed x => x,
         CheckFailed x => x,
         CheckPending x => x,
+        ChecksInterrupted x => x,
         WorkflowArtifactRecorded x => x,
         null => throw new InvalidOperationException("Null workflow event"),
     };

@@ -28,6 +28,7 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<WorkItem?> ClaimNextAsync(string workerId);
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
     Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
+    Task<ReportAck> InterruptActiveWorkAsync(string workerId, string reason);
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
     Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding);

@@ -135,7 +135,8 @@ public class WorkflowQuerier : IScopedService
                     DurationMs: task.DurationMs,
                     Output: task.Output,
                     Error: task.Error,
-                    AgentResultSettlement: task.AgentResultSettlement);
+                    AgentResultSettlement: task.AgentResultSettlement,
+                    Interruption: task.Interruption);
             }
         }
     }

@@ -3,6 +3,8 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.TestSupport;
+using Orleans;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
@@ -29,7 +31,17 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
 
-        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+        var recovering = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Unknown, recovering.Status);
+        Assert.True(recovering.IsRecovering);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, recovering.FailureReason);
+        Assert.NotNull(recovering.RecoveryDeadlineAt);
+
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IServiceScopeFactory>()
+            .CreateScope();
+        var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
 
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
@@ -37,15 +49,23 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             "agent-job-host",
             projectId));
 
-        using var scope = _fixture.Cluster.GetSiloServiceProvider(null)
-            .GetRequiredService<IServiceScopeFactory>()
-            .CreateScope();
-        var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
-        var recovered = Assert.Single(
+        var redelivery = Assert.Single(
             (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(jobKey, redelivery.AgentJobId);
+        Assert.Equal(originalWorkId, redelivery.WorkId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, redelivery.OwnerKind);
 
-        Assert.Equal(jobKey, recovered.AgentJobId);
-        Assert.Equal(originalWorkId, recovered.WorkId);
+        var repeated = Assert.Single(
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(redelivery.AgentJobId, repeated.AgentJobId);
+        Assert.Equal(redelivery.WorkId, repeated.WorkId);
+        Assert.Equal(redelivery.OwnerKind, repeated.OwnerKind);
+        Assert.Equal(redelivery.With, repeated.With);
+        Assert.Equal(redelivery.Variables, repeated.Variables);
+
+        var workKey = $"{WorkDispatchOwnerKinds.AgentJob}:{jobKey}:{originalWorkId}";
+        Assert.Empty(
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([workKey], []))).Dispatches);
 
         var firstReport = await job.ReportResultAsync(
             runnerId,
@@ -60,6 +80,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.False(duplicateReport.Accepted);
         Assert.Equal("stale", duplicateReport.Reason);
         Assert.Equal(AgentJobStatus.Completed, (await job.GetTerminalResultAsync()).Status);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         await runner.UnregisterAsync();
     }
 
@@ -78,7 +99,9 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
-        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+        var recovering = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Unknown, recovering.Status);
+        Assert.True(recovering.IsRecovering);
 
         var unknown = await job.ReportResultAsync(
             runnerId,
@@ -91,7 +114,6 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.Equal("unknown", unknown.Reason);
         var unknownResult = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Unknown, unknownResult.Status);
-        Assert.Contains("durable started fence", unknownResult.FailureReason, StringComparison.Ordinal);
 
         var duplicateUnknown = await job.ReportResultAsync(
             runnerId,
@@ -107,6 +129,129 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.True(terminal.Accepted);
         Assert.Equal(AgentJobStatus.Completed, await job.GetStatusAsync());
         await runner.UnregisterAsync();
+    }
+
+    [Fact]
+    public async Task RecoveringAgentJob_IsNotTakenOverByAnotherRunner()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-recovery-owner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-recovery-owner-project-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-recovery-owner-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("keep the original runner", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var original = await job.GetRuntimeSnapshotAsync();
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+
+        var otherRunnerId = $"agent-job-recovery-other-{Guid.NewGuid():N}";
+        var otherRunner = Grains.GetGrain<IRunnerGrain>(otherRunnerId);
+        await otherRunner.RegisterAsync(new RunnerInfo(
+            otherRunnerId,
+            ["spec/*"],
+            "agent-job-other-host",
+            projectId));
+
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IServiceScopeFactory>()
+            .CreateScope();
+        var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
+        Assert.Empty((await dispatch.PollAsync(otherRunnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        var after = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, after.RunnerId);
+        Assert.Equal(original.CurrentWorkId, after.CurrentWorkId);
+        Assert.True(after.IsRecovering);
+        await otherRunner.UnregisterAsync();
+    }
+
+    [Fact]
+    public async Task LateReportAtRecoveryDeadlineIsStaleAfterOwnerTerminalizesTheJob()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-recovery-late-report-runner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-recovery-late-report-project-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-recovery-late-report-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("late result loses deadline race", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+
+        var recovering = await job.GetRuntimeSnapshotAsync();
+        var deadline = Assert.IsType<DateTimeOffset>(recovering.RecoveryDeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+
+        var late = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult("completed", "late previous-generation result"));
+        Assert.False(late.Accepted);
+        Assert.Equal("stale", late.Reason);
+
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, terminal.FailureReason);
+        Assert.False((await job.GetRuntimeSnapshotAsync()).IsRecovering);
+
+        var duplicate = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult("completed", "duplicate late result"));
+        Assert.False(duplicate.Accepted);
+        Assert.Equal("stale", duplicate.Reason);
+        Assert.Equal(AgentJobStatus.Failed, (await job.GetTerminalResultAsync()).Status);
+    }
+
+    [Fact]
+    public async Task RunnerLossRecoveryReminder_FailsAtPersistedDeadlineWithRecordedReason()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-recovery-deadline-runner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-recovery-deadline-project-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-recovery-deadline-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("fail after recovery deadline", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.UnregisterAsync();
+
+        var recovering = await job.GetRuntimeSnapshotAsync();
+        var deadline = Assert.IsType<DateTimeOffset>(recovering.RecoveryDeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, terminal.FailureReason);
+        Assert.False((await job.GetRuntimeSnapshotAsync()).IsRecovering);
+    }
+
+    [Fact]
+    public async Task RunnerLossRecoveryReminder_ReDerivesDeadlineAfterJobReactivation()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-recovery-reactivation-runner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-recovery-reactivation-project-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-recovery-reactivation-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("re-arm after activation", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+        var deadline = Assert.IsType<DateTimeOffset>((await job.GetRuntimeSnapshotAsync()).RecoveryDeadlineAt);
+
+        await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        var reactivated = JobGrain(jobKey);
+        Assert.True((await reactivated.GetRuntimeSnapshotAsync()).IsRecovering);
+
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await reactivated.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
+        var terminal = await reactivated.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, terminal.FailureReason);
     }
 
     [Fact]
@@ -129,8 +274,12 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
 
-        Assert.Equal(AgentJobStatus.Running, await firstJob.GetStatusAsync());
-        Assert.Equal(AgentJobStatus.Running, await secondJob.GetStatusAsync());
+        var firstRecovering = await firstJob.GetRuntimeSnapshotAsync();
+        var secondRecovering = await secondJob.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Unknown, firstRecovering.Status);
+        Assert.Equal(AgentJobStatus.Unknown, secondRecovering.Status);
+        Assert.True(firstRecovering.IsRecovering);
+        Assert.True(secondRecovering.IsRecovering);
 
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
@@ -142,12 +291,14 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             .GetRequiredService<IServiceScopeFactory>()
             .CreateScope();
         var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
-        var recovered = (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches;
-
-        Assert.Equal(2, recovered.Count);
-        Assert.Equal(
-            new[] { firstWorkId, secondWorkId }.Order(),
-            recovered.Select(work => work.WorkId).Order());
+        var redeliveries = (await dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], []))).Dispatches;
+        Assert.Equal(2, redeliveries.Count);
+        Assert.Contains(redeliveries, work => work.AgentJobId == firstJob.GetPrimaryKeyString()
+            && work.WorkId == firstWorkId);
+        Assert.Contains(redeliveries, work => work.AgentJobId == secondJob.GetPrimaryKeyString()
+            && work.WorkId == secondWorkId);
 
         var firstReport = await firstJob.ReportResultAsync(
             runnerId,

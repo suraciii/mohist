@@ -31,10 +31,7 @@ function buildAllowedActions(input: RuntimeDecisionInput): Set<string> {
   return new Set([...recoveryActions, ...timelineActions])
 }
 
-function actionEnabled(
-  allowed: Set<string>,
-  kind: RuntimeActionKind,
-): boolean {
+function actionEnabled(allowed: Set<string>, kind: RuntimeActionKind): boolean {
   if (kind === 'start') {
     return allowed.has('start')
   }
@@ -65,9 +62,7 @@ function buildRetryAction(ctx: SummaryPresentationContext): RuntimeAvailableActi
     kind: 'retry',
     label: 'Retry',
     enabled: !ctx.isClosed && !ctx.isDone && offered,
-    reason: offered
-      ? undefined
-      : 'Retry is not available right now.',
+    reason: offered ? undefined : 'Retry is not available right now.',
   }
 }
 
@@ -77,9 +72,7 @@ function buildResumeAction(ctx: SummaryPresentationContext): RuntimeAvailableAct
     kind: 'resume',
     label: 'Resume',
     enabled: !ctx.isClosed && !ctx.isDone && offered,
-    reason: offered
-      ? undefined
-      : 'Resume is not available right now.',
+    reason: offered ? undefined : 'Resume is not available right now.',
   }
 }
 
@@ -89,9 +82,7 @@ function buildRerunAction(ctx: SummaryPresentationContext): RuntimeAvailableActi
     kind: 'rerun',
     label: 'Rerun stage',
     enabled: !ctx.isClosed && !ctx.isDone && offered,
-    reason: offered
-      ? undefined
-      : 'Rerun is not available right now.',
+    reason: offered ? undefined : 'Rerun is not available right now.',
   }
 }
 
@@ -101,9 +92,7 @@ function buildStopAction(ctx: SummaryPresentationContext): RuntimeAvailableActio
     kind: 'stop',
     label: 'Stop',
     enabled: !ctx.isClosed && !ctx.isDone && offered,
-    reason: offered
-      ? undefined
-      : 'Stop becomes available between tasks.',
+    reason: offered ? undefined : 'Stop becomes available between tasks.',
   }
 }
 
@@ -113,16 +102,11 @@ function buildStartNewWorkflowAction(ctx: SummaryPresentationContext): RuntimeAv
     kind: 'start',
     label: 'Start new workflow',
     enabled: !ctx.isClosed && !ctx.isDone && offered,
-    reason: offered
-      ? undefined
-      : 'Start is not available right now.',
+    reason: offered ? undefined : 'Start is not available right now.',
   }
 }
 
-function terminalActions(
-  ctx: SummaryPresentationContext,
-  terminalKind: 'start' | 'stop',
-): RuntimeAvailableAction[] {
+function terminalActions(ctx: SummaryPresentationContext, terminalKind: 'start' | 'stop'): RuntimeAvailableAction[] {
   return [
     buildRetryAction(ctx),
     buildResumeAction(ctx),
@@ -139,25 +123,19 @@ function buildApprovalActions(ctx: SummaryPresentationContext): RuntimeAvailable
       kind: 'approve',
       label: 'Approve',
       enabled: !ctx.isClosed && approveOffered,
-      reason: approveOffered
-        ? undefined
-        : 'Approval is not available right now.',
+      reason: approveOffered ? undefined : 'Approval is not available right now.',
     },
     {
       kind: 'send-back',
       label: 'Send back',
       enabled: !ctx.isClosed && sendBackOffered,
-      reason: sendBackOffered
-        ? undefined
-        : 'Send-back is not available right now.',
+      reason: sendBackOffered ? undefined : 'Send-back is not available right now.',
     },
   ]
 }
 
 function buildRunningActions(ctx: SummaryPresentationContext): RuntimeAvailableAction[] {
-  return [
-    buildStopAction(ctx),
-  ]
+  return [buildStopAction(ctx)]
 }
 
 function buildDoneActions(): RuntimeAvailableAction[] {
@@ -166,11 +144,9 @@ function buildDoneActions(): RuntimeAvailableAction[] {
 
 function buildQueuedActions(ctx: SummaryPresentationContext): RuntimeAvailableAction[] {
   if (!ctx.isBacklog) return []
-  const startOffered = actionEnabled(ctx.allowed, 'start')
-    || (ctx.isBacklog && ctx.input.issue?.canStart === true)
+  const startOffered = actionEnabled(ctx.allowed, 'start') || (ctx.isBacklog && ctx.input.issue?.canStart === true)
   const startEnabled = !ctx.isClosed && startOffered && !ctx.waitReason
-  const startReason = ctx.waitReason
-    ?? (!startOffered ? 'Start is not available right now.' : undefined)
+  const startReason = ctx.waitReason ?? (!startOffered ? 'Start is not available right now.' : undefined)
   return [
     {
       kind: 'start',
@@ -195,6 +171,23 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
     nextAction: () => 'No user action required right now.',
     actions: buildRunningActions,
   },
+  'recoverable-interrupted': {
+    headline: (ctx) => {
+      if (ctx.currentTask) return `Recoverable interruption: ${ctx.currentTask.title}`
+      return `Workflow recovering (${formatStageLabelForCtx(ctx)})`
+    },
+    rationale: (ctx) =>
+      ctx.issue?.attention?.message ??
+      ctx.issue?.attention?.reasonCode ??
+      'The runner was interrupted while active work was in progress.',
+    nextAction: (ctx) => {
+      const deadline = ctx.issue?.attention?.recoveryDeadlineAt
+      return deadline
+        ? `Wait for the original runner to recover before ${deadline}.`
+        : 'Wait for the original runner to recover.'
+    },
+    actions: () => [],
+  },
   queued: {
     headline: (ctx) => `Waiting to start (${formatStageLabelForCtx(ctx)})`,
     rationale: (ctx) => ctx.waitReason ?? 'The workflow is waiting to start.',
@@ -213,7 +206,8 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
     rationale: () => 'The workflow is paused while an approval decision is pending.',
     nextAction: (ctx) => {
       const approve = buildApprovalActions(ctx).find((a) => a.kind === 'approve' && a.enabled)
-      if (approve) return `An approval decision is needed to continue${ctx.currentTask ? ` (${ctx.currentTask.title})` : ''}.`
+      if (approve)
+        return `An approval decision is needed to continue${ctx.currentTask ? ` (${ctx.currentTask.title})` : ''}.`
       return 'Approval actions are unavailable right now.'
     },
     actions: buildApprovalActions,
@@ -228,9 +222,11 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
       if (issue?.blockedReason) return issue.blockedReason
       if (issue?.convergence?.blockedReason) return issue.convergence.blockedReason
       const recovery = issue?.recovery
-      if (recovery?.latestAttemptState === 'interrupted'
-        || issue?.workflowStatus?.toLowerCase() === 'interrupted'
-        || issue?.workflowStatus?.toLowerCase() === 'stopped') {
+      if (
+        recovery?.latestAttemptState === 'interrupted' ||
+        issue?.workflowStatus?.toLowerCase() === 'interrupted' ||
+        issue?.workflowStatus?.toLowerCase() === 'stopped'
+      ) {
         return 'Execution stopped manually. Resume or rerun to continue.'
       }
       return 'The workflow is blocked and needs an action to continue.'
@@ -275,10 +271,7 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
   },
 }
 
-function nextActionForTerminal(
-  actions: RuntimeAvailableAction[],
-  ctx: SummaryPresentationContext,
-): string {
+function nextActionForTerminal(actions: RuntimeAvailableAction[], ctx: SummaryPresentationContext): string {
   const retry = actions.find((a) => a.kind === 'retry' && a.enabled)
   if (retry) return 'Retry the failed attempt.'
   const resume = actions.find((a) => a.kind === 'resume' && a.enabled)

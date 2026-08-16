@@ -412,6 +412,33 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task ReportTimeout_WhenRunnerIsAway_PreservesRecoveringProjection()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-timeout-away-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-timeout-away-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("runner disappears before timeout", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        await runner.UnregisterAsync();
+        var afterCloseout = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Unknown, afterCloseout.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, afterCloseout.FailureReason);
+        Assert.True(afterCloseout.IsRecovering);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
+        await job.CheckTimeoutsAsync();
+
+        var afterTimeout = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Unknown, afterTimeout.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, afterTimeout.FailureReason);
+        Assert.Equal(afterCloseout.RecoveryDeadlineAt, afterTimeout.RecoveryDeadlineAt);
+        Assert.True(afterTimeout.IsRecovering);
+    }
+
+    [Fact]
     public async Task DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime()
     {
         var projectId = $"agent-job-reset-project-{Guid.NewGuid():N}";

@@ -1,15 +1,26 @@
-import type { AgentSessionTranscriptResponse, FollowupStatus, SessionFollowupResult, SessionMetadata, SessionRecoveryObservation, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
-import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import type {
-  TimelineEntry,
-  TimelineFact,
-  TimelineItem,
-  TimelineReference,
-} from '../../../entities/session'
+  AgentSessionTranscriptResponse,
+  FollowupStatus,
+  SessionFollowupResult,
+  SessionMetadata,
+  SessionRecoveryObservation,
+  SessionStatusKind,
+  SessionTurn,
+} from '../../../entities/coder-session'
+import type { AgentLaunchObservationDto } from '../../../entities/agent'
+import type { TimelineEntry, TimelineFact, TimelineItem, TimelineReference } from '../../../entities/session'
 import type { SessionTimelineCurrentActivity } from '../../../widgets/session-transcript'
 
-export type StatusKind = SessionStatusKind | 'live' | 'finalizing' | 'probing' | 'completed' | 'failed' | 'stale'
-export type EmptyStateKind = 'active-no-content' | 'idle-no-content' | 'unknown-no-content'
+export type StatusKind =
+  | SessionStatusKind
+  | 'live'
+  | 'finalizing'
+  | 'probing'
+  | 'recovering'
+  | 'completed'
+  | 'failed'
+  | 'stale'
+export type EmptyStateKind = 'active-no-content' | 'idle-no-content' | 'recovering-no-content' | 'unknown-no-content'
 
 export interface SessionStopOptions {
   onSuccess?: (result: { state: string }) => void

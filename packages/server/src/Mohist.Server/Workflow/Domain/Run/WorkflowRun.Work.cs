@@ -651,6 +651,9 @@ public static partial class WorkflowRunExtensions
         DateTimeOffset now,
         TimeSpan settlementTimeout)
     {
+        if (settlement.State == AgentResultSettlementState.Blocked)
+            return AgentExecutionUpdate.Rejected;
+
         var state = settlement.State == AgentResultSettlementState.AwaitingResult
             ? AgentResultSettlementState.Unknown
             : settlement.State;

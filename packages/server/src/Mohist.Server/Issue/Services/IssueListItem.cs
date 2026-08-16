@@ -3,6 +3,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 
 namespace Mohist.Server.Issue.Services;
 
@@ -25,6 +26,7 @@ public sealed class IssueListItem
     [JsonPropertyName("approvalState")]
     public StageApproval? StageApproval { get; set; }
     public string? BlockedReason { get; set; }
+    public WorkflowAttention? Attention { get; set; }
     public string? WorkflowRunId { get; set; }
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }
@@ -67,6 +69,7 @@ public sealed class IssueListItem
         CompletedAt = issue.CompletedAt,
         StageApproval = issue.StageApproval,
         BlockedReason = issue.BlockedReason,
+        Attention = issue.Attention,
         WorkflowRunId = issue.WorkflowRunId,
         WorkflowStage = issue.WorkflowStage,
         WorkflowStatus = issue.WorkflowStatus,

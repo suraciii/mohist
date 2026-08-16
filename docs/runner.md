@@ -172,10 +172,60 @@ the service manager. Configurable values include:
 Dispatch slots are control-plane state and are changed from the Runner detail
 page, not through Runner startup options.
 
+### Per-work containment
+
+The runner resolves the optional `workResourceLimits` configuration block at
+startup. The TypeScript shape is:
+
+```ts
+{
+  memoryMb?: number | null
+  wallClockMs?: number | null
+  watchdogIntervalMs?: number | null
+  turnBudgetMs?: number | null
+}
+```
+
+Omitted values use the defaults `memoryMb=1024`, `wallClockMs=3600000`,
+`watchdogIntervalMs=250`, and `turnBudgetMs=3600000`. Set a field to `null` to
+disable that bound. The `mohist-runner` process reads deployment overrides from
+`WORK_RESOURCE_MEMORY_MB`, `WORK_RESOURCE_WALL_CLOCK_MS`,
+`WORK_RESOURCE_WATCHDOG_INTERVAL_MS`, and `WORK_RESOURCE_TURN_BUDGET_MS`.
+
+Action subprocesses use Linux `prlimit` when util-linux is available, with
+aggregate RSS sampling and a wall-clock kill as a second line of defense. On
+macOS or minimal containers, RSS and wall-clock watchdog enforcement is used
+without `prlimit`; detection occurs on the next watchdog sample. A contained
+work is reported as a definite failure with reason `resource-containment`.
+Runtime-backed turns use `turnBudgetMs`; expiry aborts the turn, quarantines the
+runtime generation, and lets the runner recreate it. Completed results already
+waiting for acknowledgement remain journaled under their original identities.
+
+After `mo install runner`, set these variables in the managed Runner service
+environment before starting it, for example with `systemctl --user edit
+mohist-runner.service`, or export them when running `npm run dev:runner`.
+
 Runner does not select a global Runtime backend through `type`. A Workflow
 task's `uses` value selects an execution-backend Action such as
 `mohist/opencode` or `mohist/pi`. Action Input supplies model options. See
 [Action Contracts](actions/README.md).
+
+Runtime replacement and shutdown are bounded by host-local settings:
+
+- `QUARANTINE_DRAIN_TIMEOUT_MS` controls how long a quarantined OpenCode
+  generation may drain before active turns fail with
+  `generation-drain-timeout`; the default is 60 seconds.
+- `RUNTIME_SHUTDOWN_TIMEOUT_MS` controls graceful OpenCode dispatcher/process
+  teardown and Pi service shutdown; the default is 30 seconds. On expiry the
+  runner abandons the wait, destroys the transport, and proceeds with the
+  replacement or shutdown. OpenCode termination sends the graceful stop first
+  and uses a best-effort process-group `SIGKILL` when a process handle is
+  available.
+
+Both settings are millisecond values and should be set in the service manager
+configuration. A forced generation release only fails turns still active at
+the deadline; results already waiting for acknowledgement remain journaled and
+are reported under their original work identities.
 
 ## Self-hosting
 

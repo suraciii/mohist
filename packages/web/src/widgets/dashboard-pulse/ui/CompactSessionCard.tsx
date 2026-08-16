@@ -1,19 +1,19 @@
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '@/entities/project'
 import type { IssueAttentionItem } from '@/entities/agent-ops'
-import {
-  ContextHealthIndicator,
-  ContextUsageTrendMiniChart,
-} from '@/entities/coder-session'
+import { ContextHealthIndicator, ContextUsageTrendMiniChart } from '@/entities/coder-session'
 import { formatCompact, formatCost } from '@/shared/lib/format-compact'
 import type { SessionCard } from '@/entities/agent-ops'
 
 export const STAGE_COLORS: Record<string, string> = {
-  build: 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/40 dark:text-purple-200 dark:border-purple-800',
+  build:
+    'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/40 dark:text-purple-200 dark:border-purple-800',
   plan: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-800',
   review: 'bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-900/40 dark:text-teal-200 dark:border-teal-800',
-  check: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800',
-  integrate: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:border-slate-700',
+  check:
+    'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800',
+  integrate:
+    'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:border-slate-700',
 }
 
 const STAGE_COLOR_FALLBACK = 'bg-muted text-muted-foreground border-border dark:bg-muted/40'
@@ -80,11 +80,7 @@ export function CompactSessionCard({
         </h3>
 
         {(card.totalTokens != null || card.costAmount != null) && (
-          <p
-            className="mt-1 text-xs text-muted-foreground"
-            style={LINE_CLAMP_STYLE}
-            data-testid="pulse-compact-usage"
-          >
+          <p className="mt-1 text-xs text-muted-foreground" style={LINE_CLAMP_STYLE} data-testid="pulse-compact-usage">
             <UsageLine card={card} />
           </p>
         )}
@@ -147,9 +143,7 @@ export function RunningIssueHeader({
 
   return (
     <div className="flex items-center gap-2 mb-1.5">
-      {showLiveDot && (
-        <span className="inline-block h-2 w-2 rounded-full bg-info animate-pulse" />
-      )}
+      {showLiveDot && <span className="inline-block h-2 w-2 rounded-full bg-info animate-pulse" />}
       {!showLiveDot && (
         <span
           className="inline-block h-2 w-2 rounded-full bg-muted-foreground/40"
@@ -182,7 +176,7 @@ function issueAttentionTreatment(item: IssueAttentionItem): {
   family: 'danger' | 'warning'
   container: string
 } {
-  if (item.kind === 'approval-needed') {
+  if (item.kind === 'approval-needed' || item.kind === 'recoverable-interrupted') {
     return {
       family: 'warning',
       container: 'border border-warning-border bg-warning-subtle text-warning',
@@ -246,9 +240,7 @@ function getTaskProgressPercent(completed: number, total: number): number {
  * Pulse card hides its trend block entirely when this returns `< 2`
  * (no empty-axis visual to compete with the snapshot indicator).
  */
-function countUsableHistorySamples(
-  history: SessionCard['contextUsageHistory'],
-): number {
+function countUsableHistorySamples(history: SessionCard['contextUsageHistory']): number {
   if (!history) return 0
   let n = 0
   for (const sample of history) {

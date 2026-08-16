@@ -117,6 +117,7 @@ public sealed class WorkflowEventQuerier : IScopedService
             or EventCatalog.ReverseDns.TaskStarted
             or EventCatalog.ReverseDns.TaskCompleted
             or EventCatalog.ReverseDns.TaskFailed
+            or EventCatalog.ReverseDns.TaskInterrupted
             or EventCatalog.ReverseDns.TaskCancelled
             or EventCatalog.ReverseDns.AgentTaskResultUnconfirmed
             or EventCatalog.ReverseDns.TaskBlocked
@@ -125,6 +126,7 @@ public sealed class WorkflowEventQuerier : IScopedService
             or EventCatalog.ReverseDns.CheckPassed
             or EventCatalog.ReverseDns.CheckFailed
             or EventCatalog.ReverseDns.CheckPending
+            or EventCatalog.ReverseDns.ChecksInterrupted
             or EventCatalog.ReverseDns.RepairScheduled;
     }
 

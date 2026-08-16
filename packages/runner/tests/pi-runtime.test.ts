@@ -181,6 +181,31 @@ describe('PiRuntime', () => {
     expect(result).toMatchObject({ ok: true, value: { activeTurn } })
   })
 
+  it('reattaches to an active session without submitting a second prompt', async () => {
+    const session = new FakeSession()
+    session.isStreaming = true
+    const runtime = new PiRuntime({ agentDir: '/global', sdkFactory: factory(session) })
+    await runtime.start()
+
+    const resultPromise = runtime.reattachTurn(
+      {
+        target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
+      },
+      new AbortController().signal,
+    )
+    await Promise.resolve()
+    session.messages.push({ role: 'assistant', content: 'adopted answer' })
+    session.isStreaming = false
+    session.emit({ type: 'agent_settled' })
+
+    await expect(resultPromise).resolves.toMatchObject({
+      ok: true,
+      value: { facts: { finalAssistantText: 'adopted answer', runtimeSessionId: session.sessionFile } },
+    })
+    expect(session.promptCalls).toEqual([])
+    expect(session.steerCalls).toEqual([])
+  })
+
   it('creates a physical binding and runs a literal prompt with per-turn selection', async () => {
     const session = new FakeSession()
     const runtime = new PiRuntime({ agentDir: '/global', sdkFactory: factory(session) })
@@ -225,6 +250,42 @@ describe('PiRuntime', () => {
     expect(session.thinkingCalls).toEqual(['xhigh'])
     session.complete('answer')
     await expect(resultPromise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('aborts and quarantines the Pi runtime when a turn exceeds its resource budget', async () => {
+    const session = new FakeSession()
+    const clock = new FakeClock()
+    let closed = 0
+    const sdkFactory: PiSdkFactory = {
+      create: async () => ({
+        catalog: async () => [],
+        createSession: async () => session,
+        openSession: async () => session,
+        model: () => ({}),
+        close: async () => {
+          closed += 1
+        },
+      }),
+    }
+    const runtime = new PiRuntime({ agentDir: '/global', sdkFactory, clock })
+    await runtime.start()
+    await runtime.createSession({ target: { runtime: 'pi', runtimeSessionId: null, workDir: '/workspace' } })
+
+    const result = runtime.runTurn(
+      {
+        target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
+        prompt: 'over budget',
+        resourceBudgetMs: 100,
+      },
+      new AbortController().signal,
+    )
+    await Promise.resolve()
+    clock.advance(100)
+
+    await expect(result).resolves.toMatchObject({ ok: false, error: { kind: 'resource-containment' } })
+    expect(session.abortCalls).toBe(1)
+    expect(closed).toBe(1)
+    expect(runtime.ready()).toBe(false)
   })
 
   it('restores the exact bound path and never replays after a late completion', async () => {

@@ -1,0 +1,171 @@
+{
+  "project": "mohist-local",
+  "description": "Issue 570 remainder: recoverable-interruption recording and identity-preserving recovery of active Agent/work across Runner OOM or abnormal restart (runner-loss-work-recovery), plus runner-side blast-radius containment via per-work resource bounding and bounded runtime drain/shutdown (runner-resource-isolation). Builds on the landed work-result journal (#545), readiness witness (#558), and Agent result-settlement arbitration.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Workflow work: recoverable interruption recording on presence loss with bounded terminal fallback",
+      "spec": "specs/runner-loss-work-recovery/spec.md#recoverable-interruption-marking-on-runner-presence-loss",
+      "description": "Replace the presence-loss terminal failure of ordinary workflow tasks and stage checks with a recorded WorkInterruption { ReasonCode, WorkId, OwnerId, RecordedAt, RecoveryDeadlineAt } on TaskRun and the stage-checks representation (design D1). RunnerGrain.CloseoutLostAsync calls a new IWorkflowGrain.InterruptActiveWorkAsync(workerId, reason) instead of FailActiveWorkAsync(workerId, \"runner-lost\"); agent result-settlement work keeps flowing through ObserveAgentRunnerDisconnectedAsync untouched. WorkflowGrain arms its reconciliation sweep when an interruption is recorded and, at RecoveryDeadlineAt (new RunnerLossRecoveryTimeout knob, default ~15 min, configured next to AgentResultSettlementTimeout/JobTimeout), moves still-interrupted work to a definite terminal Failed carrying the recorded reason and a TaskInterrupted-family event, re-arming from persisted state on grain activation (design D2). A terminal report accepted under the original identity clears the record.",
+      "acceptanceCriteria": [
+        "Simulated presence-timeout closeout with an active ordinary workflow task records WorkInterruption (reason code, owner/work identity, timestamp, recovery deadline) and the task stays non-terminal Running — covered by a SpecTest asserting no terminal runner-lost failure.",
+        "Stage checks running on a lost runner enter the recoverable-interrupted representation and are not terminal-failed with runner-lost — covered by a SpecTest.",
+        "A task with agent result settlement still flows through ObserveAgentRunnerDisconnectedAsync arbitration (Unknown/deadline/Blocked) and is not interrupted-failed by closeout — covered by a SpecTest.",
+        "When the recovery deadline elapses with no authoritative outcome, the task/checks reach definite terminal Failed carrying the recorded reason and a TaskInterrupted-family event; the deadline survives a silo restart by re-arming from persisted RecoveryDeadlineAt — covered by SpecTests for both the fire and the re-arm.",
+        "A terminal report delivered under the original work identity after interruption is accepted and clears the interruption record — covered by a SpecTest.",
+        "RunnerLossRecoveryTimeout is configurable and defaults above the 2-minute presence timeout; closeout records the interruption before any deadline can fire — covered by a unit/spec test on the configured default and recorded deadline."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow (Domain/Run interruption record, WorkflowGrain.InterruptActiveWorkAsync + deadline sweep, WorkflowGrain.Reports.cs clear-on-report), packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs closeout change, config knob, and SpecTests under packages/server/tests/Mohist.Server.SpecTests/Specs/{Runner,Workflow} plus unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the state machine closed: nullable interruption record on TaskRun/checks, no new TaskRunStatus value (D1 rejected an Interrupted enum — computed columns, dispatch eligibility, translator shapes depend on it). Mechanics mirror BlockUnresolvedAgentResult's periodic-reconcile deadline."
+    },
+    {
+      "id": "T-002",
+      "title": "AgentJob: recovering projection with recorded reason and bounded recovery deadline",
+      "spec": "specs/runner-loss-work-recovery/spec.md#recovering-projection-for-agent-jobs-whose-runner-is-lost",
+      "description": "Extend AgentJobStatus.Unknown (not a new status) so an Unknown job whose reason is a runner-loss interruption carries RecoveryDeadlineAt, and every status surface projects a 'recovering' state with the recorded reason while the deadline is in the future (design D1). Presence-loss closeout additionally notifies AgentJobGrains with Running work for the lost runner to enter this projection via the existing MarkUnknownAsync/EnterUnknownStateAsync seam, and the report-timeout path records the same reason instead of stranding silently. The durable agent-job-recovery Orleans reminder enforces RecoveryDeadlineAt to a definite terminal Failed carrying the reason; a first authoritative report before that settles normally (design D2). AgentLaunchObservationAssembler exposes the recovering state and reason.",
+      "acceptanceCriteria": [
+        "When a Running AgentJob's runner is detected as lost, closeout moves the job into the Unknown-with-recovering projection carrying reason and RecoveryDeadlineAt — covered by a SpecTest.",
+        "When the job report timeout elapses while the runner is away, the job enters the recovering projection with the recorded reason (not a bare non-dispatchable Unknown) and stays recoverable within its deadline — covered by a SpecTest.",
+        "The agent-job-recovery reminder moves a still-recovering job at its deadline to a definite terminal Failed carrying the reason, and the reminder re-derives the deadline from persisted RecoveryDeadlineAt across silo restarts — covered by SpecTests.",
+        "The agent job status and launch-observation surfaces expose the recovering state with reason, distinguishable from healthy Running and from terminal failure — covered by unit tests on AgentLaunchObservationAssembler and the status read path.",
+        "A first authoritative report on a recovering job settles it and clears the recovering projection — covered by a SpecTest."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs (Unknown extension, reminder deadline enforcement), packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs (AgentJob notification in closeout), packages/server/src/Mohist.Server/Agent/Services/AgentLaunchObservationAssembler.cs, and SpecTests under packages/server/tests/Mohist.Server.SpecTests/Specs/{Agent,Runner} plus unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Builds on the closeout restructure from T-001 (same CloseoutLostAsync path adds the AgentJob notification). Reuse the existing settlement seam; do not bypass Unknown arbitration (spec requirement). Orleans reminder is already durable across silo restarts."
+    },
+    {
+      "id": "T-003",
+      "title": "Re-delivery of interrupted and recovering work to the returning runner under the original identity",
+      "spec": "specs/runner-loss-work-recovery/spec.md#identity-preserving-re-attachment-and-re-delivery-on-reconnect",
+      "description": "Make reconnect recovery concrete on the server (design D3): interrupted workflow work stays assigned to the original runner identity and AddMissingRedeliveriesAsync re-renders it from persisted facts (dispatch snapshot / translator) under the original work identity when the returning runner's poll report omits it; AgentJobs in the recovering projection are added to the redelivery desired set when their recorded runner reconnects and holds neither the key nor a settled outcome — changing today's 'unresolved Agent work is deliberately absent from desired redelivery' rule (absent while the runner is away, included once it is back). Recovery never mints a new work identity and no cross-runner takeover is introduced; if no runner with the recorded identity returns, the T-001/T-002 deadlines resolve the work.",
+      "acceptanceCriteria": [
+        "On reconnect, an interrupted workflow task omitted from the runner's poll report is re-delivered under the original work identity and idempotency boundary (no new identity minted) — covered by a SpecTest against DispatchService.",
+        "A recovering AgentJob is included in the redelivery desired set when its recorded runner reconnects and the runner's poll report neither holds the key nor shows a settled outcome; it stays absent while the runner is away — covered by SpecTests.",
+        "A partitioned-but-alive old process that reports the key in its poll report suppresses re-delivery — covered by a SpecTest (no duplicate delivery).",
+        "Work is never re-delivered to a different runner identity (no takeover) — covered by a SpecTest asserting assignment stays with the recorded runner.",
+        "Repeated re-deliveries of the same identity do not create unbounded churn: poll-time dedupe plus the Accepted/Stale contract retire the row once settled — covered by a SpecTest."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Runner/Services/DispatchService.cs (AddMissingRedeliveriesAsync desired-set change, AgentJob DispatchJson ledger re-delivery) and SpecTests under packages/server/tests/Mohist.Server.SpecTests/Specs/Runner",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Each re-delivery deliberately forces the runner to reconcile against its work-result journal (T-008 fence reconciliation) instead of stranding; server and runner sides are deployable in either order per the migration plan."
+    },
+    {
+      "id": "T-004",
+      "title": "Status surfaces render recoverable-interrupted and recovering states with the recorded reason",
+      "spec": "specs/runner-loss-work-recovery/spec.md#status-surfaces-render-recovery-states-with-the-recorded-reason",
+      "description": "Render the new states everywhere users look (design D6): server read models (WorkflowStatusMapper, WorkflowViews, Slack/issue-attention projections) map Running+Interruption to 'recoverable-interrupted' with reason and deadline; agent-job status and launch observation map Unknown-with-recovering-reason to 'recovering' with reason. The Web workflow and agent-session views render both states distinguished from healthy running and terminal failure; the CLI (mo run and agent observation) renders the same. BREAKING: runner-lost is no longer presented as a terminal failure of active workflow work — only the bounded deadline outcome is a failure presentation.",
+      "acceptanceCriteria": [
+        "Web workflow view and CLI mo run render a recoverable-interrupted presentation carrying the recorded reason (and deadline) for an interrupted task/checks — covered by web component/view tests and CLI output tests.",
+        "Web agent-session view and CLI agent observation render the recovering state with the recorded reason, distinguishable from healthy running and terminal failure — covered by view and CLI output tests.",
+        "Issue-attention projections surface the interrupted/recovering state instead of a terminal failure — covered by a unit test on the attention projection.",
+        "No surface renders 'runner-lost' as a terminal failure of active work after this change; the only failure presentation is the bounded deadline outcome — covered by a contract/unit test scanning the rendered states.",
+        "The server DTO/read-model layer (WorkflowStatusMapper, AgentLaunchObservationAssembler outputs, issue attention loader) carries the interruption reason and deadline end to end — covered by unit tests."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Services/WorkflowStatusMapper.cs and read models, packages/server/src/Mohist.Server/Issue/Services/* attention projections, packages/web workflow and agent-session views, packages/cli run/agent-observation rendering, with web/CLI/unit tests",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Server, web, and CLI release together in one deployment so the breaking runner-lost change never meets an old renderer (migration plan step 1). Single presentation source: the D1 interruption record."
+    },
+    {
+      "id": "T-005",
+      "title": "Late-report and late-observation idempotency across runner process generations",
+      "spec": "specs/runner-loss-work-recovery/spec.md#late-report-idempotency-across-runner-process-generations",
+      "description": "Close the gaps and prove the identity contracts for reconciliation (design D5): workflow reports keep matching FindReportableWork/FindReportableTaskAttempt on (taskRunId, workId, workerId) so any second or late report after settlement returns ReportAck.Stale with no duplicate events; an Unknown/recovering AgentJob accepts exactly one first authoritative result and every subsequent delivery for a settled job is acked Stale so the reporter's journal entry retires (a report against an Unknown job is never silently dropped — it settles or acks stale); observations (ObserveAgentExecutionAsync, launch-observation updates) reconcile with rejected = Stale semantics so a late observation never regresses a recovered or settled work. Includes the deadline-race safety: a late authoritative report after the deadline terminal-fail reconciles as Stale.",
+      "acceptanceCriteria": [
+        "A late report from a previous runner process generation arriving after the work identity settled is acknowledged Stale with no second terminal outcome or duplicate workflow event — covered by a SpecTest through WorkflowReportService.",
+        "Competing reports from the old process and a re-delivery execution: first authoritative report wins, loser acked Stale, settled outcome singular — covered by a SpecTest.",
+        "A report against an Unknown/recovering AgentJob either settles it exactly once or is acked Stale once settled — never silently dead-ended — covered by SpecTests on AgentJobGrain report paths.",
+        "A late execution observation after recovery progressed is applied at most once or acked stale and does not roll back or duplicate the recovering/settled work — covered by a SpecTest on ObserveAgentExecutionAsync/observation updates.",
+        "A late authoritative report after the recovery-deadline terminal outcome reconciles as Stale (both directions of the deadline race are safe) — covered by a SpecTest combining T-001/T-002 deadline outcomes with a late report."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Runner/Services/WorkflowReportService.cs (report reconciliation gaps), packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.Reports.cs, packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs (stale-ack for settled jobs), and SpecTests under packages/server/tests/Mohist.Server.SpecTests/Specs/{Runner,Agent,Workflow}",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "The Accepted/Stale machinery largely exists; this task closes the Unknown-job-report dead-end gap and proves the at-most-once/stale-ack guarantees deterministically, including the Stale-as-durable-ack runner contract interplay."
+    },
+    {
+      "id": "T-006",
+      "title": "Runner runtime plane: bounded quarantined-generation drain and bounded shutdown paths",
+      "spec": "specs/runner-resource-isolation/spec.md#bounded-quarantined-generation-drain",
+      "description": "Bound every wait in the runner runtime plane (design D8+D9): opencode runtime's scheduleRebuild races generation.drained against a configurable quarantineDrainTimeoutMs (default 60s), force-releases the generation on elapse (resolveGenerationDrain + detaching the server handle through bounded teardown) so the replacement generation starts, and reports each still-active turn's work as a definite failed result with reason 'generation-drain-timeout' under its original identity while sibling completed-but-unacknowledged results survive in the journal and report normally. server-process.terminateTree races server.close() + dispatcher.close() against a deadline (default ~30s) then abandons the waits and force-tears-down (dispatcher destroy(), SIGKILL best-effort, never await); OpenCode process-tree termination is SIGTERM → bounded grace → SIGKILL and itself bounded; pi shutdown() races services.close() against the same deadline with abandon-and-proceed semantics. Document the new config knobs.",
+      "acceptanceCriteria": [
+        "A quarantined generation whose active turns never end is forcibly released at the drain deadline and a replacement generation starts and serves new work — covered by a runner unit/integration test with a wedged turn.",
+        "A quarantined generation whose turns end before the deadline releases promptly without waiting for the full deadline — covered by a runner test.",
+        "Still-active turns at force-release are reported as definite failed results with reason generation-drain-timeout under their original identities, and sibling unacknowledged journal results still report normally — covered by a runner test.",
+        "A dispatcher close that would hang forever on an in-flight request returns within the bounded deadline and the caller proceeds (shutdown/replacement/teardown complete bounded) — covered by a runner unit test on server-process with a hanging close.",
+        "Process-tree termination and pi services.close() are deadline-bounded with abandon-and-proceed semantics — covered by runner unit tests with non-terminating targets.",
+        "quarantineDrainTimeoutMs and the bounded-shutdown deadline are documented runner configuration (config schema/types + docs)."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/opencode/runtime.ts (bounded drain + force release), packages/runner/src/runtime/opencode/server-process.ts (bounded terminateTree/dispatcher close), packages/runner/src/runtime/pi/runtime.ts (bounded shutdown), config types + docs, and runner tests (vitest, colocated and/or packages/runner/test)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The bound lives at the handle layer (terminateTree) so shutdown, quarantine teardown, and rebuild all inherit it. Bounded means the path returns by the deadline; forced teardown is best-effort and the OS reaps the rest. No cross-dependency with the server tasks — safe under the 'runner second' rollout order."
+    },
+    {
+      "id": "T-007",
+      "title": "Per-work resource containment without runner-process or sibling blast radius",
+      "spec": "specs/runner-resource-isolation/spec.md#per-work-resource-containment-on-the-runner",
+      "description": "Contain a runaway work to its own execution (design D7): a deployment-backed workResourceLimits runner config block (default memory bound per work, e.g. memoryMb) bounds each work. Action subprocess work gets spawn-time OS limits on its child process tree — on Linux, RLIMIT_AS/RLIMIT_DATA applied through a util-linux `prlimit(1)` wrapper at the runCommand boundary: system/process.ts gains an optional per-command resource-limit option on CommandLineOptions (layered in exactly like timeoutMs, omitted ⇒ byte-identical spawn) and actions/built-in-core.ts executes `prlimit --as=<bytes> --data=<bytes> -- <command> <args…>` through the unchanged ProcessSpawner seam when the option is set and the `prlimit` binary is available (probed once at runner startup; the in-place exec keeps the child PID and detached process-group leadership stable so killProcess's group kill and runCommand's timeout/onClose machinery keep working, and the abnormal over-limit exit maps to the containment failure) — plus an aggregate-RSS watchdog and wall-clock kill terminating only that tree; where prlimit is unavailable (macOS, minimal containers) enforcement is watchdog/wall-clock only with bounded detection latency. Runtime-backed work (OpenCode/pi turns) is budget-contained: a per-work resource watchdog (extending the existing outbox drop guard with a per-work turn budget) aborts the offending turn and quarantines its generation, torn down through T-006's bounded teardown paths. A contained work is reported as a definite failed result with reason 'resource-containment' under its original identity so it settles through the normal report path; sibling executions, journals, and awaiting-ack results are untouched, and the execution plane keeps serving new dispatches without a runner restart. Document workResourceLimits and the systemd MemoryMax recommendation.",
+      "acceptanceCriteria": [
+        "A work whose child process exceeds its configured memory bound is terminated without killing the runner process and reported as a definite failed result with reason resource-containment under its original identity — covered by a runner integration test using a memory-burning child process.",
+        "On a host where the prlimit binary is unavailable (or forced off in tests), an over-bound work is still terminated by the watchdog/wall-clock path and reported as a definite failed result with reason resource-containment — covered by a runner test forcing the fallback path.",
+        "A work within bounds completes without containment interference — covered by a runner test.",
+        "While one work is contained, sibling in-flight works continue executing and deliver their reports normally, with no sibling error/interrupted transition and no lost awaiting-ack results — covered by a runner integration test with concurrent works.",
+        "Runtime-backed work whose turn exceeds its budget is aborted, its generation quarantined and torn down bounded, and the work reported failed with reason resource-containment; works holding completed-but-unacknowledged results on the torn-down generation still deliver them — covered by a runner test.",
+        "After a containment event, the next dispatched work is admitted, executed, and reported normally without a runner restart (execution slots released, runtimes replaceable) — covered by a runner test.",
+        "workResourceLimits is documented configuration (schema/types, mo install / self-host docs) including the systemd MemoryMax unit recommendation."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/system/process.ts (optional per-command resource-limit option on runCommand/CommandLineOptions + prlimit wrapper construction), packages/runner/src/actions/built-in-core.ts (per-work limit wiring), packages/runner/src/runtime/executor.ts + agent-job-executor.ts (watchdog, wall-clock kill, containment reporting), packages/runner/src/runtime/{opencode,pi}/runtime.ts (per-work turn budget, quarantine handoff), workResourceLimits config types + docs, and runner integration/unit tests",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "Quarantined generations drain through T-006's bounded paths (dependency). cgroup-v2 scopes and process-per-work runtimes are explicitly rejected alternatives (D7). Node's spawn exposes no resource-limit seam (SpawnOptions carries none; resourceLimits is worker-threads only), so Linux RLIMITs are applied through a probed util-linux prlimit(1) wrapper at the runCommand boundary — in-place exec preserves the PID/process-group kill machinery; hosts without prlimit (macOS, minimal containers) get watchdog/wall-clock enforcement only (bounded detection latency, documented in D7 risks)."
+    },
+    {
+      "id": "T-008",
+      "title": "Runner started-fence reconciliation: re-attach, replay, or surface a definite outcome",
+      "spec": "specs/runner-loss-work-recovery/spec.md#started-fence-reconciliation-after-abnormal-restart",
+      "description": "Replace the runner's silent indefinite refusal of re-delivered dispatches holding a `started` journal entry with per-delivery reconciliation (design D4): (1) held in-process (inFlight/awaitingAck) → skip, existing dedupe; (2) after restart with runtime-backed work, probe the persisted runtime binding (binding-recovery seam) and, if the session exists with an active turn, re-attach — adopt the execution, await its terminal state, journal the result, and report under the original identity; (3) otherwise (provably dead execution on this host) complete the journal entry with an interruption fact and report a definite outcome under the original identity — the existing wire `unknown` status for workflow agent tasks (routed into settlement arbitration) and a failed result with reason 'runner-restarted' for other work. The fence itself never opens: begin() still never returns `new` for a `started` identity, so re-delivery can never trigger a second physical execution no matter how often repeated.",
+      "acceptanceCriteria": [
+        "A re-delivered dispatch whose work is still in-flight or awaiting-ack in-process is skipped (existing dedupe preserved) — covered by a runner test.",
+        "A re-delivered dispatch hitting a `started` entry with a live runtime binding (session exists, active turn) re-attaches, waits for the turn's terminal state, journals and reports under the original identity with no second physical execution — covered by a runner test with a surviving runtime session.",
+        "A re-delivered dispatch hitting a `started` entry with no surviving execution or durable result surfaces a definite outcome carrying the interruption reason (wire `unknown` for agent tasks / failed `runner-restarted` otherwise) and the work no longer strands behind the fence — covered by runner tests including journal-entry retirement on ack.",
+        "Repeated deliveries of the same `started` identity each re-run the same reconciliation decision idempotently with no second execution — covered by a runner test delivering the same dispatch multiple times.",
+        "End-to-end simulated abnormal restart (runner killed with work in `started`, restarted, re-delivered): the work re-attaches or surfaces a definite outcome under the original identity and the server settles it (clearing any recorded interruption) with at-most-once physical execution — covered by an integration test spanning runner journal + server report contract.",
+        "The fence never opens: no code path lets a `started` identity execute again — covered by a unit test on work-result-journal begin() admission."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/host.ts (re-delivery reconciliation), packages/runner/src/runtime/binding-recovery.ts (re-attach probe), packages/runner/src/runtime/work-result-journal.ts (interruption-fact completion), packages/runner/src/runtime/work-report.ts, and runner tests plus an integration test against the server report contract",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Observations are never promoted to authoritative results (rejected in #545, stays rejected). Together with T-001/T-002 deadlines and T-003 redelivery this closes the loop: interruption recorded → re-delivered on reconnect → fence reconciles → report settles. Deploys safely against an old server ('runner second' rollout)."
+    }
+  ]
+}

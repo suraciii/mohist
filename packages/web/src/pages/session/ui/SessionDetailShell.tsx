@@ -182,12 +182,15 @@ export function SessionDetailShell({
     </div>
   ) : null
 
+  const observationIsRecovering = launchObservation?.jobStatus === 'recovering'
   const observationGuidance = launchObservation
-    ? getAgentLaunchObservationMeaning(launchObservation) === 'reconcile'
-      ? 'Launch outcome is unresolved. Re-read this observation or retry with the original Idempotency-Key.'
-      : getAgentLaunchObservationMeaning(launchObservation) === 'result'
-        ? 'Initial launch is terminal. Read the result and transcript; this Session remains available.'
-        : 'Initial launch is accepted and still progressing. Continue observing the Job and transcript.'
+    ? observationIsRecovering
+      ? 'The AgentJob is recovering from an interrupted runner. The original work identity remains recoverable.'
+      : getAgentLaunchObservationMeaning(launchObservation) === 'reconcile'
+        ? 'Launch outcome is unresolved. Re-read this observation or retry with the original Idempotency-Key.'
+        : getAgentLaunchObservationMeaning(launchObservation) === 'result'
+          ? 'Initial launch is terminal. Read the result and transcript; this Session remains available.'
+          : 'Initial launch is accepted and still progressing. Continue observing the Job and transcript.'
     : null
 
   // Errors evidence (region between usage summary and transcript)
@@ -391,6 +394,18 @@ export function SessionDetailShell({
               data-testid="launch-observation-guidance"
             >
               {observationGuidance}
+            </div>
+          )}
+          {observationIsRecovering && launchObservation && (
+            <div
+              data-testid="launch-observation-recovering"
+              className="border-b border-warning-border bg-warning-subtle px-4 py-2 text-xs text-warning"
+            >
+              <div className="font-semibold">Recovering</div>
+              {launchObservation.jobFailureReason && <div>Reason: {launchObservation.jobFailureReason}</div>}
+              {launchObservation.recoveryDeadlineAt && (
+                <div>Recovery deadline: {launchObservation.recoveryDeadlineAt}</div>
+              )}
             </div>
           )}
           {recoveryBarContent && (

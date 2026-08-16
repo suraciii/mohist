@@ -5,6 +5,7 @@ import type { ActionResult } from '../core/types.js'
 import type { IssueFields } from './issue-fields.js'
 import type { PiRuntime } from '../runtime/pi/index.js'
 import type { SkillResolver } from '../runtime/skill-resolver.js'
+import type { CommandResourceLimits } from '../system/process.js'
 
 export const ALL_CAPABILITIES: ReadonlySet<ActionCapability> = new Set([
   'agent-turn',
@@ -45,6 +46,8 @@ export interface ActionHost {
   workDir: string
   signal: AbortSignal
   log: TaskLogger | null
+  /** Per-work bounds applied to action subprocesses. */
+  resourceLimits?: CommandResourceLimits
   /** Internal bounded worktree-cleanup attempt, never part of action input. */
   cleanupAttempt?: number | null
   piRuntime?: PiRuntime | null

@@ -277,6 +277,63 @@ Invalid JSON, regular expressions, or threshold stop Runner startup with a
 diagnostic. Pi continues to manage credentials; Mohist configuration does not
 copy them.
 
+### Bounded Runtime Shutdown
+
+Set these environment variables in the Runner service when a deployment needs
+to tune runtime teardown:
+
+```bash
+QUARANTINE_DRAIN_TIMEOUT_MS=60000
+RUNTIME_SHUTDOWN_TIMEOUT_MS=30000
+```
+
+`QUARANTINE_DRAIN_TIMEOUT_MS` bounds a quarantined OpenCode generation. Active
+turns still running when it expires receive a definite
+`generation-drain-timeout` failure, while completed journal results continue to
+report. `RUNTIME_SHUTDOWN_TIMEOUT_MS` is the shared deadline for OpenCode
+process/dispatcher teardown and Pi `services.close()`. After the deadline the
+Runner abandons the wait and proceeds with best-effort forced teardown. Keep
+the Runner service's own process limits configured separately; for example,
+use systemd `MemoryMax` on the Runner unit to protect the host from aggregate
+runtime memory growth.
+
+### Per-work resource containment
+
+The Runner accepts the following deployment-backed `workResourceLimits` fields:
+
+```bash
+WORK_RESOURCE_MEMORY_MB=1024
+WORK_RESOURCE_WALL_CLOCK_MS=3600000
+WORK_RESOURCE_WATCHDOG_INTERVAL_MS=250
+WORK_RESOURCE_TURN_BUDGET_MS=3600000
+```
+
+These are the defaults and may be overridden in the Runner service environment.
+`memoryMb` and `wallClockMs` bound action subprocesses; `turnBudgetMs` bounds an
+OpenCode or Pi turn; and the watchdog interval controls aggregate RSS sampling
+when the Linux `prlimit` binary is unavailable. A bound work is reported with
+the definite `resource-containment` reason, while sibling work and the Runner
+process remain alive. Set an individual typed field to `null` when embedding a
+`workResourceLimits` object programmatically to disable that bound.
+
+`mo install runner` creates the managed unit but does not guess host-specific
+memory capacity. Configure the variables with `systemctl --user edit
+mohist-runner.service` before starting or restarting the service. On Linux,
+also cap the aggregate Runner unit so a shared runtime or a watchdog-only
+container cannot exhaust the host. The recommended unit override is:
+
+```ini
+[Service]
+MemoryMax=4G
+```
+
+Choose `MemoryMax` above the sum of the Runner baseline, the configured
+per-work action limits, and the shared OpenCode/Pi runtime headroom. The
+per-work `memoryMb` bound is not a substitute for this unit-level aggregate
+limit. On macOS, `prlimit` is unavailable and containment detection is bounded
+by the watchdog sampling interval; the runner unit recommendation applies to
+Linux systemd deployments.
+
 ## Remote Access
 
 These options apply to systemd and Docker. The reverse-proxy upstream is

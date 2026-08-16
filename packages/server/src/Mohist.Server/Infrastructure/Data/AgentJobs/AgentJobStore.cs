@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Grains;
@@ -91,6 +93,16 @@ public interface IAgentJobStore
     /// reported set.
     /// </summary>
     Task<IReadOnlyList<AgentJobLedgerRecord>> ListRunningForRunnerAsync(
+        string runnerId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns AgentJobs in the runner-loss recovery projection assigned to
+    /// this runner and whose persisted recovery deadline has not elapsed.
+    /// Ordinary Unknown jobs remain excluded: they are not safe to replay
+    /// until a separate authoritative outcome or recovery decision exists.
+    /// </summary>
+    Task<IReadOnlyList<AgentJobLedgerRecord>> ListRecoveringForRunnerAsync(
         string runnerId,
         CancellationToken ct = default);
 
@@ -392,6 +404,29 @@ public class AgentJobStore : IAgentJobStore
         return rows.Select(ToRecord).ToList();
     }
 
+    public async Task<IReadOnlyList<AgentJobLedgerRecord>> ListRecoveringForRunnerAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var includeSubagentTreeFields = await HasLaunchVisibilityColumnAsync(db, ct);
+        var query = db.AgentJobs.AsNoTracking()
+            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "unknown");
+
+        if (includeSubagentTreeFields)
+            query = query.Where(r => r.LaunchVisibility == null || r.LaunchVisibility == "visible");
+
+        var rows = await ProjectRows(
+            query.OrderBy(r => r.JobKey),
+            includeSubagentTreeFields,
+            ct);
+        var now = _timeProvider.GetUtcNow();
+        return rows
+            .Select(ToRecord)
+            .Where(record => IsActiveRunnerLossRecovery(record.StateJson, now))
+            .ToList();
+    }
+
     public async Task<bool> IsTerminalWorkAsync(
         string jobKey,
         string runnerId,
@@ -451,6 +486,57 @@ public class AgentJobStore : IAgentJobStore
             .ThenBy(r => r.JobKey)
             .Take(limit), includeSubagentTreeFields, ct);
         return rows.Select(ToRecord).ToList();
+    }
+
+    private static bool IsActiveRunnerLossRecovery(
+        string stateJson,
+        DateTimeOffset now)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(stateJson);
+            var root = document.RootElement;
+            if (!TryGetProperty(root, "failureReason", out var reason)
+                || reason.ValueKind != JsonValueKind.String
+                || !string.Equals(reason.GetString(), "runner-lost", StringComparison.Ordinal))
+                return false;
+
+            if (!TryGetProperty(root, "recoveryDeadlineAt", out var deadline)
+                || deadline.ValueKind != JsonValueKind.String
+                || !DateTimeOffset.TryParse(
+                    deadline.GetString(),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out var recoveryDeadlineAt))
+                return false;
+
+            return recoveryDeadlineAt > now;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetProperty(
+        JsonElement root,
+        string name,
+        out JsonElement value)
+    {
+        if (root.TryGetProperty(name, out value))
+            return true;
+
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private static async Task<bool> HasLaunchVisibilityColumnAsync(

@@ -996,10 +996,10 @@ internal static partial class AgentCommands
     {
         var job = new Command(
             "job",
-            "Read an Agent's work-result owner (issue-479). Subcommands: list <agent>, view <job-id>.");
+            "Read an Agent's work-result owner (issue-479). Subcommands: list <agent>, view <job-id>, observation <job-id>.");
 
         job.Subcommands.Add(BuildJobList(api));
-        job.Subcommands.Add(BuildJobView(api));
+        AddJobViewAndObservation(job, api);
 
         return job;
     }

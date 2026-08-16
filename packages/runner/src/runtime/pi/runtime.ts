@@ -1,5 +1,6 @@
 import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task-log.js'
 import { resolve } from 'node:path'
+import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
 import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
 import { createPiProjector } from './projector.js'
@@ -27,6 +28,7 @@ import type {
   PiRuntimeEvent,
   PiSessionCreateRequest,
   PiSessionResolveRequest,
+  PiSessionTarget,
   PiSessionResolveResult,
   PiSessionResult,
   PiTurnObserver,
@@ -46,6 +48,7 @@ export interface PiRuntimeDeps {
   readonly providerErrorPolicy?: PiProviderErrorPolicy
   readonly clock?: PiClock
   readonly masker?: CredentialMasker
+  readonly runtimeShutdownTimeoutMs?: number
 }
 
 const defaultClock: PiClock = {
@@ -57,6 +60,7 @@ const CANCEL_CONFIRMATION_TIMEOUT_MS = 5_000
 
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
+  private readonly runtimeShutdownTimeoutMs: number
   private readonly sessions = new Map<string, PiSdkSession>()
   private readonly sessionMutexes = new Map<string, Promise<unknown>>()
   private readonly state: {
@@ -69,6 +73,7 @@ export class PiRuntime {
 
   constructor(deps: PiRuntimeDeps) {
     this.deps = deps
+    this.runtimeShutdownTimeoutMs = boundedTimeoutMs(deps.runtimeShutdownTimeoutMs, 30_000)
   }
 
   private withSessionLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
@@ -228,6 +233,24 @@ export class PiRuntime {
     if (request.options?.variant) session.setThinkingLevel(request.options.variant)
     const clock = this.deps.clock ?? defaultClock
     const duration = request.durationMs ?? null
+    const resourceBudgetMs =
+      request.resourceBudgetMs !== undefined && request.resourceBudgetMs !== null && request.resourceBudgetMs > 0
+        ? request.resourceBudgetMs
+        : null
+    let resourceContainmentTriggered = false
+    const resourceBudget =
+      resourceBudgetMs === null
+        ? null
+        : clock.setTimeout(() => {
+            resourceContainmentTriggered = true
+            fixAndAbort(
+              this.finishFailure(
+                'resource-containment',
+                `Pi turn exceeded its per-work resource budget of ${resourceBudgetMs}ms`,
+                diagnostics,
+              ),
+            )
+          }, resourceBudgetMs)
     const deadline =
       duration !== null && duration >= 0
         ? clock.setTimeout(() => {
@@ -278,8 +301,10 @@ export class PiRuntime {
     } finally {
       signal.removeEventListener('abort', cancel)
       if (deadline !== null) clock.clearTimeout(deadline)
+      if (resourceBudget !== null) clock.clearTimeout(resourceBudget)
       if (warning !== null) clock.clearTimeout(warning)
       unsubscribe()
+      if (resourceContainmentTriggered) await this.shutdown()
     }
   }
 
@@ -318,6 +343,73 @@ export class PiRuntime {
             diagnostic('session-open-failed', this.mask(message(cause))),
           ])
     }
+  }
+
+  /**
+   * Adopt a Pi turn that was already submitted before the runner process
+   * restarted. The existing session is observed until its current stream
+   * settles; this method never calls prompt() or steer().
+   */
+  async reattachTurn(
+    request: { readonly target: PiSessionTarget },
+    signal: AbortSignal,
+    observer?: PiTurnObserver,
+  ): Promise<PiResult<PiTurnResult>> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    const runtimeSessionId = request.target.runtimeSessionId
+    if (!runtimeSessionId) return this.failure('missing-session', 'Pi turn requires a bound Session')
+    const path = normalizedPath(runtimeSessionId)
+    if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
+    const session = await this.resolveFollowupSession(path, request.target.workDir)
+    if (!session.ok) return session.failure
+    if (signal.aborted) return this.finishFailure('interrupted', 'Reattached Pi turn wait was interrupted')
+
+    const result = await new Promise<PiResult<PiTurnResult>>((resolve) => {
+      let settled = false
+      let timer: ReturnType<typeof setInterval> | null = null
+      let unsubscribe = () => {}
+      const finish = (value: PiResult<PiTurnResult>) => {
+        if (settled) return
+        settled = true
+        if (timer) clearInterval(timer)
+        unsubscribe()
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      }
+      const check = () => {
+        if (!session.value.isStreaming) {
+          finish({
+            ok: true,
+            value: {
+              facts: {
+                finalAssistantText: finalText(session.value.messages),
+                runtimeSessionId: path,
+                workDir: request.target.workDir,
+              },
+              diagnostics: [],
+            },
+            diagnostics: [],
+          })
+        }
+      }
+      const onAbort = () => finish(this.finishFailure('interrupted', 'Reattached Pi turn wait was interrupted'))
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      unsubscribe = session.value.subscribe(() => {
+        // Existing runtime events were produced while the prior runner was
+        // attached. Adoption only waits for terminal state; it does not
+        // promote replayed observations into a new authoritative result.
+        void observer
+        check()
+      })
+      timer = setInterval(check, 100)
+      timer.unref?.()
+      check()
+    })
+    return result
   }
 
   /**
@@ -708,12 +800,20 @@ export class PiRuntime {
   }
 
   async shutdown(): Promise<void> {
-    for (const session of this.sessions.values()) session.dispose()
+    for (const session of this.sessions.values()) {
+      try {
+        session.dispose()
+      } catch {
+        /* best effort */
+      }
+    }
     this.sessions.clear()
     this.sessionMutexes.clear()
-    await this.state.services?.close()
+    const services = this.state.services
     this.state.services = null
     this.state.ready = false
+    this.state.catalog = null
+    await boundedWait(() => services?.close(), this.runtimeShutdownTimeoutMs)
   }
 
   private async attemptStart(): Promise<PiResult<PiReadyState>> {
@@ -741,7 +841,7 @@ export class PiRuntime {
           `Pi model catalog unavailable: ${this.mask(message(cause))}`,
         )
         this.state.services = null
-        await services.close().catch(() => undefined)
+        await boundedWait(() => services.close(), this.runtimeShutdownTimeoutMs)
         return this.unavailable()
       }
       this.state.ready = true
@@ -781,7 +881,7 @@ export class PiRuntime {
     return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics }
   }
   private finishFailure(
-    kind: 'deadline-exceeded' | 'interrupted' | 'turn-failed',
+    kind: 'deadline-exceeded' | 'interrupted' | 'turn-failed' | 'resource-containment',
     messageText: string,
     diagnostics: PiDiagnostic[] = [],
   ): PiResult<PiTurnResult> {

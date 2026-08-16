@@ -3,6 +3,7 @@ import type { Issue, WorkflowTimeline } from '../../../entities/issue'
 
 export type RuntimeSummary =
   | 'running'
+  | 'recoverable-interrupted'
   | 'queued'
   | 'approval-required'
   | 'blocked'
@@ -10,14 +11,7 @@ export type RuntimeSummary =
   | 'done'
   | 'cancelled'
 
-export type RuntimeActionKind =
-  | 'approve'
-  | 'send-back'
-  | 'retry'
-  | 'resume'
-  | 'rerun'
-  | 'stop'
-  | 'start'
+export type RuntimeActionKind = 'approve' | 'send-back' | 'retry' | 'resume' | 'rerun' | 'stop' | 'start'
 
 export interface RuntimeCurrentTask {
   kind: 'task' | 'check'
@@ -48,21 +42,26 @@ export interface RuntimeDecision {
 }
 
 export interface RuntimeDecisionInput {
-  issue: Pick<Issue,
-    | 'status'
-    | 'workflowStage'
-    | 'workflowStatus'
-    | 'health'
-    | 'approvalState'
-    | 'blockedReason'
-    | 'recovery'
-    | 'convergence'
-    | 'drift'
-    | 'workflowStageProgress'
-    | 'isDraft'
-    | 'canStart'
-    | 'blocker'
-  > & { prerequisites?: Issue['prereq'] } | null | undefined
+  issue:
+    | (Pick<
+        Issue,
+        | 'status'
+        | 'workflowStage'
+        | 'workflowStatus'
+        | 'health'
+        | 'approvalState'
+        | 'blockedReason'
+        | 'attention'
+        | 'recovery'
+        | 'convergence'
+        | 'drift'
+        | 'workflowStageProgress'
+        | 'isDraft'
+        | 'canStart'
+        | 'blocker'
+      > & { prerequisites?: Issue['prereq'] })
+    | null
+    | undefined
   timeline?: Pick<WorkflowTimeline, 'currentStage' | 'status' | 'stages' | 'pendingWork' | 'availableActions'> | null
   agentStatus?: Pick<AgentStatus, 'runnerAvailable' | 'runnerMessage' | 'capacity' | 'activeAgents'> | null
   issueNumber?: number

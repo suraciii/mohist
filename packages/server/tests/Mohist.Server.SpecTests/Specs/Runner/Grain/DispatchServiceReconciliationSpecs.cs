@@ -390,6 +390,77 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
+    public async Task Reconnect_RedeliversInterruptedWorkflowUnderOriginalIdentity()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var first = Assert.Single(
+            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        await runner.UnregisterAsync();
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            TestProjectId(_workflowId!)));
+
+        var redelivery = Assert.Single(
+            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(first, redelivery);
+        Assert.Equal(first.WorkId, redelivery.WorkId);
+        Assert.Equal(first.TaskRunId, redelivery.TaskRunId);
+
+        var repeated = Assert.Single(
+            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(first, repeated);
+
+        var key = WorkKey(_workflowId!, first.WorkId);
+        Assert.Empty((await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([key], []))).Dispatches);
+
+        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+            runnerId,
+            first.WorkId,
+            new TaskReport(
+                first.WorkId,
+                TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                TaskRunId: first.TaskRunId)));
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+    }
+
+    [Fact]
+    public async Task Reconnect_DoesNotTakeInterruptedWorkflowOverFromRecordedRunner()
+    {
+        await StartWorkflowAsync(SingleStage(checks: []));
+        var originalRunnerId = _runnerId!;
+        var originalRunner = Grains.GetGrain<IRunnerGrain>(originalRunnerId);
+        var first = Assert.Single(
+            (await Dispatch.PollAsync(originalRunnerId, new RunnerPollRequest([], []))).Dispatches);
+        await originalRunner.UnregisterAsync();
+
+        var otherRunnerId = $"other-recovery-runner-{Guid.NewGuid():N}";
+        var otherRunner = Grains.GetGrain<IRunnerGrain>(otherRunnerId);
+        await otherRunner.RegisterAsync(new RunnerInfo(
+            otherRunnerId,
+            ["spec/*"],
+            "other-host",
+            TestProjectId(_workflowId!)));
+
+        Assert.Empty((await Dispatch.PollAsync(otherRunnerId, new RunnerPollRequest([], []))).Dispatches);
+        var run = await LoadRunAsync(_workflowId!);
+        Assert.Equal(originalRunnerId, run.Assignment?.WorkerId);
+        Assert.Equal(first.WorkId, run.CurrentStage().Tasks.Single().WorkId);
+
+        await otherRunner.UnregisterAsync();
+    }
+
+    [Fact]
     public async Task Redelivery_InvalidPersistedTaskInput_FailsClaimedWork()
     {
         var workflow = await StartWorkflowAsync(SingleStage(

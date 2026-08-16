@@ -178,6 +178,29 @@ public class AgentJobReadRoutesSpecs
     }
 
     [Fact]
+    public async Task View_RecoveringUnknown_ProjectsRecoveringReasonAndDeadline()
+    {
+        var deadline = new DateTimeOffset(2026, 8, 15, 12, 5, 0, TimeSpan.Zero);
+        var grain = new ReadAgentJobGrain(
+            AgentJobStatus.Unknown,
+            Project.Id,
+            terminalResult: null,
+            recoveryDeadlineAt: deadline,
+            isRecovering: true,
+            failureReason: AgentJobFailureReasons.RunnerLost);
+
+        var result = await AgentJobReadRoutes.HandleViewAsync(
+            Project, "job-recovering", FactoryFor(grain));
+
+        var payload = await AsPayloadAsync(result);
+        var data = payload.GetProperty("data");
+        Assert.Equal("recovering", data.GetProperty("status").GetString());
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, data.GetProperty("failureReason").GetString());
+        Assert.Equal(deadline, data.GetProperty("recoveryDeadlineAt").GetDateTimeOffset());
+        Assert.Equal(0, grain.TerminalResultCalls);
+    }
+
+    [Fact]
     public async Task View_PreCutoverJob_LoadsRealStateFromGrainWithoutRow()
     {
         var terminal = new AgentJobTerminalResult(
@@ -336,17 +359,26 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
     private readonly string? _projectId;
     private readonly AgentJobTerminalResult? _terminalResult;
     private readonly AgentExecutionDefinition? _executionDefinition;
+    private readonly string? _failureReason;
+    private readonly DateTimeOffset? _recoveryDeadlineAt;
+    private readonly bool _isRecovering;
 
     public ReadAgentJobGrain(
         AgentJobStatus status,
         string? projectId,
         AgentJobTerminalResult? terminalResult,
-        AgentExecutionDefinition? executionDefinition = null)
+        AgentExecutionDefinition? executionDefinition = null,
+        DateTimeOffset? recoveryDeadlineAt = null,
+        bool isRecovering = false,
+        string? failureReason = null)
     {
         _status = status;
         _projectId = projectId;
         _terminalResult = terminalResult;
         _executionDefinition = executionDefinition;
+        _recoveryDeadlineAt = recoveryDeadlineAt;
+        _isRecovering = isRecovering;
+        _failureReason = failureReason;
     }
 
     public int TerminalResultCalls { get; private set; }
@@ -370,7 +402,17 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
     }
     public Task<AgentJobTerminalResult> WaitForTerminalAsync() => GetTerminalResultAsync();
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() =>
-        Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, false, false, _projectId, _executionDefinition));
+        Task.FromResult(new AgentJobRuntimeSnapshot(
+            _status,
+            null,
+            null,
+            _failureReason,
+            false,
+            false,
+            _projectId,
+            _executionDefinition,
+            RecoveryDeadlineAt: _recoveryDeadlineAt,
+            IsRecovering: _isRecovering));
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
     public Task MarkUnknownAsync(string reason) => Task.CompletedTask;

@@ -31,10 +31,10 @@ export type {
   RuntimeTurnResult,
   RuntimeFilePart,
   RuntimeOwnershipSnapshot,
-} from "./types.js"
+} from './types.js'
 
-export { parseModelIdentifier } from "./model-string.js"
-export type { ParsedModelIdentifier, ParseModelResult } from "./model-string.js"
+export { parseModelIdentifier } from './model-string.js'
+export type { ParsedModelIdentifier, ParseModelResult } from './model-string.js'
 
 export {
   DEFAULT_PROVIDER_ERROR_POLICY,
@@ -44,29 +44,31 @@ export {
   errorKindFor,
   normalizeAbortUnconfirmed,
   normalizeDeadlineExceeded,
+  normalizeGenerationDrainTimeout,
   normalizeInterrupted,
   normalizeInvalidInput,
   normalizeIncompatibleRuntime,
   normalizeMissingSession,
   normalizePermissionRequired,
+  normalizeResourceContainment,
   normalizeTurnFailed,
   normalizeUnavailableRuntime,
-} from "./errors.js"
+} from './errors.js'
 
-export { OpenCodeRuntime } from "./runtime.js"
-export type { OpenCodeRuntimeDeps } from "./runtime.js"
-export type { RuntimeClock } from "./runtime.js"
+export { OpenCodeRuntime } from './runtime.js'
+export type { OpenCodeRuntimeDeps } from './runtime.js'
+export type { RuntimeClock } from './runtime.js'
 
 export type {
   DirectoryReclaimResult,
   DirectoryReleaseOutcome,
   DirectoryReleaseResult,
-} from "./directory-instance.js"
+} from './directory-instance.js'
 
-export type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
+export type { WorkspaceRemovalFenceResult } from '../workspace-removal-fence.js'
 
 export {
   getOpenCodeRuntimeFactory,
   createDefaultOpenCodeRuntime,
-} from "./factory.js"
-export type { OpenCodeRuntimeFactory } from "./factory.js"
+} from './factory.js'
+export type { OpenCodeRuntimeFactory } from './factory.js'

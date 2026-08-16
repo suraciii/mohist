@@ -10,12 +10,32 @@ public partial class WorkflowGrain
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
+        if (string.Equals(reminderName, RunnerLossRecoveryReminderName, StringComparison.Ordinal))
+        {
+            RejectIfRunReloadRequired();
+            await ReconcileRunnerLossRecoveryAsync();
+            return;
+        }
+
         if (!string.Equals(reminderName, AgentResultSettlementReminderName, StringComparison.Ordinal))
             return;
 
         RejectIfRunReloadRequired();
         if (_run is null)
             return;
+
+        await ReconcileAgentResultSettlementAsync();
+    }
+
+    private async Task ReconcileAgentResultSettlementIfDueAsync()
+    {
+        var settlement = _run?.FindUnresolvedAgentResultSettlementTask()?.Task.AgentResultSettlement;
+        if (settlement?.State != AgentResultSettlementState.Unknown
+            || settlement.DeadlineAt is not { } deadline
+            || deadline > Now())
+        {
+            return;
+        }
 
         await ReconcileAgentResultSettlementAsync();
     }

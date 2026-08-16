@@ -76,6 +76,10 @@ public static class MohistDefaultWorkflowProjection
 
     private static WorkflowAttention? ProjectAttention(WorkflowStatusView? workflow)
     {
+        var interruption = FindInterruption(workflow);
+        if (interruption is not null)
+            return WorkflowAttention.RecoverableInterrupted(workflow!.WorkflowRunId, interruption);
+
         if (workflow?.Status == "awaiting-approval")
             return WorkflowAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
         if (workflow?.Status == "failed")
@@ -84,6 +88,27 @@ public static class MohistDefaultWorkflowProjection
             return WorkflowAttention.AgentResultUnconfirmed(
                 workflow.WorkflowRunId,
                 workflow.AgentResultAttention?.Message ?? "Agent result unconfirmed");
+        return null;
+    }
+
+    private static WorkInterruptionView? FindInterruption(WorkflowStatusView? workflow)
+    {
+        if (workflow is null) return null;
+        if (workflow.Interruption is not null) return workflow.Interruption;
+
+        foreach (var stage in workflow.Stages)
+        {
+            if (stage.Interruption is not null) return stage.Interruption;
+            var taskInterruption = stage.Tasks
+                .Select(task => task.Interruption)
+                .FirstOrDefault(interruption => interruption is not null);
+            if (taskInterruption is not null) return taskInterruption;
+            var checkInterruption = stage.Checks
+                .Select(check => check.Interruption)
+                .FirstOrDefault(interruption => interruption is not null);
+            if (checkInterruption is not null) return checkInterruption;
+        }
+
         return null;
     }
 

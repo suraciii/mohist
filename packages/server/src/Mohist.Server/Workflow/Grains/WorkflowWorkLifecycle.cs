@@ -224,6 +224,7 @@ internal sealed class WorkflowWorkLifecycle
     {
         var currentStage = run.CurrentStage();
         currentStage.ChecksWorkId = null;
+        currentStage.Interruption = null;
         foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
         {
             ch.Status = StageCheckStatus.Pending;

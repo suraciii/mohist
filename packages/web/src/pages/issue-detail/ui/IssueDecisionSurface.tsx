@@ -4,15 +4,22 @@ import { AlertCircleIcon, CircleCheckIcon, BotIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
-import type {
-  IssueDecisionAction,
-  IssueDecisionActionKind,
-} from '../model/issueDecisionActions'
+import type { IssueDecisionAction, IssueDecisionActionKind } from '../model/issueDecisionActions'
 import type { IssueDecisionActionController } from '../model/useIssueDecisionActions'
 
 export interface IssueDecisionSurfaceProps {
   actions: ReadonlyArray<IssueDecisionAction>
-  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled' | 'done-no-action' | 'terminal-no-action'
+  summary:
+    | 'running'
+    | 'recoverable-interrupted'
+    | 'queued'
+    | 'approval-required'
+    | 'blocked'
+    | 'failed'
+    | 'done'
+    | 'cancelled'
+    | 'done-no-action'
+    | 'terminal-no-action'
   rationale: string
   nextAction: string
   controller: IssueDecisionActionController
@@ -30,13 +37,14 @@ interface SummaryPresentation {
 }
 
 const SUMMARY_PRESENTATION: Record<IssueDecisionSurfaceProps['summary'], SummaryPresentation> = {
-  'running': { label: 'Running', tone: 'blue' },
-  'queued': { label: 'Queued', tone: 'violet' },
+  running: { label: 'Running', tone: 'blue' },
+  'recoverable-interrupted': { label: 'Recovering', tone: 'amber' },
+  queued: { label: 'Queued', tone: 'violet' },
   'approval-required': { label: 'Approval required', tone: 'amber' },
-  'blocked': { label: 'Blocked', tone: 'orange' },
-  'failed': { label: 'Failed', tone: 'red' },
-  'done': { label: 'Done', tone: 'green' },
-  'cancelled': { label: 'Cancelled', tone: 'gray' },
+  blocked: { label: 'Blocked', tone: 'orange' },
+  failed: { label: 'Failed', tone: 'red' },
+  done: { label: 'Done', tone: 'green' },
+  cancelled: { label: 'Cancelled', tone: 'gray' },
   'done-no-action': { label: 'Done', tone: 'green' },
   'terminal-no-action': { label: 'No action available', tone: 'gray' },
 }
@@ -101,7 +109,8 @@ function variantFor(action: IssueDecisionAction, primary: boolean): 'default' | 
   if (action.kind === 'mark-ready') return 'default'
   if (action.kind === 'mark-as-done') return 'default'
   if (action.kind === 'start') return primary ? 'default' : 'outline'
-  if (action.kind === 'retry' || action.kind === 'resume' || action.kind === 'rerun') return primary ? 'default' : 'outline'
+  if (action.kind === 'retry' || action.kind === 'resume' || action.kind === 'rerun')
+    return primary ? 'default' : 'outline'
   if (action.kind === 'ask-agent') return 'outline'
   if (action.kind === 'view-transcript') return 'outline'
   return 'outline'
@@ -129,9 +138,7 @@ function ActionButton({
   const descriptionId = isDisabled ? describeIdFor(action.kind) : undefined
 
   if (isNavAction(action)) {
-    const label = isPending
-      ? PENDING_BUSY_LABEL[action.kind]
-      : action.kind === 'ask-agent' ? 'Ask Agent' : action.label
+    const label = isPending ? PENDING_BUSY_LABEL[action.kind] : action.kind === 'ask-agent' ? 'Ask Agent' : action.label
     if (action.to) {
       return (
         <div className="flex flex-col items-start gap-1" data-decision-nav={action.kind}>
@@ -193,10 +200,19 @@ function ActionButton({
             isDestructive(action) && isDisabled && 'border-border bg-muted text-muted-foreground hover:bg-muted',
           )}
         >
-          {action.kind === 'mark-as-done' && !isPending ? <CircleCheckIcon className="size-4" aria-hidden="true" /> : null}
+          {action.kind === 'mark-as-done' && !isPending ? (
+            <CircleCheckIcon className="size-4" aria-hidden="true" />
+          ) : null}
           {label}
         </Button>
-        {shortcutHint && <kbd data-testid={`decision-action-${action.kind}-shortcut`} className="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground">{shortcutHint}</kbd>}
+        {shortcutHint && (
+          <kbd
+            data-testid={`decision-action-${action.kind}-shortcut`}
+            className="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground"
+          >
+            {shortcutHint}
+          </kbd>
+        )}
       </div>
       {isDisabled && reason && (
         <p
@@ -208,21 +224,12 @@ function ActionButton({
         </p>
       )}
       {isPending && (
-        <p
-          data-testid={`decision-action-${action.kind}-pending`}
-          className="sr-only"
-          aria-live="polite"
-        >
+        <p data-testid={`decision-action-${action.kind}-pending`} className="sr-only" aria-live="polite">
           {`${PENDING_BUSY_LABEL[action.kind]}. ${PENDING_BUSY_MESSAGE}`}
         </p>
       )}
       {isPending && error && (
-        <p
-          data-testid={`decision-action-${action.kind}-error`}
-          className="sr-only"
-          role="alert"
-          aria-live="assertive"
-        >
+        <p data-testid={`decision-action-${action.kind}-error`} className="sr-only" role="alert" aria-live="assertive">
           {error.message}
         </p>
       )}
@@ -281,10 +288,7 @@ export function IssueDecisionSurface({
         className,
       )}
     >
-      <p
-        data-testid="decision-rationale"
-        className="text-sm text-muted-foreground"
-      >
+      <p data-testid="decision-rationale" className="text-sm text-muted-foreground">
         {rationale}
       </p>
 
@@ -295,10 +299,7 @@ export function IssueDecisionSurface({
         >
           Next action
         </span>
-        <span
-          data-testid="decision-next-action-body"
-          className="text-sm text-card-foreground"
-        >
+        <span data-testid="decision-next-action-body" className="text-sm text-card-foreground">
           {nextAction}
         </span>
       </div>
@@ -316,10 +317,7 @@ export function IssueDecisionSurface({
       )}
 
       {actions.length > 0 && (
-        <div
-          data-testid="decision-actions"
-          className="mt-4 flex flex-wrap items-start gap-3"
-        >
+        <div data-testid="decision-actions" className="mt-4 flex flex-wrap items-start gap-3">
           {visibleActions.map((action) => (
             <ActionButton
               key={action.kind}
@@ -369,56 +367,52 @@ export function IssueDecisionSurface({
         </div>
       )}
 
-       {sendBackOpen && sendBackForm ? sendBackForm : sendBackOpen && (
-        <div
-          data-testid="decision-send-back-form"
-          className="mt-3 rounded-md border border-border bg-muted p-3"
-        >
-          <label
-            htmlFor="decision-send-back-body"
-            className="text-xs font-medium text-card-foreground"
-          >
-            What should the agent change?
-          </label>
-          <Textarea
-            id="decision-send-back-body"
-            data-testid="decision-send-back-textarea"
-            value={sendBackText}
-            onChange={(event) => setSendBackText(event.target.value)}
-            rows={3}
-            className="mt-2 resize-none bg-card"
-            placeholder="Describe the changes you want before the workflow continues..."
-          />
-          <div className="mt-2 flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              data-testid="decision-send-back-cancel"
-              onClick={() => {
-                 setUncontrolledSendBackOpen(false)
-                setSendBackText('')
-              }}
-              disabled={pendingKind === 'send-back'}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              data-testid="decision-send-back-confirm"
-              disabled={!controller.sendBackBodyValid(sendBackText) || pendingKind === 'send-back'}
-              onClick={() => {
-                const sendBackAction = actions.find((a) => a.kind === 'send-back')
-                if (!sendBackAction) return
-                controller.runAction(sendBackAction, { sendBackBody: sendBackText })
-              }}
-            >
-              {pendingKind === 'send-back' ? 'Sending back...' : 'Submit feedback'}
-            </Button>
-          </div>
-        </div>
-      )}
+      {sendBackOpen && sendBackForm
+        ? sendBackForm
+        : sendBackOpen && (
+            <div data-testid="decision-send-back-form" className="mt-3 rounded-md border border-border bg-muted p-3">
+              <label htmlFor="decision-send-back-body" className="text-xs font-medium text-card-foreground">
+                What should the agent change?
+              </label>
+              <Textarea
+                id="decision-send-back-body"
+                data-testid="decision-send-back-textarea"
+                value={sendBackText}
+                onChange={(event) => setSendBackText(event.target.value)}
+                rows={3}
+                className="mt-2 resize-none bg-card"
+                placeholder="Describe the changes you want before the workflow continues..."
+              />
+              <div className="mt-2 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="decision-send-back-cancel"
+                  onClick={() => {
+                    setUncontrolledSendBackOpen(false)
+                    setSendBackText('')
+                  }}
+                  disabled={pendingKind === 'send-back'}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  data-testid="decision-send-back-confirm"
+                  disabled={!controller.sendBackBodyValid(sendBackText) || pendingKind === 'send-back'}
+                  onClick={() => {
+                    const sendBackAction = actions.find((a) => a.kind === 'send-back')
+                    if (!sendBackAction) return
+                    controller.runAction(sendBackAction, { sendBackBody: sendBackText })
+                  }}
+                >
+                  {pendingKind === 'send-back' ? 'Sending back...' : 'Submit feedback'}
+                </Button>
+              </div>
+            </div>
+          )}
 
       {error && (
         <div
