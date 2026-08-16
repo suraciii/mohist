@@ -1,0 +1,54 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver Server-owned Slack setup guidance for blocked Agent launches while preserving canonical readiness, delivery deduplication, and existing execution behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Gate new Slack launches and deliver a deduplicated setup nudge",
+      "spec": "specs/slack-agent-setup-nudge/spec.md#canonical-readiness-gates-new-slack-work",
+      "description": "Carry the full canonical AgentExecutabilityResult through Slack admission and gate only new DM launches and channel-root launches after classification, while leaving existing-session follow-ups unchanged. For blocked states, enqueue one required Server-authored UserAction/post_message setup nudge with the deterministic dispatch reference slack-setup-nudge:{connectionId}:{identity.AsKey()}, safe caller-visible text, and the correct DM thread or channel-root target; keep executable and unknown Agents on the existing launch path. Update the Slack product documentation and extend the DM/channel ingress and outbox specs for resource isolation, delivery convergence, and state independence.",
+      "acceptanceCriteria": [
+        "A new DM with canonical state not-configured returns the distinct agent_not_configured admission result, and a channel-root launch with canonical state not-executable returns agent_not_executable; neither path accepts the message as executable Agent work.",
+        "Blocked new launches perform the readiness decision before SlackProviderInboxStore.AcceptAsync, attachment preparation, workspace provisioning, AgentLauncher invocation, Session grain input, or liveness projection, and create no provider inbox work, AgentJob, AgentSession, SessionInput, AgentTurn, attachment, or new input/turn on an existing Session.",
+        "A blocked DM and a blocked channel-root launch each create a Server-authored SlackOutboxKinds.UserAction row with post_message payload, stable client message identity, dispatch reference slack-setup-nudge:{connectionId}:{identity.AsKey()}, triggering conversation, and body.ThreadTs for DMs or no thread target for channel roots.",
+        "Setup-nudge text states that the bound Agent is not ready to accept the task and directs the caller to the responsible owner/operator, while excluding gap codes, detailed failure messages, raw configuration, credentials, repair paths, repair commands, Agent-generated wording, and claims that execution started.",
+        "Sequential redelivery, concurrent admission, and delivery-uncertain retry/reconciliation for one (workspace team, conversation, message timestamp) converge on one durable setup-nudge intent and never enqueue a replacement row or second Slack message; the original conversation and thread target remain unchanged.",
+        "Existing DM and channel-thread follow-ups remain usable when the current Agent readiness is blocked, and their persisted Session snapshots remain unchanged; readiness is checked only for new launch routes.",
+        "Executable Agents follow the normal inbox, launch, liveness, and resource-creation flow without a setup nudge; unknown Agents remain admitted for Runner verification without a setup nudge; disabled or backpressured Connections retain their existing admission response and are not reported as Agent readiness gaps.",
+        "Slack DM and channel ingress specs assert the admission codes, safe payload, thread/root targeting, resource counts, existing-session behavior, sequential and concurrent deduplication, and delivery-uncertain reuse; the outbox reliability assertions cover the existing retry/reconciliation lifecycle.",
+        "docs/slack.md documents the setup-mode response, the caller-safe summary, the owner/operator-only readiness detail, and the independence of Agent readiness from Connection health.",
+        "The relevant Server test suites pass, including the focused Slack DM/channel ingress and outbox reliability specs."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Slack ingress/readiness dispatch code, a stable setup-nudge outbox producer, expanded Slack ingress and delivery specs, and updated docs/slack.md.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use AgentReadinessService as the only readiness authority. Reuse EnqueueRequiredAsync and UserAction; no schema migration or new outbox kind is needed. Resolve a durable accepted replay before applying the new-launch gate so a previously accepted identity is retried through its existing route."
+    },
+    {
+      "id": "T-002",
+      "title": "Expose canonical executability in Slack diagnostics and operator surfaces",
+      "spec": "specs/slack-agent-setup-nudge/spec.md#readiness-detail-is-authorization-scoped-and-canonical",
+      "description": "Project the canonical AgentExecutabilityResult into the authorized Slack Connection diagnostic/read surfaces alongside the existing Connection facts, retaining the legacy Connection AgentReadiness field for compatibility. Ensure operators can inspect the complete state, every gap, next action, and FixEntryPoint from AgentReadinessService/AgentInfo.Executability, while Slack-facing setup text remains a fixed safe summary and Connection health, desired state, setup progress, and backpressure remain separate concerns. Add API and service specs for canonical detail, authorization scoping, and lifecycle independence.",
+      "acceptanceCriteria": [
+        "The authorized Slack Connection diagnostic/read response exposes the canonical executability state, all canonical gaps, each gap's code/message/nextAction/FixEntryPoint, and PendingLaunchNote when present, sourced from the same AgentReadinessService result used by ingress; no Slack-specific readiness calculation is introduced.",
+        "The response retains the legacy Connection AgentReadiness field and continues to expose Connection setup progress, desired state, health, and health reason as separate facts rather than replacing them with Agent executability.",
+        "API/read-surface specs cover a not-configured Agent with a model-missing gap and a not-executable Agent with an execution-configuration failure, verifying complete canonical details and repair entry points for authorized owners/operators.",
+        "Diagnostic precedence and state independence remain intact: disabled, unhealthy, offline, and backpressured Connection conditions use their existing Connection responses; an Agent readiness block does not mutate DesiredState, SetupProgress, ConnectionHealth, or existing Session history; a Connection health problem is not reported as an Agent gap.",
+        "Read-surface tests verify that privileged detail is not copied into the caller-visible setup-nudge payload, including gap codes, detailed failure text, configuration or credential data, repair paths, and commands.",
+        "The focused Slack diagnostic, Agent API/read-surface, and existing ConnectionDiagnostic tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Slack diagnostic/read projections with canonical AgentExecutabilityResult details, compatibility-preserving Connection facts, and passing authorization/state-independence tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "AgentQuerier already hydrates AgentInfo.Executability for privileged Agent surfaces. Keep that contract canonical and add the Slack diagnostic projection without using persisted AgentConnection.AgentReadiness or AgentReadinessDeriver as a launch verdict."
+    }
+  ]
+}
