@@ -1,6 +1,6 @@
-import type { AddTaskInput, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from "../core/types.js"
-import { isObject } from "../core/json.js"
-import { getPath } from "../core/json-path.js"
+import type { AddTaskInput, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import { isObject } from '../core/json.js'
+import { getPath } from '../core/json-path.js'
 
 interface RecoveryHandler {
   when?: string
@@ -21,7 +21,7 @@ export class UnresolvedFailureReferenceError extends Error {
     readonly promptKey?: string,
   ) {
     super(message)
-    this.name = "UnresolvedFailureReferenceError"
+    this.name = 'UnresolvedFailureReferenceError'
   }
 }
 
@@ -30,15 +30,18 @@ export function tryRecovery(
   result: WorkItemResult,
   variables?: JsonObject | null,
 ): WorkItemResult | null {
+  // Resource exhaustion is a terminal, diagnostic boundary. Repair handlers
+  // cannot make the same invocation fit a fixed process limit, and retrying
+  // here would create an unbounded recovery chain with the same failure.
+  if (result.error?.code === 'resource-containment') return null
+
   const recovery = readRecoveryConfig(work.recovery)
   if (!recovery) return null
 
-  if (!Object.prototype.hasOwnProperty.call(work, "recoveryRemaining")) return null
+  if (!Object.prototype.hasOwnProperty.call(work, 'recoveryRemaining')) return null
   const rawRemaining = work.recoveryRemaining
-  if (rawRemaining !== null && (typeof rawRemaining !== "number" || !Number.isFinite(rawRemaining))) return null
-  const remaining = rawRemaining === null
-    ? recovery.budget
-    : clampRemaining(rawRemaining, recovery.budget)
+  if (rawRemaining !== null && (typeof rawRemaining !== 'number' || !Number.isFinite(rawRemaining))) return null
+  const remaining = rawRemaining === null ? recovery.budget : clampRemaining(rawRemaining, recovery.budget)
   if (remaining <= 0) return null
 
   const output = structuredOutputForFailure(result.output)
@@ -46,8 +49,9 @@ export function tryRecovery(
     output,
     error: result.error ? { code: result.error.code, message: result.error.message } : null,
   }
-  const handler = recovery.handlers.find((h) => h.when !== undefined && matchesWhen(h.when!, failureContext))
-    ?? (result.error ? recovery.handlers.find((h) => h.when === undefined) : undefined)
+  const handler =
+    recovery.handlers.find((h) => h.when !== undefined && matchesWhen(h.when!, failureContext)) ??
+    (result.error ? recovery.handlers.find((h) => h.when === undefined) : undefined)
   if (!handler) return null
 
   const effectiveVariables = variables ?? work.variables ?? null
@@ -66,9 +70,7 @@ export function tryRecovery(
   const addTasks: AddTaskInput[] = [...renderedHandlerTasks]
 
   if (handler.retrySelf) {
-    const retryId = work.workId.includes(".")
-      ? work.workId.substring(0, work.workId.lastIndexOf("."))
-      : work.workId
+    const retryId = work.workId.includes('.') ? work.workId.substring(0, work.workId.lastIndexOf('.')) : work.workId
     addTasks.push({
       id: retryId,
       title: work.title ?? work.workId,
@@ -86,16 +88,14 @@ export function tryRecovery(
   const schedulingMessage = result.error?.message ?? `${label} recovery scheduled`
   return {
     ...result,
-    status: "completed",
-    message: result.message
-      ? `${result.message}; ${schedulingMessage}`.slice(0, 4000)
-      : schedulingMessage,
+    status: 'completed',
+    message: result.message ? `${result.message}; ${schedulingMessage}`.slice(0, 4000) : schedulingMessage,
     addTasks,
   }
 }
 
 export function matchesWhen(when: string, context: JsonObject): boolean {
-  const eq = when.indexOf("=")
+  const eq = when.indexOf('=')
   if (eq === -1) return false
   const path = when.slice(0, eq).trim()
   const expected = when.slice(eq + 1).trim()
@@ -104,20 +104,20 @@ export function matchesWhen(when: string, context: JsonObject): boolean {
 
 export function readRecoveryConfig(recovery: JsonObject | null | undefined): RecoveryConfig | null {
   if (!recovery) return null
-  const rawBudget = recovery["budget"]
-  const budget = typeof rawBudget === "number" && Number.isFinite(rawBudget) ? Math.max(0, Math.floor(rawBudget)) : 0
-  const rawHandlers = recovery["handlers"]
+  const rawBudget = recovery['budget']
+  const budget = typeof rawBudget === 'number' && Number.isFinite(rawBudget) ? Math.max(0, Math.floor(rawBudget)) : 0
+  const rawHandlers = recovery['handlers']
   if (!Array.isArray(rawHandlers)) return null
   const handlers: RecoveryHandler[] = []
   for (const raw of rawHandlers) {
     if (!isObject(raw)) continue
-    const rawWhen = raw["when"]
-    if (rawWhen !== undefined && (typeof rawWhen !== "string" || rawWhen.trim().length === 0)) continue
-    const when = typeof rawWhen === "string" ? rawWhen : undefined
+    const rawWhen = raw['when']
+    if (rawWhen !== undefined && (typeof rawWhen !== 'string' || rawWhen.trim().length === 0)) continue
+    const when = typeof rawWhen === 'string' ? rawWhen : undefined
     handlers.push({
       when,
-      tasks: readAddTasks(raw["tasks"]),
-      retrySelf: raw["retrySelf"] === true,
+      tasks: readAddTasks(raw['tasks']),
+      retrySelf: raw['retrySelf'] === true,
     })
   }
   return { budget, handlers }
@@ -128,22 +128,22 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
   const tasks: AddTaskInput[] = []
   for (const entry of raw) {
     if (!isObject(entry)) continue
-    const id = stringField(entry, "id")
+    const id = stringField(entry, 'id')
     if (!id) continue
-    const recovery = objectField(entry, "recovery")
+    const recovery = objectField(entry, 'recovery')
     const recoveryConfig = readRecoveryConfig(recovery)
     const task: AddTaskInput = {
       id,
-      title: stringField(entry, "title") ?? id,
-      uses: stringField(entry, "uses"),
-      with: objectField(entry, "with"),
+      title: stringField(entry, 'title') ?? id,
+      uses: stringField(entry, 'uses'),
+      with: objectField(entry, 'with'),
       // Spec requirement "The canonical declaration survives the complete
       // task lifecycle": recovery handler tasks keep their top-level
       // `expect` alongside `with`. Dropping it here would silently lose
       // the completion contract on the recovery path.
-      expect: objectField(entry, "expect"),
-      artifacts: objectField(entry, "artifacts"),
-      setVars: recordField(entry, "setVars"),
+      expect: objectField(entry, 'expect'),
+      artifacts: objectField(entry, 'artifacts'),
+      setVars: recordField(entry, 'setVars'),
       recovery,
     }
     if (recoveryConfig) task.recoveryRemaining = recoveryConfig.budget
@@ -174,14 +174,13 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
  * namespace.
  */
 export function expandFailureReferences(value: JsonValue, failureContext: JsonObject): JsonValue {
-  const context = "output" in failureContext || "error" in failureContext
-    ? failureContext
-    : { output: failureContext, error: null }
+  const context =
+    'output' in failureContext || 'error' in failureContext ? failureContext : { output: failureContext, error: null }
   return expandFailureValue(value, context)
 }
 
 function expandFailureValue(value: JsonValue, failureContext: JsonObject): JsonValue {
-  if (typeof value === "string") return expandFailureString(value, failureContext)
+  if (typeof value === 'string') return expandFailureString(value, failureContext)
   if (Array.isArray(value)) return value.map((item) => expandFailureValue(item, failureContext))
   if (isObject(value)) {
     const result: JsonObject = {}
@@ -202,22 +201,14 @@ function expandFailureString(value: string, failureContext: JsonObject): JsonVal
     const path = whole[1]
     const resolved = resolveFailurePath(failureContext, path)
     if (resolved === undefined) {
-      throw new UnresolvedFailureReferenceError(
-        `Recovery task references unresolved failure path '${path}'`,
-        path,
-        "",
-      )
+      throw new UnresolvedFailureReferenceError(`Recovery task references unresolved failure path '${path}'`, path, '')
     }
     return resolved
   }
   const next = value.replace(FAILURE_REFERENCE_PATTERN, (match, path: string) => {
     const resolved = resolveFailurePath(failureContext, path)
     if (resolved === undefined) {
-      throw new UnresolvedFailureReferenceError(
-        `Recovery task references unresolved failure path '${path}'`,
-        path,
-        "",
-      )
+      throw new UnresolvedFailureReferenceError(`Recovery task references unresolved failure path '${path}'`, path, '')
     }
     return failureStringify(resolved)
   })
@@ -225,21 +216,21 @@ function expandFailureString(value: string, failureContext: JsonObject): JsonVal
 }
 
 function failureStringify(value: JsonValue): string {
-  if (value === null) return ""
-  if (typeof value === "string") return value
-  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (value === null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return JSON.stringify(value)
 }
 
 function resolveFailurePath(failureContext: JsonObject, path: string): JsonValue | undefined {
-  const parts = path.split(".")
-  if (parts[0] !== "failure") return undefined
+  const parts = path.split('.')
+  if (parts[0] !== 'failure') return undefined
   const remainder = parts.slice(1)
   if (remainder.length === 0) return failureContext
-  if (remainder[0] !== "output" && remainder[0] !== "error") return undefined
+  if (remainder[0] !== 'output' && remainder[0] !== 'error') return undefined
   let current: JsonValue = failureContext[remainder[0]]
   for (const part of remainder.slice(1)) {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
+    if (typeof current !== 'object' || current === null || Array.isArray(current)) return undefined
     current = (current as JsonObject)[part]
   }
   return current
@@ -252,8 +243,8 @@ function renderRecoveryTask(
   failureContext: JsonObject,
   variables: JsonObject | null,
 ): AddTaskInput {
-  const renderedWith = task.with ? renderFieldMap(task.with, failureContext, variables) : task.with ?? null
-  const renderedExpect = task.expect ? renderFieldMap(task.expect, failureContext, variables) : task.expect ?? null
+  const renderedWith = task.with ? renderFieldMap(task.with, failureContext, variables) : (task.with ?? null)
+  const renderedExpect = task.expect ? renderFieldMap(task.expect, failureContext, variables) : (task.expect ?? null)
   return {
     ...task,
     with: renderedWith,
@@ -261,11 +252,7 @@ function renderRecoveryTask(
   }
 }
 
-function renderFieldMap(
-  input: JsonObject,
-  failureContext: JsonObject,
-  variables: JsonObject | null,
-): JsonObject {
+function renderFieldMap(input: JsonObject, failureContext: JsonObject, variables: JsonObject | null): JsonObject {
   const result: JsonObject = {}
   for (const [key, value] of Object.entries(input)) {
     result[key] = renderFieldValue(value, failureContext, variables)
@@ -274,7 +261,7 @@ function renderFieldMap(
 }
 
 function renderFieldValue(value: JsonValue, failureContext: JsonObject, variables: JsonObject | null): JsonValue {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     return renderFieldString(value, failureContext, variables)
   }
   if (Array.isArray(value)) return value.map((item) => renderFieldValue(item, failureContext, variables))
@@ -282,17 +269,17 @@ function renderFieldValue(value: JsonValue, failureContext: JsonObject, variable
   return value
 }
 
-function renderFieldString(
-  value: string,
-  failureContext: JsonObject,
-  variables: JsonObject | null,
-): JsonValue {
+function renderFieldString(value: string, failureContext: JsonObject, variables: JsonObject | null): JsonValue {
   const promptMatch = value.match(PROMPT_REFERENCE_PATTERN)
   if (promptMatch) {
     const key = promptMatch[1]
     const body = resolvePromptBody(variables, key)
     if (body === undefined) {
-      throw new Error("Recovery task references ${{ prompts." + key + " }} but the prompt body is not available in the dispatch context")
+      throw new Error(
+        'Recovery task references ${{ prompts.' +
+          key +
+          ' }} but the prompt body is not available in the dispatch context',
+      )
     }
     try {
       return expandFailureValue(body, failureContext)
@@ -308,7 +295,7 @@ function renderFieldString(
 
 function resolvePromptBody(variables: JsonObject | null, key: string): JsonValue | undefined {
   if (!variables) return undefined
-  const prompts = variables["prompts"]
+  const prompts = variables['prompts']
   if (!isObject(prompts)) return undefined
   const body = prompts[key]
   return body ?? undefined
@@ -319,9 +306,11 @@ function formatFailureDiagnostic(
   error: UnresolvedFailureReferenceError,
   failureContext: JsonObject,
 ): string {
-  const prompt = error.promptKey ? ` in Prompt '${error.promptKey}'` : ""
-  return `recovery task '${recoveryTaskId}'${prompt} references unresolved failure expression '${"${{ " + error.path + " }}"}'. ` +
+  const prompt = error.promptKey ? ` in Prompt '${error.promptKey}'` : ''
+  return (
+    `recovery task '${recoveryTaskId}'${prompt} references unresolved failure expression '${'${{ ' + error.path + ' }}'}'. ` +
     `Available failure context: ${availableFailureContext(failureContext)}.`
+  )
 }
 
 function availableFailureContext(failureContext: JsonObject): string {
@@ -331,19 +320,19 @@ function availableFailureContext(failureContext: JsonObject): string {
 }
 
 function describeFailureValue(value: JsonValue | undefined): string {
-  if (value === null || value === undefined) return "is unavailable"
+  if (value === null || value === undefined) return 'is unavailable'
   if (!isObject(value)) return `is ${typeof value}`
   const fields = Object.keys(value).sort()
-  return fields.length === 0 ? "has no fields" : `fields [${fields.join(", ")}]`
+  return fields.length === 0 ? 'has no fields' : `fields [${fields.join(', ')}]`
 }
 
 function failureResult(work: DispatchWorkItem, message: string): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
   const failureMessage = `${label}: ${message}`
   return {
-    status: "failed",
+    status: 'failed',
     message: failureMessage,
-    error: { code: "recovery-reference-unresolved", message: failureMessage },
+    error: { code: 'recovery-reference-unresolved', message: failureMessage },
   }
 }
 
@@ -358,7 +347,7 @@ function structuredOutputForFailure(output: JsonValue | null | undefined): JsonV
 
 function stringField(obj: JsonObject, key: string): string | null {
   const value = obj[key]
-  return typeof value === "string" ? value : null
+  return typeof value === 'string' ? value : null
 }
 
 function objectField(obj: JsonObject, key: string): JsonObject | null {
@@ -375,7 +364,7 @@ function recordField(obj: JsonObject, key: string): Record<string, string> | nul
   if (!isObject(value)) return null
   const result: Record<string, string> = {}
   for (const [entryKey, entryValue] of Object.entries(value)) {
-    if (typeof entryValue === "string") result[entryKey] = entryValue
+    if (typeof entryValue === 'string') result[entryKey] = entryValue
   }
   return Object.keys(result).length > 0 ? result : null
 }

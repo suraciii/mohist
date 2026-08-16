@@ -197,6 +197,11 @@ aggregate RSS sampling and a wall-clock kill as a second line of defense. On
 macOS or minimal containers, RSS and wall-clock watchdog enforcement is used
 without `prlimit`; detection occurs on the next watchdog sample. A contained
 work is reported as a definite failure with reason `resource-containment`.
+The `core/script` action also accepts `resourceProfile: full-verify`, which the
+built-in full verification workflow uses to select a finite 4096 MiB
+command-tree memory bound while preserving the Runner's other per-work limits.
+Resource exhaustion remains a diagnostic terminal failure and does not enter
+automatic recovery retries.
 Runtime-backed turns use `turnBudgetMs`; expiry aborts the turn, quarantines the
 runtime generation, and lets the runner recreate it. Completed results already
 waiting for acknowledgement remain journaled under their original identities.

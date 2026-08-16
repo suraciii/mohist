@@ -27,6 +27,9 @@ public class MohistWorkflowDefinitionTests
         Assert.Equal("load-tasks", loadTask.Id);
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
+        var verify = build.Tasks.Single(t => t.Id == "verify");
+        Assert.Equal("core/script", verify.Uses);
+        Assert.Equal("full-verify", verify.With!["resourceProfile"]!.Value.GetString());
 
         var archiveChange = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:archive-change");
         var rebase = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:rebase");
