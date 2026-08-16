@@ -790,3 +790,21 @@ Channel decision (grounded in live source):
 - Added `RunnerConfigApiSpecs.ConcurrentStartNewForSameConnection_ReusesOnePendingFence`.
   The focused Runner API and grain classes pass 14/14, and the Server spec
   project builds with zero warnings/errors.
+
+## T-002 Current Task Verification
+
+- The recovery-receipt implementation is already present in this run branch
+  from `359806d67` and subsequent receipt hardening commits: the contract
+  validator rejects malformed identity/payload combinations before grain
+  routing, the authenticated endpoint routes by owner, and Workflow receipt
+  arbitration persists request fingerprints and durable acknowledgements.
+- Focused Server apphost verification passed Workflow settlement 13/13,
+  receipt operation replay 3/3, and recovery-receipt API 6/6. The tests cover
+  contract rejection, duplicate idempotence, binding/fingerprint mismatch,
+  authoritative terminal settlement, and acknowledgement behavior.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2674, Server Arch 68, CLI 1856, Runner 1661, and Web 4727.
+- No additional production change was necessary in this task run because the
+  selected T-002 slice and its tests were already committed on the prepared
+  workflow branch; later T-004 behavior correctly supersedes the temporary
+  retryable interruption response with replacement arbitration.
