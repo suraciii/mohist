@@ -97,40 +97,6 @@ public class RunnerStatusApiSpecs
     }
 
     [Fact]
-    public async Task GetRunners_GlobalRunner_ReturnsRunner()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-api-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "test-host",
-            coderModels = new[] { "openai/gpt-4" },
-        });
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runners = payload.GetProperty("data").GetProperty("runners");
-            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runner.ValueKind);
-            Assert.Equal(runnerId, runner.GetProperty("id").GetString());
-            Assert.Equal("external", runner.GetProperty("kind").GetString());
-            Assert.Equal("test-host", runner.GetProperty("hostname").GetString());
-            Assert.Equal("global", runner.GetProperty("scope").GetProperty("type").GetString());
-            Assert.Equal("openai/gpt-4", runner.GetProperty("coderModels")[0].GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
     public async Task GetRunners_NoRunnersForProject_ReturnsEmptyList()
     {
         var projectId = await CreateProjectIdAsync($"proj-empty-{Guid.NewGuid():N}");

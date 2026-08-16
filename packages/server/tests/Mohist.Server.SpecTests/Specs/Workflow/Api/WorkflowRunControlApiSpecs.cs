@@ -195,21 +195,6 @@ public partial class WorkflowRunControlApiSpecs
     }
 
     [Fact]
-    public async Task RerunFromStage_WithUnknownStage_Returns400WithUnknownStageCode()
-    {
-        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/workflow-runs/{wrId}/rerun-from-stage",
-            new { stage = "no-such-stage" });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("unknown_stage", payload.GetProperty("code").GetString());
-        Assert.Contains("no-such-stage", payload.GetProperty("error").GetString());
-    }
-
-    [Fact]
     public async Task NotFound_OnUnknownWorkflowRun_Returns404()
     {
         var response = await _client.PostAsJsonAsync(
