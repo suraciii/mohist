@@ -652,3 +652,26 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   passed all seven lanes: typecheck, 2,675 Server unit tests, 69 architecture
   tests, 178 workflow tests, 1,848 CLI tests, 4,724 Web tests, and 1,639
   Runner tests. No source correction was necessary on the current clean tree.
+
+## T-006 verification (current task)
+
+- Re-read the unresolved-stop requirement and audited the direct stop adapter:
+  empty-body validation precedes canonical lookup and mapping creation;
+  terminal turns are durable no-ops; queued follow-up turns cancel locally;
+  launch turns continue through the canonical Job cancellation branch; and
+  running turns freeze revision, context generation, binding, deadline, and
+  operation identity before the first delivery effect.
+- The caller-scoped stop scope embeds `callerKeyId`; the filtered pending-turn
+  index rejects both another key and another caller with
+  `stop_outcome_unknown` without persisting the losing mapping. After the first
+  lifecycle resolves, a caller replaying the first key creates a separate row
+  and is classified against the current Turn rather than receiving the first
+  caller's mapping or frozen target.
+- Matching pending retries observe the existing canonical claim without
+  redispatching. Unknown and unavailable delivery outcomes remain pending,
+  and canonical recovery or a later terminal fact is reconciled before the
+  next caller can create a stop mapping. Responses are projection-only public
+  Turn observations and contain no frozen target or operation identity.
+- Added a caller-binding assertion to `DirectApiStopSpecs` and ran the focused
+  suite successfully (5 tests). The full `npm run test:fast` gate remains the
+  final verification for this task.

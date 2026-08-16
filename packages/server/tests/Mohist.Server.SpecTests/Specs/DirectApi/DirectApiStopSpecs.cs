@@ -158,10 +158,17 @@ public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
             secondClient,
             projectId,
             turnId,
-            "unknown-b",
+            "unknown-a",
             "terminal");
         Assert.Equal(turnId, ownMapping.RootElement.GetProperty("turnId").GetString());
-        Assert.Equal(2, await db.DirectApiIdempotencyMappings.CountAsync(row => row.TurnId == turnId));
+
+        var mappings = await db.DirectApiIdempotencyMappings
+            .AsNoTracking()
+            .Where(row => row.Command == DirectApiCommands.Stop && row.TurnId == turnId)
+            .ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.Equal(2, mappings.Select(row => row.CallerKeyId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(mappings, row => row.ScopeKey.EndsWith("|unknown-a", StringComparison.Ordinal));
     }
 
     [Fact]
