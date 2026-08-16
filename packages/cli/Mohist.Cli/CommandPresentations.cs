@@ -343,6 +343,7 @@ internal static class CommandPresentations
             ("view", "Read an Agent profile"),
             ("edit", "Edit an Agent profile"),
             ("archive", "Archive an Agent profile"),
+            ("start", "Create an Agent from a task and launch its first AgentSession"),
             ("launch", "Launch an AgentSession from an Agent profile"),
             ("spawn", "Spawn an allowed child AgentSession"),
             ("job", "Read AgentJobs"),

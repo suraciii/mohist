@@ -167,11 +167,11 @@ public partial class CliAgentCommandSpecs
     [Fact]
     public async Task AgentStart_RawJsonPrintsServerEnvelopeAndDoesNotPrintGeneratedKey()
     {
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        const string rawResponse = "{\"success\":true,\"data\":{\"agentId\":\"agent-start\",\"jobId\":\"job-start\"}}";
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
         {
-            success = true,
-            data = new { agentId = "agent-start", jobId = "job-start" },
-        }, HttpStatusCode.Created)));
+            Content = new StringContent(rawResponse),
+        }));
         var output = new StringWriter();
 
         var exitCode = await RunAsync(
@@ -181,10 +181,31 @@ public partial class CliAgentCommandSpecs
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
-        var document = JsonNode.Parse(output.ToString())!.AsObject();
-        Assert.True(document["success"]?.GetValue<bool>());
-        Assert.Equal("agent-start", document["data"]?["agentId"]?.GetValue<string>());
+        Assert.Equal(rawResponse, output.ToString());
         Assert.DoesNotContain("Idempotency-Key:", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AgentStart_RawJsonPreservesRejectedServerEnvelopeAndExitsNonZero()
+    {
+        const string rawResponse = "{\"success\":false,\"error\":\"Execution configuration is unresolved.\",\"code\":\"execution_config_unresolvable\"}";
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Conflict)
+        {
+            Content = new StringContent(rawResponse),
+        }));
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "start", "--prompt", "Inspect", "--json"],
+            output: output,
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Equal(rawResponse, output.ToString());
+        Assert.Contains("mo agent model list", error.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]
