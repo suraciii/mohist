@@ -82,7 +82,14 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
             turnStatus: AgentTurnStatus.Completed,
             turnResult: new AgentTurnResult(Output: """{"text":"The deployment failure was a bad config."}"""));
 
-        using var job = await ReadJobAsync(projectId, ids.JobId);
+        using var reader = await CreateReaderAsync(projectId);
+        using var job = await ReadAsync(
+            reader,
+            $"/api/v1/projects/{projectId}/agent-jobs/{ids.JobId}",
+            root => string.Equals(
+                root.GetProperty("status").GetString(),
+                PublicExecutionFieldValues.StatusTerminal,
+                StringComparison.Ordinal));
         Assert.Equal(PublicExecutionFieldValues.StatusTerminal, Json(job).GetProperty("status").GetString());
         Assert.Equal(PublicExecutionFieldValues.OutcomeCompleted, Json(job).GetProperty("outcome").GetString());
         Assert.Equal(ids.SessionId, Json(job).GetProperty("sessionId").GetString());
@@ -286,12 +293,15 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
         // the stale snapshot as the five-state unknown.
         await RewindSessionCheckpointAsync(ids.SessionId);
 
-        using var inputLagged = await client.GetAsync(inputPath);
+        var laggedReads = await Task.WhenAll(
+            client.GetAsync(inputPath),
+            client.GetAsync($"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}"));
+        using var inputLagged = laggedReads[0];
+        using var turnLagged = laggedReads[1];
         Assert.Equal(HttpStatusCode.ServiceUnavailable, inputLagged.StatusCode);
         await AssertErrorAsync(inputLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
-
-        using var turnLagged = await client.GetAsync($"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, turnLagged.StatusCode);
+        await AssertErrorAsync(turnLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
 
         await NudgeProjectorAsync();
         using var inputRecovered = await ReadAsync(client, inputPath);
@@ -498,9 +508,14 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
     /// Polls a public read until it serves the current projection. A
     /// 404 or 503 answer is part of convergence — the anchor appears
     /// only once the projector consumes the seeded facts — so the
-    /// probe keeps waiting on both; any other failure is fatal.
+    /// probe keeps waiting on both; any other failure is fatal. A caller
+    /// may also require a specific public state when the fixture writes
+    /// the canonical Job and Session in separate commits.
     /// </summary>
-    private async Task<JsonDocument> ReadAsync(HttpClient client, string path)
+    private async Task<JsonDocument> ReadAsync(
+        HttpClient client,
+        string path,
+        Func<JsonElement, bool>? isReady = null)
     {
         var body = await TestWait.ForAsync(
             probe: async () =>
@@ -514,7 +529,9 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
                 Assert.True(
                     response.IsSuccessStatusCode,
                     $"{path} answered {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
-                return await response.Content.ReadAsStringAsync();
+                var content = await response.Content.ReadAsStringAsync();
+                using var document = JsonDocument.Parse(content);
+                return isReady is null || isReady(document.RootElement) ? content : null;
             },
             isDone: content => content is not null,
             timeout: TimeSpan.FromSeconds(30),

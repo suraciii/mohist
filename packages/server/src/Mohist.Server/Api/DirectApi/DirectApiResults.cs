@@ -54,6 +54,13 @@ public static class DirectApiResults
     /// </summary>
     public static IResult ProjectionLag() => new ProjectionLagResult();
 
+    /// <summary>
+    /// The stop lifecycle has not confirmed its fenced outcome yet. The
+    /// mapping remains pending, so the caller must retry the same key rather
+    /// than treating the current projection as a completed command.
+    /// </summary>
+    public static IResult StopPending() => new StopPendingResult();
+
     public static IResult CursorInvalid() =>
         Error(
             StatusCodes.Status400BadRequest,
@@ -87,6 +94,20 @@ public static class DirectApiResults
                 JSON.Serialize(new DirectApiErrorEnvelope(new DirectApiError(
                     DirectApiErrorCodes.ProjectionLag,
                     "The public projection for this resource has not caught up yet; retry the same request shortly."))));
+        }
+    }
+
+    private sealed class StopPendingResult : IResult
+    {
+        public async Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            httpContext.Response.Headers.RetryAfter = ProjectionLagRetryAfterSeconds;
+            httpContext.Response.ContentType = "application/json";
+            await httpContext.Response.WriteAsync(
+                JSON.Serialize(new DirectApiErrorEnvelope(new DirectApiError(
+                    DirectApiErrorCodes.StopPending,
+                    "The stop outcome is not confirmed yet; retry the same request."))));
         }
     }
 

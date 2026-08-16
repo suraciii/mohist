@@ -150,6 +150,14 @@ internal static class DirectApiStopRoutes
                         ct),
                 };
             }
+            else
+            {
+                // The durable mapping stays pending until the fenced stop
+                // lifecycle confirms an outcome. Do not let a caught-up
+                // projection turn that unresolved command into a misleading
+                // successful response.
+                return DirectApiResults.StopPending();
+            }
         }
 
         return await ReadTurnObservationAsync(projectId, turnId, publicReads, ct);

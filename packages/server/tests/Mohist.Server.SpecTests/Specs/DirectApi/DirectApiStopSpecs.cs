@@ -186,7 +186,9 @@ public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
         hub.SetInvocationResponse("CancelAgentSession", null);
 
         using (var first = await client.SendAsync(StopRequest(projectId, turnId, "frozen-retry")))
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
+        {
+            await AssertErrorAsync(first, HttpStatusCode.ServiceUnavailable, DirectApiErrorCodes.StopPending);
+        }
 
         await using (var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()

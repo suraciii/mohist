@@ -907,3 +907,26 @@ Runner delivery, and reconstructs pending retries from that frozen target.
 - `npm run verify` passed: docs, file-size and format checks, solution and
   workspace builds, 3,977 Server SpecTests, 2,676 Server unit tests, 1,848
   CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70 Slack tests.
+
+## Verification diagnosis and repair (current task)
+
+- The initial worktree was clean. The first reproduced `npm run verify` failure
+  was `DirectApiStopSpecs.MatchingRetryUsesTheFrozenOperationAndBinding`:
+  the first unresolved stop expected `503` but received `200` when the public
+  projector had already caught up.
+- The direct stop adapter left an unavailable/unknown delivery mapping pending
+  but fell through to `ReadTurnObservationAsync`; a caught-up projection could
+  therefore make an unresolved command look successful. The route now returns
+  `503 stop_pending` with `Retry-After` until the fenced lifecycle settles, and
+  the focused stop spec asserts that public error code.
+- A subsequent full-gate run exposed two independent read-spec timing races:
+  a joined Job read could observe the legitimate intermediate prepared snapshot,
+  and sequential Input/Turn lag reads could straddle a pending checkpoint
+  repair. The test helper now waits for the required terminal state, and the
+  lag assertions read both anchors concurrently while retaining `503
+  projection_lag` assertions for both.
+- Focused Direct API stop and public-read suites passed (5 and 7 tests).
+  The final `npm run verify` passed all checks: 3,977 Server SpecTests, 2,676
+  Server unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests,
+  70 Slack tests, builds, docs, format, and file-size checks. Verification
+  created only ignored build/test outputs; no Git-visible side effects remain.

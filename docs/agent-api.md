@@ -223,6 +223,7 @@ Common responses are:
 | `409` | `stop_outcome_unknown` | Another stop for the Turn is unresolved. |
 | `410` | `cursor_expired` | The valid cursor is before the retained event floor; safe sequence bounds are included. |
 | `503` | `projection_lag` | The public projection has not caught up with the required source facts. |
+| `503` | `stop_pending` | The fenced stop outcome is not confirmed yet; retry the same keyed stop request. |
 
 ## Resume Session Events
 

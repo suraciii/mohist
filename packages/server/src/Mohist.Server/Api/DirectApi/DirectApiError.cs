@@ -38,6 +38,7 @@ public static class DirectApiErrorCodes
     public const string InvalidRequest = "invalid_request";
     public const string IdempotencyKeyReused = "idempotency_key_reused";
     public const string StopOutcomeUnknown = "stop_outcome_unknown";
+    public const string StopPending = "stop_pending";
     public const string LaunchPending = "launch_pending";
     public const string FollowupPending = "followup_pending";
     public const string FollowupRejected = "followup_rejected";

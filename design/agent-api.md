@@ -423,6 +423,7 @@ safe public fields:
 | 409 | stop_outcome_unknown | A different stop key attempts to supersede a stop whose fenced outcome is still unknown. The caller must read the Turn; no new stop is issued. |
 | 410 | cursor_expired | The cursor was valid but falls before the retained public event floor. The response also includes safe earliestSequence and latestSequence values. The caller reloads current Input/Turn observations before starting at a new retained position. |
 | 503 | projection_lag | The canonical request/resource is known, but its required durable public projection checkpoint has not caught up. No new admission or effect occurs; retry the same key or read. |
+| 503 | stop_pending | A keyed stop remains fenced and its outcome is not confirmed. Retry the same keyed stop request; no replacement effect is issued. |
 
 Canonical admission rejection is not hidden as an HTTP transport failure. A
 well-formed keyed launch or follow-up that receives a durable rejection returns
