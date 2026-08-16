@@ -416,3 +416,17 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   successfully; the task-first route, factory, replay, rollback, and
   coordinator-equivalence coverage is included in those totals. `git diff
   --check` was clean.
+
+## T-003 current-run audit
+
+- The committed rollback slice was re-audited against the rejected-request
+  requirement. The task-first-only append-only marker reaches the coordinator,
+  terminal abort archives before recording the rejection, reminder recovery
+  retries the archive after an acknowledgement failure, and setup-pending plus
+  definition-first plans remain non-archival. No production repair was required.
+- `AgentTaskLaunchRoutesSpecs` passed 11/11, including archived-name conflict
+  and derived-name disambiguation, recorded-rejection replay, reminder repair,
+  503 non-archival, and definition-first non-archival. `npm run test:fast` passed:
+  2,701 Server unit, 68 architecture, 178 workflow, 1,860 CLI, 4,736 Web,
+  and 1,639 Runner tests plus all typechecks. The working tree was clean before
+  this progress entry.
