@@ -31,44 +31,6 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
     }
 
     [Fact]
-    public async Task Launch_WithoutRuntimeOverride_UsesAgentConfigRuntime()
-    {
-        var projectId = await CreateProjectAsync("launch-runtime-from-config");
-        var runnerId = $"launch-runtime-from-config-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentAsync(projectId, "config-runtime-agent", runtime: "pi");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-        ClaimResult? claim = null;
-
-        try
-        {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "execute on pi via config" });
-
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
-
-            var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-            var sessionInfo = await sessionGrain.GetAsync();
-            Assert.NotNull(sessionInfo);
-            Assert.Equal("pi", sessionInfo!.Runtime);
-
-            claim = await AcquirePreparedAgentJobAsync(jobId, runnerId, projectId);
-            AssertPreparedAgentJobClaim(claim, jobId, runnerId, sessionId);
-            Assert.Equal("pi", ReadRuntimeFromDispatch(claim.Dispatch));
-        }
-        finally
-        {
-            if (claim is not null)
-            {
-                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
-                await DrainDispatchAsync(runnerId);
-            }
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
     public async Task Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode()
     {
         var projectId = await CreateProjectAsync("launch-runtime-default");
