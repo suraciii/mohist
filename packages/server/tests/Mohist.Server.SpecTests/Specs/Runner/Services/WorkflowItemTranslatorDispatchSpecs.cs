@@ -5,6 +5,7 @@ using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -14,37 +15,30 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
 public partial class WorkflowItemTranslatorSpecs
 {
-    [Theory]
-    [InlineData("opencode", "mohist/opencode")]
-    [InlineData("pi", "mohist/pi")]
-    public async Task TranslateToDispatch_AgentTask_ComposesRawPromptAndConcreteRuntimeInput(
-        string runtime,
-        string expectedUses)
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_ReturnsDelegatedHandoffWithPersistedInput()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
-        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-dispatch");
-        _agentResolver.Snapshot = new AgentExecutionDefinition(
-            "Review the change.", runtime, "model-a", "fast", ["mohist", "review"]);
-
+        var projectId = "proj-agent-dispatch";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent", With("""
             { "name": "reviewer", "prompt": "Fix ${{ vars.target }}", "session": "review", "timeout": 123 }
-            """));
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+            """), expect: With("{\"markers\":[{\"path\":\"_output\",\"contains\":\"done\"}]}"));
 
-        Assert.Equal(expectedUses, dispatch.Uses);
-        Assert.Equal(WorkDispatchOwnerKinds.Workflow, dispatch.OwnerKind);
-        Assert.Null(dispatch.AgentJobId);
-        using var with = JsonDocument.Parse(dispatch.With!);
-        Assert.Equal("Fix ${{ vars.target }}", with.RootElement.GetProperty("prompt").GetString());
-        Assert.Equal("review", with.RootElement.GetProperty("session").GetString());
-        Assert.Equal(123, with.RootElement.GetProperty("timeout").GetInt32());
-        Assert.Equal(3, with.RootElement.EnumerateObject().Count());
-        Assert.Equal("Review the change.", dispatch.AgentDefinition!.Instructions);
-        Assert.Equal(runtime, dispatch.AgentDefinition.Runtime);
-        Assert.Equal("model-a", dispatch.AgentDefinition.Model);
-        Assert.Equal("fast", dispatch.AgentDefinition.Variant);
-        Assert.Equal(["mohist", "review"], dispatch.AgentDefinition.Skills);
-        Assert.Equal("Fix ${{ vars.target }}", item.With!["prompt"]!.Value.GetString());
+        var result = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var delegated = Assert.IsType<WorkflowItemTranslationResult.Delegated>(result);
+        var command = Assert.Single(_handoff.Commands);
+
+        Assert.Equal(projectId, command.ProjectId);
+        Assert.Equal(runId, command.WorkflowRunId);
+        Assert.Equal("task-1.1", command.TaskRunId);
+        Assert.Equal("task-1.1", command.CommandId);
+        Assert.Equal("reviewer", command.AgentRef);
+        Assert.Equal("Fix ${{ vars.target }}", command.Prompt);
+        Assert.Equal("review", command.Session);
+        Assert.Equal(123, command.TimeoutMilliseconds);
+        Assert.Equal(JSON.Serialize(item.Expect), command.Expect);
+        Assert.Equal(WorkflowAgentHandoffCodec.InvocationFor(command), delegated.Invocation);
     }
 
 
@@ -60,7 +54,7 @@ public partial class WorkflowItemTranslatorSpecs
             setVars: new Dictionary<string, string> { ["out"] = "answer" },
             expect: With(@"{ ""marker"": ""${{ vars.marker }}"" }"));
 
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var dispatch = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         Assert.Equal(runId, dispatch.WorkflowRunId);
         Assert.Equal("task-1.1", dispatch.WorkId);
@@ -109,7 +103,7 @@ public partial class WorkflowItemTranslatorSpecs
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task",
             With(@"{ ""options"": ""${{ vars.agent }}"" }"));
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var dispatch = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         using var document = JsonDocument.Parse(dispatch.Variables!);
         var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
@@ -122,10 +116,10 @@ public partial class WorkflowItemTranslatorSpecs
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var run = await SeedRunningWorkflowAsync(runId, "proj-translate-roots");
-        var dispatch = await _translator.TranslateToDispatchAsync(
+        var dispatch = Dispatch(await _translator.TranslateToDispatchAsync(
             WorkItem.Task("build", "task-1.1", "Task 1", "spec/task",
                 With(@"{ ""custom"": ""value"" }")),
-            runId, run, "runner-1");
+            runId, run, "runner-1"));
 
         using var doc = JsonDocument.Parse(dispatch.Variables!);
         var roots = doc.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
@@ -163,6 +157,9 @@ public partial class WorkflowItemTranslatorSpecs
         var runId = $"wr-{Guid.NewGuid():N}";
         var run = await SeedRunningWorkflowAsync(runId, "proj-agent-missing");
         _agentResolver.Snapshot = null;
+        _handoff.Rejection = new WorkflowAgentHandoffRejection(
+            "agent_not_found",
+            "Workflow Agent handoff references Agent 'archived-reviewer' which does not exist or is archived.");
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
             With(@"{ ""name"": ""archived-reviewer"", ""prompt"": ""Review the change."" }"));
@@ -185,37 +182,36 @@ public partial class WorkflowItemTranslatorSpecs
 
         _agentResolver.Snapshot = new AgentExecutionDefinition(
             "Original instructions", "opencode", null, null, []);
-        var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var first = Assert.IsType<WorkflowItemTranslationResult.Delegated>(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         var retryRunId = $"wr-{Guid.NewGuid():N}";
         var retryRun = await SeedRunningWorkflowAsync(retryRunId, "proj-agent-retry-current", "task-1.2");
         _agentResolver.Snapshot = new AgentExecutionDefinition(
             "Edited instructions", "opencode", null, null, []);
-        var retried = await _translator.TranslateToDispatchAsync(
-            item with { Id = "task-1.2" }, retryRunId, retryRun, "runner-1");
+        var retried = Assert.IsType<WorkflowItemTranslationResult.Delegated>(await _translator.TranslateToDispatchAsync(
+            item with { Id = "task-1.2" }, retryRunId, retryRun, "runner-1"));
 
-        Assert.Equal("Original instructions", first.AgentDefinition!.Instructions);
-        Assert.Equal("Edited instructions", retried.AgentDefinition!.Instructions);
-        Assert.NotEqual(first.WorkId, retried.WorkId);
+        Assert.Equal("task-1.1", first.Invocation.CommandId);
+        Assert.Equal("task-1.2", retried.Invocation.CommandId);
+        Assert.NotEqual(first.Invocation.InvocationId, retried.Invocation.InvocationId);
+        Assert.Equal(2, _handoff.Commands.Count);
     }
 
     [Fact]
-    public async Task TranslateToDispatch_AgentTask_EmptySkillsOmitsSkillInput()
+    public async Task TranslateToDispatch_AgentTask_ReplayedInputReusesInvocationIdentity()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
-        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-empty-skills");
-        _agentResolver.Snapshot = new AgentExecutionDefinition(
-            "Keep the response concise.", "opencode", null, null, []);
-
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-replay");
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
             With("""{"name":"reviewer","prompt":"Review the change."}"""));
 
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var first = Assert.IsType<WorkflowItemTranslationResult.Delegated>(
+            await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
+        var replay = Assert.IsType<WorkflowItemTranslationResult.Delegated>(
+            await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
-        using var with = JsonDocument.Parse(dispatch.With!);
-        Assert.Equal("Review the change.", with.RootElement.GetProperty("prompt").GetString());
-        Assert.Equal("Keep the response concise.", dispatch.AgentDefinition!.Instructions);
-        Assert.Empty(dispatch.AgentDefinition.Skills);
+        Assert.Equal(first.Invocation, replay.Invocation);
+        Assert.Equal(2, _handoff.Commands.Count);
     }
 
     [Fact]
@@ -253,6 +249,24 @@ public partial class WorkflowItemTranslatorSpecs
     }
 
     [Fact]
+    public async Task TranslateToDispatch_AgentTask_DurableInvalidInputKeepsExistingRejectionCode()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-invalid-timeout");
+        _handoff.Rejection = new WorkflowAgentHandoffRejection(
+            "invalid_agent_input",
+            "Workflow Agent handoff timeout must be positive when supplied.");
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change.","timeout":0}"""));
+
+        var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(
+            () => _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
+
+        Assert.Equal("invalid_agent_input", error.Error.Code);
+        Assert.Contains("timeout", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TranslateToDispatch_ChecksItem_PreservesCheckTemplates()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
@@ -263,7 +277,7 @@ public partial class WorkflowItemTranslatorSpecs
                 With(@"{ ""path"": ""${{ vars.reviewPath }}"" }")),
         ]);
 
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var dispatch = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         var check = JsonDocument.Parse(dispatch.With!).RootElement
             .GetProperty("checks")[0]

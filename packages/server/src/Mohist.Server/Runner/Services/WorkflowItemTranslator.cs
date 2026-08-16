@@ -5,10 +5,17 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 
 namespace Mohist.Server.Runner.Services;
+
+public abstract record WorkflowItemTranslationResult
+{
+    public sealed record Dispatch(WorkDispatch Value) : WorkflowItemTranslationResult;
+    public sealed record Delegated(WorkflowAgentInvocation Invocation) : WorkflowItemTranslationResult;
+}
 
 /// <summary>
 /// Translator that owns the boundary between the control plane's
@@ -32,11 +39,12 @@ public sealed class WorkflowItemTranslator : IScopedService
     private readonly WorkflowPromptResolver _promptResolver;
     private readonly WorkflowVariableResolver _variableResolver;
     private readonly IAgentExecutionSnapshotResolver? _agentSnapshots;
+    private readonly IWorkflowAgentHandoffDispatchClient? _handoff;
 
     public WorkflowItemTranslator(
         WorkflowPromptResolver promptResolver,
         WorkflowVariableResolver variableResolver)
-        : this(promptResolver, variableResolver, null)
+        : this(promptResolver, variableResolver, null, null)
     {
     }
 
@@ -44,10 +52,20 @@ public sealed class WorkflowItemTranslator : IScopedService
         WorkflowPromptResolver promptResolver,
         WorkflowVariableResolver variableResolver,
         IAgentExecutionSnapshotResolver? agentSnapshots)
+        : this(promptResolver, variableResolver, agentSnapshots, null)
+    {
+    }
+
+    public WorkflowItemTranslator(
+        WorkflowPromptResolver promptResolver,
+        WorkflowVariableResolver variableResolver,
+        IAgentExecutionSnapshotResolver? agentSnapshots,
+        IWorkflowAgentHandoffDispatchClient? handoff)
     {
         _promptResolver = promptResolver;
         _variableResolver = variableResolver;
         _agentSnapshots = agentSnapshots;
+        _handoff = handoff;
     }
 
     /// <summary>
@@ -61,7 +79,7 @@ public sealed class WorkflowItemTranslator : IScopedService
     /// <see cref="WorkItem.Items"/> for checks); this translator never
     /// invents a dispatch id of its own.
     /// </summary>
-    public async Task<WorkDispatch> TranslateToDispatchAsync(
+    public async Task<WorkflowItemTranslationResult> TranslateToDispatchAsync(
         WorkItem item,
         string workflowRunId,
         WorkflowRun run,
@@ -114,7 +132,7 @@ public sealed class WorkflowItemTranslator : IScopedService
         return runtime is null ? [] : [runtime];
     }
 
-    private async Task<WorkDispatch> BuildTaskDispatchAsync(
+    private async Task<WorkflowItemTranslationResult> BuildTaskDispatchAsync(
         WorkItem item,
         string workflowRunId,
         WorkflowRun run,
@@ -131,6 +149,11 @@ public sealed class WorkflowItemTranslator : IScopedService
                 $"Task work item '{workId}' for workflow '{workflowRunId}' has no running task attempt");
         var attempt = WorkflowDispatchHelpers.TaskAttempt(workId);
 
+        ValidateLegacyAgentTaskInput(item, workId, item.With, item.Expect);
+        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
+            return new WorkflowItemTranslationResult.Delegated(
+                await ResolveAgentTaskAsync(item, run, workId, taskRunId));
+
         var payload = await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
 
         var prompts = await _promptResolver.LoadPromptsAsync(workflowRunId);
@@ -144,20 +167,13 @@ public sealed class WorkflowItemTranslator : IScopedService
 
         var variables = JSON.Serialize(payload);
         var with = item.With;
-        var uses = item.Uses;
-        AgentExecutionDefinition? agentDefinition = null;
-        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
-        {
-            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId);
-        }
         var withStr = SerializeRaw(with);
         var expectStr = SerializeRaw(item.Expect);
-        ValidateLegacyAgentTaskInput(item with { Uses = uses }, workId, with, item.Expect);
 
-        return new WorkDispatch(
+        return new WorkflowItemTranslationResult.Dispatch(new WorkDispatch(
             WorkflowRunId: workflowRunId,
             WorkId: workId,
-            Uses: uses,
+            Uses: item.Uses,
             With: withStr,
             Variables: variables,
             WorkType: "task",
@@ -172,11 +188,11 @@ public sealed class WorkflowItemTranslator : IScopedService
             RecoveryRemaining: item.RecoveryRemaining,
             EpicNumber: ReadEpicNumber(run),
             Expect: expectStr,
-            AgentDefinition: agentDefinition,
-            TaskRunId: taskRunId);
+            AgentDefinition: null,
+            TaskRunId: taskRunId));
     }
 
-    private async Task<WorkDispatch> BuildChecksDispatchAsync(
+    private async Task<WorkflowItemTranslationResult> BuildChecksDispatchAsync(
         WorkItem item,
         string workflowRunId,
         WorkflowRun run,
@@ -212,7 +228,7 @@ public sealed class WorkflowItemTranslator : IScopedService
         var variables = JSON.Serialize(payload);
         var withStr = SerializeRaw(with);
 
-        return new WorkDispatch(
+        return new WorkflowItemTranslationResult.Dispatch(new WorkDispatch(
             WorkflowRunId: workflowRunId,
             WorkId: workId,
             Uses: null,
@@ -224,7 +240,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
             AgentJobId: null,
-            EpicNumber: ReadEpicNumber(run));
+            EpicNumber: ReadEpicNumber(run)));
     }
 
     private async Task<Dictionary<string, JsonElement?>>
@@ -304,18 +320,19 @@ public sealed class WorkflowItemTranslator : IScopedService
         return payload;
     }
 
-    private async Task<(string Uses, Dictionary<string, JsonElement?> With, AgentExecutionDefinition Definition)> ResolveAgentTaskAsync(
+    private async Task<WorkflowAgentInvocation> ResolveAgentTaskAsync(
         WorkItem item,
         WorkflowRun run,
-        string workId)
+        string workId,
+        string taskRunId)
     {
-        if (_agentSnapshots is null)
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' references an Agent but Agent resolution is unavailable.",
-                new ExecutionError("agent_not_found",
-                    $"Workflow task '{workId}' cannot resolve the referenced Agent because Agent resolution is unavailable."));
-
         var with = item.With;
+        if (_handoff is null)
+            throw new WorkflowDispatchRejectedException(
+                $"Workflow task '{workId}' references an Agent but handoff admission is unavailable.",
+                new ExecutionError("agent_not_found",
+                    $"Workflow task '{workId}' cannot dispatch because Agent handoff admission is unavailable."));
+
         if (with is null
             || !with.TryGetValue("name", out var nameElement)
             || nameElement is null
@@ -323,7 +340,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             || string.IsNullOrWhiteSpace(nameElement.Value.GetString())
             || !with.TryGetValue("prompt", out var promptElement)
             || promptElement is null
-            || promptElement.Value.ValueKind != JsonValueKind.String)
+            || promptElement.Value.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(promptElement.Value.GetString()))
         {
             throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' has invalid mohist/agent input.",
@@ -331,42 +349,72 @@ public sealed class WorkflowItemTranslator : IScopedService
                     $"Workflow task '{workId}' declares an mohist/agent task without a non-empty 'name' or 'prompt'."));
         }
 
-        var projectId = run.Metadata.ProjectId;
-        var snapshot = projectId is null
-            ? null
-            : await _agentSnapshots.ResolveAsync(projectId, nameElement.Value.GetString()!);
-        if (snapshot is null)
+        var session = ReadOptionalAgentString(with, "session", workId);
+        var timeout = ReadOptionalAgentTimeout(with, workId);
+        var command = new WorkflowAgentHandoffCommand(
+            CommandId: workId,
+            ProjectId: run.Metadata.ProjectId ?? string.Empty,
+            WorkflowRunId: run.Id,
+            TaskRunId: taskRunId,
+            AgentRef: nameElement.Value.GetString()!,
+            Prompt: promptElement.Value.GetString()!,
+            Session: session,
+            TimeoutMilliseconds: timeout,
+            Expect: SerializeRaw(item.Expect));
+
+        WorkflowAgentHandoffDispatchResult result;
+        try
         {
-            var requestedRef = nameElement.Value.GetString()!;
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' references Agent '{requestedRef}' which is not active.",
-                new ExecutionError("agent_not_found",
-                    $"Workflow task '{workId}' references Agent '{requestedRef}' which does not exist or is archived."));
+            result = await _handoff.DispatchAsync(command);
+        }
+        catch (WorkflowAgentHandoffRejectedException ex)
+        {
+            throw ToDispatchRejection(workId, ex.Rejection);
         }
 
-        var rawPrompt = promptElement.Value.GetString()!;
-        var transformed = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["prompt"] = JSON.SerializeToElement(rawPrompt),
-        };
-        CopyIfPresent(with, transformed, "session");
-        CopyIfPresent(with, transformed, "timeout");
-
-        return (snapshot.Runtime switch
-        {
-            AgentConfigSchema.PiRuntime => "mohist/pi",
-            _ => "mohist/opencode",
-        }, transformed, snapshot);
+        if (result.Rejection is { } rejection)
+            throw ToDispatchRejection(workId, rejection);
+        return result.Invocation
+            ?? throw new InvalidOperationException(
+                $"Workflow Agent handoff for task '{workId}' completed without an invocation.");
     }
 
-    private static void CopyIfPresent(
-        Dictionary<string, JsonElement?> source,
-        Dictionary<string, JsonElement?> target,
-        string key)
+    private static string? ReadOptionalAgentString(
+        Dictionary<string, JsonElement?> with,
+        string key,
+        string workId)
     {
-        if (source.TryGetValue(key, out var value))
-            target[key] = value?.Clone();
+        if (!with.TryGetValue(key, out var value) || !value.HasValue)
+            return null;
+        if (value.Value.ValueKind != JsonValueKind.String)
+            throw InvalidAgentInput(workId, $"'{key}' must be a string when supplied.");
+        return value.Value.GetString();
     }
+
+    private static long? ReadOptionalAgentTimeout(
+        Dictionary<string, JsonElement?> with,
+        string workId)
+    {
+        if (!with.TryGetValue("timeout", out var value) || !value.HasValue)
+            return null;
+        if (value.Value.ValueKind != JsonValueKind.Number
+            || !value.Value.TryGetInt64(out var timeout))
+            throw InvalidAgentInput(workId, "'timeout' must be an integer when supplied.");
+        return timeout;
+    }
+
+    private static WorkflowDispatchRejectedException InvalidAgentInput(string workId, string detail) =>
+        new(
+            $"Workflow task '{workId}' has invalid mohist/agent input.",
+            new ExecutionError("invalid_agent_input",
+                $"Workflow task '{workId}' declares invalid mohist/agent input: {detail}"));
+
+    private static WorkflowDispatchRejectedException ToDispatchRejection(
+        string workId,
+        WorkflowAgentHandoffRejection rejection) =>
+        new(
+            $"Workflow task '{workId}' Agent handoff was rejected ({rejection.Code}): {rejection.Message}",
+            new ExecutionError(rejection.Code, rejection.Message));
 
     private static string? RuntimeForUses(string? uses) => uses switch
     {

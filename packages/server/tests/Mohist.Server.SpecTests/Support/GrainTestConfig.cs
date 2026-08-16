@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
@@ -267,6 +268,17 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentQuerier>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentJobQuerier>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentReadinessService>();
+        siloBuilder.Services.AddScoped<AgentExecutionSnapshotResolver>();
+        siloBuilder.Services.AddScoped<IAgentExecutionSnapshotResolver>(sp =>
+            sp.GetRequiredService<AgentExecutionSnapshotResolver>());
+        siloBuilder.Services.AddScoped<WorkflowAgentHandoffDispatchClient>();
+        siloBuilder.Services.AddScoped<IWorkflowAgentHandoffDispatchClient>(sp =>
+            sp.GetRequiredService<WorkflowAgentHandoffDispatchClient>());
+        siloBuilder.Services.AddSingleton<WorkflowAgentHandoffPreflight>();
+        siloBuilder.Services.AddSingleton<IWorkflowAgentHandoffPreflight>(sp =>
+            sp.GetRequiredService<WorkflowAgentHandoffPreflight>());
+        siloBuilder.Services.AddSingleton<IWorkflowAgentHandoffParticipantProbe>(
+            NoopWorkflowAgentHandoffParticipantProbe.Instance);
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();

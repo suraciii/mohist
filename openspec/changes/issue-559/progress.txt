@@ -262,3 +262,43 @@
 - `npm run test:fast`: all lanes green (typecheck, unit 2662, arch 68,
   workflow 178, CLI 1848, web 4724, runner 1646).
 - `npm run format:check`: clean.
+
+## T-005 decisions / gotchas
+
+- `WorkflowItemTranslator.TranslateToDispatchAsync` now returns a discriminated
+  result: ordinary Tasks/Checks still produce a `WorkDispatch`, while new
+  `mohist/agent` tasks produce a `Delegated` invocation. The translator renders
+  only the persisted TaskRun `with` fields (`name`, `prompt`, `session`, and
+  `timeout`) plus the frozen task-level `expect` into the handoff command.
+- `WorkflowAgentHandoffDispatchClient` performs Prepare -> Accept -> Activate
+  and persists the immutable `AgentInvocationLink` before activation. This
+  ordering is required for one-slot runners: AgentJob admission reads the
+  runtime view while selecting a slot, so the Workflow task must already be
+  agent-owned or it double-counts the handoff and leaves the job unassigned.
+  DispatchService retains an idempotent post-activation bind/cancel fallback
+  for replay and stop races.
+- Delegated tasks do not write a Workflow dispatch snapshot. DispatchService
+  skips their Workflow redelivery and the Runner runtime view/slot count skips
+  linked tasks; the AgentJob ledger is the sole active owner after claim.
+- Test silo wiring must register the real handoff client, snapshot resolver,
+  preflight adapter, and the no-op participant probe. The cutover Server spec
+  verifies activation, reciprocal session labels, AgentJob-owner claim,
+  expectation/artifact/setVars finalization, and no duplicate Workflow work.
+- Named-session O1 is resolved as per-attempt lineage: `session` is persisted
+  as the logical label (defaulting to the work id), while each attempt keeps
+  its own minted AgentSession/Input/Turn ids and does not continue a prior
+  invocation.
+
+## Verification status (T-005)
+
+- Focused translator specs: 47/47; focused delegated cutover activation,
+  AgentJob claim, terminal settlement, and Workflow finalization spec: 1/1;
+  focused settlement regression: 11/11.
+- Full Server SpecTests: 3960/3960.
+- `npm run test:fast`: all lanes green (typecheck, unit 2662, arch 68,
+  workflow 178, CLI 1848, web 4724, runner 1646).
+- `npm run format:check`: clean; server and SpecTests builds have 0 warnings
+  and 0 errors.
+- The first full fast-gate attempt hit two pre-existing runner cleanup-config
+  timing assertions under concurrent load; the suite passed 10/10 in isolation
+  and the complete fast gate passed on the subsequent run.

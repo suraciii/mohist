@@ -2404,8 +2404,8 @@
           "Mohist.Server.TestSupport.WorkflowGrainTestHelpers",
           "TestTime"
         ],
-        "digest": "b011360c1e879dff066f7e9dd5be01ed37373dd42b7057a90108bc603aef462c",
-        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=c83973cd61c671a95ddf98869525c61a3c19a650fdf5518cf154d38e00992b05 executable-closure-digest=b011360c1e879dff066f7e9dd5be01ed37373dd42b7057a90108bc603aef462c edges-digest=e01982e711f7637385e6ffad4ee0eac50c8e20a430cb66b16302e9508de59e1d move-contract-schema=1"
+        "digest": "43701694a9aa90796550fd95b54528f8abbe20116e0b0bcdf6d2203f2fca86eb",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=9602004ea0f43452c485b2b45053a30a5cade4cd8e83ecced7e70b6757dbffd8 executable-closure-digest=43701694a9aa90796550fd95b54528f8abbe20116e0b0bcdf6d2203f2fca86eb edges-digest=e01982e711f7637385e6ffad4ee0eac50c8e20a430cb66b16302e9508de59e1d move-contract-schema=1"
       },
       "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
       "moveContract": {
@@ -2421,7 +2421,7 @@
         "note": "Explicit closure review; no migration PR is created.",
         "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
         "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
-        "sourceContentDigest": "c83973cd61c671a95ddf98869525c61a3c19a650fdf5518cf154d38e00992b05"
+        "sourceContentDigest": "9602004ea0f43452c485b2b45053a30a5cade4cd8e83ecced7e70b6757dbffd8"
       },
       "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
       "executable": {
@@ -2429,8 +2429,8 @@
         "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
         "caseCount": 3,
         "caseIdentityDigest": "25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884",
-        "closureIdentityDigest": "b011360c1e879dff066f7e9dd5be01ed37373dd42b7057a90108bc603aef462c",
-        "sourceContentDigest": "c83973cd61c671a95ddf98869525c61a3c19a650fdf5518cf154d38e00992b05"
+        "closureIdentityDigest": "43701694a9aa90796550fd95b54528f8abbe20116e0b0bcdf6d2203f2fca86eb",
+        "sourceContentDigest": "9602004ea0f43452c485b2b45053a30a5cade4cd8e83ecced7e70b6757dbffd8"
       }
     },
     {

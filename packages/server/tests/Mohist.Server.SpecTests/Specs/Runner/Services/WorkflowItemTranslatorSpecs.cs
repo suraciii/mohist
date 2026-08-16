@@ -9,6 +9,7 @@ using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -28,11 +29,15 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 /// </summary>
 public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 {
+    private static WorkDispatch Dispatch(WorkflowItemTranslationResult result) =>
+        Assert.IsType<WorkflowItemTranslationResult.Dispatch>(result).Value;
+
     private readonly TestSqliteDatabase _database;
     private readonly WorkflowPromptResolver _promptResolver;
     private readonly WorkflowVariableResolver _variableResolver;
     private readonly WorkflowItemTranslator _translator;
     private readonly FakeAgentExecutionSnapshotResolver _agentResolver;
+    private readonly RecordingAgentHandoff _handoff;
 
     public WorkflowItemTranslatorSpecs()
     {
@@ -50,7 +55,8 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
             new IssueVariableStore(factory),
             runVariablesStore);
         _agentResolver = new FakeAgentExecutionSnapshotResolver();
-        _translator = new WorkflowItemTranslator(_promptResolver, _variableResolver, _agentResolver);
+        _handoff = new RecordingAgentHandoff();
+        _translator = new WorkflowItemTranslator(_promptResolver, _variableResolver, _agentResolver, _handoff);
     }
 
     private sealed class EmptyPromptLoader : IPromptLoader
@@ -137,17 +143,17 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
             2,
             [new RecoveryHandlerDefinition("error=one", [], RetrySelf: true)]);
 
-        var fresh = await _translator.TranslateToDispatchAsync(
+        var fresh = Dispatch(await _translator.TranslateToDispatchAsync(
             WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null, recovery: recovery, recoveryRemaining: null),
-            runId, run, "runner-1");
+            runId, run, "runner-1"));
         var continuationRunId = $"wr-{Guid.NewGuid():N}";
         var continuationRun = await SeedRunningWorkflowAsync(
             continuationRunId,
             "proj-translate-recovery-continuation",
             "task-1.2");
-        var continuation = await _translator.TranslateToDispatchAsync(
+        var continuation = Dispatch(await _translator.TranslateToDispatchAsync(
             WorkItem.Task("build", "task-1.2", "Task 1", "spec/task", null, recovery: recovery, recoveryRemaining: 1),
-            continuationRunId, continuationRun, "runner-1");
+            continuationRunId, continuationRun, "runner-1"));
 
         Assert.Null(fresh.RecoveryRemaining);
         Assert.Equal(1, continuation.RecoveryRemaining);
@@ -164,7 +170,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var item = WorkItem.Checks("build", "checks-build",
             [new CheckItem("check-1", "Check 1", "spec/check")]);
 
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var dispatch = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         Assert.Equal(runId, dispatch.WorkflowRunId);
         Assert.Equal("checks-build", dispatch.WorkId);
@@ -186,7 +192,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var run = await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
 
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var dispatch = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         Assert.Equal("task-1.1", dispatch.WorkId);
     }
@@ -490,6 +496,23 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json) ?? new();
+
+    private sealed class RecordingAgentHandoff : IWorkflowAgentHandoffDispatchClient
+    {
+        public List<WorkflowAgentHandoffCommand> Commands { get; } = [];
+        public WorkflowAgentHandoffRejection? Rejection { get; set; }
+
+        public Task<WorkflowAgentHandoffDispatchResult> DispatchAsync(WorkflowAgentHandoffCommand command)
+        {
+            Commands.Add(command);
+            if (Rejection is { } rejection)
+                return Task.FromResult(new WorkflowAgentHandoffDispatchResult(null, rejection));
+
+            return Task.FromResult(new WorkflowAgentHandoffDispatchResult(
+                WorkflowAgentHandoffCodec.InvocationFor(command),
+                null));
+        }
+    }
 
     private sealed class FakeAgentExecutionSnapshotResolver : IAgentExecutionSnapshotResolver
     {

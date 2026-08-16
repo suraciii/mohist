@@ -267,6 +267,18 @@ public sealed class DispatchService : IScopedService
 
         var workId = activeWork.WorkId;
         var workKey = WorkflowWorkKey(workflowRunId, workId);
+        if (activeWork.IsTask
+            && activeWork.TaskRunId is { } taskRunId
+            && run.Stages
+                .SelectMany(stage => stage.Tasks)
+                .Any(task => string.Equals(task.Id, taskRunId, StringComparison.Ordinal)
+                    && task.AgentInvocation is not null))
+        {
+            // The linkage is the durable ownership handoff. Once present,
+            // redelivery must not recreate a Workflow dispatch or count the
+            // task beside its AgentJob.
+            return (null, null);
+        }
         if (reportedWorkKeys.Contains(workKey))
             return (workKey, null);
 
@@ -279,8 +291,19 @@ public sealed class DispatchService : IScopedService
                     return (workKey, JSON.Deserialize<WorkDispatch>(storedJson)!);
             }
 
-            var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
-            var concrete = WithIssueFromRun(dispatch, run);
+            var translation = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
+            if (translation is WorkflowItemTranslationResult.Delegated delegated)
+            {
+                await BindDelegatedInvocationAsync(workflowRunId, delegated.Invocation);
+                // A delegated task has no Workflow-owned runner dispatch. Its
+                // AgentJob ledger is the sole active-work owner and will be
+                // claimed by the AgentJob poll path.
+                return (null, null);
+            }
+
+            var concrete = WithIssueFromRun(
+                ((WorkflowItemTranslationResult.Dispatch)translation).Value,
+                run);
             if (activeWork.IsChecks)
                 return (workKey, concrete);
 
@@ -332,8 +355,19 @@ public sealed class DispatchService : IScopedService
 
         try
         {
-            var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, runnerId);
-            var concrete = WithIssueFromRun(dispatch, run);
+            var translation = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, runnerId);
+            if (translation is WorkflowItemTranslationResult.Delegated delegated)
+            {
+                await BindDelegatedInvocationAsync(workflowRunId, delegated.Invocation);
+                // The handoff has already admitted the AgentJob. Returning
+                // null keeps this poll free of a duplicate Workflow dispatch;
+                // the next poll claims the durable AgentJob ledger entry.
+                return null;
+            }
+
+            var concrete = WithIssueFromRun(
+                ((WorkflowItemTranslationResult.Dispatch)translation).Value,
+                run);
             if (item.IsChecks)
                 return concrete;
 
@@ -420,6 +454,40 @@ public sealed class DispatchService : IScopedService
         WorkDispatch dispatch) =>
         await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
             .StoreActiveWorkDispatchAsync(runnerId, workId, dispatch);
+
+    private async Task BindDelegatedInvocationAsync(
+        string workflowRunId,
+        WorkflowAgentInvocation invocation)
+    {
+        var link = new AgentInvocationLink(
+            InvocationId: invocation.InvocationId,
+            TaskRunId: invocation.TaskRunId,
+            WorkId: invocation.CommandId,
+            JobId: invocation.JobKey,
+            SessionId: invocation.SessionId,
+            InputId: invocation.InputId,
+            TurnId: invocation.TurnId);
+        var ack = await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
+            .BindAgentInvocationAsync(link);
+        if (ack != ReportAck.Stale)
+            return;
+
+        // The handoff client normally binds before activation. Keep this
+        // idempotent fallback for replay or an alternate dispatch client; if
+        // the run stopped before either binding write, cancel the activated
+        // job so it cannot remain ownerless.
+        try
+        {
+            await _grains.GetGrain<IAgentJobGrain>(invocation.JobKey).CancelAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "could not cancel stale delegated AgentJob {JobId} for workflow {WorkflowRunId}",
+                invocation.JobKey,
+                workflowRunId);
+        }
+    }
 
     private async Task RejectWorkflowDispatchAsync(
         string workflowRunId,

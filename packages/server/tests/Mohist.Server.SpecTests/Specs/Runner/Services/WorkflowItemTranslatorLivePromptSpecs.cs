@@ -21,6 +21,9 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
 public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
 {
+    private static WorkDispatch Dispatch(WorkflowItemTranslationResult result) =>
+        Assert.IsType<WorkflowItemTranslationResult.Dispatch>(result).Value;
+
     private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateMigrated();
     private readonly WorkflowItemTranslator _translator;
 
@@ -57,13 +60,13 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
             DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", DateTimeOffset.UnixEpoch);
         run.StartTask(item.Id!, "runner-1", DateTimeOffset.UnixEpoch);
-        var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var first = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         await SetPromptAsync(projectId, "updated body");
-        var later = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var later = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         await SetPromptAsync(projectId, null);
-        var fallback = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+        var fallback = Dispatch(await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         Assert.Equal("first body", ReadPrompt(first.Variables));
         Assert.Equal("updated body", ReadPrompt(later.Variables));

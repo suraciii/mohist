@@ -119,6 +119,8 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentLaunchObservationAssembler>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
+        services.AddScoped<IWorkflowAgentHandoffDispatchClient>(sp =>
+            sp.GetRequiredService<WorkflowAgentHandoffDispatchClient>());
         services.AddSingleton<IWorkflowAgentHandoffPreflight>(sp =>
             sp.GetRequiredService<WorkflowAgentHandoffPreflight>());
         services.AddScoped<ISlackManagerConversationProcessor>(sp =>

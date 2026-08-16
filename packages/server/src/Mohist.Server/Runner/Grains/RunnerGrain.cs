@@ -381,8 +381,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return null;
             }
 
-            var activeWorkflowCount = (await _workflowRuns.FindRunningAssignedToAsync(RunnerId))
-                .Count(runId => !string.Equals(runId, workflowRunId, StringComparison.Ordinal));
+            var activeWorkflowCount = await CountActiveWorkflowWorksAsync(RunnerId, workflowRunId);
             var activeAgentJobCount = (await _agentJobStore.ListRunningForRunnerAsync(RunnerId))
                 .Select(work => work.JobKey)
                 .Distinct(StringComparer.Ordinal)
@@ -419,7 +418,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return null;
             }
 
-            var activeWorkflowCount = await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
+            var activeWorkflowCount = await CountActiveWorkflowWorksAsync(RunnerId);
             var activeAgentJobCount = (await _agentJobStore.ListRunningForRunnerAsync(RunnerId))
                 .Select(record => record.JobKey)
                 .Distinct(StringComparer.Ordinal)
@@ -469,6 +468,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             var issue = IssueFromRun(run);
             var stage = run.CurrentStage();
             var task = stage.RunningTask;
+            if (task?.AgentInvocation is not null)
+            {
+                // The AgentJob ledger is the sole active-work owner after
+                // handoff. The Workflow task remains running for finalization
+                // but must not appear as a second runner work item.
+                continue;
+            }
             if (task is not null)
             {
                 activeWorks.Add(new RunnerActiveWorkItem(
@@ -512,6 +518,30 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
 
         return new RunnerRuntimeState(_status, _lastPresenceAt, activeWorks, _draining);
+    }
+
+    private async Task<int> CountActiveWorkflowWorksAsync(
+        string workerId,
+        string? excludedWorkflowRunId = null)
+    {
+        var count = 0;
+        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId))
+        {
+            if (string.Equals(workflowRunId, excludedWorkflowRunId, StringComparison.Ordinal))
+                continue;
+
+            var run = await _workflowRuns.LoadAsync(workflowRunId);
+            if (run is null)
+                continue;
+
+            var stage = run.CurrentStage();
+            if (stage.RunningTask?.AgentInvocation is not null)
+                continue;
+            if (stage.RunningTask is not null || !string.IsNullOrWhiteSpace(stage.ChecksWorkId))
+                count++;
+        }
+
+        return count;
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)
