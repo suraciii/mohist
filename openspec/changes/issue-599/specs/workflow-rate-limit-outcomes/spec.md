@@ -13,17 +13,20 @@ The Runner-to-Server Workflow report contract SHALL carry a bounded Provider thr
 - **AND** SHALL NOT relabel the report as `provider-rate-limited`
 
 ### Requirement: Workflow Action projections preserve structured Provider facts
-Both OpenCode and Pi Workflow Agent Action paths SHALL preserve `provider-rate-limited` and the typed `providerRateLimit` facts from the runtime error through `ActionResult`, `WorkItemResult`, the Runner report DTO, `TaskReport`, and the Workflow status view. The facts SHALL NOT be reduced to an error message, diagnostics-only data, or a generic failed status.
+Both OpenCode and Pi Workflow Agent Action paths SHALL preserve `provider-rate-limited` and the typed `providerRateLimit` facts from the runtime error through `ActionResult.error.providerRateLimit`, `WorkItemResult`, the Runner report DTO, `WorkResult`, `TaskReport`, and the Workflow status view. The facts SHALL NOT be reduced to an error message, diagnostics-only data, or a generic failed status. The shared projection SHALL reject malformed required facts as a contract error rather than silently downgrading the category.
 
 #### Scenario: OpenCode Workflow Action preserves expiry facts
 - **WHEN** `executor-capabilities.ts` receives an OpenCode `provider-rate-limited` runtime result
-- **THEN** `runtimeActionFailure` and `projectTaskOutput` SHALL emit `WorkItemResult.status` and `error.code` as `provider-rate-limited`
-- **AND** SHALL preserve Provider identity, latest signal, wait deadline, attempt count, and timing facts
+- **THEN** `runtimeActionFailure` SHALL copy the complete facts into `ActionResult.error.providerRateLimit`
+- **AND** `projectTaskOutput` SHALL emit `WorkItemResult.status` and `error.code` as `provider-rate-limited`
+- **AND** SHALL preserve Provider identity, latest signal, wait deadline, attempt count, and every timing fact in `WorkItemResult.providerRateLimit`
 - **AND** `WorkflowItemTranslator` SHALL produce a `ProviderRateLimited` report without `TaskReportStatus.Failed`
 
 #### Scenario: Pi Workflow Action preserves expiry facts
 - **WHEN** `actions/pi.ts` receives a Pi `provider-rate-limited` runtime result
-- **THEN** its `runtimeFailure` projection and the shared task projection SHALL preserve the same structured facts and exact category
+- **THEN** its `runtimeFailure` projection SHALL copy the complete facts into `ActionResult.error.providerRateLimit`
+- **AND** the shared task projection SHALL preserve the same structured facts and exact category through `WorkItemResult`, `WorkResult`, and `TaskReport`
+- **AND** `stripRunnerPrivateFacts` SHALL remove only `turnFact` and SHALL NOT remove Provider facts
 - **AND** the Server SHALL expose those facts unchanged after report translation and persistence reload
 
 ### Requirement: AgentSession expiry close is not a generic failure

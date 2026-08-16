@@ -4,10 +4,11 @@
 
 - [x] F1: formalize one `ProviderAttemptExecutor` boundary for Pi and OpenCode, require one transport request per invocation, and fail closed when either runtime cannot disable or enforce SDK replay.
 - [x] F2: make Provider expiry use a typed non-failing AgentSession close and preserve report/event ordering semantics for both Workflow Action paths.
-- [ ] F3: make structured Provider facts explicit through both Action projections and the Runner-to-Server report translation.
+- [x] F3: make structured Provider facts explicit through both Action projections and the Runner-to-Server report translation.
 
 ## Verification
 
 - `self-review.md` is intentionally unchanged.
 - F1 changes are limited to `design.md`, `tasks.json`, and `specs/provider-rate-limit-retry/spec.md` in the first remediation commit.
-- F2 changes are limited to the terminal-close decision and its T-003/spec scenarios; the second remediation commit will include those files and this progress update.
+- F2 changes are limited to the terminal-close decision and its T-003/spec scenarios; those changes are committed in the second remediation commit.
+- F3 names `ProviderRateLimitFacts` at each Action/report boundary, requires malformed-fact rejection, and adds exact-fact preservation coverage for OpenCode and Pi.
