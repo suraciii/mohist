@@ -24,10 +24,8 @@ public sealed record AgentCreateData(
     [property: Id(6)] int? MaxConcurrentRuns,
     [property: Id(7)] IReadOnlyList<string>? AllowedSubagentAgentIds = null,
     [property: Id(8)] string? Avatar = null,
-    [property: Id(9)] string? Purpose = null,
-    [property: Id(10)] IReadOnlyList<string>? Permissions = null,
-    [property: Id(11)] string? TaskFirstIdempotencyKey = null,
-    [property: Id(12)] string? TaskFirstRequestFingerprint = null);
+    [property: Id(9)] string? TaskFirstIdempotencyKey = null,
+    [property: Id(10)] string? TaskFirstRequestFingerprint = null);
 
 [GenerateSerializer]
 public sealed record AgentUpdateData(
@@ -39,9 +37,7 @@ public sealed record AgentUpdateData(
     [property: Id(5)] int? MaxConcurrentRuns,
     [property: Id(6)] IReadOnlySet<string> Fields,
     [property: Id(7)] IReadOnlyList<string>? AllowedSubagentAgentIds = null,
-    [property: Id(8)] string? Avatar = null,
-    [property: Id(9)] string? Purpose = null,
-    [property: Id(10)] IReadOnlyList<string>? Permissions = null);
+    [property: Id(8)] string? Avatar = null);
 
 public sealed class AgentAlreadyExistsException : InvalidOperationException
 {

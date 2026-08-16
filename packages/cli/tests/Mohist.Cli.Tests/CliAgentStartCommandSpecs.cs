@@ -56,6 +56,15 @@ public partial class CliAgentCommandSpecs
                 transcriptUrl = "/api/projects/proj_123/agent-sessions/session-start/transcript",
                 jobUrl = "/api/projects/proj_123/agent-jobs/job-start",
                 observationUrl = "/api/projects/proj_123/agent-jobs/job-start/launch-observation",
+                scopeFingerprint = "scope-start",
+                execution = new { runtime = "pi", model = "provider/model", variant = "balanced" },
+                repository = "server",
+                workspace = "review",
+                workspaceRepositories = new[] { "server" },
+                issueNumber = 42,
+                epicNumber = 7,
+                permissionScope = "project-workspace-write",
+                expectedImpact = "Starts one AgentJob and AgentSession",
             },
         }, HttpStatusCode.Created)));
         var output = new StringWriter();
@@ -66,15 +75,17 @@ public partial class CliAgentCommandSpecs
                 "agent", "start", "--prompt", "Inspect the task", "--name", "task-agent",
                 "--runtime", "pi", "--model", "provider/model", "--variant", "balanced",
                 "--issue", "42", "--epic", "7", "--repo", "server", "--workspace", "review",
-                "--project", "proj_123", "--idempotency-key", "start-key",
+                "--project", "proj_123", "--idempotency-key", "start-key", "--yes",
             ],
             output: output,
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
-        var request = Assert.Single(handler.Requests);
+        Assert.Equal(2, handler.Requests.Count);
+        var request = handler.Requests[1];
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("/api/projects/proj_123/agent-tasks", request.RequestUri?.PathAndQuery);
+        Assert.Equal("scope-start", request.Headers["X-Mohist-Agent-Preflight"].Single());
         Assert.Equal("start-key", request.Headers["Idempotency-Key"].Single());
         Assert.Equal("cli", request.Headers["X-Mohist-Launch-Origin"].Single());
         var body = JsonNode.Parse(request.Body!)!.AsObject();

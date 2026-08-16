@@ -77,6 +77,8 @@ public class AgentQuerier : IScopedService
         CancellationToken ct = default)
     {
         var infos = await ListDefinitionsAsync(projectId, status, all, ct);
+        if (_readiness is null)
+            return infos;
         var hydrated = new List<AgentInfo>(infos.Count);
         foreach (var info in infos)
         {
@@ -130,7 +132,7 @@ public class AgentQuerier : IScopedService
         };
         return _readiness is null
             ? hydrated
-            : hydrated with { Executability = await _readiness.GetAsync(projectId, hydrated, ct) };
+            : hydrated with { Readiness = await _readiness.GetAsync(projectId, hydrated, ct) };
     }
 
     public static AgentInfo ToInfo(Domain.Agent agent) => new(
@@ -146,7 +148,5 @@ public class AgentQuerier : IScopedService
         agent.CreatedAt.ToString("o"),
         agent.UpdatedAt.ToString("o"),
         AllowedSubagentAgentIds: agent.AllowedSubagentAgentIds,
-        Avatar: agent.Avatar,
-        Purpose: agent.Purpose,
-        Permissions: agent.Permissions);
+        Avatar: agent.Avatar);
 }
