@@ -60,6 +60,18 @@ public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
+    public async Task AuthenticatedCookieSession_IsRejectedOnUnmatchedDirectPath()
+    {
+        using var client = fixture.CreateClient();
+        client.DefaultRequestHeaders.Add("Cookie", $"mohist_session={MohistIntegrationFixture.AdminToken}");
+
+        using var response = await client.GetAsync("/api/v1/not-a-registered-route");
+
+        await AssertDirectErrorAsync(response, HttpStatusCode.Unauthorized, "unauthenticated");
+        Assert.Equal("Bearer", Assert.Single(response.Headers.WwwAuthenticate).ToString());
+    }
+
+    [Fact]
     public async Task Direct401_IsNonClassifying_AcrossEveryFailureKind()
     {
         var revokedToken = CredentialToken.Generate(CredentialKind.Pat);

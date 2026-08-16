@@ -734,3 +734,32 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   Server SpecTests, 2,675 Server unit tests, 1,848 CLI tests, 4,724 Web tests,
   1,639 Runner tests, and 70 Slack tests. Verification produced only ignored
   build outputs; no Git-visible side effects remained.
+
+## T-001 verification (current task)
+
+- Re-read `external-agent-caller-auth/spec.md` and audited the direct boundary:
+  AuthResolutionMiddleware records the Bearer/cookie carrier and PAT-derived
+  ExternalAgentCaller once; ExternalAgentApiMiddleware enforces PAT-only
+  carrier, persisted grant, route scope, and Project grant before delegates;
+  and all seven routes remain centralized under the shared `/api/v1` group.
+- Added unit coverage proving a PAT records `callerKeyId`, principal, scopes,
+  and its persisted Project grant in HttpContext.Items, plus cookie carrier
+  recording without a caller. Added a pipeline SpecTest proving an authenticated
+  cookie is rejected on an unmatched `/api/v1` path as well as every registered
+  route. The auth path now aliases the middleware's single prefix constant.
+- Focused verification passed: AuthResolutionMiddlewareTests (23) and
+  DirectApiAuthPipelineSpecs (10). Existing implementation and pipeline tests
+  cover the required non-classifying 401, grant-less 403, readonly write fence,
+  out-of-grant 403-before-lookup, operator_all persistence, error envelope, and
+  zero-effect rejection behavior.
+
+## T-001 completion (current workflow)
+
+- The auth regression check passed serially before finalizing this task:
+  2,676 server unit tests, the 10 DirectApiAuthPipelineSpecs, and all 69
+  architecture tests. The direct boundary remains centralized and no endpoint
+  or unrelated control-plane behavior changed.
+- The final source delta aliases AuthResolutionMiddleware's direct path
+  constant to ExternalAgentApiMiddleware.PathPrefix, preventing auth and
+  boundary routing from drifting. The added tests pin caller facts in
+  HttpContext.Items and cookie rejection on unmatched /api/v1 paths.

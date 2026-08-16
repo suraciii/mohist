@@ -35,7 +35,7 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
     public const string SessionCookieName = "mohist_session";
 
     /// <summary>The path prefix of the direct external Agent API.</summary>
-    public const string DirectApiPathPrefix = "/api/v1";
+    public const string DirectApiPathPrefix = ExternalAgentApiMiddleware.PathPrefix;
 
     private const string AuthorizationHeader = "Authorization";
     private const string BearerScheme = "Bearer ";
