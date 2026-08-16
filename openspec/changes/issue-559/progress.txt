@@ -426,3 +426,11 @@
 - Focused finalizer coverage passed: `AgentInvocationSettlementSpecs` 11/11 and `AgentInvocationSettlementInterruptionSpecs` 4/4.
 - `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices were non-failing.
 - No additional production edit was required during this revalidation; this commit records the final T-004 verification on the workflow branch.
+
+## T-005 verification on final run branch
+
+- The T-005 implementation is present in commit `458079469`: `WorkflowItemTranslator` returns a delegated handoff outcome for new `mohist/agent` tasks, `WorkflowAgentHandoffDispatchClient` drives Prepare -> Accept -> Activate and binds the immutable TaskRun linkage before activation, and `DispatchService` leaves the AgentJob ledger as the sole Runner work owner without a Workflow dispatch snapshot.
+- The cutover spec verifies durable activation, reciprocal AgentSession labels, AgentJob-owner ledger claim, queued/executing/completed status projection, frozen expect transport, terminal finalization, artifacts, setVars, and cross-surface lineage. Focused coverage passed: `WorkflowItemTranslatorSpecs` 47/47 and `WorkflowAgentDispatchCutoverSpecs` 1/1.
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore` passed with 0 warnings and 0 errors. `npm test -w packages/runner` passed 1646/1646 in isolation.
+- The first concurrent `npm run test:fast` attempt hit the existing Runner cleanup-config timing failures (2 tests); the complete rerun passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices were non-failing.
+- No additional production edit was required during this revalidation; this commit records the final T-005 verification on the workflow branch.
