@@ -579,3 +579,19 @@ Channel decision (grounded in live source):
   Definition 178, Runner 1657, and Web 4727. It remains non-zero only for
   the pre-existing ArchTests migration-ledger digest drift in
   `FailIfMarkerSpecs` (67/68); no unrelated ledger metadata was changed.
+
+## T-007 Current Verification
+
+- The T-007 implementation is present in ancestor commit `4e09c94da`:
+  generation-keyed interruption projections, durable session/workflow
+  lifecycle events, additive session/turn/workflow-task/AgentJob DTO fields,
+  sanitized update stop-failure context, and session/workflow Web rendering.
+- Focused Server visibility tests passed all 2,667 Server unit tests,
+  including projection coverage. Focused Web session/workflow tests passed
+  35/35, Web FSD boundary checks passed, and the targeted Playwright workflow
+  inspector passed 2/2 scenarios including raw transport-error suppression.
+- `npm run test:fast` passed typecheck, Server Unit 2667, CLI 1855, Workflow
+  Definition 178, Runner 1657, and Web 4727. The command's only failure was
+  the unrelated pre-existing `SpecUnitMigrationLedgerRules` /
+  `FailIfMarkerSpecs` digest drift (67/68); issue-567 visibility paths did not
+  modify migration-ledger metadata.
