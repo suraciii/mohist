@@ -808,3 +808,19 @@ Channel decision (grounded in live source):
   selected T-002 slice and its tests were already committed on the prepared
   workflow branch; later T-004 behavior correctly supersedes the temporary
   retryable interruption response with replacement arbitration.
+
+## T-003 Current Task Verification
+
+- The complete Runner interruption slice is already present on this run branch:
+  the atomic `WorkResultJournal` `interrupted` state, runtime binding registry,
+  bounded shutdown handoff and cooperative Pi/OpenCode stop mapping,
+  inventory-gated receipt creation, exact receipt retry, and restart replay.
+- Baseline focused verification passed the journal, recovery-receipt, and
+  host-recovery suites: 21/21 tests, with production and test typechecks
+  passing before the final gate.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2674, Server Arch 68, CLI 1856, Runner 1661, and Web 4727.
+- No additional production change was necessary in this task run because T-003
+  implementation and its deterministic acceptance coverage were already
+  committed on the prepared workflow branch; this commit records the current
+  task verification and preserves the existing implementation unchanged.
