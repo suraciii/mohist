@@ -172,7 +172,6 @@ public class RunnerRegistryCatalogSourceTests
         public Task<IReadOnlyList<string>> ListCoderModelsByRuntimeAsync(string runtime) => throw new NotSupportedException();
         public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsAsync() => throw new NotSupportedException();
         public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsByRuntimeAsync(string runtime) => throw new NotSupportedException();
-        public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelReasoningEffortsByRuntimeAsync(string runtime) => throw new NotSupportedException();
         public Task<IReadOnlyList<RunnerInfo>> ListAllAsync() => throw new NotSupportedException();
         public Task<IReadOnlyList<RunnerInfo>> ListEligibleRunnersAsync(string projectId) => throw new NotSupportedException();
     }

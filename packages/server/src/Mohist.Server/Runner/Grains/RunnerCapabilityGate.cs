@@ -45,7 +45,7 @@ internal static class RunnerCapabilityGate
             && !Contains(catalog?.Variants, expectation.Model, expectation.Variant))
             return false;
         if (expectation.ReasoningEffort is not null
-            && !Contains(catalog?.ReasoningEfforts, expectation.Model, expectation.ReasoningEffort))
+            && !Contains(catalog?.Variants, expectation.Model, expectation.ReasoningEffort))
             return false;
 
         if (expectation.ReasoningEffort is null)
