@@ -173,6 +173,145 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task RecoveryTerminalReplayRepairsOperationAfterOwnerCommitWriteFailure()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-recovery-terminal-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-recovery-terminal-{Guid.NewGuid():N}";
+        var sessionId = $"agent-session-recovery-terminal-{Guid.NewGuid():N}";
+        var inputId = $"input-recovery-terminal-{Guid.NewGuid():N}";
+        var turnId = $"turn-recovery-terminal-{Guid.NewGuid():N}";
+        var runtimeSessionId = $"runtime-session-recovery-terminal-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: runnerId,
+            AgentRuntime: "opencode",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["mohist.io/project-id"] = projectId,
+                ["mohist.io/source-kind"] = "agent-launch",
+                ["mohist.io/agent-id"] = "agent-test",
+            })));
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId,
+            turnId,
+            "recover this job",
+            "agent-job",
+            jobKey,
+            Runtime: "opencode"));
+
+        var job = JobGrain(jobKey);
+        await job.SubmitAsync(new AgentJobInput(
+            "recover this job",
+            ProjectId: projectId,
+            Runtime: "opencode",
+            AgentId: "agent-test",
+            AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
+            PinnedRunnerId: runnerId));
+        await WaitForRunningAsync(job);
+        var initial = await job.GetRuntimeSnapshotAsync();
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(
+            runnerId,
+            initial.CurrentWorkId!,
+            sessionId,
+            runtimeSessionId));
+
+        var operationId = $"update-recovery-terminal-{Guid.NewGuid():N}";
+        var operationGrain = Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId);
+        var operation = await operationGrain.StartOrGetAsync(new RunnerUpdateOperation(
+            operationId,
+            runnerId,
+            _fixture.TimeProvider.GetUtcNow(),
+            new List<RunnerUpdateWork>
+            {
+                new(
+                    WorkDispatchOwnerKinds.AgentJob,
+                    jobKey,
+                    initial.CurrentWorkId!,
+                    null,
+                    "agent-job"),
+            }));
+        Assert.True(await job.MarkUpdateInterruptedAsync(
+            runnerId,
+            initial.CurrentWorkId!,
+            operationId));
+        await operationGrain.MarkWorkAsync(
+            operationId,
+            WorkDispatchOwnerKinds.AgentJob,
+            jobKey,
+            initial.CurrentWorkId!,
+            taskRunId: null,
+            RunnerUpdateWorkStatus.Marked);
+
+        var interruptedReceipt = new RuntimeRecoveryReceipt(
+            WorkflowRunId: string.Empty,
+            TaskRunId: string.Empty,
+            WorkId: initial.CurrentWorkId!,
+            RunnerId: runnerId,
+            AgentSessionId: sessionId,
+            AgentTurnId: turnId,
+            Runtime: "opencode",
+            RuntimeSessionId: runtimeSessionId,
+            RecoveryGeneration: 0,
+            ReceiptId: "agent-job-recovery-terminal-interrupted",
+            Payload: new RuntimeRecoveryReceiptPayload(
+                RuntimeRecoveryReceiptPayloadTypes.UpdateInterrupted,
+                UpdateOperationId: operationId,
+                StopConfirmed: true),
+            OwnerKind: RuntimeRecoveryReceiptOwnerKinds.AgentJob,
+            AgentJobId: jobKey);
+        var interruptedAcknowledgement = await job.ReceiveRecoveryReceiptAsync(interruptedReceipt);
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, interruptedAcknowledgement.Status);
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var replacement = await runner.TryClaimAgentJobAsync(jobKey, projectId);
+        Assert.NotNull(replacement);
+        var replacementRuntimeSessionId = $"runtime-session-recovery-terminal-replacement-{Guid.NewGuid():N}";
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(
+            runnerId,
+            replacement!.WorkId,
+            sessionId,
+            replacementRuntimeSessionId));
+        var replacementSnapshot = await job.GetRuntimeSnapshotAsync();
+        var result = new WorkResult("completed", "recovery terminal result");
+        var terminalReceipt = new RuntimeRecoveryReceipt(
+            WorkflowRunId: string.Empty,
+            TaskRunId: string.Empty,
+            WorkId: replacement.WorkId,
+            RunnerId: runnerId,
+            AgentSessionId: sessionId,
+            AgentTurnId: replacementSnapshot.InitialTurnId!,
+            Runtime: "opencode",
+            RuntimeSessionId: replacementRuntimeSessionId,
+            RecoveryGeneration: replacementSnapshot.RecoveryGeneration,
+            ReceiptId: "agent-job-recovery-terminal-result",
+            Payload: new RuntimeRecoveryReceiptPayload(
+                RuntimeRecoveryReceiptPayloadTypes.TerminalResult,
+                Result: result,
+                Fingerprint: RuntimeRecoveryReceiptFingerprint.For(result)),
+            OwnerKind: RuntimeRecoveryReceiptOwnerKinds.AgentJob,
+            AgentJobId: jobKey);
+
+        _fixture.OperationWriteFailures.FailNext(RunnerUpdateOperationWriteKind.MarkRecoverySettled);
+        await Assert.ThrowsAnyAsync<Exception>(() => job.ReceiveRecoveryReceiptAsync(terminalReceipt));
+
+        Assert.Equal(AgentJobStatus.Completed, await job.GetStatusAsync());
+        var beforeReplay = await operationGrain.GetAsync(operationId);
+        Assert.Equal(
+            RunnerUpdateRecoveryStatus.ReceiptAcked,
+            Assert.Single(beforeReplay!.AffectedWorks).RecoveryStatus);
+
+        var replayAcknowledgement = await job.ReceiveRecoveryReceiptAsync(terminalReceipt);
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, replayAcknowledgement.Status);
+        var settled = await operationGrain.GetAsync(operationId);
+        Assert.Equal(
+            RunnerUpdateRecoveryStatus.ReplacementSettled,
+            Assert.Single(settled!.AffectedWorks).RecoveryStatus);
+    }
+
+    [Fact]
     public async Task ReportResultAsync_AfterTerminalCompletion_IsRejected_AndPriorResultPreserved()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-terminal-runner-{Guid.NewGuid():N}");

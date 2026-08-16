@@ -458,3 +458,19 @@ Channel decision (grounded in live source):
   Definition 178, CLI 1855, Server Unit 2667, Server Spec 3936, Arch 68, Web
   4727, Runner 1647, and Slack 70. The worktree remained clean after all
   verification commands.
+
+## Re-review Receipt-Retry Failure Windows
+
+- Workflow terminal-result duplicate replay now repairs the durable operation
+  ledger for both original fenced results and replacement results before
+  returning the stored acknowledgement. Original work reaches `receipt-acked`;
+  replacement work reaches `replacement-settled`.
+- AgentJob terminal-result handling persists the terminal state and accepted
+  receipt ledger before cross-grain settlement. Exact replay repairs the
+  operation ledger before returning the stored accepted acknowledgement, so a
+  failed operation write cannot become a terminal `stale` acknowledgement.
+- Added an injectable operation-write failure probe and deterministic coverage
+  for Workflow original/replacement replay and AgentJob replacement replay.
+- Verification: Server SpecTests build passed; focused Workflow settlement
+  passed 15/15, AgentJob grain recovery class passed 21/21, and AgentJob
+  recovery API class passed 7/7. `review.md` remains untouched.

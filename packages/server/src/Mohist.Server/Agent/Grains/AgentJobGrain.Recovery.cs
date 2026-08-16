@@ -180,15 +180,11 @@ public sealed partial class AgentJobGrain
                 {
                     await SettleUpdateOperationWorkAsync(receipt);
                 }
-                else
+                else if (receipt.Payload?.Type.Trim().Equals(
+                             RuntimeRecoveryReceiptPayloadTypes.TerminalResult,
+                             StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    await _grains
-                        .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
-                        .MarkReceiptAckedAsync(
-                            RuntimeRecoveryReceiptOwnerKinds.AgentJob,
-                            Key,
-                            receipt.WorkId,
-                            taskRunId: null);
+                    await RepairTerminalReceiptOperationAsync(receipt);
                 }
             }
 
@@ -201,11 +197,26 @@ public sealed partial class AgentJobGrain
             return new RuntimeRecoveryReceiptAcknowledgement(prior.ReceiptId, prior.Status, prior.Reason);
         }
 
+        var payload = receipt.Payload!;
+        var payloadType = payload.Type.Trim().ToLowerInvariant();
         if (IsTerminal)
+        {
+            if (payloadType == RuntimeRecoveryReceiptPayloadTypes.TerminalResult
+                && MatchesRecoveryReceiptBinding(receipt)
+                && receipt.RecoveryGeneration == State.RecoveryGeneration
+                && string.Equals(
+                    payload.Fingerprint,
+                    RuntimeRecoveryReceiptFingerprint.For(payload.NormalizedTerminalResult!),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await RepairTerminalReceiptOperationAsync(receipt);
+            }
+
             return new RuntimeRecoveryReceiptAcknowledgement(
                 receipt.ReceiptId,
                 RuntimeRecoveryReceiptAckStatuses.Stale,
                 "job-terminal");
+        }
 
         if (!MatchesRecoveryReceiptBinding(receipt)
             || receipt.RecoveryGeneration != State.RecoveryGeneration)
@@ -216,8 +227,6 @@ public sealed partial class AgentJobGrain
                 "binding-mismatch");
         }
 
-        var payload = receipt.Payload!;
-        var payloadType = payload.Type.Trim().ToLowerInvariant();
         if (payloadType == RuntimeRecoveryReceiptPayloadTypes.TerminalResult)
         {
             if (State.Status is not (AgentJobStatus.Running
@@ -248,14 +257,7 @@ public sealed partial class AgentJobGrain
                 requestFingerprint,
                 RuntimeRecoveryReceiptAckStatuses.Accepted));
             await PersistAsync();
-            await MarkRecoverySettledAsync();
-            await _grains
-                .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
-                .MarkReceiptAckedAsync(
-                    RuntimeRecoveryReceiptOwnerKinds.AgentJob,
-                    Key,
-                    receipt.WorkId,
-                    taskRunId: null);
+            await RepairTerminalReceiptOperationAsync(receipt);
             return new RuntimeRecoveryReceiptAcknowledgement(
                 receipt.ReceiptId,
                 RuntimeRecoveryReceiptAckStatuses.Accepted);
@@ -327,6 +329,26 @@ public sealed partial class AgentJobGrain
                 WorkDispatchOwnerKinds.AgentJob,
                 Key,
                 State.InterruptedWorkId!,
+                taskRunId: null);
+    }
+
+    private async Task RepairTerminalReceiptOperationAsync(RuntimeRecoveryReceipt receipt)
+    {
+        if (string.IsNullOrWhiteSpace(State.UpdateOperationId)
+            || string.IsNullOrWhiteSpace(State.InterruptedWorkId))
+        {
+            return;
+        }
+
+        if (State.RecoveryGeneration > 0)
+            await MarkRecoverySettledAsync();
+
+        await _grains
+            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+            .MarkReceiptAckedAsync(
+                RuntimeRecoveryReceiptOwnerKinds.AgentJob,
+                Key,
+                receipt.WorkId,
                 taskRunId: null);
     }
 

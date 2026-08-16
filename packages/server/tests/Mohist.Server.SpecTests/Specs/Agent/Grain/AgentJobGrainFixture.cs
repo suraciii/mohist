@@ -40,6 +40,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public RecordingSessionStopDelivery StopDelivery { get; } = new();
     public RecordingSessionWorkPort WorkPort { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
+    public RunnerUpdateOperationWriteFailureProbe OperationWriteFailures =>
+        Cluster.GetSiloServiceProvider(null).GetRequiredService<RunnerUpdateOperationWriteFailureProbe>();
 
     private readonly InMemoryEventBus _sharedEventBus;
     private readonly RecordingEventStore _sharedEventStore = new();

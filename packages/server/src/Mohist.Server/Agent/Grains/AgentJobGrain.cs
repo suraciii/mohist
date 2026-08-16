@@ -403,7 +403,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             State.Interruption = recovered;
             await PersistAsync();
             await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, recovered);
-            await MarkRecoverySettledAsync();
         }
     }
 

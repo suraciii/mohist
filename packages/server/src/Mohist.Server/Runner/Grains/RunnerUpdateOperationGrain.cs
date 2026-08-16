@@ -2,6 +2,41 @@ using Orleans;
 
 namespace Mohist.Server.Runner.Grains;
 
+public enum RunnerUpdateOperationWriteKind
+{
+    MarkWork,
+    MarkRecoverySettled,
+    MarkReceiptAcked,
+}
+
+public interface IRunnerUpdateOperationWriteFailureInjector
+{
+    void BeforeWrite(
+        RunnerUpdateOperationWriteKind kind,
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId);
+}
+
+public sealed class NoopRunnerUpdateOperationWriteFailureInjector : IRunnerUpdateOperationWriteFailureInjector
+{
+    public static NoopRunnerUpdateOperationWriteFailureInjector Instance { get; } = new();
+
+    private NoopRunnerUpdateOperationWriteFailureInjector()
+    {
+    }
+
+    public void BeforeWrite(
+        RunnerUpdateOperationWriteKind kind,
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId)
+    {
+    }
+}
+
 public interface IRunnerUpdateOperationGrain : IGrainWithStringKey
 {
     Task<RunnerUpdateOperation?> GetPendingAsync();
@@ -83,7 +118,8 @@ public sealed class RunnerUpdateOperationState
 }
 
 public sealed class RunnerUpdateOperationGrain(
-    [PersistentState("runner-update-operation")] IPersistentState<RunnerUpdateOperationState> state)
+    [PersistentState("runner-update-operation")] IPersistentState<RunnerUpdateOperationState> state,
+    IRunnerUpdateOperationWriteFailureInjector writeFailureInjector)
     : Grain, IRunnerUpdateOperationGrain
 {
     public async Task<RunnerUpdateOperation?> GetPendingAsync()
@@ -182,6 +218,12 @@ public sealed class RunnerUpdateOperationGrain(
                 ? RunnerUpdateOperationStatus.Settled
                 : operation.Status,
         };
+        writeFailureInjector.BeforeWrite(
+            RunnerUpdateOperationWriteKind.MarkWork,
+            operationId,
+            ownerKind,
+            ownerId,
+            workId);
         state.State.Operations[index] = nextOperation;
         await state.WriteStateAsync();
         return nextOperation;
@@ -223,6 +265,12 @@ public sealed class RunnerUpdateOperationGrain(
                 ? RunnerUpdateOperationStatus.Settled
                 : operation.Status,
         };
+        writeFailureInjector.BeforeWrite(
+            RunnerUpdateOperationWriteKind.MarkRecoverySettled,
+            operationId,
+            ownerKind,
+            ownerId,
+            workId);
         state.State.Operations[index] = nextOperation;
         await state.WriteStateAsync();
         return nextOperation;
@@ -260,6 +308,12 @@ public sealed class RunnerUpdateOperationGrain(
                 ? RunnerUpdateOperationStatus.Settled
                 : operation.Status,
         };
+        writeFailureInjector.BeforeWrite(
+            RunnerUpdateOperationWriteKind.MarkReceiptAcked,
+            operation.OperationId,
+            ownerKind,
+            ownerId,
+            workId);
         state.State.Operations[operationIndex] = nextOperation;
         await state.WriteStateAsync();
         return nextOperation;

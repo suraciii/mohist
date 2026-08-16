@@ -371,6 +371,12 @@ public partial class WorkflowGrain
             {
                 await SettleUpdateOperationWorkAsync(receipt, replayOperationId);
             }
+            else if (receipt.Payload?.Type.Trim().Equals(
+                         RuntimeRecoveryReceiptPayloadTypes.TerminalResult,
+                         StringComparison.OrdinalIgnoreCase) == true)
+            {
+                await RepairTerminalResultOperationAsync(receipt);
+            }
 
             return new RuntimeRecoveryReceiptAcknowledgement(prior.ReceiptId, prior.Status, prior.Reason);
         }
@@ -765,6 +771,51 @@ public partial class WorkflowGrain
         var session = GrainFactory.GetGrain<IAgentSessionGrain>(sessionId);
         if (await session.GetAsync() is null) return;
         await session.ApplyInterruptionAsync(transition);
+    }
+
+    private async Task RepairTerminalResultOperationAsync(RuntimeRecoveryReceipt receipt)
+    {
+        if (_run is null)
+            return;
+
+        var task = _run.FindTaskForRecoveryReceipt(receipt.TaskRunId, receipt.WorkId);
+        if (task?.AgentInterruption is not
+            {
+                State: AgentWorkInterruptionStates.Recovered,
+                UpdateOperationId: { Length: > 0 } updateOperationId,
+            } transition)
+        {
+            return;
+        }
+
+        if (transition.RecoveryGeneration == 0)
+        {
+            await SettleUpdateOperationWorkAsync(receipt, updateOperationId);
+            return;
+        }
+
+        var original = _run.Stages
+            .SelectMany(stage => stage.Tasks)
+            .FirstOrDefault(candidate =>
+                candidate.Id != task.Id
+                && candidate.AgentInterruption is { } interruption
+                && string.Equals(interruption.UpdateOperationId, updateOperationId, StringComparison.Ordinal)
+                && interruption.RecoveryGeneration == transition.RecoveryGeneration - 1
+                && string.Equals(interruption.State, AgentWorkInterruptionStates.Interrupted, StringComparison.Ordinal));
+        if (original?.AgentResultSettlement is not { } originalSettlement
+            || originalSettlement.TaskRunId is not { } originalTaskRunId)
+        {
+            return;
+        }
+
+        await GrainFactory
+            .GetGrain<IRunnerUpdateOperationGrain>(originalSettlement.RunnerId)
+            .MarkRecoverySettledAsync(
+                updateOperationId,
+                WorkDispatchOwnerKinds.Workflow,
+                GrainKey,
+                originalSettlement.WorkId,
+                originalTaskRunId);
     }
 
     private async Task SettleUpdateOperationWorkAsync(
