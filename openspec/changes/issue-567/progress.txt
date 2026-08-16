@@ -926,3 +926,20 @@ Channel decision (grounded in live source):
   complete T-008 implementation and deterministic acceptance coverage are
   already present in the prepared branch history; this entry records the
   final verification checkpoint.
+
+## Fix-CI Current Verification
+
+- The worktree was clean before verification and no standalone verification
+  log was present. The historical failure output identified
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`:
+  the shared launch helper performed one poll immediately after assignment
+  preparation, before the durable dispatch was observable under full-suite
+  load. The repair is already committed in `4d668e8d7`, where the helper uses
+  the existing bounded `TestWait` dispatch retry.
+- A fresh `npm run verify` passed: build with 0 warnings/errors, Workflow 178,
+  CLI 1,856, Server Unit 2,674, Server Spec 3,947, Arch 68, Web 4,727,
+  Runner 1,662, and Slack 70.
+- The repaired route method passed twice at 1/1, its full class passed 5/5,
+  and the focused update/recovery/reconciliation/settlement classes passed
+  50/50. Verification created no Git-visible changes; no further production
+  or test-code change was necessary.
