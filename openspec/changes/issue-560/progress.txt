@@ -293,3 +293,16 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
 - Composer coverage now proves a conflict can be recovered with a new key
   without losing the composed task. Focused composer and feedback tests pass
   40/40; Web typecheck, FSD boundaries, and test-boundary checks pass.
+
+## T-005 final verification
+
+- Audited the existing task-first CLI slice against the CLI spec: `start` has
+  no Agent argument, forwards task/context/execution hints to `/agent-tasks`,
+  sends the CLI origin header, prints the launch table shape, and keeps raw
+  Server envelopes unchanged in JSON mode.
+- `npm run test:fast:cli` passed 1,860 tests and `npm run docs:check` passed.
+- The first full gate had one timing-sensitive dispatch poll failure in the
+  unrelated runtime-resolution spec. The exact xUnit method passed in
+  isolation, and the subsequent complete `npm run verify` passed: 3,949 Server
+  specs, 2,701 Server unit tests, 68 architecture tests, 1,860 CLI tests,
+  4,736 Web tests, 1,639 Runner tests, 70 Slack tests, and 178 workflow tests.
