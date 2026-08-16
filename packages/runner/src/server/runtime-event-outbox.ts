@@ -38,6 +38,11 @@ import { errorMessage } from '../core/errors.js'
 import { runnerLogger } from '../system/logger.js'
 import type { AgentSessionRuntimeEventReceipt } from './connection.js'
 import {
+  isWorkflowSessionBoundary,
+  runtimeEventDeliveryKey,
+  runtimeEventSchedulingKey,
+} from './runtime-event-outbox-identity.js'
+import {
   defaultRuntimeEventOutboxTimer,
   NodeRuntimeEventOutboxFileSystem,
   type AgentSessionRuntimeEventOutbox,
@@ -53,6 +58,7 @@ import {
 } from './runtime-event-outbox-ports.js'
 
 export { nextTemporaryFilePath } from './runtime-event-outbox-ports.js'
+export { runtimeEventDeliveryKey, workflowExecutionIdentity } from './runtime-event-outbox-identity.js'
 export type {
   AgentSessionRuntimeEventOutbox,
   AgentSessionRuntimeEventOutboxOptions,
@@ -65,6 +71,7 @@ export type {
   RuntimeEventTarget,
   RuntimeEventWorkMetadata,
 } from './runtime-event-outbox-ports.js'
+export type { WorkflowRuntimeEventExecutionIdentity } from './runtime-event-outbox-identity.js'
 
 const log = runnerLogger.child('session')
 
@@ -100,6 +107,17 @@ interface SnapshotShape {
   entries: InternalRecord[]
 }
 
+interface DeliveryLease {
+  readonly label: string
+  readonly batch: readonly InternalRecord[]
+}
+
+type DeliveryCompletion =
+  | { readonly kind: 'response'; readonly perRecord: AgentSessionRuntimeEventReceipt[][] }
+  | { readonly kind: 'failure'; readonly error: unknown }
+
+type DeliveryRaceOutcome = DeliveryCompletion | { readonly kind: 'timed-out' } | { readonly kind: 'stopped' }
+
 export function createAgentSessionRuntimeEventOutbox(
   options: AgentSessionRuntimeEventOutboxOptions = {},
 ): AgentSessionRuntimeEventOutbox {
@@ -131,6 +149,9 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
   >()
   private readonly receivedInputReceipts = new Map<string, AgentSessionRuntimeEventReceipt>()
+  // A deadline fails the current action while its original request remains fenced.
+  private readonly timedOutInputReceiptErrors = new Map<string, Error>()
+  private readonly activeDeliveryGroups = new Map<string, DeliveryLease>()
   private loaded = false
   private healthy = false
   private kicked: Promise<void> | null = null
@@ -249,6 +270,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       this.receivedInputReceipts.delete(recordId)
       return received
     }
+    const timedOut = this.timedOutInputReceiptErrors.get(recordId)
+    if (timedOut) throw timedOut
     if (!this.records.has(recordId))
       throw new Error(`workflow input ${recordId} is no longer pending and has no matching receipt`)
     if (this.inputReceiptWaiters.has(recordId))
@@ -326,6 +349,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   async stop(): Promise<void> {
     this.stopped = true
     this.deliveryStop.abort()
+    this.activeDeliveryGroups.clear()
     if (this.networkRetry) {
       this.timer.clearTimeout(this.networkRetry)
       this.networkRetry = null
@@ -356,7 +380,11 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     // which is contaminated by concurrent enqueues) so that progress is
     // judged by what the tick actually settled.
     while (!signal.aborted && this.healthy && !this.stopped) {
-      const groups = collectGroups([...this.records.values()])
+      const groups = collectGroups(
+        [...this.records.values()].filter(
+          (record) => !this.activeDeliveryGroups.has(runtimeEventSchedulingKey(record)),
+        ),
+      )
       if (groups.length === 0) break
       const selectedGroups = selectDeliveryGroups(groups, this.boundedConcurrency, this.nextDeliveryGroupLabel)
       this.nextDeliveryGroupLabel = selectedGroups.nextLabel
@@ -411,34 +439,97 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
 
   private async deliverBatch(batch: InternalRecord[], signal: AbortSignal): Promise<boolean> {
     if (signal.aborted || batch.length === 0) return false
+    const label = runtimeEventSchedulingKey(batch[0])
+    if (this.activeDeliveryGroups.has(label)) return false
+    const lease: DeliveryLease = { label, batch }
+    this.activeDeliveryGroups.set(label, lease)
+
     const controller = new AbortController()
-    const abortFromStop = () => controller.abort(signal.reason)
+    let resolveStopped!: () => void
+    const stopped = new Promise<DeliveryRaceOutcome>((resolve) => {
+      resolveStopped = () => resolve({ kind: 'stopped' })
+    })
+    const abortFromStop = () => {
+      controller.abort(signal.reason)
+      resolveStopped()
+    }
     signal.addEventListener('abort', abortFromStop, { once: true })
-    let timedOut = false
+
+    const timeoutError = new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`)
+    let resolveDeadline!: () => void
+    const deadline = new Promise<DeliveryRaceOutcome>((resolve) => {
+      resolveDeadline = () => resolve({ kind: 'timed-out' })
+    })
     const timer = this.timer.setTimeout(() => {
-      if (!controller.signal.aborted) {
-        timedOut = true
-        controller.abort(new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`))
-      }
+      if (!controller.signal.aborted) controller.abort(timeoutError)
+      resolveDeadline()
     }, this.deliveryTimeoutMs)
-    let perRecord: AgentSessionRuntimeEventReceipt[][] | null = null
-    let transportError: unknown = null
-    try {
-      perRecord = await this.deliverBatchRecords(batch, controller.signal)
-    } catch (error) {
-      transportError = error
-    } finally {
-      this.timer.clearTimeout(timer)
-      signal.removeEventListener('abort', abortFromStop)
-    }
-    if (timedOut) {
-      transportError = new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`)
-    }
-    if (transportError || perRecord === null) {
-      for (const record of batch) this.rejectInputReceipt(record.id, transportError)
-      this.scheduleNetworkRetry()
+    const completion: Promise<DeliveryCompletion> = this.deliverBatchRecords(batch, controller.signal).then(
+      (perRecord): DeliveryCompletion => ({ kind: 'response', perRecord }),
+      (error): DeliveryCompletion => ({ kind: 'failure', error }),
+    )
+    const outcome = await Promise.race([completion, deadline, stopped])
+    this.timer.clearTimeout(timer)
+    signal.removeEventListener('abort', abortFromStop)
+
+    if (outcome.kind === 'timed-out') {
+      // Abort is advisory: the original request may still commit and reply later.
+      this.rejectTimedOutInputReceipts(batch, timeoutError)
+      this.settleTimedOutDelivery(lease, completion)
       return false
     }
+    if (outcome.kind === 'stopped') {
+      for (const record of batch) this.rejectInputReceipt(record.id, signal.reason)
+      this.releaseDeliveryLease(lease)
+      return false
+    }
+
+    const acknowledged = await this.settleDeliveryLease(lease, outcome)
+    if (!acknowledged) this.scheduleNetworkRetry()
+    return acknowledged
+  }
+
+  private settleTimedOutDelivery(lease: DeliveryLease, completion: Promise<DeliveryCompletion>): void {
+    void completion
+      .then(async (outcome) => {
+        const acknowledged = await this.settleDeliveryLease(lease, outcome)
+        if (this.stopped || !this.healthy) return
+        if (acknowledged) {
+          void this.kick().catch((error) => {
+            log.error('late runtime-event delivery settlement failed', {
+              exception: error,
+              session: 'outbox',
+            })
+          })
+          return
+        }
+        this.scheduleNetworkRetry()
+      })
+      .catch((error) => {
+        log.error('late runtime-event delivery settlement failed', {
+          exception: error,
+          session: 'outbox',
+        })
+      })
+  }
+
+  private async settleDeliveryLease(lease: DeliveryLease, outcome: DeliveryCompletion): Promise<boolean> {
+    if (this.stopped || this.activeDeliveryGroups.get(lease.label) !== lease) return false
+    try {
+      if (outcome.kind === 'failure') {
+        for (const record of lease.batch) this.rejectInputReceipt(record.id, outcome.error)
+        return false
+      }
+      return await this.settleDeliveryReceipts(lease.batch, outcome.perRecord)
+    } finally {
+      this.releaseDeliveryLease(lease)
+    }
+  }
+
+  private async settleDeliveryReceipts(
+    batch: readonly InternalRecord[],
+    perRecord: AgentSessionRuntimeEventReceipt[][],
+  ): Promise<boolean> {
     // Settle each record against its own policy and the receipts returned
     // for its position in the batch. Only records whose head pointer is
     // unchanged (not rolled back / replaced mid-flight) are removed.
@@ -462,7 +553,6 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       anyAcknowledged = true
     }
     if (!anyAcknowledged) {
-      this.scheduleNetworkRetry()
       return false
     }
     if (removed.length === 0) return true
@@ -477,6 +567,25 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       return false
     }
     return true
+  }
+
+  private rejectTimedOutInputReceipts(batch: readonly InternalRecord[], error: Error): void {
+    for (const record of batch) {
+      if (!requiresInputReceipt(record)) continue
+      this.timedOutInputReceiptErrors.set(record.id, error)
+      this.rejectInputReceipt(record.id, error)
+    }
+  }
+
+  private releaseDeliveryLease(lease: DeliveryLease): void {
+    if (this.activeDeliveryGroups.get(lease.label) === lease) this.activeDeliveryGroups.delete(lease.label)
+  }
+
+  private hasReadyDeliveryGroup(): boolean {
+    for (const record of this.records.values()) {
+      if (!this.activeDeliveryGroups.has(runtimeEventSchedulingKey(record))) return true
+    }
+    return false
   }
 
   private async deliverBatchRecords(
@@ -499,6 +608,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (this.stopped) return
     if (this.networkRetry) return
     if (!this.healthy) return
+    if (!this.hasReadyDeliveryGroup()) return
     this.networkRetry = this.timer.setTimeout(() => {
       this.networkRetry = null
       void this.kick().catch(() => undefined)
@@ -582,6 +692,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   private resolveInputReceipt(recordId: string, receipt: AgentSessionRuntimeEventReceipt): void {
+    this.timedOutInputReceiptErrors.delete(recordId)
     const waiter = this.inputReceiptWaiters.get(recordId)
     if (waiter) {
       this.inputReceiptWaiters.delete(recordId)
@@ -638,147 +749,6 @@ function selectDeliveryGroups(
     groups: selected,
     nextLabel: groups[(start + count) % groups.length]?.label ?? null,
   }
-}
-
-function sequenceKey(record: RuntimeEventRecord): SequenceKey {
-  if (record.producerFamily === 'workflow-session') {
-    if (record.target.kind !== 'workflow') throw new Error('workflow-session family requires workflow target')
-    return {
-      family: 'workflow-session',
-      projectId: record.target.projectId,
-      workflowRunId: record.target.workflowRunId,
-      sessionName: record.target.sessionName,
-      execution: workflowExecutionIdentity(record),
-    }
-  }
-  if (record.producerFamily === 'workflow-cleanup') {
-    if (record.target.kind !== 'workflow') throw new Error('workflow-cleanup family requires workflow target')
-    return {
-      family: 'workflow-cleanup',
-      projectId: record.target.projectId,
-      workflowRunId: record.target.workflowRunId,
-      sessionName: record.target.sessionName,
-      cleanupOperationId: record.id,
-    }
-  }
-  if (record.producerFamily === 'binding-reconcile') {
-    if (record.target.kind !== 'session') throw new Error('binding-reconcile family requires session target')
-    return {
-      family: 'binding-reconcile',
-      sessionId: record.target.sessionId,
-      runtimeSessionId: record.runtimeSessionId,
-    }
-  }
-  if (record.producerFamily === 'session-followup') {
-    if (record.target.kind !== 'session') throw new Error('session-followup family requires Session target')
-    if (!nonEmpty(record.sessionTurnId))
-      throw new Error('session-followup record requires its immutable Agent turn identity')
-    return {
-      family: 'session-followup',
-      sessionId: record.target.sessionId,
-      runtimeSessionId: record.runtimeSessionId,
-      sessionTurnId: record.sessionTurnId,
-    }
-  }
-  if (record.target.kind !== 'generic') throw new Error('generic-followup family requires generic target')
-  return {
-    family: 'generic-followup',
-    projectId: record.target.projectId,
-    sessionId: record.target.sessionId,
-  }
-}
-
-export function runtimeEventDeliveryKey(record: RuntimeEventRecord): string {
-  return sequenceKeyLabel(sequenceKey(record))
-}
-
-function runtimeEventSchedulingKey(record: RuntimeEventRecord): string {
-  if (record.producerFamily !== 'workflow-session' && record.producerFamily !== 'workflow-cleanup')
-    return runtimeEventDeliveryKey(record)
-  if (record.target.kind !== 'workflow') throw new Error('workflow scheduling family requires workflow target')
-  return JSON.stringify({
-    family: 'workflow-session',
-    projectId: record.target.projectId,
-    workflowRunId: record.target.workflowRunId,
-    sessionName: record.target.sessionName,
-  })
-}
-
-function isWorkflowSessionBoundary(record: RuntimeEventRecord): boolean {
-  return (
-    (record.producerFamily === 'workflow-session' && record.event.type === 'session.input') ||
-    (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup')
-  )
-}
-export interface WorkflowRuntimeEventExecutionIdentity {
-  readonly runnerId: string
-  readonly agentSessionId: string
-  readonly taskRunId: string
-  readonly workId: string
-  readonly inputDeliveryId: string
-  readonly agentTurnId: string | null
-  readonly runtime: string
-  readonly runtimeSessionId: string
-}
-
-export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowRuntimeEventExecutionIdentity | null {
-  if (record.producerFamily !== 'workflow-session' || record.target.kind !== 'workflow') return null
-  const work = record.work
-  if (
-    !work ||
-    !nonEmpty(work.workId) ||
-    !nonEmpty(work.taskRunId) ||
-    !nonEmpty(work.runnerId) ||
-    !nonEmpty(work.agentSessionId) ||
-    !nonEmpty(work.inputDeliveryId) ||
-    !nonEmpty(record.runtime) ||
-    !nonEmpty(record.runtimeSessionId)
-  ) {
-    throw new Error('workflow-session execution record requires its complete immutable execution identity')
-  }
-  if (work.agentTurnId !== undefined && work.agentTurnId !== null && !nonEmpty(work.agentTurnId))
-    throw new Error('workflow-session execution record has an invalid Agent turn identity')
-  return {
-    runnerId: work.runnerId,
-    agentSessionId: work.agentSessionId,
-    taskRunId: work.taskRunId,
-    workId: work.workId,
-    inputDeliveryId: work.inputDeliveryId,
-    agentTurnId: work.agentTurnId ?? null,
-    runtime: record.runtime,
-    runtimeSessionId: record.runtimeSessionId,
-  }
-}
-function nonEmpty(value: string | null | undefined): value is string {
-  return typeof value === 'string' && value.length > 0
-}
-
-function sequenceKeyLabel(key: SequenceKey): string {
-  if (key.family === 'workflow-session') {
-    return JSON.stringify({
-      family: key.family,
-      projectId: key.projectId,
-      workflowRunId: key.workflowRunId,
-      sessionName: key.sessionName,
-      execution: key.execution ?? null,
-    })
-  }
-  if (key.family === 'workflow-cleanup') {
-    return JSON.stringify({
-      family: key.family,
-      projectId: key.projectId,
-      workflowRunId: key.workflowRunId,
-      sessionName: key.sessionName,
-      cleanupOperationId: key.cleanupOperationId,
-    })
-  }
-  if (key.family === 'binding-reconcile') {
-    return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
-  }
-  if (key.family === 'session-followup') {
-    return `session-followup:${key.sessionId}:${key.runtimeSessionId}:${key.sessionTurnId}`
-  }
-  return `generic-followup:${key.projectId}:${key.sessionId}`
 }
 
 function matchingReceipt(
@@ -979,21 +949,4 @@ async function defaultDelivery(
   _signal: AbortSignal,
 ): Promise<AgentSessionRuntimeEventReceipt[]> {
   throw new Error('Runtime event outbox has no delivery implementation; inject one via options.deliver')
-}
-
-interface SequenceKey {
-  readonly family:
-    | 'workflow-session'
-    | 'workflow-cleanup'
-    | 'session-followup'
-    | 'generic-followup'
-    | 'binding-reconcile'
-  readonly projectId?: string
-  readonly workflowRunId?: string
-  readonly sessionName?: string
-  readonly sessionId?: string
-  readonly runtimeSessionId?: string
-  readonly sessionTurnId?: string
-  readonly cleanupOperationId?: string
-  readonly execution?: WorkflowRuntimeEventExecutionIdentity | null
 }
