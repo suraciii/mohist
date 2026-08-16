@@ -338,3 +338,15 @@ Plan skeleton for next run (est. half a day):
   no owner grain, claim, or execution dependency is present.
 - Server UnitTests passed after the additions: 2722 tests. `git diff --check`
   also passes.
+
+## T-006 Requeue correction (current run)
+
+- Found that stale Runner requeue cleared `AgentJob.State.WorkId` and then
+  omitted `DispatchJson` whenever the pending row had no assigned runner.
+  That created a visibility gap and could discard the frozen tuple before
+  re-resolution. Requeue now clears only the runner assignment, preserving
+  the stable work id and dispatch snapshot; normal admission can replace the
+  capability revision before the next conditional claim.
+- Added `StaleDispatchRequeue_PreservesPendingProjectionForReresolution` to
+  cover the invariant. Server SpecTests passed: 3942; Server UnitTests passed:
+  2722. Runner CI before this correction passed: 154 files / 1666 tests.

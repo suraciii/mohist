@@ -147,16 +147,6 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
         string? token = null,
         string? permitId = null,
         string? dispatchId = null) => Task.CompletedTask;
-
-    /// <summary>
-    /// Records a deterministic capability preflight rejection. The frozen
-    /// tuple is retained as durable failure evidence and no runner dispatch
-    /// is created.
-    /// </summary>
-    Task FailPreflightAsync(AgentJobPreflightFailure failure) => Task.CompletedTask;
-
-    /// <summary>Returns a claimed AgentJob to pending after a stale dispatch.</summary>
-    Task RequeueAsync(string runnerId, string workId, string reason) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -178,11 +168,6 @@ public sealed record AgentJobPendingDispatch(
     [property: Id(0)] string AgentJobId,
     [property: Id(1)] string WorkId,
     [property: Id(2)] WorkDispatch Dispatch);
-
-[GenerateSerializer]
-public sealed record AgentJobPreflightFailure(
-    [property: Id(0)] string Category,
-    [property: Id(1)] AgentExecutionCapabilityFailureEvidence Evidence);
 
 [GenerateSerializer]
 public sealed record PrepareManualLaunchCommand(
