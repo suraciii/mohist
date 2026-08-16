@@ -419,3 +419,10 @@
 - Focused `AgentJobWorkflowTerminalDeliverySpecs` passed 7/7, and focused Runner transport/evaluation coverage passed 44/44.
 - `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. .NET preview SDK notices and concurrent-build copy retries were non-failing.
 - No additional production edit was required during this revalidation; this commit records the final T-003 verification on the workflow branch.
+
+## T-004 verification on current branch (final)
+
+- T-004 remains implemented in commit `92f8eef71`: Workflow-owned `SettleAgentInvocationAsync`, durable per-effect settlement receipts, typed workflow-terminal subscription finalization, reconcile reminder recovery, normal failure/recovery decisions, and StopAsync AgentJob cancellation.
+- Focused finalizer coverage passed: `AgentInvocationSettlementSpecs` 11/11 and `AgentInvocationSettlementInterruptionSpecs` 4/4.
+- `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices were non-failing.
+- No additional production edit was required during this revalidation; this commit records the final T-004 verification on the workflow branch.
