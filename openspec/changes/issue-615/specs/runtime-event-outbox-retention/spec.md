@@ -23,8 +23,8 @@ Every workflow, generic, and Session runtime-event request SHALL carry `runtimeE
 
 #### Scenario: A duplicate and new record share one batch
 - **WHEN** a batch contains an already accepted record followed by a new record with valid identity
-- **THEN** the AgentSession grain SHALL return the stored receipt for the duplicate and apply the new record once in one atomic state commit
-- **AND** the response SHALL preserve one receipt per input position
+- **THEN** the AgentSession grain SHALL retain the stored receipt for the duplicate and prepare the new record once with its `Pending` ledger entry in one atomic state commit
+- **AND** the response SHALL preserve one positional receipt per input after the new record's transcript and required side effects finalize as `Accepted`
 - **AND** a conflicting reuse of an existing ID SHALL reject the whole batch without applying the new record
 
 ### Requirement: Acceptance and transcript persistence recover as one idempotent boundary
@@ -75,12 +75,12 @@ The outbox SHALL treat `session.input` and terminal `session.activity` records a
 - **AND** a later retry SHALL submit the original terminal activity unchanged
 
 ### Requirement: Compaction preserves Server-visible transcript invariants
-The first release SHALL compact only adjacent `message.delta` or `reasoning.delta` records whose payload contains a non-empty `text`, `partId`, and `messageId`, and whose applicable `turnId`, logical target, physical `runtimeSessionId`, and logical sequence key all match. The reducer SHALL concatenate text in original order, retain the earliest representative `runtimeEventId`, retain every replaced source ID and `compactedRawEventCount`, and preserve the Server transcript's cumulative text and raw-event count. The Server transcript accumulator SHALL interpret `compactedRawEventCount` as the number of source delta rows for its existing `RawEventCount` and flush thresholds.
+The first release SHALL compact only adjacent `message.delta` or `reasoning.delta` records whose payload contains a non-empty `text`, `partId`, and `messageId`, and whose applicable `turnId`, logical target, physical `runtimeSessionId`, and logical lane key all match. The reducer SHALL concatenate text in original order, retain the earliest representative `runtimeEventId`, retain every replaced source ID and `compactedRawEventCount`, and preserve the Server transcript's cumulative text and raw-event count. The Server transcript accumulator SHALL interpret `compactedRawEventCount` as the number of source delta rows for its existing `RawEventCount` and flush thresholds.
 
 Tool-call, usage, model, and binding-reconciliation records SHALL have no compaction reducer in this change. They remain protected, even when they share an ID or appear replaceable. A missing identity, unsupported payload shape, non-adjacent record, different physical runtime, different Agent turn, different text part, different logical target, or any protected event type SHALL consume capacity unchanged and emit an `unsafe-compaction` diagnostic. No compaction may alter turn boundaries, FIFO order, tool-call lifecycle/count, usage/cost accounting, model observations, binding identity, or terminal details.
 
 #### Scenario: Adjacent text deltas are compacted losslessly
-- **WHEN** adjacent pending text deltas share event type, target, runtime session, turn, logical sequence key, `partId`, and `messageId`
+- **WHEN** adjacent pending text deltas share event type, target, runtime session, turn, logical lane key, `partId`, and `messageId`
 - **THEN** the outbox MAY replace them with one representative record whose text is their ordered concatenation
 - **AND** the representative SHALL retain all source IDs and their count
 - **AND** the Server transcript SHALL contain the same cumulative text and raw-event count as delivery of the source rows separately
