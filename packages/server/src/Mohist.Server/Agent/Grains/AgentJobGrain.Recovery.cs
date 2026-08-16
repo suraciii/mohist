@@ -168,6 +168,30 @@ public sealed partial class AgentJobGrain
                     "receipt-id-reused");
             }
 
+            // The receipt ledger may have been persisted just before the
+            // operation-grain write. Repair that cross-grain acknowledgement
+            // before returning the stored answer, so an exact replay cannot
+            // leave the update permanently unresolved.
+            if (prior.Status == RuntimeRecoveryReceiptAckStatuses.Accepted)
+            {
+                if (receipt.Payload?.Type.Trim().Equals(
+                        RuntimeRecoveryReceiptPayloadTypes.UpdateInterrupted,
+                        StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await SettleUpdateOperationWorkAsync(receipt);
+                }
+                else
+                {
+                    await _grains
+                        .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+                        .MarkReceiptAckedAsync(
+                            RuntimeRecoveryReceiptOwnerKinds.AgentJob,
+                            Key,
+                            receipt.WorkId,
+                            taskRunId: null);
+                }
+            }
+
             if (State.Status == AgentJobStatus.Pending
                 && string.IsNullOrWhiteSpace(State.RunnerId)
                 && string.Equals(prior.Reason, "replacement-created", StringComparison.Ordinal))

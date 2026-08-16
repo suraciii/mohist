@@ -320,6 +320,18 @@ Channel decision (grounded in live source):
   still showed the known unrelated AgentJob dispatch timing failure; the
   focused RunnerConfig class passes directly.
 
+## Review MF-1/MF-3/MF-5 Increment
+
+- Workflow Pi Agent turns now pass the runtime-turn registry and canonical
+  work key into `piAction`, so update shutdown can resolve the physical turn
+  binding and persist an interruption receipt.
+- Server terminal-result fingerprints now hash the explicit cross-language
+  seven-field result payload and exclude the Server-only computed `ErrorCode`.
+- AgentJob duplicate accepted receipts repair the update-operation ledger
+  before returning their stored acknowledgement, including both interruption
+  and terminal-result receipts.
+- Verification: Runner typecheck and Server build pass.
+
 ## Fix-CI Verification Repair
 
 - The persisted `verify.1` output showed one deterministic Server unit failure

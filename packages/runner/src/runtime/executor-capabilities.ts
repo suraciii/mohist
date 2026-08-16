@@ -559,6 +559,8 @@ async function runPiAgentTurn(
     runtimeEventOutbox: deps.agentSessionRuntimeEventOutbox,
     runtimeEventRecordId: deps.runtimeEventRecordId,
     runnerId: deps.connection.runnerId,
+    runtimeTurnRegistry: deps.runtimeTurnRegistry,
+    runtimeTurnKey: workKey(work),
     cleanupAttempt,
     agentRecovery: work.agentRecovery ?? null,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),

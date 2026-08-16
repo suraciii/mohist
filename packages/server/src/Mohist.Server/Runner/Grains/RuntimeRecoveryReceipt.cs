@@ -176,8 +176,22 @@ public static class RuntimeRecoveryReceiptFingerprint
     public static string For(WorkResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
+
+        // Keep this payload identical to the Runner's workResultFingerprint:
+        // ErrorCode is a Server-only computed property and must not enter the
+        // cross-language receipt hash.
+        var canonical = new
+        {
+            status = result.Status,
+            message = result.Message,
+            output = result.Output,
+            exitCode = result.ExitCode,
+            artifactUploadIds = result.ArtifactUploadIds,
+            addTasks = result.AddTasks,
+            error = result.Error,
+        };
         return Convert.ToHexString(SHA256.HashData(
-            JsonSerializer.SerializeToUtf8Bytes(result, JSON.Options))).ToLowerInvariant();
+            JsonSerializer.SerializeToUtf8Bytes(canonical, JSON.Options))).ToLowerInvariant();
     }
 }
 
