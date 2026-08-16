@@ -736,4 +736,12 @@ public sealed record AgentJobTerminalResult(
     [property: Id(2)] string? Output,
     [property: Id(3)] string[]? ArtifactUploadIds,
     [property: Id(4)] string? FailureReason,
-    [property: Id(5)] int? ExitCode);
+    [property: Id(5)] int? ExitCode,
+    /// <summary>
+    /// Frozen execution tuple evidence copied from the AgentJob input when
+    /// the terminal result is recorded. These append-only fields are null
+    /// for legacy jobs and for an unset configuration member.
+    /// </summary>
+    [property: Id(6)] string? Model = null,
+    [property: Id(7)] string? Variant = null,
+    [property: Id(8)] string? ReasoningEffort = null);

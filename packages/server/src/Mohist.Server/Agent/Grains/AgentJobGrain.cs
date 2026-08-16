@@ -1388,7 +1388,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             output,
             artifactUploadIds,
             failureReason,
-            terminalExitCode ?? exitCode);
+            terminalExitCode ?? exitCode,
+            Model: State.Input?.Model ?? State.RoutedPlan?.Model,
+            Variant: State.Input?.Variant ?? State.RoutedPlan?.Variant,
+            ReasoningEffort: State.Input?.ReasoningEffort ?? State.RoutedPlan?.ReasoningEffort);
         State.PendingSessionClose = pending;
         StageTerminalDeliveryEvent(
             terminalStatus,

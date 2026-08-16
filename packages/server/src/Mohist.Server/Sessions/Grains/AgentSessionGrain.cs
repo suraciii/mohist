@@ -2749,7 +2749,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             s.BindingEpoch,
             s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus,
             AgentWorkInterruptionProjection.Latest(s.Status.InterruptionHistory),
-            s.Status.InterruptionHistory);
+            s.Status.InterruptionHistory,
+            eventSummary.AppliedReasoningEffort);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)

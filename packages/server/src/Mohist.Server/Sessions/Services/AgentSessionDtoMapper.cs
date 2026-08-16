@@ -102,7 +102,8 @@ internal static class AgentSessionDtoMapper
                 string.Equals(s.FailureCategory, ContextExhaustionClassifier.ContextExhaustionCategory, StringComparison.Ordinal) ? true : null,
                 string.Equals(s.FailureCategory, ContextExhaustionClassifier.SuspectedContextExhaustionCategory, StringComparison.Ordinal) ? true : null,
                 s.ToolCallCount,
-                s.ToolErrorCount);
+                s.ToolErrorCount,
+                s.AppliedReasoningEffort);
 
     /// <summary>
     /// Projects a single transcript part into the

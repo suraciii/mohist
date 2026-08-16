@@ -401,7 +401,12 @@ public sealed record AgentSessionInfo(
     [property: Id(24)] long BindingEpoch = 0,
     [property: Id(25)] string? LastTerminalStatus = null,
     [property: Id(26)] AgentWorkInterruptionTransition? Interruption = null,
-    [property: Id(27)] IReadOnlyList<AgentWorkInterruptionTransition>? InterruptionHistory = null);
+    [property: Id(27)] IReadOnlyList<AgentWorkInterruptionTransition>? InterruptionHistory = null,
+    /// <summary>
+    /// Reasoning effort applied to the last execution, resolved from the
+    /// session activity evidence. Null when unset or not yet recorded.
+    /// </summary>
+    [property: Id(28)] string? AppliedReasoningEffort = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(

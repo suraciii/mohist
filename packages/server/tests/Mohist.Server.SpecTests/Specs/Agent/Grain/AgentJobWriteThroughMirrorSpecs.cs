@@ -76,9 +76,12 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
 
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "terminal mirror",
+            Model: "openai/gpt-5.5",
             WorkspacePath: "/tmp/mirror-terminal",
             ProjectId: projectId,
-            AgentId: "agent-terminal"));
+            AgentId: "agent-terminal",
+            Variant: "balanced",
+            ReasoningEffort: "high"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
@@ -106,10 +109,13 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         Assert.Equal(new[] { "artifact-completed" }, state.TerminalResult.ArtifactUploadIds);
         Assert.Null(state.TerminalResult.FailureReason);
         Assert.Equal(0, state.TerminalResult.ExitCode);
+        Assert.Equal("openai/gpt-5.5", state.TerminalResult.Model);
+        Assert.Equal("balanced", state.TerminalResult.Variant);
+        Assert.Equal("high", state.TerminalResult.ReasoningEffort);
     }
 
     [Fact]
-    public async Task Mirror_FailedTerminalTransitionWritesFailureReason()
+    public async Task Mirror_FailedTerminalTransitionWithoutEffortRecordsEffortAsAbsent()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"mirror-fail-runner-{Guid.NewGuid():N}");
         var jobKey = $"mirror-fail-{Guid.NewGuid():N}";
@@ -146,6 +152,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         Assert.Equal(new[] { "artifact-failed" }, state.TerminalResult.ArtifactUploadIds);
         Assert.Equal("boom", state.TerminalResult.FailureReason);
         Assert.Equal(1, state.TerminalResult.ExitCode);
+        Assert.Null(state.TerminalResult.ReasoningEffort);
     }
 
     [Fact]

@@ -633,7 +633,8 @@ public partial class AgentSessionQuerier : IScopedService
             Interruption: interruption,
             InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
-            TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
+            TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
+            AppliedReasoningEffort: summary.AppliedReasoningEffort);
     }
 
     private static bool IsApplicableToCurrentRuntime(
@@ -758,7 +759,8 @@ public partial class AgentSessionQuerier : IScopedService
             Interruption: interruption,
             InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
-            TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
+            TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
+            AppliedReasoningEffort: transcriptSummary.AppliedReasoningEffort);
     }
 
     /// <summary>
@@ -851,6 +853,7 @@ public partial class AgentSessionQuerier : IScopedService
             summary.FailureReason,
             summary.ToolCallCount,
             summary.ToolErrorCount,
+            summary.AppliedReasoningEffort,
             BuildRecoveryHistory(loaded));
     }
 
@@ -1179,4 +1182,5 @@ internal sealed record UnifiedTranscriptSummary(
     string? FailureReason,
     int? ToolCallCount,
     int? ToolErrorCount,
+    string? AppliedReasoningEffort,
     IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory);

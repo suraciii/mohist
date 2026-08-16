@@ -18,6 +18,7 @@ internal static class AgentSessionActivitySummaryReducer
         var currentTurnSequence = source.CurrentTurnSequence;
         var currentPartSequence = source.CurrentPartSequence;
         var resolvedModel = source.ResolvedModel;
+        var appliedReasoningEffort = source.AppliedReasoningEffort;
         var latestActivity = source.LatestActivity;
 
         foreach (var mutation in mutations)
@@ -52,7 +53,13 @@ internal static class AgentSessionActivitySummaryReducer
             if (mutation.Type == TranscriptPartTypes.Model)
             {
                 var payload = AgentSessionJsonHelper.ParsePayload(mutation.PayloadJson);
-                resolvedModel = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? resolvedModel;
+                var model = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel");
+                if (!string.IsNullOrWhiteSpace(model))
+                {
+                    resolvedModel = model;
+                    var effort = AgentSessionJsonHelper.GetStringProp(payload, "appliedReasoningEffort");
+                    appliedReasoningEffort = string.IsNullOrWhiteSpace(effort) ? null : effort;
+                }
             }
             else if (mutation.Type == TranscriptPartTypes.SessionActivity)
             {
@@ -81,6 +88,7 @@ internal static class AgentSessionActivitySummaryReducer
         return source with
         {
             ResolvedModel = resolvedModel,
+            AppliedReasoningEffort = appliedReasoningEffort,
             FailureCategory = latestActivity?.FailureCategory,
             FailureReason = latestActivity?.FailureReason,
             LastTerminalStatus = latestActivity?.LastTerminalStatus,

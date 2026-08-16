@@ -241,3 +241,26 @@ Plan skeleton for next run (est. half a day):
 - Non-Agent `mohist/pi` and `mohist/opencode` tasks use the common fence when their action options name a model or true variant. Their Agent-owned reasoning-effort member is intentionally unset because those actions do not own an Agent profile snapshot; explicit adapter-level effort handling remains the runtime contract. This keeps the tuple shape uniform without inventing an effort value.
 - Added Server fence/admission coverage for absent catalogs, deterministic AgentJob and Workflow preflight failures, matching and changed catalog claims, first-writer snapshots, and the lifecycle-gate heartbeat race. Runner coverage verifies stale snapshots are rejected and requeued without entering execution.
 - Verification: Server SpecTests 3938 passed, Server UnitTests 2709 passed, Runner typecheck passed, and the full Runner suite 153 files / 1663 tests passed.
+
+## T-007 (readiness and execution evidence)
+
+- `AgentReadinessService` now compares the resolved `reasoningEffort` in
+  definition matching, reports `effort-without-model`, and classifies both
+  normalized `unsupported_execution_configuration` and
+  `incompatible_execution_configuration` failures as Needs setup. Guidance
+  explicitly names `reasoningEffort` so saved Pi thinking-level variants have
+  a clear re-entry path.
+- `AgentJobTerminalResult` gains append-only model, variant, and
+  `ReasoningEffort` evidence fields. `AgentJobGrain` copies them from the
+  frozen input/plan at terminalization; absent effort remains null and no
+  default is synthesized.
+- Server session transcript projection and the persisted activity summary now
+  retain adapter-reported `appliedReasoningEffort` beside the resolved model.
+  A latest model fact without the field clears the applied effort, preventing
+  an older effort from leaking into a new model/runtime binding. Generic and
+  unified session summaries expose the optional field, and the CLI contract
+  catalog includes it.
+- Added readiness, projector/reducer, and Orleans AgentJob terminal-evidence
+  coverage. Verification: Server UnitTests 2717 passed, Server SpecTests
+  3938 passed, focused Pi projector tests 8 passed, and Runner source
+  typecheck passed. `git diff --check` passed.
