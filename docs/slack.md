@@ -474,7 +474,12 @@ and first AgentTurn. Acceptance is the **👀 (Received)** reaction on the user'
 message, not an acknowledgement message. The liveness projection then shows
 whether the work is running or queued. A queued or running Turn can be stopped.
 Agent replies, failures, and conclusions that need human action
-return to the same Slack conversation. Completing the AgentJob does not close
+return to the same Slack conversation. When the needed action is one Mohist
+can execute — such as stopping or retrying a Turn — the notice carries a
+signed action button. Pressing it performs the operation under the presser's
+authority with the same result as the CLI or Web operation. A button is never
+a second command grammar; it is a shortcut to the same operation.
+Completing the AgentJob does not close
 the Session; when a reply asks a question, the user can answer directly.
 
 ### Continue the Same Session
@@ -519,7 +524,8 @@ AgentSession:
   creates an independent AgentSession for it. The original Agent's context is
   neither switched nor contaminated.
 - A message that mentions several Bots managed by the same Mohist Server starts
-  no work and produces one prompt to select an Agent. A Bot's own message never
+  no work and produces one interactive selection instead of a free-text
+  reply; choosing an Agent starts its work. A Bot's own message never
   becomes input — not for itself, and not for another Bot. Separate Mohist
   Servers have no shared routing state, so the first version does not
   coordinate one multi-Bot message across installations.
@@ -705,6 +711,8 @@ does not change the Agent's capabilities:
 - **Do not send empty acknowledgements**: Messages that say only received,
   understood, or confirmed interrupt a channel and can trigger other Bots.
   Silence without new information is a normal completion, not a failure.
+  The exception is a human's direct question: always answer it, even if the
+  answer is only that you have nothing to add — never leave a person waiting.
 - **Call back after a delegation**: When work delegated by another person or
   Agent is complete, mention the delegator in the result. Missing this callback
   is a common cause of stalled collaboration. Do not mention someone merely to
@@ -840,6 +848,9 @@ confirmation and cannot be hidden behind one ambiguous delete operation:
   mentions, and replies in a bound thread trigger it.
 - The first version does not include Slack's native Agent entry point, Agent
   Home, or streaming replies.
+- The first version does not include Slack-native slash commands or message
+  shortcuts. Structured control in Slack uses signed action buttons;
+  everything else is a message.
 - The first version does not include a public app marketplace, multi-tenant
   hosting, billing, Slack Connect external-member invocation, or cross-company
   directory discovery.

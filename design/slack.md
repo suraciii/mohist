@@ -42,6 +42,8 @@ share authoritative Server state but not responsibilities.
 | installation DSL | `mo slack setup` installs the Workspace-level Mohist App; `mo slack install-agent <agent>` installs an existing Agent | `setup-agent` conflicts with Agent Readiness setup, while `create` falsely says an Agent or Connection is being created when the user is installing an Agent into Slack |
 | conversational Agent creation | Mohist App may ask only for name and daily responsibility, creates a real Agent with defaults, then guides Slack installation | a Mohist App DM is already an authorization boundary and needs no draft approval state |
 | reply location | Server chooses the delivery target and injects a reply anchor with the input: thread root, triggering message, or DM | the model does not guess a thread from memory; the anchor is a system fact |
+| structured control in Slack | signed action buttons with Server-verified payloads, plus Server-consumed boundary messages such as claim; no Slack-native slash commands | buttons reuse one verified mechanism and the same operations as CLI and Web; slash commands are a third grammar that forces manifest changes and reinstalls while doing nothing messages plus buttons cannot |
+| liveness honesty | reactions and status messages project only real state-machine facts; timers are cleanup backstops, never sources of narrative | Buzz's welcome-kickoff failure mode: announcing ignorance on a deadline writes the wrong story in permanent ink — facts decide, timers are a last-resort backstop |
 | interruption | new input for the same active Session defaults to Steer, joining the current Turn or waiting in queue; only explicit Stop is Interrupt | this matches SessionInput / AgentTurn and prevents ordinary messages from aborting long work |
 | collaboration rules | inject a built-in Skill: no empty acknowledgement, mention the delegator after completing delegated work, silence by default, self-contained replies, and no guessed reply location | behavior remains inspectable and evolvable rather than hard-coded in adapter or renderer |
 | process transparency | Slack carries liveness and final replies; Open in Mohist links to the Web Session timeline for complete progress | a quiet channel and an owner-visible timeline are separate signals with separate homes |
@@ -578,7 +580,14 @@ Two rules follow:
   existing thread neither switches nor contaminates the original Agent Session.
 - Do not start work when ownership is ambiguous. If one message mentions
   multiple Mohist Bots, or a thread is bound to multiple Bots and an unmentioned
-  reply arrives, ask the user to choose instead of guessing.
+  reply arrives, ask the user to choose instead of guessing. The chooser is an
+  interactive Slack selection, not a free-text reply to parse.
+- Do not start work when the target Agent cannot run it. When admission finds
+  the Agent not Ready or its Connection unavailable, Server posts one
+  Server-authored guidance message — safe summary for the caller, specific gap
+  only for Owner and operators — without creating a Session, Turn, or queued
+  input. This is Buzz's setup-mode nudge: the platform answers for an agent
+  that cannot answer for itself, deduplicated per triggering message.
 
 DM is the exception. Slack DM users do not organize work by thread; treating
 each message as new work would split a continuous thought into separate jobs.
@@ -688,6 +697,11 @@ exit path leaves liveness open.
   crash or complete non-response permits a system-authored fallback explicitly
   labeled as a system failure.
 
+Detecting that a Turn ended without publishing belongs to the Runtime as an
+advisory reminder to the model — Buzz's reply guard, bounded and explicitly
+silence-licensing — never to Server, which neither synthesizes the missing
+reply nor treats silence as failure.
+
 ### Reply Action CLI: `mo slack message send`
 
 The reply action command surface is `mo slack message send`, a general CLI for
@@ -733,6 +747,24 @@ mo slack message send --conversation <id> --text "architecture diagram" --image 
   message types. `mo slack message` is a command group, not an isolated command;
   future `message get` and `message thread` may let an Agent fetch context. Only
   send is implemented first.
+
+### Signed Action Buttons
+
+Slack interactivity reaches Server as `block_actions` provider interactions.
+Every interactive control Mohist renders carries a Server-signed payload bound
+to Connection, conversation, actor Slack identity, target resource, and expiry.
+Server revalidates signature, freshness, and actor authorization on every
+click; a stale, foreign, or expired action is rejected with a visible notice.
+An accepted click enters the durable provider inbox like any other input and
+delegates to the same application service the equivalent CLI or Web call
+uses. Buttons are shortcuts to existing operations, never a second command
+grammar: they carry no free text, and their effects are exactly the effects of
+the operation they name.
+
+Current actions: Stop a queued or running Turn, Retry from a failure notice,
+and Agent selection for a multi-Bot mention. Routing Mohist approval gates
+into Slack as actionable notifications requires a notification routing policy
+and belongs to a future phase.
 
 ### Delivery Intent, Claim/Ack, and Unknown Results
 
@@ -892,9 +924,11 @@ preserved for compatibility. Its conversation-side delivery is a current gap:
 the running build still acknowledges Manager requests with a text message and
 executes management through that protocol.
 
-Public App Marketplace, multi-tenant hosting, coordination across Mohist
-Servers, Slack-native Agent ingress, App Home, and complete scale and operations
-experience remain future phases. Future capabilities must still enter through
+Slack-native slash commands, message shortcuts, streaming replies, and
+Slack-native Agent ingress remain excluded. Approval-gate notifications routed
+into Slack, Public App Marketplace, multi-tenant hosting, coordination across
+Mohist Servers, App Home, and complete scale and operations experience remain
+future phases. Future capabilities must still enter through
 Agent API and the existing Connection boundary. The adapter must never parse
 Runner logs, override Agent configuration, or write the Mohist database
 directly.
