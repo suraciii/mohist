@@ -548,9 +548,10 @@ export async function abortAndConfirmSession(
         'status',
       )
       const statuses = beforeAbort.data
-      const status = statuses && typeof statuses === 'object'
-        ? (statuses as Record<string, ProviderRetryStatus>)[sessionId]
-        : undefined
+      const status =
+        statuses && typeof statuses === 'object'
+          ? (statuses as Record<string, ProviderRetryStatus>)[sessionId]
+          : undefined
       if (!status || status.type === 'idle') {
         return {
           ok: false,

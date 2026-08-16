@@ -737,3 +737,16 @@ Channel decision (grounded in live source):
   178, CLI 1,856, Server Unit 2,674, Server Arch 68, Runner 1,661, and Web
   4,727. The issue's durable lifecycle, projection, DTO, and browser coverage
   remains in the prepared T-007 implementation.
+
+## T-008 Final Run Verification
+
+- The prepared T-008 slice provides the runner update-operation recovery-status
+  endpoint, bounded injectable CLI polling, per-work recovered/unresolved output,
+  persisted recovery results, and non-success exit semantics for unresolved work.
+- Baseline focused verification passed CLI 1,856/1,856 and the supported Server
+  apphost `RunnerConfigApiSpecs` 10/10. The initial full gate stopped only at the
+  repository formatter on five issue-567 Runner files; `npm run format` repaired
+  that existing drift without behavioral changes.
+- Final `npm run verify` passed end to end: build 0 warnings/errors, Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Spec 3,946, Arch 68, Web 4,727,
+  Runner 1,661, and Slack 70. Runner typecheck also passed independently.
