@@ -25,12 +25,17 @@ The Session view SHALL surface the session's most recent result in the first vie
 
 ### Requirement: The launch result stays distinct from later Turn results
 
-For launch-origin sessions, the Session view SHALL present the first AgentJob result — supplied by the session's first AgentTurn — as the launch result, distinct from later Turn results, reusing the existing launch-observation read surface. Later Turns MUST NOT rewrite the presented launch result, and a launch result MUST NOT be fabricated for a session that was not created by an AgentJob launch.
+For sessions created by an AgentJob launch — direct `agent-launch` sessions and Slack `agent-connection` sessions alike, both launch-coordinator creations whose first AgentTurn carries the JobId — the Session view SHALL present the first AgentJob result, supplied by that first AgentTurn, as the launch result, distinct from later Turn results, reusing the existing launch-observation read surface. Later Turns MUST NOT rewrite the presented launch result, and a launch result MUST NOT be fabricated for a session none of whose Turns carries a JobId.
 
 #### Scenario: Launch result is presented for launch-origin sessions
 
 - **WHEN** the session was created by an AgentJob launch whose first AgentTurn has a terminal result
 - **THEN** the Session view SHALL present that result as the launch result
+
+#### Scenario: Agent-connection sessions present their launch result
+
+- **WHEN** a Slack agent-connection session — created by the launch coordinator with a real AgentJob, so its first AgentTurn carries that JobId — has a first AgentTurn with a terminal result
+- **THEN** the Session view SHALL present that result as the launch result, exactly as for direct launch sessions
 
 #### Scenario: A follow-up Turn does not rewrite the launch result
 
@@ -38,9 +43,9 @@ For launch-origin sessions, the Session view SHALL present the first AgentJob re
 - **THEN** the launch result SHALL remain the first AgentTurn's result
 - **AND** the follow-up's result SHALL be presented as a later Turn result
 
-#### Scenario: Non-launch sessions do not fabricate a launch result
+#### Scenario: Sessions without a JobId-bearing Turn do not fabricate a launch result
 
-- **WHEN** the session was not created by an AgentJob launch
+- **WHEN** none of the session's Turns carries a JobId — the session was not created by an AgentJob launch
 - **THEN** the Session view SHALL NOT present a launch result
 
 ### Requirement: Terminal Turn results are first-class outcome entries

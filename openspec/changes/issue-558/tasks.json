@@ -6,14 +6,14 @@
       "id": "T-001",
       "title": "Server: session 列表读模型携带结果事实（主题摘录、最新 Turn 结果、启动结果、Turn 观察的 jobId）",
       "spec": "specs/agent-history-results/spec.md#agent-scoped-session-list-read-model-carries-result-facts",
-      "description": "在 AgentSessionReadModels.cs 增加共享结果信封（AgentSessionTurnOutcomeDto: TurnId/Sequence/Outcome/Result 复用 AgentTurnResultObservationDto；AgentSessionLaunchOutcomeDto: JobId + Turn outcome），并为 AgentSessionListItemDto 与 UnifiedSessionListItemDto 追加可选字段 Subject/LatestTurn/Launch（沿用 Origin/TargetId 追加先例）。在 AgentSessionQuerier 的 ListAgentSessionsAsync、ListUnifiedSessionsByAgentAsync 及共享统一 DTO 的 workspace 变体的读边界上，从已反序列化的 AgentSession.Status.Inputs/Status.Turns 纯函数派生这些字段（零新增查询/Grain 调用/AgentJob join）：有界首输入主题摘录（空白折叠、单行、固定字符上限，无文本则显式缺失）、最新 Turn 终态结果（completed 带结果消息 / failed 带失败类别与原因 / cancelled / 其余含 no-Turn、queued、executing、unknown 一律 unresolved，绝不从 Activity 推断）、以及最低序列且带 JobId 的 Turn 提供的 launch 结果（后续 Turn 不得改写；无 JobId Turn 则无 Launch 信封）。同时在 AgentSessionObservationMapper 的 AgentTurnObservationDto 上暴露已记录的 JobId（仅 launch 创建的 Turn 携带）。只读投影：不新增持久化状态、事件或 transcript fact 类型。",
+      "description": "在 AgentSessionReadModels.cs 增加共享结果信封（AgentSessionTurnOutcomeDto: TurnId/Sequence/Outcome/Result 复用 AgentTurnResultObservationDto；AgentSessionLaunchOutcomeDto: JobId + Turn outcome），并为 AgentSessionListItemDto 与 UnifiedSessionListItemDto 追加可选字段 Subject/LatestTurn/Launch/Cost/EndedAt（沿用 Origin/TargetId 追加先例）。在 AgentSessionQuerier 的 ListAgentSessionsAsync、ListUnifiedSessionsByAgentAsync 及共享统一 DTO 的 workspace 变体的读边界上，从已反序列化的 AgentSession.Status.Inputs/Status.Turns 纯函数派生这些字段（零新增查询/Grain 调用/AgentJob join）：有界首输入主题摘录（空白折叠、单行、固定字符上限，无文本则显式缺失）、最新 Turn 终态结果（completed 带结果消息 / failed 带失败类别与原因 / cancelled / 其余含 no-Turn、queued、executing、unknown 一律 unresolved，绝不从 Activity 推断）、以及最低序列且带 JobId 的 Turn 提供的 launch 结果（后续 Turn 不得改写；无任何带 JobId 的 Turn 则无 Launch 信封——agent-connection 会话由 launch coordinator 以真实 AgentJob 创建（EnsureInitialLaunchAsync 必带 JobId 并盖章于首 Turn），同样产出 Launch 信封）。同时从 Status.UsageSummary 派生 Cost（CostAmount/CostCurrency，未记录则显式缺失）与 EndedAt（Status 上 LastDataAt/CurrentTurnEndedAt/IdleSince/BoundAt 锚点的最新非空值，无则显式缺失；开始时间即既有 CreatedAt），AgentSessionTurnOutcomeDto 附带 Turn 自身 RecordedAt/UpdatedAt 使首轮执行耗时为 Turn 级事实。并在 AgentSessionObservationMapper 的 AgentTurnObservationDto 上暴露已记录的 JobId（launch coordinator 创建会话——含 agent-launch 与 agent-connection——的首 Turn 携带，后续 Turn 为空）。只读投影：不新增持久化状态、事件或 transcript fact 类型。",
       "acceptanceCriteria": [
-        "AgentSessionQuerier 的 agent 范围列表读与 agent 过滤/工作区过滤的统一列表读，对每个返回 session 均返回 subject（有界单行摘录，无首输入文本时为显式缺失而非编造）、latestTurn（Outcome ∈ completed|failed|cancelled|unresolved，completed 附结果消息，failed 附失败类别/原因）与 launch（首个带 JobId 的 Turn 的结果 + JobId）",
+        "AgentSessionQuerier 的 agent 范围列表读与 agent 过滤/工作区过滤的统一列表读，对每个返回 session 均返回 subject（有界单行摘录，无首输入文本时为显式缺失而非编造）、latestTurn（Outcome ∈ completed|failed|cancelled|unresolved，completed 附结果消息，failed 附失败类别/原因）与 launch（首个带 JobId 的 Turn 的结果 + JobId）、cost（CostAmount/CostCurrency，未记录时显式缺失而非显示 0）与 endedAt（已记录生命周期锚点的最新非空值，无锚点时显式缺失）",
         "completed/failed/cancelled 按终态 Turn 状态映射；无 Turn、queued、executing、unknown 一律映射为 unresolved，且不得从 session Activity 推断结果词汇（服务器端完成词汇归一化，含既有 cancelled 别名归一）",
-        "launch 信封由最低序列带 JobId 的 Turn 提供：后续 Turn 终态不得改写呈现的 launch 结果；agent-connection / 无 Turn / 非 launch 会话不产出 Launch 信封（不编造）",
-        "AgentTurnObservationDto 暴露 jobId（仅 launch 创建 Turn 有值），launch-observation 读路径行为不变、未新增重复的 AgentJob 查询路径",
+        "launch 信封由最低序列带 JobId 的 Turn 提供：后续 Turn 终态不得改写呈现的 launch 结果；无任何带 JobId Turn 的会话（无 Turn、workflow 创建等非 launch 会话）不产出 Launch 信封（不编造）；agent-connection 会话为 launch coordinator 以真实 AgentJob 创建，首 Turn 携带 JobId，同样产出 Launch 信封",
+        "AgentTurnObservationDto 暴露 jobId（launch coordinator 创建会话——含 agent-launch 与 agent-connection——的首 Turn 有值，后续 Turn 为空），launch-observation 读路径行为不变、未新增重复的 AgentJob 查询路径",
         "未引入新的持久化 session 状态、事件或 transcript fact 类型：实现仅为读边界上的纯投影（零额外查询 / Grain 调用 / AgentJob join）",
-        "Mohist.Server.SpecTests 的 AgentSessionQuerier 覆盖：主题摘录截断与缺失、各终态状态→结果映射、unresolved 回退、launch 信封存在/缺失（agent-launch vs agent-connection vs 无 Turn）、后续 Turn 不改写 launch —— 全部通过 dotnet test",
+        "Mohist.Server.SpecTests 的 AgentSessionQuerier 覆盖：主题摘录截断与缺失、各终态状态→结果映射、unresolved 回退、launch 信封存在（agent-launch 与 agent-connection 均存在——皆为 launch coordinator 创建、首 Turn 带 JobId）与缺失（无任何带 JobId 的 Turn）、后续 Turn 不改写 launch、cost 存在/缺失、endedAt 锚点派生与无锚点缺失 —— 全部通过 dotnet test",
         "CliFieldContractTests 按追加的可选 DTO 字段更新并通过（位置 record 仅追加，既有构造调用点不需改动）"
       ],
       "priority": 1,
@@ -28,14 +28,15 @@
       "id": "T-002",
       "title": "Web: Agent 页历史重写为承载结果的行与结果分组",
       "spec": "specs/agent-history-results/spec.md#outcomes-use-result-vocabulary-with-honest-unknown-handling",
-      "description": "在 entities/agent 的 session 列表 DTO 类型与查询中消费 T-001 的新字段（subject/latestTurn/launch），重写 pages/agent-detail 的历史区：行主标签为 subject 摘录（缺失时用诚实占位符，绝不用 Agent 名）；次行呈现 origin、上下文引用（Issue/Epic 编号经既有 toProjectPath 模式解析为页面链接，repository/workspace 与 Slack 来源按记录呈现）、模型；尾部信号为创建/最近活动时间戳、Activity 徽章（独立信号）、launch 结果 chip 与最新结果 chip。分组改为基于最新 Turn 结果的 Failed/Completed/Cancelled/Unresolved（组内按最近活动排序，优先级 Failed/Unresolved 在前），删除与分组重叠的 Recent 切片；unknown Activity 绝不落入 Failed 组，失败的 launch Job 不使 Session 被标记为失败（失败留在行内 launch 信号）。缺失上下文省略而非渲染空占位。本任务同时满足 #history-rows-identify-the-task-and-its-context 与 #the-first-agentjob-result-is-presented-per-row。",
+      "description": "在 entities/agent 的 session 列表 DTO 类型与查询中消费 T-001 的新字段（subject/latestTurn/launch/cost/endedAt），重写 pages/agent-detail 的历史区：行主标签为 subject 摘录（缺失时用诚实占位符，绝不用 Agent 名）；次行呈现 origin、上下文引用（Issue/Epic 编号经既有 toProjectPath 模式解析为页面链接，repository/workspace 与 Slack 来源按记录呈现）、模型；尾部信号为开始时间、结束时间与耗时（活跃会话呈现至今耗时，不编造结束时间）、成本（未记录则省略而非显示 0）、Activity 徽章（独立信号）、launch 结果 chip（携带 Turn 级 recordedAt/updatedAt）与最新结果 chip。分组改为基于最新 Turn 结果的 Failed/Completed/Cancelled/Unresolved（组内按最近活动排序，优先级 Failed/Unresolved 在前），删除与分组重叠的 Recent 切片；unknown Activity 绝不落入 Failed 组，失败的 launch Job 不使 Session 被标记为失败（失败留在行内 launch 信号）。缺失上下文省略而非渲染空占位。本任务同时满足 #history-rows-identify-the-task-and-its-context、#history-rows-surface-duration-and-cost 与 #the-first-agentjob-result-is-presented-per-row。",
       "acceptanceCriteria": [
-        "历史行主标签为 subject 摘录，Agent 名不再作为行主标签；行的次行呈现 origin、上下文引用（Issue/Epic 链接到其页面）、模型，尾部呈现创建与最近活动时间戳、独立于结果的 Activity 徽章、launch 结果与最新结果 chip",
+        "历史行主标签为 subject 摘录，Agent 名不再作为行主标签；行的次行呈现 origin、上下文引用（Issue/Epic 链接到其页面）、模型，尾部呈现开始/结束时间、耗时、成本（记录时）、独立于结果的 Activity 徽章、launch 结果与最新结果 chip",
+        "耗时与成本呈现诚实：有结束锚点时呈现结束时间与 endedAt−createdAt 耗时；Activity 仍活跃的会话呈现至今耗时且不编造结束时间；无成本记录时省略成本信号而非显示 0",
         "分组键仅为最新 Turn 结果（Failed/Completed/Cancelled/Unresolved），组内按最近活动时间排序；Activity unknown 的 session 不出现在 Failed 组且不被称为 Failed；Recent 重复切片被移除",
         "失败 launch 后接已完成后续 Turn 的会话归入 Completed 组且行内 launch 失败仍可见；仅有失败 launch Turn 的会话因该 Turn 失败归入 Failed（Turn 事实推导，而非 Job 状态或 Activity 推断）",
         "launch 结果取首 Turn（T-001 的 launch 信封），后续 Turn 终态不改写行内呈现的 launch 结果，最新结果作为独立信号呈现",
         "无上下文引用的会话行省略引用呈现，不渲染空占位符",
-        "AgentDetailPage 页面测试覆盖：subject/引用/时间戳/双信号、四组分组、unknown-Activity 不入 Failed、失败 Job 非失败 Session、Recent 移除；entities/agent DTO 类型与查询测试同步更新，npm run verify（或对应 vitest 门禁）通过"
+        "AgentDetailPage 页面测试覆盖：subject/引用/开始-结束-耗时-成本/双信号、四组分组、unknown-Activity 不入 Failed、失败 Job 非失败 Session、Recent 移除；entities/agent DTO 类型与查询测试同步更新，npm run verify（或对应 vitest 门禁）通过"
       ],
       "priority": 2,
       "mode": "AFK",
@@ -49,13 +50,13 @@
       "id": "T-003",
       "title": "Web: Session 首屏呈现最近结果与 launch 结果（区别于 Activity 徽章）",
       "spec": "specs/session-result-presentation/spec.md#the-first-viewport-surfaces-the-most-recent-result",
-      "description": "在 entities/session 增加表驱动纯函数 deriveLatestTurnOutcome(turns)：选取最高序列且具终态状态的 Turn 并映射为与服务器一致的结果词汇（completed/failed/cancelled/unresolved；非终态与缺失一律 unresolved，绝不从 Activity 推断），测试镜像服务器映射表。在 pages/session 的 SessionDetailShell 首屏头部将最近结果作为与 StatusBadge 并列的独立信号呈现：completed 附结果消息（有界摘录）、failed 附失败类别与原因、cancelled 与 unresolved 如实陈述。launch 结果：利用 T-001 暴露在 Turn 观察上的 jobId，取首个携带 jobId 的 Turn 的终态结果作为 launch 结果，标注为首轮执行且与最近结果视觉区分；非 launch 会话不呈现 launch 结果区；既有 ?jobId= 新鲜 launch 流程（launchObservationQueryOptions）保持不变。本任务同时满足 #the-launch-result-stays-distinct-from-later-turn-results。",
+      "description": "在 entities/session 增加表驱动纯函数 deriveLatestTurnOutcome(turns)：选取最高序列且具终态状态的 Turn 并映射为与服务器一致的结果词汇（completed/failed/cancelled/unresolved；非终态与缺失一律 unresolved，绝不从 Activity 推断），测试镜像服务器映射表。在 pages/session 的 SessionDetailShell 首屏头部将最近结果作为与 StatusBadge 并列的独立信号呈现：completed 附结果消息（有界摘录）、failed 附失败类别与原因、cancelled 与 unresolved 如实陈述。launch 结果：利用 T-001 暴露在 Turn 观察上的 jobId，取首个携带 jobId 的 Turn 的终态结果作为 launch 结果，标注为首轮执行且与最近结果视觉区分；无任何带 jobId Turn 的会话不呈现 launch 结果区（不编造）；agent-connection 会话首 Turn 携带 coordinator 分配的真实 jobId，与直启会话同样呈现 launch 结果，历史行与 Session 头对同一会话呈现一致；既有 ?jobId= 新鲜 launch 流程（launchObservationQueryOptions）保持不变。本任务同时满足 #the-launch-result-stays-distinct-from-later-turn-results。",
       "acceptanceCriteria": [
         "Session 头部首屏以结果词汇呈现最近结果（completed+结果消息摘录 / failed+失败类别与原因 / cancelled / unresolved），与 Activity 徽章为两个并列且来源独立的信号，最近结果不派生自 Activity 值",
         "无终态 Turn（含 queued/executing/unknown/无 Turn）时首屏呈现 unresolved，不暗示成功或失败",
-        "launch 来源会话呈现首个 jobId Turn 的终态结果作为 launch 结果；后续 Turn 终态不改写 launch 结果且其结果作为后续 Turn 结果另行呈现；非 launch 会话不编造 launch 结果",
+        "launch 来源会话（含 agent-connection——首 Turn 携带真实 jobId）呈现首个 jobId Turn 的终态结果作为 launch 结果；后续 Turn 终态不改写 launch 结果且其结果作为后续 Turn 结果另行呈现；无任何带 jobId Turn 的会话不编造 launch 结果",
         "deriveLatestTurnOutcome 为 entities/session 中的表驱动纯函数，单元测试覆盖与服务器 D2 映射一致的全部分支（含别名与非终态回退）",
-        "SessionDetailShell 页面测试覆盖最近结果、launch 结果、非 launch 会话、与 Activity 徽章的区分；?jobId= 新鲜 launch 观察流程回归测试保持通过"
+        "SessionDetailShell 页面测试覆盖最近结果、launch 结果（含 agent-connection 会话与无 jobId Turn 会话两类边界）、与 Activity 徽章的区分；?jobId= 新鲜 launch 观察流程回归测试保持通过"
       ],
       "priority": 2,
       "mode": "AFK",
@@ -95,7 +96,7 @@
         "design/session-timeline.md 定义终态 Turn 结果作为 outcome 条目的呈现语义：呈现类别表含 outcome 行、各结果句式、不分组规则、failed 保持 error、可展开结构化证据契约",
         "docs/web-ui.md 的 Agents 实现缺口列表不再包含 “AgentJob has no result view separate from its continuing AgentSession” 的陈述（grep 校验为空）",
         "docs/web-ui.md 的 AgentSession 实现缺口脚注不再将首屏最近结果与终态 Turn 结果条目呈现列为缺失，正文首屏规范句保持为已满足的规范陈述",
-        "两份文档描述与 T-002/T-003/T-004 已落地行为一致（分组词汇、结果词汇、launch 语义无文档-实现漂移）"
+        "两份文档描述与 T-002/T-003/T-004 已落地行为一致（分组词汇、结果词汇、launch 语义、耗时/成本呈现无文档-实现漂移）"
       ],
       "priority": 4,
       "mode": "AFK",

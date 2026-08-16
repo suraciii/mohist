@@ -10,6 +10,7 @@ Today the Web cannot explain what an Agent execution produced:
 The facts this change needs are already recorded and already loaded:
 
 - `AgentSessionQuery` deserializes the full `AgentSession` domain record per row. `Status.Inputs[0].Text` is the first input; `Status.Turns` carries every `AgentTurnRecord` with `Status` (`queued`/`executing`/`completed`/`failed`/`cancelled`/`unknown`) and `Result` (`Message`, `Output`, `FailureReason`, `FailureCategory`, `ExitCode`); `AgentTurnRecord.JobId` links the launch turn to its AgentJob.
+- `Status.UsageSummary` on the same snapshot carries the session's accumulated cost (`CostAmount`/`CostCurrency`) and token totals, and the lifecycle anchors for start/end/duration (`CreatedAt`, `LastDataAt`, `CurrentTurnEndedAt`, `IdleSince`, `BoundAt`); each `AgentTurnRecord` additionally records `RecordedAt`/`UpdatedAt`, so Turn-level elapsed is a recorded fact too.
 - `UnifiedSessionSummaryDto.Turns` already exposes all Turn observations (via `AgentSessionObservationMapper.Turns`) to the Session page.
 - The AgentJob read surface (`/agent-jobs/{jobId}/launch-observation`, `AgentLaunchObservationAssembler`) already composes Job + first-Turn result facts for the fresh-launch flow.
 
@@ -19,8 +20,8 @@ Constraints: read-and-presentation layer only — no new persisted session state
 
 **Goals:**
 
-- Agent-scoped and agent-filtered unified session list reads expose, per session: a bounded first-input subject excerpt, the latest AgentTurn's terminal result facts in result vocabulary (`completed` / `failed` / `cancelled` / `unresolved`), and the first AgentJob (launch) result supplied by the first AgentTurn.
-- The Agent page history renders result-bearing rows (subject, origin, context references, timestamps, Activity as a separate signal) grouped by execution outcome, never by Activity.
+- Agent-scoped and agent-filtered unified session list reads expose, per session: a bounded first-input subject excerpt, the latest AgentTurn's terminal result facts in result vocabulary (`completed` / `failed` / `cancelled` / `unresolved`), the first AgentJob (launch) result supplied by the first JobId-bearing Turn, the session's accumulated cost, and its derived end time (elapsed computed from the recorded lifecycle anchors).
+- The Agent page history renders result-bearing rows (subject, origin, context references, start/end/elapsed and cost, Activity as a separate signal) grouped by execution outcome, never by Activity.
 - The Session view's first viewport surfaces the most-recent result distinct from the Activity badge, and presents the launch result for launch-origin sessions without letting later Turns rewrite it.
 - The Session timeline renders terminal Turn results as first-class, sentence-form outcome entries with expandable structured evidence layered on the same recorded facts as the raw view.
 - Documentation converges: the AgentJob result-view gap closes, the AgentSession gap footnote no longer lists the removed gaps, and `design/session-timeline.md` defines result-entry semantics.
@@ -40,7 +41,7 @@ Constraints: read-and-presentation layer only — no new persisted session state
 `ListAgentSessionsAsync`, `ListUnifiedSessionsByAgentAsync` (and the workspace variant that shares the unified DTO) already hold the deserialized `AgentSession` per row. The subject excerpt, latest-Turn outcome, and launch outcome are pure functions over `Status.Inputs` / `Status.Turns` computed at the read boundary — zero additional queries, zero grain calls, no AgentJob join.
 
 *Alternatives rejected:*
-- *Per-row launch-observation fetch* (Web calls `/agent-jobs/{jobId}/launch-observation` for each history row): N+1 requests against Orleans grains for up to 200 rows on a 5s-polled list; also requires a jobId the list does not carry.
+- *Per-row launch-observation fetch* (Web calls `/agent-jobs/{jobId}/launch-observation` for each history row): N+1 requests against Orleans grains for up to 200 rows on a repeatedly re-fetched list; also requires a jobId the list does not carry.
 - *Deriving outcomes from `TranscriptReductions` summaries:* heavier (already-loaded transcripts aside, the vocabulary would come from transcript events, not the authoritative Turn records) and wrong source — the spec derives outcomes from Turn result facts.
 - *Deriving from Activity:* explicitly forbidden.
 
@@ -48,14 +49,14 @@ Constraints: read-and-presentation layer only — no new persisted session state
 
 Add to `AgentSessionReadModels.cs` one shared record (following the shared `AgentTurnResultObservationDto` precedent, not the per-surface context-ref duplication):
 
-- `AgentSessionTurnOutcomeDto(TurnId, Sequence, Outcome, Result)` where `Outcome` ∈ `completed | failed | cancelled | unresolved` and `Result` reuses the existing `AgentTurnResultObservationDto` shape (message, output, failure category/reason, exit code).
-- `AgentSessionListItemDto` and `UnifiedSessionListItemDto` each gain three optional fields appended after the existing optional parameters (`Origin`/`TargetId` precedent, so existing constructor call sites compile): `Subject` (bounded excerpt, `null` when no recorded first-input text — absent rather than fabricated), `LatestTurn` (`AgentSessionTurnOutcomeDto?`), and `Launch` (`AgentSessionLaunchOutcomeDto?` = `JobId` + the first Turn's `AgentSessionTurnOutcomeDto`).
+- `AgentSessionTurnOutcomeDto(TurnId, Sequence, Outcome, Result, RecordedAt, UpdatedAt)` where `Outcome` ∈ `completed | failed | cancelled | unresolved`, `Result` reuses the existing `AgentTurnResultObservationDto` shape (message, output, failure category/reason, exit code), and `RecordedAt`/`UpdatedAt` mirror the Turn record's own timestamps — so a Turn's elapsed (`UpdatedAt − RecordedAt` when both recorded) is a recorded fact, giving the launch chip Turn-level duration instead of session-level proxies.
+- `AgentSessionListItemDto` and `UnifiedSessionListItemDto` each gain five optional fields appended after the existing optional parameters (`Origin`/`TargetId` precedent, so existing constructor call sites compile): `Subject` (bounded excerpt, `null` when no recorded first-input text — absent rather than fabricated), `LatestTurn` (`AgentSessionTurnOutcomeDto?`), `Launch` (`AgentSessionLaunchOutcomeDto?` = `JobId` + the first JobId-bearing Turn's `AgentSessionTurnOutcomeDto`), `Cost` (`AgentSessionCostDto?` = `CostAmount` + `CostCurrency` from `Status.UsageSummary`, `null` when no cost is recorded — absent rather than zero), and `EndedAt` (the latest non-null lifecycle anchor among `Status.LastDataAt`, `CurrentTurnEndedAt`, `IdleSince`, `BoundAt`; `null` when nothing beyond `CreatedAt` is recorded — the start time is the already-carried `CreatedAt`). Session elapsed is `EndedAt − CreatedAt` computed at presentation; per-execution cost beyond the session-level summary is honestly unavailable because usage accumulates per session, not per Turn.
 
-Normalization happens server-side, where the list read already normalizes vocabulary (e.g., the `cancelled` alias note on `ListAgentSessionsAsync`): `completed`/`failed`/`cancelled` map from terminal Turn statuses; no Turn, `queued`, `executing`, and `unknown` all resolve to `unresolved`. Every consumer gets honest vocabulary instead of each client re-deriving it.
+Normalization happens server-side, at the same read boundary that already normalizes vocabulary (the runner-protocol Activity `cancelled` alias is normalized to `stopped` on these list DTOs — same boundary, a different vocabulary): `completed`/`failed`/`cancelled` map from terminal Turn statuses; no Turn, `queued`, `executing`, and `unknown` all resolve to `unresolved`. Every consumer gets honest vocabulary instead of each client re-deriving it.
 
 ### D3 — The launch result is the first AgentTurn that carries a `JobId`
 
-`AgentTurnRecord.JobId` is stamped only on launch-created turns (the launch coordinator's first Turn); follow-up and agent-connection Turns never carry one. Derivation rule: the lowest-sequence Turn with a `JobId` supplies the launch outcome and the `JobId` link. Because the rule is positional-by-Job rather than "latest", later Turns can never rewrite the presented launch result, and non-launch sessions (no JobId on any Turn) get no `Launch` envelope — nothing is fabricated.
+`AgentTurnRecord.JobId` is stamped on the first Turn of every session created by the launch coordinator — this covers **both** launch source classes: direct `agent-launch` sessions **and** `agent-connection` (Slack connection) sessions, which the coordinator also creates with a real AgentJob (`AgentLaunchCoordinatorGrain` stamps `Source = "agent-connection"` and passes `JobId: plan.JobKey` — a live `IAgentJobGrain` id — into `EnsureInitialLaunchAsync`, which requires a JobId and stamps it on the first Turn). Only follow-up Turns never carry one. Derivation rule: the lowest-sequence Turn with a `JobId` supplies the launch outcome and the `JobId` link. The rule is fact-based (Turn-carried JobId), not source-kind-based: both launch classes get a `Launch` envelope on both surfaces, and sessions with no JobId-bearing Turn (no Turn at all, workflow-created sessions, sessions predating the stamp) get none — nothing is fabricated and no recorded fact is suppressed. Because the rule is positional-by-Job rather than "latest", later Turns can never rewrite the presented launch result.
 
 The existing AgentJob read surface stays the deep-read path: the fresh-launch flow (`?jobId=` in URL → `launchObservationQueryOptions`) is unchanged, and the Turn facts remain session-read facts, exactly as the spec states ("supplied by the session's first AgentTurn"). No duplicated AgentJob query path is built.
 
@@ -73,7 +74,7 @@ The "Recent" slice that currently duplicates rows across groups is removed; rece
 
 ### D5 — History rows are task-bearing
 
-Row primary label = `Subject` excerpt (fallback to an honest placeholder only when the excerpt is absent — never the Agent name). Secondary line: origin, context references rendered as links (Issue/Epic numbers resolve to their pages via the existing `toProjectPath` patterns; repository/workspace as text or workspace link; Slack provenance from origin/target when present), model. Trailing signals: created + last-activity timestamps, Activity badge, launch-result chip, latest-outcome chip. Absent context is omitted, not rendered as empty placeholders.
+Row primary label = `Subject` excerpt (fallback to an honest placeholder only when the excerpt is absent — never the Agent name). Secondary line: origin, context references rendered as links (Issue/Epic numbers resolve to their pages via the existing `toProjectPath` patterns; repository/workspace as text or workspace link; Slack provenance from origin/target when present), model. Trailing signals: start time (`createdAt`), end time (`endedAt`) and elapsed — for a session whose Activity is still active, elapsed-so-far rather than a fabricated end — cost (amount + currency, omitted when unrecorded), Activity badge, launch-result chip (carrying the launch Turn's own `recordedAt`/`updatedAt`, so the first execution's duration is Turn-level), latest-outcome chip. Absent context is omitted, not rendered as empty placeholders.
 
 ### D6 — Session header's most-recent result derives client-side from the already-exposed Turn observations
 
@@ -83,7 +84,7 @@ Row primary label = `Subject` excerpt (fallback to an honest placeholder only wh
 
 ### D7 — Launch result on the Session view identifies the launch Turn by `JobId`
 
-Expose `jobId` on `AgentTurnObservationDto` (the fact already exists on `AgentTurnRecord`; the observation mapper just does not map it today). The Session header then presents the first JobId-bearing Turn's terminal result as the **launch result**, labeled as the first execution and visually distinct from the most-recent result. This is more robust than positional "first Turn" and enables linking to the launch-observation surface. Non-launch sessions show no launch result section.
+Expose `jobId` on `AgentTurnObservationDto` (the fact already exists on `AgentTurnRecord`; the observation mapper just does not map it today). The Session header then presents the first JobId-bearing Turn's terminal result as the **launch result**, labeled as the first execution and visually distinct from the most-recent result. This is more robust than positional "first Turn" and enables linking to the launch-observation surface. Sessions with no JobId-bearing Turn (e.g. workflow-created sessions) show no launch result section; agent-connection sessions do show one — their first execution is an AgentJob launch with a recorded result (D3) — keeping the Session header and the history row consistent for the same session.
 
 ### D8 — Timeline terminal Turn results become `outcome` entries
 
@@ -100,15 +101,15 @@ Extend the timeline presentation model (`entities/session/model/timeline`):
 
 ### Testing
 
-- Server: extend the `AgentSessionQuerier` spec tests (SpecTests, seeded rows) for subject excerpt bounding/absence, per-status outcome mapping, `unresolved` fallbacks, launch-envelope presence/absence (agent-launch vs agent-connection vs no-turn), and follow-up-does-not-rewrite-launch.
-- Web: pure-function tests for the outcome derivation helpers and `turnStateFacts` outcome mapping; page/widget specs for history rows (subject, refs, signals, grouping) and the header/timeline result presentation; raw-view parity check that the expanded evidence matches the same Turn observation.
+- Server: extend the `AgentSessionQuerier` spec tests (SpecTests, seeded rows) for subject excerpt bounding/absence, per-status outcome mapping, `unresolved` fallbacks, launch-envelope presence for both launch classes (agent-launch and agent-connection — both are launch-coordinator creations whose first Turn carries a JobId), launch-envelope absence when no Turn carries a JobId, follow-up-does-not-rewrite-launch, cost presence/absence, and ended-at derivation from the lifecycle anchors.
+- Web: pure-function tests for the outcome derivation helpers and `turnStateFacts` outcome mapping; page/widget specs for history rows (subject, refs, start/end/elapsed/cost signals, grouping) and the header/timeline result presentation; raw-view parity check that the expanded evidence matches the same Turn observation.
 
 ## Risks / Trade-offs
 
 - [First-input text becomes exposed on list routes where it previously appeared only in detail/transcript reads] -> bounded server-side excerpt (single line, fixed character cap), same project-scoped authentication as the transcript; the full text remains only in detail reads.
 - [Large first inputs inflate list payloads] -> the excerpt is truncated server-side to a constant bound, so per-row growth is capped regardless of input size.
 - [Vocabulary drift between the server's outcome normalization (D2) and the Web's header derivation (D6)] -> one table-driven TS helper in `entities/session` with tests mirroring the server mapping; both consume the same Turn statuses.
-- [Sessions whose status snapshot predates persisted Turns/Inputs report no outcomes] -> they resolve to `unresolved`/absent subject — honest, never inferred from Activity.
+- [Sessions whose status snapshot predates persisted Turns/Inputs report no outcomes] -> they resolve to `unresolved`/absent subject, cost, and end anchor — honest, never inferred from Activity.
 - [History rewrite changes familiar affordances ("Failed" group for unknown Activity, "Recent" slice, model chip prominence)] -> deliberate per the spec's result vocabulary; covered by updated page specs; model and timestamps remain as secondary row signals.
 - [Positional DTO records are append-sensitive] -> new fields are appended as optional parameters following the `Origin`/`TargetId` precedent; contract tests (`CliFieldContractTests` pattern) updated.
 - [`JobId` on the Turn observation widens the observation DTO] -> it is already recorded and already implied by the launch-observation surface; exposure is an id, not content.

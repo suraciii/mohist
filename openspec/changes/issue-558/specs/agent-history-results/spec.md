@@ -1,6 +1,6 @@
 ### Requirement: Agent-scoped session list read model carries result facts
 
-The Agent-scoped session list read and the agent-filtered unified session list read SHALL expose, for every returned session, a first-input subject excerpt and the terminal Turn result facts of the session's latest AgentTurn. The latest-Turn outcome SHALL use the result vocabulary `completed` (with the Turn's result message), `failed` (with failure category and reason when recorded), `cancelled`, or `unresolved`. These additions SHALL be read-only projections over facts that are already recorded — the change MUST NOT introduce new persisted session state, new events, or new transcript fact types — and the first AgentJob result SHALL be sourced from the existing AgentJob read surface and launch observation rather than a duplicated read path.
+The Agent-scoped session list read and the agent-filtered unified session list read SHALL expose, for every returned session, a first-input subject excerpt, the terminal Turn result facts of the session's latest AgentTurn, the session's accumulated cost when recorded, and its derived end time. The latest-Turn outcome SHALL use the result vocabulary `completed` (with the Turn's result message), `failed` (with failure category and reason when recorded), `cancelled`, or `unresolved`. These additions SHALL be read-only projections over facts that are already recorded — the change MUST NOT introduce new persisted session state, new events, or new transcript fact types — and the first AgentJob result SHALL be sourced from the existing AgentJob read surface and launch observation rather than a duplicated read path.
 
 #### Scenario: Completed latest Turn carries its result message
 
@@ -29,6 +29,18 @@ The Agent-scoped session list read and the agent-filtered unified session list r
 - **THEN** the list item SHALL carry a bounded excerpt of that text as the session subject
 - **AND** a session with no recorded first-input text SHALL leave the subject explicitly absent rather than fabricating one
 
+#### Scenario: Session cost is carried when recorded
+
+- **WHEN** a listed session's status snapshot records an accumulated usage cost
+- **THEN** the list item SHALL carry the cost amount together with its currency
+- **AND** a session with no recorded cost SHALL leave the cost explicitly absent rather than fabricating zero
+
+#### Scenario: End time derives from recorded lifecycle anchors
+
+- **WHEN** a listed session has recorded lifecycle anchors beyond creation
+- **THEN** the list item SHALL carry an end time derived as the latest recorded anchor
+- **AND** a session with no anchor beyond creation SHALL leave the end time explicitly absent rather than inferring one
+
 ### Requirement: History rows identify the task and its context
 
 Each session row in the Agent page history SHALL identify the task it executed: the first-input subject excerpt as the row's primary subject, the session's recorded origin, its context references (Issue, Epic, repository, workspace, and Slack provenance when present), and its created and last-activity timestamps. The row's current Activity SHALL be presented as its own separate signal alongside these facts.
@@ -53,6 +65,27 @@ Each session row in the Agent page history SHALL identify the task it executed: 
 
 - **WHEN** a history row is rendered
 - **THEN** the row SHALL show the created and last-activity timestamps and the current Activity as a signal separate from the execution outcome
+
+### Requirement: History rows surface duration and cost
+
+Each session row in the Agent page history SHALL present the session's start time, its end time and elapsed duration, and its accumulated cost when recorded. A still-active session's elapsed SHALL be presented as time-so-far rather than a fabricated end time, and absent cost SHALL be omitted rather than rendered as zero.
+
+#### Scenario: Ended sessions show start, end, and elapsed
+
+- **WHEN** a history row is rendered for a session with a derived end time
+- **THEN** the row SHALL show the start time, the end time, and the elapsed duration between them
+
+#### Scenario: Active sessions show elapsed so far
+
+- **WHEN** a history row is rendered for a session whose Activity is active
+- **THEN** the row SHALL present the elapsed time so far
+- **AND** it MUST NOT present a fabricated end time
+
+#### Scenario: Cost is shown when recorded and omitted when not
+
+- **WHEN** a session records an accumulated cost
+- **THEN** the row SHALL show the cost amount with its currency
+- **AND** a session with no recorded cost SHALL omit the cost signal rather than showing zero
 
 ### Requirement: Outcomes use result vocabulary with honest unknown handling
 
