@@ -627,3 +627,66 @@ Plan skeleton for next run (est. half a day):
 - Added regression coverage for missing `complete`, blank capability
   revisions, and readiness precedence over an otherwise rejecting catalog.
 - Server UnitTests passed: 2725 tests. `git diff --check` is clean.
+
+## T-006 Final Fence Correction (current run)
+
+- Closed the remaining Workflow claim/render race. The tuple is resolved from
+  the read-only pending projection before claim, then the rendered dispatch is
+  checked again before `StoreActiveWorkDispatchAsync`; a changed Agent or issue
+  variable tuple is re-pended instead of becoming claim-visible under the old
+  expectation. The first-writer winner is checked for both capability revision
+  and tuple equality.
+- Centralized dispatch tuple extraction for AgentDefinition snapshots and
+  `mohist/pi`/`mohist/opencode` action options. Template-preserving
+  `options: "${{ vars.agent }}"` dispatches are compared using the frozen
+  `vars.agent` values in the dispatch Variables payload, so redacted workflow
+  templates remain compatible with the fence.
+- Verification: Server UnitTests passed (2729), Server SpecTests passed
+  (3944), Runner CI baseline passed (155 files, 1668 tests), and
+  `git diff --check` is clean.
+
+## T-007 Completion (current run)
+
+- Closed a readiness evidence gap: explicit capability preflight failures keep
+  their category in durable `CapabilityFailureEvidence`, but terminal delivery
+  clears the transient `PendingSessionClose` and `PendingFailureEvent` fields.
+  `AgentJobQuerier.GetLatestExecutionAsync` now falls back to the durable
+  capability category, so readiness still maps
+  `unsupported_execution_configuration` and
+  `incompatible_execution_configuration` to Needs setup after delivery.
+- Added a storage/querier regression with both transient delivery fields
+  cleared, while preserving the frozen `reasoningEffort` on the queried input.
+- Verification: Server UnitTests passed (2729), Server SpecTests passed
+  (3945), and `git diff --check` passed.
+
+## T-008 Final Cross-Slice Verification (current run)
+
+- Added an end-to-end AgentJob regression for a saved Pi thinking-level value
+  still stored in `variant`: with a complete Pi catalog that lists the value
+  only under `reasoningEfforts`, admission records a deterministic
+  `incompatible_execution_configuration` failure with the frozen tuple and
+  capability revision. The test proves no migration or variant-to-effort
+  reinterpretation occurs.
+- Strengthened the Web no-support editor fixture so it publishes effort values
+  while explicitly reporting `supportsReasoningEffort=false`; the editor must
+  still render no effort control and must omit effort on save.
+- Focused baseline before these changes: Web 116 tests, Server UnitTests 2729,
+  and Runner 63 tests passed.
+- Verification after the additions: `npm run test:fast` passed every lane;
+  `npm run verify` passed docs, file sizes, formatting, build, Server Unit 2729,
+  Spec 3946, Arch 68, Workflow Definition 178, CLI 1858, Web 4732, Runner
+  1668, and Slack 70 tests. The new saved-Pi-variant spec is included in the
+  3946 passing Server SpecTests.
+
+## Verification Repair Confirmation (current run)
+
+- The initial worktree was clean, with no intended or verification-generated
+  changes. There was no saved failure log; the issue history identified the
+  prior root causes as the file-size ratchet being exceeded by legitimate
+  issue-557 growth and stale ArchTests migration-ledger closure evidence after
+  an intended fixture dependency change. Those causes are already repaired in
+  commits `f1169085f` and `7c0026740`.
+- Reproduced `npm run verify` successfully: docs, file sizes, formatting,
+  build, Server Unit 2729, Spec 3946, Arch 68, Workflow Definition 178, CLI
+  1858, Web 4732, Runner 1668, and Slack 70 all passed. `npm run test:fast`
+  also passed every lane. Verification created no Git-visible changes.
