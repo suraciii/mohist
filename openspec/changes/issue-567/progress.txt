@@ -645,3 +645,21 @@ Channel decision (grounded in live source):
   Runner 1,657, and Web 4,727. The runner harness omitted its aggregate line,
   but the captured shell command returned successfully and every child exited
   with code 0.
+
+## T-003 Exact-stop and inventory hardening
+
+- Shutdown receipt matching now requires the exact Workflow task attempt in the
+  pending-operation inventory; a missing taskRunId is malformed rather than a
+  wildcard. AgentJob inventory entries continue to require no task attempt.
+- Pi cancellation no longer treats an already-idle bound session as proof that
+  the held turn stopped. OpenCode cancellation checks for an active session
+  before abort and requires that exact session to be idle afterward. Both paths
+  now leave the started fence unresolved when they only observe idleness.
+- Added deterministic Runner coverage for omitted task attempts and idle Pi /
+  OpenCode observations. Focused journal/receipt/host/adapter tests passed
+  43/43; the full Runner suite passed 1,660/1,660; production and test
+  typechecks passed; `npm run test:fast` passed Workflow Definition 178, CLI
+  1,856, Server Unit 2,667, Server Arch 68, Runner 1,660, and Web 4,727.
+- `npm run format:check` still reports the repository's existing formatting
+  drift in legacy Runner files touched by this slice; no unrelated formatter
+  churn was included.

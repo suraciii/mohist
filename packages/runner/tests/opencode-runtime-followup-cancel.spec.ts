@@ -342,7 +342,9 @@ describe("OpenCodeRuntime.cancel", () => {
     const request: RuntimeCancelRequest = {
       target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
     }
-    client.sessionStatus.mockResolvedValueOnce({ data: { ses_existing: { type: "idle" } } })
+    client.sessionStatus
+      .mockResolvedValueOnce({ data: { ses_existing: { type: "busy" } } })
+      .mockResolvedValueOnce({ data: { ses_existing: { type: "idle" } } })
     const result = await runtime.cancel(request)
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error("expected ok")
@@ -359,7 +361,9 @@ describe("OpenCodeRuntime.cancel", () => {
 
   it("returns a cancelled fact without confirmation when the Session remains busy", async () => {
     const { deps, client } = buildDeps()
-    client.sessionStatus.mockResolvedValueOnce({ data: { ses_existing: { type: "busy" } } })
+    client.sessionStatus
+      .mockResolvedValueOnce({ data: { ses_existing: { type: "busy" } } })
+      .mockResolvedValueOnce({ data: { ses_existing: { type: "busy" } } })
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
 
@@ -368,6 +372,20 @@ describe("OpenCodeRuntime.cancel", () => {
     })
 
     expect(result).toMatchObject({ ok: true, value: { facts: { cancelled: true, stopConfirmed: false } } })
+  })
+
+  it("does not confirm an idle OpenCode session as a stopped turn", async () => {
+    const { deps, client } = buildDeps()
+    client.sessionStatus.mockResolvedValueOnce({ data: { ses_existing: { type: "idle" } } })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.cancel({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+
+    expect(result).toMatchObject({ ok: true, value: { facts: { cancelled: true, stopConfirmed: false } } })
+    expect(client.sessionAbort).not.toHaveBeenCalled()
   })
 
   it("fails with unavailable-runtime when the runtime is not ready", async () => {
@@ -397,7 +415,8 @@ describe("OpenCodeRuntime.cancel", () => {
   })
 
   it("fails with missing-session when client.session.abort returns 404", async () => {
-    const { deps } = buildDeps({ missingSessionOnAbort: true })
+    const { deps, client } = buildDeps({ missingSessionOnAbort: true })
+    client.sessionStatus.mockResolvedValueOnce({ data: { ses_orphan: { type: "busy" } } })
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
 
@@ -411,7 +430,8 @@ describe("OpenCodeRuntime.cancel", () => {
   })
 
   it("returns an unconfirmed cancel fact when client.session.abort throws a non-404 error", async () => {
-    const { deps } = buildDeps({ failAbort: true })
+    const { deps, client } = buildDeps({ failAbort: true })
+    client.sessionStatus.mockResolvedValueOnce({ data: { ses_existing: { type: "busy" } } })
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
 

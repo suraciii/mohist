@@ -74,6 +74,17 @@ describe("PiRuntime cancel confirmation", () => {
     await expect(cancel).resolves.toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
   })
 
+  it("does not confirm an already-idle Pi session as a stopped turn", async () => {
+    const session = new FakeSession()
+    session.isStreaming = false
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+
+    await expect(
+      runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } }),
+    ).resolves.toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
+  })
+
   it("does not confirm when agent_settled arrives while streaming remains active", async () => {
     const session = new FakeSession()
     const clock = new FakeClock()
