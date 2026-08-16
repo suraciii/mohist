@@ -375,3 +375,9 @@
 
 - The existing T-003 implementation was revalidated without additional production edits: `AgentJobWorkflowTerminalDeliverySpecs` passed 7/7, focused Runner transport/evaluation coverage passed 44/44, and Runner typecheck passed.
 - `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646. The .NET SDK preview notices were non-failing.
+
+## T-004 verification on current workflow branch
+
+- The existing T-004 implementation was revalidated without additional production edits: `AgentInvocationSettlementSpecs` passed 11/11, `AgentInvocationSettlementInterruptionSpecs` 4/4, `WorkflowGrainStateSaveFailureSpecs` 16/16, and `WorkflowGrainProductionContractSpecs` 2/2.
+- Full Server SpecTests passed 3960/3960 with zero errors, failures, or skips.
+- `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and concurrent build-copy retries were non-failing.
