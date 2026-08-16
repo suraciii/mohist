@@ -255,3 +255,16 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   response content and preserve actionable rejection guidance on stderr.
 - `npm run test:fast:cli` passed with 1,860 tests and `npm run docs:check`
   passed before the full repository gate.
+
+## T-002 follow-up repair
+
+- The task route now declares its attachment rollback before the all-rejected
+  `input_unusable` return and invokes it explicitly, keeping the determinable
+  rejection path orphan-free even if attachment binding behavior changes.
+- Added route coverage for per-file `NotFound` verdict projection and the
+  no-Agent invariant on an all-rejected attachment-only task.
+- `npm run test:fast` passed with 2,701 Server unit, 68 architecture, 178
+  workflow, 1,860 CLI, 4,735 Web, and 1,639 Runner tests plus typechecks.
+  The parallel 3,949-test spec assembly had two unrelated timing failures;
+  the task route class passed 11/11 and both flaky tests passed in exact
+  single-test reruns.

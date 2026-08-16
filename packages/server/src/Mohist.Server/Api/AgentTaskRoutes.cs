@@ -208,8 +208,17 @@ public static class AgentTaskRoutes
                 return ApiResults.BadRequest(ex.Message, "attachment_invalid", new { fields = new[] { "attachments" } });
             }
 
+            var newlyBoundIds = attachmentBatch.NewlyBoundAttachmentIds ?? [];
+            async Task RollbackAttachmentsAsync() => await attachments.UnbindAgentInputAsync(
+                project.Id,
+                preMintedSessionId,
+                preMintedInputId,
+                newlyBoundIds,
+                CancellationToken.None);
+
             if (attachmentBatch.AcceptedCount == 0 && !hasText)
             {
+                await RollbackAttachmentsAsync();
                 return ApiResults.BadRequest(
                     "input has no usable content: all attachments were rejected",
                     "input_unusable",
@@ -221,14 +230,6 @@ public static class AgentTaskRoutes
                             .ToArray(),
                     });
             }
-
-            var newlyBoundIds = attachmentBatch.NewlyBoundAttachmentIds ?? [];
-            async Task RollbackAttachmentsAsync() => await attachments.UnbindAgentInputAsync(
-                project.Id,
-                preMintedSessionId,
-                preMintedInputId,
-                newlyBoundIds,
-                CancellationToken.None);
 
             var callerHint = new ExecutionConfigHint(
                 NormalizeOptional(body.Runtime),

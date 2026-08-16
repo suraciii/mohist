@@ -113,6 +113,26 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
+    public async Task TaskLaunch_AllRejectedAttachmentsReturnsVerdictsAndCreatesNothing()
+    {
+        var projectId = await CreateProjectAsync("task-input-unusable");
+        var before = await AgentCountAsync(projectId);
+
+        using var response = await PostTaskAsync(
+            projectId,
+            new { attachments = new[] { "att_missing-for-task" } },
+            "task-input-unusable");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("input_unusable", payload.GetProperty("code").GetString());
+        var verdict = Assert.Single(payload.GetProperty("details").GetProperty("attachments").EnumerateArray());
+        Assert.False(verdict.GetProperty("accepted").GetBoolean());
+        Assert.Equal("NotFound", verdict.GetProperty("reason").GetString());
+        Assert.Equal(before, await AgentCountAsync(projectId));
+    }
+
+    [Fact]
     public async Task TaskLaunch_RejectsDeterminableFailuresBeforeCreate()
     {
         var projectId = await CreateProjectAsync("task-rejections");
