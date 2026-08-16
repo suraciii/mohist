@@ -297,14 +297,8 @@ public class WorkflowSessionSpecs
     private static string RunnerSessionPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}";
 
-    private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
-    {
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        return await db.AgentSessions
-            .Where(s => s.LabelSourceId == workflowRunId && s.LabelSessionName == sessionName)
-            .Select(s => s.Id)
-            .SingleAsync();
-    }
+    private Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName) =>
+        WorkflowApiTestSupport.ResolveSessionIdAsync(_fixture.Services, workflowRunId, sessionName);
 
     private static AgentSessionMetadata WorkflowSessionMetadata(
         string projectId,
