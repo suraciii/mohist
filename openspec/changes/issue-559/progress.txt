@@ -434,3 +434,9 @@
 - `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore` passed with 0 warnings and 0 errors. `npm test -w packages/runner` passed 1646/1646 in isolation.
 - The first concurrent `npm run test:fast` attempt hit the existing Runner cleanup-config timing failures (2 tests); the complete rerun passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices were non-failing.
 - No additional production edit was required during this revalidation; this commit records the final T-005 verification on the workflow branch.
+
+## T-006 verification on final run branch
+
+- The T-006 implementation remains present in commit `9b8b4be22`: derived invocation status from authoritative AgentJob and settlement facts, Workflow invocation identifiers and terminal result projection, reciprocal AgentJob/AgentSession lineage, sibling-path regression coverage, and the BREAKING/freeze/named-session documentation updates.
+- `npm run verify` passed completely: docs 92, file-size ratchet, format check, solution and workspace builds, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Server SpecTests 3960, Web 4724, Runner 1646, and Slack 70. Preview .NET SDK and existing Rollup chunk warnings were non-failing.
+- The worktree was clean before this progress entry; no duplicate production edit was made during this final task verification.
