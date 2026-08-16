@@ -690,3 +690,14 @@ Plan skeleton for next run (est. half a day):
   build, Server Unit 2729, Spec 3946, Arch 68, Workflow Definition 178, CLI
   1858, Web 4732, Runner 1668, and Slack 70 all passed. `npm run test:fast`
   also passed every lane. Verification created no Git-visible changes.
+
+## Verification Repair Confirmation (latest run)
+
+- Re-ran `npm run verify` from the clean repaired HEAD. The file-size ratchet,
+  migration-ledger ArchTests, build, and all repository test lanes passed:
+  Server Unit 2729, Spec 3946, Arch 68, Workflow Definition 178, CLI 1858,
+  Web 4732, Runner 1668, and Slack 70.
+- Focused post-gate checks also passed: ArchTests 68/68, Runner CI (155 files,
+  1668 tests), and Web tests (377 files, 4732 tests). The verification commands
+  left no Git-visible generated changes; only this progress entry is intended
+  for the completion commit.
