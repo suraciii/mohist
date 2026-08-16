@@ -373,6 +373,18 @@ Channel decision (grounded in live source):
 - Runner production/tests and Web typechecks pass after the final formatting
   normalization.
 
+## Final Verification
+
+- `npm run verify` passed docs, file-size, format, and the full solution build
+  (0 warnings/errors).
+- Its test phase passed Workflow Definition 178, CLI 1855, Server Unit 2667,
+  and Architecture 68, while Server SpecTests passed 3939/3940. The sole
+  failure was the pre-existing/flaky
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  timing test; all issue-567 recovery specs passed.
+- Runner passed 1651/1651 and Web passed 4727/4727 in the independent full
+  workspace runs; the final tree remains clean and `review.md` is untouched.
+
 ## Fix-CI Verification Repair
 
 - The persisted `verify.1` output showed one deterministic Server unit failure
