@@ -93,15 +93,15 @@ A new Slack launch blocked by Agent readiness or covered non-disabled Connection
 - **AND** it SHALL NOT create provider inbox work, attachments, a workspace, an AgentJob, an AgentSession, a SessionInput, an AgentTurn, or liveness status
 
 ### Requirement: Executable, unknown, and connection states remain independent
-An Agent with canonical executability `executable` SHALL continue through the existing Slack launch and status flow without a setup nudge. An Agent with canonical executability `unknown` SHALL remain admitted for Runner verification without a setup nudge. Connection health, desired Connection state, and Agent readiness SHALL remain separate concerns: a Connection health condition SHALL NOT be reported as an Agent setup gap, and a blocked Agent readiness result SHALL NOT be converted into a Connection lifecycle state.
+An Agent with canonical executability `executable` on an available Connection SHALL continue through the existing Slack launch and status flow without a setup nudge. An Agent with canonical executability `unknown` on an available Connection SHALL remain admitted for Runner verification without a setup nudge. Connection health, desired Connection state, and Agent readiness SHALL remain separate concerns: a Connection health condition SHALL NOT be reported as an Agent setup gap, and a blocked Agent readiness result SHALL NOT be converted into a Connection lifecycle state.
 
 #### Scenario: An executable Agent accepts a Slack task
-- **WHEN** an authorized new DM or channel-root launch targets an Agent with executability `executable`
+- **WHEN** an authorized new DM, channel-root, or first unbound-thread mention targets an Agent with executability `executable` on an available Connection
 - **THEN** the Server SHALL accept the task through the existing inbox and launch flow
 - **AND** it SHALL create the normal execution resources and SHALL NOT create a setup nudge
 
 #### Scenario: Unknown executability remains admitted
-- **WHEN** an authorized new Slack launch targets an Agent with executability `unknown`
+- **WHEN** an authorized new Slack launch targets an Agent with executability `unknown` on an available Connection
 - **THEN** the Server SHALL accept the task for Runner verification using the existing unknown-readiness behavior
 - **AND** it SHALL NOT emit a blocked-Agent setup nudge
 

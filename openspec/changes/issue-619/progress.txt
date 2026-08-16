@@ -3,4 +3,4 @@ Issue 619 plan repair progress
 - F1 fixed: proposal, design, spec, and tasks now cover enabled non-disabled Connection unavailability (incomplete setup, unhealthy/degraded health including service-offline and backpressure, or OfflineGapAt), with Connection-gate precedence, safe required nudge, deduplication, no execution resources, and existing Disabled audited-discard behavior.
 - F2 fixed: proposal, design, spec, and tasks now treat a first Bot mention in an unbound channel thread as a new launch, gate it before launch side effects, target the nudge at body.ThreadTs, and test deduplication; bound-thread follow-ups remain exempt.
 - Commit: 11117ec14 (Clarify issue 619 unavailable Slack launch paths)
-- Next: run final consistency and status checks; do not edit self-review.md.
+- Final consistency checks completed: tasks JSON parses, spec anchors are current, no stale scope wording remains, and self-review.md is unchanged.
