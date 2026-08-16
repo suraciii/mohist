@@ -120,3 +120,13 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   existing completed Agents Ready while Project-default-only fields remain
   unaffected by default changes. Full server specs pass 3938/3938 after the
   rebuild.
+
+### Final verification
+
+- `npm run test:fast` passed: typecheck, 2,693 server unit tests, 68
+  architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724 Web tests,
+  and 1,639 Runner tests.
+- The focused T-001 server suites and the full 3,938-test server spec
+  assembly also passed. The implementation is committed on the workflow
+  branch; the pre-existing `SpecUnitMigrationLedger.json` worktree change
+  remains intentionally unstaged.
