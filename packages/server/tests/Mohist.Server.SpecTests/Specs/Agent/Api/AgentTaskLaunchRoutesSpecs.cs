@@ -47,6 +47,9 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal("pi", agentData.GetProperty("agentConfig").GetProperty("runtime").GetString());
         Assert.Equal("provider/task", agentData.GetProperty("agentConfig").GetProperty("model").GetString());
         Assert.Equal("balanced", agentData.GetProperty("agentConfig").GetProperty("variant").GetString());
+        Assert.Equal("pi", agentData.GetProperty("effectiveExecutionConfig").GetProperty("runtime").GetString());
+        Assert.Equal("provider/task", agentData.GetProperty("effectiveExecutionConfig").GetProperty("model").GetString());
+        Assert.Equal("balanced", agentData.GetProperty("effectiveExecutionConfig").GetProperty("variant").GetString());
         Assert.False(string.IsNullOrWhiteSpace(agentData.GetProperty("instructions").GetString()));
         Assert.False(string.IsNullOrWhiteSpace(agentData.GetProperty("description").GetString()));
         Assert.NotEqual("Needs setup", agentData.GetProperty("readiness").GetProperty("conclusion").GetString());
@@ -89,6 +92,64 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal("pi", config.GetProperty("runtime").GetString());
         Assert.Equal("provider/default", config.GetProperty("model").GetString());
         Assert.Equal("balanced", config.GetProperty("variant").GetString());
+
+        using var listed = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents");
+        listed.EnsureSuccessStatusCode();
+        var listedAgent = (await listed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").EnumerateArray().Single();
+        Assert.Equal("pi", listedAgent.GetProperty("effectiveExecutionConfig").GetProperty("runtime").GetString());
+        Assert.Equal("provider/default", listedAgent.GetProperty("effectiveExecutionConfig").GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task TaskLaunch_PreflightProjectsScopeAndLaunchRejectsScopeDrift()
+    {
+        var projectId = await CreateProjectAsync("task-preflight");
+        using var configured = await _fixture.Client.PutAsJsonAsync(
+            $"/api/projects/{projectId}/default-execution-config",
+            new { runtime = "pi", model = "provider/default", variant = "balanced" });
+        configured.EnsureSuccessStatusCode();
+
+        const string key = "task-preflight-key";
+        var body = new
+        {
+            prompt = "confirm the execution scope",
+            context = new { repository = "main" },
+        };
+        using var preflightRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-tasks/preflight")
+        {
+            Content = JsonContent.Create(body),
+        };
+        preflightRequest.Headers.Add("Idempotency-Key", key);
+        preflightRequest.Headers.Add("X-Mohist-Launch-Origin", "web");
+        using var preflight = await _fixture.Client.SendAsync(preflightRequest);
+        Assert.Equal(HttpStatusCode.OK, preflight.StatusCode);
+        var preflightData = (await preflight.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("pi", preflightData.GetProperty("execution").GetProperty("runtime").GetString());
+        Assert.Equal("provider/default", preflightData.GetProperty("execution").GetProperty("model").GetString());
+        Assert.Equal("project-workspace-write", preflightData.GetProperty("permissionScope").GetString());
+        var fingerprint = preflightData.GetProperty("scopeFingerprint").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(fingerprint));
+
+        using var changedDefault = await _fixture.Client.PutAsJsonAsync(
+            $"/api/projects/{projectId}/default-execution-config",
+            new { runtime = "pi", model = "provider/changed", variant = "balanced" });
+        changedDefault.EnsureSuccessStatusCode();
+
+        using var launchRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-tasks")
+        {
+            Content = JsonContent.Create(body),
+        };
+        launchRequest.Headers.Add("Idempotency-Key", key);
+        launchRequest.Headers.Add("X-Mohist-Launch-Origin", "web");
+        launchRequest.Headers.Add("X-Mohist-Agent-Preflight", fingerprint!);
+        using var rejected = await _fixture.Client.SendAsync(launchRequest);
+        Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        Assert.Equal("launch_scope_changed", (await rejected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        Assert.Equal(0, await AgentCountAsync(projectId));
     }
 
     [Fact]

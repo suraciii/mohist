@@ -221,4 +221,12 @@ describe('writeAgentModelAndVariant', () => {
       runtime: 'pi',
     })
   })
+
+  it('prefers the server effective execution projection over an empty raw config', () => {
+    const read = readAgentModelAndVariant({
+      agentConfig: null,
+      effectiveExecutionConfig: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
+    })
+    expect(read).toEqual({ model: 'provider/model', variant: 'balanced', runtime: 'pi' })
+  })
 })

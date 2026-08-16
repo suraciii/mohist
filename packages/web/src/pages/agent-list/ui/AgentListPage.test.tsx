@@ -147,6 +147,21 @@ describe('AgentListPage', () => {
       expect(screen.getByText('high')).toBeInTheDocument()
     })
 
+    it('renders the server effective execution projection when the raw definition is empty', async () => {
+      mockAgents([
+        makeAgent({
+          id: 'defaulted-pi',
+          name: 'Defaulted Pi',
+          effectiveExecutionConfig: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
+        }),
+      ])
+      renderPage()
+      const row = await screen.findByTestId('agent-row-defaulted-pi')
+      expect(row).toHaveTextContent('pi')
+      expect(row).toHaveTextContent('provider/model')
+      expect(row).toHaveTextContent('balanced')
+    })
+
     it('renders purpose and the server Readiness conclusion distinctly', async () => {
       mockAgents([
         makeAgent({
