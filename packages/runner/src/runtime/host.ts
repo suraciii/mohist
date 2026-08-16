@@ -95,6 +95,7 @@ interface ShutdownWorkState {
   requested: boolean
   stopConfirmed: boolean
   operationId: string | null
+  stopFailure?: string | null
 }
 
 interface AwaitingAckEntry {
@@ -1055,12 +1056,23 @@ export class RunnerHost {
     while (Date.now() <= deadline && attempt < SHUTDOWN_HANDOFF_ATTEMPTS) {
       attempt += 1
       const remaining = Math.max(1, deadline - Date.now())
+      const request = new AbortController()
       try {
         const response = await withTimeout(
-          this.fetchPendingUpdateOperation(new AbortController().signal).then((value) => ({ value })),
+          this.fetchPendingUpdateOperation(request.signal).then((value) => ({ value })),
           remaining,
         )
-        if (response) return response.value
+        if (response) {
+          if (response.value?.runnerId && response.value.runnerId !== this.options.runnerId) {
+            log.warn('update shutdown handoff named a different Runner; ignoring operation', {
+              context: 'update-interruption',
+              expectedRunnerId: this.options.runnerId,
+              actualRunnerId: response.value.runnerId,
+            })
+            return null
+          }
+          return response.value
+        }
         // A timed-out request does not establish that this is an ordinary
         // restart; spend the remaining handoff budget on the brief retry.
         continue
@@ -1072,6 +1084,8 @@ export class RunnerHost {
           exception: error,
         })
         await Promise.resolve()
+      } finally {
+        request.abort()
       }
     }
     return null
@@ -1087,6 +1101,7 @@ export class RunnerHost {
     entry.shutdown = { requested: true, stopConfirmed: false, operationId }
     const binding = this.runtimeTurnRegistry.get(key)
     let confirmed = false
+    let stopFailure: string | null = null
     if (binding?.runtimeSessionId) {
       const handle = resolveCommandRuntime(
         { runtime: binding.runtime },
@@ -1108,16 +1123,51 @@ export class RunnerHost {
           )
           confirmed = result !== null && readCancelFacts(result)?.stopConfirmed === true
         } catch (error) {
+          stopFailure =
+            'The Runner could not confirm the stop before shutdown; the recorded recovery path remains active.'
           log.warn('cooperative stop failed during shutdown', {
             work: entry.work.workId,
             context: operationId ? 'update-interruption' : 'shutdown',
             reason: 'runtime-stop-unconfirmed',
             ...(operationId ? { updateOperationId: operationId } : {}),
+            exception: error,
           })
         }
       }
     }
+    if (operationId && !confirmed && stopFailure === null) {
+      stopFailure = 'The Runner could not confirm the stop before shutdown; the recorded recovery path remains active.'
+    }
     entry.shutdown.stopConfirmed = confirmed
+    if (stopFailure !== null) {
+      entry.shutdown.stopFailure = stopFailure
+      if (operationId) {
+        try {
+          await withTimeout(
+            this.connection.reportRecoveryStopFailure(
+              {
+                runnerId: this.options.runnerId,
+                ownerKind: entry.work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow',
+                ownerId: entry.work.ownerKind === 'agent-job' ? (entry.work.agentJobId ?? '') : entry.work.workflowRunId,
+                workId: entry.work.workId,
+                taskRunId: entry.work.taskRunId ?? null,
+                operationId,
+                message: stopFailure,
+              },
+              new AbortController().signal,
+            ),
+            Math.max(1, deadline - Date.now()),
+          )
+        } catch (error) {
+          log.warn('update stop failure could not be persisted', {
+            work: entry.work.workId,
+            context: 'update-interruption',
+            updateOperationId: operationId,
+            exception: error,
+          })
+        }
+      }
+    }
     // The runtime stop is authoritative when it confirms. The child signal is
     // still aborted to release action wrappers and non-runtime work promptly.
     entry.controller.abort()

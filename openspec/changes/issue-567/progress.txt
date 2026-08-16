@@ -505,3 +505,22 @@ Channel decision (grounded in live source):
   `FailIfMarkerSpecs` source/closure digest mismatch (67/68). This failure is
   unrelated to the runner update-operation fence and no ledger change was
   made.
+
+## T-003 Shutdown Handoff Hardening
+
+- Each bounded pending-operation request now has its own abort controller;
+  timeout expiry cancels the underlying request before shutdown continues.
+  A response naming a different Runner is ignored, so it cannot establish
+  update context for receipt creation.
+- Stop-failure reporting is sent only when a pending update operation has
+  established update context. Ordinary restarts still perform the runtime
+  stop attempt but do not submit an empty-operation recovery failure.
+- Added deterministic Runner coverage for handoff timeout cancellation,
+  inventory exclusion, cross-Runner operation rejection, OpenCode confirmed
+  stop mapping, and ordinary-restart stop-failure classification.
+- Verification: focused recovery/journal/connection tests passed 30/30;
+  Runner typechecks passed; the complete Runner suite passed 1657/1657;
+  Runner format checks passed. `npm run test:fast` passed typecheck, Server
+  Unit 2667, CLI 1855, Workflow Definition 178, Web 4727, and Runner 1657;
+  it remained non-zero only for the pre-existing Server ArchTests
+  `FailIfMarkerSpecs` migration-ledger digest drift (67/68).
