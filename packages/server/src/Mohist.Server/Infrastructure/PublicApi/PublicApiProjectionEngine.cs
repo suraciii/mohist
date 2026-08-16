@@ -233,6 +233,18 @@ public sealed partial class PublicApiProjectionEngine
             }
         }
 
+        var dirtySessionLifecycleSources = new List<string>();
+        foreach (var head in await db.AgentSessionLifecycleTransitions.AsNoTracking()
+            .GroupBy(row => row.SessionId)
+            .Select(group => new { Source = group.Key, MaxId = group.Max(row => row.Id) })
+            .ToListAsync(ct))
+        {
+            if (IsJournalBehind(checkpoints, PublicProjectionFeeds.AgentSessionLifecycle, head.Source, head.MaxId))
+            {
+                dirtySessionLifecycleSources.Add(head.Source);
+            }
+        }
+
         // --- target resolution ---
         // A dirty Job whose Session ledger row exists projects as part
         // of that Session target (the Session owns the public stream);
@@ -267,6 +279,14 @@ public sealed partial class PublicApiProjectionEngine
                 {
                     targets.Add("session:" + sessionId);
                 }
+            }
+        }
+
+        foreach (var sessionId in dirtySessionLifecycleSources)
+        {
+            if (onlySession is null || string.Equals(sessionId, onlySession, StringComparison.Ordinal))
+            {
+                targets.Add("session:" + sessionId);
             }
         }
 
@@ -336,13 +356,17 @@ public sealed partial class PublicApiProjectionEngine
             return false;
         }
 
+        var lifecycleRows = await db.AgentSessionLifecycleTransitions.AsNoTracking()
+            .Where(transition => transition.SessionId == sessionId)
+            .OrderBy(transition => transition.Id)
+            .ToListAsync(ct);
         var session = AgentSessionJson.Deserialize(row);
         if (session is null)
         {
             _log.LogWarning(
                 "Public projection skipped AgentSession {SessionId}: the ledger state could not be deserialized",
                 sessionId);
-            AdvanceSessionCheckpoints(checkpoints, row, [], [], new Dictionary<string, long>());
+            AdvanceSessionCheckpoints(checkpoints, row, [], [], new Dictionary<string, long>(), lifecycleRows);
             return true;
         }
 
@@ -361,7 +385,7 @@ public sealed partial class PublicApiProjectionEngine
         // but nothing is published.
         if (string.IsNullOrWhiteSpace(facts.ProjectId))
         {
-            AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows, jobJournalHeads);
+            AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows, jobJournalHeads, lifecycleRows);
             return true;
         }
 
@@ -420,10 +444,40 @@ public sealed partial class PublicApiProjectionEngine
         }
 
         // --- desired transitions, from consumed facts only ---
-        var transitions = PublicExecutionAggregator.DeriveTransitions(facts, observedAt);
+        var consumedLifecycleId = checkpoints.TryGetValue(
+            CheckpointKey(PublicProjectionFeeds.AgentSessionLifecycle, sessionId),
+            out var lifecycleWatermark)
+            && long.TryParse(lifecycleWatermark, out var lifecycleCheckpoint)
+                ? lifecycleCheckpoint
+                : 0;
+        var pendingLifecycleRows = rebuildGeneration is null
+            ? lifecycleRows.Where(transition => transition.Id > consumedLifecycleId).ToList()
+            : lifecycleRows;
+        var transitionFacts = lifecycleRows.Count == 0
+            ? PublicExecutionAggregator.DeriveTransitions(facts, observedAt)
+                .Select(transition => (Transition: transition, Facts: facts))
+                .ToList()
+            : pendingLifecycleRows
+                .Select(transition =>
+                {
+                    var historicalFacts = BuildHistoricalFacts(
+                        sessionId,
+                        row,
+                        transition,
+                        journalRows,
+                        facts);
+                    return (Transition: PublicExecutionAggregator.FromLifecycleTransition(transition), Facts: historicalFacts);
+                })
+                .Concat(PublicExecutionAggregator.DeriveContextResetTransitions(facts)
+                    .Select(transition => (Transition: transition, Facts: facts)))
+                .OrderBy(item => item.Transition.OccurredAt)
+                .ThenBy(item => PublicExecutionAggregator.TransitionRank(item.Transition.EventType))
+                .ThenBy(item => item.Transition.Identity, StringComparer.Ordinal)
+                .ToList();
         var newEvents = new List<PublicSessionEventRow>();
-        foreach (var transition in transitions)
+        foreach (var item in transitionFacts)
         {
+            var transition = item.Transition;
             if (existingTransitions.Contains(transition.Identity))
             {
                 continue;
@@ -442,7 +496,7 @@ public sealed partial class PublicApiProjectionEngine
 
             var sequence = stream.NextSequence;
             stream.NextSequence = checked(stream.NextSequence + 1);
-            var payload = BuildEventPayload(facts, transition, observedAt, sequence);
+            var payload = BuildEventPayload(item.Facts, transition, observedAt, sequence);
             if (payload is null)
             {
                 // The transition's anchor has no public payload in this
@@ -470,13 +524,16 @@ public sealed partial class PublicApiProjectionEngine
         long? latestSequence = newEvents.Count > 0
             ? newEvents[^1].Sequence
             : existingEvents.Count > 0 ? existingEvents.Max(e => e.Sequence) : stream.LatestSequence;
-        var terminalSequences = existingEvents
-            .Concat(newEvents)
+        var terminalSequences = newEvents
             .Where(eventRow => IsTerminalTransition(eventRow.Type))
-            .GroupBy(eventRow => eventRow.SourceTransition, StringComparer.Ordinal)
+            .Select(eventRow =>
+            {
+                var transition = transitionFacts.First(item => item.Transition.Identity == eventRow.SourceTransition).Transition;
+                return (transition.FactIdentity, eventRow.Sequence);
+            })
             .ToDictionary(
-                group => group.Key,
-                group => group.First().Sequence,
+                item => item.FactIdentity,
+                item => item.Sequence,
                 StringComparer.Ordinal);
         if (newEvents.Count > 0 && rebuildGeneration is null)
         {
@@ -492,7 +549,7 @@ public sealed partial class PublicApiProjectionEngine
             stream.UpdatedAt = observedAt;
         }
 
-        AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows, jobJournalHeads);
+        AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows, jobJournalHeads, lifecycleRows);
         return true;
     }
 
@@ -864,6 +921,79 @@ public sealed partial class PublicApiProjectionEngine
                 .ToList(),
         };
     }
+
+    private static PublicProjectionFacts BuildHistoricalFacts(
+        string sessionId,
+        AgentSessionRow row,
+        AgentSessionLifecycleTransitionRow transition,
+        IReadOnlyList<AgentSessionEventRow> journalRows,
+        PublicProjectionFacts currentFacts)
+    {
+        AgentSessionLifecycleSnapshot? snapshot;
+        try
+        {
+            snapshot = JsonSerializer.Deserialize<AgentSessionLifecycleSnapshot>(transition.SnapshotJson, JSON.Options);
+        }
+        catch (JsonException)
+        {
+            snapshot = null;
+        }
+
+        if (snapshot is null)
+        {
+            return currentFacts;
+        }
+
+        return new PublicProjectionFacts
+        {
+            SessionId = sessionId,
+            ProjectId = row.LabelProjectId,
+            AgentId = row.LabelAgentId,
+            Activity = snapshot.Activity,
+            SessionCreatedAt = currentFacts.SessionCreatedAt,
+            PendingStopActive = snapshot.PendingStopActive,
+            PendingResetActive = snapshot.PendingResetActive,
+            Jobs = snapshot.Jobs.Select(ToJobFacts).ToList(),
+            Inputs = snapshot.Inputs
+                .Select(input => new PublicProjectionFacts.InputFacts(
+                    input.InputId,
+                    input.Acceptance,
+                    input.RecordedAt,
+                    input.JobId))
+                .ToList(),
+            Turns = snapshot.Turns
+                .Select(turn => new PublicProjectionFacts.TurnFacts(
+                    turn.TurnId,
+                    turn.Status,
+                    turn.InputIds,
+                    turn.JobId,
+                    turn.RecordedAt,
+                    turn.UpdatedAt,
+                    turn.Result))
+                .ToList(),
+            SessionJournal = journalRows
+                .Select(journal => new PublicProjectionFacts.SessionJournalFacts(
+                    journal.Id,
+                    journal.Type,
+                    journal.Time))
+                .ToList(),
+        };
+    }
+
+    private static PublicProjectionFacts.JobFacts ToJobFacts(AgentSessionLifecycleJob job) => new(
+        job.JobKey,
+        job.Status,
+        job.ProjectId,
+        job.AgentId,
+        job.SessionId,
+        job.InitialInputId,
+        job.InitialTurnId,
+        job.SubmittedAt,
+        job.ReadySince,
+        job.RunningSince,
+        job.TerminalAt,
+        job.WaitingReason,
+        job.TerminalResult);
 
     private static PublicProjectionFacts.JobFacts ToJobFacts(AgentJobRow row, AgentJobState state) => new(
         row.JobKey,

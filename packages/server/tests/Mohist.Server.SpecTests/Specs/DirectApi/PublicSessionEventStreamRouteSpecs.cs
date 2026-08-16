@@ -188,6 +188,37 @@ public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture 
     }
 
     [Fact]
+    public async Task ProductionSessionDeleteClosesTheStreamAndExplicitPurgeInvalidatesItsCursor()
+    {
+        var seeded = await SeedStreamViaProjectorAsync();
+        using var client = await CreateReaderAsync(seeded.ProjectId);
+        var cursor = await EncodeCursorAsync(seeded.ProjectId, seeded.SessionId, 1, 2);
+
+        await DeleteSessionAsync(seeded.SessionId);
+
+        using var noCursor = await GetAsync(client, seeded.ProjectId, seeded.SessionId);
+        await AssertErrorAsync(noCursor, HttpStatusCode.NotFound, DirectApiErrorCodes.SessionNotFound);
+
+        using var tombstone = await GetAsync(
+            client,
+            seeded.ProjectId,
+            seeded.SessionId,
+            $"after={Uri.EscapeDataString(cursor)}");
+        await AssertErrorAsync(tombstone, HttpStatusCode.Gone, DirectApiErrorCodes.CursorExpired);
+        using var tombstoneBody = JsonDocument.Parse(await tombstone.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Null, tombstoneBody.RootElement.GetProperty("earliestSequence").ValueKind);
+        Assert.Equal(2, tombstoneBody.RootElement.GetProperty("latestSequence").GetInt64());
+
+        await PurgeDeletedSessionAsync(seeded.SessionId);
+        using var purged = await GetAsync(
+            client,
+            seeded.ProjectId,
+            seeded.SessionId,
+            $"after={Uri.EscapeDataString(cursor)}");
+        await AssertErrorAsync(purged, HttpStatusCode.BadRequest, DirectApiErrorCodes.CursorInvalid);
+    }
+
+    [Fact]
     public async Task ProjectionLagReturns503WithoutServingTheJournal()
     {
         var seeded = await SeedStreamAsync();
@@ -573,6 +604,22 @@ public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture 
             item.SessionId == sessionId && item.Type == eventType);
         row.PayloadJson = row.PayloadJson[..^1] + $",\"{fieldName}\":\"private\"}}";
         await db.SaveChangesAsync();
+    }
+
+    private async Task DeleteSessionAsync(string sessionId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        await scope.ServiceProvider
+            .GetRequiredService<IAgentSessionStore>()
+            .DeleteAsync(sessionId);
+    }
+
+    private async Task PurgeDeletedSessionAsync(string sessionId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        await scope.ServiceProvider
+            .GetRequiredService<IAgentSessionStreamRetention>()
+            .PurgeDeletedAsync(sessionId);
     }
 
     private async Task UpdateStreamAsync(string sessionId, Action<PublicStreamStateRow> update)

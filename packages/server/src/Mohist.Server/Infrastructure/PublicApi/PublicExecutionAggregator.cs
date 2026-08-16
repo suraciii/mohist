@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api.DirectApi;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Infrastructure.PublicApi;
@@ -26,6 +27,9 @@ public static class PublicProjectionFeeds
 
     /// <summary>AgentSession CloudEvents journal (<c>AgentSessionEvents</c>), keyed by source.</summary>
     public const string AgentSessionEvents = "agent_session_events";
+
+    /// <summary>Session lifecycle transition history, keyed by Session id.</summary>
+    public const string AgentSessionLifecycle = "agent_session_lifecycle";
 }
 
 /// <summary>
@@ -494,6 +498,16 @@ internal static class PublicExecutionAggregator
     /// </summary>
     public static IReadOnlyList<PublicSourceTransition> DeriveTransitions(
         PublicProjectionFacts facts,
+        DateTimeOffset now) =>
+        DeriveLifecycleTransitions(facts, now)
+            .Concat(DeriveContextResetTransitions(facts))
+            .OrderBy(t => t.OccurredAt)
+            .ThenBy(t => TransitionRank(t.EventType))
+            .ThenBy(t => t.Identity, StringComparer.Ordinal)
+            .ToList();
+
+    internal static IReadOnlyList<PublicSourceTransition> DeriveLifecycleTransitions(
+        PublicProjectionFacts facts,
         DateTimeOffset now)
     {
         var transitions = new List<PublicSourceTransition>();
@@ -504,6 +518,7 @@ internal static class PublicExecutionAggregator
             {
                 transitions.Add(new PublicSourceTransition(
                     InputRejectedFact(input.InputId),
+                    InputRejectedFact(input.InputId),
                     PublicSessionEventTypes.InputRejected,
                     input.RecordedAt ?? now,
                     PublicAnchorKind.Input,
@@ -512,6 +527,7 @@ internal static class PublicExecutionAggregator
             else if (input.Acceptance == AgentSessionInputAcceptance.Accepted)
             {
                 transitions.Add(new PublicSourceTransition(
+                    InputAcceptedFact(input.InputId),
                     InputAcceptedFact(input.InputId),
                     PublicSessionEventTypes.InputAccepted,
                     input.RecordedAt ?? now,
@@ -527,6 +543,7 @@ internal static class PublicExecutionAggregator
                 case AgentTurnStatus.Queued:
                     transitions.Add(new PublicSourceTransition(
                         TurnQueuedFact(turn.TurnId),
+                        TurnQueuedFact(turn.TurnId),
                         PublicSessionEventTypes.TurnQueued,
                         turn.RecordedAt ?? now,
                         PublicAnchorKind.Turn,
@@ -535,6 +552,7 @@ internal static class PublicExecutionAggregator
                 case AgentTurnStatus.Executing when facts.PendingStopActive:
                     transitions.Add(new PublicSourceTransition(
                         TurnOutcomePendingFact(turn.TurnId),
+                        TurnOutcomePendingFact(turn.TurnId),
                         PublicSessionEventTypes.TurnOutcomePending,
                         turn.UpdatedAt ?? turn.RecordedAt ?? now,
                         PublicAnchorKind.Turn,
@@ -542,6 +560,7 @@ internal static class PublicExecutionAggregator
                     break;
                 case AgentTurnStatus.Executing:
                     transitions.Add(new PublicSourceTransition(
+                        TurnRunningFact(turn.TurnId),
                         TurnRunningFact(turn.TurnId),
                         PublicSessionEventTypes.TurnRunning,
                         turn.UpdatedAt ?? turn.RecordedAt ?? now,
@@ -553,6 +572,7 @@ internal static class PublicExecutionAggregator
                 case AgentTurnStatus.Cancelled:
                     transitions.Add(new PublicSourceTransition(
                         TurnTerminalFact(turn.TurnId),
+                        TurnTerminalFact(turn.TurnId),
                         PublicSessionEventTypes.TurnTerminal,
                         turn.UpdatedAt ?? turn.RecordedAt ?? now,
                         PublicAnchorKind.Turn,
@@ -560,6 +580,7 @@ internal static class PublicExecutionAggregator
                     break;
                 case AgentTurnStatus.Unknown:
                     transitions.Add(new PublicSourceTransition(
+                        TurnUnknownFact(turn.TurnId),
                         TurnUnknownFact(turn.TurnId),
                         PublicSessionEventTypes.SessionUnknown,
                         turn.UpdatedAt ?? turn.RecordedAt ?? now,
@@ -569,22 +590,28 @@ internal static class PublicExecutionAggregator
             }
         }
 
-        // session.unknown for a Session whose own facts are unresolved.
+        // Legacy Sessions without lifecycle history use the current state
+        // as a one-time recovery approximation. New writes are recorded by
+        // AgentSessionStore and do not take this path.
         if (facts.Activity == AgentSessionActivity.Unknown
             && facts.Turns.All(turn => turn.Status != AgentTurnStatus.Unknown))
         {
             transitions.Add(new PublicSourceTransition(
-                SessionUnknownFact(),
+                SessionUnknownFact(facts.SessionId),
+                SessionUnknownFact(facts.SessionId),
                 PublicSessionEventTypes.SessionUnknown,
                 now,
                 PublicAnchorKind.Session,
                 facts.SessionId));
         }
 
-        // session.context_reset: only from a durable canonical binding
-        // replacement fact. The first runtime-session binding is the
-        // initial bind, not a reset; every later binding fact replaced
-        // the physical runtime session, which is the context boundary.
+        return transitions;
+    }
+
+    internal static IReadOnlyList<PublicSourceTransition> DeriveContextResetTransitions(
+        PublicProjectionFacts facts)
+    {
+        var transitions = new List<PublicSourceTransition>();
         var runtimeBoundSeen = 0;
         foreach (var journal in facts.SessionJournal)
         {
@@ -598,6 +625,7 @@ internal static class PublicExecutionAggregator
             {
                 transitions.Add(new PublicSourceTransition(
                     ContextResetFact(journal.JournalId),
+                    ContextResetFact(journal.JournalId),
                     PublicSessionEventTypes.ContextReset,
                     journal.Time,
                     PublicAnchorKind.Session,
@@ -605,16 +633,36 @@ internal static class PublicExecutionAggregator
             }
         }
 
-        return transitions
-            .OrderBy(t => t.OccurredAt)
-            .ThenBy(t => TransitionRank(t.EventType))
-            .ThenBy(t => t.Identity, StringComparer.Ordinal)
-            .ToList();
+        return transitions;
     }
+
+    internal static PublicSourceTransition FromLifecycleTransition(
+        AgentSessionLifecycleTransitionRow row) =>
+        new(
+            row.SourceTransition,
+            LifecycleFactIdentity(row),
+            row.EventType,
+            row.OccurredAt,
+            row.AnchorKind switch
+            {
+                "input" => PublicAnchorKind.Input,
+                "turn" => PublicAnchorKind.Turn,
+                _ => PublicAnchorKind.Session,
+            },
+            row.AnchorId);
+
+    private static string LifecycleFactIdentity(AgentSessionLifecycleTransitionRow row) =>
+        row.EventType switch
+        {
+            PublicSessionEventTypes.InputRejected => InputRejectedFact(row.AnchorId),
+            PublicSessionEventTypes.TurnTerminal => TurnTerminalFact(row.AnchorId),
+            _ => row.SourceTransition,
+        };
 
     /// <summary>One normalized source transition of a Session's public journal.</summary>
     internal sealed record PublicSourceTransition(
         string Identity,
+        string FactIdentity,
         string EventType,
         DateTimeOffset OccurredAt,
         PublicAnchorKind AnchorKind,
@@ -640,7 +688,7 @@ internal static class PublicExecutionAggregator
     private static string TurnOutcomePendingFact(string turnId) => $"turn:{turnId}:outcome_pending";
     private static string TurnUnknownFact(string turnId) => $"turn:{turnId}:unknown";
     private static string InputAcceptedFact(string inputId) => $"input:{inputId}:accepted";
-    private static string SessionUnknownFact() => "session:unknown";
+    private static string SessionUnknownFact(string sessionId) => $"session:{sessionId}:unknown";
     private static string ContextResetFact(long journalId) => $"session:context-reset:{journalId}";
 
     // --- component mapping helpers ---
@@ -836,7 +884,7 @@ internal static class PublicExecutionAggregator
         return null;
     }
 
-    private static int TransitionRank(string eventType) => eventType switch
+    internal static int TransitionRank(string eventType) => eventType switch
     {
         PublicSessionEventTypes.InputAccepted => 0,
         PublicSessionEventTypes.InputRejected => 1,

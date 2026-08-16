@@ -141,6 +141,86 @@ public sealed class PublicExecutionProjectionSpecs : IAsyncDisposable
     }
 
     [Fact]
+    public async Task LifecycleHistory_PreservesCompressedQueuedRunningAndTerminalTransitions()
+    {
+        await _harness.SeedJobAsync("job_history_1", "proj_pub", "agent_pub", "session_history_1", "input_history_1", "turn_history_1");
+
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_history_1", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_history_1", "job_history_1", recordedAt: T0)],
+            turns: [PublicProjectionTestSupport.Turn("turn_history_1", "input_history_1", "job_history_1", AgentTurnStatus.Queued, recordedAt: T0)]));
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_history_1", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_history_1", "job_history_1", recordedAt: T0)],
+            turns: [PublicProjectionTestSupport.Turn("turn_history_1", "input_history_1", "job_history_1", AgentTurnStatus.Executing, recordedAt: T0, updatedAt: T0.AddSeconds(1))]));
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_history_1", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Idle,
+            inputs: [PublicProjectionTestSupport.Input("input_history_1", "job_history_1", recordedAt: T0)],
+            turns: [PublicProjectionTestSupport.Turn(
+                "turn_history_1",
+                "input_history_1",
+                "job_history_1",
+                AgentTurnStatus.Completed,
+                recordedAt: T0,
+                updatedAt: T0.AddSeconds(2),
+                result: new AgentTurnResult(Output: """{"text":"Done."}"""))]));
+
+        Assert.Empty(await _harness.EventsAsync("session_history_1"));
+        Assert.True(await _harness.Engine.ProcessPendingAsync());
+
+        var events = await _harness.EventsAsync("session_history_1");
+        Assert.Equal(
+            [
+                PublicSessionEventTypes.InputAccepted,
+                PublicSessionEventTypes.TurnQueued,
+                PublicSessionEventTypes.TurnRunning,
+                PublicSessionEventTypes.TurnTerminal,
+            ],
+            events.Select(row => row.Type));
+        Assert.Equal(4, events.Select(row => row.SourceTransition).Distinct(StringComparer.Ordinal).Count());
+
+        var payloads = events
+            .Select(row => JsonSerializer.Deserialize<PublicExecutionRead>(row.PayloadJson, JSON.PublicApi)!)
+            .ToList();
+        Assert.Equal(PublicExecutionFieldValues.StatusQueued, payloads[0].Status);
+        Assert.Equal(PublicExecutionFieldValues.StatusQueued, payloads[1].Status);
+        Assert.Equal(PublicExecutionFieldValues.StatusRunning, payloads[2].Status);
+        Assert.Equal(PublicExecutionFieldValues.StatusTerminal, payloads[3].Status);
+    }
+
+    [Fact]
+    public async Task LifecycleHistory_PreservesDistinctUnknownEpisodes()
+    {
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_unknown_history", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Unknown,
+            inputs: [],
+            turns: []));
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_unknown_history", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [],
+            turns: []));
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_unknown_history", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Unknown,
+            inputs: [],
+            turns: []));
+
+        Assert.True(await _harness.Engine.ProcessPendingAsync());
+
+        var events = (await _harness.EventsAsync("session_unknown_history"))
+            .Where(row => row.Type == PublicSessionEventTypes.SessionUnknown)
+            .ToList();
+        Assert.Equal(2, events.Count);
+        Assert.Equal(2, events.Select(row => row.SourceTransition).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal([1L, 2L], events.Select(row => row.Sequence));
+    }
+
+    [Fact]
     public async Task FiveStatePrecedence_RunningOverQueued_UnknownOnlyFromFacts_OutcomePendingIsRunning()
     {
         // accepted: a durably accepted input with no turn yet.

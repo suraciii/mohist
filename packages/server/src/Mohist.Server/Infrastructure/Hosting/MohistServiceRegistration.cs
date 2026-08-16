@@ -164,7 +164,9 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowRunWorkProjection, WorkflowRunWorkProjection>();
         services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
         services.AddScoped<IWorkspaceStore, WorkspaceStore>();
-        services.AddScoped<IAgentSessionStore, AgentSessionStore>();
+        services.AddScoped<AgentSessionStore>();
+        services.AddScoped<IAgentSessionStore>(sp => sp.GetRequiredService<AgentSessionStore>());
+        services.AddScoped<IAgentSessionStreamRetention>(sp => sp.GetRequiredService<AgentSessionStore>());
         services.AddScoped<AgentSessionReconcileQuerier>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();

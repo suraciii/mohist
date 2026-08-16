@@ -68,7 +68,8 @@ public sealed partial class PublicApiProjectionEngine
         AgentSessionRow sessionRow,
         IReadOnlyList<AgentJobRow> jobRows,
         IReadOnlyList<AgentSessionEventRow> journalRows,
-        IReadOnlyDictionary<string, long> jobJournalHeads)
+        IReadOnlyDictionary<string, long> jobJournalHeads,
+        IReadOnlyList<AgentSessionLifecycleTransitionRow> lifecycleRows)
     {
         AdvanceCheckpoint(
             checkpoints,
@@ -83,6 +84,15 @@ public sealed partial class PublicApiProjectionEngine
                 PublicProjectionFeeds.AgentSessionEvents,
                 AgentSessionSource(sessionRow.Id),
                 journalRows.Max(row => row.Id).ToString());
+        }
+
+        if (lifecycleRows.Count > 0)
+        {
+            AdvanceCheckpoint(
+                checkpoints,
+                PublicProjectionFeeds.AgentSessionLifecycle,
+                sessionRow.Id,
+                lifecycleRows.Max(row => row.Id).ToString());
         }
 
         foreach (var jobRow in jobRows)

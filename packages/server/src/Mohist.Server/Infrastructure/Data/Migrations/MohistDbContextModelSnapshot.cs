@@ -2100,6 +2100,52 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionLifecycleTransitionRow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("SourceTransition")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("EventType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("AnchorKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("AnchorId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("SnapshotJson")
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId", "Id")
+                        .HasDatabaseName("IX_AgentSessionLifecycleTransitions_SessionId_Id");
+
+                    b.ToTable("AgentSessionLifecycleTransitions", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>
                 {
                     b.Property<string>("Id")
