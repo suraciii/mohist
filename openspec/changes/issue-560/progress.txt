@@ -346,3 +346,16 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   The first parallel `npm run test:fast` attempt hit two unrelated Runner
   cleanup timing assertions; the isolated Runner suite passed 1,639/1,639,
   and the subsequent full `npm run test:fast` passed with all existing totals.
+
+## T-004 verification audit
+
+- Re-verified the committed task-first Web slice against every
+  `web-agent-task-composer` requirement: task-only launch and stable retry key,
+  selected-Agent definition-first regression, Project-default recommendation
+  and adjusted catalog hints, no-default Runtime/Model/Variant catalog gating,
+  actionable conflict/pending/execution-config feedback, empty-state routing,
+  and Agent refinement links/edit surfaces.
+- Focused Web verification passed 172 tests across the composer, Agent entity,
+  empty state, Agent detail, session, and profile editor suites. Web typecheck,
+  FSD boundaries, and test-boundary checks passed. The complete Web suite passed
+  4,736 tests in 378 files.
