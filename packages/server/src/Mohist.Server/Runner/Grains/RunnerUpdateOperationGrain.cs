@@ -162,6 +162,19 @@ public sealed class RunnerUpdateOperationGrain(
         ValidateCandidate(candidate);
         await LoadAsync();
 
+        // Two confirmations for the same live Runner connection can race
+        // before either HTTP request observes the persisted operation. Reuse
+        // that connection's pending fence; a different connection generation
+        // is the explicit chained-update boundary and must get a new fence.
+        var existing = state.State.Operations.LastOrDefault(operation =>
+            operation.Status == RunnerUpdateOperationStatus.Pending
+            && string.Equals(
+                operation.ConnectionGeneration,
+                candidate.ConnectionGeneration,
+                StringComparison.Ordinal));
+        if (existing is not null)
+            return existing;
+
         var duplicate = state.State.Operations.LastOrDefault(operation =>
             string.Equals(operation.OperationId, candidate.OperationId, StringComparison.Ordinal));
         if (duplicate is not null)

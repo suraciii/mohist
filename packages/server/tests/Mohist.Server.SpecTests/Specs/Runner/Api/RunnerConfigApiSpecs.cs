@@ -157,6 +157,42 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
     }
 
     [Fact]
+    public async Task ConcurrentStartNewForSameConnection_ReusesOnePendingFence()
+    {
+        var runnerId = $"runner-update-operation-race-{Guid.NewGuid():N}";
+        var operationGrain = _fixture.Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId);
+        var createdAt = _fixture.TimeProvider.GetUtcNow();
+        var first = new RunnerUpdateOperation(
+            "runner-update:race-first",
+            runnerId,
+            createdAt,
+            new[] { new RunnerUpdateWork(
+                WorkDispatchOwnerKinds.AgentJob,
+                "job-race-first",
+                "work-race-first",
+                null,
+                "agent-job") },
+            ConnectionGeneration: "runner-connection:race");
+        var second = first with
+        {
+            OperationId = "runner-update:race-second",
+            AffectedWorks = new[] { new RunnerUpdateWork(
+                WorkDispatchOwnerKinds.AgentJob,
+                "job-race-second",
+                "work-race-second",
+                null,
+                "agent-job") },
+        };
+
+        var results = await Task.WhenAll(
+            operationGrain.StartNewAsync(first),
+            operationGrain.StartNewAsync(second));
+
+        Assert.Equal(results[0].OperationId, results[1].OperationId);
+        Assert.Single((await operationGrain.GetPendingAsync())!.AffectedWorks);
+    }
+
+    [Fact]
     public async Task RecoveryStatus_ProjectsReceiptAcknowledgedAndReplacementSettledPerWork()
     {
         var runnerId = $"runner-recovery-status-{Guid.NewGuid():N}";
