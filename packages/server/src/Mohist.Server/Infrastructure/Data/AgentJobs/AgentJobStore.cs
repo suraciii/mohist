@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Grains;
@@ -55,6 +57,20 @@ public interface IAgentJobStore
     Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default);
 
     /// <summary>
+    /// Atomically transitions a pending AgentJob while fencing the frozen
+    /// work identity. The capability-claim dispatch snapshot is written in
+    /// the same ledger transaction as Pending -> Running; the caller owns
+    /// the execution-tuple predicate before calling.
+    /// </summary>
+    Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        string expectedWorkId,
+        string dispatchJson,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Inserts a new AgentJob ledger row if one does not exist. The
     /// initial <see cref="AgentJobLedgerRecord.Revision"/> must be 0;
     /// on success the returned record carries the post-insert revision.
@@ -77,6 +93,16 @@ public interface IAgentJobStore
     /// reported set.
     /// </summary>
     Task<IReadOnlyList<AgentJobLedgerRecord>> ListRunningForRunnerAsync(
+        string runnerId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns AgentJobs in the runner-loss recovery projection assigned to
+    /// this runner and whose persisted recovery deadline has not elapsed.
+    /// Ordinary Unknown jobs remain excluded: they are not safe to replay
+    /// until a separate authoritative outcome or recovery decision exists.
+    /// </summary>
+    Task<IReadOnlyList<AgentJobLedgerRecord>> ListRecoveringForRunnerAsync(
         string runnerId,
         CancellationToken ct = default);
 
@@ -209,7 +235,29 @@ public class AgentJobStore : IAgentJobStore
         return ToRecord(existing);
     }
 
-    public async Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default)
+    public Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        CancellationToken ct = default) =>
+        ClaimAsyncCore(key, runnerId, runningSince, null, null, ct);
+
+    public Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        string expectedWorkId,
+        string dispatchJson,
+        CancellationToken ct = default) =>
+        ClaimAsyncCore(key, runnerId, runningSince, expectedWorkId, dispatchJson, ct);
+
+    private async Task<AgentJobLedgerRecord> ClaimAsyncCore(
+        string key,
+        string runnerId,
+        DateTimeOffset runningSince,
+        string? expectedWorkId,
+        string? dispatchJson,
+        CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -245,6 +293,16 @@ public class AgentJobStore : IAgentJobStore
             throw new AgentJobLedgerReconstructionException(
                 $"AgentJob ledger row {key} has no DispatchJson; cannot transition Pending -> Running.");
         }
+
+        if (expectedWorkId is not null
+            && !string.Equals(existing.WorkId, expectedWorkId, StringComparison.Ordinal))
+        {
+            throw new AgentJobLedgerConflictException(
+                $"AgentJob ledger row {key} work identity changed; expected {expectedWorkId}, found {existing.WorkId}.");
+        }
+
+        if (expectedWorkId is not null && string.IsNullOrWhiteSpace(dispatchJson))
+            throw new ArgumentException("A capability claim requires the updated dispatch snapshot.", nameof(dispatchJson));
 
         var nextRevision = existing.Revision + 1;
         var runningSinceText = FormatTimestamp(runningSince);
@@ -290,6 +348,8 @@ public class AgentJobStore : IAgentJobStore
                 $"AgentJob ledger row {key} claim revision mismatch after update (expected {nextRevision}, saw {updated.Revision}).");
         }
 
+        if (dispatchJson is not null)
+            updated.DispatchJson = dispatchJson;
         StageDirectApiProjection(updated);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -299,6 +359,7 @@ public class AgentJobStore : IAgentJobStore
             key, runnerId, nowText);
         return ToRecord(updated);
     }
+
 
     public async Task<IReadOnlyList<AgentJobLedgerRecord>> ListEligiblePendingAsync(
         string? projectId,
@@ -341,6 +402,29 @@ public class AgentJobStore : IAgentJobStore
 
         var rows = await ProjectRows(query, includeSubagentTreeFields, ct);
         return rows.Select(ToRecord).ToList();
+    }
+
+    public async Task<IReadOnlyList<AgentJobLedgerRecord>> ListRecoveringForRunnerAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var includeSubagentTreeFields = await HasLaunchVisibilityColumnAsync(db, ct);
+        var query = db.AgentJobs.AsNoTracking()
+            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "unknown");
+
+        if (includeSubagentTreeFields)
+            query = query.Where(r => r.LaunchVisibility == null || r.LaunchVisibility == "visible");
+
+        var rows = await ProjectRows(
+            query.OrderBy(r => r.JobKey),
+            includeSubagentTreeFields,
+            ct);
+        var now = _timeProvider.GetUtcNow();
+        return rows
+            .Select(ToRecord)
+            .Where(record => IsActiveRunnerLossRecovery(record.StateJson, now))
+            .ToList();
     }
 
     public async Task<bool> IsTerminalWorkAsync(
@@ -402,6 +486,57 @@ public class AgentJobStore : IAgentJobStore
             .ThenBy(r => r.JobKey)
             .Take(limit), includeSubagentTreeFields, ct);
         return rows.Select(ToRecord).ToList();
+    }
+
+    private static bool IsActiveRunnerLossRecovery(
+        string stateJson,
+        DateTimeOffset now)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(stateJson);
+            var root = document.RootElement;
+            if (!TryGetProperty(root, "failureReason", out var reason)
+                || reason.ValueKind != JsonValueKind.String
+                || !string.Equals(reason.GetString(), "runner-lost", StringComparison.Ordinal))
+                return false;
+
+            if (!TryGetProperty(root, "recoveryDeadlineAt", out var deadline)
+                || deadline.ValueKind != JsonValueKind.String
+                || !DateTimeOffset.TryParse(
+                    deadline.GetString(),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out var recoveryDeadlineAt))
+                return false;
+
+            return recoveryDeadlineAt > now;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetProperty(
+        JsonElement root,
+        string name,
+        out JsonElement value)
+    {
+        if (root.TryGetProperty(name, out value))
+            return true;
+
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private static async Task<bool> HasLaunchVisibilityColumnAsync(

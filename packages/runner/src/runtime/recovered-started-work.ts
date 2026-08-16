@@ -24,6 +24,7 @@ interface RecoveredStartedEntry {
  */
 export class RecoveredStartedWork {
   private readonly entries = new Map<string, RecoveredStartedEntry>()
+  private readonly observed = new Set<string>()
 
   constructor(
     private readonly journal: WorkResultJournal,
@@ -38,6 +39,32 @@ export class RecoveredStartedWork {
       if (this.entries.has(key)) continue
       this.entries.set(key, { work: entry.work, attempts: 0, retryAt: 0 })
     }
+  }
+
+  /**
+   * Admits a delivery-driven reconciliation into the unknown-report
+   * path (runtimes with no turn-adoption API). Distinct from
+   * `recover()`: this is current-process state for work the server just
+   * re-delivered, not a startup fence sweep.
+   */
+  enqueue(work: DispatchWorkItem): void {
+    const key = workKey(work)
+    if (this.entries.has(key)) return
+    this.entries.set(key, { work, attempts: 0, retryAt: 0 })
+  }
+
+  /**
+   * Cancels a startup unknown-report entry because a re-delivered
+   * dispatch has taken over reconciliation of that work identity under
+   * the journal fence.
+   */
+  drop(key: string): void {
+    this.entries.delete(key)
+    this.observed.delete(key)
+  }
+
+  has(key: string): boolean {
+    return this.entries.has(key) || this.observed.has(key)
   }
 
   async retryDue(now: number): Promise<void> {
@@ -82,6 +109,7 @@ export class RecoveredStartedWork {
     })
     await this.journal.acknowledgeUnconfirmed(entry.work)
     this.entries.delete(key)
+    this.observed.add(key)
   }
 
   private scheduleRetry(key: string, now: number): void {

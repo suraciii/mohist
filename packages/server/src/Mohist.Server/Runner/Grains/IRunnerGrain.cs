@@ -54,7 +54,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// </summary>
     Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker);
     /// <summary>Claims one AgentJob from its owner ledger during a poll.</summary>
-    Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId);
+    Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId,
+        CapabilityClaimExpectation? expectation = null);
     /// <summary>
     /// Marks the runner present. Poll and control-plane heartbeat both refresh
     /// presence; the former also participates in dispatch reconciliation.
@@ -139,7 +140,29 @@ public sealed record ActionCatalogTombstone(
 [GenerateSerializer]
 public sealed record RuntimeCatalogEntry(
     [property: Id(0)] string[]? Models = null,
-    [property: Id(1)] Dictionary<string, string[]>? Variants = null);
+    [property: Id(1)] Dictionary<string, string[]>? Variants = null,
+    [property: Id(2)] Dictionary<string, string[]>? ReasoningEfforts = null,
+    [property: Id(3)] bool? SupportsReasoningEffort = null,
+    [property: Id(4)] bool? Complete = null,
+    [property: Id(5)] string? CapabilityRevision = null);
+
+/// <summary>
+/// Immutable evidence used at the Runner-to-owner claim boundary. The
+/// execution tuple is kept generic; runtime adapters translate it only after
+/// the owner has accepted the conditional claim.
+/// </summary>
+[GenerateSerializer]
+public sealed record CapabilityClaimExpectation(
+    [property: Id(0)] string OwnerKind,
+    [property: Id(1)] string OwnerId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string? Runtime,
+    [property: Id(4)] string? Model,
+    [property: Id(5)] string? ReasoningEffort,
+    [property: Id(6)] string? Variant,
+    [property: Id(7)] string? CapabilityRevision,
+    [property: Id(8)] long? RuntimeGeneration,
+    [property: Id(9)] string? ConnectionGeneration);
 
 [GenerateSerializer]
 public record RunnerInfo(
@@ -238,10 +261,27 @@ public record WorkDispatch(
     /// carries this together with <see cref="WorkId"/> so the Server can bind
     /// the Turn without trusting mutable Session labels.
     /// </summary>
-    [property: Id(26)] string? TaskRunId = null)
+    [property: Id(26)] string? TaskRunId = null,
+    [property: Id(27)] CapabilityClaimExpectation? CapabilityClaim = null,
+    /// <summary>
+    /// Runtime binding recorded on the attempt's agent result settlement.
+    /// Present only on re-delivered dispatches for still-unresolved agent
+    /// work: the runner must reconcile against the bound execution instead
+    /// of submitting a new prompt. Null on fresh dispatches.
+    /// </summary>
+    [property: Id(28)] AgentRecoveryBinding? AgentRecovery = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }
+
+/// <summary>
+/// The runtime facts a runner needs to reconcile already-started agent work:
+/// enough to probe and adopt the recorded execution, nothing more.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentRecoveryBinding(
+    [property: Id(0)] string Runtime,
+    [property: Id(1)] string RuntimeSessionId);
 
 public static class WorkDispatchOwnerKinds
 {

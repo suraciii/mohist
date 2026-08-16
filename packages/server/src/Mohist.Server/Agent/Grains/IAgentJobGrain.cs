@@ -26,6 +26,10 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// </summary>
     Task<ClaimResult?> ClaimNextAsync(string runnerId);
 
+    Task<ClaimResult?> ClaimNextAsync(
+        string runnerId,
+        CapabilityClaimExpectation expectation) => ClaimNextAsync(runnerId);
+
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);
     Task SubmitAsync(AgentJobInput input);
@@ -108,6 +112,14 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// never overwritten.
     /// </summary>
     Task MarkUnknownAsync(string reason) => Task.CompletedTask;
+
+    /// <summary>
+    /// Enters the existing Unknown arbitration with a durable runner-loss
+    /// recovery deadline. The default keeps lightweight test and legacy
+    /// implementations source-compatible; the authoritative grain persists
+    /// the deadline in AgentJobState.
+    /// </summary>
+    Task MarkUnknownAsync(string reason, DateTimeOffset recoveryDeadlineAt) => MarkUnknownAsync(reason);
 
     Task ConcurrencyPermitGrantedAsync(
         string? token = null,
@@ -246,7 +258,17 @@ public sealed record AgentJobRuntimeSnapshot(
     /// Launch-time <c>AgentTurn</c> id the coordinator durably
     /// recorded on the AgentSession.
     /// </summary>
-    [property: Id(11)] string? InitialTurnId = null);
+    [property: Id(11)] string? InitialTurnId = null,
+    /// <summary>
+    /// Persisted absolute deadline for an Unknown job recovering from runner
+    /// loss. Null for ordinary Unknown jobs and terminal jobs.
+    /// </summary>
+    [property: Id(12)] DateTimeOffset? RecoveryDeadlineAt = null,
+    /// <summary>
+    /// Read projection computed from the persisted deadline and the grain's
+    /// injected clock. The wire status remains <see cref="AgentJobStatus.Unknown"/>.
+    /// </summary>
+    [property: Id(13)] bool IsRecovering = false);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
@@ -320,6 +342,7 @@ public static class AgentJobSessionDeliveryIds
 public static class AgentJobFailureReasons
 {
     public const string RunnerUnavailable = "runner-unavailable";
+    public const string RunnerLost = "runner-lost";
     public const string ReportTimeout = "report-timeout";
 
     /// <summary>

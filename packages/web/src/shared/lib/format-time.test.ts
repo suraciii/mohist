@@ -189,6 +189,12 @@ describe('formatSessionTime', () => {
       expect(out.secondary).toBe(absoluteOf(dateMs))
     })
 
+    it('recovering 5h past threshold — still relative', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'recovering', now: pastThreshold })
+      expect(out.primary).toBe('5h ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+
     it('probing 5h past threshold — relative preserved (probing invariant)', () => {
       const out = formatSessionTime({ date: dateMs, statusKind: 'probing', now: pastThreshold })
       expect(out.primary).toBe('5h ago')

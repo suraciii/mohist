@@ -11,6 +11,7 @@ public static partial class WorkflowRunExtensions
             if (results.Count == 0) return [];
 
             var current = run.CurrentStage();
+            current.Interruption = null;
             var events = new List<WorkflowEvent>();
             CheckFailed? firstFailure = null;
 

@@ -543,6 +543,7 @@ internal sealed partial class TableRenderer
         }
 
         RenderWorkflowRunMetadata(status);
+        RenderWorkflowRunInterruption(status?["interruption"]);
         RenderWorkflowRunFailure(status?["failure"]);
         RenderAgentResultAttention(status?["agentResultAttention"]);
 
@@ -579,6 +580,27 @@ internal sealed partial class TableRenderer
     // when present. Stage-level failures are surfaced through the stage table's
     // individual rows instead of being printed here — keeping this helper
     // scoped to the run-level failure field of WorkflowStatusView.
+    private void RenderWorkflowRunInterruption(JsonNode? interruptionNode)
+    {
+        if (interruptionNode is not JsonObject interruption) return;
+
+        var reason = StringOf(interruption, "reasonCode");
+        var workId = StringOf(interruption, "workId");
+        var ownerId = StringOf(interruption, "ownerId");
+        var recordedAt = StringOf(interruption, "recordedAt");
+        var deadline = StringOf(interruption, "recoveryDeadlineAt");
+        if (string.IsNullOrEmpty(reason) && string.IsNullOrEmpty(workId) && string.IsNullOrEmpty(deadline))
+            return;
+
+        _out.WriteLine("");
+        _out.WriteLine("recoverable interruption:");
+        if (!string.IsNullOrEmpty(reason)) _out.WriteLine($"  reason:    {reason}");
+        if (!string.IsNullOrEmpty(workId)) _out.WriteLine($"  work id:   {workId}");
+        if (!string.IsNullOrEmpty(ownerId)) _out.WriteLine($"  owner id:  {ownerId}");
+        if (!string.IsNullOrEmpty(recordedAt)) _out.WriteLine($"  recorded:  {recordedAt}");
+        if (!string.IsNullOrEmpty(deadline)) _out.WriteLine($"  deadline:  {deadline}");
+    }
+
     private void RenderWorkflowRunFailure(JsonNode? failureNode)
     {
         if (failureNode is not JsonObject failure) return;

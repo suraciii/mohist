@@ -10,10 +10,14 @@ namespace Mohist.Server.Agent.Services;
 public class AgentJobQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly TimeProvider _timeProvider;
 
-    public AgentJobQuerier(IDbContextFactory<MohistDbContext> dbFactory)
+    public AgentJobQuerier(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        TimeProvider? timeProvider = null)
     {
         _dbFactory = dbFactory;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<IReadOnlyList<AgentJobListItem>> ListByAgentAsync(
@@ -157,16 +161,21 @@ public class AgentJobQuerier : IScopedService
         return null;
     }
 
-    private static AgentJobListItem ToItem(AgentJobRow row)
+    private AgentJobListItem ToItem(AgentJobRow row)
     {
         var state = JSON.Deserialize<AgentJobState>(row.State);
+        var isRecovering = state?.Status == AgentJobStatus.Unknown
+            && state.RecoveryDeadlineAt is { } deadline
+            && deadline > _timeProvider.GetUtcNow();
         return new AgentJobListItem(
             row.JobKey,
             row.AgentId,
-            row.Status,
+            isRecovering ? "recovering" : row.Status,
             row.SubmittedAt,
             row.TerminalAt,
-            state?.WaitingReason);
+            state?.WaitingReason,
+            isRecovering ? state?.FailureReason : null,
+            isRecovering ? state?.RecoveryDeadlineAt : null);
     }
 }
 
@@ -176,7 +185,9 @@ public sealed record AgentJobListItem(
     string? Status,
     string? SubmittedAt,
     string? TerminalAt,
-    string? WaitingReason = null);
+    string? WaitingReason = null,
+    string? FailureReason = null,
+    DateTimeOffset? RecoveryDeadlineAt = null);
 
 public sealed record AgentExecutionHistory(
     AgentJobStatus Status,

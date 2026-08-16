@@ -103,6 +103,17 @@ export interface AgentSessionStartup {
   agentName?: string | null
 }
 
+/**
+ * Server-recorded runtime binding attached to an unresolved-agent
+ * redelivery. Its presence marks the dispatch as a recovery probe: the
+ * runner must reconcile the recorded execution, never submit a new
+ * prompt. Mirrors `WorkDispatch.AgentRecovery` on the server.
+ */
+export interface AgentRecoveryBinding {
+  runtime: string
+  runtimeSessionId: string
+}
+
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
@@ -156,6 +167,12 @@ export type WorkDispatchResponse = {
    * `WorkDispatch.InitialTurnId` on the server.
    */
   initialTurnId?: string | null
+  /**
+   * Server-recorded runtime binding for unresolved-agent redelivery.
+   * Present only on recovery dispatches; marks the work as a
+   * reconciliation probe. Mirrors `WorkDispatch.AgentRecovery`.
+   */
+  agentRecovery?: AgentRecoveryBinding | null
 }
 
 /**
@@ -249,6 +266,7 @@ export interface DispatchWorkItem {
    * `WorkDispatch.InitialTurnId` on the server.
    */
   initialTurnId?: string | null
+  agentRecovery?: AgentRecoveryBinding | null
 }
 
 export interface AddTaskInput {
@@ -315,6 +333,17 @@ export type ActionResult = ({ output: JsonObject | null; error?: never } | { out
   turnFact?: { finalAssistantText?: string | null } | null
 }
 
+export interface WorkResourceLimits {
+  /** Maximum aggregate child-process memory in MiB. Null disables the bound. */
+  memoryMb?: number | null
+  /** Maximum wall-clock duration for an action subprocess in milliseconds. */
+  wallClockMs?: number | null
+  /** Aggregate-RSS sampling interval for action subprocesses in milliseconds. */
+  watchdogIntervalMs?: number | null
+  /** Maximum runtime-backed turn duration in milliseconds. */
+  turnBudgetMs?: number | null
+}
+
 export interface RunnerOptions {
   serverUrl: string
   runnerId: string
@@ -347,6 +376,15 @@ export interface RunnerOptions {
   /** Idle grace before an unowned shared Agent runtime is terminated. */
   runtimeIdleGraceMs?: number
 
+  /** Maximum time a quarantined OpenCode generation may drain. */
+  quarantineDrainTimeoutMs?: number
+
+  /** Maximum time runtime shutdown waits before abandoning cleanup. */
+  runtimeShutdownTimeoutMs?: number
+
+  /** Deployment-backed per-work resource containment policy. */
+  workResourceLimits?: WorkResourceLimits | null
+
   /**
    * Optional override for the incremental task-log flush interval in
    * milliseconds. Defaults to {@link TASK_LOG_FLUSH_INTERVAL_MS}
@@ -378,6 +416,10 @@ export interface RunnerOptions {
 export interface RuntimeCatalogEntry {
   models: string[]
   variants: Record<string, string[]>
+  reasoningEfforts?: Record<string, string[]>
+  supportsReasoningEffort?: boolean
+  complete?: boolean
+  capabilityRevision?: string | null
 }
 
 export interface RunnerRegistration {

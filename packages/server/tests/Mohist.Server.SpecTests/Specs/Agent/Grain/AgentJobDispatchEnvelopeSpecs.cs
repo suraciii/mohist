@@ -29,14 +29,45 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         var job = JobGrain(jobKey);
         var sessionId = $"agent-session-{Guid.NewGuid():N}";
 
+        // An explicit reasoningEffort is only claimable when the runner
+        // advertises a complete catalog and a ready readiness witness for
+        // that runtime (stage-1 capability fence, #557).
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "agent-job-host",
+            projectId,
+            ConnectionGeneration: "connection-1",
+            RuntimeCatalogs: new Dictionary<string, RuntimeCatalogEntry>
+            {
+                ["pi"] = new(
+                    Models: ["openai/gpt-5.5"],
+                    Variants: new Dictionary<string, string[]>
+                    {
+                        ["openai/gpt-5.5"] = ["balanced"],
+                    },
+                    ReasoningEfforts: new Dictionary<string, string[]>
+                    {
+                        ["openai/gpt-5.5"] = ["high"],
+                    },
+                    SupportsReasoningEffort: true,
+                    Complete: true,
+                    CapabilityRevision: "catalog-rev-envelope-1"),
+            }));
+        await runner.ObserveRuntimeReadinessAsync(
+            "connection-1",
+            [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]);
+
         var instructions = "Always respond in formal English; refuse non-code tasks.";
-        var configElement = JsonDocument.Parse("{\"type\":\"opencode\",\"model\":\"openai/gpt-5.5\",\"reasoningEffort\":\"high\",\"variant\":\"balanced\"}").RootElement.Clone();
+        var configElement = JsonDocument.Parse("{\"type\":\"pi\",\"model\":\"openai/gpt-5.5\",\"reasoningEffort\":\"high\",\"variant\":\"balanced\"}").RootElement.Clone();
 
         var input = new AgentJobInput(
             Prompt: "summarize the diff",
             Model: "openai/gpt-5.5",
             WorkspacePath: "/tmp/agent-job-agent-source",
             ProjectId: projectId,
+            Runtime: "pi",
             AgentId: "agent-7",
             AgentInstructions: instructions,
             AgentConfig: configElement,
@@ -45,7 +76,15 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
             ReasoningEffort: "high");
 
         await job.SubmitAsync(input);
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        await WaitForStatusAsync(
+            job,
+            AgentJobStatus.Running,
+            TimeSpan.FromSeconds(5),
+            new RunnerPollRequest(
+                [],
+                [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)],
+                ConnectionGeneration: "connection-1"));
 
         var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 

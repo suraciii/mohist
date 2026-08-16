@@ -47,6 +47,12 @@ public sealed class AgentJobState
     [Id(31)] public string? ConcurrencyWaiterId { get; set; }
     [Id(32)] public PendingInitialTurnTerminalDelivery? PendingInitialTurnTerminalDelivery { get; set; }
     [Id(33)] public AgentJobTerminalLogOwnership? TerminalLogOwnership { get; set; }
+    /// <summary>
+    /// Absolute deadline for a runner-loss recovery projection. This stays
+    /// separate from the job timeout so the reminder can re-derive the
+    /// recovery decision after activation or a silo restart.
+    /// </summary>
+    [Id(34)] public DateTimeOffset? RecoveryDeadlineAt { get; set; }
 }
 
 [GenerateSerializer]

@@ -4,10 +4,7 @@ import { AlertCircleIcon, BotIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
-import type {
-  IssueDecisionAction,
-  IssueDecisionActionKind,
-} from '../model/issueDecisionActions'
+import type { IssueDecisionAction, IssueDecisionActionKind } from '../model/issueDecisionActions'
 import type { IssueDecisionActionController } from '../model/useIssueDecisionActions'
 import { ConfirmationDrawer } from './ConfirmationDrawer'
 
@@ -55,7 +52,17 @@ export interface MobileActionBarProps {
   rationale: string
   nextAction: string
   controller: IssueDecisionActionController
-  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled' | 'done-no-action' | 'terminal-no-action'
+  summary:
+    | 'running'
+    | 'recoverable-interrupted'
+    | 'queued'
+    | 'approval-required'
+    | 'blocked'
+    | 'failed'
+    | 'done'
+    | 'cancelled'
+    | 'done-no-action'
+    | 'terminal-no-action'
 }
 
 export function MobileActionBar({
@@ -98,12 +105,9 @@ export function MobileActionBar({
     controller.runAction(sendBackAction, { sendBackBody: sendBackText })
   }
 
-  const launcherLabel = primary
-    ? primary.label
-    : actions[0]?.label ?? 'Open actions'
-  const launcherPendingLabel = primary && pendingKind === primary.kind
-    ? (PENDING_BUSY_LABEL[primary.kind] ?? primary.pendingLabel)
-    : null
+  const launcherLabel = primary ? primary.label : (actions[0]?.label ?? 'Open actions')
+  const launcherPendingLabel =
+    primary && pendingKind === primary.kind ? (PENDING_BUSY_LABEL[primary.kind] ?? primary.pendingLabel) : null
   const launcherLabelText = launcherPendingLabel ?? launcherLabel
 
   return (
@@ -168,9 +172,7 @@ export function MobileActionBar({
               const reason = isBusy ? PENDING_BUSY_MESSAGE : describeReason(action)
               const isDisabled = !action.enabled || isBusy
               const descriptionId = isDisabled ? describeIdFor(action.kind) : undefined
-              const label = isPending
-                ? (PENDING_BUSY_LABEL[action.kind] ?? action.pendingLabel)
-                : action.label
+              const label = isPending ? (PENDING_BUSY_LABEL[action.kind] ?? action.pendingLabel) : action.label
 
               if (isNavAction(action) && action.to) {
                 return (
@@ -196,7 +198,9 @@ export function MobileActionBar({
                         isDisabled && 'pointer-events-none opacity-50',
                       )}
                     >
-                      {action.kind === 'ask-agent' && !isPending ? <BotIcon className="size-4" aria-hidden="true" /> : null}
+                      {action.kind === 'ask-agent' && !isPending ? (
+                        <BotIcon className="size-4" aria-hidden="true" />
+                      ) : null}
                       {label}
                     </Link>
                     {isDisabled && reason && (
@@ -228,7 +232,13 @@ export function MobileActionBar({
                 <div key={action.kind} className="flex flex-col items-stretch gap-1">
                   <Button
                     type="button"
-                    variant={action.primary ? 'default' : action.kind === 'send-back' || action.kind === 'stop' ? 'destructive' : 'outline'}
+                    variant={
+                      action.primary
+                        ? 'default'
+                        : action.kind === 'send-back' || action.kind === 'stop'
+                          ? 'destructive'
+                          : 'outline'
+                    }
                     size="default"
                     data-testid={`mobile-sheet-action-${action.kind}`}
                     data-primary={action.primary ? 'true' : 'false'}
@@ -238,7 +248,9 @@ export function MobileActionBar({
                     onClick={handleActionClick}
                     className={cn(
                       'min-h-[40px] justify-center text-sm font-semibold',
-                      (action.kind === 'stop' || action.kind === 'send-back') && isDisabled && 'border-border bg-muted text-muted-foreground hover:bg-muted',
+                      (action.kind === 'stop' || action.kind === 'send-back') &&
+                        isDisabled &&
+                        'border-border bg-muted text-muted-foreground hover:bg-muted',
                     )}
                   >
                     {label}
@@ -271,7 +283,9 @@ export function MobileActionBar({
                 className="flex items-start gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
               >
                 <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span>No action is currently available. The next transition will appear here when conditions change.</span>
+                <span>
+                  No action is currently available. The next transition will appear here when conditions change.
+                </span>
               </div>
             )}
           </div>
@@ -302,10 +316,7 @@ export function MobileActionBar({
         </div>
 
         {controller.stopConfirming && (
-          <div
-            data-testid="mobile-stop-confirmation"
-            className="px-4 pb-4 space-y-3"
-          >
+          <div data-testid="mobile-stop-confirmation" className="px-4 pb-4 space-y-3">
             <div className="space-y-1">
               <h3
                 data-testid="mobile-stop-confirmation-title"
@@ -313,10 +324,7 @@ export function MobileActionBar({
               >
                 {controller.stopConfirmTitle}
               </h3>
-              <p
-                data-testid="mobile-stop-confirmation-body"
-                className="text-sm text-muted-foreground"
-              >
+              <p data-testid="mobile-stop-confirmation-body" className="text-sm text-muted-foreground">
                 {controller.stopConfirmBody}
               </p>
             </div>
@@ -349,10 +357,7 @@ export function MobileActionBar({
         )}
 
         {sendBackOpen && (
-          <div
-            data-testid="mobile-send-back-form"
-            className="px-4 pb-4 space-y-3"
-          >
+          <div data-testid="mobile-send-back-form" className="px-4 pb-4 space-y-3">
             <div className="space-y-1">
               <h3 className="text-base font-semibold text-popover-foreground">Send back for changes</h3>
               <p className="text-sm text-muted-foreground">
@@ -360,10 +365,7 @@ export function MobileActionBar({
               </p>
             </div>
             <div>
-              <label
-                htmlFor="mobile-send-back-body"
-                className="text-xs font-medium text-popover-foreground"
-              >
+              <label htmlFor="mobile-send-back-body" className="text-xs font-medium text-popover-foreground">
                 Feedback
               </label>
               <Textarea

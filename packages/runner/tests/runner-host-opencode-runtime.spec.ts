@@ -372,10 +372,13 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
         runtimeCatalogs: {
           pi: {
             models: ['anthropic/claude-sonnet-4', 'openai/gpt-5.5'],
-            variants: {
+            variants: {},
+            reasoningEfforts: {
               'anthropic/claude-sonnet-4': ['off'],
               'openai/gpt-5.5': ['low', 'high'],
             },
+            supportsReasoningEffort: true,
+            complete: true,
           },
         },
       })

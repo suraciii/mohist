@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import { WorkResultJournal, workKey } from './work-result-journal.js'
+import { runnerRestartedResult } from './work-report.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
 import { withTestRunnerResources } from '../../tests/support/test-resources.js'
 import type { RunnerFileSystem } from '../system/filesystem.js'
@@ -64,6 +65,29 @@ describe('WorkResultJournal', () => {
     })
   })
 
+  it('CompletesAStartedFenceWithAnInterruptionFactAndRetiresItAfterAck', async () => {
+    await withTestRunnerResources(async (_fileSystem) => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      await journal.begin(work)
+      const interruption = runnerRestartedResult(work)
+      await journal.completeInterrupted(work, interruption.result, interruption.interruption)
+
+      const restarted = new WorkResultJournal('/runner')
+      await restarted.load()
+      expect(restarted.completed()).toEqual([
+        expect.objectContaining({
+          work,
+          state: 'completed',
+          result: expect.objectContaining({ status: 'unknown', message: 'runner-restarted' }),
+          interruption: expect.objectContaining({ reason: 'runner-restarted', workId: work.workId }),
+        }),
+      ])
+      await restarted.acknowledge(work)
+      expect(restarted.completed()).toEqual([])
+    })
+  })
+
   it('RejectsAResultForADifferentDispatchIdentity', async () => {
     await withTestRunnerResources(async (_fileSystem) => {
       const journal = new WorkResultJournal('/runner')
@@ -83,6 +107,83 @@ describe('WorkResultJournal', () => {
       await expect(journal.begin(work)).rejects.toThrow('unavailable')
       expect(await fileSystem.readText('/runner/.mohist/runner-state/work-results.json')).toBe('{not-json')
     })
+  })
+
+  it('RearmsAStartedFenceForADriftedRecoveryDispatchInsteadOfRefusing', async () => {
+    await withTestRunnerResources(async () => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      await journal.begin(work)
+      await expect(journal.begin({ ...work, variables: { workspace: { path: '/workspace-2' } } })).rejects.toThrow(
+        'identity conflict',
+      )
+
+      const recovery: DispatchWorkItem = {
+        ...work,
+        variables: { workspace: { path: '/workspace-2' } },
+        agentRecovery: { runtime: 'pi', runtimeSessionId: '/sessions/pi-1' },
+      }
+      expect(await journal.beginRecovery(recovery)).toBe('started')
+      expect(journal.started()).toEqual([{ work: recovery, state: 'started' }])
+      await journal.complete(recovery, result)
+      await journal.acknowledge(recovery)
+      expect(journal.started()).toEqual([])
+    })
+  })
+
+  it('KeepsACompletedEntryUnarmedForARecoveryDispatch', async () => {
+    await withTestRunnerResources(async () => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      await journal.begin(work)
+      await journal.complete(work, result)
+
+      const recovery: DispatchWorkItem = {
+        ...work,
+        agentRecovery: { runtime: 'pi', runtimeSessionId: '/sessions/pi-1' },
+      }
+      expect(await journal.beginRecovery(recovery)).toBe('completed')
+      expect(journal.completed()).toEqual([{ work, state: 'completed', result }])
+    })
+  })
+
+  it('FencesAFreshRecoveryDispatchLikeBegin', async () => {
+    await withTestRunnerResources(async () => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+
+      const recovery: DispatchWorkItem = {
+        ...work,
+        agentRecovery: { runtime: 'pi', runtimeSessionId: '/sessions/pi-1' },
+      }
+      expect(await journal.beginRecovery(recovery)).toBe('new')
+      expect(journal.started()).toEqual([{ work: recovery, state: 'started' }])
+    })
+  })
+
+  it('RestoresTheOriginalPayloadWhenReArmPersistenceFails', async () => {
+    const fileSystem = new FailingWriteFileSystem()
+    await withTestRunnerResources(
+      async () => {
+        const journal = new WorkResultJournal('/runner')
+        await journal.load()
+        await journal.begin(work)
+        fileSystem.failWrites = true
+
+        const recovery: DispatchWorkItem = {
+          ...work,
+          agentRecovery: { runtime: 'pi', runtimeSessionId: '/sessions/pi-1' },
+        }
+        await expect(journal.beginRecovery(recovery)).rejects.toThrow('disk full')
+        expect(journal.ready()).toBe(false)
+
+        fileSystem.failWrites = false
+        await journal.retryPendingPersistence()
+        expect(journal.ready()).toBe(true)
+        expect(journal.started()).toEqual([{ work, state: 'started' }])
+      },
+      { fileSystem },
+    )
   })
 
   it('RetainsASettledResultUntilTemporaryPersistenceRecovers', async () => {

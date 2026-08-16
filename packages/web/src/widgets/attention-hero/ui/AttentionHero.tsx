@@ -11,11 +11,7 @@ import {
   type ApprovalWaitMetricsResponse,
   type Issue,
 } from '../../../entities/issue'
-import {
-  deriveAttentionItems,
-  isIssueAttentionItem,
-  type AttentionItem,
-} from '../../../entities/agent-ops'
+import { deriveAttentionItems, isIssueAttentionItem, type AttentionItem } from '../../../entities/agent-ops'
 import { formatDuration } from '@/shared/lib/format-duration'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -50,15 +46,15 @@ function isApprovalItem(item: AttentionItem): boolean {
 }
 
 function attentionTreatment(item: AttentionItem): AttentionTreatment {
-  return item.kind === 'approval-needed' || item.kind === 'runner-capacity-limited'
+  return item.kind === 'approval-needed' ||
+    item.kind === 'runner-capacity-limited' ||
+    item.kind === 'recoverable-interrupted'
     ? warningTreatment
     : dangerTreatment
 }
 
 function attentionSummaryTreatment(items: AttentionItem[]): AttentionTreatment {
-  return items.some((item) => attentionTreatment(item).family === 'danger')
-    ? dangerTreatment
-    : warningTreatment
+  return items.some((item) => attentionTreatment(item).family === 'danger') ? dangerTreatment : warningTreatment
 }
 
 export interface AttentionHeroProps {
@@ -143,18 +139,15 @@ export function AttentionHero({
       className={cn('rounded-lg border p-4', heroTreatment.container)}
     >
       <div className="flex items-center gap-2 mb-3">
-        <span className={cn(
-          'inline-flex items-center justify-center size-6 rounded-full text-warning-foreground',
-          heroTreatment.dot,
-        )}>
+        <span
+          className={cn(
+            'inline-flex items-center justify-center size-6 rounded-full text-warning-foreground',
+            heroTreatment.dot,
+          )}
+        >
           <AlertTriangleIcon className="size-3.5" />
         </span>
-        <span className={cn(
-          'text-xs font-semibold uppercase tracking-wide',
-          heroTreatment.text,
-        )}>
-          Needs attention
-        </span>
+        <span className={cn('text-xs font-semibold uppercase tracking-wide', heroTreatment.text)}>Needs attention</span>
         <span className={cn('text-xs font-medium', heroTreatment.text)}>({items.length})</span>
       </div>
       <ApprovalWaitSummary approvalWait={approvalWait} />
@@ -192,12 +185,7 @@ interface AttentionItemRowProps {
   toProjectPath: (path: string) => string
 }
 
-function AttentionItemRow({
-  item,
-  isPending,
-  onApprove,
-  toProjectPath,
-}: AttentionItemRowProps) {
+function AttentionItemRow({ item, isPending, onApprove, toProjectPath }: AttentionItemRowProps) {
   if (!isIssueAttentionItem(item)) {
     return <RunnerAttentionRow item={item} toProjectPath={toProjectPath} />
   }
@@ -214,15 +202,10 @@ function AttentionItemRow({
       data-family={treatment.family}
       className={cn('flex items-center gap-3 rounded-md bg-background px-3 py-2 border', treatment.border)}
     >
-      <span className={cn('font-mono font-semibold text-sm', treatment.text)}>
-        #{item.issueNumber}
-      </span>
+      <span className={cn('font-mono font-semibold text-sm', treatment.text)}>#{item.issueNumber}</span>
       <span className="font-medium text-foreground text-sm">{item.label}</span>
       {item.detail && (
-        <span
-          data-testid="attention-item-detail"
-          className="text-muted-foreground text-sm truncate min-w-0 flex-1"
-        >
+        <span data-testid="attention-item-detail" className="text-muted-foreground text-sm truncate min-w-0 flex-1">
           {item.detail}
         </span>
       )}
@@ -255,13 +238,7 @@ function AttentionItemRow({
   )
 }
 
-function RunnerAttentionRow({
-  item,
-  toProjectPath,
-}: {
-  item: AttentionItem
-  toProjectPath: (path: string) => string
-}) {
+function RunnerAttentionRow({ item, toProjectPath }: { item: AttentionItem; toProjectPath: (path: string) => string }) {
   const treatment = attentionTreatment(item)
 
   if (item.kind === 'runner-unavailable') {
@@ -275,10 +252,7 @@ function RunnerAttentionRow({
           <ShieldOffIcon className="size-3" />
         </span>
         <span className={cn('font-medium text-sm', treatment.text)}>{item.label}</span>
-        <span
-          data-testid="runner-down-message"
-          className={cn('text-sm truncate min-w-0 flex-1', treatment.text)}
-        >
+        <span data-testid="runner-down-message" className={cn('text-sm truncate min-w-0 flex-1', treatment.text)}>
           {item.detail ?? 'No runner is connected.'}
         </span>
         <Link
@@ -299,15 +273,17 @@ function RunnerAttentionRow({
       data-kind={item.kind}
       className={cn('flex items-center gap-3 rounded-md px-3 py-2 border', treatment.container)}
     >
-      <span className={cn('inline-flex items-center justify-center size-5 rounded-full shrink-0 text-warning-foreground', treatment.dot)}>
+      <span
+        className={cn(
+          'inline-flex items-center justify-center size-5 rounded-full shrink-0 text-warning-foreground',
+          treatment.dot,
+        )}
+      >
         <GaugeIcon className="size-3" />
       </span>
       <span className="font-medium text-sm text-foreground">{item.label}</span>
       {item.detail && (
-        <span
-          data-testid="runner-capacity-detail"
-          className="text-muted-foreground text-sm truncate min-w-0 flex-1"
-        >
+        <span data-testid="runner-capacity-detail" className="text-muted-foreground text-sm truncate min-w-0 flex-1">
           {item.detail}
         </span>
       )}
@@ -332,11 +308,7 @@ function ApprovalWaitSummary({ approvalWait }: { approvalWait?: ApprovalWaitMetr
   const hasData = approvalWait.sampleCount > 0 && approvalWait.averageSeconds != null
   if (!hasData) {
     return (
-      <p
-        data-testid="approval-wait-empty"
-        data-state="empty"
-        className="text-xs text-muted-foreground"
-      >
+      <p data-testid="approval-wait-empty" data-state="empty" className="text-xs text-muted-foreground">
         Approval wait metric appears once an approval is completed.
       </p>
     )
@@ -344,8 +316,8 @@ function ApprovalWaitSummary({ approvalWait }: { approvalWait?: ApprovalWaitMetr
 
   return (
     <p data-testid="approval-wait-value" data-state="value" className="text-sm text-foreground">
-      Your approvals averaged{' '}
-      <span className="font-semibold">{formatDuration(approvalWait.averageSeconds)}</span> over the last 7 days.
+      Your approvals averaged <span className="font-semibold">{formatDuration(approvalWait.averageSeconds)}</span> over
+      the last 7 days.
     </p>
   )
 }
@@ -363,13 +335,9 @@ function AllClearState({ approvalWait }: AllClearStateProps) {
         <span className="inline-flex items-center justify-center size-6 rounded-full bg-success text-success-foreground">
           <CheckCircle2Icon className="size-3.5" />
         </span>
-        <span className="text-sm font-semibold text-success uppercase tracking-wide">
-          All clear
-        </span>
+        <span className="text-sm font-semibold text-success uppercase tracking-wide">All clear</span>
       </div>
-      <p className="text-sm text-success mb-3">
-        Nothing needs your attention right now.
-      </p>
+      <p className="text-sm text-success mb-3">Nothing needs your attention right now.</p>
       <ApprovalWaitSummary approvalWait={approvalWait} />
     </section>
   )
@@ -387,13 +355,9 @@ function LoadingState() {
         <span className="inline-flex items-center justify-center size-6 rounded-full bg-muted-foreground/30 text-muted-foreground">
           <AlertTriangleIcon className="size-3.5" />
         </span>
-        <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-          Checking attention
-        </span>
+        <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Checking attention</span>
       </div>
-      <p className="text-sm text-muted-foreground">
-        Loading current issue status...
-      </p>
+      <p className="text-sm text-muted-foreground">Loading current issue status...</p>
     </section>
   )
 }

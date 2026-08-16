@@ -29,6 +29,7 @@ public static class EventCatalog
         ReverseDns.TaskStarted,
         ReverseDns.TaskCompleted,
         ReverseDns.TaskFailed,
+        ReverseDns.TaskInterrupted,
         ReverseDns.TaskCancelled,
         ReverseDns.AgentTaskResultUnconfirmed,
         ReverseDns.TaskBlocked,
@@ -37,6 +38,7 @@ public static class EventCatalog
         ReverseDns.CheckPassed,
         ReverseDns.CheckFailed,
         ReverseDns.CheckPending,
+        ReverseDns.ChecksInterrupted,
         ReverseDns.RepairScheduled,
         ReverseDns.WorkflowArtifactRecorded,
         ReverseDns.AgentSessionRuntimeBound,
@@ -167,6 +169,7 @@ public static class EventCatalog
         public const string TaskStarted = "com.mohist.workflow.task.started";
         public const string TaskCompleted = "com.mohist.workflow.task.completed";
         public const string TaskFailed = "com.mohist.workflow.task.failed";
+        public const string TaskInterrupted = "com.mohist.workflow.task.interrupted";
         public const string TaskCancelled = "com.mohist.workflow.task.cancelled";
         public const string AgentTaskResultUnconfirmed = "com.mohist.workflow.agent-result-unconfirmed";
         public const string TaskBlocked = "com.mohist.workflow.task.blocked";
@@ -175,6 +178,7 @@ public static class EventCatalog
         public const string CheckPassed = "com.mohist.workflow.check.passed";
         public const string CheckFailed = "com.mohist.workflow.check.failed";
         public const string CheckPending = "com.mohist.workflow.check.pending";
+        public const string ChecksInterrupted = "com.mohist.workflow.checks.interrupted";
         public const string RepairScheduled = "com.mohist.workflow.repair-scheduled";
         public const string WorkflowArtifactRecorded = "com.mohist.workflow.artifact.recorded";
 

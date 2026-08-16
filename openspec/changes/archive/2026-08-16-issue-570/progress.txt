@@ -1,0 +1,76 @@
+## Codebase Patterns
+
+- WorkflowRun is persisted as JSON through WorkflowRunStore; additive nullable properties on TaskRun and StageRun survive activation without a schema migration.
+- Runner presence closeout enumerates running workflow assignments and first calls ObserveAgentRunnerDisconnectedAsync. Only a stale response falls through to ordinary-work interruption recording, preserving AgentResultSettlement arbitration.
+- Workflow reminder reconciliation follows the existing AgentResultSettlement pattern: owner grain registers a durable Orleans reminder from the persisted absolute deadline and re-runs the check on activation.
+- Workflow status remains Running and TaskRunStatus remains Running while WorkInterruption is present; no Interrupted enum is introduced.
+
+## T-001 Working Notes
+
+- The workspace contained an uncommitted partial T-001 implementation when work began, including WorkInterruption, interruption events, closeout wiring, and focused specs. Existing changes were preserved and completed in place.
+- Directly constructed WorkflowGrain contract tests have no Orleans reminder registry. Runner-loss reconciliation must not attempt reminder removal during activation when no persisted interruption exists; cleanup is requested only after a report clears a known interruption.
+- Successful completion of the single-task fixture advances the workflow to Ready, not Completed; the terminal-report acceptance is about identity/report acceptance and interruption clearing.
+- Full SpecTests build requires `-p:SkipWebBuild=true` in this environment because the web workspace dependencies do not provide `tsc`.
+- Final verification passed: 3,923 server SpecTests, server UnitTests, and server ArchTests; the focused runner/workflow set passed independently before the full run.
+
+## T-002 Working Notes
+
+- AgentJob recovery stays on persisted `AgentJobStatus.Unknown`: `AgentJobState.RecoveryDeadlineAt` is additive JSON state, and `AgentJobRuntimeSnapshot.IsRecovering` is a clock-derived read projection. No new enum value was introduced.
+- `IAgentJobGrain.MarkUnknownAsync(string, DateTimeOffset)` is an overload with a default interface implementation, preserving existing Unknown callers and lightweight test doubles. Runner closeout calls it for each persisted Running AgentJob with `runner-lost` and one absolute deadline.
+- The `agent-job-recovery` reminder keeps running for deadline-bearing Unknown jobs, re-reads the persisted absolute deadline after activation, and transitions an overdue job to terminal Failed with the recorded reason. Terminal reports clear the deadline before persisting.
+- Report timeout checks runner presence: an offline/unreadable assigned runner records the same `runner-lost` recovering reason and deadline; an online runner retains the existing bare `report-timeout` Unknown behavior.
+- AgentJob detail/list and launch-observation server projections expose `recovering`, reason, and future deadline while the durable status remains Unknown. CLI field catalogs intentionally omit the new detail fields until the later T-004 status-surface slice.
+- T-003 redelivery remains separate: T-002 tests settle the original work identity with a direct authoritative report after recovery; DispatchService does not yet include recovering Unknown AgentJobs in reconnect redelivery.
+- Verification: focused Agent/Runner specs 64/64, assembler unit specs 4/4, full SpecTests 3,928/3,928, UnitTests 2,666/2,666, and ArchTests exit 0. Use `-p:SkipWebBuild=true` because this environment has no `tsc` for the web workspace.
+
+## T-003 Working Notes
+
+- `AgentJobStatus.Unknown` recovery rows retain `AssignedRunnerId`, `WorkId`, and `DispatchJson`; reconnect redelivery can therefore reuse the ledger snapshot without claiming or minting a new identity.
+- `IAgentJobStore.ListRecoveringForRunnerAsync` is the desired-set boundary: it selects only rows assigned to the requested runner with `runner-lost` and a future persisted `RecoveryDeadlineAt`. Ordinary or expired Unknown rows remain absent.
+- `DispatchService` unions running and recovering AgentJob ledgers, then applies the existing `reportedWorkKeys` check. A reported in-flight/awaiting-ack key suppresses redelivery; repeated omitted polls return the same snapshot until Accepted/Stale settlement removes the row from the desired set.
+- Workflow interruption redelivery already uses the persisted dispatch snapshot/translator through `FindRunningAssignedToAsync` and remains restricted to the recorded runner assignment; no cross-runner claim path was changed.
+- Focused T-003 verification passed: DispatchServiceReconciliationSpecs 16/16, AgentJobRunnerRecoverySpecs 5/5, MixedOwnerDispatchSpecs 6/6, AgentJobStoreSpecs 26/26, and RunnerOutstandingWorkSpecs 9/9. The direct xUnit runner is needed for class filtering because the repository's Microsoft Testing Platform wrapper ignores VSTest filters.
+- Final verification passed: direct full SpecTests 3,931/3,931, UnitTests 2,666/2,666, and ArchTests 68/68. The first Microsoft Testing Platform full-suite invocation had one shared-fixture failure in `AgentSessionLaunchRuntimeResolutionSpecs`; its class passed 10/10 when rerun directly, and the direct full run passed.
+
+## T-004 Working Notes
+
+- Workflow read models now carry the persisted `WorkInterruption` fact through run, stage, task, and check views. `WorkflowStatusMapper` projects `Running` work with an interruption as `recoverable-interrupted`, preserving reason, work identity, owner, recorded time, and recovery deadline without populating terminal failure. Legacy status reads with an unresolvable current stage remain tolerant.
+- Issue detail/list projections expose recoverable interruption attention with the recorded reason and deadline. Existing agent-result settlement arbitration remains separate, and `runner-lost` is not converted into active-work failure before the recovery deadline.
+- Web workflow/task/check views, issue attention surfaces, and agent-session views render recoverable interruption and recovering states distinctly from healthy running and terminal failure. CLI `mo run`, AgentJob output, and `mo agent job observation` expose the same status, reason, and deadline fields.
+- Added focused server, CLI, and web presentation tests covering interruption reason/deadline propagation, recovering observation output, and healthy/failure distinction. Server UnitTests passed 2,668/2,668, CLI tests passed 1,851/1,851, ArchTests passed 68/68, and direct full SpecTests passed 3,931/3,931. Web verification is blocked in this workspace because `packages/web` has no installed `tsx`/TypeScript/Vitest binaries (`npm --prefix packages/web run check:fsd` exits with `tsx: not found`).
+
+## T-005 Working Notes
+
+- Workflow and AgentJob owner grains now enforce recovery deadlines in the report turn as well as through reminders. A report arriving at or after a due deadline first produces the recorded terminal failure and returns `Stale`, so a previous runner generation cannot win a reminder race; a report accepted before the deadline clears the interruption/deadline and remains settled when a later reminder runs.
+- Workflow execution observations reconcile a due settlement before applying a late observation, and `Blocked` settlements reject all later observations as `Stale` without rewriting the physical fact or producing duplicate events. Existing identical observation replays remain accepted no-ops for compatibility.
+- T-005 SpecTests cover late workflow reports and duplicate event counts, both workflow deadline ordering directions, late AgentJob report stale acknowledgment, and post-block observation rejection. Verification passed: SpecTests 3,933/3,933, UnitTests 2,668/2,668, and ArchTests 68/68 with `-p:SkipWebBuild=true`.
+
+## T-006 Working Notes
+
+- OpenCode generations track active turns as abortable records. Rebuild waits on `generation.drained` only until `quarantineDrainTimeoutMs` (default 60s); force release marks every turn still in the set with the stable `generation-drain-timeout` runtime error, races its whole turn promise, aborts its local signal, resolves the drain, and lets the replacement start. Turns already returned to the host are outside that set and remain eligible for normal journal/report delivery.
+- Runtime teardown uses `runtimeShutdownTimeoutMs` (default 30s) as an abandon-and-proceed bound for OpenCode server/undici cleanup and Pi `services.close()`. OpenCode graceful close sends the SDK's SIGTERM first; timeout destroys the dispatcher and performs best-effort process-group SIGKILL when a handle exposes a PID.
+- RunnerOptions and CLI expose `QUARANTINE_DRAIN_TIMEOUT_MS` and `RUNTIME_SHUTDOWN_TIMEOUT_MS`; runner and self-host docs describe defaults, forced-failure semantics, and the systemd `MemoryMax` recommendation.
+- Focused and full runner verification passed: `typecheck`, `typecheck:tests`, and Vitest 1,643/1,643 across 152 files.
+
+## T-007 Working Notes
+
+- `WorkResourceLimits` is an additive runner configuration type with nullable `memoryMb`, `wallClockMs`, `watchdogIntervalMs`, and `turnBudgetMs`; omitted values resolve to 1024 MiB, 1 hour, 250 ms RSS sampling, and 1 hour respectively. `RunnerOptions` and `AgentJobExecutorOptions` accept the partial deployment shape.
+- Action subprocess containment is attached to `CommandLineOptions.resourceLimits`. When `prlimit` is available, `runCommand` preserves the detached child PID/process group and spawns `prlimit --as=<bytes> --data=<bytes> -- <command> <args...>`; otherwise the same child tree is guarded by aggregate `/proc` RSS sampling and a wall-clock timer. The no-option spawn/result path remains unchanged. A separate `resourceContainment` result marker lets built-in process/script actions report `resource-containment` without widening existing timeout/Git contracts.
+- `RunnerHost` probes `prlimit` once before admitting work. `MOHIST_DISABLE_PRLIMIT=1` and the exported test setter force the watchdog fallback. Linux integration coverage uses a real memory-burning Node child; unit coverage uses deterministic RSS and ProcessSpawner seams.
+- OpenCode resource-budget expiry aborts the turn, marks the current generation for the existing bounded rebuild/quarantine path, and returns the new `resource-containment` runtime error. Pi expiry aborts the turn and bounded-shuts services so the same runtime handle is replaceable on the next host loop. Journal/report ownership remains in `RunnerHost`, so siblings and completed awaiting-ack results retain their identities.
+- Runner verification for T-007: focused containment/runtime tests 82/82, Linux integration tests 13/13, runner `test:ci` 1,651/1,651, `typecheck`, `typecheck:tests`, and `docs:check` passed. Repository-wide `format:check` still reports pre-existing formatting drift in earlier issue slices and unrelated web files; no bulk formatting was applied.
+
+## T-008 Working Notes
+
+- `RunnerHost` keeps the `started` journal fence closed. In-process `inFlight`/`awaitingAck` entries still skip immediately; after restart, a `started` delivery is registered in `inFlight` while reconciliation probes the persisted AgentSession binding, so repeated deliveries cannot execute the work twice.
+- `binding-recovery.ts` resolves workflow-agent sessions by the original `workflowSessionName(with, workId)` and generic AgentJobs by their dispatched `agentSessionId`. A live binding with `activeTurn` is adopted through the runtime-specific `reattachTurn` seam; missing or idle bindings complete the journal with a `runner-restarted` interruption fact. Probe/transport uncertainty leaves the `started` fence for a later delivery rather than fabricating an outcome.
+- OpenCode adoption watches the existing session status/event stream until idle and reads the terminal assistant message without calling `session.prompt`; Pi adoption reopens the bound session and waits for its existing stream to settle without `prompt` or `steer`. Replayed runtime observations are not promoted independently into a result.
+- Fallback reports use wire `unknown` for runtime-backed agent tasks, including AgentJobs, so existing settlement arbitration remains authoritative, and `failed` plus error code/message `runner-restarted` for ordinary work. Journal acknowledgement retires the interruption receipt only after the server returns a durable `Accepted`/`Stale` acknowledgement.
+- Added fence, repeated-delivery, live OpenCode re-attach, dead AgentJob, journal interruption-retirement, Pi/OpenCode adoption, and report-wire tests. Verification passed: runner `test:ci` 1,659/1,659, integration tests 13/13, production/test typechecks, and `git diff --check`.
+
+## Fix-CI Working Notes
+
+- The stored failed verification output was `/tmp/pi-bash-885db9064df3fc45.log`: repository `format:check` reported 45 Biome errors in the issue-570 TypeScript changes. Reproducing `npm run format:check` on the completed branch reported 50 errors across 65 changed formattable files; formatting those exact changed files fixed the failure without changing behavior or assertions.
+- The next focused verification exposed the underlying web defect previously masked by the environment's missing `tsx`: four downstream TypeScript contracts omitted the new `recoverable-interrupted` workflow summary or `recovering` session state. The fix propagates those values through desktop/mobile decision surfaces, the session empty-state union, and session time formatting, with focused regressions for the warning recovery surface and non-terminal time display.
+- Focused repair verification passed: runner typechecks and `test:ci` 1,659/1,659; web typecheck; affected web tests 43/43; format check; and `git diff --check`. The first full-gate rerun then exposed the file-size ratchet: six issue-570 files had grown past their baseline limits. Recovery helpers/commands/specs were moved into partial classes and focused modules; the ratchet and all affected builds passed.
+- That full-gate run exposed one remaining web test defect: `attention.test.ts` omitted `recoverable-interrupted` from its exhaustive expected kind set. The assertion was updated; the final `npm run verify` passed docs, file sizes, formatting, build, 178 workflow tests, 1,851 CLI tests, 2,668 unit tests, 3,933 SpecTests, 68 ArchTests, 4,730 Web tests, 1,659 Runner tests, and 70 Slack tests.

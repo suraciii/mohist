@@ -15,6 +15,101 @@ namespace Mohist.Server.UnitTests.Workflow.Grain;
 public class WorkflowBlockedStatusProjectionTests
 {
     [Fact]
+    public void RecoverableInterruption_DerivesRecoverableStatusAndCarriesTheRecordedFact()
+    {
+        var recordedAt = new DateTimeOffset(2026, 8, 15, 1, 0, 0, TimeSpan.Zero);
+        var deadline = recordedAt.AddMinutes(15);
+        var run = new WorkflowRun
+        {
+            Id = "wf-interrupted",
+            Metadata = new WorkflowRunMetadata("test", recordedAt),
+            Status = WorkflowRunStatus.Running,
+            CurrentStageId = "build",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Tasks =
+                    [
+                        new TaskRun
+                        {
+                            Id = "build.1",
+                            DefinitionId = "build",
+                            Attempt = 1,
+                            Title = "Build",
+                            Status = TaskRunStatus.Running,
+                            Uses = "mohist/pi",
+                            Interruption = new WorkInterruption("runner-lost", "build.1", "wf-interrupted", recordedAt, deadline),
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null);
+
+        Assert.Equal("recoverable-interrupted", view!.Status);
+        Assert.Equal("recoverable-interrupted", view.Stages[0].Status);
+        Assert.Equal("recoverable-interrupted", view.Stages[0].Tasks[0].Status);
+        Assert.Equal("runner-lost", view.Interruption!.ReasonCode);
+        Assert.Equal(deadline, view.Interruption.RecoveryDeadlineAt);
+        Assert.Equal(view.Interruption, view.Stages[0].Tasks[0].Interruption);
+        Assert.Null(view.Failure);
+
+        var projection = MohistDefaultWorkflowProjection.ProjectWorkflowState(
+            570,
+            "Runner recovery",
+            IssueStatus.InProgress,
+            view);
+        Assert.Equal(WorkflowAttentionReason.RecoverableInterrupted, projection.Attention!.Reason);
+        Assert.Equal("runner-lost", projection.Attention.ReasonCode);
+        Assert.Equal(deadline, projection.Attention.RecoveryDeadlineAt);
+    }
+
+    [Fact]
+    public void RecoverableInterruptionOnChecks_ProjectsReasonAndDeadlineWithoutFailure()
+    {
+        var interruption = new WorkInterruption(
+            "runner-lost",
+            "check:build.1",
+            "wf-check-interrupted",
+            TestTime.UtcNow,
+            TestDeadline);
+        var run = new WorkflowRun
+        {
+            Id = "wf-check-interrupted",
+            Metadata = new WorkflowRunMetadata("test", TestTime.UtcNow),
+            Status = WorkflowRunStatus.Running,
+            CurrentStageId = "check",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "check",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Interruption = interruption,
+                    Checks =
+                    [new StageCheck { Name = "build", Title = "Build check", Status = StageCheckStatus.Running }],
+                },
+            ],
+        };
+
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null);
+
+        var check = Assert.Single(view!.Stages[0].Checks);
+        Assert.Equal("recoverable-interrupted", check.Status);
+        Assert.Equal(interruption.ReasonCode, check.Interruption!.ReasonCode);
+        Assert.Equal(interruption.RecoveryDeadlineAt, check.Interruption.RecoveryDeadlineAt);
+        Assert.Null(view.Failure);
+    }
+
+    [Fact]
     public void BlockedSettlement_DerivesBlockedWireStatusForRunStageAndTask()
     {
         var run = CreateRunWithSettlement(AgentResultSettlementState.Blocked);

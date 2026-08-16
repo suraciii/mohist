@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Domain;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -412,6 +413,72 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         await _store.ClaimAsync(key, "runner-a", _time.GetUtcNow());
         await Assert.ThrowsAsync<AgentJobLedgerConflictException>(
             () => _store.ClaimAsync(key, "runner-a", _time.GetUtcNow()));
+    }
+
+    [Fact]
+    public async Task ClaimWithWorkIdentityFence_MismatchLeavesPendingLedgerUnchanged()
+    {
+        var key = $"ledger-capability-{Guid.NewGuid():N}";
+        var workId = $"{key}-work";
+        var definition = new AgentExecutionDefinition(
+            "instructions",
+            "pi",
+            "provider/model",
+            "balanced",
+            [],
+            ReasoningEffort: "high");
+        var dispatch = new WorkDispatch(
+            string.Empty,
+            workId,
+            WorkType: "agent-job",
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentJobId: key,
+            AgentDefinition: definition);
+        var inserted = await _store.InsertLedgerAsync(
+            NewPendingRecord(key, "runner-a", _time.GetUtcNow()) with
+            {
+                WorkId = workId,
+                DispatchJson = JSON.Serialize(dispatch),
+            });
+        var expectation = new CapabilityClaimExpectation(
+            WorkDispatchOwnerKinds.AgentJob,
+            key,
+            workId,
+            "pi",
+            "provider/other-model",
+            "high",
+            "balanced",
+            "catalog-revision-2",
+            2,
+            "runner-a:connection:2");
+
+        await Assert.ThrowsAsync<AgentJobLedgerConflictException>(() => _store.ClaimAsync(
+            key,
+            "runner-a",
+            _time.GetUtcNow(),
+            $"{workId}-replaced",
+            JSON.Serialize(dispatch with { CapabilityClaim = expectation })));
+
+        var unchanged = await _store.LoadLedgerAsync(key);
+        Assert.NotNull(unchanged);
+        Assert.Equal(inserted.Revision, unchanged!.Revision);
+        Assert.Equal("runner-a", unchanged.AssignedRunnerId);
+        Assert.Equal(workId, unchanged.WorkId);
+        Assert.Equal(JSON.Serialize(dispatch), unchanged.DispatchJson);
+        Assert.Equal(
+            AgentJobStatus.Pending,
+            JsonSerializer.Deserialize<AgentJobState>(unchanged.StateJson, JSON.Options)!.Status);
+
+        var claimed = await _store.ClaimAsync(
+            key,
+            "runner-a",
+            _time.GetUtcNow(),
+            workId,
+            JSON.Serialize(dispatch with { CapabilityClaim = expectation }));
+        Assert.Equal(AgentJobStatus.Running,
+            JsonSerializer.Deserialize<AgentJobState>(claimed.StateJson, JSON.Options)!.Status);
+        var claimedDispatch = JSON.Deserialize<WorkDispatch>(claimed.DispatchJson!);
+        Assert.Equal("catalog-revision-2", claimedDispatch!.CapabilityClaim!.CapabilityRevision);
     }
 
     [Fact]

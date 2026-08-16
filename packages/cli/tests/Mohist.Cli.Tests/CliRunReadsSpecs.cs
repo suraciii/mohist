@@ -22,7 +22,7 @@ public sealed class RunReadsCollectionDefinition
 // status. All watch timing is driven by an injected TimeProvider so tests
 // never touch wall-clock (design/testing.md).
 [Collection("RunReads")]
-public class CliRunReadsSpecs
+public partial class CliRunReadsSpecs
 {
     private const string WrId = "wr_read01";
     private static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(2);
@@ -32,6 +32,7 @@ public class CliRunReadsSpecs
         string status = "running",
         string? currentStage = "build",
         object? agentResultAttention = null,
+        object? interruption = null,
         string? agentAction = "mohist/pi",
         string? agentRuntime = "pi") => new
     {
@@ -68,6 +69,7 @@ public class CliRunReadsSpecs
             failure = (object?)null,
             availableActions = Array.Empty<object>(),
             agentResultAttention,
+            interruption,
             metadata = new { name = "Mohist", labels = new Dictionary<string, string>(), createdAt = "2026-07-05T00:00:00Z" },
         },
         issueRef = new { projectId = "proj_abc", number = 42, title = "Close the agent subscriptions gap" },

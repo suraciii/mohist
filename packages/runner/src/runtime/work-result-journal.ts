@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from 'node:path'
 import { currentRunnerFileSystem } from '../system/filesystem.js'
 import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { WorkInterruptionFact } from './work-report.js'
 
 export const DEFAULT_WORK_RESULT_JOURNAL_FILE = '.mohist/runner-state/work-results.json'
 
@@ -10,6 +11,8 @@ export interface WorkResultJournalEntry {
   work: DispatchWorkItem
   state: WorkResultJournalState
   result?: WorkItemResult
+  /** Present when the result was surfaced because a started execution died. */
+  interruption?: WorkInterruptionFact
 }
 
 export type WorkResultJournalBegin = 'new' | WorkResultJournalState
@@ -100,6 +103,46 @@ export class WorkResultJournal {
     }, true)
   }
 
+  /**
+   * Admission for a recovery dispatch. A `started` fence hit by a
+   * recovery dispatch is re-armed with the re-rendered payload (the
+   * recorded execution died with the process that fenced it; the fence
+   * identity — owner + work id — is unchanged, so the payload swap
+   * cannot fork execution) and reconciled by the caller instead of
+   * refusing replay. A `completed` entry is returned as-is: the
+   * awaiting-ack machinery owns reporting that result.
+   */
+  beginRecovery(work: DispatchWorkItem): Promise<WorkResultJournalBegin> {
+    return this.mutate(async () => {
+      const key = workKey(work)
+      const existing = this.entries.get(key)
+      if (existing) {
+        if (existing.state === 'completed') return 'completed'
+        if (!sameWork(existing.work, work)) {
+          const prior = cloneWork(existing.work)
+          existing.work = cloneWork(work)
+          try {
+            await this.persist()
+          } catch (error) {
+            existing.work = prior
+            this.persistencePending = true
+            throw error
+          }
+        }
+        return 'started'
+      }
+      this.entries.set(key, { work: cloneWork(work), state: 'started' })
+      try {
+        await this.persist()
+      } catch (error) {
+        this.entries.delete(key)
+        this.persistencePending = true
+        throw error
+      }
+      return 'new'
+    }, true)
+  }
+
   async complete(work: DispatchWorkItem, result: WorkItemResult): Promise<WorkResultJournalPersistence> {
     return await this.mutate(async () => {
       const key = workKey(work)
@@ -139,6 +182,38 @@ export class WorkResultJournal {
   started(): WorkResultJournalEntry[] {
     this.ensureReady()
     return [...this.entries.values()].filter((entry) => entry.state === 'started').map(cloneEntry)
+  }
+
+  async completeInterrupted(
+    work: DispatchWorkItem,
+    result: WorkItemResult,
+    interruption: WorkInterruptionFact,
+  ): Promise<void> {
+    await this.mutate(async () => {
+      const key = workKey(work)
+      const existing = this.entries.get(key)
+      if (!existing || !sameWork(existing.work, work)) {
+        throw new Error(`Work result journal cannot complete unknown work ${key}`)
+      }
+      if (existing.state === 'completed') {
+        if (!sameResult(existing.result, result) || !sameInterruption(existing.interruption, interruption)) {
+          throw new Error(`Work result journal result conflict for ${key}`)
+        }
+        return
+      }
+      existing.state = 'completed'
+      existing.result = cloneResult(result)
+      existing.interruption = structuredClone(interruption)
+      try {
+        await this.persist()
+      } catch (error) {
+        this.unavailable = true
+        existing.state = 'started'
+        delete existing.result
+        delete existing.interruption
+        throw error
+      }
+    })
   }
 
   async acknowledge(work: DispatchWorkItem): Promise<void> {
@@ -254,8 +329,12 @@ function parseJournal(raw: string): WorkResultJournalFile | null {
 
 function isEntry(value: unknown): value is WorkResultJournalEntry {
   if (!isRecord(value) || !isWork(value.work)) return false
-  if (value.state === 'started') return value.result === undefined
-  return value.state === 'completed' && isResult(value.result)
+  if (value.state === 'started') return value.result === undefined && value.interruption === undefined
+  return (
+    value.state === 'completed' &&
+    isResult(value.result) &&
+    (value.interruption === undefined || isInterruption(value.interruption))
+  )
 }
 
 function isWork(value: unknown): value is DispatchWorkItem {
@@ -296,5 +375,21 @@ function cloneEntry(entry: WorkResultJournalEntry): WorkResultJournalEntry {
     work: cloneWork(entry.work),
     state: entry.state,
     ...(entry.result ? { result: cloneResult(entry.result) } : {}),
+    ...(entry.interruption ? { interruption: structuredClone(entry.interruption) } : {}),
   }
+}
+
+function isInterruption(value: unknown): value is WorkInterruptionFact {
+  return (
+    isRecord(value) &&
+    value.reason === 'runner-restarted' &&
+    typeof value.ownerKind === 'string' &&
+    typeof value.ownerId === 'string' &&
+    typeof value.workId === 'string' &&
+    typeof value.recordedAt === 'string'
+  )
+}
+
+function sameInterruption(left: WorkInterruptionFact | undefined, right: WorkInterruptionFact): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
 }

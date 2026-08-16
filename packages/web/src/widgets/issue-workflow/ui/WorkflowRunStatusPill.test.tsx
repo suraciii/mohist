@@ -61,9 +61,21 @@ describe('WorkflowRunStatusPill', () => {
   })
 
   it('uses visually distinct color treatments for pending, ready, and running', () => {
-    const { container: pendingContainer } = render(<><WorkflowRunStatusPill status="pending" /></>)
-    const { container: readyContainer } = render(<><WorkflowRunStatusPill status="ready" /></>)
-    const { container: runningContainer } = render(<><WorkflowRunStatusPill status="running" /></>)
+    const { container: pendingContainer } = render(
+      <>
+        <WorkflowRunStatusPill status="pending" />
+      </>,
+    )
+    const { container: readyContainer } = render(
+      <>
+        <WorkflowRunStatusPill status="ready" />
+      </>,
+    )
+    const { container: runningContainer } = render(
+      <>
+        <WorkflowRunStatusPill status="running" />
+      </>,
+    )
 
     const pendingPill = pendingContainer.querySelector('[data-testid="workflow-run-status-pending"]') as HTMLElement
     const readyPill = readyContainer.querySelector('[data-testid="workflow-run-status-ready"]') as HTMLElement
@@ -88,6 +100,17 @@ describe('WorkflowRunStatusPill', () => {
     expect(pendingClasses).not.toEqual(readyClasses)
     expect(readyClasses).not.toEqual(runningClasses)
     expect(pendingClasses).not.toEqual(runningClasses)
+  })
+
+  it('renders recoverable-interrupted as distinct from healthy running and failure', () => {
+    renderPill('recoverable-interrupted')
+
+    const pill = screen.getByTestId('workflow-run-status-recoverable-interrupted')
+    expect(pill).toBeInTheDocument()
+    expect(pill.dataset.status).toBe('recoverable-interrupted')
+    expect(pill).toHaveTextContent(/recoverable interruption/i)
+    expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-failed')).not.toBeInTheDocument()
   })
 
   it('renders awaiting-approval as a distinct presentation', () => {

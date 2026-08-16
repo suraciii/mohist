@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -24,12 +25,12 @@ namespace Mohist.Server.Runner.Grains;
 /// <list type="bullet">
 ///   <item><description>presence: lastSeen — poll IS the heartbeat (online/offline).</description></item>
 ///   <item><description>slots: capacity configuration (control-plane owned).</description></item>
-///   <item><description>closeout: on presence loss, fail workflow work while retaining active AgentJob ledgers for reconnect redelivery.</description></item>
+///   <item><description>closeout: on presence loss, record recoverable workflow interruptions while retaining active AgentJob ledgers for reconnect redelivery.</description></item>
 /// </list>
 /// No work-completion wall clock — work liveness is the runner process's
 /// poll report; the only server-side timer is presence expiry.
 /// </summary>
-public class RunnerGrain : Grain, IRunnerGrain, IRemindable
+public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
@@ -54,6 +55,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly RunnerDefinitionStore _definitions;
     private readonly IAgentJobStore _agentJobStore;
+    private readonly AgentJobOptions _agentJobOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
 
@@ -65,6 +67,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         WorkflowRunQuerier workflowRuns,
         RunnerDefinitionStore definitions,
         IAgentJobStore agentJobStore,
+        IOptions<AgentJobOptions> agentJobOptions,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
         [PersistentState("runner")] IPersistentState<RunnerState> state,
@@ -73,6 +76,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _workflowRuns = workflowRuns;
         _definitions = definitions;
         _agentJobStore = agentJobStore;
+        _agentJobOptions = agentJobOptions.Value;
+        ValidateRunnerLossRecoveryTimeout(_agentJobOptions.RunnerLossRecoveryTimeout);
         _log = log;
         _timeProvider = timeProvider;
         _state = state;
@@ -474,7 +479,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
-    public async Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId)
+    public async Task<ClaimResult?> TryClaimAgentJobAsync(
+        string agentJobId,
+        string? projectId,
+        CapabilityClaimExpectation? expectation = null)
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -487,6 +495,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return null;
             }
 
+            if (expectation is not null
+                && (!string.Equals(expectation.OwnerId, agentJobId, StringComparison.Ordinal)
+                    || !RunnerCapabilityGate.Matches(_info, _readinessConnectionGeneration, _runtimeReadiness, expectation)))
+                return null;
+
             var activeWorkflowCount = await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
             var activeAgentJobCount = (await _agentJobStore.ListRunningForRunnerAsync(RunnerId))
                 .Select(record => record.JobKey)
@@ -495,7 +508,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (activeWorkflowCount + activeAgentJobCount >= MaxWorkflowSlots)
                 return null;
 
-            return await GrainFactory.GetGrain<IAgentJobGrain>(agentJobId).ClaimNextAsync(RunnerId);
+            var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
+            return expectation is null
+                ? await job.ClaimNextAsync(RunnerId)
+                : await job.ClaimNextAsync(RunnerId, expectation);
         }
         catch (AgentJobLedgerConflictException)
         {
@@ -838,7 +854,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
                 var observation = await workflow.ObserveAgentRunnerDisconnectedAsync(workerId);
                 if (observation == ReportAck.Stale)
-                    await workflow.FailActiveWorkAsync(workerId, "runner-lost");
+                    await workflow.InterruptActiveWorkAsync(workerId, "runner-lost");
             }
             catch (Exception ex)
             {
@@ -848,17 +864,41 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             }
         }
 
-        // An AgentJob's running ledger is the durable recovery record. Keep
-        // it intact so the same work identity is redelivered after this
-        // runner reconnects; its normal timeout remains the final
-        // fail-closed outcome when no runner returns.
+        var recoveryDeadlineAt = _timeProvider.GetUtcNow()
+            + _agentJobOptions.RunnerLossRecoveryTimeout;
+        foreach (var record in await _agentJobStore.ListRunningForRunnerAsync(workerId))
+        {
+            try
+            {
+                await GrainFactory.GetGrain<IAgentJobGrain>(record.JobKey)
+                    .MarkUnknownAsync(AgentJobFailureReasons.RunnerLost, recoveryDeadlineAt);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "runner {runner} failed to enter AgentJob {job} recovery projection",
+                    RunnerId,
+                    record.JobKey);
+            }
+        }
+    }
+
+    private static void ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.FromMinutes(2))
+            throw new InvalidOperationException(
+                "AgentJob RunnerLossRecoveryTimeout must be longer than the two-minute runner presence timeout.");
     }
 
     private void SetRunnerInfo(RunnerInfo? info)
     {
         var retained = info is null
             ? null
-            : info with { ActionCatalog = CloneActionCatalog(info.ActionCatalog) };
+            : info with
+            {
+                ActionCatalog = CloneActionCatalog(info.ActionCatalog),
+                RuntimeCatalogs = CloneRuntimeCatalogs(info.RuntimeCatalogs),
+            };
         _info = retained;
         var state = _state.State ??= new RunnerState();
         state.LastKnownInfo = retained;
@@ -924,6 +964,30 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             catalog.Tombstones.Select(tombstone => new ActionCatalogTombstone(tombstone.Name, tombstone.Guidance)).ToArray());
     }
 
+    private static Dictionary<string, RuntimeCatalogEntry>? CloneRuntimeCatalogs(
+        Dictionary<string, RuntimeCatalogEntry>? catalogs)
+    {
+        if (catalogs is null)
+            return null;
+
+        return catalogs.ToDictionary(
+            entry => entry.Key,
+            entry => new RuntimeCatalogEntry(
+                entry.Value.Models is null ? null : [.. entry.Value.Models],
+                CloneMap(entry.Value.Variants),
+                CloneMap(entry.Value.ReasoningEfforts),
+                entry.Value.SupportsReasoningEffort,
+                entry.Value.Complete,
+                entry.Value.CapabilityRevision),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string[]>? CloneMap(Dictionary<string, string[]>? values) =>
+        values?.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value is null ? Array.Empty<string>() : [.. entry.Value],
+            StringComparer.OrdinalIgnoreCase);
+
     private static System.Text.Json.JsonElement? CloneDefault(System.Text.Json.JsonElement? value)
     {
         if (value is not { } element || element.ValueKind == System.Text.Json.JsonValueKind.Undefined)
@@ -931,23 +995,4 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return element.Clone();
     }
 
-    private async Task PersistAsync()
-    {
-        await _state.WriteStateAsync();
-    }
-
-    /// <summary>
-    /// Resolves the issue reference carried on a workflow run's metadata
-    /// typed metadata. Returns null when the run has no issue context. Used to
-    /// project the issue ref for
-    /// active workflow work — issue metadata lives on the run, not the work
-    /// item, so without this the read model would lose the issue reference.
-    /// </summary>
-    private static WorkIssueRef? IssueFromRun(WorkflowRun run)
-    {
-        if (string.IsNullOrWhiteSpace(run.Metadata.ProjectId)
-            || run.Metadata.IssueNumber is not > 0)
-            return null;
-        return new WorkIssueRef(run.Metadata.ProjectId, run.Metadata.IssueNumber.Value);
-    }
 }
