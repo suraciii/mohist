@@ -523,3 +523,25 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   behavior and public API surface are unchanged. `npm run check:filesizes`,
   the server SpecTests build, and the focused T-006 suite pass after the
   split.
+
+## T-007 verification rerun (current workflow)
+
+- The existing T-007 implementation was audited against
+  `public-session-event-stream/spec.md`: the route reads only
+  `PublicSessionEventRow` records after cursor binding, generation, and
+  projection-lag checks; it does not consult the event bus, SignalR, Runner,
+  transcript, or UI timeline.
+- The focused `PublicSessionEventStreamRouteSpecs` suite passed all 5 tests,
+  covering exclusive paging, limit capping, allowlisted execution and
+  context-reset payloads, cursor tamper/cross-binding/generation rejection,
+  expiry bounds, tombstones, physical purge, and projection lag. The
+  `PublicSessionEventCursorCodecTests` coverage ran with the full 2,675-test
+  unit assembly and passed. `npm run test:fast:arch` passed all 69 tests.
+- The HMAC key remains persisted through the encrypted server-secret store at
+  the deployment-wide server address; the hosted initializer creates it on
+  startup and each request reloads it, so persisted rotation invalidates old
+  cursors immediately.
+- A repository-wide `npm run test:fast` rerun was interrupted by 10 unrelated
+  5-second timeouts in `packages/runner/tests/runner-host-cleanup-config.spec.ts`;
+  `concurrently` then terminated the other lanes. No Runner files were
+  changed. The T-007 server and focused verification above passed.
