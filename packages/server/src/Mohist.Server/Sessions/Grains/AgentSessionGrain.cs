@@ -597,7 +597,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
 
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
-            throw new InvalidOperationException("A follow-up operation is already in progress.");
+            throw new FollowupOperationInProgressException(session.Id);
         if (session.Status.PendingStop is { IsActive: true } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
         if (session.Status.Activity == AgentSessionActivity.Unknown)

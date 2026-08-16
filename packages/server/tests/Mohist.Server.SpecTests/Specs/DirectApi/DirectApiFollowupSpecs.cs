@@ -262,6 +262,45 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(before, await MappingCountAsync());
     }
 
+    [Fact]
+    public async Task InProgressAdmission_RemainsPendingAndRetryable()
+    {
+        var projectId = await SeedProjectAsync();
+        var sessionId = $"session-followup-pending-{Guid.NewGuid():N}";
+        await SeedSessionWithPendingFollowupAsync(sessionId, projectId, "agent-canonical");
+        var token = await CreatePatAsync(projectId);
+        using var client = DirectClient(token);
+        const string key = "followup-pending";
+        const string text = "wait for the current admission";
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var request = Request(projectId, sessionId, key, text);
+            using var response = await client.SendAsync(request);
+            await AssertErrorAsync(
+                response,
+                HttpStatusCode.ServiceUnavailable,
+                DirectApiErrorCodes.FollowupPending);
+        }
+
+        await using var db = await fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
+            row.Command == DirectApiCommands.Followup
+            && row.ScopeKey == $"{sessionId}|{key}");
+        Assert.Equal(DirectApiMappingStates.Pending, mapping.State);
+        using var outcome = JsonDocument.Parse(mapping.Outcome!);
+        Assert.Equal(
+            DirectApiWriteValidation.FollowupInputId(sessionId, key),
+            outcome.RootElement.GetProperty("inputId").GetString());
+
+        var row = await db.AgentSessions.AsNoTracking().SingleAsync(item => item.Id == sessionId);
+        var session = AgentSessionJson.Deserialize(row)!;
+        Assert.DoesNotContain(session.Status.Inputs ?? [], input => input.Text == text);
+        Assert.DoesNotContain(session.Status.Turns ?? [], turn => turn.Id == DirectApiWriteValidation.FollowupTurnId(sessionId, key));
+    }
+
     private async Task<JsonDocument> PostObservationAsync(
         HttpClient client,
         string projectId,
@@ -393,6 +432,39 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
             Activity = activity,
             AgentRuntimeSessionId = "runtime-followup",
             BoundAt = now,
+        };
+        await sessions.SaveAsync(session.Id, session);
+    }
+
+    private async Task SeedSessionWithPendingFollowupAsync(
+        string sessionId,
+        string projectId,
+        string agentId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<IAgentSessionStore>();
+        var now = fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        var session = AgentSession.Create(
+            sessionId,
+            "runner-followup",
+            "/mohist-tests/work",
+            new AgentSessionMetadata(Labels: new Dictionary<string, string>
+            {
+                ["mohist.io/project-id"] = projectId,
+                ["mohist.io/source-kind"] = "agent-launch",
+                ["mohist.io/agent-id"] = agentId,
+            }),
+            now,
+            runtime: "opencode");
+        session.Status = session.Status with
+        {
+            Activity = AgentSessionActivity.Active,
+            AgentRuntimeSessionId = "runtime-followup",
+            BoundAt = now,
+            PendingFollowup = new AgentSessionFollowupLease(
+                OperationId: "already-admitting",
+                RuntimeSessionId: "runtime-followup",
+                StartedAt: now),
         };
         await sessions.SaveAsync(session.Id, session);
     }

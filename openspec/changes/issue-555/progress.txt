@@ -818,3 +818,29 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   Web tests, and 1,639 Runner tests. No source correction was necessary;
   T-004 implementation and coverage were already present and clean on the
   workflow branch.
+
+## T-005 completion (current workflow)
+
+- Audited the existing follow-up route against the binding idempotency and
+  public-read requirements. Canonical Session membership is resolved after
+  direct authorization and before mapping admission; Project and Agent come
+  only from immutable Session labels; fingerprints contain only the version,
+  follow-up discriminator, canonical Session ID, and accepted body; and the
+  pre-minted Input/Turn IDs are stable for `sessionId|key`.
+- Corrected a transient admission classification gap: an unaccepted existing
+  follow-up lease now throws `FollowupOperationInProgressException` from the
+  Session grain. The direct route already maps that typed condition to `503
+  followup_pending`, so it no longer catches it as a definitive durable
+  rejection. Existing control-plane callers retain the same base exception
+  contract.
+- Added `InProgressAdmission_RemainsPendingAndRetryable` to
+  `DirectApiFollowupSpecs`. It verifies two retries return `503
+  followup_pending`, retain a pending mapping with the deterministic IDs, and
+  create no Input or Turn.
+- Pre-change T-004 regression passed (7 tests). Focused T-005 follow-up
+  coverage passed (7 tests), the Session grain follow-up suite passed (37),
+  and `npm run test:fast` passed all seven lanes: typecheck, 2,676 Server
+  unit tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests,
+  4,724 Web tests, and 1,639 Runner tests. The first fast run encountered
+  the known concurrent Runner cleanup timing race; the isolated Runner lane
+  and full rerun both passed. Format and file-size checks are clean.
