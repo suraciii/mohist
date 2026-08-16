@@ -18,7 +18,6 @@ import { captureOutputs } from './output-capture.js'
 import { checkBranchStability, expectedWorkspaceBranch } from './branch-stability.js'
 import { executeCheckDispatch, type CheckDeclaration } from './check-execution.js'
 import { tryRecovery } from './recovery.js'
-import { enforceCleanWorktree, resolveCleanupAgentAction } from './worktree-enforcement.js'
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from './task-log.js'
 import { isActionFailure } from '../actions/action-result.js'
 import type { ActionCapabilitySet } from '../actions/manifest.js'
@@ -37,6 +36,16 @@ import { capabilitySet } from '../actions/host.js'
 import type { BindingRecoveryCoordinator } from './binding-recovery.js'
 import { SkillResolver } from './skill-resolver.js'
 import { renderWithDeferred, buildActionHost, type ExecutorCapabilityDeps } from './executor-capabilities.js'
+import {
+  applyBoundaryOutcome,
+  buildCompletionBoundary,
+  buildExecutionIdentity,
+  isWorkflowTask,
+  probeCommitReceipt,
+  type ActionExecutionCapture,
+  type CompletionWorkspace,
+} from './completion-boundary.js'
+import type { WorkflowTaskCompletionBoundary } from '../core/types.js'
 
 const COMPLETED_STATUSES = new Set(['completed', 'success', 'succeeded', 'pass', 'passed'])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -64,6 +73,7 @@ export class WorkExecutor {
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
+    private readonly runnerId = 'unknown',
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -85,6 +95,10 @@ export class WorkExecutor {
   ): Promise<WorkExecution> {
     const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
     const logger = new TaskLogger({ collector: ownedCollector, masker: createCredentialMaskerFromEnvironment() })
+    if (isWorkflowTask(work)) {
+      return await this.executeWorkflowTaskWithBoundary(work, signal, ownedCollector, logger)
+    }
+
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== 'agent-job') {
       const precheck = await this.prepareWorkspace(work, signal, logger)
@@ -98,8 +112,73 @@ export class WorkExecutor {
       const result = await this.executeChecks(work, resolvedWorkspace, signal, logger)
       return { result, collector: ownedCollector }
     }
-    const result = await this.executeOne(work, resolvedWorkspace, signal, logger)
+    const result = await this.executeOne(work, resolvedWorkspace, signal, logger, {
+      actionStarted: false,
+      actionResult: null,
+      phase: 'execution',
+    })
     return { result, collector: ownedCollector }
+  }
+
+  private async executeWorkflowTaskWithBoundary(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+    collector: TaskLogCollector,
+    log: TaskLogger,
+  ): Promise<WorkExecution> {
+    const capture: ActionExecutionCapture = { actionStarted: false, actionResult: null, phase: 'admission' }
+    let resolvedWorkspace: ResolvedWorkspace | null = null
+    let result: WorkItemResult
+    try {
+      const precheck = await this.prepareWorkspace(work, signal, log)
+      if (precheck.kind === 'failure') {
+        capture.phase = 'workspace-setup'
+        result = precheck.result
+      } else {
+        resolvedWorkspace = precheck.workspace
+        result = await this.executeOne(work, resolvedWorkspace, signal, log, capture)
+      }
+    } catch (error) {
+      capture.phase = 'outer-catch'
+      result = failure(work, errorMessage(error))
+    }
+
+    const workspace = resolvedWorkspace as CompletionWorkspace | null
+    const identity = buildExecutionIdentity(work, workspace, this.runnerId)
+    const expectedVariables = work.variables ?? {}
+    const expectedWorkspace = workspaceVariables(work)
+    const receipt = await probeCommitReceipt({
+      work,
+      identity,
+      workspace,
+      expectedBranch: workspace?.branch ?? expectedWorkspaceBranch(expectedVariables),
+      expectedHead: work.workspaceHead ?? stringField(expectedWorkspace, 'head'),
+      expectedTree: work.workspaceTree ?? stringField(expectedWorkspace, 'tree'),
+      signal,
+      now: this.now,
+      log,
+    })
+    const boundaryReceipt = capture.actionStarted
+      ? receipt
+      : {
+          ...receipt,
+          authoritative: false,
+          reason: receipt.reason ?? `action-not-started:${capture.phase}`,
+        }
+    const boundary = buildCompletionBoundary({
+      work,
+      runnerId: this.runnerId,
+      workspace,
+      capture,
+      result,
+      receipt: boundaryReceipt,
+      now: this.now,
+    })
+    return {
+      result: applyBoundaryOutcome(result, boundary),
+      boundary,
+      collector,
+    }
   }
 
   private async prepareWorkspace(
@@ -135,18 +214,21 @@ export class WorkExecutor {
     resolvedWorkspace: ResolvedWorkspace,
     signal: AbortSignal,
     log: TaskLogger,
+    capture: ActionExecutionCapture,
   ): Promise<WorkItemResult> {
     if (work.ownerKind === 'agent-job') {
       if (!this.agentJobExecutor) {
         return failure(work, 'AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor')
       }
       try {
+        capture.phase = 'agent-job'
         return await this.agentJobExecutor.execute(work, signal)
       } catch (error) {
         return failure(work, errorMessage(error))
       }
     }
 
+    capture.phase = 'action-resolution'
     const resolved = this.actions.resolve(work.uses)
     if (resolved.kind === 'unknown') {
       return failure(work, `No action found for '${work.uses ?? ''}'`)
@@ -157,6 +239,7 @@ export class WorkExecutor {
     const definition = resolved.definition
 
     try {
+      capture.phase = 'input-resolution'
       const variables = await this.variables(work, resolvedWorkspace, signal)
       const deferred = deferredInputFields(definition.manifest)
       const clonedWith = work.with ? structuredClone(work.with) : null
@@ -182,6 +265,7 @@ export class WorkExecutor {
       const workspaceRoot = this.workspaceRoot(variables)
       const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
       const expectedBranch = expectedWorkspaceBranch(variables)
+      capture.phase = 'start-branch-probe'
       const startCheck = await checkBranchStability(work, workDir, expectedBranch, 'start', signal, log)
       if (startCheck.kind === 'violation') {
         return startCheck.result
@@ -189,6 +273,8 @@ export class WorkExecutor {
       const caps = capabilitySet(definition.manifest)
       const host = buildActionHost(this.capabilityDeps(), work, workDir, signal, log, caps)
       let rawResult: unknown
+      capture.actionStarted = true
+      capture.phase = 'action'
       try {
         rawResult = await definition.run(validatedWith, host)
       } catch (thrown) {
@@ -216,6 +302,7 @@ export class WorkExecutor {
       if (outcome) {
         ;(validatedResult as { outcome?: 'unknown' }).outcome = outcome
       }
+      capture.actionResult = validatedResult
       const actionSucceeded = !isActionFailure(validatedResult)
       const completion = actionSucceeded
         ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
@@ -228,10 +315,12 @@ export class WorkExecutor {
         if (recoveryResult) return recoveryResult
         return resultForRecovery
       }
+      capture.phase = 'end-branch-probe'
       const endCheck = await checkBranchStability(work, workDir, expectedBranch, 'end', signal, log)
       if (endCheck.kind === 'violation') {
         return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
       }
+      capture.phase = 'artifact-capture'
       const artifactResult = await captureAndUploadArtifactsForWork(
         this.connection,
         work,
@@ -242,29 +331,12 @@ export class WorkExecutor {
         variables,
         signal,
       )
-      const worktreeHostBuilder = (
-        cleanupWork: DispatchWorkItem,
-        cleanupSignal: AbortSignal,
-        cleanupWorkDir: string,
-        cleanupAttempt?: number,
-      ) => buildActionHost(this.capabilityDeps(), cleanupWork, cleanupWorkDir, cleanupSignal, log, caps, cleanupAttempt)
-      const worktreeResult = await enforceCleanWorktree(
-        work,
-        workDir,
-        artifactResult,
-        renderedWith,
-        variables,
-        signal,
-        resolveCleanupAgentAction((host, withInput) => definition.run(withInput, host)),
-        { buildHost: worktreeHostBuilder },
-        log,
-      )
-      const recoveryResult = tryRecovery(work, worktreeResult, variables)
+      const recoveryResult = tryRecovery(work, artifactResult, variables)
       if (recoveryResult) return recoveryResult
-      if (worktreeResult.status !== 'completed') {
-        return worktreeResult
-      }
-      const withCapturedOutputs = this.captureDeclaredOutputs(work, worktreeResult, validatedResult)
+      if (artifactResult.status !== 'completed') return artifactResult
+      capture.phase = 'output-capture'
+      const withCapturedOutputs = this.captureDeclaredOutputs(work, artifactResult, validatedResult)
+      capture.phase = 'set-variable'
       const withVarsResult = await applySetVarsForWork(
         this.connection,
         work,
@@ -342,15 +414,22 @@ export class WorkExecutor {
     const variables = work.variables ?? {}
     const ws = variables['workspace']
     if (!isObject(ws)) {
-      return { path: '', branch: null }
+      return { path: '', branch: null, workspaceId: work.workspaceId ?? null, workspaceGeneration: work.workspaceGeneration ?? null }
     }
     const name = stringField(ws, 'name')
     if (name) {
-      return { path: name, branch: `mohist/ws-${name}` }
+      return {
+        path: name,
+        branch: `mohist/ws-${name}`,
+        workspaceId: work.workspaceId ?? stringField(ws, 'id') ?? stringField(ws, 'identity'),
+        workspaceGeneration: work.workspaceGeneration ?? scalarWorkspaceField(ws, 'generation'),
+      }
     }
     return {
       path: stringField(ws, 'path') ?? '',
       branch: stringField(ws, 'branch'),
+      workspaceId: work.workspaceId ?? stringField(ws, 'id') ?? stringField(ws, 'identity'),
+      workspaceGeneration: work.workspaceGeneration ?? scalarWorkspaceField(ws, 'generation'),
     }
   }
 
@@ -442,16 +521,29 @@ function projectTaskOutput(
 export interface WorkExecution {
   result: WorkItemResult
   collector: TaskLogCollector
+  boundary?: WorkflowTaskCompletionBoundary
 }
 
-type ResolvedWorkspace = { path: string; branch: string | null }
+type ResolvedWorkspace = CompletionWorkspace
 
-function infoToResolved(info: { path: string; branch?: string | null }): ResolvedWorkspace {
-  return { path: info.path, branch: info.branch ?? null }
+function infoToResolved(info: { path: string; branch?: string | null; workspaceId?: string | null; workspaceGeneration?: string | number | null }): ResolvedWorkspace {
+  return {
+    path: info.path,
+    branch: info.branch ?? null,
+    workspaceId: info.workspaceId ?? null,
+    workspaceGeneration: info.workspaceGeneration ?? null,
+  }
 }
 
 function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject {
-  return { path: workspace.path, branch: workspace.branch }
+  return {
+    path: workspace.path,
+    branch: workspace.branch,
+    ...(workspace.workspaceId ? { id: workspace.workspaceId, identity: workspace.workspaceId } : {}),
+    ...(workspace.workspaceGeneration !== null && workspace.workspaceGeneration !== undefined
+      ? { generation: workspace.workspaceGeneration }
+      : {}),
+  }
 }
 
 function readWorkspaceName(work: DispatchWorkItem): string | null {
@@ -554,4 +646,14 @@ function formatCheckUnresolvedError(unresolved: string[]): string {
 function stringField(obj: JsonObject, key: string): string | null {
   const value = obj[key]
   return typeof value === 'string' ? value : null
+}
+
+function scalarWorkspaceField(obj: JsonObject, key: string): string | number | null {
+  const value = obj[key]
+  return typeof value === 'string' || typeof value === 'number' ? value : null
+}
+
+function workspaceVariables(work: DispatchWorkItem): JsonObject {
+  const value = work.variables?.workspace
+  return isObject(value) ? value : {}
 }

@@ -84,12 +84,12 @@ export function branchInvariantViolationFailure(
  * Task boundary invariant: the workflow workspace must remain on
  * `workspace.branch` for the entire lifetime of a task. The start
  * check runs before the action is invoked; the end check runs after
- * a successful action but before `enforceCleanWorktree` so a
+ * a successful action and before the completion receipt probe so a
  * wrong-branch state is reported as a branch-invariant violation
- * (runner/action bug) rather than as a generic dirty-worktree
- * failure. The two checks are intentionally not exhaustive: the
- * action itself may temporarily move refs, and that is the
- * integration's contract; we only assert the boundary.
+ * (runner/action bug) rather than as generic workspace evidence.
+ * The two checks are intentionally not exhaustive: the action itself
+ * may temporarily move refs, and that is the integration's contract;
+ * we only assert the boundary.
  */
 export async function checkBranchStability(
   work: DispatchWorkItem,

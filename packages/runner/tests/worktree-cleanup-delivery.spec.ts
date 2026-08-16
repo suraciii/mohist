@@ -56,14 +56,16 @@ function installExecutorGit(resources: WorktreeTestResources, state: FakeWorktre
     switch (args.join(" ")) {
       case "rev-parse --abbrev-ref HEAD":
         return gitOk(`${state.branch}\n`)
-      case "rev-parse --is-inside-work-tree":
-        return gitOk("true\n")
-      case "diff --cached --name-only":
-        return gitOk(fileList(state.staged))
-      case "diff --name-only":
-        return gitOk(fileList(state.unstaged))
-      case "ls-files --others --exclude-standard":
-        return gitOk(fileList(state.untracked))
+      case "rev-parse HEAD":
+        return gitOk("head-1\n")
+      case "rev-parse HEAD^{tree}":
+        return gitOk("tree-1\n")
+      case "status --porcelain=v1 -z":
+        return gitOk([
+          ...state.staged.map((path) => `M  ${path}`),
+          ...state.unstaged.map((path) => ` M ${path}`),
+          ...state.untracked.map((path) => `?? ${path}`),
+        ].join("\0"))
       case "rev-parse --git-path index.lock":
         return gitOk("/fake/worktree/.git/index.lock\n")
       default:
@@ -91,7 +93,12 @@ function buildRegistry(handlers: Record<string, TestActionDefinition | ((inputs:
 function buildExecutor(registry: ActionRegistry, worktree: FakeWorktree, connection: Pick<ServerConnection, "uploadArtifact" | "report">): WorkExecutor {
   return new WorkExecutor(
     registry,
-     verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch }),
+     verifyOnlyWorkspaceManager({
+       path: worktree.workDir,
+       branch: worktree.branch,
+       workspaceId: "workspace-cleanup",
+       workspaceGeneration: 1,
+     }),
     connection as never,
     worktree.workDir,
   )
@@ -105,6 +112,11 @@ function buildWork(worktree: FakeWorktree, overrides: Partial<DispatchWorkItem> 
     title: "Agent-backed task",
     uses: "mohist/opencode",
     with: { prompt: "do the work" },
+    runnerId: "runner-1",
+    workspaceId: "workspace-cleanup",
+    workspaceGeneration: 1,
+    workspaceHead: "head-1",
+    workspaceTree: "tree-1",
     variables: {
       workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
       project: { path: worktree.workDir },
@@ -243,10 +255,10 @@ describe("worktree cleanup before delivery", () => {
 
     const agentResult = await executor.execute(buildWork(worktree), new AbortController().signal)
     expect(agentResult.status).toBe("completed")
-    expect(agentResult.cleanupAttempts).toBe(1)
-    expect(cleanupPrompts).toHaveLength(1)
-    expect(worktree.cleanupCommits).toEqual([{ files: ["src/agent-output.ts"], sha: "cleanup-sha" }])
-    expect(worktree.untracked).toEqual([])
+    expect(agentResult.workspaceOutcome).toBe("dirty")
+    expect(cleanupPrompts).toHaveLength(0)
+    expect(worktree.cleanupCommits).toEqual([])
+    expect(worktree.untracked).toEqual(["src/agent-output.ts"])
 
     const rebaseCalls: string[] = []
     installRebaseMockGit(resources, rebaseCalls)
@@ -352,11 +364,12 @@ describe("worktree cleanup before delivery", () => {
       new AbortController().signal,
     )
 
-    expect(agentResult.status).toBe("failed")
-    expect(agentResult.cleanupAttempts).toBe(3)
-    expect(attempt).toBe(3)
-    expect(agentResult.message).toMatch(/worktree dirty after 3 cleanup attempt/i)
-    expect(agentResult.message).toMatch(/untracked=\[src\/never-clean\.ts\]/)
+    expect(agentResult.status).toBe("completed")
+    expect(agentResult.workspaceOutcome).toBe("dirty")
+    expect(agentResult.cleanupAttempts).toBeUndefined()
+    expect(attempt).toBe(0)
+    expect(agentResult.workspaceReason).toBe("workspace-status-non-empty")
+    expect(worktree.untracked).toEqual(["src/never-clean.ts"])
   })
 
   it("treats Pi-backed tasks as agent-backed for cleanup", async (resources) => {
@@ -391,9 +404,9 @@ describe("worktree cleanup before delivery", () => {
     const agentResult = await executor.execute(buildWork(worktree, { uses: "mohist/pi" }), new AbortController().signal)
 
     expect(agentResult.status).toBe("completed")
-    expect(agentResult.cleanupAttempts).toBe(1)
-    expect(cleanupPrompts).toHaveLength(1)
-    expect(worktree.cleanupCommits).toEqual([{ files: ["openspec/changes/issue-596/proposal.md"], sha: "pi-cleanup-sha" }])
-    expect(worktree.untracked).toEqual([])
+    expect(agentResult.workspaceOutcome).toBe("dirty")
+    expect(cleanupPrompts).toHaveLength(0)
+    expect(worktree.cleanupCommits).toEqual([])
+    expect(worktree.untracked).toEqual(["openspec/changes/issue-596/proposal.md"])
   })
 })

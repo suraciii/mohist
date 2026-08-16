@@ -23,7 +23,12 @@ import { WorkExecutor } from './executor.js'
 import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
-import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
+import {
+  CompletionBoundaryPersistenceError,
+  executeWork,
+  retryPendingTerminalTaskLogs,
+  type HostTaskLogDeps,
+} from './host-task-log.js'
 import { AWAITING_ACK_RETRY_INTERVAL_MS, POLL_TIMEOUT_MS } from './host-timing.js'
 import { TerminalTaskLogDeliveryStoreImpl, type TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
@@ -34,8 +39,7 @@ import { CancelOperationJournal } from './cancel-operation-journal.js'
 import { WorkResultJournal, workKey as journalWorkKey } from './work-result-journal.js'
 import { RecoveredStartedWork } from './recovered-started-work.js'
 import { loadBuildInfo } from './build-info.js'
-import type { DispatchWorkItem } from '../core/types.js'
-import type { WorkItemResult } from '../core/types.js'
+import type { DispatchWorkItem, WorkItemResult, WorkflowTaskCompletionBoundary } from '../core/types.js'
 import { currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
 import { SkillResolver } from './skill-resolver.js'
@@ -78,6 +82,8 @@ interface InFlightEntry {
 interface AwaitingAckEntry {
   /** The result to (re-)report until the owner acks (Accepted or Stale). */
   result: WorkItemResult
+  /** Boundary paired with the result; persisted before report delivery. */
+  boundary?: WorkflowTaskCompletionBoundary
   /** Monotonic attempt count for diagnostics. */
   attempts: number
   /** Earliest wall-clock time for the next bounded report attempt. */
@@ -455,6 +461,7 @@ export class RunnerHost {
       this.bindingRecoveryCoordinator,
       this.skillResolver,
       this.namedWorkspaceManager,
+      this.options.runnerId,
     )
   }
 
@@ -743,8 +750,8 @@ export class RunnerHost {
       piRuntime: this.piRuntime,
       workResultJournal: this.workResultJournal,
       removeInFlight: (key) => this.inFlight.delete(key),
-      queueAwaitingAck: (key, work, result) =>
-        this.awaitingAck.set(key, { work, entry: { result, attempts: 0, retryAt: null } }),
+      queueAwaitingAck: (key, work, result, boundary) =>
+        this.awaitingAck.set(key, { work, entry: { result, boundary, attempts: 0, retryAt: null } }),
       syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
       reportOnce: (key) => this.reportOnce(key),
       scheduleReportRetry: (key) => this.scheduleReportRetry(key),
@@ -762,15 +769,26 @@ export class RunnerHost {
    */
   private async executeAndTransition(work: DispatchWorkItem, signal: AbortSignal, key: string): Promise<void> {
     let result: WorkItemResult
+    let boundary: WorkflowTaskCompletionBoundary | undefined
     try {
-      result = await executeWork(
+      const execution = await executeWork(
         this.taskLogDeps(),
         this.workExecutor,
         this.terminalTaskLogDeliveryInFlight,
         work,
         signal,
       )
+      result = execution.result
+      boundary = execution.boundary
     } catch (error) {
+      if (error instanceof CompletionBoundaryPersistenceError) {
+        log.warn('completion boundary persistence is pending; retaining work fence', {
+          work: work.workId,
+          exception: error,
+        })
+        this.markResultPersistencePending(key)
+        return
+      }
       if (signal.aborted) return
       log.error('work failed before report', { work: work.workId, exception: error })
       result = { status: 'failed', message: String(error) }
@@ -780,7 +798,7 @@ export class RunnerHost {
     // that prevented a result from returning stays as the started fence above.
     let persistence: Awaited<ReturnType<WorkResultJournal['complete']>>
     try {
-      persistence = await this.workResultJournal.complete(work, result)
+      persistence = await this.workResultJournal.complete(work, result, boundary)
     } catch (error) {
       log.error('work result journal could not persist settled result', { work: work.workId, exception: error })
       // Keep the work in `inFlight` and stop admission. Reporting a result
@@ -829,7 +847,7 @@ export class RunnerHost {
       this.inFlight.delete(key)
       this.awaitingAck.set(key, {
         work: entry.work,
-        entry: { result: entry.result!, attempts: 0, retryAt },
+        entry: { result: entry.result!, boundary: entry.boundary, attempts: 0, retryAt },
       })
       promoted.push(key)
     }
@@ -859,7 +877,7 @@ export class RunnerHost {
     const held = this.awaitingAck.get(key)
     if (!held) return
     held.entry.attempts += 1
-    await reportAndRequireDurableAck(this.connection, held.work, held.entry.result)
+    await reportAndRequireDurableAck(this.connection, held.work, held.entry.result, held.entry.boundary)
     await this.workResultJournal.acknowledge(held.work)
     this.awaitingAck.delete(key)
     this.syncOpenCodeWorkOwners()
@@ -910,6 +928,8 @@ export class RunnerHost {
       connection: this.connection,
       terminalTaskLogDelivery: this.terminalTaskLogDelivery,
       options: this.options,
+      persistCompletionBoundary: async (work, execution) =>
+        await this.workResultJournal.complete(work, execution.result, execution.boundary),
     }
   }
 

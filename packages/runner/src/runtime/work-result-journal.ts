@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from 'node:path'
 import { currentRunnerFileSystem } from '../system/filesystem.js'
-import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { DispatchWorkItem, WorkItemResult, WorkflowTaskCompletionBoundary } from '../core/types.js'
 import type { WorkInterruptionFact } from './work-report.js'
 
 export const DEFAULT_WORK_RESULT_JOURNAL_FILE = '.mohist/runner-state/work-results.json'
@@ -11,6 +11,8 @@ export interface WorkResultJournalEntry {
   work: DispatchWorkItem
   state: WorkResultJournalState
   result?: WorkItemResult
+  /** Immutable Workflow task completion boundary captured before reporting. */
+  boundary?: WorkflowTaskCompletionBoundary
   /** Present when the result was surfaced because a started execution died. */
   interruption?: WorkInterruptionFact
 }
@@ -143,7 +145,11 @@ export class WorkResultJournal {
     }, true)
   }
 
-  async complete(work: DispatchWorkItem, result: WorkItemResult): Promise<WorkResultJournalPersistence> {
+  async complete(
+    work: DispatchWorkItem,
+    result: WorkItemResult,
+    boundary?: WorkflowTaskCompletionBoundary,
+  ): Promise<WorkResultJournalPersistence> {
     return await this.mutate(async () => {
       const key = workKey(work)
       const existing = this.entries.get(key)
@@ -151,11 +157,14 @@ export class WorkResultJournal {
         throw new Error(`Work result journal cannot complete unknown work ${key}`)
       }
       if (existing.state === 'completed') {
-        if (!sameResult(existing.result, result)) throw new Error(`Work result journal result conflict for ${key}`)
+        if (!sameResult(existing.result, result) || !sameBoundary(existing.boundary, boundary)) {
+          throw new Error(`Work result journal result conflict for ${key}`)
+        }
         return this.persistencePending ? await this.persistOrRetain() : { state: 'durable' }
       }
       existing.state = 'completed'
       existing.result = cloneResult(result)
+      if (boundary) existing.boundary = structuredClone(boundary)
       return await this.persistOrRetain()
     })
   }
@@ -188,6 +197,7 @@ export class WorkResultJournal {
     work: DispatchWorkItem,
     result: WorkItemResult,
     interruption: WorkInterruptionFact,
+    boundary?: WorkflowTaskCompletionBoundary,
   ): Promise<void> {
     await this.mutate(async () => {
       const key = workKey(work)
@@ -196,13 +206,18 @@ export class WorkResultJournal {
         throw new Error(`Work result journal cannot complete unknown work ${key}`)
       }
       if (existing.state === 'completed') {
-        if (!sameResult(existing.result, result) || !sameInterruption(existing.interruption, interruption)) {
+        if (
+          !sameResult(existing.result, result) ||
+          !sameInterruption(existing.interruption, interruption) ||
+          !sameBoundary(existing.boundary, boundary)
+        ) {
           throw new Error(`Work result journal result conflict for ${key}`)
         }
         return
       }
       existing.state = 'completed'
       existing.result = cloneResult(result)
+      if (boundary) existing.boundary = structuredClone(boundary)
       existing.interruption = structuredClone(interruption)
       try {
         await this.persist()
@@ -333,6 +348,7 @@ function isEntry(value: unknown): value is WorkResultJournalEntry {
   return (
     value.state === 'completed' &&
     isResult(value.result) &&
+    (value.boundary === undefined || isBoundary(value.boundary)) &&
     (value.interruption === undefined || isInterruption(value.interruption))
   )
 }
@@ -375,6 +391,7 @@ function cloneEntry(entry: WorkResultJournalEntry): WorkResultJournalEntry {
     work: cloneWork(entry.work),
     state: entry.state,
     ...(entry.result ? { result: cloneResult(entry.result) } : {}),
+    ...(entry.boundary ? { boundary: structuredClone(entry.boundary) } : {}),
     ...(entry.interruption ? { interruption: structuredClone(entry.interruption) } : {}),
   }
 }
@@ -392,4 +409,31 @@ function isInterruption(value: unknown): value is WorkInterruptionFact {
 
 function sameInterruption(left: WorkInterruptionFact | undefined, right: WorkInterruptionFact): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function sameBoundary(
+  left: WorkflowTaskCompletionBoundary | undefined,
+  right: WorkflowTaskCompletionBoundary | undefined,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function isBoundary(value: unknown): value is WorkflowTaskCompletionBoundary {
+  if (!isRecord(value) || value.version !== 1 || typeof value.fingerprint !== 'string') return false
+  if (value.workspaceOutcome !== 'committed-clean' && value.workspaceOutcome !== 'dirty' && value.workspaceOutcome !== 'unconfirmed') return false
+  const identity = value.identity
+  const completion = value.actionCompletion
+  const receipt = value.commitReceipt
+  return (
+    isRecord(identity) &&
+    typeof identity.workflowRunId === 'string' &&
+    typeof identity.taskAttemptId === 'string' &&
+    typeof identity.workId === 'string' &&
+    isRecord(completion) &&
+    completion.version === 1 &&
+    typeof completion.actionStarted === 'boolean' &&
+    isRecord(receipt) &&
+    receipt.version === 1 &&
+    typeof receipt.authoritative === 'boolean'
+  )
 }

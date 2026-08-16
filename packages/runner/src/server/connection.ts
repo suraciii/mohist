@@ -9,6 +9,7 @@ import type {
   RuntimeReadinessWitness,
   WorkDispatchResponse,
   WorkItemResult,
+  WorkflowTaskCompletionBoundary,
 } from '../core/types.js'
 import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
@@ -124,7 +125,12 @@ export class ServerConnection {
     return result
   }
 
-  async report(work: DispatchWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
+  async report(
+    work: DispatchWorkItem,
+    result: WorkItemResult,
+    signal: AbortSignal,
+    boundary?: WorkflowTaskCompletionBoundary,
+  ): Promise<Record<string, unknown>> {
     const ownerKind = work.ownerKind?.trim().toLowerCase()
     const body: Record<string, unknown> = {
       workId: work.workId,
@@ -135,9 +141,12 @@ export class ServerConnection {
       error: result.error,
       output: result.output,
       exitCode: result.exitCode,
+      workspaceOutcome: result.workspaceOutcome ?? boundary?.workspaceOutcome ?? null,
+      workspaceReason: result.workspaceReason ?? boundary?.workspaceReason ?? null,
       artifactUploadIds: result.artifactUploadIds ?? null,
       cleanupAttempts: result.cleanupAttempts ?? null,
       addTasks: result.addTasks ?? null,
+      completionBoundary: boundary ?? null,
     }
     if (ownerKind) {
       body.ownerKind = ownerKind
@@ -869,6 +878,11 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     setVars: dispatch.setVars ? (parseObject(dispatch.setVars) as Record<string, string> | null) : null,
     ownerKind: dispatch.ownerKind ?? undefined,
     agentJobId: dispatch.agentJobId ?? undefined,
+    runnerId: dispatch.runnerId ?? undefined,
+    workspaceId: dispatch.workspaceId ?? undefined,
+    workspaceGeneration: dispatch.workspaceGeneration ?? undefined,
+    workspaceHead: dispatch.workspaceHead ?? undefined,
+    workspaceTree: dispatch.workspaceTree ?? undefined,
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
     agentDefinition: dispatch.agentDefinition ?? undefined,

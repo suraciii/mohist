@@ -140,6 +140,11 @@ export type WorkDispatchResponse = {
   setVars?: string | null
   ownerKind?: string | null
   agentJobId?: string | null
+  runnerId?: string | null
+  workspaceId?: string | null
+  workspaceGeneration?: string | number | null
+  workspaceHead?: string | null
+  workspaceTree?: string | null
   /**
    * Minted AgentSession id for agent-job dispatches whose launch
    * created a generic (non-workflow) AgentSession. The runner uses
@@ -223,6 +228,16 @@ export interface DispatchWorkItem {
   uses?: string | null
   with?: JsonObject | null
   /**
+   * Runner/workspace facts frozen by Workflow dispatch. Older dispatches may
+   * omit these fields; the boundary then remains unconfirmed rather than
+   * inventing authoritative workspace evidence.
+   */
+  runnerId?: string | null
+  workspaceId?: string | null
+  workspaceGeneration?: string | number | null
+  workspaceHead?: string | null
+  workspaceTree?: string | null
+  /**
    * Task-level completion contract, separate from `with`. The
    * executor applies this AFTER the Action returns; the Action
    * never receives or interprets it. Mirrors the `WorkDispatch.Expect`
@@ -286,10 +301,68 @@ export interface AddTaskInput {
   expect?: JsonObject | null
 }
 
+export type WorkspaceOutcome = 'committed-clean' | 'dirty' | 'unconfirmed'
+
+export interface WorkflowTaskExecutionIdentity {
+  workflowRunId: string
+  stage: string | null
+  taskAttemptId: string
+  workId: string
+  ownerKind: string
+  ownerId: string
+  runnerId: string
+  workspaceId: string | null
+  workspaceGeneration: string | number | null
+}
+
+export type ActionCompletionOutcome = 'succeeded' | 'failed' | 'unknown'
+
+export interface ActionCompletion {
+  version: 1
+  actionStarted: boolean
+  outcome: ActionCompletionOutcome
+  phase: string
+  output: JsonValue | null
+  error: ActionError | null
+  artifactUploadIds: string[]
+  capturedOutputs: JsonObject | null
+  completedAt: string
+}
+
+export interface CommitReceipt {
+  version: 1
+  identity: WorkflowTaskExecutionIdentity
+  expectedBranch: string | null
+  expectedHead: string | null
+  expectedTree: string | null
+  observedBranch: string | null
+  observedHead: string | null
+  observedTree: string | null
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
+  authoritative: boolean
+  reason: string | null
+  probedAt: string
+}
+
+export interface WorkflowTaskCompletionBoundary {
+  version: 1
+  identity: WorkflowTaskExecutionIdentity
+  actionCompletion: ActionCompletion
+  commitReceipt: CommitReceipt
+  workspaceOutcome: WorkspaceOutcome
+  workspaceReason: string | null
+  fingerprint: string
+}
+
 export interface WorkItemResult {
   status: string
   message?: string | null
   error?: ActionError | null
+  /** Initial completion-boundary classification; cleanup does not rewrite it. */
+  workspaceOutcome?: WorkspaceOutcome
+  workspaceReason?: string | null
   /**
    * Successful public output of the dispatched work. Workflow task work
    * carries the Action contract (`JsonObject | null`). Check work carries a

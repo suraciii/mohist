@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { DispatchWorkItem, WorkItemResult, WorkflowTaskCompletionBoundary } from '../core/types.js'
 import { WorkResultJournal, workKey } from './work-result-journal.js'
 import { runnerRestartedResult } from './work-report.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
@@ -19,6 +19,46 @@ const work: DispatchWorkItem = {
 const result: WorkItemResult = {
   status: 'completed',
   output: { answer: 'done' },
+}
+
+const boundary: WorkflowTaskCompletionBoundary = {
+  version: 1,
+  identity: {
+    workflowRunId: 'workflow-1',
+    stage: 'build',
+    taskAttemptId: 'task-1',
+    workId: 'work-1',
+    ownerKind: 'workflow',
+    ownerId: 'workflow-1',
+    runnerId: 'runner-1',
+    workspaceId: 'workspace-1',
+    workspaceGeneration: 2,
+  },
+  actionCompletion: {
+    version: 1,
+    actionStarted: true,
+    outcome: 'succeeded',
+    phase: 'action',
+    output: { answer: 'done' },
+    error: null,
+    artifactUploadIds: ['artifact-1'],
+    capturedOutputs: null,
+    completedAt: '2026-08-16T00:00:00.000Z',
+  },
+  commitReceipt: {
+    version: 1,
+    identity: {
+      workflowRunId: 'workflow-1', stage: 'build', taskAttemptId: 'task-1', workId: 'work-1',
+      ownerKind: 'workflow', ownerId: 'workflow-1', runnerId: 'runner-1', workspaceId: 'workspace-1', workspaceGeneration: 2,
+    },
+    expectedBranch: 'main', expectedHead: 'head-1', expectedTree: 'tree-1',
+    observedBranch: 'main', observedHead: 'head-1', observedTree: 'tree-1',
+    staged: [], unstaged: [], untracked: [], authoritative: true, reason: null,
+    probedAt: '2026-08-16T00:00:00.000Z',
+  },
+  workspaceOutcome: 'committed-clean',
+  workspaceReason: null,
+  fingerprint: 'boundary-fingerprint',
 }
 
 class FailingWriteFileSystem extends MemoryFileSystem {
@@ -43,6 +83,22 @@ describe('WorkResultJournal', () => {
       expect(restarted.completed()).toEqual([{ work, state: 'completed', result }])
       await restarted.acknowledge(work)
       expect(restarted.completed()).toEqual([])
+    })
+  })
+
+  it('PersistsTheImmutableCompletionBoundaryAndRejectsConflictingReplay', async () => {
+    await withTestRunnerResources(async () => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      await journal.begin(work)
+      await journal.complete(work, result, boundary)
+
+      const restarted = new WorkResultJournal('/runner')
+      await restarted.load()
+      expect(restarted.completed()[0]).toMatchObject({ work, result, boundary })
+      await expect(restarted.complete(work, result, boundary)).resolves.toEqual({ state: 'durable' })
+      await expect(restarted.complete(work, result, { ...boundary, workspaceOutcome: 'dirty' })).rejects.toThrow('conflict')
+      expect(restarted.completed()[0]?.boundary).toEqual(boundary)
     })
   })
 

@@ -53,6 +53,8 @@ function workspacePrepSink(log: TaskLogger | null | undefined) {
 export interface WorkspaceInfo {
   path: string
   branch?: string | null
+  workspaceId?: string | null
+  workspaceGeneration?: string | number | null
 }
 
 export class WorkspaceManager {

@@ -156,13 +156,20 @@ describe("WorkExecutor forwards action output to the task log", () => {
     expect(entries.map((entry) => entry.text)).toContain("git rev-parse --abbrev-ref HEAD")
   })
 
-  it("CapturesCleanWorktreeOutputWithCleanupSource", async (workDir) => {
+  it("CapturesCompletionReceiptProbeOutputWithReceiptSource", async (workDir) => {
     const gitRunner: GitRunner = async (_workDir, args, _signal, options) => {
       options?.sink?.log.write(options.sink.source, `git ${args.join(" ")}`)
       const joined = args.join(" ")
       return {
         success: true,
-        stdout: joined === "rev-parse --abbrev-ref HEAD" ? "main\n" : joined === "rev-parse --is-inside-work-tree" ? "true\n" : "",
+        stdout:
+          joined === "rev-parse --abbrev-ref HEAD"
+            ? "main\n"
+            : joined === "rev-parse HEAD"
+              ? "head-1\n"
+              : joined === "rev-parse HEAD^{tree}"
+                ? "tree-1\n"
+                : "",
         stderr: "",
         exitCode: 0,
         combinedOutput: "",
@@ -171,13 +178,25 @@ describe("WorkExecutor forwards action output to the task log", () => {
     const registry = makeRegistry(async () => ({ output: { ok: true } }))
 
     const { collector } = await withTaskLogResources(
-      async () => await runWith(registry, workDir, buildWork(workDir, { variables: { workspace: { path: workDir, branch: "main", changeDir: null } } })),
+      async () => await runWith(registry, workDir, buildWork(workDir, {
+        runnerId: "runner-1",
+        workspaceId: "workspace-1",
+        workspaceGeneration: 1,
+        workspaceHead: "head-1",
+        workspaceTree: "tree-1",
+        variables: { workspace: { path: workDir, branch: "main", changeDir: null } },
+      }), verifyOnlyWorkspaceManager({
+        path: workDir,
+        branch: "main",
+        workspaceId: "workspace-1",
+        workspaceGeneration: 1,
+      })),
       gitRunner,
     )
 
-    const entries = collector.flush().entries.filter((entry) => entry.source === "cleanup")
-    expect(entries.map((entry) => entry.text)).toContain("git rev-parse --is-inside-work-tree")
-    expect(entries.map((entry) => entry.text)).toContain("git diff --cached --name-only")
+    const entries = collector.flush().entries.filter((entry) => entry.source === "receipt-probe")
+    expect(entries.map((entry) => entry.text)).toContain("git rev-parse --abbrev-ref HEAD")
+    expect(entries.map((entry) => entry.text)).toContain("git status --porcelain=v1 -z")
   })
 
   it("CapturesFailingOpsCommandOutputInCollector", async (workDir) => {

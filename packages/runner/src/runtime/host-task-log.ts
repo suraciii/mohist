@@ -1,6 +1,6 @@
-import type { DispatchWorkItem, RunnerOptions, WorkItemResult } from '../core/types.js'
+import type { DispatchWorkItem, RunnerOptions } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
-import { WorkExecutor } from './executor.js'
+import { WorkExecutor, type WorkExecution } from './executor.js'
 import { TaskLogCollector } from './task-log.js'
 import type {
   TerminalTaskLogDeliveryIdentity,
@@ -41,6 +41,17 @@ export interface HostTaskLogDeps {
   readonly connection: ServerConnection
   readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   readonly options: RunnerOptions
+  readonly persistCompletionBoundary?: (
+    work: DispatchWorkItem,
+    execution: WorkExecution,
+  ) => Promise<{ state: 'durable' } | { state: 'pending'; error: unknown }>
+}
+
+export class CompletionBoundaryPersistenceError extends Error {
+  constructor(public readonly cause: unknown) {
+    super(`completion boundary persistence is pending: ${cause instanceof Error ? cause.message : String(cause)}`)
+    this.name = 'CompletionBoundaryPersistenceError'
+  }
 }
 
 function terminalTaskLogIdentity(work: DispatchWorkItem): TerminalTaskLogDeliveryIdentity {
@@ -156,8 +167,8 @@ async function deliverTerminalTaskLog(
 
 /**
  * Executes a single work item to completion, flushing its task log, and
- * returns the resulting {@link WorkItemResult}. Does NOT report — the
- * caller owns the report lifecycle and
+ * returns the resulting {@link WorkExecution}. Does NOT report — the
+ * caller owns the completion-boundary journal and report lifecycle and
  * the awaitingAck transition so a transport failure is retried rather
  * than lost. Throws on execution failure (including abort); the caller
  * synthesises a `{ status: "failed" }` result from the thrown error.
@@ -172,7 +183,7 @@ export async function executeWork(
   inFlightDeliveries: Set<string>,
   work: DispatchWorkItem,
   signal: AbortSignal,
-): Promise<WorkItemResult> {
+): Promise<WorkExecution> {
   // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
   // dispatches upload under `work.agentJobId`, workflow dispatches
   // under `work.workflowRunId`. Routing through a single uploadTaskLog
@@ -257,22 +268,40 @@ export async function executeWork(
   const collector = new TaskLogCollector()
   const flushTrigger = startIncrementalFlushForCollector(collector)
   let terminalPersistenceAttempted = false
+  let execution: WorkExecution | null = null
+  let boundaryPersisted = false
   try {
-    const execution = await workExecutor.executeWithLog(work, signal, collector)
-    // Detach the listener before stopping the timer so a stale
-    // tick can never re-fire against a collector that the executor
-    // has handed back to us for terminal flushing.
+    execution = await workExecutor.executeWithLog(work, signal, collector)
+    // Stop incremental delivery before the completion boundary is written.
+    // Once execution returns, no task-log delivery may race the durable
+    // boundary or be mistaken for a terminal report.
     execution.collector.setAppendListener(null)
+    await flushTrigger.stop()
+    if (deps.persistCompletionBoundary && execution.boundary) {
+      const persistence = await deps.persistCompletionBoundary(work, execution)
+      if (persistence.state === 'pending') throw new CompletionBoundaryPersistenceError(persistence.error)
+      boundaryPersisted = true
+    }
     terminalPersistenceAttempted = true
     const persisted = await persistTerminalTaskLog(deps, work, execution.collector.snapshot())
-    // Stop the trigger before the terminal flush and wait for any
-    // in-flight incremental upload to settle so terminal
-    // reconciliation cannot overlap it.
-    await flushTrigger.stop()
-    if (signal.aborted) return execution.result
+    if (signal.aborted) return execution
     await deliverTerminalTaskLog(deps, inFlightDeliveries, persisted, signal)
-    return execution.result
+    return execution
   } catch (error) {
+    if (error instanceof CompletionBoundaryPersistenceError) {
+      collector.setAppendListener(null)
+      await flushTrigger.stop()
+      throw error
+    }
+    if (boundaryPersisted && execution) {
+      log.error('terminal task-log delivery failed after completion boundary persistence', {
+        work: work.workId,
+        exception: error,
+      })
+      collector.setAppendListener(null)
+      await flushTrigger.stop()
+      return execution
+    }
     if (!terminalPersistenceAttempted) {
       terminalPersistenceAttempted = true
       try {

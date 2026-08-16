@@ -307,13 +307,10 @@ export function mergeCleanupCount(result: WorkItemResult, attempts: number): Wor
 }
 
 /**
- * Task completion invariant: the worktree must be clean before
- * `executeOne` reports completion. For agent-backed tasks the
- * executor runs a bounded cleanup loop that sends a constrained
- * follow-up prompt to the same agent session, instructing the
- * agent to commit task-related changes or revert unrelated ones.
- * Deterministic actions that leave a dirty worktree fail
- * immediately with structured evidence.
+ * Legacy bounded cleanup helper retained for explicit recovery callers.
+ * Workflow task execution records its immutable completion receipt first and
+ * does not use this helper as the Action business-success gate. Any caller
+ * that uses it must treat its result as separate recovery evidence.
  */
 export async function enforceCleanWorktree(
   work: DispatchWorkItem,

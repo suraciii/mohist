@@ -1,4 +1,4 @@
-import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { DispatchWorkItem, WorkItemResult, WorkflowTaskCompletionBoundary } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import { probeRuntimeBinding, reattachRuntimeTurn, resolvePersistedWorkBinding } from './binding-recovery.js'
 import type { OpenCodeRuntime } from './opencode/index.js'
@@ -19,7 +19,12 @@ export interface HostRecoveryContext {
   readonly piRuntime: PiRuntime | null
   readonly workResultJournal: WorkResultJournal
   readonly removeInFlight: (key: string) => void
-  readonly queueAwaitingAck: (key: string, work: DispatchWorkItem, result: WorkItemResult) => void
+  readonly queueAwaitingAck: (
+    key: string,
+    work: DispatchWorkItem,
+    result: WorkItemResult,
+    boundary?: WorkflowTaskCompletionBoundary,
+  ) => void
   readonly syncOpenCodeWorkOwners: () => void
   readonly reportOnce: (key: string) => Promise<void>
   readonly scheduleReportRetry: (key: string) => void
