@@ -42,6 +42,9 @@ useMswServer(
           'openai/gpt-4': ['standard'],
           'anthropic/claude': ['low', 'medium', 'high'],
         },
+        reasoningEfforts: {
+          'pi/anthropic/claude': ['low', 'medium', 'high'],
+        },
       },
     })
   }),
@@ -182,6 +185,28 @@ describe('AgentProfileEditor', () => {
       expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
         expect.objectContaining({
           agentConfig: { model: 'anthropic/claude', variant: 'high', runtime: 'opencode' },
+        }),
+        expect.any(Object),
+      )
+    })
+
+    it('renders Pi reasoning efforts and persists the selected effort', async () => {
+      renderEditor()
+      fillRequiredFields()
+      fireEvent.change(screen.getByTestId('agent-runtime'), { target: { value: 'pi' } })
+      fireEvent.click(document.querySelector('#agent-model') as HTMLElement)
+
+      const effort = await waitFor(() => screen.getByTestId('agent-model-row-pi/anthropic/claude-variant-high'))
+      fireEvent.click(effort)
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentConfig: {
+            model: 'pi/anthropic/claude',
+            reasoningEffort: 'high',
+            runtime: 'pi',
+          },
         }),
         expect.any(Object),
       )

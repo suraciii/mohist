@@ -32,8 +32,9 @@ public static class OpencodeRoutes
                 .ToArray();
 
             var modelVariants = await registry.ListCoderModelVariantsByRuntimeAsync(selectedRuntime);
+            var reasoningEfforts = await registry.ListCoderModelReasoningEffortsByRuntimeAsync(selectedRuntime);
 
-            return ApiResults.Ok(new { models = visibleModels, modelVariants });
+            return ApiResults.Ok(new { models = visibleModels, modelVariants, reasoningEfforts });
         });
 
         app.MapGet("/api/opencode/runtime", async (ConfigService svc, IConfiguration configuration, IEnvironmentVariableProvider environment) =>

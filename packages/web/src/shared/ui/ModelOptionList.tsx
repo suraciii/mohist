@@ -15,9 +15,12 @@ export interface ModelOptionListProps {
   id?: string
   searchPlaceholder?: string
   modelVariants?: ModelVariantMap
+  modelReasoningEfforts?: ModelVariantMap
   valueVariant?: string | null
+  valueReasoningEffort?: string | null
   onSelectModel: (modelId: string) => void
   onSelectModelVariant?: (modelId: string, variant: string | null) => void
+  onSelectModelReasoningEffort?: (modelId: string, effort: string | null) => void
 }
 
 export function ModelOptionList({
@@ -27,9 +30,12 @@ export function ModelOptionList({
   id,
   searchPlaceholder = 'Search models...',
   modelVariants,
+  modelReasoningEfforts,
   valueVariant,
+  valueReasoningEffort,
   onSelectModel,
   onSelectModelVariant,
+  onSelectModelReasoningEffort,
 }: ModelOptionListProps) {
   const isCompact = size === 'compact'
   const inputRef = useRef<HTMLInputElement>(null)
@@ -53,7 +59,7 @@ export function ModelOptionList({
 
   const handleChipKeyDown = useCallback(
     (event: React.KeyboardEvent, modelId: string, chipIndex: number) => {
-      const variants = variantListFor(modelId, modelVariants)
+      const variants = variantListFor(modelId, modelReasoningEfforts ?? modelVariants)
       if (variants.length === 0) return
 
       if (event.key === 'ArrowLeft') {
@@ -70,16 +76,16 @@ export function ModelOptionList({
         }
       } else if (event.key === 'Enter') {
         event.preventDefault()
-        onSelectModelVariant?.(modelId, variants[chipIndex] ?? null)
+        if (modelReasoningEfforts) onSelectModelReasoningEffort?.(modelId, variants[chipIndex] ?? null)
+        else onSelectModelVariant?.(modelId, variants[chipIndex] ?? null)
       }
     },
-    [modelVariants, onSelectModelVariant, inputRef],
+    [modelVariants, modelReasoningEfforts, onSelectModelVariant, onSelectModelReasoningEffort, inputRef],
   )
 
   const handleCommandKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      const isRightOrTab =
-        event.key === 'ArrowRight' || (event.key === 'Tab' && !event.shiftKey)
+      const isRightOrTab = event.key === 'ArrowRight' || (event.key === 'Tab' && !event.shiftKey)
       if (!isRightOrTab) return
 
       const target = event.target as HTMLElement | null
@@ -92,13 +98,13 @@ export function ModelOptionList({
       const activeModelId = activeItem.getAttribute('data-model-id')
       if (!activeModelId) return
 
-      const variants = variantListFor(activeModelId, modelVariants)
+      const variants = variantListFor(activeModelId, modelReasoningEfforts ?? modelVariants)
       if (variants.length === 0) return
 
       event.preventDefault()
       chipRefs.current[activeModelId]?.[0]?.focus()
     },
-    [modelVariants],
+    [modelVariants, modelReasoningEfforts],
   )
 
   return (
@@ -106,12 +112,7 @@ export function ModelOptionList({
       <div className={cn('p-2', isCompact && 'pb-1')}>
         <div className="relative">
           <div className="absolute left-3 top-1/2 -translate-y-1/2">
-            <Search
-              className={cn(
-                'text-muted-foreground',
-                isCompact ? 'h-3.5 w-3.5' : 'h-4 w-4',
-              )}
-            />
+            <Search className={cn('text-muted-foreground', isCompact ? 'h-3.5 w-3.5' : 'h-4 w-4')} />
           </div>
           <CommandRoot.Input
             ref={inputRef}
@@ -133,12 +134,7 @@ export function ModelOptionList({
         label="Model options"
       >
         <CommandEmpty>
-          <div
-            className={cn(
-              'px-3 py-4 text-center text-muted-foreground',
-              isCompact ? 'text-xs' : 'text-sm',
-            )}
-          >
+          <div className={cn('px-3 py-4 text-center text-muted-foreground', isCompact ? 'text-xs' : 'text-sm')}>
             No models found
           </div>
         </CommandEmpty>
@@ -151,7 +147,7 @@ export function ModelOptionList({
             className="**:[[cmdk-group-heading]]:sticky **:[[cmdk-group-heading]]:top-0 **:[[cmdk-group-heading]]:z-10 **:[[cmdk-group-heading]]:bg-muted"
           >
             {providerModels.map((model) => {
-              const modelVariantsList = variantListFor(model.id, modelVariants)
+              const modelVariantsList = variantListFor(model.id, modelReasoningEfforts ?? modelVariants)
               const isSelected = model.id === value
               if (!chipRefs.current[model.id]) {
                 chipRefs.current[model.id] = []
@@ -166,24 +162,15 @@ export function ModelOptionList({
                   className={cn(
                     'flex w-full items-center justify-between gap-2 rounded-none cursor-pointer data-selected:bg-muted data-selected:text-foreground',
                     isCompact ? 'px-2 py-1' : 'px-3 py-1.5',
-                    isSelected &&
-                      'bg-accent text-accent-foreground',
+                    isSelected && 'bg-accent text-accent-foreground',
                   )}
                 >
                   <div className="flex min-w-0 flex-col items-start">
-                    <span
-                      className={cn(
-                        'w-full truncate font-medium',
-                        isCompact ? 'text-xs' : 'text-sm',
-                      )}
-                    >
+                    <span className={cn('w-full truncate font-medium', isCompact ? 'text-xs' : 'text-sm')}>
                       {model.name}
                     </span>
                     <span
-                      className={cn(
-                        'w-full truncate text-muted-foreground',
-                        isCompact ? 'text-[10px]' : 'text-xs',
-                      )}
+                      className={cn('w-full truncate text-muted-foreground', isCompact ? 'text-[10px]' : 'text-xs')}
                     >
                       {model.id}
                     </span>
@@ -191,17 +178,18 @@ export function ModelOptionList({
                   {modelVariantsList.length > 0 && (
                     <ModelVariantChips
                       modelId={model.id}
-                      modelVariants={modelVariants}
-                      activeVariant={isSelected ? (valueVariant ?? null) : null}
+                      modelVariants={modelReasoningEfforts ?? modelVariants}
+                      activeVariant={
+                        isSelected ? ((modelReasoningEfforts ? valueReasoningEffort : valueVariant) ?? null) : null
+                      }
                       size={isCompact ? 'compact' : 'default'}
                       baseTestId={id ? `${id}-row-${model.id}-variant` : undefined}
                       chipRefs={chipRefs.current[model.id]}
-                      onChipKeyDown={(e, chipIndex) =>
-                        handleChipKeyDown(e, model.id, chipIndex)
-                      }
-                      onSelect={(mId, variant) =>
-                        onSelectModelVariant?.(mId, variant)
-                      }
+                      onChipKeyDown={(e, chipIndex) => handleChipKeyDown(e, model.id, chipIndex)}
+                      onSelect={(mId, variant) => {
+                        if (modelReasoningEfforts) onSelectModelReasoningEffort?.(mId, variant)
+                        else onSelectModelVariant?.(mId, variant)
+                      }}
                     />
                   )}
                 </CommandRoot.Item>

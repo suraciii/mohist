@@ -170,18 +170,22 @@ export function unarchiveAgent(projectId: string, id: string) {
 export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): {
   model: string | null
   variant: string | null
+  reasoningEffort: string | null
   runtime: AgentRuntime
 } {
   const config = agent?.agentConfig
-  if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
+  if (!config || typeof config !== 'object')
+    return { model: null, variant: null, reasoningEffort: null, runtime: DEFAULT_AGENT_RUNTIME }
   const rawModel = typeof config.model === 'string' ? config.model : null
   const model = rawModel && rawModel.trim() ? rawModel : null
   const runtime = config.runtime === 'opencode' || config.runtime === 'pi' ? config.runtime : DEFAULT_AGENT_RUNTIME
-  if (!model) return { model: null, variant: null, runtime }
+  if (!model) return { model: null, variant: null, reasoningEffort: null, runtime }
   const rawVariant = typeof config.variant === 'string' ? config.variant : null
   return {
     model,
     variant: rawVariant && rawVariant.trim() ? rawVariant : null,
+    reasoningEffort:
+      typeof config.reasoningEffort === 'string' && config.reasoningEffort.trim() ? config.reasoningEffort : null,
     runtime,
   }
 }
@@ -191,6 +195,7 @@ export function writeAgentModelAndVariant(
   model: string | null,
   variant: string | null,
   runtime: AgentRuntime = DEFAULT_AGENT_RUNTIME,
+  reasoningEffort: string | null = null,
 ): Record<string, unknown> | null {
   const next: Record<string, unknown> = {}
   if (model === null) {
@@ -199,6 +204,9 @@ export function writeAgentModelAndVariant(
   next.model = model
   if (variant !== null) {
     next.variant = variant
+  }
+  if (reasoningEffort !== null) {
+    next.reasoningEffort = reasoningEffort
   }
   next.runtime = runtime
   return next

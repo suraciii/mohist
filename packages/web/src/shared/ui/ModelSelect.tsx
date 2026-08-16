@@ -39,9 +39,12 @@ export interface ModelSelectProps {
   id?: string
   'aria-labelledby'?: string
   modelVariants?: ModelVariantMap
+  modelReasoningEfforts?: ModelVariantMap
   valueVariant?: string | null
+  valueReasoningEffort?: string | null
   onChangeVariant?: (variant: string | null) => void
   onChangeModelVariant?: (model: string, variant: string | null) => void
+  onChangeModelReasoningEffort?: (model: string, effort: string | null) => void
   disabled?: boolean
 }
 
@@ -72,9 +75,12 @@ export function ModelSelect({
   id,
   'aria-labelledby': ariaLabelledby,
   modelVariants,
+  modelReasoningEfforts,
   valueVariant,
+  valueReasoningEffort,
   onChangeVariant,
   onChangeModelVariant,
+  onChangeModelReasoningEffort,
   disabled = false,
 }: ModelSelectProps) {
   const [open, setOpen] = useState(false)
@@ -103,6 +109,14 @@ export function ModelSelect({
     [onChange, onChangeModelVariant, onChangeVariant],
   )
 
+  const handleSelectModelReasoningEffort = useCallback(
+    (modelId: string, effort: string | null) => {
+      onChangeModelReasoningEffort?.(modelId, effort)
+      setOpen(false)
+    },
+    [onChangeModelReasoningEffort],
+  )
+
   const selectedModel = value ? normalizedModels.find((m) => m.id === value) : null
   const selectedDescriptor: ModelDescriptor | null = value
     ? selectedModel
@@ -114,9 +128,11 @@ export function ModelSelect({
         }
       : describeModel(value)
     : null
-  const resolvedSelectedVariant = value
-    ? resolveVariantAgainstModel(value, valueVariant, modelVariants)
+  const resolvedSelectedVariant = value ? resolveVariantAgainstModel(value, valueVariant, modelVariants) : null
+  const resolvedSelectedReasoningEffort = value
+    ? resolveVariantAgainstModel(value, valueReasoningEffort, modelReasoningEfforts)
     : null
+  const selectedLevel = resolvedSelectedReasoningEffort ?? resolvedSelectedVariant
 
   const isCompact = size === 'compact'
 
@@ -131,11 +147,7 @@ export function ModelSelect({
               disabled={disabled}
               aria-labelledby={ariaLabelledby}
               className={`flex-1 justify-between gap-1.5 min-h-[44px] md:min-h-0 ${
-                open
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : value
-                    ? 'text-foreground'
-                    : 'text-muted-foreground'
+                open ? 'border-blue-500 bg-blue-50 text-blue-700' : value ? 'text-foreground' : 'text-muted-foreground'
               }`}
             />
           }
@@ -144,14 +156,11 @@ export function ModelSelect({
             <div className="flex min-w-0 flex-1 flex-col items-start gap-0 text-left leading-tight">
               <span className="w-full truncate font-medium">
                 {selectedDescriptor.name}
-                {resolvedSelectedVariant ? ` · ${resolvedSelectedVariant}` : ''}
+                {selectedLevel ? ` · ${selectedLevel}` : ''}
               </span>
               <span
                 className={`w-full truncate text-muted-foreground ${isCompact ? 'text-[10px]' : 'text-xs'}`}
-                title={
-                  selectedDescriptor.fullId +
-                  (resolvedSelectedVariant ? `:${resolvedSelectedVariant}` : '')
-                }
+                title={selectedDescriptor.fullId + (selectedLevel ? `:${selectedLevel}` : '')}
               >
                 {selectedDescriptor.fullId}
               </span>
@@ -161,19 +170,19 @@ export function ModelSelect({
           )}
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
-        <PopoverContent
-          className={`p-0 ${isCompact ? 'w-64' : 'w-80'}`}
-          align="end"
-        >
+        <PopoverContent className={`p-0 ${isCompact ? 'w-64' : 'w-80'}`} align="end">
           <ModelOptionList
             models={normalizedModels}
             value={value}
             size={size}
             id={id}
             modelVariants={modelVariants}
+            modelReasoningEfforts={modelReasoningEfforts}
             valueVariant={valueVariant}
+            valueReasoningEffort={valueReasoningEffort}
             onSelectModel={handleSelectModel}
             onSelectModelVariant={handleSelectModelVariant}
+            onSelectModelReasoningEffort={handleSelectModelReasoningEffort}
           />
         </PopoverContent>
       </Popover>
