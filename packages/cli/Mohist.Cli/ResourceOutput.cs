@@ -58,7 +58,7 @@ internal static class ResourceOutputCatalog
 
         IReadOnlyList<string> fields = shape switch
         {
-            MohistCliApi.TableShape.ProjectList or MohistCliApi.TableShape.Project => ["id", "name", "createdAt", "updatedAt", "repositories", "variables", "defaultRepository"],
+            MohistCliApi.TableShape.ProjectList or MohistCliApi.TableShape.Project => ["id", "name", "createdAt", "updatedAt", "repositories", "variables", "defaultRepository", "defaultExecutionConfig"],
             MohistCliApi.TableShape.WorkflowStatus => ["issueNumber", "title", "stage", "runtimeStatus", "workflowRunId", "changeDir", "workspacePath", "workflow"],
             MohistCliApi.TableShape.EpicList => ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "progress", "pauseReason"],
             MohistCliApi.TableShape.EpicShow => ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "linkedIssues", "progress", "nextIssueNumber", "nextIssueReason", "pauseReason"],
