@@ -614,3 +614,16 @@ Plan skeleton for next run (est. half a day):
   a shared .NET build artifact lock (`CS2012`); the retry passed all lanes:
   Runner 1668, Web 4732, Server Unit 2722, Arch 68, Workflow 178, and CLI
   1858.
+
+## T-005 Focused Verification (current run)
+
+- Revalidated the pure resolver implementation against the complete
+  runtime-reasoning-capability decision table. It returns one typed
+  disposition, preserves the frozen tuple in explicit rejection evidence,
+  keeps missing/incomplete/revisionless evidence at `needs-setup`, and keeps
+  known-but-not-ready runtimes at `unavailable` before compatibility checks.
+  Unset effort remains exempt on effort-unsupported runtimes, and runner
+  selection is deterministic by identity without mutating catalog inputs.
+- Added regression coverage for missing `complete`, blank capability
+  revisions, and readiness precedence over an otherwise rejecting catalog.
+- Server UnitTests passed: 2725 tests. `git diff --check` is clean.

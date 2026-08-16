@@ -76,6 +76,32 @@ public sealed class AgentExecutionCapabilityResolverTests
     }
 
     [Fact]
+    public void MissingCompleteFlag_IsLegacyNonAuthoritative()
+    {
+        var result = Resolve([
+            new AgentExecutionCapabilitySnapshot(
+                "runner-a",
+                Runtime,
+                CompleteCatalogEntry() with { Complete = null })]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.NeedsSetup, result.Disposition);
+        Assert.True(result.IsPending);
+    }
+
+    [Fact]
+    public void BlankCapabilityRevision_IsRevisionless()
+    {
+        var result = Resolve([
+            new AgentExecutionCapabilitySnapshot(
+                "runner-a",
+                Runtime,
+                CompleteCatalogEntry() with { CapabilityRevision = "  " })]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.NeedsSetup, result.Disposition);
+        Assert.True(result.IsPending);
+    }
+
+    [Fact]
     public void KnownRuntimeThatIsNotReady_ReturnsPendingUnavailable()
     {
         var result = Resolve([
@@ -83,6 +109,25 @@ public sealed class AgentExecutionCapabilityResolverTests
                 "runner-a",
                 Runtime,
                 Catalog: null,
+                RuntimeReady: false)]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.Unavailable, result.Disposition);
+        Assert.Equal("runner-a", result.RunnerId);
+        Assert.True(result.IsPending);
+    }
+
+    [Fact]
+    public void NotReadyRuntimeTakesPrecedenceOverCatalogRejection()
+    {
+        var result = Resolve([
+            new AgentExecutionCapabilitySnapshot(
+                "runner-a",
+                Runtime,
+                CompleteCatalogEntry() with
+                {
+                    SupportsReasoningEffort = false,
+                    ReasoningEfforts = null,
+                },
                 RuntimeReady: false)]);
 
         Assert.Equal(AgentExecutionCapabilityDisposition.Unavailable, result.Disposition);
