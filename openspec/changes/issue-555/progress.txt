@@ -132,3 +132,84 @@ shipped and green.
 - Unmatched /api/v1 paths still pass through the boundary middleware
   (routing leaves endpoint null but the pipeline runs), so "any /api/v1
   path" rejection semantics hold even for unknown routes.
+
+# T-002: Public execution projection engine and PublicExecutionRead snapshot
+
+Status: COMPLETE. Three public projection table families (one additive
+migration), PublicExecutionProjector hosted background service as their
+only writer, checkpointed atomic batches, PublicExecutionRead DTO with
+the 22-key allowlist and five-state precedence, terminal fences,
+generation switching, and 21 new tests (6 unit contract + 14 projection
+Specs + 1 hosted-projector Spec). Full SpecTests suite (3944) green;
+npm run test:fast green.
+
+## Codebase Patterns
+
+- Namespace split matters for the arch rule "InfrastructureData must not
+  depend on application layer (Agent.Grains)": the projection ENGINE
+  lives in Infrastructure/PublicApi/ (may read AgentJobState etc.); the
+  ROWS stay in Infrastructure/Data/PublicApi/ (pure persistence).
+- Migrations are hand-authored (no dotnet-ef CLI): new migration =
+  <date>_Name.cs + Designer.cs (calls
+  MohistDbContextModelSnapshot.BuildModelCore) + hand-edited snapshot.
+  The snapshot diff test (ProjectEventsModelDebug) catches drift; watch
+  .IsRequired() on non-nullable string properties — SQLite/EF differ
+  flags them as AlterColumn diffs when the snapshot omits IsRequired.
+- JsonSerializerOptions must come from the shared JSON facade (ArchTests
+  rule): added JSON.PublicApi (explicit nulls, RFC3339 UTC converter,
+  JsonPropertyName-pinned names) for public payloads.
+- Spec/unit ledger rule: SpecTests classes in Specs/ must be
+  integration-flavored (SpecUnitMigrationLedger rule flags
+  "static-light" candidates for migration to UnitTests). The contract
+  tests are pure serialization tests -> they live in
+  Mohist.Server.UnitTests/DirectApi/. Helper classes in Specs/ must end
+  with an allowed suffix — PublicProjectionTestSupport.
+- AgentSessionRow computed columns LabelProjectId/LabelAgentId
+  (json_extract from State) are the public project/agent identity source
+  for the projection.
+- AgentJobRow.Status column is NOT reliably maintained by the grain; the
+  engine deserializes State JSON (AgentJobState.Status) instead.
+- Canonical output string is JSON; ExtractPublicOutput only surfaces
+  {"text": "..."} when a non-empty string text key exists.
+
+## Gotchas
+
+- MTP focused run: dotnet run --project ... -- -class "<FQN>". Full
+  SpecTests dotnet test takes ~4min.
+- FakeTimeProvider in the integration fixture is pinned at 2026-06-30;
+  use fixture.TimeProvider.GetUtcNow() for canonical timestamps.
+- TestWait.ForAsync advance callbacks must cross a real async boundary
+  without banned Task.Delay/DateTimeOffset.UtcNow — an HTTP GET through
+  the same host works.
+- EF transactions: engine reads checkpoints as TRACKED rows (not
+  AsNoTracking) so re-saving an already-projected session updates rows
+  instead of colliding on the composite PK.
+- The hosted projector runs in EVERY MohistIntegrationFixture host; it
+  tolerates sessions without a public project label by consuming and
+  checkpointing without publishing.
+
+## Decisions
+
+- Follow-up projection waits for the canonical Session Input/Turn fact
+  (engine derives journal transitions from session ledger state only).
+- Durable input rejection: the canonical input record is live
+  (inputId present, turnId null, outcome=rejected). A rejection that
+  created no records leaves the Job anchor at preparing until a durable
+  fact lands — driven by durable facts, no invention.
+- outcome_pending = AgentTurnStatus.Executing + an active
+  AgentSessionStopClaim on the Session (aggregate running, admission
+  blocked, reason stop_outcome_unknown).
+- session.context_reset is derived from durable
+  com.mohist.agent-session.runtime-bound journal rows: the FIRST bind is
+  the initial bind; every later one is a context boundary (RebindRuntime
+  Session is the only rebinding transition and only reset/runtime-change
+  /missing-recovery reach it).
+- Rebuild re-derives all transitions into generation+1 (fences do not
+  apply to the rebuild's own re-emission), flips active_generation
+  atomically in the same transaction, and preserves next_sequence (the
+  global allocator) so sequences continue past the old generation's
+  head. The rebuild entrypoint itself is control-plane and lands later.
+- Unknown reasonCode: unresolved consumed facts carry
+  reasonCode=stop_outcome_unknown when a stop is involved; session-wide
+  unknown activity also maps to it (stable safe public code, no cause
+  detail).

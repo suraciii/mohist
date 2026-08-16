@@ -31,6 +31,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Grains;
@@ -228,6 +229,16 @@ public static class MohistServiceRegistration
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<DispatcherActivationService>();
         services.AddHostedService<EventPushWorker>();
+
+        // The public execution projection: one engine, one hosted
+        // writer, one nudge channel. Canonical write paths nudge the
+        // projector after their commits; the hosted loop's timer sweep
+        // is the safety net. Correctness never depends on the nudge.
+        services.AddSingleton<PublicApiProjectionEngine>();
+        services.AddSingleton<PublicProjectionNudge>();
+        services.AddSingleton<IPublicProjectionNudge>(sp => sp.GetRequiredService<PublicProjectionNudge>());
+        services.AddOptions<PublicProjectionOptions>();
+        services.AddHostedService<PublicExecutionProjector>();
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());

@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.PublicApi;
 using Orleans;
 
 namespace Mohist.Server.Infrastructure.Data.Sessions;
@@ -33,19 +34,22 @@ public class AgentSessionStore : IAgentSessionStore
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<AgentSessionStore> _log;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly IPublicProjectionNudge? _publicProjectionNudge;
 
     public AgentSessionStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
         IGrainFactory grainFactory,
         ILogger<AgentSessionStore> log,
-        IBackgroundTaskLauncher backgroundTasks)
+        IBackgroundTaskLauncher backgroundTasks,
+        IPublicProjectionNudge? publicProjectionNudge = null)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
         _backgroundTasks = backgroundTasks;
+        _publicProjectionNudge = publicProjectionNudge;
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -92,6 +96,7 @@ public class AgentSessionStore : IAgentSessionStore
         await using var db = await _dbFactory.CreateDbContextAsync();
         await StageSessionAsync(db, key, state);
         await db.SaveChangesAsync();
+        PokeDispatcherBestEffort();
     }
 
     public async Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
@@ -123,8 +128,20 @@ public class AgentSessionStore : IAgentSessionStore
         PokeDispatcherBestEffort();
     }
 
-    private void PokeDispatcherBestEffort() =>
+    private void PokeDispatcherBestEffort()
+    {
         EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(AgentSessionStore), _backgroundTasks);
+        // Best-effort latency nudge for the public execution projector;
+        // its timer sweep recovers anything lost here.
+        try
+        {
+            _publicProjectionNudge?.Nudge();
+        }
+        catch
+        {
+            // A nudge is advisory only.
+        }
+    }
 
     private async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
     {

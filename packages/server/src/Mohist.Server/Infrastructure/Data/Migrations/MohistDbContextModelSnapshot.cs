@@ -1722,6 +1722,166 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Projects");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicExecutionSnapshotRow", b =>
+                {
+                    b.Property<string>("AnchorType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnchorId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("AgentId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotJson")
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("TerminalFact")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TerminalOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TerminalAt")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("TerminalSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LastSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AnchorType", "AnchorId");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("IX_public_execution_snapshots_SessionId");
+
+                    b.HasIndex("SessionId", "LastSequence")
+                        .HasDatabaseName("IX_public_execution_snapshots_SessionId_LastSequence");
+
+                    b.ToTable("public_execution_snapshots", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicProjectionCheckpointRow", b =>
+                {
+                    b.Property<string>("Feed")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Watermark")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Feed", "SourceKey");
+
+                    b.ToTable("public_projection_checkpoints", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicSessionEventRow", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("OccurredAt")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("SourceTransition")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SessionId", "Generation", "Sequence");
+
+                    b.HasIndex("SessionId", "Generation", "SourceTransition")
+                        .IsUnique()
+                        .HasDatabaseName("UX_public_session_events_Transition");
+
+                    b.HasIndex("SessionId", "Generation", "Sequence")
+                        .HasDatabaseName("IX_public_session_events_SessionId_Generation_Sequence");
+
+                    b.ToTable("public_session_events", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicStreamStateRow", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ActiveGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("NextSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("EarliestSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LatestSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Closed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SessionId");
+
+                    b.ToTable("public_stream_states", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.RunnerRow", b =>
                 {
                     b.Property<string>("Id")

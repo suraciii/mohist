@@ -2075,6 +2075,7 @@ public partial class MohistDbContext : DbContext
         });
 
         ConfigureAdditionalModels(modelBuilder);
+        ConfigurePublicApiModels(modelBuilder);
     }
 
     private static bool DictionaryEqual(Dictionary<string, string>? left, Dictionary<string, string>? right)
