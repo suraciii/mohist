@@ -460,3 +460,9 @@
 - Existing admission/claim regressions passed: `AgentJobGrainSpecs` 20/20, `AgentJobDispatchEnvelopeSpecs` 7/7, `AgentJobGrainRoutedLaunchSpecs` 11/11, `AgentConcurrencyReconciliationSpecs` 3/3, and `AgentSessionFollowupConcurrencySpecs` 15/15.
 - `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and transient concurrent-build copy retries were non-failing.
 - No additional production edit was required during this T-002 run; this entry records the verification on the workflow branch.
+
+## T-003 verification on current run
+
+- The requested T-003 implementation is already present in commit `97e2c1ca9`: discriminator-gated `PendingWorkflowTerminalDelivery`, stable typed `com.mohist.agent.job.workflow-terminal` emission with recovery retry, and Runner-side frozen `expect` evaluation carried through `WorkDispatch.Expect`. No duplicate production edit was made during this run.
+- Focused verification passed: `AgentJobWorkflowTerminalDeliverySpecs` 7/7, Runner `agent-job-executor.spec.ts` plus `server-connection-report.spec.ts` 44/44, and Runner typecheck.
+- `npm run test:fast` passed all lanes on the clean rerun: scripts/Web/Runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. The first parallel attempt hit the recorded MSBuild file-lock race; the rerun was clean. Preview .NET SDK notices were non-failing.
