@@ -388,3 +388,8 @@
 - Focused `WorkflowAgentDispatchCutoverSpecs` passed 1/1, and the status projection coverage is included in the passing Server Unit suite.
 - `npm run verify` passed completely: docs 92, file-size ratchet, format check, solution and workspace builds, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Server SpecTests 3960, Web 4724, Runner 1646, and Slack 70. .NET preview and existing Rollup chunk warnings were non-failing.
 - No production edit was required during this revalidation; the final commit records the T-006 verification entry on the workflow branch.
+
+## Verification repair
+
+- Reproduced `npm run verify` with one SpecTests failure in `AgentSessionFollowupConcurrencySpecs.LimitBecomingUnbounded_GrantsExistingFollowupWaiter` at line 153: the deferred permit-grant callback had not yet persisted `ConcurrencyPermitId` when the test read the session state. Build, Unit, Arch, Workflow Definition, and CLI lanes passed; the worktree stayed clean because verification outputs are ignored.
+- The focused `AgentSessionFollowupConcurrencySpecs` class passed 15/15 before the repair, confirming a timing race rather than a deterministic production failure. The spec now waits for the durable `dispatch-pending` lease state before asserting the unchanged permit identity and status. The wait is bounded and preserves the original assertions.

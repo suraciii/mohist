@@ -149,7 +149,16 @@ public class AgentSessionFollowupConcurrencySpecs
             snapshot.Waiters,
             waiter => waiter.OwnerId == session.GetPrimaryKeyString());
 
-        var lease = Assert.Single(_fixture.StateStore.State?.Status.PendingFollowups!);
+        var pendingFollowups = await TestWait.ForAsync(
+            () => Task.FromResult(_fixture.StateStore.State?.Status.PendingFollowups),
+            current => current is not null
+                && current.Count == 1
+                && current[0].ConcurrencyPermitId is not null
+                && current[0].ConcurrencyGateStatus == "dispatch-pending",
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "followup grant notification persists the assigned permit");
+        var lease = Assert.Single(pendingFollowups!);
         Assert.Equal(permit.PermitId, lease.ConcurrencyPermitId);
         Assert.Equal("dispatch-pending", lease.ConcurrencyGateStatus);
     }
