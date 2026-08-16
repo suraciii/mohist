@@ -403,3 +403,16 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   The required `npm run test:fast` gate also passed: typecheck, 2,701 Server
   unit, 68 architecture, 178 workflow, 1,860 CLI, 4,736 Web, and 1,639 Runner
   tests.
+
+## T-002 current-run audit
+
+- The committed task-first route, deterministic definition factory, coordinator
+  fingerprint extensions, deterministic Agent adoption, response replay
+  projection, and task-first documentation were re-audited against
+  `agent-task-launch` and the task-first creation requirements. No production
+  repair was required in this run.
+- The Server build passed. The available Microsoft Testing Platform runner
+  executed all 2,701 Server unit tests and all 3,950 Server specification tests
+  successfully; the task-first route, factory, replay, rollback, and
+  coordinator-equivalence coverage is included in those totals. `git diff
+  --check` was clean.
