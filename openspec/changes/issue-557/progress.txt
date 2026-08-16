@@ -398,3 +398,29 @@ Plan skeleton for next run (est. half a day):
 - Tightened CLI edit validation so an invalid `--reasoning-effort` is rejected before project/agent resolution and before any HTTP request, matching the write-surface acceptance criterion. The existing create path already validated before resolution; update/edit now does the same while retaining the current-config merge after validation.
 - Updated the CLI regression test to assert zero requests for invalid edit effort input.
 - Verification: Server UnitTests passed (2722 tests), CLI tests passed (1858 tests), and `git diff --check` passed.
+
+## T-002 Completion Verification (latest run)
+
+- Reconfirmed the existing T-002 implementation on the required workflow
+  branch: `AgentLauncher.ResolveReasoningEffort` feeds the immutable
+  `AgentExecutionDefinition`, `AgentJobInput` (Id 25), and
+  `RoutedAgentLaunchPlan` (Id 22); manual coordinator envelopes preserve the
+  effort; `AgentJobGrain.BuildDispatchAsync` emits `with.reasoningEffort` only
+  when non-empty; and AgentJob idempotency comparisons include the effort so
+  a replay cannot rewrite the first snapshot.
+- Reconfirmed manual HTTP, routed/subscription, mention/connection, and
+  workflow launch coverage. The virtual `mohist/agent` workflow action carries
+  the frozen effort in `WorkDispatch.AgentDefinition`; concrete workflow
+  actions preserve `${{ vars.agent }}` as raw `with.options`, so the merged
+  issue-level effort reaches the Runner template renderer without the
+  translator re-reading an Agent definition. Runner session-target and
+  follow-up definitions preserve absent effort as null/undefined, and the
+  AgentJob executor reads the frozen dispatch payload into both turn
+  executors.
+- Verification: Server UnitTests passed (2722 tests), Server SpecTests passed
+  (3942 tests), Runner CI passed (154 files, 1666 tests), and `npm run
+  test:fast` passed all functional lanes. The command exits non-zero only in
+  the pre-existing ArchTests migration-ledger lane (67 passed, 1 failed:
+  `current-fail-if-marker-review` source/closure digest mismatch).
+- `git diff --check` passed. No T-002 source regression was found; the
+  append-only records continue to deserialize absent effort as null.
