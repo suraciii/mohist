@@ -295,3 +295,32 @@ Plan skeleton for next run (est. half a day):
   functional lanes passed; its ArchTests lane remains blocked by the
   pre-existing `current-fail-if-marker-review` migration-ledger digest
   mismatch in the branch, unrelated to T-002. `git diff --check` passed.
+
+## T-003 (versioned runtime catalog entries)
+
+- Runtime catalog fields are append-only: `RuntimeCatalogEntry` keeps the
+  existing model/variant ids and uses ids 2-5 for nullable
+  `ReasoningEfforts`, `SupportsReasoningEffort`, `Complete`, and
+  `CapabilityRevision`; legacy JSON omits these fields and deserializes them
+  as null/non-authoritative. The Runner TypeScript contract uses optional
+  fields for the same mixed-version behavior.
+- Pi registration publishes native thinking levels only in per-model
+  `reasoningEfforts`, with an empty true-variant map. Pi is omitted from the
+  registration until its catalog is loaded, then receives `complete: true`
+  and a content-derived revision. OpenCode has no model discovery source in
+  this Runner, so it publishes `supportsReasoningEffort: false` with an
+  empty, non-authoritative catalog; claiming it complete would falsely reject
+  every requested OpenCode model. This preserves any true variants if an
+  external catalog supplies them, and never publishes efforts for OpenCode.
+- `deriveCapabilityRevision` canonicalizes model/map/value ordering before a
+  SHA-256 hash. Reconnects with the same capability content retain the
+  revision, while changed capability content gets a new revision; the Server
+  stores the runner-provided entry verbatim and never recalculates it.
+- Added Server registry aggregation and `/opencode/models` metadata output
+  for per-model reasoning efforts. Web settings queries expose that response
+  as `reasoningEfforts` beside `modelVariants` for the later editor control.
+- Verification: Runner CI passed (154 files, 1666 tests), Web CI passed (377
+  files, 4726 tests), Server UnitTests passed (2719 tests), Server SpecTests
+  passed (3941 tests), Runner/Web typechecks passed, and `git diff --check`
+  passed. `npm run format:check` still reports pre-existing formatter errors
+  in unrelated earlier-task files; the T-003 Web files were formatted.

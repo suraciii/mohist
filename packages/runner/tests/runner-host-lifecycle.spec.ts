@@ -209,7 +209,17 @@ describe("RunnerHost", () => {
         runnerId: "runner-test",
       })
       expect(registration).toMatchObject({
-        runtimeCatalogs: { pi: { models: [], variants: {} } },
+        runtimeCatalogs: {
+          opencode: { models: [], variants: {}, supportsReasoningEffort: false },
+          pi: {
+            models: [],
+            variants: {},
+            reasoningEfforts: {},
+            supportsReasoningEffort: true,
+            complete: true,
+            capabilityRevision: expect.any(String),
+          },
+        },
       })
       for (const identityField of [
         "buildGitHash",

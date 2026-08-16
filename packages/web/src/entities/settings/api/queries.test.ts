@@ -8,6 +8,7 @@ import {
   projectDefaultWorkflowProfileQueryOptions,
   resolveEffectiveDefaultWorkflowProfile,
   selectAgentTurnActions,
+  selectModelReasoningEfforts,
   selectModelVariants,
   setWorkflowProfileAgentActionMutationOptions,
   setProjectDefaultWorkflowProfileMutationOptions,
@@ -44,6 +45,23 @@ describe('selectModelVariants', () => {
   it('does not throw when the underlying data is malformed', () => {
     expect(() => selectModelVariants({ models: ['openai/gpt-4'] } as never)).not.toThrow()
     expect(selectModelVariants({ models: ['openai/gpt-4'] } as never)).toEqual({})
+  })
+})
+
+describe('selectModelReasoningEfforts', () => {
+  it('returns the per-model reasoningEfforts map without reading variants', () => {
+    const efforts = { 'openai/gpt-5.5': ['low', 'high'] }
+    expect(
+      selectModelReasoningEfforts({
+        models: ['openai/gpt-5.5'],
+        reasoningEfforts: efforts,
+      }),
+    ).toEqual(efforts)
+  })
+
+  it('returns an empty map when the runtime does not publish efforts', () => {
+    expect(selectModelReasoningEfforts(undefined)).toEqual({})
+    expect(selectModelReasoningEfforts({ models: ['openai/gpt-5.5'], reasoningEfforts: {} })).toEqual({})
   })
 })
 
