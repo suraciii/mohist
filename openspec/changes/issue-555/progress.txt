@@ -780,3 +780,21 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   model-diff (1) tests passed. `npm run test:fast` passed all lanes: 2,676
   server unit, 69 architecture, 178 workflow, 1,848 CLI, 4,724 Web, and
   1,639 Runner tests, plus typechecks.
+
+## T-003 completion (current workflow)
+
+- Re-read the public-execution-read requirement and confirmed the existing
+  implementation serves Job, Input, and Turn responses from persisted public
+  snapshot JSON, with canonical Project membership and exact Input/Turn
+  anchoring performed only to establish 404 ownership and source watermarks.
+- The shared `PublicRead` mapper emits the resource-specific 404 codes or a
+  bodyless `503 projection_lag` response with `Retry-After`; it is reused by
+  command response paths. The public DTO contract and production architecture
+  rule keep internal read types and unlisted execution fields out of the
+  `Api/DirectApi` boundary.
+- Focused verification passed: `PublicExecutionReadRouteSpecs` (7),
+  `PublicExecutionReadQuerierSpecs` (1), `PublicExecutionReadContractTests`
+  (6), and `ProductionContractRules` (3). `npm run test:fast` passed all
+  seven lanes: typecheck, 2,676 server unit, 69 architecture, 178 workflow,
+  1,848 CLI, 4,724 Web, and 1,639 Runner tests. No source correction was
+  necessary on this current workflow branch.
