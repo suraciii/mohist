@@ -35,7 +35,7 @@ internal static class AgentSessionObservationMapper
             turn.Id,
             turn.Sequence,
             turn.InputIds,
-            TurnStatus(turn.Status, turn.Interruption),
+            TurnStatus(turn.Status),
             turn.Result is null
                 ? null
                 : new AgentTurnResultObservationDto(
@@ -54,21 +54,16 @@ internal static class AgentSessionObservationMapper
         _ => "unknown",
     };
 
-    public static string TurnStatus(
-        AgentTurnStatus status,
-        AgentWorkInterruptionTransition? interruption = null) =>
-        interruption is not null && AgentWorkInterruptionStates.IsKnown(interruption.State)
-            ? interruption.State
-            : status switch
-            {
-                AgentTurnStatus.Queued => "queued",
-                AgentTurnStatus.Executing => "executing",
-                AgentTurnStatus.Completed => "completed",
-                AgentTurnStatus.Failed => "failed",
-                AgentTurnStatus.Unknown => "unknown",
-                AgentTurnStatus.Cancelled => "cancelled",
-                _ => "unknown",
-            };
+    public static string TurnStatus(AgentTurnStatus status) => status switch
+    {
+        AgentTurnStatus.Queued => "queued",
+        AgentTurnStatus.Executing => "executing",
+        AgentTurnStatus.Completed => "completed",
+        AgentTurnStatus.Failed => "failed",
+        AgentTurnStatus.Unknown => "unknown",
+        AgentTurnStatus.Cancelled => "cancelled",
+        _ => "unknown",
+    };
 
     public static AgentWorkInterruptionTransitionDto? ToDto(
         AgentWorkInterruptionTransition? transition) =>

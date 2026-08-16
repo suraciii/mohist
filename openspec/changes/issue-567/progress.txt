@@ -721,3 +721,19 @@ Channel decision (grounded in live source):
   Unit 2,668, Server Arch 68, Runner 1,661, and Web 4,727. The repository
   format check still reports only pre-existing unrelated Runner formatting
   drift; the changed TypeScript files pass targeted Biome checks.
+
+## T-007 Contract Correction
+
+- The prepared T-007 visibility slice was already present on this branch. Its
+  session observation mapper had one additive-contract regression: interruption
+  lifecycle state replaced the canonical AgentTurn `status` value. Restored
+  `queued` / `executing` / `completed` / `failed` / `unknown` / `cancelled`
+  status projection while retaining the interruption DTO and history fields.
+- Added a fixed-time unit theory covering every canonical turn status alongside
+  a recovered interruption, proving visibility does not repurpose the existing
+  status field.
+- Verification passed: Server Unit 2,674/2,674; Web interruption-focused tests
+  35/35; Web FSD and test-boundary checks; and `npm run test:fast` with Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Arch 68, Runner 1,661, and Web
+  4,727. The issue's durable lifecycle, projection, DTO, and browser coverage
+  remains in the prepared T-007 implementation.

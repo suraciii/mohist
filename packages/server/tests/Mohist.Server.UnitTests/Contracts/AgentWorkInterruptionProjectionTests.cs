@@ -1,5 +1,6 @@
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Contracts;
@@ -95,6 +96,41 @@ public sealed class AgentWorkInterruptionProjectionTests
         Assert.Equal(AgentWorkInterruptionStates.Recovered, newTurn.Interruption!.State);
         Assert.Equal(2, session.Status.InterruptionHistory!.Count);
         Assert.Equal("update-1", AgentWorkInterruptionProjection.Latest(session.Status.InterruptionHistory)!.UpdateOperationId);
+    }
+
+    [Theory]
+    [InlineData(AgentTurnStatus.Queued, "queued")]
+    [InlineData(AgentTurnStatus.Executing, "executing")]
+    [InlineData(AgentTurnStatus.Completed, "completed")]
+    [InlineData(AgentTurnStatus.Failed, "failed")]
+    [InlineData(AgentTurnStatus.Unknown, "unknown")]
+    [InlineData(AgentTurnStatus.Cancelled, "cancelled")]
+    public void TurnObservation_PreservesCanonicalStatusAlongsideInterruption(
+        AgentTurnStatus status,
+        string expectedStatus)
+    {
+        var at = DateTimeOffset.Parse("2026-08-15T00:00:00Z");
+        var snapshot = AgentSessionStatusSnapshot.Created(at.UtcDateTime) with
+        {
+            Turns =
+            [
+                new AgentTurnRecord(
+                    "turn-1",
+                    1,
+                    ["input-1"],
+                    status,
+                    Interruption: Transition(
+                        AgentWorkInterruptionStates.Recovered,
+                        "work-1.recovery.1",
+                        1,
+                        at)),
+            ]
+        };
+
+        var turn = Assert.Single(AgentSessionObservationMapper.Turns(snapshot)!);
+
+        Assert.Equal(expectedStatus, turn.Status);
+        Assert.Equal(AgentWorkInterruptionStates.Recovered, turn.Interruption?.State);
     }
 
     [Fact]
