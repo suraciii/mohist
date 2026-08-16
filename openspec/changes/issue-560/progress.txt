@@ -210,3 +210,30 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   the prior T-002 baseline remains 3,944/3,944 specs. Japanese full stops now
   derive only the first sentence, preserving deterministic task naming for
   non-ASCII prompts.
+
+## T-003 progress notes
+
+- The coordinator plan uses append-only Orleans field `DefinitionCreatedByLaunch`
+  at Id 52; the task-first command envelope carries the corresponding marker at
+  Id 39. Missing fields deserialize false, so definition-first and older plans
+  never archive their Agent.
+- The task-first launcher passes the marker only after the definition is created.
+  Abort convergence archives `IAgentGrain` before setting the terminal
+  `RejectionReason`/`Completed` state. The pending abort payload retains the
+  reason while archive recovery is incomplete, and repeated `ArchiveAsync` is
+  idempotent across reminder replay.
+- `launch_setup_pending` remains the non-terminal path: no abort completion or
+  archive is invoked, so the active task-first Agent can recover with the same
+  key. Terminal rejection and replay map to `launch_rejected`; definition-first
+  terminal rejections use the same response mapping but leave their Agent active.
+- Focused T-003 coverage passes: task terminal rejection archive + recorded
+  replay, archived-name conflict and derived-name disambiguation, injected
+  archive failure repaired by `ReceiveReminder`, 503 non-archival, and
+  definition-first non-archival. The task route class passes 10/10, launch
+  idempotency 8/8, spawn coordinator 3/3, and runtime-resolution regression
+  10/10. The initial full regression had one unrelated timing poll failure;
+  the exact runtime-resolution class passed on rerun.
+- Final T-003 verification: `npm run test:fast` passed (typecheck, 2,701
+  Server unit tests, 68 architecture tests, 178 workflow tests, 1,859 CLI
+  tests, 4,734 Web tests, and 1,639 Runner tests); the complete Server spec
+  assembly passed 3,948/3,948 and `npm run format:check` passed.

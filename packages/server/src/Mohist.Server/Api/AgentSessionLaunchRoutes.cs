@@ -183,6 +183,14 @@ public static class AgentSessionLaunchRoutes
             {
                 return LaunchSetupPending(ex);
             }
+            catch (AgentSpawnPreplanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
+            catch (AgentSpawnPostPlanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
             catch (AgentReadinessException ex)
             {
                 return ReadinessRejected(ex);
@@ -322,6 +330,14 @@ public static class AgentSessionLaunchRoutes
                 retainNewlyBoundAttachments = true;
                 return LaunchSetupPending(ex);
             }
+            catch (AgentSpawnPreplanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
+            catch (AgentSpawnPostPlanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
             catch (AgentReadinessException ex)
             {
                 return ReadinessRejected(ex);
@@ -431,6 +447,15 @@ public static class AgentSessionLaunchRoutes
             StatusCodes.Status409Conflict,
             "agent_needs_setup",
             exception.Result);
+
+    internal static IResult LaunchRejected(AgentSpawnPreplanRejectedException exception) =>
+        LaunchRejected(exception.Message, exception.Reason);
+
+    internal static IResult LaunchRejected(AgentSpawnPostPlanRejectedException exception) =>
+        LaunchRejected(exception.Message, exception.Reason);
+
+    private static IResult LaunchRejected(string message, string reason) =>
+        ApiResults.Conflict(message, "launch_rejected", new { reason });
 
     internal static async Task<IResult?> ValidateContextAsync(
         AgentSessionLaunchContextRef? context,

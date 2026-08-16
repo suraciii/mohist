@@ -133,7 +133,15 @@ public sealed record AgentLaunchCoordinatorPlan(
     /// the original response instead of re-validating mutable attachment
     /// state.
     /// </summary>
-    [property: Id(51)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
+    [property: Id(51)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    /// <summary>
+    /// True only for a task-first launch whose Agent definition was created
+    /// by the route before the canonical launch plan. The coordinator uses
+    /// this append-only marker to archive that definition when the launch
+    /// reaches a terminal rejection. Missing on older plans, and therefore
+    /// false for every definition-first launch.
+    /// </summary>
+    [property: Id(52)] bool DefinitionCreatedByLaunch = false);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The

@@ -1,5 +1,6 @@
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -157,7 +158,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 WorkspaceRepositories: command.WorkspaceRepositories,
                 Origin: command.Origin ?? command.Request.Origin,
                 TargetId: command.TargetId ?? command.Request.TargetId,
-                AttachmentResults: command.AttachmentResults);
+                AttachmentResults: command.AttachmentResults,
+                DefinitionCreatedByLaunch: command.DefinitionCreatedByLaunch);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -390,7 +392,10 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
     {
         var abortPlan = plan with
         {
-            RejectionReason = reason,
+            // A task-first rejection is not recorded as terminal until its
+            // created definition has been archived. The pending payload
+            // keeps the reason available to reminder recovery meanwhile.
+            RejectionReason = plan.DefinitionCreatedByLaunch ? null : reason,
             PostPlanRejected = postPlan,
             Pending = new AgentLaunchCoordinatorPending(
                 Guid.NewGuid().ToString("N"),
@@ -761,7 +766,9 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
     private async Task BeginAbortLaunchAsync(AgentLaunchCoordinatorPlan plan)
     {
         var current = plan;
-        var reason = plan.RejectionReason ?? "spawn_rejected";
+        var reason = plan.RejectionReason
+            ?? plan.Pending?.Payload
+            ?? "spawn_rejected";
         var fence = _grains.GetGrain<ISessionTreeMutationFenceGrain>(plan.ProjectId);
 
         if (!current.AbortFenceAcknowledged)
@@ -822,8 +829,23 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             await SaveStateAsync();
         }
 
+        if (current.DefinitionCreatedByLaunch)
+        {
+            // Archiving is part of the durable abort convergence. If the
+            // process dies after this call but before the completed plan is
+            // persisted, the reminder repeats the idempotent archive before
+            // it records the terminal rejection as complete.
+            await _participantProbe.OnArchiveDefinitionAsync(
+                current.AgentId,
+                current.Pending?.CommandId ?? string.Empty);
+            await _grains
+                .GetGrain<IAgentGrain>(GrainKey.Agent(current.ProjectId, current.AgentId))
+                .ArchiveAsync();
+        }
+
         _state.State.Plan = current with
         {
+            RejectionReason = reason,
             Pending = null,
             Completed = true,
         };
@@ -968,4 +990,9 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     /// was committed. This is append-only so older envelopes deserialize
     /// with no response metadata.
     /// </summary>
-    [property: Id(38)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
+    [property: Id(38)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    /// <summary>
+    /// Marks a task-first envelope whose definition was created before the
+    /// canonical launch plan. Append-only Orleans field id.
+    /// </summary>
+    [property: Id(39)] bool DefinitionCreatedByLaunch = false);
