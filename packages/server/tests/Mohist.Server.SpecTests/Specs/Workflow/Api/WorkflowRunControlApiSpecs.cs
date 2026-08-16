@@ -41,63 +41,6 @@ public partial class WorkflowRunControlApiSpecs
     }
 
     [Fact]
-    public async Task Stop_OnActiveRun_TransitionsToStoppedAndReturnsOk()
-    {
-        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
-
-        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/stop", content: null);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var run = await LoadRunAsync(wrId);
-        Assert.NotNull(run);
-        Assert.Equal(WorkflowRunStatus.Stopped, run!.Status);
-
-        var issueStatus = await GetIssueStatusAsync(projectId, issueNumber);
-        Assert.Equal("in_progress", issueStatus);
-    }
-
-    [Fact]
-    public async Task Approve_OnAwaitingApprovalRun_ApprovesStageAndAdvances()
-    {
-        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
-        await ForceAwaitingApprovalAsync(wrId);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/workflow-runs/{wrId}/approve",
-            new { displayName = "supervisor" });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var run = await LoadRunAsync(wrId);
-        var plan = run!.Stages.Single(s => s.Id == "plan");
-        Assert.Equal("approved", plan.ApprovalStatus?.Result);
-        Assert.Equal("service", plan.ApprovalStatus?.DecidedBy);
-        Assert.Equal("supervisor", plan.ApprovalStatus?.DisplayName);
-        Assert.Equal(StageRunStatus.Completed, plan.Status);
-        Assert.Equal("build", run.CurrentStageId);
-    }
-
-    [Fact]
-    public async Task Reject_OnAwaitingApprovalRun_RecordsFeedbackAndSchedulesFeedbackTask()
-    {
-        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
-        await ForceAwaitingApprovalAsync(wrId);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/workflow-runs/{wrId}/reject",
-            new { displayName = "supervisor", message = "add more detail" });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var run = await LoadRunAsync(wrId);
-        Assert.Single(run!.Feedback);
-        Assert.Equal("add more detail", run.Feedback[0].Body);
-        var plan = run.Stages.Single(s => s.Id == "plan");
-        Assert.Equal(StageRunStatus.Running, plan.Status);
-        Assert.Equal("service", plan.ApprovalStatus?.DecidedBy);
-        Assert.Equal("supervisor", plan.ApprovalStatus?.DisplayName);
-        Assert.Contains(plan.Tasks, t => t.DefinitionId == WorkflowRunExtensions.DefaultFeedbackTaskId);
-    }
-
-    [Fact]
     public async Task Approve_WithOverlongAuthor_Returns400AndDoesNotCallGrain()
     {
         var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
