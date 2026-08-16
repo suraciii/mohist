@@ -1,0 +1,7 @@
+2026-08-16T14:23:22Z
+
+- Read the issue-620 artifacts and self-review; self-review.md is intentionally unchanged.
+- Addressed MF-001 in design, proposal, retry spec, and T-002: root Retry now has an explicit retry-specific launcher key and fresh Session/input/turn identity contract; threaded Retry uses the existing Session follow-up boundary.
+- Addressed MF-002 in design, both capability specs, proposal, and T-001/T-002/T-003: committed pending Retry and selection operations are resumed by a fixed-key durable action-recovery reminder; interaction replay re-enters pending operations and provider-inbox ordering is explicit.
+- Addressed MF-003 in design, retry spec, proposal, and T-002: retryability is an exact authoritative category allowlist with text-only behavior for unknown, missing, legacy, and non-allowlisted failures; the category-to-control matrix is required in tests.
+- Structural validation is next: re-check artifact consistency, run JSON/diff checks, commit the first artifact set, then perform a final must-fix disposition audit.

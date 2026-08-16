@@ -48,7 +48,7 @@ An accepted selection MUST dispatch the authoritative original message context, 
 - **THEN** the Server reports unavailable or stale, starts no work for that candidate, and leaves the original message available for an explicit new request rather than silently choosing another Bot
 
 ### Requirement: Ambiguous prompt state records candidates and one selection outcome
-The Server MUST persist one prompt record keyed by the stable Slack message identity `(workspace, conversation, message timestamp)`. The record MUST retain the original thread context, the eligible candidate set, the prompt delivery identity, and the selection outcome, including the selected Connection and resulting dispatch or terminal state when known. The record MUST be sufficient to validate later actions without trusting redelivered Slack text.
+The Server MUST persist one prompt record keyed by the stable Slack message identity `(workspace, conversation, message timestamp)`. The record MUST retain the original thread context, the eligible candidate set, the prompt delivery identity, and the selection outcome, including the selected Connection and resulting dispatch or terminal state when known. The record MUST retain a stable selection dispatch key and recovery-lease state once a winner is committed. The record MUST be sufficient to validate later actions without trusting redelivered Slack text.
 
 #### Scenario: Concurrent Bot ingress handles one ambiguous message
 - **WHEN** multiple mentioned Connections process the same Slack message concurrently
@@ -59,7 +59,7 @@ The Server MUST persist one prompt record keyed by the stable Slack message iden
 - **THEN** it returns the same stable message identity, candidate set, selected winner, and dispatch outcome used to route the original message
 
 ### Requirement: Selection is single-winner and idempotent
-The Server MUST commit at most one selection outcome for a prompt. A stable selection operation identity MUST be persisted before dispatch so repeated Slack delivery, adapter failover, and concurrent clicks cannot create multiple sessions or inputs. A repeated selection MUST converge on the recorded winner and outcome; a different candidate after a winner is committed MUST be rejected as already applied or stale.
+The Server MUST commit at most one selection outcome for a prompt. A stable selection operation identity MUST be persisted before dispatch, with a `selection-dispatch-pending` state, so repeated Slack delivery, adapter failover, and concurrent clicks cannot create multiple sessions or inputs. A committed pending selection MUST be resumable by the fixed-key durable Server action-recovery reminder after the interaction request or process is lost. A repeated selection MUST converge on the recorded winner and outcome; a different candidate after a winner is committed MUST be rejected as already applied or stale.
 
 #### Scenario: The same selection is redelivered
 - **WHEN** Slack redelivers the same signed candidate action after the first selection was accepted
@@ -72,6 +72,11 @@ The Server MUST commit at most one selection outcome for a prompt. A stable sele
 #### Scenario: The prompt was claimed but its delivery was not persisted
 - **WHEN** the prompt-creating request fails after durable claim but before its outbox delivery is visible
 - **THEN** a retry for the same winning prompt identity recreates or converges on the one required prompt delivery without creating a second prompt record or changing the candidate set
+
+#### Scenario: The selection winner was committed before dispatch
+- **WHEN** the Server records the winner and `selection-dispatch-pending` before the selected Connection launch or follow-up dispatch, then the process dies
+- **THEN** the fixed-key action-recovery reminder claims the prompt row after restart and resumes the same selection operation using its persisted dispatch key and source snapshot
+- **AND** a selection redelivery may perform the same resume or observe the recovery lease, but no unselected or duplicate work starts
 
 ### Requirement: Selection outcomes replace the obsolete choice controls
 After a selection is accepted or rejected, the Server MUST enqueue an idempotent update for the prompt message that uses Server-provided text and blocks. An accepted selection MUST identify the selected Bot and show that the original request was dispatched; the choice actions MUST no longer be active for that prompt. A stale, unauthorized, expired, unavailable, or replayed selection MUST produce a readable outcome without claiming that unselected work started.
@@ -96,7 +101,7 @@ The choice prompt MUST include readable fallback text that names the candidates 
 - **THEN** normal single-Bot routing handles that new message, while the original ambiguous message remains single-winner and is not dispatched again
 
 ### Requirement: The adapter forwards selection actions without interpreting authorization or routing
-The Slack adapter MUST normalize multi-Bot selection `block_actions` events into the existing interaction envelope, preserve the signed action value and stable Slack identity, omit raw Slack payloads and credentials, acknowledge Slack before waiting for Server processing, and deliver Server-provided selection text and blocks through the existing outbox contract. The adapter MUST NOT choose a Bot, validate the candidate, or dispatch work locally.
+The Slack adapter MUST normalize multi-Bot selection `block_actions` events into the existing interaction envelope, preserve the signed action value and stable Slack identity, omit raw Slack payloads and credentials, acknowledge Slack before waiting for Server processing, and deliver Server-provided selection text and blocks through the existing outbox contract. Original message ingress is recorded in the provider inbox before prompt claim, but a button click uses the prompt row and selection operation as its separate durable interaction receipt; it MUST NOT be stopped by the source-message inbox's duplicate result. A replay MUST load or resume the selection operation and enqueue the stable prompt presentation reference. The adapter MUST NOT choose a Bot, validate the candidate, or dispatch work locally.
 
 #### Scenario: Slack delivers a Bot choice click
 - **WHEN** the Socket Mode adapter receives one candidate button click
