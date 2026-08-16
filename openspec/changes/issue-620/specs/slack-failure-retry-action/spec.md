@@ -1,5 +1,5 @@
 ### Requirement: Failed Slack results expose a signed Retry action
-A retryable failed Slack result MUST include a Server-generated Block Kit Retry action in the terminal presentation. The action payload MUST identify the original Slack Connection, session or work target, failed input or turn, workspace, conversation, message and thread context, actor, a single-use nonce, and an expiry. The payload MUST be signed with the verified Slack Connection credential, and the rendered payload MUST NOT contain a Slack credential. For this capability, retryable means terminal status `failed` plus one of the exact categories `runner-unavailable`, `runner-lost`, `report-timeout`, `timeout`, `deadline-exceeded`, `probe_timeout`, `opencode-transport-failed`, `unavailable-runtime`, `rate_limited`, or `retry-safe`, compared case-insensitively after trimming. The Server MUST NOT infer retryability from failure text.
+A retryable failed Slack result MUST include a Server-generated Block Kit Retry action in the terminal presentation. The action payload MUST identify the original Slack Connection, session or work target, failed input or turn, workspace, conversation, message and thread context, original direct-message mode, actor, a single-use nonce, and an expiry. The payload MUST be signed with the verified Slack Connection credential, and the rendered payload MUST NOT contain a Slack credential. For this capability, retryable means terminal status `failed` plus one of the exact categories `runner-unavailable`, `runner-lost`, `report-timeout`, `timeout`, `deadline-exceeded`, `probe_timeout`, `opencode-transport-failed`, `unavailable-runtime`, `rate_limited`, or `retry-safe`, compared case-insensitively after trimming. The Server MUST NOT infer retryability from failure text.
 
 #### Scenario: A retryable failure is rendered with Retry
 - **WHEN** a Slack execution reaches a retryable failed terminal state
@@ -16,7 +16,7 @@ A retryable failed Slack result MUST include a Server-generated Block Kit Retry 
 - **THEN** the terminal delivery is readable but text-only and exposes no Retry control
 
 ### Requirement: Retry interactions are verified and authorized at the Server boundary
-The Server MUST accept a Retry interaction only when the normalized event is a supported Block Kit action, the signature is valid under constant-time comparison, the action is unexpired, and the payload matches the receiving Connection, Slack workspace, conversation, message or thread context, and bound actor. The Server MUST re-read the authoritative session and failed-turn state before dispatching. Invalid, tampered, expired, wrong-Connection, wrong-context, or unauthorized actions MUST produce an explicit user-visible outcome and MUST NOT invoke runtime control or launch work.
+The Server MUST accept a Retry interaction only when the normalized event is a supported Block Kit action, the signature is valid under constant-time comparison, the action is unexpired, and the payload matches the receiving Connection, Slack workspace, conversation, message or thread context, and bound actor. A matching bound actor is not sufficient authorization: before claiming a new Retry operation, and before an interaction replay resumes an uncompleted operation, the Server MUST call the current `SlackConnectionAccessDecider` for that Connection with the actor, the signed original direct-message mode, current workspace/conversation, and the validated adapter `SlackLeaseContext`. That check MUST re-read the current access policy and allowlist and, where required, use the lease-bound verified Bot token to confirm live Slack membership and channel visibility. The Server MUST re-read the authoritative session and failed-turn state before dispatching. Invalid, tampered, expired, wrong-Connection, wrong-context, or unauthorized actions MUST produce an explicit user-visible outcome and MUST NOT invoke runtime control or launch work. A committed pending operation may be resumed by the durable recovery worker without a Slack actor or lease because it was accepted only after this check.
 
 #### Scenario: The bound actor retries a still-failed execution
 - **WHEN** the original actor selects a valid, unexpired Retry action while the referenced execution is still retryable and failed
@@ -30,12 +30,17 @@ The Server MUST accept a Retry interaction only when the normalized event is a s
 - **WHEN** a Slack member other than the actor bound into the signed payload selects the action
 - **THEN** the Server reports an unauthorized outcome, emits no execution side effect, and presents the rejection in Slack
 
+#### Scenario: The bound actor loses current Connection permission
+- **WHEN** the bound actor selects Retry after the Connection policy changes, the actor is removed from its allowlist, the Connection owner changes, or the live Slack member/channel check can no longer be confirmed
+- **THEN** the Server re-evaluates `SlackConnectionAccessDecider` through the validated adapter lease, reports unauthorized, emits no execution side effect, and presents the rejection in Slack
+- **AND** an owner-or-session-initiator check alone MUST NOT accept the action
+
 #### Scenario: The action is delivered to the wrong Slack context
 - **WHEN** a valid signed action is received for a different Connection, workspace, conversation, message, or thread than the payload identifies
 - **THEN** the Server reports a stale outcome, emits no execution side effect, and presents the rejection in Slack
 
 ### Requirement: An accepted Retry starts one fresh attempt from the original Slack context
-An accepted Retry MUST create or dispatch a fresh execution attempt with a new attempt identity while preserving the original Slack request, actor, Connection, conversation, thread, and reply-routing context. The new attempt MUST be handled through the existing durable session, inbox, and outbox boundaries. The failed attempt MUST NOT be mutated into a successful attempt, and a Retry MUST NOT dispatch to another Connection or conversation. A root retry uses a new Session plus new initial input and turn under a retry-specific launch idempotency key; a threaded retry uses a new follow-up input and turn in the existing Session under that retry-specific key.
+An accepted Retry MUST create or dispatch a fresh execution attempt with a new attempt identity while preserving the original Slack request, actor, Connection, conversation, thread, and reply-routing context. The new attempt MUST be handled through the existing durable session, inbox, and outbox boundaries. The failed attempt MUST NOT be mutated into a successful attempt, and a Retry MUST NOT dispatch to another Connection or conversation. A root retry uses a new Session plus new initial input and turn under a retry-specific launch idempotency key; a threaded retry uses an atomic Retry-only force-new-turn follow-up admission in the existing Session under that retry-specific key, followed by operation-targeted dispatch of that follow-up operation. It MUST NOT use the normal first-queued-turn selection when another queued follow-up exists.
 
 #### Scenario: A failed root request is retried
 - **WHEN** a valid Retry action is accepted for a failed root Slack request
@@ -44,11 +49,13 @@ An accepted Retry MUST create or dispatch a fresh execution attempt with a new a
 
 #### Scenario: A failed threaded request is retried
 - **WHEN** a valid Retry action is accepted for a failed threaded Slack request
-- **THEN** a new follow-up input and turn are accepted in the original Session and queued through the existing follow-up dispatcher with the retry-specific idempotency key
+- **THEN** a new follow-up input and turn are atomically accepted in the original Session with an explicit force-new-turn assignment mode, pre-minted identities, and the retry-specific idempotency key
+- **AND** the retry operation targets and dispatches the returned follow-up operation/turn directly rather than selecting the first queued turn
+- **AND** if an unrelated queued follow-up already exists, that follow-up remains separate and the Retry's returned input and turn identities are the ones dispatched
 - **AND** the new attempt remains in the original thread with the original provenance and the failed result remains an immutable historical outcome
 
 ### Requirement: Retry dispatch is idempotent across replay and redelivery
-The Server MUST persist a stable Retry operation identity before dispatching the fresh attempt. Repeated delivery of the same action value, Slack redelivery, adapter failover, or a concurrent request MUST collapse to the same operation result. The Server MUST NOT start more than one fresh attempt for one signed Retry action. A committed `dispatch-pending` operation MUST be resumable by a fixed-key durable Server recovery reminder even after the interaction request has been acknowledged or the original process has restarted. The interaction route MUST re-enter a pending operation on replay instead of returning only a duplicate-receipt result.
+The Server MUST persist a stable Retry operation identity before dispatching the fresh attempt. For a threaded retry it MUST also persist the accepted follow-up operation identifier and use an operation-targeted dispatcher/resume method that addresses that operation directly; it MUST NOT resume through a first-queued-turn scan. Repeated delivery of the same action value, Slack redelivery, adapter failover, or a concurrent request MUST collapse to the same operation result. The Server MUST NOT start more than one fresh attempt for one signed Retry action. A committed `dispatch-pending` operation MUST be resumable by a fixed-key durable Server recovery reminder even after the interaction request has been acknowledged or the original process has restarted. The interaction route MUST re-enter a pending operation on replay instead of returning only a duplicate-receipt result.
 
 #### Scenario: The same Retry action is selected twice
 - **WHEN** the first selection has been accepted and the same signed action is selected again
@@ -65,6 +72,7 @@ The Server MUST persist a stable Retry operation identity before dispatching the
 #### Scenario: The Server process dies after the pending-operation commit
 - **WHEN** the Server commits `dispatch-pending` and the process dies before the launch or follow-up dispatcher is called
 - **THEN** the fixed-key recovery reminder claims the pending operation after restart and invokes the same operation resume path with the same retry dispatch key
+- **AND** a threaded retry resumes with its persisted follow-up operation target rather than the Session's first queued turn
 - **AND** a concurrent interaction replay can either perform that resume or observe its recovery lease, but neither path creates a second attempt
 
 ### Requirement: Retry validates terminal state before taking effect

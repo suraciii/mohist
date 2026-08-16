@@ -14,7 +14,7 @@ When a human Slack message addresses at least two eligible enabled Mohist Bots i
 - **THEN** that Bot does not appear as a selectable candidate and it does not receive or start work for the message
 
 ### Requirement: Selection actions are signed, actor-bound, and context-bound
-Each multi-Bot selection action MUST be signed with the credential of the Connection that owns the prompt delivery and MUST bind the original workspace, conversation, message, optional thread, actor, candidate set, selected Connection, nonce, and expiry. The Server MUST verify the signature with constant-time comparison and MUST revalidate the receiving Connection, workspace, conversation, thread, actor, selected Connection access authorization, candidate eligibility, and action expiry before dispatching. Client-submitted candidate identifiers or message content MUST NOT override the durable prompt context.
+Each multi-Bot selection action MUST be signed with the credential of the Connection that owns the prompt delivery and MUST bind the original workspace, conversation, message, optional thread, original direct-message mode, actor, candidate set, selected Connection, nonce, and expiry. The Server MUST verify the signature with constant-time comparison and MUST revalidate the receiving Connection, workspace, conversation, thread, actor, selected Connection access authorization, candidate eligibility, and action expiry before dispatching. Client-submitted candidate identifiers or message content MUST NOT override the durable prompt context.
 
 #### Scenario: The original actor selects an eligible Bot
 - **WHEN** the actor bound to an unexpired signed action selects a candidate that is in the persisted candidate set, remains eligible, and remains authorized for that actor
