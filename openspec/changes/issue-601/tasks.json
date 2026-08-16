@@ -1,0 +1,109 @@
+{
+  "project": "mohist-local",
+  "description": "Make Workflow task completion durable and identity-bound so cleanup uncertainty is recoverable rather than reported as a business failure.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement the immutable completion boundary and runner journal",
+      "spec": "specs/workflow-task-commit-boundary/spec.md#durable-action-completion-and-commit-receipt",
+      "description": "Add the runtime-neutral ActionCompletion, CommitReceipt, exact execution identity, outcome, cleanup scope, and boundary fingerprint used by runner and server reports. Extend the runner WorkResultJournal and the runner-to-server serialization contract so one matching boundary is atomically persisted before reporting, remains immutable while recovery evidence changes, and is retained until an idempotent acknowledgement.",
+      "acceptanceCriteria": [
+        "A successful and failed Workflow task attempt can be represented with one matching ActionCompletion and CommitReceipt containing run, stage, task attempt, work, owner, runner, workspace, and workspace-generation identity.",
+        "The runner journal persists the boundary with its report payload through the existing atomic temporary-file-and-rename path before the result becomes reportable; a write failure leaves the work fenced and recoverable.",
+        "Boundary and journal replay with the same canonical identity and fingerprint reuses the original record, while a different completion, receipt, outcome, generation, branch, HEAD, tree, or status is rejected without changing the original record.",
+        "Cleanup lease, mutation, probe, and verification fields are stored separately from the immutable completion and receipt, and acknowledgement removes or retires the local record only after the server acknowledgement is received.",
+        "Runner journal and contract tests cover persistence across restart, atomic-write failure, exact replay, conflicting payloads, and immutability after recovery evidence is appended."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Versioned completion-boundary domain and wire types plus an atomic WorkResultJournal implementation with replay/conflict protection.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the boundary authoritative and immutable; use a separate mutable recovery value for cleanup and later verification observations."
+    },
+    {
+      "id": "T-002",
+      "title": "Arbitrate workspace outcomes in the common runner execution pipeline",
+      "spec": "specs/workflow-task-commit-boundary/spec.md#explicit-workspace-outcome-arbitration",
+      "description": "Build the receipt probe and arbitration path after Action result normalization and artifact capture, then route generic Actions and Pi/OpenCode executions through the same completion-boundary builder. Replace cleanup convergence as the business success gate: authoritative matching clean evidence yields committed-clean, authoritative changes yield dirty, unverifiable evidence yields unconfirmed, and a conclusive Action failure retains failed-Action semantics.",
+      "acceptanceCriteria": [
+        "The runner captures Action output, error, and artifact references independently of cleanup and persists the completion boundary before any cleanup or report delivery begins.",
+        "Arbitration returns exactly committed-clean only for authoritative matching workspace identity, generation, branch, HEAD, tree, and empty status; matching staged, unstaged, or untracked paths return dirty; missing, mismatched, timed-out, or incomplete evidence returns unconfirmed with a reason.",
+        "Dirty and unconfirmed results preserve Action output, artifacts, receipt evidence, and workspace identity and are no longer converted into failed WorkItemResult values solely because enforceCleanWorktree cannot converge.",
+        "An authoritative Action failure remains failed regardless of workspace outcome, and runtime session idle, transcript, stop, or cleanup responses cannot settle the Workflow task.",
+        "Runner tests with deterministic filesystem and clock seams cover clean, dirty, unconfirmed, probe failure, cleanup timeout, conclusive Action failure, generic Action execution, Pi execution, and OpenCode execution through the shared pipeline."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A report-ready runner completion-boundary builder/arbitrator and updated executor, journal, and generic/Pi/OpenCode paths that preserve recoverable workspace outcomes.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The original workspace observation is the receipt boundary; any later cleanup probe must be separate evidence and must not rewrite it."
+    },
+    {
+      "id": "T-003",
+      "title": "Persist and settle enriched Workflow task reports",
+      "spec": "specs/workflow-task-commit-boundary/spec.md#workflow-and-runner-settlement-contract",
+      "description": "Extend Workflow report admission and the Workflow aggregate to accept the exact completion boundary, validate it against the active task attempt and workspace identity, and durably store it before applying projections. Implement normal committed-clean settlement, explicit dirty and unconfirmed recoverable settlement with preserved output/artifacts and recovery metadata, conclusive failed-Action behavior, status views, and exact replay/conflict handling.",
+      "acceptanceCriteria": [
+        "WorkflowReportService and the grain reject reports whose task attempt, work, owner, runner, workspace, generation, boundary fingerprint, receipt, or outcome does not match the active execution, while exact replays return the original durable acknowledgement.",
+        "The accepted boundary is persisted in WorkflowRun state before task, stage, run, artifact, variable, or status projections are applied, and activation/reconciliation can resume an accepted boundary whose projections were interrupted.",
+        "A committed-clean report follows the existing successful task advancement path and publishes output and artifacts exactly once; a dirty report exposes a nonterminal recoverable dirty state; an unconfirmed report exposes a nonterminal recoverable unconfirmed state with reason, deadline or next action, workspace identity, and generation.",
+        "Dirty or unconfirmed evidence cannot produce TaskFailed, StageFailed, or WorkflowRunFailed, while a conclusive Action failure retains existing failed-task semantics and session activity alone cannot settle the task.",
+        "Server status and API projections expose the recoverable outcome and enough identity/scope data for recovery consumers without overloading the existing AgentResultSettlement Git fields.",
+        "Server specification tests cover durable-before-projection ordering, clean success, dirty and unconfirmed recovery, action failure, artifact idempotency, lost acknowledgement replay, and conflicting completion or receipt rejection with unchanged original state."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Enriched runner report DTOs, Workflow aggregate persistence/settlement behavior, recoverable status views, and idempotent report acknowledgement/conflict handling.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use the existing WorkflowRun aggregate transaction and AgentResultSettlement recovery pattern as implementation guidance, but keep Git receipt fields in a dedicated settlement value."
+    },
+    {
+      "id": "T-004",
+      "title": "Implement fenced scoped cleanup and workspace-generation recovery",
+      "spec": "specs/workflow-task-commit-boundary/spec.md#fenced-and-bounded-cleanup-recovery",
+      "description": "Add server-authorized cleanup leases and fencing tokens keyed by the complete execution identity and workspace generation, then implement runner-side validation and bounded mutations against the recorded cleanup scope. Integrate timeout, stale-fence, unsafe-path, fresh-generation, preserved-workspace, and later-authoritative-verification recovery without rerunning the Action or using broad reset/clean operations.",
+      "acceptanceCriteria": [
+        "At most one current cleanup fence is granted for an exact task/workspace generation, with explicit expiration and work budget; stale, expired, superseded, or mismatched requests are rejected before filesystem mutation.",
+        "Replaying the same lease or cleanup operation returns its prior durable result and performs no second ownership claim or filesystem mutation.",
+        "Runner cleanup validates the workspace marker, registry binding, managed-root containment, generation, and path containment before each mutation and removes only generated paths explicitly present in the persisted cleanup scope.",
+        "Broad git reset, git clean, checkout, restore, branch replacement, whole-workspace deletion, task-source deletion, declared-output deletion, recorded-artifact deletion, and unrelated-path deletion are refused and leave the task recoverable with a safety reason.",
+        "Lease expiry, budget exhaustion, cleanup failure, or unavailable verification preserves the original completion, receipt evidence, output, artifacts, and affected workspace as dirty or unconfirmed; a fresh recovery workspace receives a distinct identity, generation, and fence while the old workspace remains protected.",
+        "An authorized later clean verification settles the preserved completion without rerunning the Action, creating another task attempt, or duplicating artifacts/events.",
+        "Server lease/recovery tests with a controllable TimeProvider and runner filesystem tests with fake markers and probes cover lease exclusivity, replay, stale generation, expiration, scoped deletion, containment rejection, timeout preservation, fresh allocation, and later clean verification."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Generation-aware cleanup lease/recovery operations and runner scoped-cleanup implementation with bounded, idempotent, fence-checked filesystem behavior.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Cleanup is a recovery operation after the immutable boundary, never a prerequisite that decides Action business success."
+    },
+    {
+      "id": "T-005",
+      "title": "Roll out boundary enforcement and reconcile legacy executions",
+      "spec": "specs/workflow-task-commit-boundary/spec.md#consistent-runtime-coverage-and-deterministic-recovery",
+      "description": "Add the compatibility and enforcement controls required to deploy the new contract safely across active runners, including capability negotiation, legacy-report handling, startup reconciliation, and report acknowledgement retention. Ensure upgraded generic, Pi, and OpenCode runners use the same boundary path and that pre-existing started fences become explicitly recoverable unconfirmed observations rather than being rerun or silently settled.",
+      "acceptanceCriteria": [
+        "Compatibility mode accepts capability declarations and additive boundary fields during rollout, but legacy reports cannot manufacture an authoritative committed-clean result once enforcement is enabled.",
+        "After enforcement is enabled, a report without a valid completion boundary is rejected or retained as recoverable unconfirmed and never settles success or failure solely from runtime/session activity.",
+        "Runner startup reconciles pre-existing started journal fences without rerunning the Action, preserves local records until an idempotent acknowledgement, and can retry report delivery after an acknowledgement loss.",
+        "The enforcement transition is documented in configuration and operational status so active runners are upgraded before authoritative-boundary enforcement is enabled, and rollback does not require an unsafe server that ignores enriched reports.",
+        "End-to-end contract tests exercise legacy and upgraded report payloads, startup recovery, lost acknowledgements, duplicate delivery, and generic/Pi/OpenCode execution against deterministic fake time/filesystem seams with no duplicate Workflow events or mutations."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Compatibility/enforcement configuration, startup reconciliation, rollout documentation, and end-to-end contract coverage for upgraded and legacy runner behavior.",
+      "dependsOn": ["T-003", "T-004"],
+      "passes": false,
+      "notes": "Enable enforcement only after active runners advertise boundary support; retain the compatibility server while upgraded runners drain."
+    }
+  ]
+}
