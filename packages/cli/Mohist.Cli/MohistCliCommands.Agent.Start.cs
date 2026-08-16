@@ -188,15 +188,34 @@ internal static partial class AgentCommands
         string mode,
         string idempotencyKey)
     {
-        string? responseCode = null;
-        string? rawResponse = null;
-        JsonNode? responseNode = null;
-        if (mode == "json" || !response.IsSuccessStatusCode)
+        if (mode == "json")
         {
-            rawResponse = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var rawResponse = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             try
             {
-                responseNode = string.IsNullOrWhiteSpace(rawResponse) ? null : JsonNode.Parse(rawResponse);
+                var responseNode = string.IsNullOrWhiteSpace(rawResponse) ? null : JsonNode.Parse(rawResponse);
+                var envelope = MohistCliApi.ExtractEnvelope(responseNode, response);
+                api.Output.Write(rawResponse);
+                if (envelope.Success && response.IsSuccessStatusCode)
+                    return 0;
+
+                WriteTaskLaunchGuidance(api, envelope.Code, idempotencyKey);
+                return MohistCliApi.FailureExitCode(response);
+            }
+            catch (JsonException)
+            {
+                api.Output.Write(rawResponse);
+                return MohistCliApi.FailureExitCode(response);
+            }
+        }
+
+        string? responseCode = null;
+        if (!response.IsSuccessStatusCode)
+        {
+            var rawResponse = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            try
+            {
+                var responseNode = string.IsNullOrWhiteSpace(rawResponse) ? null : JsonNode.Parse(rawResponse);
                 responseCode = MohistCliApi.ExtractEnvelope(responseNode, response).Code;
             }
             catch (JsonException)
@@ -206,19 +225,16 @@ internal static partial class AgentCommands
             }
         }
 
-        if (mode == "json" && responseNode is not null
-            && MohistCliApi.ExtractEnvelope(responseNode, response).Success)
-        {
-            api.Output.Write(rawResponse);
-            if (rawResponse is null || !rawResponse.EndsWith('\n', StringComparison.Ordinal))
-                api.Output.WriteLine();
-            return 0;
-        }
-
         var exit = await api.PrintServerResponseAsync(
             response,
             mode: mode,
             tableShape: nameof(MohistCliApi.TableShape.AgentSessionLaunch));
+        WriteTaskLaunchGuidance(api, responseCode, idempotencyKey);
+        return exit;
+    }
+
+    private static void WriteTaskLaunchGuidance(MohistCliApi api, string? responseCode, string idempotencyKey)
+    {
         if (responseCode == "execution_config_unresolvable")
         {
             api.Error.WriteLine(
@@ -229,6 +245,5 @@ internal static partial class AgentCommands
         {
             api.Error.WriteLine($"Hint: retry with the same --idempotency-key {idempotencyKey}.");
         }
-        return exit;
     }
 }

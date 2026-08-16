@@ -245,3 +245,13 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   proves the same caller key is retained after a failed response.
 - Web typecheck, FSD boundaries, and test-boundary checks pass. Focused T-004
   coverage passes 153 tests; the full Web suite passes 4,735 tests.
+
+## T-005 follow-up verification
+
+- Added `start` to the progressive Agent command presentation so the task-first
+  entry point remains visible in `mo agent --help`.
+- Raw JSON startup output now writes accepted and rejected Server responses
+  byte-for-byte without appending a CLI newline; focused tests assert exact
+  response content and preserve actionable rejection guidance on stderr.
+- `npm run test:fast:cli` passed with 1,860 tests and `npm run docs:check`
+  passed before the full repository gate.
