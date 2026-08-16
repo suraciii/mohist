@@ -393,3 +393,9 @@
 
 - Reproduced `npm run verify` with one SpecTests failure in `AgentSessionFollowupConcurrencySpecs.LimitBecomingUnbounded_GrantsExistingFollowupWaiter` at line 153: the deferred permit-grant callback had not yet persisted `ConcurrencyPermitId` when the test read the session state. Build, Unit, Arch, Workflow Definition, and CLI lanes passed; the worktree stayed clean because verification outputs are ignored.
 - The focused `AgentSessionFollowupConcurrencySpecs` class passed 15/15 before the repair, confirming a timing race rather than a deterministic production failure. The spec now waits for the durable `dispatch-pending` lease state before asserting the unchanged permit identity and status. The wait is bounded and preserves the original assertions.
+
+## Verification repair revalidation
+
+- Reproduced the affected `Mohist.Server.SpecTests.Specs.Sessions.AgentSessionFollowupConcurrencySpecs` class after the repair: 15/15 passed.
+- Re-ran `npm run verify`: docs 92, file-size, format, build, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Server SpecTests 3960, Web 4724, Runner 1646, and Slack 70 all passed.
+- Verification emitted no Git-visible changes; the worktree remains clean apart from this progress record.
