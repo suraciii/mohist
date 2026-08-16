@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Api.DirectApi;
 
@@ -10,6 +11,14 @@ namespace Mohist.Server.Api.DirectApi;
 /// </summary>
 public static class DirectApiResults
 {
+    /// <summary>
+    /// The retry hint carried on every 503 projection_lag answer, in
+    /// delta seconds. The projector's timer sweep bounds the worst
+    /// case, so a short hint lets a caller retry promptly and simply
+    /// receive another 503 while the projection catches up.
+    /// </summary>
+    public const string ProjectionLagRetryAfterSeconds = "1";
+
     public static IResult Error(int statusCode, string code, string message) =>
         Results.Json(
             new DirectApiErrorEnvelope(new DirectApiError(code, message)),
@@ -24,6 +33,74 @@ public static class DirectApiResults
         Results.Json(
             new DirectApiErrorEnvelope(DirectApiError.Forbidden()),
             statusCode: StatusCodes.Status403Forbidden);
+
+    /// <summary>
+    /// The 404 answer for a canonical resource that is absent from or
+    /// does not belong to the authorized Project: the route's resource
+    /// code with its fixed safe public message.
+    /// </summary>
+    public static IResult ResourceNotFound(string resourceNotFoundCode) =>
+        Error(
+            StatusCodes.Status404NotFound,
+            resourceNotFoundCode,
+            ResourceNotFoundMessage(resourceNotFoundCode));
+
+    /// <summary>
+    /// The projection freshness gate: the required source watermark is
+    /// ahead of the stored projection checkpoint, so no snapshot is
+    /// served as current state. The answer carries the error envelope
+    /// and a Retry-After hint; it has no execution body and no effect.
+    /// </summary>
+    public static IResult ProjectionLag() => new ProjectionLagResult();
+
+    /// <summary>
+    /// The 503 projection-lag answer as a concrete result so the
+    /// Retry-After hint rides on the same response as the error
+    /// envelope without any secondary serialization path.
+    /// </summary>
+    private sealed class ProjectionLagResult : IResult
+    {
+        public async Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            httpContext.Response.Headers.RetryAfter = ProjectionLagRetryAfterSeconds;
+            httpContext.Response.ContentType = "application/json";
+            await httpContext.Response.WriteAsync(
+                JSON.Serialize(new DirectApiErrorEnvelope(new DirectApiError(
+                    DirectApiErrorCodes.ProjectionLag,
+                    "The public projection for this resource has not caught up yet; retry the same request shortly."))));
+        }
+    }
+
+    /// <summary>
+    /// Serves an already-serialized public snapshot exactly as the
+    /// projection committed it — the response body is the stored
+    /// allowlist, byte for byte, never a re-serialization through an
+    /// internal shape.
+    /// </summary>
+    public static IResult Snapshot(string snapshotJson) =>
+        Results.Content(snapshotJson, "application/json");
+
+    /// <summary>
+    /// The one mapping from a projection read outcome to its HTTP
+    /// answer, shared by the resource reads and reused by the command
+    /// and event routes for their projection-sourced bodies.
+    /// </summary>
+    public static IResult PublicRead(PublicReadOutcome outcome, string resourceNotFoundCode) =>
+        outcome.Status switch
+        {
+            PublicReadStatus.Found => Snapshot(outcome.SnapshotJson!),
+            PublicReadStatus.NotFound => ResourceNotFound(resourceNotFoundCode),
+            _ => ProjectionLag(),
+        };
+
+    private static string ResourceNotFoundMessage(string code) => code switch
+    {
+        DirectApiErrorCodes.JobNotFound => "The requested agent job was not found in this project.",
+        DirectApiErrorCodes.InputNotFound => "The requested agent input was not found in this project.",
+        DirectApiErrorCodes.TurnNotFound => "The requested agent turn was not found in this project.",
+        _ => "The requested resource was not found in this project.",
+    };
 
     /// <summary>
     /// Placeholder answer for the route templates registered ahead of

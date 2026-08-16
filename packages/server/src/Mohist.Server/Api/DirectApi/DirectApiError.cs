@@ -11,6 +11,25 @@ public static class DirectApiErrorCodes
     public const string Unauthenticated = "unauthenticated";
     public const string Forbidden = "forbidden";
     public const string NotImplemented = "not_implemented";
+
+    /// <summary>
+    /// The canonical-resource 404 codes. They surface only after the
+    /// caller's Project grant passed: a resource absent from or not
+    /// belonging to the authorized Project is indistinguishable from a
+    /// missing one.
+    /// </summary>
+    public const string JobNotFound = "job_not_found";
+    public const string InputNotFound = "input_not_found";
+    public const string TurnNotFound = "turn_not_found";
+
+    /// <summary>
+    /// The freshness gate of every projection-sourced answer: the
+    /// required durable source watermark is ahead of the stored
+    /// projection checkpoint, so the projection cannot yet be served
+    /// as current state. A transport condition — never the public
+    /// five-state <c>unknown</c>.
+    /// </summary>
+    public const string ProjectionLag = "projection_lag";
 }
 
 /// <summary>

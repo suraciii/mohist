@@ -213,3 +213,47 @@ npm run test:fast green.
   reasonCode=stop_outcome_unknown when a stop is involved; session-wide
   unknown activity also maps to it (stable safe public code, no cause
   detail).
+
+# T-003: Job, Input, and Turn public read routes with projection lag
+
+Status: COMPLETE. Added the three projection-only GET routes, canonical
+membership checks with resource-specific 404s, shared public-read outcome
+mapping, and the 503 projection_lag freshness gate with Retry-After. Added
+canonical Input/Turn discovery so an owned record without a committed
+snapshot returns lag rather than a false 404; deleted or foreign canonical
+records remain indistinguishable from missing resources. Added exact
+allowlist/lag route specs, a deterministic pre-snapshot lag recovery spec,
+and the DirectApi internal-read isolation architecture rule.
+
+## Codebase Patterns
+
+- PublicExecutionReadQuerier lives in Infrastructure/PublicApi and reads
+  canonical rows only to establish Project membership and source watermarks;
+  response bodies are always the stored SnapshotJson from
+  PublicExecutionSnapshotRow.
+- Job reads compare AgentJob ledger revision and AgentJob journal MAX(id),
+  plus the joined Session feeds. Input/Turn reads locate the canonical
+  record in Session state, then compare the Session ledger digest, Session
+  journal head, and joined Job ledger/journal feeds.
+- DirectApiResults.PublicRead is the shared transport mapper: Found serves
+  the persisted JSON verbatim, NotFound maps to the caller-supplied resource
+  code, and ProjectionLag emits only the error envelope with Retry-After.
+
+## Gotchas
+
+- The architecture test embeds production sources, so its internal-type
+  regex must use actual word-boundaries; a backspace character in a verbatim
+  string silently disables the intended check.
+- The projection engine must checkpoint joined AgentJob journal heads when it
+  consumes a Session target, otherwise a correct read freshness check would
+  remain permanently behind for jobs with canonical journal rows.
+
+## Verification
+
+- npm run test:fast: typecheck, unit, architecture, workflow, CLI, web, and
+  runner lanes all passed.
+- Focused SpecTests passed for PublicExecutionProjectionSpecs (14),
+  PublicExecutionProjectorHostingSpecs (1), PublicExecutionReadRouteSpecs (7),
+  and PublicExecutionReadQuerierSpecs (1).
+- Final rerun: npm run test:fast passed all seven lanes (typecheck, unit,
+  architecture, workflow, CLI, web, and runner).

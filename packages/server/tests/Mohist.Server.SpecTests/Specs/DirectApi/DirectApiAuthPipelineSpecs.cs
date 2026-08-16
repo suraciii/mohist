@@ -264,11 +264,12 @@ public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         // operator_all covers a Project that does not even exist: the read
-        // passes the pipeline (the placeholder delegate answers 501).
+        // passes the pipeline and the implemented handler then answers the
+        // canonical missing-resource code.
         using var response = await client.GetAsync(
             $"/api/v1/projects/does-not-exist-{Guid.NewGuid():N}/agent-jobs/job_1");
-        Assert.Equal(HttpStatusCode.NotImplemented, response.StatusCode);
-        await AssertDirectErrorAsync(response, HttpStatusCode.NotImplemented, "not_implemented");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await AssertDirectErrorAsync(response, HttpStatusCode.NotFound, "job_not_found");
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.PublicApi;
 
 namespace Mohist.Server.Api.DirectApi;
 
@@ -22,10 +23,11 @@ namespace Mohist.Server.Api.DirectApi;
 /// delegate runs.
 /// </para>
 /// <para>
-/// The delegates registered here are placeholders: they only prove the
-/// pipeline passed. The follow-up implementation tasks replace them
-/// with the public read, idempotent write, and event-stream handlers
-/// in place, without altering this registration's order or metadata.
+/// The read delegates are served only from the persisted public
+/// projection (the shared lag-checked read service). The write and
+/// event-stream templates still answer with the placeholder result
+/// until their endpoint delegates land; they replace it in place,
+/// without altering this registration's order or metadata.
 /// </para>
 /// </summary>
 public static class DirectApiRoutes
@@ -43,12 +45,38 @@ public static class DirectApiRoutes
         group.MapPost("/agent-turns/{turnId}/stop", () => DirectApiResults.NotImplemented())
             .RequireScopes(Scope.Operator);
 
-        // Reads: readonly or operator.
-        group.MapGet("/agent-jobs/{jobId}", () => DirectApiResults.NotImplemented())
+        // Reads: readonly or operator. Each read is served only from
+        // the persisted public projection through the shared read
+        // service: canonical Project membership answers the route's
+        // 404 resource code, and a checkpoint that has not consumed
+        // the anchor's durable source facts yet answers 503
+        // projection_lag instead of a stale snapshot.
+        group.MapGet("/agent-jobs/{jobId}", async (
+            string projectId,
+            string jobId,
+            PublicExecutionReadQuerier publicReads,
+            CancellationToken ct) =>
+            DirectApiResults.PublicRead(
+                await publicReads.ReadJobAsync(projectId, jobId, ct),
+                DirectApiErrorCodes.JobNotFound))
             .RequireScopes(Scope.Readonly, Scope.Operator);
-        group.MapGet("/agent-inputs/{inputId}", () => DirectApiResults.NotImplemented())
+        group.MapGet("/agent-inputs/{inputId}", async (
+            string projectId,
+            string inputId,
+            PublicExecutionReadQuerier publicReads,
+            CancellationToken ct) =>
+            DirectApiResults.PublicRead(
+                await publicReads.ReadInputAsync(projectId, inputId, ct),
+                DirectApiErrorCodes.InputNotFound))
             .RequireScopes(Scope.Readonly, Scope.Operator);
-        group.MapGet("/agent-turns/{turnId}", () => DirectApiResults.NotImplemented())
+        group.MapGet("/agent-turns/{turnId}", async (
+            string projectId,
+            string turnId,
+            PublicExecutionReadQuerier publicReads,
+            CancellationToken ct) =>
+            DirectApiResults.PublicRead(
+                await publicReads.ReadTurnAsync(projectId, turnId, ct),
+                DirectApiErrorCodes.TurnNotFound))
             .RequireScopes(Scope.Readonly, Scope.Operator);
         group.MapGet("/agent-sessions/{sessionId}/events", () => DirectApiResults.NotImplemented())
             .RequireScopes(Scope.Readonly, Scope.Operator);

@@ -342,7 +342,7 @@ public sealed class PublicApiProjectionEngine
             _log.LogWarning(
                 "Public projection skipped AgentSession {SessionId}: the ledger state could not be deserialized",
                 sessionId);
-            AdvanceSessionCheckpoints(checkpoints, row, [], []);
+            AdvanceSessionCheckpoints(checkpoints, row, [], [], new Dictionary<string, long>());
             return true;
         }
 
@@ -353,15 +353,15 @@ public sealed class PublicApiProjectionEngine
             .Where(e => e.Source == AgentSessionSource(sessionId))
             .OrderBy(e => e.Id)
             .ToListAsync(ct);
+        var jobJournalHeads = await LoadJobJournalHeadsAsync(db, jobRows, ct);
 
         var facts = BuildFacts(sessionId, row, session, jobRows, journalRows);
-
         // A target without a public Project identity cannot be served on
         // the public boundary; its facts are consumed and checkpointed,
         // but nothing is published.
         if (string.IsNullOrWhiteSpace(facts.ProjectId))
         {
-            AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows);
+            AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows, jobJournalHeads);
             return true;
         }
 
@@ -401,8 +401,14 @@ public sealed class PublicApiProjectionEngine
             .ToHashSet(StringComparer.Ordinal);
 
         // --- terminal fences from the anchor snapshots ---
+        // A prepared Job anchor is committed with a null SessionId
+        // before this Session's row exists, so the fence load must
+        // reach those anchors by Job key as well — otherwise a fence
+        // set in the prepared phase would be invisible here.
+        var sessionJobKeys = jobRows.Select(job => job.JobKey).ToList();
         var anchorRows = await db.PublicExecutionSnapshots
-            .Where(s => s.SessionId == sessionId)
+            .Where(s => s.SessionId == sessionId
+                || (s.AnchorType == "job" && sessionJobKeys.Contains(s.AnchorId)))
             .ToListAsync(ct);
         var fences = new Dictionary<string, PublicExecutionSnapshotRow>(StringComparer.Ordinal);
         foreach (var anchorRow in anchorRows)
@@ -478,7 +484,7 @@ public sealed class PublicApiProjectionEngine
             stream.UpdatedAt = observedAt;
         }
 
-        AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows);
+        AdvanceSessionCheckpoints(checkpoints, row, jobRows, journalRows, jobJournalHeads);
         return true;
     }
 
@@ -948,11 +954,31 @@ public sealed class PublicApiProjectionEngine
         checkpoints[CheckpointKey(feed, sourceKey)] = watermark;
     }
 
+    private static async Task<Dictionary<string, long>> LoadJobJournalHeadsAsync(
+        MohistDbContext db,
+        IReadOnlyList<AgentJobRow> jobRows,
+        CancellationToken ct)
+    {
+        if (jobRows.Count == 0)
+        {
+            return new Dictionary<string, long>(StringComparer.Ordinal);
+        }
+
+        var sources = jobRows.Select(row => AgentJobSource(row.JobKey)).ToList();
+        var heads = await db.AgentJobEvents.AsNoTracking()
+            .Where(row => sources.Contains(row.Source))
+            .GroupBy(row => row.Source)
+            .Select(group => new { group.Key, Max = group.Max(row => row.Id) })
+            .ToListAsync(ct);
+        return heads.ToDictionary(head => head.Key, head => head.Max, StringComparer.Ordinal);
+    }
+
     private static void AdvanceSessionCheckpoints(
         Dictionary<string, string> checkpoints,
         AgentSessionRow sessionRow,
         IReadOnlyList<AgentJobRow> jobRows,
-        IReadOnlyList<AgentSessionEventRow> journalRows)
+        IReadOnlyList<AgentSessionEventRow> journalRows,
+        IReadOnlyDictionary<string, long> jobJournalHeads)
     {
         AdvanceCheckpoint(
             checkpoints,
@@ -976,6 +1002,18 @@ public sealed class PublicApiProjectionEngine
                 PublicProjectionFeeds.AgentJobs,
                 jobRow.JobKey,
                 RevisionWatermark(jobRow.Revision));
+
+            // The joined Job's journal rows are part of the consumed
+            // input for this target; checkpointing their head is what
+            // lets the target settle instead of staying forever dirty.
+            if (jobJournalHeads.TryGetValue(AgentJobSource(jobRow.JobKey), out var head))
+            {
+                AdvanceCheckpoint(
+                    checkpoints,
+                    PublicProjectionFeeds.AgentJobEvents,
+                    AgentJobSource(jobRow.JobKey),
+                    head.ToString());
+            }
         }
     }
 
