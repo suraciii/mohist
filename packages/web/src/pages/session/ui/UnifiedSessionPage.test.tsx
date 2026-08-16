@@ -133,6 +133,12 @@ describe('UnifiedSessionPage', () => {
     expect(screen.getByTestId('session-source-context')).toHaveTextContent(detailLabel)
   })
 
+  it('links the Agent in the session view to its editable detail page', () => {
+    renderPage()
+    expect(screen.getByTestId('session-agent-link')).toHaveAttribute('href', '/Test/agents/agent-1')
+    expect(screen.getByTestId('session-agent-link')).toHaveTextContent('Reviewer')
+  })
+
   it('passes authoritative inputs, turns, and activity into the timeline instead of duplicate evidence regions', () => {
     summary = baseSummary({
       inputs: [

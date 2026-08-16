@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { makeAgent, renderPage, state } from '../../../../tests/support/agent-session-composer-test-support'
+
+useMswServer()
 
 describe('AgentSessionComposerPage', () => {
   beforeEach(() => {
     state.agentsData = []
     state.availabilityData = []
     state.launchCalls.length = 0
+    state.taskCalls.length = 0
+    state.defaultExecutionConfig = { runtime: 'opencode', model: 'openai/gpt-4o', variant: null }
     state.launchError = null
     state.launchFailuresRemaining = -1
     state.launchResponse = null
@@ -105,10 +111,109 @@ describe('AgentSessionComposerPage', () => {
 
   /* ── Launch call + navigation ─────────────────────────── */
 
-  it('calls mutate with correct args on launch', async () => {
+  it('launches a task without an Agent selection through the task-first mutation', async () => {
+    renderPage()
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Review the current change' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => {
+      expect(state.taskCalls).toHaveLength(1)
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/sess-123')
+    })
+    expect(state.taskCalls[0].body).toEqual({
+      prompt: 'Review the current change',
+      context: null,
+      attachments: [],
+    })
+    expect(state.taskCalls[0].body).not.toHaveProperty('runtime')
+    expect(state.taskCalls[0].body).not.toHaveProperty('model')
+    expect(state.taskCalls[0].body).not.toHaveProperty('variant')
+    expect(state.launchCalls).toHaveLength(0)
+    expect(state.taskCalls[0].idempotencyKey).toBeTruthy()
+  })
+
+  it('requires catalog-backed Runtime and Model when the Project has no default', async () => {
+    state.defaultExecutionConfig = null
+    server.use(
+      http.get('*/api/projects/:projectId/opencode/models', () => HttpResponse.json({
+        success: true,
+        data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
+      })),
+    )
+    renderPage()
+
+    expect(await screen.findByTestId('execution-config-controls')).toBeInTheDocument()
+    expect(screen.getByTestId('task-runtime')).toHaveValue('opencode')
+    expect(screen.getByTestId('launch-button')).toBeDisabled()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+    fireEvent.click(await screen.findByRole('option', { name: /anthropic\/claude-3/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+    fireEvent.click(await screen.findByTestId('task-model-row-anthropic/claude-3-variant-high'))
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Use the catalog model' } })
+    expect(screen.getByTestId('launch-button')).not.toBeDisabled()
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
+    expect(state.taskCalls[0].body).toMatchObject({
+      prompt: 'Use the catalog model',
+      runtime: 'opencode',
+      model: 'anthropic/claude-3',
+      variant: 'high',
+    })
+  })
+
+  it('shows the Project default as a recommendation and submits adjusted catalog values as hints', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/opencode/models', () => HttpResponse.json({
+        success: true,
+        data: { models: ['anthropic/claude-3'], modelVariants: { 'anthropic/claude-3': ['high', 'low'] } },
+      })),
+    )
+    renderPage()
+    expect(await screen.findByTestId('recommended-execution-config')).toHaveTextContent(/recommended execution configuration/i)
+    expect(screen.getByTestId('recommended-execution-config')).toHaveTextContent(/Project default for tasks/i)
+    expect(screen.queryByTestId('execution-config-controls')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('adjust-execution-config'))
+    expect(await screen.findByTestId('execution-config-controls')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+    fireEvent.click(await screen.findByRole('option', { name: /anthropic\/claude-3/i }))
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Use an adjusted model' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
+    expect(state.taskCalls[0].body).toMatchObject({
+      prompt: 'Use an adjusted model',
+      runtime: 'opencode',
+      model: 'anthropic/claude-3',
+    })
+  })
+
+  it('preserves task and context state when the task-first launch is rejected', async () => {
+    state.launchError = { error: 'Execution configuration is unresolved', code: 'execution_config_unresolvable' }
+    renderPage(['/agent-sessions/new?issue=42'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Keep this task' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    const feedback = await screen.findByTestId('error-execution-config')
+    expect(feedback).toHaveAttribute('data-feedback-kind', 'execution-config-unresolvable')
+    expect(feedback).toHaveTextContent(/Runtime and Model/i)
+    expect(feedback).toHaveTextContent(/Project default/i)
+    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
+    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
+  })
+
+  it('calls mutate with correct args on launch when an Agent is selected', async () => {
     state.agentsData = [makeAgent('agent-1')]
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
+    expect(screen.queryByTestId('execution-config-controls')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('recommended-execution-config')).not.toBeInTheDocument()
     fireEvent.change(textarea, { target: { value: 'Hello agent' } })
     fireEvent.click(screen.getByTestId('launch-button'))
     await waitFor(() => {

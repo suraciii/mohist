@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon } from 'lucide-react'
 import {
@@ -7,15 +7,19 @@ import {
   useAgentListAvailability,
   useAgents,
   useLaunchAgentSession,
+  useStartAgentTask,
 } from '../../../entities/agent'
 import type {
   AgentAvailabilitySummaryEntry,
   AgentExecutabilityResult,
   AgentInfo,
   AgentSessionLaunchContext,
+  AgentSessionLaunchResponse,
+  AgentTaskLaunchInput,
 } from '../../../entities/agent'
 import { extractAttachmentIds } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
+import { AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, useAvailableModelIds, useModelVariants, type AgentRuntime } from '../../../entities/settings'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
 import {
@@ -29,6 +33,7 @@ import { Label } from '@/shared/ui/components/label'
 import { Badge } from '@/shared/ui/components/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
 import { cn } from '@/shared/lib/utils'
+import { ModelSelect } from '../../../shared/ui/ModelSelect'
 
 interface ContextRef {
   type: 'issue' | 'epic' | 'repository' | 'workspace'
@@ -95,7 +100,7 @@ function AgentSelector({
             {selectedAgent ? (
               <span className="truncate">{selectedAgent.name}</span>
             ) : (
-              <span className="text-muted-foreground">Select an agent...</span>
+              <span className="text-muted-foreground">New Agent for this task</span>
             )}
             <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
           </Button>
@@ -115,6 +120,30 @@ function AgentSelector({
           </div>
         </div>
         <div className="max-h-64 overflow-y-auto border-t">
+          <div
+            role="button"
+            tabIndex={0}
+            data-testid="agent-option-new-task"
+            onClick={() => {
+              onChange('')
+              setOpen(false)
+              setSearch('')
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                onChange('')
+                setOpen(false)
+                setSearch('')
+              }
+            }}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 cursor-pointer text-sm border-b',
+              selectedRef === '' ? 'bg-muted' : 'hover:bg-muted',
+            )}
+          >
+            <BotIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="font-medium text-foreground">New Agent for this task</span>
+          </div>
           {filtered.length === 0 && (
             <div className="px-3 py-4 text-center text-sm text-muted-foreground">No agents found</div>
           )}
@@ -162,6 +191,72 @@ function AgentSelector({
   )
 }
 
+function TaskExecutionConfigControls({
+  runtime,
+  model,
+  variant,
+  onRuntimeChange,
+  onModelChange,
+  onVariantChange,
+}: {
+  runtime: AgentRuntime
+  model: string | null
+  variant: string | null
+  onRuntimeChange: (runtime: AgentRuntime) => void
+  onModelChange: (model: string | null) => void
+  onVariantChange: (variant: string | null) => void
+}) {
+  const { data: availableModels } = useAvailableModelIds(runtime)
+  const modelVariants = useModelVariants(runtime)
+  const models = availableModels?.models ?? []
+
+  return (
+    <div data-testid="execution-config-controls" className="space-y-3 rounded-lg border border-border bg-card p-4">
+      <div>
+        <p className="text-sm font-medium text-foreground">Execution configuration</p>
+        <p className="text-xs text-muted-foreground mt-0.5">Choose the Runtime and a catalog model for this task. Variant is optional.</p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="task-runtime">Runtime</Label>
+          <select
+            id="task-runtime"
+            data-testid="task-runtime"
+            aria-label="Runtime"
+            value={runtime}
+            onChange={(event) => onRuntimeChange(event.target.value as AgentRuntime)}
+            className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+          >
+            <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+            <option value={AGENT_RUNTIME_PI}>Pi</option>
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="task-model">Model</Label>
+          <ModelSelect
+            id="task-model"
+            value={model}
+            placeholder={availableModels ? 'Select a catalog model' : 'Loading catalog models...'}
+            models={models}
+            onChange={(nextModel) => onModelChange(nextModel)}
+            onChangeVariant={onVariantChange}
+            modelVariants={modelVariants}
+            valueVariant={variant}
+            onChangeModelVariant={(nextModel, nextVariant) => {
+              onModelChange(nextModel)
+              onVariantChange(nextVariant)
+            }}
+            disabled={!availableModels}
+          />
+        </div>
+      </div>
+      <p data-testid="execution-config-catalog-hint" className="text-[11px] text-muted-foreground">
+        Models and variants come from the selected Runtime catalog.
+      </p>
+    </div>
+  )
+}
+
 export interface AgentSessionComposerPageComponents {
   AttachmentComposer: ComponentType<ComponentProps<typeof DefaultAttachmentComposer>>
 }
@@ -172,6 +267,7 @@ export interface AgentSessionComposerData {
   availability: AgentAvailabilitySummaryEntry[] | undefined
   availabilityLoading: boolean
   launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error'>
+  startTaskMutation: Pick<ReturnType<typeof useStartAgentTask>, 'mutate' | 'isPending' | 'error'>
 }
 
 export type AgentSessionComposerDataHook = () => AgentSessionComposerData
@@ -185,6 +281,7 @@ const useDefaultData: AgentSessionComposerDataHook = () => {
     availability,
     availabilityLoading,
     launchMutation: useLaunchAgentSession(),
+    startTaskMutation: useStartAgentTask(),
   }
 }
 
@@ -203,10 +300,10 @@ export function AgentSessionComposerPage({
   useDocumentTitle('New Session — Mohist')
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { projectId } = useProject()
+  const { projectId, currentProject } = useProject()
   const [searchParams] = useSearchParams()
 
-  const { agents, agentsLoading, availability, availabilityLoading, launchMutation } = dataHook()
+  const { agents, agentsLoading, availability, availabilityLoading, launchMutation, startTaskMutation } = dataHook()
 
   const launchableAgents = useMemo(() => agents?.filter((a) => a.status !== 'archived') ?? [], [agents])
 
@@ -226,12 +323,26 @@ export function AgentSessionComposerPage({
 
   const [prompt, setPrompt] = useState('')
   const [promptTouched, setPromptTouched] = useState(false)
+  const [executionRuntime, setExecutionRuntime] = useState<AgentRuntime>(AGENT_RUNTIME_OPENCODE)
+  const [executionModel, setExecutionModel] = useState<string | null>(null)
+  const [executionVariant, setExecutionVariant] = useState<string | null>(null)
+  const [executionConfigAdjusted, setExecutionConfigAdjusted] = useState(false)
   const [launchAttachmentResult, setLaunchAttachmentResult] = useState<{
+    agentId: string
+    agentName: string
     accepted: AttachmentResultAccepted[]
     rejected: AttachmentResultRejected[]
     sessionPath: string
   } | null>(null)
   const launchKeyRef = useRef<string | null>(null)
+  const defaultExecutionConfig = currentProject?.defaultExecutionConfig ?? null
+
+  useEffect(() => {
+    if (executionConfigAdjusted || !defaultExecutionConfig) return
+    setExecutionRuntime(defaultExecutionConfig.runtime)
+    setExecutionModel(defaultExecutionConfig.model)
+    setExecutionVariant(defaultExecutionConfig.variant ?? null)
+  }, [defaultExecutionConfig, executionConfigAdjusted])
 
   const selectedAgent = useMemo(
     () => agents?.find((a) => a.id === selectedAgentRef) ?? null,
@@ -251,19 +362,21 @@ export function AgentSessionComposerPage({
   const attachmentIds = useMemo(() => extractAttachmentIds(prompt), [prompt])
   const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
 
-  const canLaunch =
-    (!promptEmpty || attachmentIds.length > 0) &&
-    !!selectedAgentRef &&
-    !isArchived &&
-    !launchBlockedByExecutability &&
-    !launchMutation.isPending
+  const isCreatingAgent = !selectedAgentRef
+  const executionConfigResolvable = !!defaultExecutionConfig || !!executionModel
+  const executionControlsVisible = isCreatingAgent && (!defaultExecutionConfig || executionConfigAdjusted)
+  const launchPending = launchMutation.isPending || startTaskMutation.isPending
+  const canLaunch = (!promptEmpty || attachmentIds.length > 0)
+    && (!isCreatingAgent || executionConfigResolvable)
+    && (!selectedAgentRef || (!isArchived && !launchBlockedByExecutability))
+    && !launchPending
 
   const removeRef = useCallback((index: number) => {
     setContextRefs((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
   const handleLaunch = useCallback(() => {
-    if (!canLaunch || !selectedAgent) return
+    if (!canLaunch) return
 
     const context: AgentSessionLaunchContext = {}
     for (const ref of contextRefs) {
@@ -275,44 +388,69 @@ export function AgentSessionComposerPage({
       else if (ref.type === 'workspace') context.workspacePath = ref.value
     }
     const hasContext = Object.keys(context).length > 0
+    const idempotencyKey = launchKeyRef.current ??= crypto.randomUUID()
+    const onSuccess = (data: AgentSessionLaunchResponse) => {
+      const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
+      const sessionPath = data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
+      const accepted = data.attachments ?? []
+      const rejected = data.rejectedAttachments ?? []
+      launchKeyRef.current = null
+      if (accepted.length > 0 || rejected.length > 0) {
+        setLaunchAttachmentResult({
+          agentId: data.agentId,
+          agentName: data.agentName,
+          accepted,
+          rejected,
+          sessionPath,
+        })
+        return
+      }
+      navigate(sessionPath)
+    }
 
-    launchMutation.mutate(
-      {
-        agentRef: selectedAgentRef,
-        prompt: prompt.trim(),
-        context: hasContext ? context : null,
-        attachments: attachmentIds,
-        idempotencyKey: (launchKeyRef.current ??= crypto.randomUUID()),
-      },
-      {
-        onSuccess: (data) => {
-          const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-          const sessionPath =
-            data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
-          const accepted = data.attachments ?? []
-          const rejected = data.rejectedAttachments ?? []
-          launchKeyRef.current = null
-          if (accepted.length > 0 || rejected.length > 0) {
-            setLaunchAttachmentResult({ accepted, rejected, sessionPath })
-            return
-          }
-          navigate(sessionPath)
+    if (selectedAgentRef) {
+      launchMutation.mutate(
+        {
+          agentRef: selectedAgentRef,
+          prompt: prompt.trim(),
+          context: hasContext ? context : null,
+          attachments: attachmentIds,
+          idempotencyKey,
         },
-      },
-    )
+        { onSuccess },
+      )
+      return
+    }
+
+    const taskInput: AgentTaskLaunchInput = {
+      prompt: prompt.trim(),
+      context: hasContext ? context : null,
+      attachments: attachmentIds,
+    }
+    if (!defaultExecutionConfig || executionConfigAdjusted) {
+      taskInput.runtime = executionRuntime
+      taskInput.model = executionModel
+      taskInput.variant = executionVariant
+    }
+    startTaskMutation.mutate({ ...taskInput, idempotencyKey }, { onSuccess })
   }, [
     attachmentIds,
     canLaunch,
-    selectedAgent,
-    selectedAgentRef,
     contextRefs,
-    prompt,
+    defaultExecutionConfig,
+    executionConfigAdjusted,
+    executionModel,
+    executionRuntime,
+    executionVariant,
     launchMutation,
     navigate,
+    prompt,
+    selectedAgentRef,
+    startTaskMutation,
     toProjectPath,
   ])
 
-  const launchError = launchMutation.error
+  const launchError = selectedAgentRef ? launchMutation.error : startTaskMutation.error
   const launchFeedback = getAgentLaunchErrorFeedback(launchError, selectedExecutability)
   const isExecutabilityError = launchFeedback?.kind === 'not-configured' || launchFeedback?.kind === 'not-executable'
   const launchErrorData =
@@ -353,7 +491,13 @@ export function AgentSessionComposerPage({
             ? 'error-agent-not-executable'
             : launchFeedback?.kind === 'back-pressure'
               ? 'error-back-pressure'
-              : 'error-execution-unavailable'
+              : launchFeedback?.kind === 'launch-conflict'
+                ? 'error-launch-conflict'
+                : launchFeedback?.kind === 'launch-pending'
+                  ? 'error-launch-pending'
+                  : launchFeedback?.kind === 'execution-config-unresolvable'
+                    ? 'error-execution-config'
+                    : 'error-execution-unavailable'
 
   return (
     <div data-testid="agent-session-composer-page" className="flex-1 overflow-y-auto bg-background">
@@ -369,7 +513,7 @@ export function AgentSessionComposerPage({
           <div
             data-testid={launchErrorTestId}
             data-feedback-kind={launchFeedback.kind}
-            className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm ${launchFeedback.kind === 'not-configured' || launchFeedback.kind === 'not-executable' || launchFeedback.kind === 'execution-unavailable' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
+            className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm ${launchFeedback.kind === 'not-configured' || launchFeedback.kind === 'not-executable' || launchFeedback.kind === 'execution-unavailable' || launchFeedback.kind === 'execution-config-unresolvable' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
           >
             <div className="flex items-start gap-2">
               <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
@@ -420,6 +564,35 @@ export function AgentSessionComposerPage({
         )}
 
         <div className="space-y-1.5">
+          <Label htmlFor="prompt">
+            Prompt <span className="text-muted-foreground">(optional when files are attached)</span>
+          </Label>
+          <AttachmentComposer
+            projectId={projectId!}
+            value={prompt}
+            onChange={setPrompt}
+            onBlur={() => setPromptTouched(true)}
+            placeholder="Enter your prompt for the agent..."
+          />
+          {showPromptError && (
+            <p data-testid="prompt-error" className="text-xs text-destructive">
+              Prompt is required unless at least one file is attached.
+            </p>
+          )}
+        </div>
+
+        {contextRefs.length > 0 && (
+          <div className="space-y-1.5">
+            <Label>Context References</Label>
+            <div className="flex flex-wrap gap-2" data-testid="context-refs-list">
+              {contextRefs.map((ref, i) => (
+                <ContextRefChip key={`${ref.type}-${ref.value}`} refItem={ref} onRemove={() => removeRef(i)} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-1.5">
           <Label htmlFor="agent-select">Agent</Label>
           <AgentSelector
             agents={launchableAgents}
@@ -427,6 +600,9 @@ export function AgentSessionComposerPage({
             onChange={setSelectedAgentRef}
             isLoading={agentsLoading}
           />
+          <p className="text-xs text-muted-foreground">
+            Leave this as <span className="font-medium text-foreground">New Agent for this task</span> for a one-off task, or select an existing Agent to use its definition.
+          </p>
           {isArchived && (
             <p data-testid="archived-warning" className="text-xs text-muted-foreground">
               This agent is archived and cannot be used to launch new sessions.
@@ -475,34 +651,44 @@ export function AgentSessionComposerPage({
           )}
         </div>
 
-        {contextRefs.length > 0 && (
-          <div className="space-y-1.5">
-            <Label>Context References</Label>
-            <div className="flex flex-wrap gap-2" data-testid="context-refs-list">
-              {contextRefs.map((ref, i) => (
-                <ContextRefChip key={`${ref.type}-${ref.value}`} refItem={ref} onRemove={() => removeRef(i)} />
-              ))}
+        {isCreatingAgent && defaultExecutionConfig && !executionConfigAdjusted && (
+          <div data-testid="recommended-execution-config" className="rounded-lg border border-border bg-card p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Recommended execution configuration</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Project default for tasks in this Project</p>
+                <p className="mt-2 text-xs text-foreground">
+                  {defaultExecutionConfig.runtime === 'opencode' ? 'OpenCode' : 'Pi'} · {defaultExecutionConfig.model}
+                  {defaultExecutionConfig.variant ? ` · ${defaultExecutionConfig.variant}` : ''}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="adjust-execution-config"
+                onClick={() => setExecutionConfigAdjusted(true)}
+              >
+                Adjust
+              </Button>
             </div>
           </div>
         )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="prompt">
-            Prompt <span className="text-muted-foreground">(optional when files are attached)</span>
-          </Label>
-          <AttachmentComposer
-            projectId={projectId!}
-            value={prompt}
-            onChange={setPrompt}
-            onBlur={() => setPromptTouched(true)}
-            placeholder="Enter your prompt for the agent..."
+        {executionControlsVisible && (
+          <TaskExecutionConfigControls
+            runtime={executionRuntime}
+            model={executionModel}
+            variant={executionVariant}
+            onRuntimeChange={(runtime) => {
+              setExecutionRuntime(runtime)
+              setExecutionModel(null)
+              setExecutionVariant(null)
+            }}
+            onModelChange={setExecutionModel}
+            onVariantChange={setExecutionVariant}
           />
-          {showPromptError && (
-            <p data-testid="prompt-error" className="text-xs text-destructive">
-              Prompt is required unless at least one file is attached.
-            </p>
-          )}
-        </div>
+        )}
 
         {launchAttachmentResult && (
           <div data-testid="launch-attachment-results" className="space-y-3">
@@ -510,7 +696,17 @@ export function AgentSessionComposerPage({
               <p className="text-sm font-medium text-foreground">Attachments submitted</p>
               <p className="text-xs text-muted-foreground">The Agent received only the files marked accepted.</p>
             </div>
-            <AttachmentResults accepted={launchAttachmentResult.accepted} rejected={launchAttachmentResult.rejected} />
+            <AttachmentResults
+              accepted={launchAttachmentResult.accepted}
+              rejected={launchAttachmentResult.rejected}
+            />
+            <a
+              data-testid="launched-agent-link"
+              className="inline-flex text-xs font-medium text-primary underline underline-offset-2"
+              href={toProjectPath(`/agents/${encodeURIComponent(launchAttachmentResult.agentId)}`)}
+            >
+              Refine {launchAttachmentResult.agentName}
+            </a>
             <Button
               type="button"
               data-testid="open-launched-session"
@@ -531,7 +727,7 @@ export function AgentSessionComposerPage({
             disabled={!canLaunch}
             title={launchBlockedByExecutability ? 'Executability is blocked - fix the gaps first.' : undefined}
           >
-            {launchMutation.isPending ? 'Launching...' : 'Launch Session'}
+            {launchPending ? 'Launching...' : 'Launch Session'}
           </Button>
         </div>
       </div>

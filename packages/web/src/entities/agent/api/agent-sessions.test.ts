@@ -12,6 +12,7 @@ import {
   getGenericSessionSummary,
   getGenericSessionTranscript,
   launchAgentSession,
+  startAgentTask,
   launchAgentSessionMutationOptions,
   getAgentLaunchObservationMeaning,
   postGenericFollowup,
@@ -154,6 +155,46 @@ describe('launchAgentSession (client fn)', () => {
     await launchAgentSession('proj-1', 'agent-foo', { prompt: 'Hello' }, 'retry-key')
 
     expect(key).toBe('retry-key')
+  })
+})
+
+describe('startAgentTask (client fn)', () => {
+  it('POSTs task-first fields to /agent-tasks with the web origin and key', async () => {
+    const captured: { url: string; body: unknown; key: string; origin: string }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agent-tasks', async ({ request }) => {
+        captured.push({
+          url: new URL(request.url).pathname,
+          body: await request.json(),
+          key: request.headers.get('Idempotency-Key') ?? '',
+          origin: request.headers.get('X-Mohist-Launch-Origin') ?? '',
+        })
+        return HttpResponse.json({ success: true, data: { sessionId: 's-task' } })
+      }),
+    )
+
+    await startAgentTask('proj-1', {
+      prompt: 'Start from this task',
+      context: { issueNumber: 42 },
+      attachments: ['att-1'],
+      runtime: 'pi',
+      model: 'provider/model',
+      variant: 'high',
+    }, 'task-key')
+
+    expect(captured).toEqual([{
+      url: '/api/projects/proj-1/agent-tasks',
+      body: {
+        prompt: 'Start from this task',
+        context: { issueNumber: 42 },
+        attachments: ['att-1'],
+        runtime: 'pi',
+        model: 'provider/model',
+        variant: 'high',
+      },
+      key: 'task-key',
+      origin: 'web',
+    }])
   })
 })
 

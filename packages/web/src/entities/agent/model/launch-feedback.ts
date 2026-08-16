@@ -6,6 +6,9 @@ export type AgentLaunchFeedbackKind =
   | 'not-configured'
   | 'not-executable'
   | 'execution-unavailable'
+  | 'launch-conflict'
+  | 'launch-pending'
+  | 'execution-config-unresolvable'
 
 export interface AgentLaunchFeedback {
   kind: AgentLaunchFeedbackKind
@@ -51,6 +54,9 @@ export function getAgentAvailabilityFeedback(waitingReason: string | null | unde
 type LaunchErrorLike = {
   code?: unknown
   message?: unknown
+  status?: unknown
+  details?: unknown
+  data?: unknown
 }
 
 export function getAgentLaunchErrorFeedback(
@@ -60,6 +66,34 @@ export function getAgentLaunchErrorFeedback(
   const candidate = error as LaunchErrorLike | null
   const code = typeof candidate?.code === 'string' ? candidate.code.toLowerCase() : ''
   const message = typeof candidate?.message === 'string' ? candidate.message.toLowerCase() : ''
+  const status = typeof candidate?.status === 'number' ? candidate.status : 0
+
+  if (code === 'execution_config_unresolvable') {
+    return {
+      kind: 'execution-config-unresolvable',
+      title: 'Execution configuration is required',
+      message: 'This task does not have a resolvable execution configuration.',
+      nextAction: 'Choose a Runtime and Model here, or configure the Project default execution configuration, then retry.',
+    }
+  }
+
+  if (code === 'launch_setup_pending') {
+    return {
+      kind: 'launch-pending',
+      title: 'Launch is still converging',
+      message: 'The server is still determining the launch outcome.',
+      nextAction: 'Retry with the same Idempotency-Key so the original outcome can be recovered.',
+    }
+  }
+
+  if (code === 'launch_idempotency_conflict' || (status === 409 && message.includes('idempotency'))) {
+    return {
+      kind: 'launch-conflict',
+      title: 'Launch request conflicts with an earlier attempt',
+      message: 'This Idempotency-Key is already associated with different task details.',
+      nextAction: 'Keep the original task details or start a new launch with a new key.',
+    }
+  }
 
   if (code === 'agent_not_configured' || executability?.state === 'not-configured') {
     return {

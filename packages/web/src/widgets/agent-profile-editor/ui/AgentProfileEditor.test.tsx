@@ -141,6 +141,7 @@ describe('AgentProfileEditor', () => {
       renderEditor()
       await act(async () => {
         fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'My New Agent' } })
+        fireEvent.change(screen.getByTestId('editor-description'), { target: { value: 'Handles task intake' } })
         fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Be helpful' } })
       })
       await act(async () => {
@@ -149,6 +150,7 @@ describe('AgentProfileEditor', () => {
       expect(mocks.createMutation.mutate).toHaveBeenCalled()
       const callArgs = (mocks.createMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(callArgs.name).toBe('My New Agent')
+      expect(callArgs.description).toBe('Handles task intake')
       expect(callArgs.instructions).toBe('Be helpful')
     })
 
@@ -239,7 +241,7 @@ describe('AgentProfileEditor', () => {
       projectId: 'proj-1',
       name: 'Existing Agent',
       purpose: 'Review changes',
-      description: '',
+      description: 'Original purpose',
       instructions: 'Original instructions',
       agentConfig: { model: 'anthropic/claude', variant: 'high' },
       skills: ['code'],
@@ -257,6 +259,8 @@ describe('AgentProfileEditor', () => {
       })
       const nameInput = screen.getByTestId('editor-name') as HTMLInputElement
       expect(nameInput.value).toBe('Existing Agent')
+      expect((screen.getByTestId('editor-purpose') as HTMLTextAreaElement).value).toBe('Review changes')
+      expect((screen.getByTestId('editor-description') as HTMLTextAreaElement).value).toBe('Original purpose')
       const instructionsInput = screen.getByTestId('editor-instructions') as HTMLTextAreaElement
       expect(instructionsInput.value).toBe('Original instructions')
       expect(screen.getByTestId('editor-save')).toHaveTextContent('Save Changes')
@@ -275,6 +279,7 @@ describe('AgentProfileEditor', () => {
       renderEditor({ agent: existingAgent })
       await act(async () => {
         fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Updated Name' } })
+        fireEvent.change(screen.getByTestId('editor-description'), { target: { value: 'Updated purpose' } })
         fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Updated instructions' } })
         fireEvent.change(screen.getByTestId('editor-skills'), { target: { value: 'code, debug' } })
       })
@@ -285,6 +290,7 @@ describe('AgentProfileEditor', () => {
       const callArgs = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(callArgs.agentRef).toBe('agent-1')
       expect(callArgs.data.name).toBe('Updated Name')
+      expect(callArgs.data.description).toBe('Updated purpose')
       expect(callArgs.data.instructions).toBe('Updated instructions')
       expect(callArgs.data.skills).toEqual(['code', 'debug'])
     })

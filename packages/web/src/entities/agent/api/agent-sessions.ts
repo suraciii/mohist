@@ -106,6 +106,13 @@ export interface AgentSessionLaunchInput {
   attachments?: string[]
 }
 
+export interface AgentTaskLaunchInput extends AgentSessionLaunchInput {
+  name?: string | null
+  runtime?: string | null
+  model?: string | null
+  variant?: string | null
+}
+
 export interface AgentLaunchObservationDto {
   jobId: string
   jobStatus: string
@@ -209,6 +216,20 @@ export function launchAgentSession(
 ) {
   return request<AgentSessionLaunchResponse>(
     projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/sessions`),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: {
+        'X-Mohist-Launch-Origin': 'web',
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
+    },
+  )
+}
+
+export function startAgentTask(projectId: string, input: AgentTaskLaunchInput, idempotencyKey?: string) {
+  return request<AgentSessionLaunchResponse>(
+    projectApiPath(projectId, '/agent-tasks'),
     {
       method: 'POST',
       body: JSON.stringify(input),
@@ -360,6 +381,29 @@ export function useLaunchAgentSession() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation(launchAgentSessionMutationOptions(projectId, queryClient))
+}
+
+export function startAgentTaskMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: ({ idempotencyKey, ...input }: AgentTaskLaunchInput & { idempotencyKey?: string }) =>
+      startAgentTask(projectId!, input, idempotencyKey),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-availability', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['agents', projectId] })
+      toast.success('Task launched')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  }
+}
+
+export function useStartAgentTask() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(startAgentTaskMutationOptions(projectId, queryClient))
 }
 
 export function genericFollowupMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {

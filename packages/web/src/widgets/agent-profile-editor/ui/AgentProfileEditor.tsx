@@ -61,6 +61,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
 
   const [name, setName] = useState(agent?.name ?? '')
   const [purpose, setPurpose] = useState(agent?.purpose ?? '')
+  const [description, setDescription] = useState(agent?.description ?? '')
   const [instructions, setInstructions] = useState(agent?.instructions ?? '')
   const [skillsText, setSkillsText] = useState(agent?.skills?.join(', ') ?? '')
   const [permissionsText, setPermissionsText] = useState(agent?.permissions?.join(', ') ?? '')
@@ -104,6 +105,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
       const payload: AgentUpdateRequest = {
         name: name.trim() || null,
         purpose: purpose.trim() || null,
+        description: description.trim() || null,
         instructions: instructions.trim() || null,
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
@@ -125,6 +127,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
       const payload: AgentCreateRequest = {
         name: name.trim(),
         purpose: purpose.trim() || null,
+        description: description.trim() || null,
         instructions: instructions.trim(),
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
@@ -220,6 +223,18 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 placeholder="Review pull requests before release"
                 rows={2}
                 data-testid="editor-purpose"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-description">Description</Label>
+              <Textarea
+                id="agent-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What is this Agent for?"
+                rows={2}
+                data-testid="editor-description"
               />
             </div>
 

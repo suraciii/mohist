@@ -118,7 +118,15 @@ describe('AgentListPage', () => {
       renderPage()
       expect(await screen.findByTestId('agents-empty-state')).toBeInTheDocument()
       expect(screen.getByText(/no agents defined/i)).toBeInTheDocument()
+      expect(screen.getByTestId('agents-empty-task')).toBeInTheDocument()
       expect(screen.getByTestId('agents-empty-create')).toBeInTheDocument()
+    })
+
+    it('routes the empty-state primary action to the task-first composer', async () => {
+      renderPage()
+      await screen.findByTestId('agents-empty-state')
+      fireEvent.click(screen.getByTestId('agents-empty-task'))
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/new')
     })
 
     it('renders active agents in the list', async () => {
