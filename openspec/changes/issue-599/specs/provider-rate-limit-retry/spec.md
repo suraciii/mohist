@@ -30,6 +30,17 @@ Pi SHALL disable SDK auto-retry with `AgentSession.setAutoRetryEnabled(false)` a
 - **AND** RunnerHost SHALL NOT admit OpenCode work through an opaque `session.prompt()` path
 - **AND** the runtime SHALL NOT claim Provider concurrency or bounded-retry support for that configuration
 
+#### Scenario: Pi lacks a single-attempt capability
+- **WHEN** the installed Pi SDK cannot disable auto-retry or the adapter cannot wrap the ModelRuntime transport
+- **THEN** the Pi runtime SHALL fail readiness with `provider-attempt-boundary-unsupported`
+- **AND** RunnerHost SHALL NOT admit Pi work through an opaque `session.prompt()` path
+- **AND** the runtime SHALL NOT claim Provider concurrency or bounded-retry support for that configuration
+
+#### Scenario: Adapter status events do not create hidden attempts
+- **WHEN** either adapter receives SDK retry/status events while a Provider attempt is running or backing off
+- **THEN** those events MAY supply diagnostics for the current signal
+- **AND** SHALL NOT cause another Provider request unless the Mohist coordinator acquires a fresh lease and invokes `executeOne`
+
 #### Scenario: Deadline warning does not bypass Provider admission
 - **WHEN** a coordinated turn reaches its deadline-warning point
 - **THEN** the runtime SHALL emit the warning through a non-Provider session/runtime event

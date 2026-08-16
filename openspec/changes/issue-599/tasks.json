@@ -35,8 +35,8 @@
         "Rate-limit delays and attempts use a budget independent of the ordinary consecutive Provider retry budget, so a sequence that recovers after the ordinary threshold reports normal success while genuine non-rate-limit failures retain their existing classification.",
         "Persistent throttling returns status and error code provider-rate-limited with Provider identity, latest signal, first-throttled time, deadline, last and next attempt times, attempt count, and accumulated wait facts.",
         "Cancellation during admission or backoff interrupts promptly, prevents the next request, releases any held permit, and preserves the existing cancellation or interruption classification rather than becoming provider-rate-limited.",
-        "Pi tests verify setAutoRetryEnabled(false) and per-ModelRuntime-call admission; OpenCode tests verify the pinned single-attempt server/SDK capability and fail-closed startup when it is absent.",
-        "The deadline warning path emits a non-Provider runtime/session event and never invokes session.promptAsync or another raw model request outside the coordinator.",
+        "Both adapters implement the same ProviderAttemptExecutor contract: Pi tests verify setAutoRetryEnabled(false), missing-capability fail-closed readiness, and per-ModelRuntime-call admission; OpenCode tests verify the typed retry: false request, server-enforced single-attempt behavior, and fail-closed startup when either capability is absent.",
+        "The deadline warning path emits a non-Provider runtime/session event and never invokes session.promptAsync or another raw model request outside the coordinator; SDK retry/status events cannot create hidden attempts.",
         "Deterministic Pi/OpenCode tests with fake Providers, fake clocks, queued requests, Retry-After variants, fallback backoff, ordinary retry failures, recovery, deadline expiry, SDK attempt boundaries, hidden-replay rejection, and cancellation verify all criteria."
       ],
       "priority": 2,
