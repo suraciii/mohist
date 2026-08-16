@@ -303,6 +303,37 @@
   timing assertions under concurrent load; the suite passed 10/10 in isolation
   and the complete fast gate passed on the subsequent run.
 
+## T-006 decisions / gotchas
+
+- `AgentInvocationStatusProjection` is derived from the authoritative AgentJob
+  runtime snapshot plus the durable Workflow settlement/recovery facts:
+  Pending -> `queued`, Running/Unknown -> `executing`, terminal AgentJob states
+  retain their terminal values, and an unsettled failed terminal with remaining
+  recovery budget is exposed as `recovering`. No status mirror is persisted.
+- Workflow task read views carry the stable invocation, Job, Session, Input, and
+  Turn ids. Terminal result facts are read from the AgentJob terminal record,
+  never reconstructed from Session transcript content. AgentJob and AgentSession
+  read models expose reciprocal WorkflowRun/TaskRun/work/invocation lineage.
+- Session lineage is projected from durable workflow labels and initial
+  job-linked input/turn records. Direct and routed Agent launches remain
+  unlinked, and existing table/CLI shapes retain their compact columns; JSON
+  read output carries the optional lineage fields.
+- `AgentJobGrain` delivery methods and the Session workflow-lineage helper were
+  split into dedicated files to satisfy the repository file-size ratchet without
+  changing runtime ownership or event-delivery behavior.
+
+## Verification status (T-006)
+
+- Focused Workflow Agent cutover spec passed 1/1 after the read-model changes;
+  status projection unit coverage passed as part of the 2673 Server UnitTests.
+- The full gate's initial Server SpecTests runs exposed the existing one-shot
+  `AgentSessionLaunchRuntimeResolutionSpecs` poll race; the sibling-path test
+  helper now uses `TestWait`, and the full Server SpecTests lane passes 3960/3960.
+  The same gate then exposed a Runner test-only `JsonObject` type mismatch in
+  the expectation helper; it was corrected, and the complete Runner CI lane
+  passes 1646/1646. The remaining Web, CLI, Workflow Definition, Unit, Arch,
+  docs, format, file-size, and build lanes are green.
+
 ## T-001 verification on resumed workflow branch
 
 - The prepared workflow branch already contains the complete T-001 implementation in commit `d7e9d99d3` (with later issue-559 slices already layered above it); no duplicate production edit was made.

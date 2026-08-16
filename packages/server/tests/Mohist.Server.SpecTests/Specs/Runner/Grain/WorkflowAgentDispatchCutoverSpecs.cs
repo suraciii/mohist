@@ -85,6 +85,15 @@ public sealed class WorkflowAgentDispatchCutoverSpecs : Mohist.Server.SpecTests.
             .LoadJsonAsync(workflowId, task.WorkId!));
         Assert.Equal(WorkflowAgentHandoffDisposition.Activated, handoffPlan!.Disposition);
 
+        var queuedInvocation = Assert.Single((await Services.GetRequiredService<WorkflowQuerier>().GetStatusAsync(workflowId))!.Stages[0].Tasks).AgentInvocation;
+        Assert.NotNull(queuedInvocation);
+        Assert.Equal("queued", queuedInvocation.Status);
+        Assert.Equal(link.InvocationId, queuedInvocation.InvocationId);
+        Assert.Equal(link.JobId, queuedInvocation.JobId);
+        Assert.Equal(link.SessionId, queuedInvocation.SessionId);
+        Assert.Equal(link.InputId, queuedInvocation.InputId);
+        Assert.Equal(link.TurnId, queuedInvocation.TurnId);
+
         using (var scope = Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<IAgentSessionStore>();
@@ -109,6 +118,10 @@ public sealed class WorkflowAgentDispatchCutoverSpecs : Mohist.Server.SpecTests.
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, active.OwnerKind);
         Assert.Equal(link.JobId, active.OwnerId);
         Assert.DoesNotContain(runtime.ActiveWorks, work => work.OwnerKind == WorkDispatchOwnerKinds.Workflow);
+
+        var executingInvocation = Assert.Single((await Services.GetRequiredService<WorkflowQuerier>().GetStatusAsync(workflowId))!.Stages[0].Tasks).AgentInvocation;
+        Assert.NotNull(executingInvocation);
+        Assert.Equal("executing", executingInvocation.Status);
 
         await SeedPendingUploadAsync(workflowId, link.WorkId, link.TaskRunId, "upload-review", "review.md");
         var output = JSON.DeserializeElement("""
@@ -146,6 +159,37 @@ public sealed class WorkflowAgentDispatchCutoverSpecs : Mohist.Server.SpecTests.
             .CreateDbContextAsync();
         var artifact = await db.WorkflowArtifacts.SingleAsync(row => row.WorkflowRunId == workflowId);
         Assert.Equal("review.md", artifact.Path);
+
+        var completedInvocation = Assert.Single((await Services.GetRequiredService<WorkflowQuerier>().GetStatusAsync(workflowId))!.Stages[0].Tasks).AgentInvocation;
+        Assert.NotNull(completedInvocation);
+        Assert.Equal("completed", completedInvocation.Status);
+        Assert.NotNull(completedInvocation.Result);
+        Assert.Contains("promise", completedInvocation.Result!.Output);
+
+        using (var scope = Services.CreateScope())
+        {
+            var sessions = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+            var summary = await sessions.GetUnifiedSessionSummaryAsync(projectId, link.SessionId);
+            Assert.NotNull(summary);
+            var origin = summary!.WorkflowInvocation;
+            Assert.NotNull(origin);
+            Assert.Equal(workflowId, origin.WorkflowRunId);
+            Assert.Equal(link.TaskRunId, origin.TaskRunId);
+            Assert.Equal(link.InvocationId, origin.InvocationId);
+            Assert.Equal(link.JobId, origin.JobId);
+            Assert.Equal(link.SessionId, origin.SessionId);
+            Assert.Equal(link.InputId, origin.InputId);
+            Assert.Equal(link.TurnId, origin.TurnId);
+        }
+
+        var jobSnapshot = await Grains.GetGrain<IAgentJobGrain>(link.JobId).GetRuntimeSnapshotAsync();
+        Assert.Equal(workflowId, jobSnapshot.WorkflowRunId);
+        Assert.Equal(link.InvocationId, jobSnapshot.WorkflowInvocation!.InvocationId);
+        Assert.Equal(link.TaskRunId, jobSnapshot.WorkflowInvocation.TaskRunId);
+        Assert.Equal(link.WorkId, jobSnapshot.WorkflowInvocation.WorkId);
+        Assert.Equal(link.SessionId, jobSnapshot.AgentSessionId);
+        Assert.Equal(link.InputId, jobSnapshot.InitialInputId);
+        Assert.Equal(link.TurnId, jobSnapshot.InitialTurnId);
     }
 
     private DispatchService ResolveDispatchService() =>

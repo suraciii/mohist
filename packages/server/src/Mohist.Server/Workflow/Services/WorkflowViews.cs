@@ -150,7 +150,8 @@ public sealed record TaskStatusView(
     long? DurationMs = null,
     JsonElement? Output = null,
     ExecutionError? Error = null,
-    AgentResultSettlementView? AgentResultSettlement = null);
+    AgentResultSettlementView? AgentResultSettlement = null,
+    WorkflowAgentInvocationView? AgentInvocation = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

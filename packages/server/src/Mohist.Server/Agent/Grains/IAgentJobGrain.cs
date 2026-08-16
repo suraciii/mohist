@@ -297,7 +297,14 @@ public sealed record AgentJobRuntimeSnapshot(
     /// Launch-time <c>AgentTurn</c> id the coordinator durably
     /// recorded on the AgentSession.
     /// </summary>
-    [property: Id(11)] string? InitialTurnId = null);
+    [property: Id(11)] string? InitialTurnId = null,
+    /// <summary>
+    /// Workflow handoff discriminator copied from the durable AgentJob input.
+    /// It is exposed for read-side lineage only; admission and execution do
+    /// not branch on this value.
+    /// </summary>
+    [property: Id(12)] AgentJobWorkflowInvocation? WorkflowInvocation = null,
+    [property: Id(13)] string? WorkflowRunId = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending

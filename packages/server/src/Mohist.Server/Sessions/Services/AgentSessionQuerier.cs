@@ -348,7 +348,6 @@ public class AgentSessionQuerier : IScopedService
 
     private static string ResolveAgentSessionActivity(AgentSessionRecord record) =>
         AgentSessionJsonHelper.ActivityName(record.Session);
-
     /// <summary>
     /// Builds the optional <see cref="AgentSessionListContextRefsDto"/>
     /// envelope from the labels stamped at launch. Returns <c>null</c>
@@ -750,7 +749,8 @@ public class AgentSessionQuerier : IScopedService
             Turns: AgentSessionObservationMapper.Turns(session.Status),
             RecoveryHistory: transcriptSummary.RecoveryHistory,
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
-            TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
+            TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
+            WorkflowInvocation: AgentSessionWorkflowInvocationProjection.Build(record));
     }
 
     /// <summary>
@@ -1086,9 +1086,9 @@ public class AgentSessionQuerier : IScopedService
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         null, null, null,
         new AgentEventSummaryDto(null, null, null, null, null, null),
-        AgentSessionDtoMapper.ToUsageDto(s));
+        AgentSessionDtoMapper.ToUsageDto(s),
+        AgentSessionWorkflowInvocationProjection.Build(record));
     }
-
     private AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
     {
         var s = record.Session;

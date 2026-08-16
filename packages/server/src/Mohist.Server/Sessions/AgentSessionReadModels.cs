@@ -191,7 +191,8 @@ public sealed record WorkflowSessionDto(
     string? FailureReason,
     int? ExitCode,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    [property: JsonPropertyName("workflowInvocation")] WorkflowInvocationLineageDto? WorkflowInvocation = null);
 
 /// <summary>
 /// Read shape for a generic (non-workflow) <see cref="Sessions.Domain.AgentSession"/>
@@ -452,7 +453,8 @@ public sealed record UnifiedSessionSummaryDto(
     [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
     [property: JsonPropertyName("recoveryHistory")] IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory = null,
     string? Origin = null,
-    string? TargetId = null);
+    string? TargetId = null,
+    [property: JsonPropertyName("workflowInvocation")] WorkflowInvocationLineageDto? WorkflowInvocation = null);
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered
@@ -491,6 +493,22 @@ public sealed record UnifiedSessionContextRefsDto(
     string? Repository,
     string? WorkspaceName,
     string? WorkspacePath);
+
+/// <summary>
+/// Reciprocal lineage labels for a Workflow Agent handoff. The values are
+/// minted once by the handoff and are shared with the Workflow task read
+/// projection; no transcript fact is needed to resolve the owning run or
+/// task.
+/// </summary>
+public sealed record WorkflowInvocationLineageDto(
+    string InvocationId,
+    string WorkflowRunId,
+    string TaskRunId,
+    string WorkId,
+    string JobId,
+    string SessionId,
+    string InputId,
+    string TurnId);
 
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 

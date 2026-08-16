@@ -51,14 +51,31 @@ an identity.
 
 | Path | Agent identity | Work owner | Execution | AgentSession Origin |
 |---|---|---|---|---|
-| Direct Workflow invocation | No; uses an Inline Agent or Agent Definition Reference | TaskRun | An execution-backend Action (`mohist/opencode`, `mohist/pi`) or `mohist/agent` | Workflow |
-| Mohist Agent launch | Yes; uses a stored Mohist Agent | AgentJob | The Mohist Agent's internal execution entry point | Agent launch |
+| Inline Workflow invocation | No; task input selects the capability | TaskRun | An execution-backend Action (`mohist/opencode` or `mohist/pi`) | Workflow |
+| Workflow Agent delegation | Yes; resolves a stored Mohist Agent | AgentJob for execution, TaskRun for Workflow completion | The AgentJob's internal execution entry point, with Workflow terminal finalization | Workflow |
+| Direct Mohist Agent launch | Yes; uses a stored Mohist Agent | AgentJob | The Mohist Agent's internal execution entry point | Agent launch |
 
-The paths can use the same execution-backend capability and AgentSession model,
-but they do not share Agent identity or work lifecycle. A Workflow invokes
-OpenCode or Pi through an execution-backend Action. An AgentJob executes a
-Mohist Agent, reusing only the underlying execution-backend capability; it does
-not invoke a Workflow Action in reverse.
+All paths can reuse the same execution-backend capability and AgentSession
+model, but they do not share work ownership. `mohist/agent` is the Workflow
+Agent delegation path: it freezes the Agent definition, mints one Job/Session/
+Input/Turn identity, and exposes that identity on both read surfaces. The
+AgentJob owns admission, Runner claim, execution, and its terminal result. The
+TaskRun owns `expect`, artifacts, variables, recovery, and Workflow advancement.
+The terminal crosses that boundary through typed delivery, not the Workflow
+task-report endpoint.
+
+The stable Workflow invocation status is derived from authoritative records:
+admitted but unclaimed, including permit or Runner waiting, is `queued`; a
+claimed or `Unknown` non-terminal AgentJob is `executing`; terminal AgentJob
+states map to `completed`, `failed`, or `cancelled`; a failed terminal with a
+pending or applying Workflow recovery decision is `recovering`. The status is
+not a mirror stored on the handoff plan and does not parse the transcript.
+
+The Workflow Agent delegation is a BREAKING cutover for clients that assumed
+`mohist/agent` was an inline TaskRun action. Clients must use the task's
+`workflowInvocation` identifiers and terminal `result`. Direct Agent launches,
+inline `mohist/opencode`/`mohist/pi` tasks, runtime adapters, and external
+Agent API paths retain their existing identifiers and semantics.
 
 ## Inline Agent
 
@@ -79,12 +96,12 @@ facts.
 
 ## Agent Definition Reference
 
-A task can instead set `uses: mohist/agent` and provide a `name` to use a
-predefined Mohist Agent's Instructions and execution configuration. This is not
-an Inline Agent because the Instructions and configuration come from the Agent
-resource rather than task input. It is also not a Mohist Agent launch because
-it creates no AgentJob. The TaskRun owns success or failure, and the
-AgentSession still has a Workflow Origin. See the
+A task can set `uses: mohist/agent` and provide a `name` to delegate to a
+predefined Mohist Agent's Instructions and execution configuration. It is not
+an Inline Agent: the Agent resource supplies the frozen execution definition.
+It is also not a direct Mohist Agent launch: the Session origin remains
+Workflow and the TaskRun remains the owner of Workflow completion effects. The
+AgentJob owns the delegated execution itself. See the
 [`mohist/agent` Action](actions/agent.md) contract.
 
 ## Mohist Agent
@@ -380,7 +397,10 @@ for execution-backend reuse boundaries.
 
 Each AgentSession has exactly one Origin:
 
-- **Workflow Origin**: A Workflow task creates or continues the named Session.
+- **Workflow Origin**: An inline Workflow task creates or continues the named
+  Session. A `mohist/agent` delegation keeps the Workflow origin but mints an
+  independent Session/Input/Turn set for every attempt; its `session` value is
+  only a logical label.
 - **Agent launch Origin**: Each Mohist Agent launch creates a Session associated
   with that Agent.
 - **Agent Connection Origin**: An entry point such as Slack starts a Session for
@@ -420,10 +440,12 @@ The `mohist/opencode` and `mohist/pi` Workflow Actions are implemented; see
 their Action documents for configuration. A Mohist Agent selects OpenCode or Pi
 through its configuration, and the snapshot fixes that backend to the AgentJob.
 The Web UI and CLI can create, edit, and launch a Mohist Agent and read and
-continue an AgentSession. The `mohist/agent` Action is also implemented and lets
-a Workflow task resolve a named Agent definition at dispatch. Max concurrent
-runs is enforced for launches and follow-ups. See
-[Agent Event Routing](event-routing.md) for Mohist Agent event responses.
+continue an AgentSession. The `mohist/agent` Action delegates new Workflow
+attempts through the same AgentJob admission boundary and exposes the stable
+invocation identifiers/status/result contract described in
+[Two Invocation Paths](#two-invocation-paths). Max concurrent runs is enforced
+for launches and follow-ups. See [Agent Event Routing](event-routing.md) for
+Mohist Agent event responses.
 
 ## Implementation Gaps
 

@@ -160,7 +160,19 @@ public static class AgentJobReadRoutes
             ArtifactUploadIds: artifactUploadIds,
             FailureReason: failureReason,
             ExitCode: exitCode,
-            ExecutionDefinition: snapshot.ExecutionDefinition));
+            ExecutionDefinition: snapshot.ExecutionDefinition,
+            WorkflowOrigin: snapshot.WorkflowInvocation is { } invocation
+                && !string.IsNullOrWhiteSpace(snapshot.WorkflowRunId)
+                ? new AgentJobWorkflowOriginDto(
+                    invocation.InvocationId,
+                    snapshot.WorkflowRunId!,
+                    invocation.TaskRunId,
+                    invocation.WorkId,
+                    jobId,
+                    snapshot.AgentSessionId,
+                    snapshot.InitialInputId,
+                    snapshot.InitialTurnId)
+                : null));
     }
 
     private static string ToStatusString(AgentJobStatus status) => status switch
@@ -219,4 +231,19 @@ public sealed record AgentJobViewDto(
     IReadOnlyList<string>? ArtifactUploadIds,
     string? FailureReason,
     int? ExitCode,
-    AgentExecutionDefinition? ExecutionDefinition);
+    AgentExecutionDefinition? ExecutionDefinition,
+    AgentJobWorkflowOriginDto? WorkflowOrigin = null);
+
+/// <summary>
+/// Reciprocal Workflow lineage for a handoff AgentJob. Direct launches have
+/// no origin and retain the existing AgentJob read shape.
+/// </summary>
+public sealed record AgentJobWorkflowOriginDto(
+    string InvocationId,
+    string WorkflowRunId,
+    string TaskRunId,
+    string WorkId,
+    string JobId,
+    string? SessionId,
+    string? InputId,
+    string? TurnId);

@@ -37,22 +37,32 @@ across Runtime loss.
 | Runtime Session | external Runtime | physical provider Session and execution facts |
 | Runtime adapter | Runner process | provider protocol, process resources, event reconciliation, error classification |
 
-There are two work-owner paths:
+There are three ownership cases, with two execution boundaries:
 
 ```text diagram
-Workflow TaskRun -- resolved Action ----+
-                                       +--> Runtime adapter --> Runtime Session
-Agent AgentJob ---- execution snapshot -+
-                         |
-                         +--> AgentSession records conversation facts
+Inline Workflow TaskRun -- mohist/opencode|pi --> Runtime adapter --> Runtime Session
+Workflow TaskRun -- mohist/agent handoff --> AgentJob --> Runtime adapter --> Runtime Session
+                                                     |
+                                                     +--> AgentSession records conversation facts
 ```
 
-TaskRun remains the owner when a Workflow calls `mohist/opencode`, `mohist/pi`, or a resolved
-`mohist/agent` definition. Resolving a named Agent for a Workflow task snapshots its Instructions
-and execution configuration for that dispatch; it does not create AgentJob or transfer work
-lifecycle to the Agent context. Resolution occurs again for each dispatch attempt, so a retry uses
-the definition that exists for that attempt. A missing or archived Agent fails dispatch instead of
-falling back to another Runtime path.
+A Workflow `mohist/opencode` or `mohist/pi` task remains a TaskRun-owned inline
+execution. A Workflow `mohist/agent` task is a delegation: preflight freezes the
+named Agent definition, workspace, timeout, and completion contract; the durable
+handoff mints Job/Session/Input/Turn identifiers; and AgentJob owns admission,
+Runner claim, execution, and the terminal Agent result. Workflow remains the
+owner of task settlement, `expect`, artifacts, `setVars`, recovery, and
+advancement through the typed terminal finalizer. A retry is a new handoff
+attempt and resolves the current Agent definition again. A missing or archived
+Agent fails dispatch instead of falling back to an inline Runtime path.
+
+The handoff is a BREAKING identifier/status contract. Workflow and Session read
+surfaces project the same invocation identity. Invocation status is derived from
+the AgentJob ledger plus settlement/task facts: pending but unclaimed, including
+permit and Runner waiting, is `queued`; running and non-terminal `Unknown` are
+`executing`; terminal AgentJob states are `completed`, `failed`, or `cancelled`;
+and a failed terminal with a pending or applying recovery decision is
+`recovering`. No handoff-plan status mirror or transcript parsing participates.
 
 Web, CLI, Agent Connection, event routing, and mentions are call origins for the AgentJob path.
 They all enter through the canonical AgentJob launch boundary and cannot create a third execution
@@ -75,10 +85,12 @@ TaskRun and AgentJob own pending, running, and terminal work states; success and
 or recovery decisions. AgentSession owns ordered SessionInput and AgentTurn records, Transcript,
 context, usage, Activity, and current Runtime Binding.
 
-The Workflow Action adapter reports a work result to TaskRun. The AgentJob executor reports a work
-result to AgentJob. Both report conversation facts to AgentSession. A Session event cannot advance
-a Workflow or make an AgentJob terminal. A work failure may appear in Transcript, but AgentSession
-does not arbitrate that result.
+The inline Workflow Action adapter reports a work result to TaskRun. The
+AgentJob executor reports a work result to AgentJob, and the typed terminal
+transport lets the Workflow finalizer apply task effects. Both paths report
+conversation facts to AgentSession. A Session event cannot advance a Workflow
+or make an AgentJob terminal. A work failure may appear in Transcript, but
+AgentSession does not arbitrate either work result.
 
 A Follow-up is a Session command, not a new work dispatch. It appends a SessionInput to an existing
 AgentSession and either joins the current Turn through steer or creates a later Turn. It does not
@@ -331,9 +343,14 @@ Each AgentSession has exactly one immutable origin.
 
 ### Workflow origin
 
-Address a Workflow-origin Session by `(projectId, workflowRunId, sessionName)`. Reusing the same
-name in one WorkflowRun continues the logical Session. When no explicit name exists, use the Work
-ID so unrelated tasks do not share context accidentally.
+Address an inline Workflow-origin Session by `(projectId, workflowRunId,
+sessionName)`; inline tasks may continue a logical Session when they reuse a
+name. A `mohist/agent` handoff keeps the Workflow origin but resolves the named
+`session` as a label only, defaulting to the Work ID. Each attempt mints an
+independent AgentSession, first SessionInput, and first AgentTurn. Reusing the
+label never merges delegated attempts. Reciprocal labels carry the
+WorkflowRun/TaskRun/work/invocation lineage, and the read surfaces carry the
+same Job/Session/Input/Turn identifiers.
 
 ### Agent launch origin
 
@@ -505,10 +522,13 @@ original identities and a risk warning.
 
 ## Module Ownership
 
-- Workflow owns TaskRun and the Workflow Action contract. It does not interpret Transcript.
-- Agent owns Mohist Agent and AgentJob. It does not derive work results from Session Activity.
+- Workflow owns TaskRun, the Workflow Action contract, delegated-task settlement,
+  recovery, and advancement. It does not interpret Transcript.
+- Agent owns Mohist Agent and AgentJob admission, execution, and terminal result.
+  It does not derive work results from Session Activity.
 - Session owns AgentSession identity, source, work directory, Inputs, Turns, Activity, Binding,
-  Transcript, context, and usage.
+  Transcript, context, and usage. Its lineage labels point back to a Workflow
+  handoff but do not transfer work ownership.
 - Runner executes resolved work and reports physical facts. It does not arbitrate logical Session
   state.
 - Runtime adapters hide provider SDK, protocol, process, cache, and error details. They do not

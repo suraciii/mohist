@@ -2,7 +2,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { AgentJobExecutor, projectTurnToWorkItemResult } from '../src/runtime/agent-job-executor.js'
 import type { AgentJobRuntimeAccessors } from '../src/runtime/agent-job-executor.js'
 import type { ServerConnection } from '../src/server/connection.js'
-import type { DispatchWorkItem } from '../src/core/types.js'
+import type { DispatchWorkItem, JsonObject } from '../src/core/types.js'
 import type {
   OpenCodeRuntime,
   RuntimeResult,
@@ -722,7 +722,7 @@ describe('AgentJobExecutor work-result projection', () => {
 describe('AgentJobExecutor workflow expectation evaluation', () => {
   const workDir = '/tmp/agent-job-ws'
 
-  function expectationWork(expect: Record<string, unknown>): DispatchWorkItem {
+  function expectationWork(expect: JsonObject): DispatchWorkItem {
     return buildAgentJobWork({ expect })
   }
 

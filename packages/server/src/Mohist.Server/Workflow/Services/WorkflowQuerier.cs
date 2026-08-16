@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Agent.Grains;
+using Orleans;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -21,6 +23,7 @@ public class WorkflowQuerier : IScopedService
     private readonly IWorkflowArtifactQuerier _artifactQuerier;
     private readonly WorkflowRunStatusCache _statusCache;
     private readonly IWorkflowRunDeserializer _runDeserializer;
+    private readonly IGrainFactory? _grains;
 
     public WorkflowQuerier(
         IDbContextFactory<MohistDbContext> db,
@@ -28,7 +31,8 @@ public class WorkflowQuerier : IScopedService
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactQuerier artifactQuerier,
         WorkflowRunStatusCache statusCache,
-        IWorkflowRunDeserializer runDeserializer)
+        IWorkflowRunDeserializer runDeserializer,
+        IGrainFactory? grains = null)
     {
         _db = db;
         _definitionResolver = definitionResolver;
@@ -36,6 +40,7 @@ public class WorkflowQuerier : IScopedService
         _artifactQuerier = artifactQuerier;
         _statusCache = statusCache;
         _runDeserializer = runDeserializer;
+        _grains = grains;
     }
 
     public virtual async Task<WorkflowStatusView?> GetStatusAsync(string workflowRunId)
@@ -59,6 +64,7 @@ public class WorkflowQuerier : IScopedService
         if (view is null) return null;
 
         await AttachArtifactSummariesAsync(view, workflowRunId);
+        await AttachAgentInvocationViewsAsync(view, run);
 
         return view;
     }
@@ -135,7 +141,63 @@ public class WorkflowQuerier : IScopedService
                     DurationMs: task.DurationMs,
                     Output: task.Output,
                     Error: task.Error,
-                    AgentResultSettlement: task.AgentResultSettlement);
+                    AgentResultSettlement: task.AgentResultSettlement,
+                    AgentInvocation: task.AgentInvocation);
+            }
+        }
+    }
+
+    private async Task AttachAgentInvocationViewsAsync(WorkflowStatusView view, WorkflowRun run)
+    {
+        if (_grains is null) return;
+
+        var linkedTasks = run.Stages
+            .SelectMany(stage => stage.Tasks.Select(task => (Stage: stage.Id, Task: task)))
+            .Where(item => item.Task.AgentInvocation is not null)
+            .ToList();
+        if (linkedTasks.Count == 0) return;
+
+        var projections = await Task.WhenAll(linkedTasks.Select(async item =>
+        {
+            var link = item.Task.AgentInvocation!;
+            var job = _grains.GetGrain<IAgentJobGrain>(link.JobId);
+            var snapshot = await job.GetRuntimeSnapshotAsync();
+            var recoveryPending = AgentInvocationStatusProjection.HasPendingRecoveryDecision(item.Task);
+            AgentJobTerminalResult? terminal = null;
+            if (snapshot.Status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
+                terminal = await job.GetTerminalResultAsync();
+
+            var result = terminal is null
+                ? null
+                : new WorkflowAgentInvocationResultView(
+                    terminal.Message,
+                    terminal.Output,
+                    terminal.ArtifactUploadIds,
+                    terminal.FailureReason,
+                    terminal.ExitCode);
+            return (item.Stage, item.Task.Id, View: new WorkflowAgentInvocationView(
+                link.InvocationId,
+                run.Id,
+                link.TaskRunId,
+                link.WorkId,
+                AgentInvocationStatusProjection.Map(snapshot.Status, recoveryPending, recoveryPending),
+                link.JobId,
+                link.SessionId,
+                link.InputId,
+                link.TurnId,
+                result));
+        }));
+
+        foreach (var stage in view.Stages)
+        {
+            for (var i = 0; i < stage.Tasks.Count; i++)
+            {
+                var task = stage.Tasks[i];
+                var projection = projections.FirstOrDefault(item =>
+                    string.Equals(item.Stage, stage.Stage, StringComparison.Ordinal)
+                    && string.Equals(item.Id, task.Id, StringComparison.Ordinal));
+                if (projection.View is null) continue;
+                stage.Tasks[i] = task with { AgentInvocation = projection.View };
             }
         }
     }

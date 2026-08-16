@@ -130,6 +130,9 @@ public sealed class CliFieldContractTests
         new(MohistCliApi.TableShape.SessionScheduleCreate, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
         new(MohistCliApi.TableShape.SessionScheduleList, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
         new(MohistCliApi.TableShape.SessionScheduleCancel, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
+        new(MohistCliApi.TableShape.Sessions, "workflowInvocation", DeviationKind.Omit, "workflow session tables retain their established compact columns; use session show for handoff lineage"),
+        new(MohistCliApi.TableShape.AgentJobView, "workflowOrigin", DeviationKind.Omit, "agent job tables retain their established compact columns; JSON output carries Workflow origin"),
+        new(MohistCliApi.TableShape.SessionShow, "workflowInvocation", DeviationKind.Omit, "session tables retain their established compact columns; JSON output carries Workflow lineage"),
     ];
 
     [Fact]
