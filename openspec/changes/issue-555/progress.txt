@@ -943,5 +943,9 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   `IAgentSessionStreamRetention.PurgeDeletedAsync` is the explicit physical
   purge path and removes the tombstone only after closure.
 - Focused projection (16) and event-stream (6) suites pass, as does the
-  server build and EF model consistency spec. Full repository verification is
-  running next.
+  server build and EF model consistency spec.
+- The first full gate reached the tests but failed one architecture rule: the
+  canonical history model referenced Agent.Grains Job types. Commit
+  `c8ed0fca0` moved those values to primitive persisted fields and performs
+  reconstruction only in the projection layer; all 69 architecture tests and
+  both focused suites now pass. Full repository verification is rerunning.
