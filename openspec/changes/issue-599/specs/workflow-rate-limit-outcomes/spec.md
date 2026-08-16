@@ -31,9 +31,16 @@ The Workflow Agent Session close path SHALL distinguish Provider expiry from run
 
 #### Scenario: Provider expiry does not publish turn-failed
 - **WHEN** an OpenCode or Pi Workflow Agent turn reaches the bounded Provider wait deadline
-- **THEN** `enqueueTerminalClose` SHALL use the Provider-rate-limit close status
-- **AND** the Session transcript SHALL contain `turn.rate_limited` rather than `turn.failed`
+- **THEN** the OpenCode `enqueueTerminalClose` path and the Pi final-fact reporting path SHALL use the Provider-rate-limit close status
+- **AND** the Session transcript SHALL contain one typed `turn.rate_limited` close plus idle activity rather than `turn.failed`
+- **AND** `AgentSessionGrain` SHALL prefer that typed close if a duplicate or legacy `turn.failed` is present in the same replay batch
 - **AND** the Workflow SHALL not emit `TaskFailed` or `FailureReason.TaskFailed` from that observation
+
+#### Scenario: Replayed Provider close remains typed and idempotent
+- **WHEN** a `turn.rate_limited` close is replayed or delivered after the authoritative report
+- **THEN** binding validation SHALL use the frozen Workflow execution identity
+- **AND** the replay SHALL not emit a second close, generic `turn.failed`, duplicate work, or a generic failure observation
+- **AND** the post-report observation SHALL be an idempotent no-op while retaining the authoritative Provider facts
 
 #### Scenario: Report and Session close arrive in either order
 - **WHEN** the `turn.rate_limited` observation and authoritative `provider-rate-limited` work report are delivered in either order
