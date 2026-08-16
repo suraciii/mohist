@@ -404,3 +404,26 @@ rotation immediately invalidate old cursors.
   and direct follow-up regression specs passed.
 - `npm run test:fast` passed all seven lanes after replacing the cursor JSON
   options with the shared `JSON.PublicApi` facade required by ArchTests.
+
+# T-008: Move agent-api and auth docs to shipped status
+
+Status: IMPLEMENTED. Updated design/agent-api.md and design/auth.md to
+`status: shipped` with shipped-behavior status sections. Replaced the user-doc
+implementation-gap sections with direct API usage guidance covering all seven
+routes, Bearer PAT and persisted Project grants, strict idempotency, the
+PublicExecutionRead allowlist and five-state aggregate, projection_lag, and
+opaque cursor resume with cursor_invalid/cursor_expired handling. Moved the API
+out of the WIP docs index and marked it available in the repository README.
+The operator-triggered projection rebuild entrypoint is not described as a
+shipped user command.
+
+Verification so far: `npm run docs:check` passed (92 Markdown files).
+The final file-size ratchet also required splitting existing changed helpers
+into `MohistDbContext.Helpers.cs`, `PublicApiProjectionEngine.Checkpoints.cs`,
+and `CanonicalFollowupTarget.cs`; this is behavior-preserving and keeps the
+full gate within its structural limits.
+
+Final verification: `npm run verify` passed. This covered docs, file sizes,
+format, solution and workspace builds, 3,969 Server SpecTests, 2,671 Server
+unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70 Slack
+tests.

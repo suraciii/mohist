@@ -1,5 +1,5 @@
 ---
-status: wip
+status: shipped
 ---
 
 # External Agent API
@@ -651,13 +651,14 @@ The external API composes existing owners rather than making route shape decide 
 
 ## Status
 
-Frontmatter remains `wip` because this document specifies target behavior, not a shipped route
-surface. The current Server does not yet provide the PAT `ExternalAgentCaller` Project grant,
-Server-computed external idempotency mapping, public AgentJob read, durable checkpointed public
-projection, generation-aware cursor stream, or public-key-to-canonical-operation stop mapping and
-frozen target defined here.
+The `/api/v1` External Agent API is shipped. The seven routes use canonical
+Project, Agent, Job, Session, Input, and Turn IDs and expose only the public
+execution and Session-event contracts defined here. Bearer PAT authentication,
+persisted Project grants, route scopes, keyed launch/follow-up/stop writes,
+projection-backed Job/Input/Turn reads, five-state observations, and resumable
+Session events are part of the shipped boundary.
 
-The public contract remains deliberately narrow. Existing Web,
-CLI, Agent Connection, canonical Session, and product cascade-stop routes are not evidence that the
-direct `/api/v1` contract is implemented. No compatibility promise or source implementation is
-implied by this target specification.
+The boundary remains deliberately narrow. It does not expose Runner or Runtime
+selection, workspace or prompt content, transcripts, internal operations, or a
+Project-wide event stream. Existing Web, CLI, Agent Connection, and product
+cascade-stop routes remain separate adapters with their own contracts.

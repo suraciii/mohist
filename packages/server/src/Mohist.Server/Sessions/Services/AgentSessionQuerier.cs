@@ -1174,19 +1174,6 @@ public sealed record GenericFollowupTarget(
     string SessionId,
     bool IsActive);
 
-public sealed record CanonicalFollowupTarget(
-    string RunnerId,
-    string SessionId,
-    string SourceKind,
-    string? WorkflowRunId,
-    string? SessionName,
-    string? Runtime,
-    string? RuntimeSessionId,
-    string? WorkDir,
-    AgentExecutionDefinition? Definition = null,
-    string? ProjectId = null,
-    string? AgentId = null);
-
 public sealed record SessionStopTarget(
     string RunnerId,
     string SessionId,
