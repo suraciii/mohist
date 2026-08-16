@@ -243,10 +243,21 @@ Web UI invoke the same product capabilities.
 
 ## Launch Entry Points
 
+A task-first launch is available when the caller has a task but does not yet
+need to configure an Agent. `POST /api/projects/{projectRef}/agent-tasks`
+accepts exactly these JSON fields: `prompt`, `attachments`, `context`, `name`,
+`runtime`, `model`, and `variant`. `context` uses the same `issueNumber`,
+`epicNumber`, `repository`, `workspace`, `workspacePath`, and `targetId`
+references as a definition-first launch. The request must include an
+`Idempotency-Key` header. The Server derives missing definition fields,
+materializes the resolved execution configuration, creates the Agent, and then
+uses the canonical AgentJob and AgentSession launch pipeline.
+
 | Entry point | New delegation | Mohist behavior |
 |---|---|---|
-| Web UI | Select an Agent and enter a task with optional context | Creates an AgentJob, AgentSession, first Input, and first Turn, then opens the session page |
-| CLI | `mo agent launch <agent>` | Creates the same AgentJob, AgentSession, first Input, and first Turn and returns their IDs |
+| Web UI | Start with a task and optional context | Creates a derived Agent, AgentJob, AgentSession, first Input, and first Turn, then opens the session page |
+| CLI | `mo agent start --prompt <task>` | Creates the derived Agent and returns the same AgentJob, AgentSession, first Input, and first Turn identities |
+| Web UI / CLI | Select or name an existing Agent | Uses the unchanged definition-first launch path |
 | Agent Connection | The first task in a Slack direct message, an explicit New task, or a new root mention in a channel | Delivers the message to the connected Agent without changing Agent configuration |
 | Event routing | A matching event and response prompt | Creates an AgentJob and AgentSession for the event |
 | Issue comment mention | Comment content after `@<agent-name>` | Uses the comment as the task and associates its Issue context |
@@ -257,6 +268,15 @@ supervise and advance this Issue." For continuous attention, the Agent adds the
 Issue to its watch list with `mo issue watch add`. Every launch entry point
 creates an AgentJob and fixes the Agent Instructions and configuration for that
 work. Later Agent edits do not change work that has started.
+
+Task-first replay uses the same key space as definition-first launches. A retry
+with the same key and caller-visible inputs returns the original Agent, Job,
+Session, Input, Turn, workspace, attachment result, and canonical URLs. A
+changed prompt, context, attachment list, name, runtime, model, or variant
+returns `409 launch_idempotency_conflict`; a still-converging launch returns
+`503 launch_setup_pending` and the same key. A recorded rejection is replayed
+as the same rejection. Callers must retry a pending launch with the original
+key, not generate a new task.
 
 A Mohist Agent's central role is proxy. It occupies a production-line position
 that the owner could occupy and acts through the same commands and Approval

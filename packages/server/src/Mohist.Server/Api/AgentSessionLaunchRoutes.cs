@@ -80,6 +80,9 @@ public static class AgentSessionLaunchRoutes
                     "body_required");
             }
 
+            if (body.BindingError is not null)
+                return ApiResults.BadRequest(body.BindingError, "validation_failed");
+
             if (body.UndeclaredFields.Count > 0)
             {
                 return ApiResults.BadRequest(
@@ -335,7 +338,7 @@ public static class AgentSessionLaunchRoutes
         return app;
     }
 
-    private static object BuildAttachmentResultDto(AgentInputAttachmentAcceptance acceptance) =>
+    internal static object BuildAttachmentResultDto(AgentInputAttachmentAcceptance acceptance) =>
         acceptance.IsAccepted
             ? (object)new
             {
@@ -353,7 +356,7 @@ public static class AgentSessionLaunchRoutes
                 message = acceptance.RejectionMessage,
             };
 
-    private static IResult AcceptedLaunch(
+    internal static IResult AcceptedLaunch(
         string projectId,
         string projectName,
         AgentLaunchResult result,
@@ -401,7 +404,7 @@ public static class AgentSessionLaunchRoutes
                 statusCode: 201);
     }
 
-    private static string ReadLaunchOrigin(HttpRequest request)
+    internal static string ReadLaunchOrigin(HttpRequest request)
     {
         if (request.Headers.TryGetValue("X-Mohist-Launch-Origin", out var values)
             && values.Count > 0
@@ -415,21 +418,21 @@ public static class AgentSessionLaunchRoutes
         return "web";
     }
 
-    private static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
+    internal static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
         ApiResults.Fail(
             exception.Message,
             StatusCodes.Status503ServiceUnavailable,
             "launch_setup_pending",
             new { idempotencyKey = exception.IdempotencyKey });
 
-    private static IResult ExecutabilityRejected(AgentExecutabilityException exception) =>
+    internal static IResult ExecutabilityRejected(AgentExecutabilityException exception) =>
         ApiResults.Fail(
             exception.Message,
             StatusCodes.Status409Conflict,
             exception.ErrorCode,
             exception.Result);
 
-    private static async Task<IResult?> ValidateContextAsync(
+    internal static async Task<IResult?> ValidateContextAsync(
         AgentSessionLaunchContextRef? context,
         string projectId,
         IssueQuerier issueQuerier,
@@ -465,7 +468,7 @@ public static class AgentSessionLaunchRoutes
 
         return null;
     }
-    private static string? ReadIdempotencyKey(HttpRequest request)
+    internal static string? ReadIdempotencyKey(HttpRequest request)
     {
         if (!request.Headers.TryGetValue("Idempotency-Key", out var values))
             return null;
@@ -490,7 +493,8 @@ public sealed record AgentSessionLaunchBody(
     AgentSessionLaunchContextRef? Context,
     IReadOnlyList<string>? Attachments,
     IReadOnlyList<string> UndeclaredFields,
-    JsonElement Raw)
+    JsonElement Raw,
+    string? BindingError = null)
 {
     public static async ValueTask<AgentSessionLaunchBody?> BindAsync(HttpContext context)
     {
@@ -498,9 +502,9 @@ public sealed record AgentSessionLaunchBody(
         {
             return await BindCoreAsync(context);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return new AgentSessionLaunchBody(null, null, null, [], default);
+            return new AgentSessionLaunchBody(null, null, null, [], default, ex.Message);
         }
     }
 
@@ -535,16 +539,10 @@ public sealed record AgentSessionLaunchBody(
         if (raw.TryGetProperty("context", out var ctxElement)
             && ctxElement.ValueKind == JsonValueKind.Object)
         {
-            ctx = new AgentSessionLaunchContextRef(
-                IssueNumber: TryReadPositiveInt(ctxElement, "issueNumber"),
-                EpicNumber: TryReadPositiveInt(ctxElement, "epicNumber"),
-                Repository: TryReadString(ctxElement, "repository"),
-                Workspace: TryReadString(ctxElement, "workspace"),
-                WorkspacePath: TryReadString(ctxElement, "workspacePath"),
-                TargetId: TryReadString(ctxElement, "targetId"));
+            ctx = ReadContext(ctxElement);
         }
 
-        var attachments = TryReadAttachments(raw);
+        var attachments = ReadAttachments(raw);
 
         return new AgentSessionLaunchBody(
             Prompt: prompt,
@@ -554,7 +552,7 @@ public sealed record AgentSessionLaunchBody(
             Raw: raw);
     }
 
-    private static IReadOnlyList<string>? TryReadAttachments(JsonElement parent)
+    internal static IReadOnlyList<string>? ReadAttachments(JsonElement parent)
     {
         if (!parent.TryGetProperty("attachments", out var attachmentsElement)
             || attachmentsElement.ValueKind == JsonValueKind.Null)
@@ -585,14 +583,14 @@ public sealed record AgentSessionLaunchBody(
         return ids.Count == 0 ? null : ids;
     }
 
-    private static string? TryReadString(JsonElement parent, string name) =>
+    internal static string? TryReadString(JsonElement parent, string name) =>
         !parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null
             ? null
             : value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : throw new JsonException($"context.{name} must be a string");
 
-    private static int? TryReadPositiveInt(JsonElement parent, string name)
+    internal static int? TryReadPositiveInt(JsonElement parent, string name)
     {
         if (!parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
             return null;
@@ -600,6 +598,15 @@ public sealed record AgentSessionLaunchBody(
             throw new JsonException($"context.{name} must be an integer");
         return number;
     }
+
+    internal static AgentSessionLaunchContextRef ReadContext(JsonElement context) =>
+        new(
+            IssueNumber: TryReadPositiveInt(context, "issueNumber"),
+            EpicNumber: TryReadPositiveInt(context, "epicNumber"),
+            Repository: TryReadString(context, "repository"),
+            Workspace: TryReadString(context, "workspace"),
+            WorkspacePath: TryReadString(context, "workspacePath"),
+            TargetId: TryReadString(context, "targetId"));
 }
 
 public sealed record AgentSessionLaunchContextRef(

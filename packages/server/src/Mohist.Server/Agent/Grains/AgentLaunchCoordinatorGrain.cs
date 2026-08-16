@@ -158,7 +158,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch,
                 WorkspaceRepositories: command.WorkspaceRepositories,
                 Origin: command.Origin ?? command.Request.Origin,
-                TargetId: command.TargetId ?? command.Request.TargetId);
+                TargetId: command.TargetId ?? command.Request.TargetId,
+                AttachmentResults: command.AttachmentResults);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -179,7 +180,11 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentId: final.AgentId,
             AgentName: final.AgentName,
             AlreadyPersisted: existing?.Completed == true,
-            ParentLinkEdgeId: final.ParentLinkEdgeId);
+            ParentLinkEdgeId: final.ParentLinkEdgeId,
+            WorkspaceName: final.WorkspaceName,
+            Origin: final.Origin,
+            TargetId: final.TargetId,
+            AttachmentResults: final.AttachmentResults);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeAsync(AgentLaunchCoordinatorRequest request)
@@ -214,7 +219,11 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentId: final.AgentId,
             AgentName: final.AgentName,
             AlreadyPersisted: true,
-            ParentLinkEdgeId: final.ParentLinkEdgeId);
+            ParentLinkEdgeId: final.ParentLinkEdgeId,
+            WorkspaceName: final.WorkspaceName,
+            Origin: final.Origin,
+            TargetId: final.TargetId,
+            AttachmentResults: final.AttachmentResults);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeExistingSpawnAsync(string spawnRequestFingerprint)
@@ -247,7 +256,11 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentId: final.AgentId,
             AgentName: final.AgentName,
             AlreadyPersisted: true,
-            ParentLinkEdgeId: final.ParentLinkEdgeId);
+            ParentLinkEdgeId: final.ParentLinkEdgeId,
+            WorkspaceName: final.WorkspaceName,
+            Origin: final.Origin,
+            TargetId: final.TargetId,
+            AttachmentResults: final.AttachmentResults);
     }
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
@@ -996,4 +1009,10 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(36)] string? Origin = null,
     [property: Id(37)] string? TargetId = null,
-    [property: Id(38)] string? ReasoningEffort = null);
+    [property: Id(38)] string? ReasoningEffort = null,
+    /// <summary>
+    /// Response attachment verdicts captured before the coordinator plan
+    /// was committed. This is append-only so older envelopes deserialize
+    /// with no response metadata.
+    /// </summary>
+    [property: Id(39)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
