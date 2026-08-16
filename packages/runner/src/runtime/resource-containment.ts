@@ -13,7 +13,10 @@ export const DEFAULT_WORK_TURN_BUDGET_MS = 60 * 60 * 1000
  * `core/script` when the workflow opts into this profile.
  */
 export const FULL_VERIFY_RESOURCE_PROFILE = 'full-verify'
-export const FULL_VERIFY_MEMORY_MB = 4096
+// Server/.NET verification needs more virtual address space than the default
+// per-work bound. Keep this finite; the Runner service's aggregate cgroup
+// limit remains the outer protection when several works are active.
+export const FULL_VERIFY_MEMORY_MB = 16 * 1024
 
 export interface ResolvedWorkResourceLimits {
   readonly memoryMb: number | null

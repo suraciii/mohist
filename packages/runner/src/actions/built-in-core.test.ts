@@ -42,7 +42,7 @@ describe('core/script failure diagnostics', () => {
         )
 
         expect(result).toMatchObject({ output: { exitCode: 0 } })
-        expect(captured).toEqual({ memoryMb: 4096, wallClockMs: 60_000, watchdogIntervalMs: 250 })
+        expect(captured).toEqual({ memoryMb: 16_384, wallClockMs: 60_000, watchdogIntervalMs: 250 })
       },
       {
         commandRunner: {

@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "T-001",
+      "description": "Raise the finite full-verify command profile to 16384 MiB and update the runner contract tests and documentation.",
+      "status": "pending",
+      "acceptance": [
+        "The named full-verify profile resolves to 16384 MiB.",
+        "Ordinary work and watchdog limits remain unchanged.",
+        "Focused Runner tests pass without touching live workflow state."
+      ]
+    }
+  ]
+}
