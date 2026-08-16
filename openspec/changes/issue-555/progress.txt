@@ -427,3 +427,12 @@ Final verification: `npm run verify` passed. This covered docs, file sizes,
 format, solution and workspace builds, 3,969 Server SpecTests, 2,671 Server
 unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70 Slack
 tests.
+
+## T-002 verification rerun
+
+- Focused `PublicExecutionProjectionSpecs` (14) and
+  `PublicExecutionProjectorHostingSpecs` (1) passed on the current tree.
+- The full `npm run test:fast` gate passed again: typecheck, server unit and
+  architecture, workflow, CLI, web, and runner lanes all green.
+- The T-002 implementation remains contained in commit `85ff6bec2`; this
+  rerun found no additional projection or migration changes necessary.
