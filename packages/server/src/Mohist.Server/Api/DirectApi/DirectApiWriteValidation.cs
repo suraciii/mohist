@@ -11,6 +11,7 @@ public static class DirectApiWriteValidation
     public const int FingerprintVersion = 1;
     public const string LaunchCommand = "launch";
     public const string FollowupCommand = "followup";
+    public const string StopCommand = "stop";
 
     public static IdempotencyKeyValidation ReadIdempotencyKey(IHeaderDictionary headers)
     {
@@ -104,8 +105,42 @@ public static class DirectApiWriteValidation
         return Convert.ToHexString(SHA256.HashData(bytes.WrittenSpan)).ToLowerInvariant();
     }
 
+    public static string LaunchScopeKey(string projectId, string agentId, string publicKey) =>
+        $"{projectId}|{agentId}|{publicKey}";
+
+    public static string FollowupScopeKey(string sessionId, string publicKey) =>
+        $"{sessionId}|{publicKey}";
+
+    /// <summary>
+    /// Stop mappings include the caller credential in their relational scope.
+    /// The filtered pending-stop index still provides the per-Turn fence for
+    /// different keys and callers while an outcome is unresolved.
+    /// </summary>
+    public static string StopScopeKey(string turnId, string callerKeyId, string publicKey) =>
+        $"{turnId}|{callerKeyId}|{publicKey}";
+
     public static string FollowupFingerprint(string sessionId, string text) =>
         Fingerprint(FollowupCommand, sessionId, text);
+
+    public static string StopFingerprint(string turnId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(turnId);
+
+        var bytes = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(bytes))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("v", FingerprintVersion);
+            writer.WriteString("command", StopCommand);
+            writer.WriteString("turnId", turnId);
+            writer.WritePropertyName("body");
+            writer.WriteStartObject();
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        return Convert.ToHexString(SHA256.HashData(bytes.WrittenSpan)).ToLowerInvariant();
+    }
 
     public static string FollowupInputId(string sessionId, string publicKey) =>
         AgentLaunchCoordinatorCodec.StableToken($"{sessionId}|{publicKey}|followup-input");

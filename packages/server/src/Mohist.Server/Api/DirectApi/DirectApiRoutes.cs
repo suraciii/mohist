@@ -229,7 +229,7 @@ public static class DirectApiRoutes
         var inputId = DirectApiWriteValidation.FollowupInputId(sessionId, publicKey);
         var turnId = DirectApiWriteValidation.FollowupTurnId(sessionId, publicKey);
         var fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text);
-        var scopeKey = $"{sessionId}|{publicKey}";
+        var scopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, publicKey);
         var initialOutcome = new DirectApiFollowupOutcome(
             SessionId: sessionId,
             AgentId: target.AgentId,
@@ -447,7 +447,7 @@ public static class DirectApiRoutes
         var publicKey = key.Value!;
         var text = body.Text!;
         var fingerprint = DirectApiWriteValidation.LaunchFingerprint(projectId, agent.Id, text);
-        var scopeKey = $"{projectId}|{agent.Id}|{publicKey}";
+        var scopeKey = DirectApiWriteValidation.LaunchScopeKey(projectId, agent.Id, publicKey);
         var coordinatorKey = DirectApiWriteValidation.DerivedLaunchCoordinatorKey(
             projectId,
             agent.Id,
@@ -563,9 +563,10 @@ public static class DirectApiRoutes
                 "The launch is still being admitted; retry with the same Idempotency-Key.");
         }
 
-        return DirectApiResults.PublicRead(
-            await publicReads.ReadJobAsync(projectId, outcome.JobId, ct),
-            DirectApiErrorCodes.JobNotFound);
+        var observation = await publicReads.ReadJobAsync(projectId, outcome.JobId, ct);
+        return observation.Status == PublicReadStatus.NotFound
+            ? DirectApiResults.ProjectionLag()
+            : DirectApiResults.PublicRead(observation, DirectApiErrorCodes.JobNotFound);
     }
 
     private static IResult RejectedLaunch(

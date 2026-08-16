@@ -453,3 +453,23 @@ tests.
 - `npm run test:fast` passed all seven lanes: typecheck, unit, architecture,
   workflow, CLI, web, and runner. No additional implementation changes were
   needed on the current workflow branch.
+
+## T-004 verification rerun
+
+- Launch command responses now map a completed durable mapping with a missing
+  public Job anchor to `projection_lag`, matching the shared projection-only
+  response behavior used by follow-up and reads; a successful canonical
+  operation is never translated into `job_not_found` while its projection is
+  catching up.
+- `DirectApiWriteValidation` owns the launch/follow-up scope builders and the
+  stop scope/fingerprint builders. Normal launch/follow-up scope strings are
+  unchanged; stop scope embeds `callerKeyId` and stop fingerprints contain
+  the version, stop discriminator, canonical Turn ID, and empty body for T-006.
+- Added unit coverage for printable ASCII key boundaries, strict JSON
+  rejection (including duplicate/unknown properties and trailing commas),
+  exact whitespace-preserving text, and command scope/fingerprint inputs.
+- Focused Direct API suites passed: launch (7), follow-up (5), and database
+  initialization (7). The full unit assembly passed 2,675 tests and the
+  server build passed with `SkipWebBuild=true`.
+- `npm run test:fast` passed all seven lanes: typecheck, unit, architecture,
+  workflow, CLI, web, and runner.
