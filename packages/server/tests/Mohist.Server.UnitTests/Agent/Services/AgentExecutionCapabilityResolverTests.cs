@@ -193,7 +193,6 @@ public sealed class AgentExecutionCapabilityResolverTests
         var catalog = CompleteCatalogEntry() with
         {
             SupportsReasoningEffort = false,
-            ReasoningEfforts = null,
         };
         IReadOnlyList<AgentExecutionCapabilitySnapshot> snapshot = [
             new AgentExecutionCapabilitySnapshot("runner-a", Runtime, catalog),

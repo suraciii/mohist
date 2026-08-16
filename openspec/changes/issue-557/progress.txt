@@ -494,3 +494,24 @@ Plan skeleton for next run (est. half a day):
 - Verification: Server UnitTests passed (2722), Server SpecTests passed
   (3942), Runner CI passed (154 files, 1666 tests), and `git diff --check`
   passed.
+
+## T-008 Follow-up (current run)
+
+- Closed the metadata contract gap between the runtime catalog and the Web
+  editor: `IRunnerRegistryGrain` now exposes the explicit per-runtime
+  `supportsReasoningEffort` flag. The registry aggregates `true` when any
+  registered catalog supports effort, `false` when all reported flags reject
+  it, and null when no runner reported the flag. `/opencode/models` returns
+  that field beside model variants and per-model efforts, so the Web's
+  no-support behavior is backed by the actual API rather than only test data.
+- Added integration coverage for Pi-supported and OpenCode-unsupported
+  metadata, plus a unique-runtime registry test to avoid cross-spec leakage
+  from the global runner registry. Updated `docs/actions/agent.md` to name the
+  canonical effort vocabulary, OpenCode's unsupported contract, and the
+  required re-entry path for saved Pi thinking-level variants with no
+  migration.
+- Verification: Web CI/typecheck/FSD passed (377 files, 4732 tests), Server
+  UnitTests passed (2722), Server SpecTests passed (3943), and docs:check plus
+  `git diff --check` passed. `npm run test:fast` and `npm run verify` remain
+  subject to the pre-existing ArchTests migration-ledger digest, file-size
+  ratchet, and unrelated Runner Biome diagnostics documented above.
