@@ -25,107 +25,16 @@ public class AgentSessionActivityVisibilitySpecs
         _client = fixture.Client;
     }
 
+    /// <summary>
+    /// Single wire case for <c>GET /api/projects/{projectRef}/agent/activity</c>:
+    /// the mixed generic/workflow card JSON shape. Generic cards carry
+    /// <c>agentId</c>/<c>agentName</c>; workflow cards must not leak them.
+    /// Card projection and attribution semantics are owned by
+    /// <see cref="AgentActivityFeedAssemblerSpecs"/>; activeAgents selection
+    /// by <see cref="AgentStatusHistoryBoundedSelectionSpecs"/>.
+    /// </summary>
     [Fact]
-    public async Task ActivityCard_ForGenericAgentLaunchSession_CarriesAgentIdAndAgentName()
-    {
-        var project = await CreateProjectAsync("gen-activity-agent");
-        var agentId = "agent_testAgent1";
-        var agentName = "test-agent-one";
-        var sessionId = $"session-{Guid.NewGuid():N}";
-
-        await InsertGenericSessionAsync(project, sessionId, agentId, agentName, issueNumber: null);
-
-        var activity = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agent/activity");
-        var sessions = activity.GetProperty("sessions").EnumerateArray()
-            .ToList();
-
-        var card = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal(agentId, card.GetProperty("agentId").GetString());
-        Assert.Equal(agentName, card.GetProperty("agentName").GetString());
-    }
-
-    [Fact]
-    public async Task ActivityCard_ForGenericSessionWithoutIssueRef_ProducesNoSyntheticIssueCard()
-    {
-        var project = await CreateProjectAsync("gen-activity-noissue");
-        var agentId = "agent_noIssueAgent";
-        var agentName = "no-issue-agent";
-        var sessionId = $"session-{Guid.NewGuid():N}";
-
-        await InsertGenericSessionAsync(project, sessionId, agentId, agentName, issueNumber: null);
-
-        var activity = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agent/activity");
-        var sessions = activity.GetProperty("sessions").EnumerateArray()
-            .ToList();
-
-        var card = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal(0, card.GetProperty("issueNumber").GetInt32());
-        Assert.Equal(agentId, card.GetProperty("agentId").GetString());
-        Assert.Equal(agentName, card.GetProperty("agentName").GetString());
-    }
-
-    [Fact]
-    public async Task ActivityCard_ForGenericSessionWithIssueRef_IsAssociatedButAgentAttributed()
-    {
-        var project = await CreateProjectAsync("gen-activity-wissue");
-        var agentId = "agent_withIssueAgent";
-        var agentName = "with-issue-agent";
-        var sessionId = $"session-{Guid.NewGuid():N}";
-        const int issueNumber = 42;
-
-        await InsertGenericSessionAsync(project, sessionId, agentId, agentName, issueNumber);
-
-        var activity = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agent/activity");
-        var sessions = activity.GetProperty("sessions").EnumerateArray()
-            .ToList();
-
-        var card = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal(issueNumber, card.GetProperty("issueNumber").GetInt32());
-        Assert.Equal(agentId, card.GetProperty("agentId").GetString());
-        Assert.Equal(agentName, card.GetProperty("agentName").GetString());
-    }
-
-    [Fact]
-    public async Task ActiveAgents_GenericSession_AppearsDespiteBlankWorkflowRunId()
-    {
-        var project = await CreateProjectAsync("gen-activeagents");
-        var agentId = "agent_activeGenAgent";
-        var agentName = "active-gen-agent";
-        var sessionId = $"session-{Guid.NewGuid():N}";
-        var runnerId = $"runner-{Guid.NewGuid():N}";
-
-        await InsertActiveGenericSessionAsync(project, sessionId, agentId, agentName, runnerId);
-
-        var status = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agent/status");
-        var activeAgents = status.GetProperty("activeAgents").EnumerateArray()
-            .ToList();
-
-        var entry = Assert.Single(activeAgents, a => a.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal(agentId, entry.GetProperty("agentId").GetString());
-        Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
-    }
-
-    [Fact]
-    public async Task ActiveAgents_StaleGenericSession_IsNotReported()
-    {
-        var project = await CreateProjectAsync("gen-stale-activeagents");
-        var sessionId = $"session-{Guid.NewGuid():N}";
-
-        await InsertGenericSessionAsync(project, sessionId, "agent_stale", "stale-agent", issueNumber: null);
-
-        var status = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agent/status");
-        var activeAgents = status.GetProperty("activeAgents").EnumerateArray().ToList();
-
-        Assert.DoesNotContain(activeAgents, agent => agent.GetProperty("sessionId").GetString() == sessionId);
-    }
-
-    [Fact]
-    public async Task WorkflowActivityCard_DoesNotLeakAgentIdOrAgentName()
+    public async Task ActivityCards_MixedGenericAndWorkflowSessions_ExposeContractualJsonShape()
     {
         var project = await CreateProjectAsync("gen-wf-regression");
         var agentId = "agent_wfAgent";
@@ -149,48 +58,34 @@ public class AgentSessionActivityVisibilitySpecs
         var genericCard = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == genericSessionId);
         Assert.Equal(agentId, genericCard.GetProperty("agentId").GetString());
         Assert.Equal(agentName, genericCard.GetProperty("agentName").GetString());
+        Assert.Equal(0, genericCard.GetProperty("issueNumber").GetInt32());
     }
 
-    private async Task InsertGenericSessionAsync(
-        string projectId,
-        string sessionId,
-        string agentId,
-        string agentName,
-        int? issueNumber)
+    /// <summary>
+    /// Single wire case for the <c>activeAgents</c> array on
+    /// <c>GET /api/projects/{projectRef}/agent/status</c>: a generic
+    /// agent-launch session's entry shape. Candidate selection and stale
+    /// exclusion are owned by <see cref="AgentStatusHistoryBoundedSelectionSpecs"/>.
+    /// </summary>
+    [Fact]
+    public async Task ActiveAgents_GenericSession_ExposesContractualEntryShape()
     {
-        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-            [GenericAgentSessionMetadata.AgentId] = agentId,
-            [GenericAgentSessionMetadata.AgentName] = agentName,
-        };
-        if (issueNumber.HasValue)
-            labels[AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.Value.ToString();
+        var project = await CreateProjectAsync("gen-activeagents");
+        var agentId = "agent_activeGenAgent";
+        var agentName = "active-gen-agent";
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var runnerId = $"runner-{Guid.NewGuid():N}";
 
-        var session = new AgentSession
-        {
-            Id = sessionId,
-            Runtime = new AgentSessionRuntime("test-runner", null),
-            Settings = new AgentSessionSettings("test-model"),
-            Status = new AgentSessionStatusSnapshot(
-                CreatedAt: TestTime.UtcDateTime,
-                AgentRuntimeSessionId: sessionId),
-            Metadata = new AgentSessionMetadata(labels),
-        };
+        await InsertActiveGenericSessionAsync(project, sessionId, agentId, agentName, runnerId);
 
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        db.AgentSessions.Add(new AgentSessionRow
-        {
-            Id = session.Id,
-            State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
-            CreatedAt = TestTime.UtcDateTime,
-            Status = "opened",
-            AgentSessionId = sessionId,
-            RunnerId = "test-runner",
-        });
-        await db.SaveChangesAsync();
+        var status = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project}/agent/status");
+        var activeAgents = status.GetProperty("activeAgents").EnumerateArray()
+            .ToList();
+
+        var entry = Assert.Single(activeAgents, a => a.GetProperty("sessionId").GetString() == sessionId);
+        Assert.Equal(agentId, entry.GetProperty("agentId").GetString());
+        Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
     }
 
     private async Task InsertActiveGenericSessionAsync(

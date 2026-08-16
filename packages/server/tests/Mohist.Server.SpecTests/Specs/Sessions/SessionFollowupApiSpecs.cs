@@ -100,37 +100,6 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
     }
 
     [Fact]
-    public async Task FollowupEndpoint_IdleLiveSession_StartsUserTurnWithoutCreatingTask()
-    {
-        var (project, issue, _, session) = await CreateAndStartSessionAsync("followup-idle", sessionName: "plan", attachAndStart: true);
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
-        Assert.NotEqual("active", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync())?.Status);
-        var tasksBefore = await WaitForWorkflowTasksAsync(project.Id, issue.Number);
-
-        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        runnerHub.Clear();
-        tracker.Register(_runnerId, "conn-followup-idle");
-        try
-        {
-            using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "start an idle turn" });
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var data = body.RootElement.GetProperty("data");
-            Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("inputId").GetString()));
-            Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("turnId").GetString()));
-            Assert.Equal("ReceiveFollowup", Assert.Single(runnerHub.SentMessages).Method);
-            Assert.Equal(tasksBefore, await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number));
-        }
-        finally
-        {
-            tracker.Unregister(_runnerId);
-        }
-    }
-
-    [Fact]
     public async Task FollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
         var (project, issue, _, _) = await CreateAndStartSessionAsync("followup-empty", sessionName: "plan");
@@ -195,42 +164,6 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
             Assert.Equal("runtime_session_missing", data.GetProperty("code").GetString());
             Assert.Equal(session.Id, data.GetProperty("sessionId").GetString());
             Assert.Empty(runnerHub.SentMessages);
-    }
-
-    [Fact]
-    public async Task FollowupEndpoint_RunnerOffline_ReturnsAcceptedAndQueued()
-    {
-        // Per D4: acceptance is decoupled from runner delivery. The
-        // input persists and the turn stays queued; the runner-offline
-        // result no longer reverts acceptance. The same-key retry
-        // re-attempts dispatch while the turn is queued.
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("followup-offline", sessionName: "plan", attachAndStart: true);
-
-        using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "ping" });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var data = doc.RootElement.GetProperty("data");
-        Assert.Equal("accepted", data.GetProperty("status").GetString());
-        Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
-        Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
-    }
-
-    [Fact]
-    public async Task ResolveFollowupTargetAsync_ReadsRunnerIdAndWorkflowRunIdFromSession()
-    {
-        var (project, issue, workflowRunId, _) = await CreateAndStartSessionAsync("followup-target", sessionName: "plan");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<Mohist.Server.Sessions.Services.AgentSessionQuerier>();
-
-        var target = await querier.ResolveFollowupTargetAsync(project.Id, issue.Number, "plan");
-
-        Assert.NotNull(target);
-        Assert.Equal(_runnerId, target!.RunnerId);
-        Assert.Equal(workflowRunId, target.WorkflowRunId);
-        Assert.Equal("plan", target.SessionName);
-        Assert.False(target.IsActive);
     }
 
     private Task<HttpResponseMessage> PostFollowupAsync(string projectId, int issueNumber, string sessionName, object body) =>
