@@ -104,7 +104,7 @@ public partial class WorkflowItemTranslatorSpecs
         await issueVariables.SetVariablesAsync(projectId, 42, new VariableBundle(
             Vars: JsonSerializer.SerializeToElement(new
             {
-                agent = new { model = "old-issue-model", variant = "old-issue-variant" },
+                agent = new { model = "old-issue-model", variant = "old-issue-variant", reasoningEffort = "low" },
             })));
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task",
@@ -115,6 +115,7 @@ public partial class WorkflowItemTranslatorSpecs
         var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
         Assert.Equal("stage-model", agent.GetProperty("model").GetString());
         Assert.Equal("stage-variant", agent.GetProperty("variant").GetString());
+        Assert.Equal("low", agent.GetProperty("reasoningEffort").GetString());
     }
 
     [Fact]

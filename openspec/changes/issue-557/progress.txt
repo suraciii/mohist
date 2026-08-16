@@ -275,3 +275,23 @@ Plan skeleton for next run (est. half a day):
   CLI tests 1858 passed, and `git diff --check` passed. The SpecTests runner
   ignored the requested name filter under Microsoft.Testing.Platform and ran
   the full project.
+
+## T-002 Verification (current run)
+
+- Confirmed the committed `0619ebc95` slice freezes `reasoningEffort` on
+  `AgentExecutionDefinition` (Id 6), `AgentJobInput` (Id 25),
+  `RoutedAgentLaunchPlan` (Id 22), the manual coordinator envelopes/plans,
+  AgentJob dispatch `with`, workflow AgentDefinition snapshots, and Runner
+  session-target/follow-up/turn options. Manual, mention, routed, and
+  workflow paths are covered by the existing freeze tests; absent effort
+  remains null/omitted and later Agent edits/deletion do not rewrite it.
+- Extended workflow variable coverage to prove an issue-level
+  `vars.agent.reasoningEffort` survives the stage model/variant overlay, and
+  repaired the T-002 Runner test assertions so `npm run test:ci -w
+  packages/runner` includes clean test typechecking.
+- Verification: Runner test CI passed (153 files, 1663 tests), Server
+  SpecTests passed (3938 tests), Server UnitTests passed (2717 tests), and
+  the focused Runner plumbing suite passed (83 tests). `npm run test:fast`
+  functional lanes passed; its ArchTests lane remains blocked by the
+  pre-existing `current-fail-if-marker-review` migration-ledger digest
+  mismatch in the branch, unrelated to T-002. `git diff --check` passed.

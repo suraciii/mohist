@@ -101,7 +101,7 @@ describe("buildActionHost agent-turn capability forwards the frozen effort", () 
 
     expect(result.error).toBeUndefined()
     expect(runTurn).toHaveBeenCalledTimes(1)
-    const request = runTurn.mock.calls[0]?.[0] as {
+    const request = (runTurn.mock.calls[0] as unknown as [unknown] | undefined)?.[0] as {
       options?: { model?: unknown; variant?: string | null; reasoningEffort?: string | null }
     }
     // The frozen definition wins over the caller option, exactly like variant.
@@ -117,7 +117,7 @@ describe("buildActionHost agent-turn capability forwards the frozen effort", () 
     const result = await host.agent!.turn({ prompt: "do", options: { reasoningEffort: "low" } })
 
     expect(result.error).toBeUndefined()
-    const request = runTurn.mock.calls[0]?.[0] as { options?: { reasoningEffort?: string | null } }
+    const request = (runTurn.mock.calls[0] as unknown as [unknown] | undefined)?.[0] as { options?: { reasoningEffort?: string | null } }
     expect(request.options?.reasoningEffort).toBe("low")
   })
 
@@ -128,7 +128,7 @@ describe("buildActionHost agent-turn capability forwards the frozen effort", () 
     const result = await host.agent!.turn({ prompt: "do" })
 
     expect(result.error).toBeUndefined()
-    const request = runTurn.mock.calls[0]?.[0] as { options?: { reasoningEffort?: string | null } }
+    const request = (runTurn.mock.calls[0] as unknown as [unknown] | undefined)?.[0] as { options?: { reasoningEffort?: string | null } }
     // Absent effort is unset — never synthesized into a default.
     expect(request.options?.reasoningEffort).toBeNull()
   })

@@ -73,10 +73,11 @@ describe("resolveSessionTarget", () => {
 
     const resolved = resolveSessionTarget(payload)
     expect(resolved).not.toBeNull()
-    expect(resolved!.kind).toBe("generic")
-    expect(resolved!.definition?.model).toBe("openai/gpt-5.5")
-    expect(resolved!.definition?.variant).toBe("balanced")
-    expect(resolved!.definition?.reasoningEffort).toBe("high")
+    const generic = resolved?.kind === "generic" ? resolved : null
+    expect(generic).not.toBeNull()
+    expect(generic?.definition?.model).toBe("openai/gpt-5.5")
+    expect(generic?.definition?.variant).toBe("balanced")
+    expect(generic?.definition?.reasoningEffort).toBe("high")
   })
 
   it("KeepsAnAbsentDefinitionEffortUnset_WithoutSynthesizingADefault", () => {
@@ -102,7 +103,8 @@ describe("resolveSessionTarget", () => {
     }
 
     const resolved = resolveSessionTarget(payload)
-    expect(resolved?.definition?.reasoningEffort).toBeUndefined()
+    const generic = resolved?.kind === "generic" ? resolved : null
+    expect(generic?.definition?.reasoningEffort).toBeUndefined()
   })
 
   it("ReturnsNull_WhenGenericTargetMissingSessionId", () => {
