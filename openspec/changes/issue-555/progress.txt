@@ -709,3 +709,22 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   3,975 Server SpecTests, 2,675 Server unit tests, 1,848 CLI tests, 4,724 Web
   tests, 1,639 Runner tests, and 70 Slack tests. No source changes were needed
   beyond this progress record.
+
+## Verification diagnosis (current task)
+
+- The initial worktree inspection found no tracked or untracked Git-visible
+  changes and no repository verification log. Ignored files were ordinary
+  build outputs only.
+- The historical incomplete verification was the earlier parallel
+  `npm run test:fast` interruption with ten Runner cleanup test timeouts;
+  the isolated Runner lane and subsequent full fast gate passed. This is a
+  transient test-runner failure, not a source or assertion defect.
+- Reproduced the exact `npm run verify` command on the current commit. It
+  passed docs, file-size, format, build, 3,975 Server SpecTests, 2,675 Server
+  unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70
+  Slack tests.
+- Focused Direct API checks also passed: auth (9), launch idempotency (7),
+  follow-up (6), stop (5), projection (14), public reads (7), event stream
+  (5), public execution contract (6), and cursor codec (3). No underlying
+  code, test, or build-configuration fix was warranted; verification created
+  no Git-visible changes.
