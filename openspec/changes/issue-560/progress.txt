@@ -319,3 +319,19 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   in isolation. `npm run test:fast` passed with 2,701 Server unit tests, 68
   architecture tests, 178 workflow tests, 1,860 CLI tests, 4,736 Web tests,
   1,639 Runner tests, and all typechecks.
+
+## T-002 completion verification
+
+- Re-audited the task-first route, definition factory, coordinator fingerprint,
+  deterministic Agent adoption, response replay projection, and the route/docs
+  registration against the T-002 requirements. The implementation is already
+  present on this workflow branch and no additional production change was
+  required in this verification pass.
+- The Server build passed with no warnings or errors. The focused factory/unit
+  coverage passed as part of 2,701 Server unit tests.
+- The complete Server spec assembly passed 3,949/3,950 tests; the one failure
+  was the known timing-sensitive runtime dispatch poll outside T-002. The
+  exact failing runtime-resolution test passed when rerun alone.
+- `npm run test:fast` passed: typechecks, 2,701 Server unit tests, 68
+  architecture tests, 178 workflow tests, 1,860 CLI tests, 4,736 Web tests,
+  and 1,639 Runner tests.
