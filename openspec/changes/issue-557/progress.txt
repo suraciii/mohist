@@ -480,3 +480,17 @@ Plan skeleton for next run (est. half a day):
   execution dependency; catalog inputs are only enumerated and read.
 - `git diff --check` passed. The Server build emitted only the existing
   preview-.NET and frontend bundler warnings.
+
+## T-007 Final Verification (current run)
+
+- Revalidated the committed T-007 implementation against the readiness and
+  execution-evidence requirement: readiness compares resolved effort, reports
+  `effort-without-model`, and maps both normalized execution-configuration
+  failure categories to Needs setup with `reasoningEffort` re-entry guidance.
+  Pi model facts carry adapter-reported `appliedReasoningEffort`, while
+  AgentJob terminal evidence carries frozen model, variant, and effort.
+- Confirmed the absent path remains null throughout projector/reducer and
+  terminal evidence; no default effort is synthesized.
+- Verification: Server UnitTests passed (2722), Server SpecTests passed
+  (3942), Runner CI passed (154 files, 1666 tests), and `git diff --check`
+  passed.
