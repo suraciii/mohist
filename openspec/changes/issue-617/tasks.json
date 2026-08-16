@@ -1,0 +1,51 @@
+{
+  "project": "mohist-local",
+  "description": "Version the Slack collaboration Skill so direct questions receive useful replies and recovery continues silently.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Publish the versioned Slack collaboration contract",
+      "spec": "specs/slack-collaboration-skill/spec.md#slack-turns-shall-receive-a-versioned-collaboration-contract",
+      "description": "Update the embedded `mohist-slack-collaboration` Markdown asset and Server catalog to version 1.1.0, preserving the existing v1 context shape and Server-owned reply anchor. Encode the ordered direct-question, useful-no-additional-information, valid-silence, explicit-reply, self-contained-result, and silent-recovery rules in the asset, then extend Server contract and Slack ingress coverage to verify the published identity, hash, anchor, and root/follow-up behavior.",
+      "acceptanceCriteria": [
+        "The embedded asset at `packages/server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md` states that every direct human question receives a useful reply through the explicit Slack reply action, including a substantive no-additional-information answer rather than an acknowledgement-only message.",
+        "The asset preserves silence for a non-question turn with no conclusion, result, failure reason, or next step, while requiring self-contained conclusion/evidence/next-step replies for results and failures and delegator mentions for completed delegated work.",
+        "The asset instructs recovery after restart, Session recovery, or context compaction to reconstruct state from durable Session records and available Slack thread/startup context, preserve the existing Session and reply anchor, and avoid interruption or recovery narration; an outstanding direct question still takes precedence.",
+        "`SlackCollaborationSkillCatalog.Version` is `1.1.0`, and `Resolve()` continues to read the embedded resource and compute a lower-case SHA-256 over the exact UTF-8 instruction bytes without a manually pinned hash or a context wire-version change.",
+        "Server contract tests assert the exact managed Skill name and version, derive and compare its hash, and verify the required direct-question, silence, recovery, explicit-action, anchor, self-contained-reply, and no-empty-acknowledgement language without requiring one exact prose answer.",
+        "Server Slack ingress coverage continues to prove that a direct message uses its triggering message as the thread root, a threaded follow-up preserves the existing root and current triggering message, and both paths carry all Server-selected anchor fields without credentials or internal tokens.",
+        "The focused Server unit and Slack specification suites pass, including `SlackExecutionContextContractTests` and `SlackReplyAnchorIngressSpecs`.",
+        "No database migration, public API shape change, Agent definition change, credential-flow change, or Slack delivery/outbox behavior change is introduced by this slice."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Embedded `mohist-slack-collaboration` Skill v1.1.0, updated Server catalog contract tests, and passing Slack anchor ingress coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep `AgentSlackExecutionContext.CurrentVersion` at 1. The Server remains the asset authority; queued v1 contexts remain structurally compatible during rolling deployment and rollback."
+    },
+    {
+      "id": "T-002",
+      "title": "Harden Runner Slack validation and envelope isolation",
+      "spec": "specs/slack-collaboration-skill/spec.md#the-embedded-skill-identity-and-content-shall-be-verifiable-at-dispatch-time",
+      "description": "Make the Runner accept only a structurally valid v1 Slack context whose managed Skill name is exactly `mohist-slack-collaboration`, whose metadata is non-empty, and whose lower-case SHA-256 matches the delivered UTF-8 instructions. Exercise the shared AgentJob and follow-up injection path so valid Slack dispatches inline the updated Skill and anchor facts, malformed contexts fail before runtime invocation, and Web, CLI, and Workflow envelopes remain unchanged.",
+      "acceptanceCriteria": [
+        "`readSlackExecutionContext` rejects unsupported context versions, incomplete reply anchors, incomplete Skill metadata, a Skill name other than `mohist-slack-collaboration`, and any content hash that does not exactly equal the lower-case SHA-256 digest of the supplied UTF-8 instructions.",
+        "A valid v1 context carrying the Server-published Skill name, version `1.1.0`, instructions, and matching hash resolves successfully and is inlined as the managed Slack Skill without pinning the content hash in Runner code.",
+        "AgentJob and follow-up dispatch tests prove malformed Slack contexts return the existing invalid/unavailable result before the Agent runtime is called, covering at least mismatched hash, wrong Skill name, and incomplete anchor or Skill metadata.",
+        "A valid Slack dispatch emits `[mohist-system-facts]` with the Server-provided reply anchor and includes the managed Skill instructions in the execution definition; the Runner does not add destination-selection behavior or expose the Skill body as system facts.",
+        "Normal execution envelopes remain unchanged and contain no Slack collaboration Skill, Slack reply anchor, or Slack system facts when no valid Slack provenance is present; the assertion covers the shared envelope path used by AgentJob and follow-up dispatches.",
+        "Runner type checks, test-boundary checks, and focused tests pass via `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and `npm test -w packages/runner`.",
+        "The dependency graph remains scoped to Slack: no Web, CLI, or Workflow execution receives Slack-specific instructions or facts as a side effect."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Exact managed-Skill validation in the Runner, pre-runtime rejection tests, Slack envelope injection coverage, and non-Slack envelope regression coverage.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuse `readSlackExecutionContext`, `inlineSlackCollaborationSkill`, `buildExecutionEnvelope`, `agent-job-executor`, and `followup-handler`. Do not add a question classifier, recovery marker, Server fallback reply, or new context fields."
+    }
+  ]
+}
