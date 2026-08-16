@@ -388,3 +388,18 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   `AgentSessionLaunchRuntimeResolutionSpecs.Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode` failed at `PollDispatchForSessionAsync` because the helper performed one `/poll` request immediately after the durable assignment-prepared signal.
 - The native xUnit method runner isolated the test and passed it, confirming a load-sensitive test-harness race rather than an implementation failure. The shared launch-spec helper now uses bounded `TestWait.ForAsync` polling for the existing dispatch, preserving all AgentJob, session, and dispatch assertions.
 - Focused runtime-resolution coverage passed 10/10 and the full Server Spec assembly passed 3,950/3,950 after the repair. The final `npm run verify` gate also passed: 178 Workflow, 2,701 Server unit, 3,950 Server spec, 68 architecture, 1,860 CLI, 4,736 Web, 1,639 Runner, and 70 Slack tests, with docs, format, size, and builds clean.
+
+## T-001 current-run audit
+
+- The committed T-001 slice was re-audited against the selected task and the
+  `agent-creation-defaults` requirements. The additive Project migration,
+  replace-on-set grain method, closed PUT/PATCH routes, explicit nullable GET
+  projection, scoped per-project DB reader, resolver precedence matrix,
+  readiness matrix, definition-first launch resolution, and Configure an Agent
+  documentation are all present; no production repair was required.
+- Regression verification in this run passed: the focused Server UnitTests
+  filter passed 2,701/2,701, the focused Project/default/readiness/launcher
+  SpecTests filter passed 3,950/3,950, and the Server project build passed.
+  The required `npm run test:fast` gate also passed: typecheck, 2,701 Server
+  unit, 68 architecture, 178 workflow, 1,860 CLI, 4,736 Web, and 1,639 Runner
+  tests.
