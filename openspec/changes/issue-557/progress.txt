@@ -425,6 +425,23 @@ Plan skeleton for next run (est. half a day):
 - `git diff --check` passed. No T-002 source regression was found; the
   append-only records continue to deserialize absent effort as null.
 
+## Verification repair follow-up
+
+- Reproduced the full `npm run verify` and the ArchTests project directly.
+  Docs, file sizes, formatting, build, CLI (1858), Server Unit (2722), Spec
+  (3943), and Workflow Definition (178) all pass; ArchTests alone failed
+  `current-fail-if-marker-review`.
+- The failure was caused by T-006's intended change to the shared
+  `WorkflowGrainSpecs` fixture: it now references
+  `CapabilityCatalogTestHelpers`, which is part of the blocked
+  `FailIfMarkerSpecs` closure. The migration ledger's closure symbols and
+  source/closure/edge digests were stale, even though `FailIfMarkerSpecs.cs`
+  itself was unchanged. Updated only that ledger evidence; no assertions,
+  ignore rules, or generated files were changed.
+- The corrected ArchTests suite passes. The full gate is being rerun after
+  this metadata repair; the worktree was clean before the repair and the
+  verification commands did not create Git-visible output changes.
+
 ## T-006 Final Verification (current run)
 
 - Audited the committed resolver-gated admission slice against the selected
@@ -512,6 +529,27 @@ Plan skeleton for next run (est. half a day):
   migration.
 - Verification: Web CI/typecheck/FSD passed (377 files, 4732 tests), Server
   UnitTests passed (2722), Server SpecTests passed (3943), and docs:check plus
-  `git diff --check` passed. `npm run test:fast` and `npm run verify` remain
-  subject to the pre-existing ArchTests migration-ledger digest, file-size
-  ratchet, and unrelated Runner Biome diagnostics documented above.
+  `git diff --check` passed. The later ledger repair cleared the remaining
+  ArchTests failure; the full gate and fast tier pass.
+
+## Verification repair (current run)
+
+- The worktree was clean before diagnosis; the first reproducible `npm run
+  verify` failure was `check:filesizes`, not generated output. Eight files had
+  grown past their ratchet allowance: CLI command/tests, Runner host, AgentJob
+  and launch coordinator grains, Runner routes, and session grain/querier.
+- Fixed the root cause by moving related methods, contracts, and tests into
+  partial/contract files. No assertions, ignore rules, or generated files were
+  removed. Formatted all 51 changed task files; docs, file-size, format, and
+  whitespace gates now pass.
+- Focused verification passed: CLI 1858, Server UnitTests 2722, Server
+  SpecTests 3943, Workflow Definition 178, Runner source and test typechecks,
+  Runner boundary checks, and Runner Vitest 154 files/1666 tests. The
+  `current-fail-if-marker-review` failure was repaired by refreshing the
+  blocked-row closure evidence for T-006's intended fixture dependency;
+  `FailIfMarkerSpecs.cs` itself remains unchanged.
+- Final verification passed: `npm run verify` completed docs, file-size,
+  format, build, all .NET suites (including ArchTests 68/68), Web CI (377
+  files/4732 tests), Runner CI (154 files/1666 tests), and Slack CI (7
+  files/70 tests). `npm run test:fast` passed every lane, and verification
+  left no Git-visible changes beyond the two intended files.
