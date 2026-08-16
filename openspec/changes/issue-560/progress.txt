@@ -283,3 +283,13 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   workflow, 1,860 CLI, 4,735 Web, and 1,639 Runner tests plus typechecks.
   The full 3,949-test server assembly had one timing-sensitive polling failure
   in the unrelated runtime-resolution class; its exact rerun passed 10/10.
+
+## T-004 conflict recovery follow-up
+
+- Added a conflict-only `Start with a new launch key` action to the Web
+  composer. It resets the caller key and mutation error while preserving the
+  prompt, attachments, context references, Agent selection, and execution
+  choices; pending and ordinary rejection retries continue using the same key.
+- Composer coverage now proves a conflict can be recovered with a new key
+  without losing the composed task. Focused composer and feedback tests pass
+  40/40; Web typecheck, FSD boundaries, and test-boundary checks pass.

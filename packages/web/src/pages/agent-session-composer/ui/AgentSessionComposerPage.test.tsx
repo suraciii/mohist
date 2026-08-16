@@ -230,6 +230,29 @@ describe('AgentSessionComposerPage', () => {
     expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
   })
 
+  it('offers a new launch key after a conflict without clearing the composed task', async () => {
+    state.launchError = { error: 'This key conflicts with an earlier task', code: 'launch_idempotency_conflict' }
+    renderPage(['/agent-sessions/new?issue=42'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Keep this task' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    const feedback = await screen.findByTestId('error-launch-conflict')
+    expect(feedback).toHaveTextContent(/new key/i)
+    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
+    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
+
+    fireEvent.click(screen.getByTestId('reset-launch-key'))
+    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
+    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
+
+    state.launchError = null
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => expect(state.taskCalls).toHaveLength(2))
+    expect(state.taskCalls[1].idempotencyKey).not.toBe(state.taskCalls[0].idempotencyKey)
+  })
+
   it('calls mutate with correct args on launch when an Agent is selected', async () => {
     state.agentsData = [makeAgent('agent-1')]
     renderPage(['/agent-sessions/new?agent=agent-1'])

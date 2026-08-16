@@ -275,8 +275,8 @@ export interface AgentSessionComposerData {
   agentsLoading: boolean
   availability: AgentAvailabilitySummaryEntry[] | undefined
   availabilityLoading: boolean
-  launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error'>
-  startTaskMutation: Pick<ReturnType<typeof useStartAgentTask>, 'mutate' | 'isPending' | 'error'>
+  launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error' | 'reset'>
+  startTaskMutation: Pick<ReturnType<typeof useStartAgentTask>, 'mutate' | 'isPending' | 'error' | 'reset'>
 }
 
 export type AgentSessionComposerDataHook = () => AgentSessionComposerData
@@ -532,6 +532,22 @@ export function AgentSessionComposerPage({
             <p className="ml-6 text-xs">
               {launchFeedback.message} {launchFeedback.nextAction}
             </p>
+            {launchFeedback.kind === 'launch-conflict' && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="reset-launch-key"
+                className="ml-6 w-fit"
+                onClick={() => {
+                  launchKeyRef.current = null
+                  if (selectedAgentRef) launchMutation.reset()
+                  else startTaskMutation.reset()
+                }}
+              >
+                Start with a new launch key
+              </Button>
+            )}
             {isNeedsSetupError && gapsFromError && gapsFromError.length > 0 && (
               <ul className="ml-6 list-disc space-y-0.5">
                 {gapsFromError.map((gap) => (
