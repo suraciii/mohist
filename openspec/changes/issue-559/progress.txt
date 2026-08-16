@@ -90,3 +90,64 @@
 - `npm run test:fast`: all lanes green (typecheck, unit 2662, arch 68, wf 178,
   cli 1848, web 4724, runner 1639).
 - Arch fix: `("Workflow", "Agent")` allowance added (see above).
+
+## T-002 decisions / gotchas
+
+- Per-invocation deadline: `AgentJobInput.TimeoutMilliseconds` (Id 26) and
+  `Expect` (Id 27) were added to both `PrepareManualLaunchCommand` and
+  `AgentJobInput` (append-only ids after `WorkflowInvocation` Id 25).
+  `AgentJobGrain.EffectiveJobTimeout()` = positive `Input.TimeoutMilliseconds`
+  else `AgentJobOptions.JobTimeout`; used by `ArmJobTimeout`,
+  `JobTimeoutExceeded`, and the report-timeout reason message. Direct/routed
+  launches never carry the fields → global backstop unchanged.
+- Omitted `timeout` resolves to `WorkflowAgentHandoffDeadline.DefaultTimeoutMilliseconds`
+  (3_600_000, the runner's inline action default from
+  `packages/runner/src/actions/built-ins.ts`) at the handoff's
+  `ManualLaunchCommandFor` render — resolving open question O2 to the action
+  default. The frozen command keeps the raw null; render is deterministic.
+- Dispatch lineage: `BuildDispatchAsync` sets `WorkflowRunId` from
+  `input.WorkflowRunId` ONLY when the `WorkflowInvocation` discriminator is
+  present (direct/mention/routed launches keep `string.Empty` — the
+  `AgentSessionLaunchValidationRoutesSpecs` regression locks that), plus
+  `TaskRunId: input.WorkflowInvocation?.TaskRunId` and `Expect: input.Expect`.
+  Runner wire already parses `expect`/`taskRunId` on agent-job dispatches;
+  T-003's executor evaluation is their first runner consumer.
+- `PlansEquivalent`/`EquivalentInput` now compare TimeoutMilliseconds/Expect
+  (and the discriminator on `EquivalentInput`) so a conflicting re-render is a
+  conflict, not a silent accept.
+- **Pre-existing deadlock fixed in `AgentConcurrencyGrain` (required for the
+  "shared gate, later admitted" acceptance)**: the gate delivered
+  permit-grant notifications INLINE from its own turn; a granted AgentJob
+  owner (`ConcurrencyPermitGrantedAsync` → `TryAdmitAsync`) re-enters the
+  gate (`AcquireAsync`/`MarkDispatchedAsync`), queueing behind the delivery
+  call → 30s response-timeout deadlock for every release-with-job-waiter
+  (release from `ReportResultAsync`, client `ReleaseAsync`, even the
+  reconciliation reminder). No prior spec exercised a real job waiter (the
+  followup owner never calls back into the gate; existing gate specs used
+  fake owner ids). Fix: `SchedulePendingNotificationDelivery()` fire-and-forgets
+  `ProcessPendingNotificationsAsync` — the task starts on the gate context,
+  suspends at the first owner call, continuation (durable notification
+  removal) resumes on the gate context; all state mutations stay serialized.
+  Failed delivery keeps the notification; reminder re-drains.
+- Because delivery is now deferred, `AgentSessionFollowupConcurrencySpecs.
+  GateGrant_NotificationFailure_RetainsPermitAndDurableRetryRecord` now polls
+  (TestWait) for the recorded attempt instead of asserting synchronously.
+- Workflow-originated admission specs live in
+  `Specs/Agent/Grain/WorkflowAgentJobAdmissionSpecs.cs` on the
+  `AgentJobGrainFixture` (has runners + FakeTimeProvider); they drive jobs
+  through `PrepareManualLaunchAsync`+`SubmitPreparedLaunchAsync` with the
+  discriminator — the exact participant shape activation produces.
+- WaitingReason is only on `AgentJobState` (no grain getter): specs read it
+  by deserializing the ledger row's StateJson via `IAgentJobStore`.
+- Grain timers ARE driven by the fixture FakeTimeProvider (Orleans 10 timers
+  use the registered TimeProvider), so advancing fake time fires
+  ArmJobTimeout's timer; specs still call `CheckTimeoutsAsync` for
+  determinism.
+
+## Verification status (T-002)
+
+- Full SpecTests: 3937/3937 (one unrelated documented flaky poll miss on a
+  first run; clean re-run green).
+- `npm run test:fast`: all lanes green (typecheck, unit 2662, arch 68, wf
+  178, cli 1848, web 4724, runner 1639).
+- `npm run format:check`: clean.

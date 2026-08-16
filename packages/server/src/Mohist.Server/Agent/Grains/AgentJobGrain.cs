@@ -834,7 +834,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             SpawnOrigin: command.SpawnOrigin,
             WorkspaceRepositories: command.WorkspaceRepositories,
             Skills: command.Skills,
-            WorkflowInvocation: command.WorkflowInvocation);
+            WorkflowInvocation: command.WorkflowInvocation,
+            TimeoutMilliseconds: command.TimeoutMilliseconds,
+            Expect: command.Expect);
 
     private static AgentSlackExecutionContext? SlackExecutionContextFor(PrepareManualLaunchCommand command)
     {
@@ -871,7 +873,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
         && SkillsEquivalent(left.Skills, right.Skills)
-        && Equals(left.WorkflowInvocation, right.WorkflowInvocation);
+        && Equals(left.WorkflowInvocation, right.WorkflowInvocation)
+        && left.TimeoutMilliseconds == right.TimeoutMilliseconds
+        && string.Equals(left.Expect ?? string.Empty, right.Expect ?? string.Empty, StringComparison.Ordinal);
 
     private static bool SkillsEquivalent(
         IReadOnlyList<string>? left,
@@ -940,7 +944,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && Equals(left.AllowedSubagents, right.AllowedSubagents)
         && string.Equals(left.PinnedRunnerId, right.PinnedRunnerId, StringComparison.Ordinal)
         && Equals(left.AgentSessionStartup, right.AgentSessionStartup)
-        && Equals(left.SlackExecutionContext, right.SlackExecutionContext);
+        && Equals(left.SlackExecutionContext, right.SlackExecutionContext)
+        && Equals(left.WorkflowInvocation, right.WorkflowInvocation)
+        && left.TimeoutMilliseconds == right.TimeoutMilliseconds
+        && string.Equals(left.Expect ?? string.Empty, right.Expect ?? string.Empty, StringComparison.Ordinal);
 
     private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
     {
@@ -1415,7 +1422,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(
-            WorkflowRunId: string.Empty,
+            WorkflowRunId: input.WorkflowInvocation is null
+                ? string.Empty
+                : input.WorkflowRunId ?? string.Empty,
             WorkId: workId,
             Uses: null,
             With: withJson,
@@ -1432,7 +1441,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId,
             AgentDefinition: ExecutionDefinitionFrom(input),
             PinnedRunnerId: input.PinnedRunnerId,
-            AgentSessionStartup: input.AgentSessionStartup);
+            AgentSessionStartup: input.AgentSessionStartup,
+            Expect: input.Expect,
+            TaskRunId: input.WorkflowInvocation?.TaskRunId);
     }
 
     private static WorkDispatch? DeserializeDispatch(string? json)
@@ -1451,13 +1462,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private void ArmJobTimeout()
     {
-        if (_options.JobTimeout <= TimeSpan.Zero)
+        // A per-invocation deadline (workflow handoff) replaces the
+        // global backstop so a long agent turn is not prematurely
+        // failed; direct and routed launches keep the global bound.
+        var timeout = EffectiveJobTimeout();
+        if (timeout <= TimeSpan.Zero)
             return;
 
-        var dueTime = _options.JobTimeout;
+        var dueTime = timeout;
         if (State.RunningSince is { } runningSince)
         {
-            var remaining = runningSince + _options.JobTimeout - _timeProvider.GetUtcNow();
+            var remaining = runningSince + timeout - _timeProvider.GetUtcNow();
             dueTime = remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
         }
 
@@ -1473,11 +1488,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal || State.RunnerId is null)
             return;
 
+        var timeout = EffectiveJobTimeout();
         _log.LogWarning(
             "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown",
-            Key, _options.JobTimeout);
+            Key, timeout);
         await EnterUnknownStateAsync(
-            $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}");
+            $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {timeout}");
     }
 
     private async Task EvaluatePendingAsync()
@@ -1491,11 +1507,24 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private bool JobTimeoutExceeded()
     {
+        var timeout = EffectiveJobTimeout();
         return State.RunnerId is not null
             && State.RunningSince is not null
-            && _options.JobTimeout > TimeSpan.Zero
-            && _timeProvider.GetUtcNow() >= State.RunningSince.Value + _options.JobTimeout;
+            && timeout > TimeSpan.Zero
+            && _timeProvider.GetUtcNow() >= State.RunningSince.Value + timeout;
     }
+
+    /// <summary>
+    /// Effective report deadline for the current job: the per-invocation
+    /// deadline frozen by a Workflow handoff when present and positive,
+    /// otherwise the global <see cref="AgentJobOptions.JobTimeout"/>
+    /// backstop. Direct and routed launches never carry the deadline, so
+    /// their behavior is unchanged.
+    /// </summary>
+    private TimeSpan EffectiveJobTimeout() =>
+        State.Input?.TimeoutMilliseconds is long milliseconds && milliseconds > 0
+            ? TimeSpan.FromMilliseconds(milliseconds)
+            : _options.JobTimeout;
 
     internal async Task EnterTerminalStateAsync(
         AgentJobStatus terminalStatus,

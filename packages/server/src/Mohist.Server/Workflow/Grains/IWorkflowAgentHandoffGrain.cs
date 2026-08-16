@@ -51,6 +51,19 @@ public sealed record WorkflowAgentHandoffCommand(
     [property: Id(8)] string? Expect = null);
 
 /// <summary>
+/// Per-invocation execution deadline resolved at activation render time
+/// when the task input omits <c>timeout</c>. Matches the runtime action
+/// default for inline <c>mohist/opencode</c> / <c>mohist/pi</c> turns (60
+/// minutes) so a handoff execution is never bounded tighter than the inline
+/// semantics it replaces — in particular not by the shorter global
+/// <c>AgentJobOptions.JobTimeout</c> backstop.
+/// </summary>
+public static class WorkflowAgentHandoffDeadline
+{
+    public const long DefaultTimeoutMilliseconds = 3_600_000;
+}
+
+/// <summary>
 /// Immutable linkage reserved for a handoff. This is intentionally not an
 /// AgentJob state mirror: it has no Runner, runtime-session, transcript, or
 /// terminal fields.

@@ -364,7 +364,14 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             WorkflowInvocation: new AgentJobWorkflowInvocation(
                 InvocationId: invocation.InvocationId,
                 TaskRunId: command.TaskRunId,
-                WorkId: command.CommandId));
+                WorkId: command.CommandId),
+            // D4: the frozen timeout becomes the per-invocation deadline;
+            // an omitted timeout resolves to the runtime action default so
+            // the handoff matches inline mohist/opencode / mohist/pi
+            // semantics instead of the shorter global JobTimeout backstop.
+            TimeoutMilliseconds: command.TimeoutMilliseconds
+                ?? WorkflowAgentHandoffDeadline.DefaultTimeoutMilliseconds,
+            Expect: command.Expect);
     }
 
     private EnsureInitialLaunchCommand EnsureInitialLaunchCommandFor(WorkflowAgentHandoffPlan plan)

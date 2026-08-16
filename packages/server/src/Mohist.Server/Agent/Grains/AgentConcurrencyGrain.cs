@@ -48,7 +48,7 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
 
         await EnsureReminderAsync();
         await ReconcileFromAuthoritativeStateAsync();
-        await ProcessPendingNotificationsAsync();
+        SchedulePendingNotificationDelivery();
     }
 
     public async Task<AgentConcurrencyAcquireResult> AcquireAsync(
@@ -79,7 +79,7 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             if (_state.State.PendingNotifications.Count > 0)
             {
                 await _state.WriteStateAsync();
-                await ProcessPendingNotificationsAsync();
+                SchedulePendingNotificationDelivery();
             }
 
             return AgentConcurrencyAcquireResult.Granted;
@@ -157,7 +157,7 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         var limit = await ReadLimitAsync(projectId, agentId);
         await GrantWaitersAsync(projectId, agentId, limit);
         await _state.WriteStateAsync();
-        await ProcessPendingNotificationsAsync();
+        SchedulePendingNotificationDelivery();
     }
 
     public async Task ReconcileAsync(string projectId, string agentId, IReadOnlySet<string> activeTokens)
@@ -171,7 +171,7 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         await GrantWaitersAsync(projectId, agentId, limit);
 
         await _state.WriteStateAsync();
-        await ProcessPendingNotificationsAsync();
+        SchedulePendingNotificationDelivery();
     }
 
     public Task<int> GetActiveCountAsync() =>
@@ -240,7 +240,39 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             return;
 
         await ReconcileFromAuthoritativeStateAsync();
-        await ProcessPendingNotificationsAsync();
+        SchedulePendingNotificationDelivery();
+    }
+
+    /// <summary>
+    /// Fires the pending permit-grant notifications without blocking the
+    /// current gate turn. A notified job owner re-enters the gate during
+    /// its admission (<c>AcquireAsync</c> / <c>MarkDispatchedAsync</c>), so
+    /// delivering inline from inside the gate's own turn would queue that
+    /// re-entry behind the delivery call and deadlock the whole release
+    /// chain. The delivery task starts on the gate's execution context,
+    /// suspends at the first owner call, and its continuation — the durable
+    /// notification removal — resumes on the same context after the owner
+    /// acknowledges, so every state mutation stays serialized on the grain
+    /// scheduler. A failed delivery keeps the notification persisted; the
+    /// reconciliation reminder re-drains it.
+    /// </summary>
+    private void SchedulePendingNotificationDelivery()
+    {
+        _ = DeliverPendingNotificationsSafelyAsync();
+    }
+
+    private async Task DeliverPendingNotificationsSafelyAsync()
+    {
+        try
+        {
+            await ProcessPendingNotificationsAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Agent concurrency gate {Key} could not deliver pending permit notifications; reminder will retry",
+                Key);
+        }
     }
 
     private async Task<IReadOnlyList<AgentConcurrencyWaiter>> GrantWaitersAsync(

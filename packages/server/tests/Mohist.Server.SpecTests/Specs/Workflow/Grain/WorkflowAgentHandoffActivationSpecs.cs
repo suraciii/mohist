@@ -184,6 +184,57 @@ public sealed class WorkflowAgentHandoffActivationSpecs
     }
 
     [Fact]
+    public async Task ActivateAsync_FreezesTheDeclaredOrDefaultDeadlineAndExpectOntoTheJobInput()
+    {
+        var projectId = $"handoff-deadline-{Guid.NewGuid():N}";
+        var agentRef = $"agent_deadline_{Guid.NewGuid():N}";
+        _fixture.Preflight.Set(projectId, agentRef, Definition(AgentConfigSchema.PiRuntime));
+        var command = Command(projectId, agentRef, "declare the execution deadline");
+        var handoff = Handoff(command);
+        await handoff.PrepareAsync(command);
+        await handoff.AcceptAsync(Acceptance(command));
+
+        var activated = await handoff.ActivateAsync();
+        var invocation = activated.Invocation!;
+
+        await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
+        {
+            var jobs = scope.ServiceProvider.GetRequiredService<IAgentJobStore>();
+            var state = JSON.Deserialize<AgentJobState>(
+                (await jobs.LoadLedgerAsync(invocation.JobKey))!.StateJson)!;
+            // D4: the frozen TimeoutMilliseconds becomes the per-invocation
+            // deadline on AgentJobInput; the frozen expect rides the input
+            // so dispatch can project it onto WorkDispatch.Expect.
+            Assert.Equal(command.TimeoutMilliseconds, state.Input!.TimeoutMilliseconds);
+            Assert.Equal(command.Expect, state.Input.Expect);
+        }
+
+        // An omitted task timeout resolves to the runtime action default
+        // (60 minutes) at the activation boundary, matching inline
+        // mohist/opencode / mohist/pi semantics instead of the shorter
+        // global AgentJobOptions.JobTimeout backstop.
+        var omitted = Command(projectId, agentRef, "default the execution deadline") with
+        {
+            TimeoutMilliseconds = null,
+        };
+        var omittedHandoff = Handoff(omitted);
+        await omittedHandoff.PrepareAsync(omitted);
+        await omittedHandoff.AcceptAsync(Acceptance(omitted));
+
+        var omittedActivated = await omittedHandoff.ActivateAsync();
+
+        await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
+        {
+            var jobs = scope.ServiceProvider.GetRequiredService<IAgentJobStore>();
+            var state = JSON.Deserialize<AgentJobState>(
+                (await jobs.LoadLedgerAsync(omittedActivated.Invocation!.JobKey))!.StateJson)!;
+            Assert.Equal(WorkflowAgentHandoffDeadline.DefaultTimeoutMilliseconds, state.Input!.TimeoutMilliseconds);
+            Assert.Equal(3_600_000, WorkflowAgentHandoffDeadline.DefaultTimeoutMilliseconds);
+            Assert.Equal(omitted.Expect, state.Input.Expect);
+        }
+    }
+
+    [Fact]
     public async Task ActivateAsync_ReplayOfActivatedPlan_IsNoOpReturningTheSameInvocation()
     {
         var projectId = $"handoff-replay-activated-{Guid.NewGuid():N}";

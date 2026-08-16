@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.TestSupport;
 using Orleans;
 using Orleans.Core.Internal;
 using Orleans.Runtime;
@@ -468,7 +469,16 @@ public class AgentSessionFollowupConcurrencySpecs
 
         await gate.ReleaseAsync(projectId, agentId, "launch:active");
 
-        var snapshot = await gate.GetSnapshotAsync();
+        // Notification delivery runs off the gate's turn (a granted owner
+        // re-enters the gate during admission), so the failed first
+        // attempt becomes observable once the deferred delivery settles.
+        var snapshot = await TestWait.ForAsync(
+            () => gate.GetSnapshotAsync(),
+            current => current.PendingNotifications.Count == 1
+                && current.PendingNotifications[0].Attempts > 0,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "failed gate-grant notification records its first attempt");
         var permit = Assert.Single(snapshot.ActivePermits);
         Assert.Equal("followup:missing", permit.DispatchId);
         Assert.Equal(AgentConcurrencyPermitStatus.DispatchPending, permit.Status);
@@ -480,7 +490,13 @@ public class AgentSessionFollowupConcurrencySpecs
         await gate.ReceiveReminder(
             "agent-concurrency-reconciliation",
             new TickStatus(now, TimeSpan.FromSeconds(30), now));
-        var recovered = await gate.GetSnapshotAsync();
+        var recovered = await TestWait.ForAsync(
+            () => gate.GetSnapshotAsync(),
+            current => current.PendingNotifications.Count == 1
+                && current.PendingNotifications[0].Attempts > notification.Attempts,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "gate-grant notification records a durable retry attempt");
         Assert.Single(recovered.ActivePermits);
         Assert.Single(recovered.PendingNotifications);
         Assert.True(recovered.PendingNotifications[0].Attempts > notification.Attempts);

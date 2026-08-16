@@ -192,7 +192,29 @@ public sealed record PrepareManualLaunchCommand(
     /// introduces no branch in admission or execution. Append-only Orleans
     /// field id (next free after <see cref="Skills"/>).
     /// </summary>
-    [property: Id(25)] AgentJobWorkflowInvocation? WorkflowInvocation = null);
+    [property: Id(25)] AgentJobWorkflowInvocation? WorkflowInvocation = null,
+    /// <summary>
+    /// Per-invocation execution deadline in milliseconds, frozen by a
+    /// Workflow handoff from the task's <c>timeout</c> input (defaulting to
+    /// the runtime action default — 60 minutes — at the handoff boundary).
+    /// When present, <c>ArmJobTimeout</c> honors it over the global
+    /// <see cref="AgentJobOptions.JobTimeout"/> backstop so a long agent
+    /// turn is not prematurely failed, while an explicit short timeout
+    /// still bounds the execution exactly as declared. Null for direct and
+    /// routed launches (the global backstop applies unchanged). Append-only
+    /// Orleans field id (next free after <see cref="WorkflowInvocation"/>).
+    /// </summary>
+    [property: Id(26)] long? TimeoutMilliseconds = null,
+    /// <summary>
+    /// Frozen task-level completion contract (<c>expect</c>) the Workflow
+    /// handoff captured at first preflight. Projected onto the dispatch
+    /// envelope's <see cref="WorkDispatch.Expect"/> field so the Runner's
+    /// agent-job executor can evaluate it after the agent turn settles;
+    /// the Agent execution itself never sees it. Null for direct and
+    /// routed launches. Append-only Orleans field id (next free after
+    /// <see cref="TimeoutMilliseconds"/>).
+    /// </summary>
+    [property: Id(27)] string? Expect = null);
 
 /// <summary>
 /// Lineage discriminator a Workflow handoff stamps on its AgentJob input:
@@ -647,7 +669,27 @@ public sealed record AgentJobInput(
     /// admission or execution. Append-only Orleans field id (next free after
     /// <see cref="SpawnOrigin"/>).
     /// </summary>
-    [property: Id(25)] AgentJobWorkflowInvocation? WorkflowInvocation = null);
+    [property: Id(25)] AgentJobWorkflowInvocation? WorkflowInvocation = null,
+    /// <summary>
+    /// Per-invocation execution deadline in milliseconds. Frozen by a
+    /// Workflow handoff from the task's <c>timeout</c> input; when present
+    /// and positive it replaces the global
+    /// <see cref="AgentJobOptions.JobTimeout"/> backstop in
+    /// <c>ArmJobTimeout</c>, <c>JobTimeoutExceeded</c>, and the report-timeout
+    /// failure message. Null for direct and routed launches — the global
+    /// backstop applies unchanged. Append-only Orleans field id (next free
+    /// after <see cref="WorkflowInvocation"/>).
+    /// </summary>
+    [property: Id(26)] long? TimeoutMilliseconds = null,
+    /// <summary>
+    /// Frozen task-level completion contract (<c>expect</c>) serialized as
+    /// JSON. Projected onto <see cref="WorkDispatch.Expect"/> for agent-job
+    /// dispatches so the Runner can evaluate the Workflow expectation after
+    /// the agent turn settles; admission and execution never read it.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="TimeoutMilliseconds"/>).
+    /// </summary>
+    [property: Id(27)] string? Expect = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(
