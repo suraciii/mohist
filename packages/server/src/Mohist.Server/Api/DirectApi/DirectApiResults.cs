@@ -54,6 +54,13 @@ public static class DirectApiResults
     /// </summary>
     public static IResult ProjectionLag() => new ProjectionLagResult();
 
+    /// <summary>
+    /// The stop lifecycle has not confirmed its fenced outcome yet. The
+    /// mapping remains pending, so the caller must retry the same key rather
+    /// than treating the current projection as a completed command.
+    /// </summary>
+    public static IResult StopPending() => new StopPendingResult();
+
     public static IResult CursorInvalid() =>
         Error(
             StatusCodes.Status400BadRequest,
