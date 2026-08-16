@@ -1,6 +1,6 @@
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Infrastructure;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Project.Services;
 
@@ -21,7 +21,9 @@ public class ProjectInfo
     /// without a second endpoint, and consumed by Readiness / launch
     /// resolution through the DB-backed scoped reader.
     /// </summary>
-    [Id(6)] public ExecutionConfigHint? DefaultExecutionConfig { get; set; }
+    [Id(6)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public ExecutionConfigHint? DefaultExecutionConfig { get; set; }
 
     public RepositoryInfo? DefaultRepository =>
         Repositories.FirstOrDefault(r => r.IsDefault);

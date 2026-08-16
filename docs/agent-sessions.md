@@ -106,7 +106,7 @@ A Mohist Agent is a first-class resource in a Project. It stores:
 | Description | When should this Agent be selected? | Used only for discovery and selection; not included in execution Instructions |
 | Instructions | What role does the Agent have, how does it work, and when does it stop? | Fixed when each new AgentJob starts |
 | Runtime | Which execution backend runs the Agent? | Owned by the Agent; an ordinary client cannot override it for one request |
-| Model / Variant | Which model and reasoning level does the Agent use? | Owned by the Agent; uses the Runtime default when not configured |
+| Model / Variant | Which model and reasoning level does the Agent use? | Owned by the Agent; a missing Model or Variant falls back to the Project default execution configuration, then to the Runtime default |
 | Skills | Which capability descriptions load at startup? | Fixed with the AgentJob; an entry point cannot add or remove them for one request |
 | Max concurrent runs | How many executions can this Agent run at once, including launches and follow-ups? | Applies to subsequent scheduling immediately; lowering it does not stop running executions, and excess work queues |
 | State | Can the Agent accept new delegations? | An archived Agent rejects new delegations; existing Sessions remain readable and can continue |
@@ -116,6 +116,41 @@ Do not put them in Instructions or copy them to an Agent or Agent Connection.
 An Agent references only a Runtime, Model, and Variant. Readiness summarizes
 whether those references can currently execute and directs a missing credential
 to the single settings entry point.
+
+### Project Default Execution Configuration
+
+A Project can hold one default execution configuration: a Runtime, a Model,
+and an optional Variant. It states what tasks in the Project run on when an
+entry point does not supply an execution configuration and the Agent
+definition leaves a field unset. Each execution field resolves by one
+precedence rule:
+
+1. The caller-supplied value, when an entry point accepts one;
+2. The Agent definition's value;
+3. The Project default.
+
+A Runtime that resolves from no source defaults to `opencode` under the
+existing rule. An explicitly malformed value is never masked by a
+lower-precedence source: an unsupported Runtime or a Model outside the
+`provider/model` form remains a configuration gap and blocks launch even
+when a Project default is configured.
+
+Configure the default through the Project settings surface
+(`PUT /api/projects/{projectRef}/default-execution-config` with
+`runtime`, `model`, and optional `variant`; the Project read reports
+`defaultExecutionConfig`, null when unset). Setting a new default replaces
+the previous one; an invalid default is rejected and leaves the previous
+default untouched. The default resolves at launch, so each AgentJob stores
+the configuration it launched with and later default changes never change
+an in-flight or completed execution.
+
+With a default configured, an Agent without a Model (or with a Variant but
+no Model) is no longer structurally Needs setup: Readiness reports Ready or
+Unknown, and a launch dispatches with the model the default resolved. Without
+a default, the gap remains Needs setup with its actionable repair. Removing
+or changing the default re-introduces or re-resolves the gap accordingly,
+but a Readiness conclusion confirmed by a completed execution is not flipped
+by a default change alone.
 
 A delegation can include context references such as an Issue, Epic, or
 Repository, but context is not Agent configuration. An ordinary client can
@@ -158,6 +193,13 @@ A temporarily offline Runner or lack of capacity is Availability, not a reason
 to change a Ready Agent to Needs setup. Work can be accepted and queued. The
 Web UI, CLI, and Agent Connections present the unified Mohist conclusion and do
 not maintain separate Runtime judgment rules.
+
+Structural gaps resolve Model and Variant by Agent definition, then Project
+default. When a configured Project default resolves a missing Model or a
+Variant set without a Model, those gaps do not appear and the conclusion
+follows the existing history rules (Ready or Unknown). Definition errors — an
+unsupported Runtime or a Model outside the `provider/model` form — remain gaps
+regardless of any Project default.
 
 Availability states whether a new execution can start now. After a Runner or
 capacity recovers, a queued AgentJob can briefly show "waiting for scheduling"
