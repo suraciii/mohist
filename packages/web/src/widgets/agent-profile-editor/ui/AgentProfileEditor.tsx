@@ -75,7 +75,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
 
   const { data: availableModels } = useAvailableModelIds(runtime)
   const modelVariantsMap = useModelVariants(runtime)
-  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? availableModels?.reasoningEfforts : undefined
+  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? modelVariantsMap : undefined
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
