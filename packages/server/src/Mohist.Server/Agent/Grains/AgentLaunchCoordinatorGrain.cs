@@ -838,12 +838,12 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             // process dies after this call but before the completed plan is
             // persisted, the reminder repeats the idempotent archive before
             // it records the terminal rejection as complete.
-            await _participantProbe.OnArchiveDefinitionAsync(
-                current.AgentId,
-                current.Pending?.CommandId ?? string.Empty);
             await _grains
                 .GetGrain<IAgentGrain>(GrainKey.Agent(current.ProjectId, current.AgentId))
                 .ArchiveAsync();
+            await _participantProbe.OnArchiveDefinitionAsync(
+                current.AgentId,
+                current.Pending?.CommandId ?? string.Empty);
         }
 
         _state.State.Plan = current with
