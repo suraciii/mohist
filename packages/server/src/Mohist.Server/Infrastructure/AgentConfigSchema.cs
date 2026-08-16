@@ -7,7 +7,7 @@ namespace Mohist.Server.Infrastructure;
 /// Converged AgentConfig schema shared by the issue-level and
 /// agent-definition write surfaces. The
 /// issue-level <c>agentConfig</c> surfaces accept only <c>model</c> +
-/// <c>variant</c>; Agent-definition surfaces additionally accept
+/// model level fields; Agent-definition surfaces additionally accept
 /// <c>runtime</c>. Legacy runtime/liveness keys
 /// (<c>type</c>, <c>livenessQuietThresholdMs</c>, <c>probeTimeoutMs</c>,
 /// <c>sessionStartTimeoutMs</c>, <c>compaction</c>) are rejected at the
@@ -46,6 +46,7 @@ public static class AgentConfigSchema
     public static readonly IReadOnlySet<string> IssueAllowedKeys = new HashSet<string>(StringComparer.Ordinal)
     {
         "model",
+        "reasoningEffort",
         "variant",
     };
 
@@ -62,7 +63,7 @@ public static class AgentConfigSchema
                     : $"agentConfig.{property.Name} is not allowed; Issue agent config accepts only {string.Join(", ", IssueAllowedKeys)}.";
         }
 
-        return null;
+        return ValidateReasoningEffort(agentConfig.Value);
     }
 
     public static readonly IReadOnlySet<string> ForbiddenKeys = new HashSet<string>(StringComparer.Ordinal)

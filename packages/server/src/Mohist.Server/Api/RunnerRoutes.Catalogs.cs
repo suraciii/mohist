@@ -24,7 +24,6 @@ public static partial class RunnerRoutes
             normalized[entry.Key.Trim()] = new RuntimeCatalogEntry(
                 models,
                 NormalizeCoderModelVariants(entry.Value.Variants),
-                NormalizeCoderModelVariants(entry.Value.ReasoningEfforts),
                 entry.Value.SupportsReasoningEffort,
                 entry.Value.Complete,
                 NormalizeIdentity(entry.Value.CapabilityRevision));

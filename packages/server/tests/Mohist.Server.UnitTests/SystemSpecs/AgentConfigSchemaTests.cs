@@ -259,11 +259,10 @@ public class AgentConfigSchemaTests
     }
 
     [Fact]
-    public void ValidateIssue_ReasoningEffortIsRejectedBecauseIssuesCannotOverrideAgentExecutionTuple()
+    public void ValidateIssue_ReasoningEffortIsAllowed()
     {
         var error = AgentConfigSchema.ValidateIssue(JsonDocument.Parse("""{"reasoningEffort":"high"}""").RootElement);
 
-        Assert.NotNull(error);
-        Assert.Contains("agentConfig.reasoningEffort", error);
+        Assert.Null(error);
     }
 }

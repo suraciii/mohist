@@ -19,7 +19,7 @@ export function buildRegistrationState(
   )
   const piCapabilityRevision = piCatalog
     ? createHash('sha256')
-        .update(JSON.stringify({ models: piModels, reasoningEfforts: piReasoningEfforts }))
+        .update(JSON.stringify({ models: piModels, variants: piReasoningEfforts }))
         .digest('hex')
     : null
   return {
@@ -32,8 +32,7 @@ export function buildRegistrationState(
           runtimeCatalogs: {
             pi: {
               models: piModels,
-              variants: {},
-              reasoningEfforts: piReasoningEfforts,
+              variants: piReasoningEfforts,
               supportsReasoningEffort: true,
               complete: true,
               capabilityRevision: piCapabilityRevision,

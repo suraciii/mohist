@@ -77,11 +77,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
                     Models: ["openai/model"],
                     Variants: new Dictionary<string, string[]>
                     {
-                        ["openai/model"] = ["balanced"],
-                    },
-                    ReasoningEfforts: new Dictionary<string, string[]>
-                    {
-                        ["openai/model"] = ["high"],
+                        ["openai/model"] = ["balanced", "high"],
                     },
                     SupportsReasoningEffort: true,
                     Complete: true,

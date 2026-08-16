@@ -975,7 +975,6 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             entry => new RuntimeCatalogEntry(
                 entry.Value.Models is null ? null : [.. entry.Value.Models],
                 CloneMap(entry.Value.Variants),
-                CloneMap(entry.Value.ReasoningEfforts),
                 entry.Value.SupportsReasoningEffort,
                 entry.Value.Complete,
                 entry.Value.CapabilityRevision),
