@@ -30,6 +30,21 @@ public sealed class AgentTaskDefinitionFactoryTests
     }
 
     [Fact]
+    public void DerivesFirstSentence_WithUnicodeSentenceBoundary()
+    {
+        var definition = AgentTaskDefinitionFactory.Build(
+            "修复登录流程。然后补充测试。",
+            hasAcceptedAttachment: false,
+            nameHint: null,
+            callerHint: new ExecutionConfigHint(Model: "provider/task"),
+            projectDefault: null,
+            identity: "project\\njapanese",
+            occupiedNames: []);
+
+        Assert.Equal("修复登录流程", definition.Name);
+    }
+
+    [Fact]
     public void DisambiguatesNames_CaseInsensitively_AndIncludesReservedNames()
     {
         var definition = AgentTaskDefinitionFactory.Build(
