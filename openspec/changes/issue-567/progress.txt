@@ -750,3 +750,24 @@ Channel decision (grounded in live source):
 - Final `npm run verify` passed end to end: build 0 warnings/errors, Workflow
   178, CLI 1,856, Server Unit 2,674, Server Spec 3,946, Arch 68, Web 4,727,
   Runner 1,661, and Slack 70. Runner typecheck also passed independently.
+
+## CI Verification Repair
+
+- A fresh `npm run verify` reproduced one Server Spec failure:
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  failed because the shared launch helper made exactly one HTTP poll after the
+  durable assignment-prepared signal and received no matching dispatch. The
+  exact class and method passed in isolation, confirming an asynchronous
+  readiness race rather than an issue-567 recovery regression.
+- Updated `AgentSessionLaunchRoutesTestSupport.PollDispatchForSessionAsync` to
+  retry the expected dispatch through the existing bounded `TestWait` helper,
+  retaining the same AgentJob/session identity assertions. This is the same
+  eventual-dispatch synchronization already used by the neighboring launch
+  support. The initial one-second bound still timed out under the full-suite
+  load, so it was aligned with the existing five-second dispatch retry bound.
+- The affected spec project builds with 0 warnings/errors, the route class
+  passes three consecutive runs, the issue-567 recovery/reconciliation
+  classes pass 38/38, and the full Server Spec apphost passes 3,946/3,946.
+- Final `npm run verify` passes end to end: build 0 warnings/errors, Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Spec 3,946, Arch 68, Web 4,727,
+  Runner 1,661, and Slack 70.
