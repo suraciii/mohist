@@ -139,9 +139,13 @@ export function availableModelIdsQueryOptions(
   return {
     queryKey: ['opencode-model-ids', normalized, projectId],
     queryFn: async () => {
-      if (normalized === null) return { models: [], modelVariants: {} }
+      if (normalized === null) return { models: [], modelVariants: {}, reasoningEfforts: {} }
       const response = await getModels(projectId, normalized)
-      return { models: response.models, modelVariants: response.modelVariants ?? {} }
+      return {
+        models: response.models,
+        modelVariants: response.modelVariants ?? {},
+        reasoningEfforts: response.reasoningEfforts ?? {},
+      }
     },
     enabled: !!projectId && normalized !== null,
   }
@@ -149,9 +153,11 @@ export function availableModelIdsQueryOptions(
 
 export function useAvailableModelIds(runtime: AgentRuntime | string | null = DEFAULT_AGENT_RUNTIME) {
   const { projectId } = useProject()
-  return useQuery<{ models: string[]; modelVariants: OpencodeModelVariants }>(
-    availableModelIdsQueryOptions(projectId, runtime),
-  )
+  return useQuery<{
+    models: string[]
+    modelVariants: OpencodeModelVariants
+    reasoningEfforts: import('./client').ModelReasoningEfforts
+  }>(availableModelIdsQueryOptions(projectId, runtime))
 }
 
 export function selectModelVariants(data: { models: string[]; modelVariants: OpencodeModelVariants } | undefined) {
