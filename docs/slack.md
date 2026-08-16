@@ -145,6 +145,14 @@ semantics as the CLI and Web UI. Conversation is only a natural-language
 interface to those capabilities. It neither creates a second meaning for a
 management operation nor executes work for another Agent.
 
+The Mohist App conversation follows the same liveness and reply contract as
+every Agent Connection (see [Present Replies](#present-replies)): acceptance
+and progress are reactions, and the built-in Agent authors replies through the
+same send action. It performs management through the same operations the CLI
+and Web UI call, under the operator's own authority, and reports only confirmed
+results. The conversation is not a separate command channel: it has no hidden
+protocol, no message-shaped commands, and no effects beyond those operations.
+
 The people who can drive the Mohist App are the people who can manage the
 corresponding resources. It responds to a management request only from an
 operator allowed to manage the target Connection or Agent. An ordinary
@@ -462,9 +470,10 @@ for the missing task. An attachment by itself is valid explicit input, and
 Mohist does not invent a hidden prompt for it.
 
 After acceptance, Mohist creates an AgentJob, AgentSession, first SessionInput,
-and first AgentTurn. The Bot first confirms acceptance and shows whether the
-work is running or queued. A queued or running Turn can be stopped. Agent
-replies, failures, and conclusions that need human action
+and first AgentTurn. Acceptance is the **👀 (Received)** reaction on the user's
+message, not an acknowledgement message. The liveness projection then shows
+whether the work is running or queued. A queued or running Turn can be stopped.
+Agent replies, failures, and conclusions that need human action
 return to the same Slack conversation. Completing the AgentJob does not close
 the Session; when a reply asks a question, the user can answer directly.
 
@@ -510,10 +519,10 @@ AgentSession:
   creates an independent AgentSession for it. The original Agent's context is
   neither switched nor contaminated.
 - A message that mentions several Bots managed by the same Mohist Server starts
-  no work and produces one prompt to select an Agent. A Bot's own message does
-  not automatically become another Bot's input. Separate Mohist Servers have
-  no shared routing state, so the first version does not coordinate one
-  multi-Bot message across installations.
+  no work and produces one prompt to select an Agent. A Bot's own message never
+  becomes input — not for itself, and not for another Bot. Separate Mohist
+  Servers have no shared routing state, so the first version does not
+  coordinate one multi-Bot message across installations.
 
 As in Buzz, several Agents can therefore act as independent collaborators in
 one discussion without automatically triggering one another or making the
@@ -561,11 +570,15 @@ content it chooses to say.
 - **Mohist owns liveness**: reactions (👀 Received, ⏳ Working, ✅ Completed)
   and one status message that can be updated in place. These signals begin as
   soon as input is accepted and do not depend on the Agent sending a reply.
+  Reactions are best-effort: a failed reaction call never blocks or fails
+  work. Liveness always reaches a terminal form (✅ or ⚠️) on every outcome,
+  including Agent crash, cancellation, and service restart.
 - **The Agent owns the reply**: the Agent uses Mohist's send action to write to
   the injected reply anchor. Agent reasoning, tool calls, and intermediate
   output are not visible to Slack users. Only content that the Agent actively
   sends appears in Slack; Mohist does not extract or invent a reply from the
-  execution result.
+  execution result, and no Mohist component interprets Agent output to produce
+  Slack content or management effects.
 
 The Web session timeline contains the complete execution record, including
 Inputs, tool calls, and intermediate output. When an External Web URL is
@@ -671,6 +684,12 @@ single status message.
 > Anyone still confirms that the Bot can see the current channel. Per-Connection
 > selection of accepted channels is not delivered. Coordination between Bots
 > managed by different Mohist Servers is also not available.
+>
+> The Mohist App conversation is migrating to the standard liveness and reply
+> contract. The current build still acknowledges a management request with a
+> text message and performs management through a model-output protocol instead
+> of the ordinary operations surface; reactions, the send action, and the
+> standard reply contract specified above are not yet delivered for it.
 
 ## Slack Collaboration Rules for Agents
 
@@ -698,6 +717,10 @@ does not change the Agent's capabilities:
 - **Do not guess the reply location**: Mohist identifies the thread and message
   anchor for every Input. Do not choose a historical message from memory or
   send a reply or delegation into another channel.
+- **Resume silently after a restart**: After a service restart, Session
+  recovery, or context compaction, rebuild state from durable records and the
+  thread and continue. Do not announce the interruption, summarize what was
+  lost, or ask how to proceed.
 
 ## Permissions
 
