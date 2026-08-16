@@ -524,3 +524,19 @@ Channel decision (grounded in live source):
   Unit 2667, CLI 1855, Workflow Definition 178, Web 4727, and Runner 1657;
   it remained non-zero only for the pre-existing Server ArchTests
   `FailIfMarkerSpecs` migration-ledger digest drift (67/68).
+
+## T-004 Receipt Commit-Before-Ack Coverage
+
+- The existing Workflow replacement arbitration was verified on the current
+  branch: a matching interruption receipt preserves the original settlement,
+  creates one generation-1 task/work/turn identity, and stale old-work ingress
+  remains rejected. Focused issue coverage passed 40/40.
+- Added a deterministic replay test that injects failure into the update-fence
+  write after the Workflow replacement commit. The first delivery throws with
+  the replacement and receipt ledger durable but the fence still marked; the
+  exact replay returns the stored acknowledgement, settles the fence, and
+  creates no second attempt.
+- The Server spec project builds with 0 warnings/errors. `npm run test:fast`
+  passed all functional suites and typechecks; it remains non-zero only for
+  the pre-existing `SpecUnitMigrationLedgerRules` / `FailIfMarkerSpecs`
+  migration-ledger digest drift (67/68).

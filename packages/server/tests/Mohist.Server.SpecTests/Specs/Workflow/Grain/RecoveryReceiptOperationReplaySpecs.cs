@@ -84,6 +84,78 @@ public sealed class RecoveryReceiptOperationReplaySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task InterruptedReceiptDoesNotAcknowledgeBeforeReplacementCommitAndReplayRepairsFence()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var original = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            original.Id,
+            work.WorkId,
+            runnerId,
+            "replay-interrupted-session",
+            "replay-interrupted-turn",
+            "opencode",
+            "replay-interrupted-runtime-session");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+
+        var operationId = $"runner-update:replay-interrupted-{Guid.NewGuid():N}";
+        var operationGrain = Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId);
+        var operation = await operationGrain.StartOrGetAsync(new RunnerUpdateOperation(
+            operationId,
+            runnerId,
+            _fixture.TimeProvider.GetUtcNow(),
+            new[]
+            {
+                new RunnerUpdateWork(
+                    WorkDispatchOwnerKinds.Workflow,
+                    _workflowId!,
+                    work.WorkId,
+                    original.Id,
+                    WorkItemTypes.Task)
+            }));
+        await operationGrain.MarkWorkAsync(
+            operationId,
+            WorkDispatchOwnerKinds.Workflow,
+            _workflowId!,
+            work.WorkId,
+            original.Id,
+            RunnerUpdateWorkStatus.Marked);
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            original.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+
+        var receipt = InterruptedReceipt(binding, _workflowId!, operationId);
+        _fixture.OperationWriteFailures.FailNext(RunnerUpdateOperationWriteKind.MarkWork);
+        await Assert.ThrowsAnyAsync<Exception>(() => workflow.ReceiveRecoveryReceiptAsync(receipt));
+
+        var committed = await LoadRunAsync(_workflowId!);
+        var interrupted = Assert.Single(committed.CurrentStage().Tasks, task => task.Id == original.Id);
+        var replacement = Assert.Single(committed.CurrentStage().Tasks, task => task.Id != original.Id);
+        Assert.Equal(TaskRunStatus.Interrupted, interrupted.Status);
+        Assert.Equal(AgentResultSettlementState.RecoverablyInterrupted, interrupted.AgentResultSettlement!.State);
+        Assert.Equal(binding.AgentTurnId, interrupted.AgentResultSettlement.AgentTurnId);
+        Assert.Equal(1, replacement.RecoveryGeneration);
+        Assert.Single(committed.AppliedRecoveryReceipts);
+        Assert.Equal(RunnerUpdateWorkStatus.Marked,
+            Assert.Single((await operationGrain.GetAsync(operationId))!.AffectedWorks).Status);
+
+        var acknowledgement = await workflow.ReceiveRecoveryReceiptAsync(receipt);
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, acknowledgement.Status);
+        Assert.Equal(receipt.ReceiptId, acknowledgement.AppliedReceiptId);
+        var afterReplay = await LoadRunAsync(_workflowId!);
+        Assert.Equal(2, afterReplay.CurrentStage().Tasks.Count);
+        var settled = await operationGrain.GetAsync(operationId);
+        Assert.Equal(RunnerUpdateWorkStatus.Settled, Assert.Single(settled!.AffectedWorks).Status);
+        Assert.Equal(RunnerUpdateRecoveryStatus.ReceiptAcked,
+            Assert.Single(settled.AffectedWorks).RecoveryStatus);
+    }
+
+    [Fact]
     public async Task TerminalReplacementReplayRepairsOperationAfterWriteFailure()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
