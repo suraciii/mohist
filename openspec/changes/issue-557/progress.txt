@@ -101,3 +101,86 @@
   arch 68, wf 178, cli 1858, runner 1656, web 4724, typecheck all green;
   `npm run test:fast` passes. SpecTests are NOT in test:fast — run the
   project directly for integration coverage.
+
+## T-003 (catalog wire) — exploration notes, NOT yet implemented
+
+No code changes landed yet; this is the reconnaissance from the aborted run.
+
+Key locations:
+- C# `RuntimeCatalogEntry`: packages/server/src/Mohist.Server/Runner/Grains/IRunnerGrain.cs
+  (~line 100). Record with Id(0) Models, Id(1) Variants. Append Id(2)
+  ReasoningEfforts (Dictionary<string,string[]>?), Id(3) SupportsReasoningEffort
+  (bool?), Id(4) Complete (bool?), Id(5) CapabilityRevision (string?) — nullable
+  so legacy entries deserialize as null = non-authoritative.
+- TS `RuntimeCatalogEntry`: packages/runner/src/core/types.ts:385. Add optional
+  fields reasoningEfforts?, supportsReasoningEffort?, complete?, capabilityRevision?.
+- Runner registration: runtime/host.ts `registrationState()` (~line 808). Pi
+  currently publishes thinkingLevels as `variants` (from commit c7cc2483b). Change:
+  efforts under `reasoningEfforts`, `variants: {}` empty map, supportsReasoningEffort
+  true, complete true ONLY when piRuntime.catalog() non-null (catalog() returns null
+  until loaded — attemptStart clears it on failure, so `complete` follows catalog
+  presence; when catalog missing, publish entry WITHOUT complete/revision, or omit
+  the pi entry entirely — current code omits entry when no catalog).
+- OpenCode: host.ts does NOT publish an opencode catalog at all (model discovery
+  was removed in d72e6a4a5 "honor requested model without probing"). Design D3 says
+  OpenCode registers supportsReasoningEffort:false, complete:true, no efforts,
+  variants unchanged — but OpenCode has NO model list, and per the D4 decision
+  table complete:true + absent model ⇒ incompatible ⇒ would kill all OpenCode
+  dispatch. Resolution for next run: register opencode with
+  supportsReasoningEffort:false but WITHOUT complete/capabilityRevision (empty
+  models/variants ⇒ non-authoritative ⇒ needs-setup) so current behavior is
+  preserved until opencode gains a real catalog; OR only publish complete once a
+  real opencode catalog exists. Record the decision in code comments. The task AC
+  only requires: supportsReasoningEffort=false, true variants unchanged (none
+  today), no reasoning efforts.
+- Server wire/normalize: RunnerRoutes.NormalizeRuntimeCatalogs (~line 987) currently
+  REBUILDS each entry (models+variants only) — must carry the new fields verbatim.
+  NormalizeCoderModelVariants reusable for reasoningEfforts maps. Both
+  RunnerRegisterRequest and RunnerHeartbeatRequest carry RuntimeCatalogs.
+  RunnerRegistryGrain.RegisterAsync already stores RunnerInfo verbatim (enriches
+  RegisteredAt only) — no change needed there beyond nothing.
+- RunnerRegistryGrain.CatalogFor fallback (legacy CoderModels/CoderModelVariants
+  path, lines ~116-129) constructs legacy RuntimeCatalogEntry — leave as
+  non-authoritative (no complete/revision) which is exactly right.
+- Server API exposure: OpencodeRoutes /api/projects/{id}/opencode/models?runtime=
+  returns { models, modelVariants } — add `modelReasoningEfforts` (aggregate like
+  ListCoderModelVariantsByRuntime; needs new registry method e.g.
+  ListCoderModelReasoningEffortsByRuntimeAsync mirroring the variants one).
+  Web: entities/settings/api/client.ts getModels (~line 59) add
+  reasoningEfforts?: Record<string,string[]> to response type;
+  queries.ts availableModelIdsQueryOptions (~line 130) thread it through
+  (selectModelVariants pattern for selectModelReasoningEfforts). T-008 builds the
+  editor control on this; T-003 only needs the plumbing + exposure + tests.
+- capabilityRevision derivation: compute on RUNNER side (host.ts) via
+  node:crypto sha256 over a canonical serialization — MUST sort keys and lists
+  deterministically (open design question: stability across serialization order —
+  answer: build a canonical form: sorted model ids, sorted efforts/variants, then
+  JSON.stringify). Server stores it verbatim, never recomputes.
+- Existing runner tests that WILL break and need updating:
+  runner-host-opencode-runtime.spec.ts lines ~314-410 (three specs asserting
+  thinkingLevels under variants) — flip to reasoningEfforts + empty variants map;
+  runner-host-lifecycle.spec.ts:212 (`runtimeCatalogs: { pi: { models: [], variants: {} } }`)
+  gains new fields. Test-resources default pi factory returns catalog with
+  models:[] (support/test-resources.ts:85) so default registration is
+  complete:true with empty content.
+- Server test homes: RunnerRegistrySpecs.cs (grain aggregation — extend with
+  verbatim storage + reasoningEfforts aggregation), ApiContractSpecs.cs /
+  IssueModelVariantApiSpecs.cs (wire round-trip via POST /api/runner/{id}/register
+  with runtimeCatalogs; legacy entry without complete/revision fields must
+  deserialize as nulls and stay non-authoritative — JSON.Options is
+  WhenWritingNull so absent fields → null bool?s, fine).
+- Web test homes: entities/settings/api/queries.test.ts (selectModelVariants
+  pattern at line 22).
+
+Plan skeleton for next run (est. half a day):
+1. IRunnerGrain.cs record fields (Ids 2-5) + runner core/types.ts interface.
+2. host.ts registrationState(): pi entry with efforts/empty variants/complete
+   gated on catalog; content-hash capabilityRevision via canonical serializer
+   (new small module, unit-test the hash stability: key order, list order,
+   identical re-registration ⇒ same revision; capability change ⇒ new revision).
+3. RunnerRoutes.NormalizeRuntimeCatalogs verbatim pass-through (trim/null rules
+   mirroring models/variants for reasoningEfforts).
+4. RunnerRegistryGrain ListCoderModelReasoningEffortsByRuntimeAsync +
+   OpencodeRoutes response field + web client/queries plumbing.
+5. Tests both sides per the AC list. Run: runner vitest, server unit + SpecTests,
+   web vitest, npm run test:fast.
