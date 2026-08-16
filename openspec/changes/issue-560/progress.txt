@@ -430,3 +430,10 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
   2,701 Server unit, 68 architecture, 178 workflow, 1,860 CLI, 4,736 Web,
   and 1,639 Runner tests plus all typechecks. The working tree was clean before
   this progress entry.
+
+## T-004 current-run audit
+
+- Re-audited the committed Web slice against every `web-agent-task-composer` scenario. The composer renders prompt, attachments, and context before the optional Agent selector; the neutral selection calls `startAgentTask` with a stable caller-generated key, while an existing selection keeps `useLaunchAgentSession` and sends no execution hints.
+- Project `defaultExecutionConfig` drives the recommendation-only path. Adjusted and no-default create-new paths use the shared catalog-backed `ModelSelect` with `useAvailableModelIds` and `useModelVariants`; selected existing Agents never render those controls. Conflict, pending convergence, and unresolved execution configuration feedback preserves composed state and gives actionable repair guidance.
+- The launch response uses the canonical `sessionUrl`, exposes the created Agent from the attachment interstitial, and the session header links to the same editable Agent detail page. The empty Agents state routes its primary action to `agent-sessions/new` and retains definition-first configuration as the secondary action. `docs/web-ui.md` documents these paths.
+- Verification passed: Web typecheck, FSD boundary check, test-boundary check, focused coverage (147 tests), full Web suite (4,736 tests in 378 files), `docs:check` (92 files), and `git diff --check`. No production repair was required in this audit.
