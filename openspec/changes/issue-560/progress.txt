@@ -453,3 +453,13 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
 - The initial worktree inspection for this repair was clean. The actual failure was the shared launch-spec helper polling the runner once immediately after the durable assignment-prepared signal; the dispatch visibility race is fixed by commit `52c4867a7` with bounded `TestWait.ForAsync` polling.
 - The supported focused apphost command ran `AgentSessionLaunchRuntimeResolutionSpecs` 10/10 with zero errors, failures, or skips. A `dotnet test --filter` attempt is not focused under the installed Microsoft Testing Platform because it ignores VSTest filters; the complete Server Spec assembly nevertheless passed 3,950/3,950.
 - A fresh full `npm run verify` passed all repository checks and test lanes. Post-verification `git status`, `git diff --check`, and `git diff` showed no Git-visible verification side effects.
+
+## Review repair: must-fix dispositions
+
+- MF-1 fixed in commit `14869ea81`: Agent reads now include the server-authoritative `effectiveExecutionConfig`; Web list/detail and CLI rendering consume it, including Project-default-resolved and materialized-Pi cases. Regression coverage was added for both projections.
+- MF-2 fixed in commit `14869ea81`: `/agent-tasks/preflight` returns the resolved Agent, execution, repository/workspace, Issue/Epic, permission scope, expected impact, and scope fingerprint. Web confirms the projection before launch; CLI displays it and requires confirmation or `--yes`. Launch rejects scope drift.
+- MF-3 fixed in commit `14869ea81`: task-first Agent state durably stores the first idempotency key and request fingerprint. Crash adoption calls the grain adoption path and never re-derives mutable Project defaults.
+- MF-4 fixed in commit `14869ea81`: Agent grain creation is first-writer-wins; matching task-first requests adopt the existing state and mismatched fingerprints conflict. `AgentGrainSpecs` covers this behavior in commit `433a8b737`.
+- MF-5 fixed in commit `14869ea81`: task-first requests carry collaborator and concurrency fields; the Web composer and profile editor configure them, and Agent detail displays them. The values participate in the launch fingerprint and preflight permission projection.
+
+The changes do not edit `review.md`. The latest focused verification passed: Server SpecTests 3,952/3,952, CLI tests 1,860/1,860, Web targeted tests 75/75, Web typecheck, and the FSD boundary check.
