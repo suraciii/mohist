@@ -471,6 +471,19 @@ public partial class WorkflowGrain
         if (translated is not WorkflowItemTranslator.InboundReport.Task taskReport)
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "terminal-result-invalid");
 
+        var replacementRecoveryTransition = task.AgentInterruption is { State: AgentWorkInterruptionStates.Recovering }
+            ? task.AgentInterruption
+            : null;
+        var recoveryOriginal = replacementRecoveryTransition is null
+            ? null
+            : _run.Stages
+                .SelectMany(stage => stage.Tasks)
+                .FirstOrDefault(candidate =>
+                    candidate.Id != task.Id
+                    && candidate.AgentInterruption is { } interruption
+                    && string.Equals(interruption.UpdateOperationId, replacementRecoveryTransition.UpdateOperationId, StringComparison.Ordinal)
+                    && interruption.RecoveryGeneration == replacementRecoveryTransition.RecoveryGeneration - 1
+                    && string.Equals(interruption.State, AgentWorkInterruptionStates.Interrupted, StringComparison.Ordinal));
         var wasUpdateInterrupted = settlement.State == AgentResultSettlementState.RecoverablyInterrupted;
         var activeWork = wasUpdateInterrupted
             ? _run.FindRecoveryReceiptWork(receipt.TaskRunId, receipt.WorkId, receipt.RunnerId)
@@ -478,9 +491,8 @@ public partial class WorkflowGrain
         if (activeWork is null || !activeWork.IsTask)
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "work-not-reportable");
 
-        var racedUpdateInterruption = wasUpdateInterrupted
+        var racedUpdateInterruption = wasUpdateInterrupted || replacementRecoveryTransition is not null
             ? task.AgentInterruption
-            : null;
             : null;
         var effectiveReport = taskReport.Value with { TaskRunId = receipt.TaskRunId };
         try
@@ -531,6 +543,24 @@ public partial class WorkflowGrain
             if (task.AgentInterruption is not null)
                 await ApplySessionInterruptionAsync(settlement.AgentSessionId, task.AgentInterruption!);
             await SettleUpdateOperationWorkAsync(receipt, settlement.UpdateOperationId!);
+        }
+        else if (replacementRecoveryTransition is not null)
+        {
+            if (task.AgentInterruption is not null)
+                await ApplySessionInterruptionAsync(settlement.AgentSessionId, task.AgentInterruption);
+            if (recoveryOriginal?.AgentResultSettlement is { } originalSettlement
+                && recoveryOriginal.AgentResultSettlement.TaskRunId is { } originalTaskRunId)
+            {
+                await GrainFactory
+                    .GetGrain<IRunnerUpdateOperationGrain>(originalSettlement.RunnerId)
+                    .MarkRecoverySettledAsync(
+                        replacementRecoveryTransition.UpdateOperationId,
+                        WorkDispatchOwnerKinds.Workflow,
+                        GrainKey,
+                        originalSettlement.WorkId,
+                        originalTaskRunId);
+            }
+            await ReconcileAgentResultSettlementAsync();
         }
         else
         {

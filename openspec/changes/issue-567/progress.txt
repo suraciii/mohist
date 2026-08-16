@@ -366,6 +366,19 @@ Channel decision (grounded in live source):
   Web passed 4727/4727; CLI passed 1855/1855. Runner/Web typechecks and Server
   test build pass.
 
+## Re-review MF-1 Increment
+
+- Workflow terminal-result receipts now recognize a bound replacement task in
+  the `recovering` transition, project it to `recovered`, reconcile its
+  terminal settlement, and mark the original update fence
+  `replacement-settled` rather than acknowledging the replacement work id.
+- Added a deterministic Workflow spec that allocates and binds a replacement,
+  delivers its terminal receipt, and asserts recovered visibility plus the
+  replacement-settled operation state.
+- Verification: the Server SpecTests build passed and the new settlement spec
+  passed in the full run. The full invocation also reproduced two unrelated
+  existing dispatch timing/runtime-resolution failures.
+
 ## Final Gate Preparation
 
 - Reduced the Runner connection client implementation to 998 lines while

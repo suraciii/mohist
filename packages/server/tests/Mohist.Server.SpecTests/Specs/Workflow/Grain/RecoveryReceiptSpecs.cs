@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Events;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
@@ -165,6 +166,95 @@ public sealed class RecoveryReceiptSpecs : WorkflowGrainSpecs
         var settledWork = Assert.Single(settledOperation!.AffectedWorks);
         Assert.Equal(RunnerUpdateWorkStatus.Settled, settledWork.Status);
         Assert.Equal(RunnerUpdateRecoveryStatus.ReceiptAcked, settledWork.RecoveryStatus);
+    }
+
+    [Fact]
+    public async Task RecoveryReceipt_TerminalResultForReplacementProjectsRecoveredAndSettlesReplacement()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var original = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            original.Id,
+            work.WorkId,
+            runnerId,
+            "replacement-receipt-session",
+            "replacement-receipt-turn",
+            "opencode",
+            "replacement-receipt-runtime-session");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+
+        var operationId = $"runner-update:replacement-receipt-{Guid.NewGuid():N}";
+        var operationGrain = Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId);
+        var operation = await operationGrain.StartOrGetAsync(new RunnerUpdateOperation(
+            operationId,
+            runnerId,
+            _fixture.TimeProvider.GetUtcNow(),
+            new[]
+            {
+                new RunnerUpdateWork(
+                    WorkDispatchOwnerKinds.Workflow,
+                    _workflowId!,
+                    work.WorkId,
+                    original.Id,
+                    WorkItemTypes.Task)
+            }));
+        await operationGrain.MarkWorkAsync(
+            operation.OperationId,
+            WorkDispatchOwnerKinds.Workflow,
+            _workflowId!,
+            work.WorkId,
+            original.Id,
+            RunnerUpdateWorkStatus.Marked);
+        Assert.Equal(
+            ReportAck.Accepted,
+            await workflow.MarkUpdateInterruptedAsync(original.Id, work.WorkId, runnerId, operation.OperationId));
+
+        var interrupted = await workflow.ReceiveRecoveryReceiptAsync(
+            InterruptedReceipt(binding, _workflowId!, operation.OperationId));
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, interrupted.Status);
+
+        var fenced = await LoadRunAsync(_workflowId!);
+        var replacement = Assert.Single(fenced.CurrentStage().Tasks, task => task.Id != original.Id);
+        var replacementDispatch = await workflow.ClaimNextAsync(runnerId);
+        Assert.NotNull(replacementDispatch);
+        Assert.Equal(replacement.WorkId, replacementDispatch!.Id);
+
+        var replacementBinding = new AgentExecutionBinding(
+            replacement.Id,
+            replacement.WorkId!,
+            runnerId,
+            "replacement-receipt-session-2",
+            "replacement-receipt-turn-2",
+            "opencode",
+            "replacement-receipt-runtime-session-2");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(replacementBinding));
+
+        var result = new WorkResult("completed", "replacement receipt result");
+        var terminal = TerminalReceipt(
+            replacementBinding,
+            _workflowId!,
+            result,
+            "replacement-terminal-result") with
+        {
+            RecoveryGeneration = replacement.RecoveryGeneration,
+        };
+        var acknowledgement = await workflow.ReceiveRecoveryReceiptAsync(terminal);
+
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, acknowledgement.Status);
+        var recovered = await LoadRunAsync(_workflowId!);
+        var recoveredReplacement = Assert.Single(recovered.CurrentStage().Tasks, task => task.Id == replacement.Id);
+        Assert.Equal(TaskRunStatus.Completed, recoveredReplacement.Status);
+        Assert.Equal(AgentWorkInterruptionStates.Recovered, recoveredReplacement.AgentInterruption?.State);
+        Assert.Equal(operationId, recoveredReplacement.AgentInterruption?.UpdateOperationId);
+        Assert.False(recovered.HasUnresolvedAgentResult());
+
+        var settledOperation = await operationGrain.GetAsync(operationId);
+        var settledWork = Assert.Single(settledOperation!.AffectedWorks);
+        Assert.Equal(RunnerUpdateWorkStatus.Settled, settledWork.Status);
+        Assert.Equal(RunnerUpdateRecoveryStatus.ReplacementSettled, settledWork.RecoveryStatus);
     }
 
     private static RuntimeRecoveryReceipt TerminalReceipt(
