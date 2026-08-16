@@ -335,3 +335,14 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
 - `npm run test:fast` passed: typechecks, 2,701 Server unit tests, 68
   architecture tests, 178 workflow tests, 1,860 CLI tests, 4,736 Web tests,
   and 1,639 Runner tests.
+
+## T-003 archive crash-window verification
+
+- Corrected the coordinator's archive probe ordering so `IAgentGrain.ArchiveAsync`
+  completes before the injected participant failure. Reminder replay now tests
+  the real crash window after archival and before the terminal plan write;
+  repeated archival remains idempotent and the recorded rejection is stable.
+- The complete Server spec assembly passed 3,950/3,950 after the correction.
+  The first parallel `npm run test:fast` attempt hit two unrelated Runner
+  cleanup timing assertions; the isolated Runner suite passed 1,639/1,639,
+  and the subsequent full `npm run test:fast` passed with all existing totals.
