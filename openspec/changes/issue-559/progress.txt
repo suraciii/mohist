@@ -399,3 +399,9 @@
 - Reproduced the affected `Mohist.Server.SpecTests.Specs.Sessions.AgentSessionFollowupConcurrencySpecs` class after the repair: 15/15 passed.
 - Re-ran `npm run verify`: docs 92, file-size, format, build, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Server SpecTests 3960, Web 4724, Runner 1646, and Slack 70 all passed.
 - Verification emitted no Git-visible changes; the worktree remains clean apart from this progress record.
+
+## T-001 verification on current branch
+
+- T-001 remains implemented in commit `d7e9d99d3`; the current branch also contains the later issue-559 slices, so no duplicate production edit was made during this task revalidation.
+- Focused handoff coverage passed 26/26 across `WorkflowAgentHandoffGrainSpecs`, `WorkflowAgentHandoffActivationSpecs`, `WorkflowAgentHandoffPreflightSpecs`, and `WorkflowAgentJobAdmissionSpecs`.
+- `npm run test:fast` passed all lanes: scripts/web/runner typecheck, Server Unit 2673, Arch 68, Workflow Definition 178, CLI 1848, Web 4724, and Runner 1646. Preview .NET SDK notices and concurrent-build file-lock retries were non-failing.
