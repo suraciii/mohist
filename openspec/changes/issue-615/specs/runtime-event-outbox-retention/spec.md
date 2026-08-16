@@ -14,7 +14,7 @@ The Runner SHALL enforce a finite retention capacity over all logical runtime-ev
 - **AND** SHALL NOT overwrite the snapshot with an empty or truncated protected-record state
 
 ### Requirement: Runtime-event requests have one strict identity-complete contract
-Every workflow, generic, and Session runtime-event request SHALL carry `runtimeEventContractVersion: 2` and the same envelope: a tagged-union `logicalTarget` (`workflow` with project/run/session name, `generic` with project/session ID, or `session` with session ID), `runtime`, `runtimeSessionId`, explicit-null applicable AgentSession/Agent turn/input identity, and `runtimeEvents` entries containing `runtimeEventId`, `type`, and `payload`. The route-derived target SHALL equal the envelope target. The cleanup-turn request SHALL use the explicit single-record v2 variant with `runtimeEventId`, workflow `logicalTarget`, runtime/session identity, `taskRunId`, `workId`, `prompt`, and `cleanupOperationId`, where the two IDs are equal. Every acceptance SHALL carry `runtimeEventContractVersion`, `runtimeEventId`, type, logical target, physical runtime identity, and all applicable AgentSession/turn/input identities. Batch acceptance SHALL return exactly one positional receipt per submitted event; cleanup-turn SHALL return a one-element receipt array. `runtimeEventId` SHALL be the durable Runner record ID; `InputDeliveryId` is equal to it for `session.input`. Missing, old, malformed, conflicting, or count-mismatched identity fails closed and retains the original record.
+Every workflow, generic, and Session runtime-event request SHALL carry `runtimeEventContractVersion: 2` and the same envelope: a tagged-union `logicalTarget` (`workflow` with project/run/session name, `generic` with project/session ID, or `session` with session ID), `runtime`, `runtimeSessionId`, explicit-null applicable AgentSession/Agent turn/input identity, and `runtimeEvents` entries containing `runtimeEventId`, `type`, and `payload`. The route-derived target SHALL equal the envelope target. The cleanup-turn request SHALL use the explicit single-record v2 variant with `runtimeEventId`, workflow `logicalTarget`, runtime/session identity, `taskRunId`, `workId`, `prompt`, and `cleanupOperationId`, where the two IDs are equal. Every acceptance SHALL carry `runtimeEventContractVersion`, `runtimeEventId`, type, logical target, physical runtime identity, and all applicable AgentSession/turn/input identities. Batch acceptance SHALL return exactly one positional receipt per submitted event; cleanup-turn SHALL return a one-element receipt array. `runtimeEventId` SHALL be the durable Runner record ID; `InputDeliveryId` is equal to it for `session.input`. The AgentSession ledger SHALL distinguish durable `Pending` recovery from final `Accepted`: a matching pending ID returns no positive receipt, retries transcript persistence and any required binding/follow-up operation idempotently, and emits a receipt only after those effects and the final ledger state are durable. Missing, old, malformed, conflicting, or count-mismatched identity fails closed and retains the original record.
 
 #### Scenario: A replay returns the original acceptance
 - **WHEN** the same v2 `runtimeEventId` and identical fingerprint are posted again through a workflow, generic, Session, or cleanup route
@@ -26,6 +26,25 @@ Every workflow, generic, and Session runtime-event request SHALL carry `runtimeE
 - **THEN** the AgentSession grain SHALL return the stored receipt for the duplicate and apply the new record once in one atomic state commit
 - **AND** the response SHALL preserve one receipt per input position
 - **AND** a conflicting reuse of an existing ID SHALL reject the whole batch without applying the new record
+
+### Requirement: Acceptance and transcript persistence recover as one idempotent boundary
+The Server SHALL not issue a positive runtime-event receipt from AgentSession state alone. It SHALL prepare new domain state and a `Pending` acceptance entry in one state commit, then durably flush the corresponding transcript effect through an operation keyed by `runtimeEventId` before finalizing the entry as `Accepted`. The transcript store SHALL deduplicate that key, including after a crash between transcript flush and final ledger finalization. Workflow binding and follow-up dispatch SHALL use the same key for idempotent external operations. A failure or response loss at any boundary SHALL leave a recoverable pending entry and SHALL never produce a receipt for a missing transcript row or a duplicate transcript row.
+
+#### Scenario: State commit succeeds but transcript flush fails
+- **WHEN** a new runtime event has a durable `Pending` ledger entry and AgentSession state but its transcript flush fails or the Server crashes before the flush
+- **THEN** the route SHALL return no positive receipt and the Runner record SHALL remain pending
+- **AND** a retry with the same `runtimeEventId` SHALL perform one durable transcript write without reapplying the domain event
+- **AND** the final receipt SHALL be issued only after the transcript and `Accepted` ledger state are durable
+
+#### Scenario: Transcript flush succeeds before final ledger state
+- **WHEN** the transcript store durably writes a runtime event but AgentSession finalization fails or the response is lost
+- **THEN** the acceptance ledger SHALL remain `Pending` and the transcript store SHALL recognize the same key as already applied
+- **AND** a retry SHALL not append a second transcript row and SHALL finalize the original receipt once
+
+#### Scenario: Generic, Session, Workflow, and cleanup routes do not acknowledge deferred flushes
+- **WHEN** any of those routes receives a runtime event whose transcript persistence is still deferred or fails
+- **THEN** the route SHALL return no positive receipt
+- **AND** the event SHALL remain recoverable by its original `runtimeEventId`
 
 ### Requirement: Protected records remain exact and are not evicted by retention
 The outbox SHALL protect `session.input`, terminal `session.activity`, `turn.failed`, and any non-streaming tool-call, usage, model, or binding-reconciliation fact unless that record has passed an explicitly defined lossless compaction rule. A protected record MUST preserve its local record ID, logical target, physical `runtimeSessionId`, turn and work identity, event type, payload, acknowledgement policy, and sequence position until the Server positively settles it. Retention enforcement MUST NOT drop a protected record merely to make room for another record.
@@ -56,12 +75,12 @@ The outbox SHALL treat `session.input` and terminal `session.activity` records a
 - **AND** a later retry SHALL submit the original terminal activity unchanged
 
 ### Requirement: Compaction preserves Server-visible transcript invariants
-The first release SHALL compact only adjacent `message.delta` or `reasoning.delta` records whose payload contains a non-empty `text`, `partId`, and `messageId`, and whose applicable `turnId`, logical target, physical `runtimeSessionId`, and sequence identity all match. The reducer SHALL concatenate text in original order, retain the earliest representative `runtimeEventId`, retain every replaced source ID and `compactedRawEventCount`, and preserve the Server transcript's cumulative text and raw-event count. The Server transcript accumulator SHALL interpret `compactedRawEventCount` as the number of source delta rows for its existing `RawEventCount` and flush thresholds.
+The first release SHALL compact only adjacent `message.delta` or `reasoning.delta` records whose payload contains a non-empty `text`, `partId`, and `messageId`, and whose applicable `turnId`, logical target, physical `runtimeSessionId`, and logical sequence key all match. The reducer SHALL concatenate text in original order, retain the earliest representative `runtimeEventId`, retain every replaced source ID and `compactedRawEventCount`, and preserve the Server transcript's cumulative text and raw-event count. The Server transcript accumulator SHALL interpret `compactedRawEventCount` as the number of source delta rows for its existing `RawEventCount` and flush thresholds.
 
 Tool-call, usage, model, and binding-reconciliation records SHALL have no compaction reducer in this change. They remain protected, even when they share an ID or appear replaceable. A missing identity, unsupported payload shape, non-adjacent record, different physical runtime, different Agent turn, different text part, different logical target, or any protected event type SHALL consume capacity unchanged and emit an `unsafe-compaction` diagnostic. No compaction may alter turn boundaries, FIFO order, tool-call lifecycle/count, usage/cost accounting, model observations, binding identity, or terminal details.
 
 #### Scenario: Adjacent text deltas are compacted losslessly
-- **WHEN** adjacent pending text deltas share event type, target, runtime session, turn, sequence, `partId`, and `messageId`
+- **WHEN** adjacent pending text deltas share event type, target, runtime session, turn, logical sequence key, `partId`, and `messageId`
 - **THEN** the outbox MAY replace them with one representative record whose text is their ordered concatenation
 - **AND** the representative SHALL retain all source IDs and their count
 - **AND** the Server transcript SHALL contain the same cumulative text and raw-event count as delivery of the source rows separately
@@ -85,7 +104,7 @@ Tool-call, usage, model, and binding-reconciliation records SHALL have no compac
 - **AND** no retry or retention operation SHALL rewrite a record's `runtimeSessionId`
 
 ### Requirement: Producer and observer paths surface admission failures
-Durable enqueue, runtime-event reporting, synchronous runtime observers, and terminal settlement SHALL propagate protected-capacity admission failures as explicit awaitable outcomes. An observer callback MUST be able to record an admission failure without throwing synchronously into the runtime provider, and the owning action or command MUST observe the failure when its reporting boundary settles. The failure MUST NOT be silently converted into task success, task failure, a fabricated terminal event, or replacement of the runtime's actual result.
+Durable enqueue, runtime-event reporting, synchronous runtime observers, and terminal settlement SHALL propagate protected-capacity admission failures as explicit awaitable outcomes. An observer callback MUST be able to record an admission failure without throwing synchronously into the runtime provider, and the owning action or command MUST observe the failure when its reporting boundary settles. The failure MUST NOT be silently converted into task success, task failure, a fabricated terminal event, or replacement of the runtime's actual result. For AgentJob launch input, the gate applies both to a new input and to a coordinator-owned input already present in AgentSession state.
 
 #### Scenario: AgentJob input is admitted before runtime invocation
 - **WHEN** an AgentJob has an AgentSession and its OpenCode or Pi physical session has been resolved or created
@@ -93,6 +112,13 @@ Durable enqueue, runtime-event reporting, synchronous runtime observers, and ter
 - **AND** a protected-capacity rejection, persistence failure, attach failure, timeout, or mismatched receipt SHALL return `execution-unavailable`
 - **AND** the corresponding runtime's `runTurn` SHALL be called zero times
 - **AND** a later delivery retry SHALL reuse the same `runtimeEventId` and SHALL not invoke the runtime again
+
+#### Scenario: Coordinator-owned AgentJob input is reconciled without duplication
+- **WHEN** an AgentJob with an AgentSession carries `initialInputId` and `initialTurnId` because the coordinator already recorded its launch input and turn
+- **THEN** OpenCode and Pi SHALL attach the resolved physical session before enqueueing a `session.input` record whose `runtimeEventId` is exactly `initialInputId`
+- **AND** the Server SHALL verify the original prompt, turn, and identity fingerprint and complete the existing `Pending` acceptance entry without creating a second input, turn, or transcript row
+- **AND** the executor SHALL await the positive receipt before `runTurn`, with any conflict, capacity, persistence, attach, timeout, or receipt failure producing `execution-unavailable` and zero `runTurn` calls
+- **AND** all retries SHALL reuse `initialInputId` and the original physical runtime identity
 
 #### Scenario: Workflow input cannot be admitted
 - **WHEN** protected capacity rejects the initial Workflow `session.input`
