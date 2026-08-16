@@ -257,3 +257,47 @@ and the DirectApi internal-read isolation architecture rule.
   and PublicExecutionReadQuerierSpecs (1).
 - Final rerun: npm run test:fast passed all seven lanes (typecheck, unit,
   architecture, workflow, CLI, web, and runner).
+
+# T-004: Idempotency engine and launch command
+
+Status: IMPLEMENTED. Added the direct API idempotency mapping table and
+indexes, strict launch body/key validation, versioned server fingerprinting,
+direct-only derived coordinator identity, durable rejection observations, and
+the launch route on the existing canonical launcher/projection.
+
+## Codebase Patterns
+
+- The mapping table lives in `Infrastructure/Data/DirectApi/` with a partial
+  EF model configuration in `MohistDbContext.DirectApiModels.cs`; mappings use
+  the composite `(Command, ScopeKey)` key plus the explicit unique index and
+  the nullable `TurnId` column needed by the filtered pending-stop index.
+- `DirectApiIdempotencyService.GetOrCreateAsync` commits the pending row in a
+  separate SaveChanges call before invoking canonical launch. A raced insert
+  reloads the unique-index winner; completion is a second durable update.
+- Mapping `Outcome` is internal JSON. A pending launch stores the deterministic
+  direct coordinator key there; completed rows add canonical Job/Session/Input/
+  Turn IDs. The route never returns this JSON or the fingerprint.
+- The direct route uses `AgentLaunchCoordinatorCodec.StableToken` over a
+  direct-only namespace string. Its coordinator request sets
+  `ExactPromptFingerprint=true` and `Origin=direct-api`, so text is kept
+  byte-significant while existing Web launch normalization remains unchanged.
+- Pending retries resume the coordinator through `ResumeIdempotentAsync` first,
+  then fall back to `LaunchIdempotentAsync` only when no coordinator plan
+  exists. This avoids re-reading mutable Agent readiness after a crash.
+- Whitespace-only direct text is accepted by the launch path and Session/Job
+  admission checks because Web callers still pass the already-trimmed prompt.
+  Empty text remains invalid at the direct JSON boundary.
+
+## Verification
+
+- Existing T-003 regression: `PublicExecutionReadRouteSpecs` passed (7).
+- Model/snapshot diff check: `ProjectEventsModelDebug` passed (1).
+- T-004 focused SpecTests passed (7): key/body validation, archived Agent,
+  exact-text conflict, whitespace preservation, replay uniqueness, pending
+  mapping recovery, and durable rejection replay.
+
+## T-004 follow-up verification
+
+- The direct exact-text path also required the canonical `AgentSessionGrain.EnsureInitialLaunchAsync` validation to use `IsNullOrEmpty`; Web launch callers remain normalized before reaching that boundary, while direct whitespace text is persisted byte-significantly.
+- Direct launch responses can briefly be `503 launch_pending` while the coordinator converges; repeated same-key requests complete the durable mapping without changing the canonical IDs. The whitespace spec accepts that documented window and asserts the mapping reaches `completed` with the exact fingerprint.
+- Re-ran T-004 three times, T-003 public-read routes, public projection specs, and `npm run test:fast`; all passed. The server/spec build was run with `-p:SkipWebBuild=true` for focused .NET verification because the server project’s default web-asset assertion expects a generated `packages/web/dist/index.html`.

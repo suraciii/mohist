@@ -492,7 +492,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 $"AgentJob '{Key}' cannot be re-submitted; current status is {State.Status}");
 
         if (input is null
-            || (string.IsNullOrWhiteSpace(input.Prompt)
+            || (string.IsNullOrEmpty(input.Prompt)
                 && (input.Attachments is null || input.Attachments.Count == 0)))
             throw new ArgumentException(
                 "AgentJobInput.Prompt is required unless at least one attachment is accepted.",
@@ -673,7 +673,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     {
         await HydrateAsync();
         ArgumentNullException.ThrowIfNull(command);
-        if (string.IsNullOrWhiteSpace(command.Prompt)
+        if (string.IsNullOrEmpty(command.Prompt)
             && (command.Attachments is null || command.Attachments.Count == 0))
         {
             throw new ArgumentException(

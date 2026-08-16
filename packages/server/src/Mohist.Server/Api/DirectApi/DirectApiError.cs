@@ -30,6 +30,13 @@ public static class DirectApiErrorCodes
     /// five-state <c>unknown</c>.
     /// </summary>
     public const string ProjectionLag = "projection_lag";
+    public const string IdempotencyKeyRequired = "idempotency_key_required";
+    public const string IdempotencyKeyInvalid = "idempotency_key_invalid";
+    public const string InvalidRequest = "invalid_request";
+    public const string IdempotencyKeyReused = "idempotency_key_reused";
+    public const string LaunchPending = "launch_pending";
+    public const string AgentNotFound = "agent_not_found";
+    public const string AgentNotReady = "agent_not_ready";
 }
 
 /// <summary>

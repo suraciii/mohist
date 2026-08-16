@@ -99,6 +99,7 @@ public static class DirectApiResults
         DirectApiErrorCodes.JobNotFound => "The requested agent job was not found in this project.",
         DirectApiErrorCodes.InputNotFound => "The requested agent input was not found in this project.",
         DirectApiErrorCodes.TurnNotFound => "The requested agent turn was not found in this project.",
+        DirectApiErrorCodes.AgentNotFound => "The requested Agent was not found in this project.",
         _ => "The requested resource was not found in this project.",
     };
 

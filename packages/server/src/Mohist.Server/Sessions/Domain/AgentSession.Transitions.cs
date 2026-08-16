@@ -437,7 +437,7 @@ public static partial class AgentSessionExtensions
             if (string.IsNullOrWhiteSpace(turnId))
                 throw new ArgumentException("Turn id is required.", nameof(turnId));
             var normalizedAttachments = NormalizeAttachmentDescriptors(attachments);
-            var hasText = !string.IsNullOrWhiteSpace(prompt);
+            var hasText = !string.IsNullOrEmpty(prompt);
             var hasAttachments = normalizedAttachments is { Count: > 0 };
             if (!hasText && !hasAttachments)
                 throw new ArgumentException(

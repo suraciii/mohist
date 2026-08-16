@@ -1722,6 +1722,61 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Projects");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.DirectApi.DirectApiIdempotencyMappingRow", b =>
+                {
+                    b.Property<string>("Command")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ScopeKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CallerKeyId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("Fingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("State")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("Outcome")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FrozenTarget")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TurnId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Command", "ScopeKey");
+
+                    b.HasIndex("Command", "ScopeKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_direct_api_idempotency_mappings_Command_ScopeKey");
+
+                    b.HasIndex("TurnId")
+                        .IsUnique()
+                        .HasFilter("\"Command\" = 'stop' AND \"State\" IN ('pending')")
+                        .HasDatabaseName("UX_direct_api_idempotency_mappings_PendingStop_TurnId");
+
+                    b.ToTable("direct_api_idempotency_mappings", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicExecutionSnapshotRow", b =>
                 {
                     b.Property<string>("AnchorType")
