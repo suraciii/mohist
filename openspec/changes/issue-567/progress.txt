@@ -400,6 +400,20 @@ Channel decision (grounded in live source):
   contain the complete-success message.
 - Verification: the full CLI test suite passes (1855/1855).
 
+## Re-review Final Verification
+
+- Exact Workflow settlement class passed 13/13, including the replacement
+  terminal-receipt regression.
+- Runner production build passed; the full Runner suite passed 1652/1652,
+  including the bounded shutdown delivery coverage.
+- Full CLI suite passed 1855/1855, and the full Server solution build passed
+  with 0 warnings and 0 errors.
+- The earlier full Server SpecTests invocation passed 3939 tests and reported
+  only the two unrelated existing dispatch timing/runtime-resolution failures;
+  the affected Workflow class passes independently.
+- Three incremental commits preserve the MF-1, MF-2, and MF-3 fixes. The
+  review file remains unchanged.
+
 ## Final Gate Preparation
 
 - Reduced the Runner connection client implementation to 998 lines while
