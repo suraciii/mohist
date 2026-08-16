@@ -366,6 +366,9 @@ public static class AgentJobSessionDeliveryIds
 
     public static string SubagentTerminalEventId(string jobKey) =>
         $"agent-job:{jobKey}:subagent-terminal";
+
+    public static string WorkflowTerminalEventId(string jobKey) =>
+        $"workflow-terminal:{jobKey}";
 }
 
 public static class AgentJobFailureReasons

@@ -106,7 +106,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             if (State.PendingSessionClose is not null
                 || State.PendingFailureEvent is not null
                 || State.PendingTerminalDeliveryEvent is not null
-                || State.PendingSubagentTerminalEvent is not null)
+                || State.PendingSubagentTerminalEvent is not null
+                || State.PendingWorkflowTerminalDelivery is not null)
             {
                 await EnsureRecoveryReminderAsync();
                 if (State.PendingSessionClose is not null)
@@ -117,6 +118,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                     await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
                 if (State.PendingSubagentTerminalEvent is not null)
                     await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
+                if (State.PendingWorkflowTerminalDelivery is not null)
+                    await EmitWorkflowTerminalDeliveryAsync(State.PendingWorkflowTerminalDelivery);
             }
             return;
         }
@@ -322,6 +325,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
+            if (State.PendingWorkflowTerminalDelivery is not null)
+                await EmitWorkflowTerminalDeliveryAsync(State.PendingWorkflowTerminalDelivery);
             return new AgentJobReportResult(false, "stale");
         }
 
@@ -1545,7 +1550,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             if (State.PendingSessionClose is not null
                 || State.PendingFailureEvent is not null
                 || State.PendingTerminalDeliveryEvent is not null
-                || State.PendingSubagentTerminalEvent is not null)
+                || State.PendingSubagentTerminalEvent is not null
+                || State.PendingWorkflowTerminalDelivery is not null)
                 await EnsureRecoveryReminderAsync();
             await PersistAsync();
             await TryReleaseConcurrencyPermitAsync();
@@ -1557,6 +1563,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
+            if (State.PendingWorkflowTerminalDelivery is not null)
+                await EmitWorkflowTerminalDeliveryAsync(State.PendingWorkflowTerminalDelivery);
             return;
         }
 
@@ -1592,6 +1600,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             artifactUploadIds,
             terminalExitCode ?? exitCode);
         StageSubagentTerminalEvent(terminalStatus);
+        StageWorkflowTerminalDelivery(
+            terminalStatus,
+            message,
+            output,
+            failureReason,
+            failureCategory,
+            artifactUploadIds,
+            terminalExitCode ?? exitCode);
 
         if (terminalStatus == AgentJobStatus.Failed)
         {
@@ -1629,6 +1645,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
         if (State.PendingSubagentTerminalEvent is not null)
             await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
+        if (State.PendingWorkflowTerminalDelivery is not null)
+            await EmitWorkflowTerminalDeliveryAsync(State.PendingWorkflowTerminalDelivery);
     }
 
     private async Task MarkInitialTurnExecutingAsync()
@@ -1803,7 +1821,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await PersistAsync();
         if (State.PendingFailureEvent is not null
             || State.PendingTerminalDeliveryEvent is not null
-            || State.PendingSubagentTerminalEvent is not null)
+            || State.PendingSubagentTerminalEvent is not null
+            || State.PendingWorkflowTerminalDelivery is not null)
             return;
         try
         {
@@ -1895,6 +1914,100 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
+    /// <summary>
+    /// Stages the workflow-terminal delivery obligation. Only a job whose
+    /// input carries the <see cref="AgentJobWorkflowInvocation"/>
+    /// discriminator (a Workflow handoff) owes the Workflow side a typed
+    /// terminal; direct and routed launches stage nothing. The obligation
+    /// freezes the full typed payload — invocation identity, terminal
+    /// facts, the boundary completion evaluation parsed from the
+    /// runner-reported output, and the recorded timestamp — so emission and
+    /// reminder retries never re-read mutable state.
+    /// </summary>
+    private void StageWorkflowTerminalDelivery(
+        AgentJobStatus status,
+        string? message,
+        string? output,
+        string? failureReason,
+        string? failureCategory,
+        string[]? artifactUploadIds,
+        int? exitCode)
+    {
+        var invocation = State.Input?.WorkflowInvocation;
+        if (invocation is null
+            || State.PendingWorkflowTerminalDelivery is not null
+            || status is not (AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled))
+        {
+            return;
+        }
+
+        var input = State.Input!;
+        State.PendingWorkflowTerminalDelivery = new PendingWorkflowTerminalDelivery(
+            EventId: AgentJobSessionDeliveryIds.WorkflowTerminalEventId(Key),
+            InvocationId: invocation.InvocationId,
+            ProjectId: input.ProjectId,
+            WorkflowRunId: input.WorkflowRunId ?? string.Empty,
+            TaskRunId: invocation.TaskRunId,
+            WorkId: invocation.WorkId,
+            JobId: Key,
+            SessionId: input.AgentSessionId,
+            InputId: input.InitialInputId,
+            TurnId: input.InitialTurnId,
+            Status: status,
+            Message: message,
+            Output: output,
+            FailureReason: failureReason,
+            FailureCategory: failureCategory,
+            ExitCode: exitCode,
+            ArtifactUploadIds: artifactUploadIds,
+            Evaluation: AgentJobCompletionEvaluationCodec.Parse(output),
+            RecordedAt: _timeProvider.GetUtcNow());
+    }
+
+    private async Task EmitWorkflowTerminalDeliveryAsync(PendingWorkflowTerminalDelivery pending)
+    {
+        try
+        {
+            var envelope = BuildWorkflowTerminalEnvelope(pending);
+            await _eventStore.AppendAsync(envelope, CancellationToken.None);
+            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} failed to append {Type} event (eventId={EventId}); reminder will retry",
+                Key, EventCatalog.ReverseDns.AgentJobWorkflowTerminal, pending.EventId);
+            await EnsureRecoveryReminderAsync();
+            return;
+        }
+        State.PendingWorkflowTerminalDelivery = null;
+        await PersistAsync();
+        _log.LogInformation(
+            "AgentJob {Id} emitted {Type} event (eventId={EventId}, status={Status}, invocation={Invocation})",
+            Key,
+            EventCatalog.ReverseDns.AgentJobWorkflowTerminal,
+            pending.EventId,
+            pending.Status,
+            pending.InvocationId);
+    }
+
+    internal CloudEvent BuildWorkflowTerminalEnvelope(PendingWorkflowTerminalDelivery pending)
+    {
+        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
+        var projectId = extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var pid) ? pid : null;
+        var issue = extensions.TryGetValue(EventCatalog.Lineage.Issue, out var iss) ? iss : null;
+        var epic = extensions.TryGetValue(EventCatalog.Lineage.Epic, out var epi) ? epi : null;
+        var workflowRunId = extensions.TryGetValue(EventCatalog.Lineage.WorkflowRunId, out var wri) ? wri : null;
+        var agentId = extensions.TryGetValue(EventCatalog.Lineage.AgentId, out var aid) ? aid : null;
+        ProducerConformance.Assert(EventProducerFamily.AgentJob, extensions, new ProducerLineageContext(
+            ProjectId: projectId,
+            Issue: issue,
+            Epic: epic,
+            WorkflowRunId: workflowRunId,
+            AgentId: agentId));
+        return AgentJobLineage.BuildWorkflowTerminalEnvelope(Key, pending, extensions);
+    }
+
     internal CloudEvent BuildSubagentTerminalEnvelope(PendingSubagentTerminalEvent pending) =>
         AgentJobLineage.BuildSubagentTerminalEnvelope(Key, pending);
 
@@ -1929,10 +2042,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
+            if (State.PendingWorkflowTerminalDelivery is not null)
+                await EmitWorkflowTerminalDeliveryAsync(State.PendingWorkflowTerminalDelivery);
             if (State.PendingSessionClose is null
                 && State.PendingFailureEvent is null
                 && State.PendingTerminalDeliveryEvent is null
                 && State.PendingSubagentTerminalEvent is null
+                && State.PendingWorkflowTerminalDelivery is null
                 && !State.ConcurrencyReleasePending)
             {
                 await UnregisterSelfAsync(reminderName);

@@ -8,6 +8,7 @@ import type { ServerConnection } from '../server/connection.js'
 import type { BindingRecoveryCoordinator } from './binding-recovery.js'
 import { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
+import { evaluateCompletion, type CompletionEvaluation } from '../actions/expectations.js'
 import { inlineSlackCollaborationSkill, readSlackExecutionContext } from './slack-execution-context.js'
 import {
   attachmentManifestEnvelope,
@@ -173,7 +174,7 @@ export class AgentJobExecutor {
     }
 
     if (runtimeName === 'pi') {
-      return executePiTurn(
+      const result = await executePiTurn(
         this.turnDeps(),
         work,
         signal,
@@ -186,8 +187,9 @@ export class AgentJobExecutor {
         binding,
         skills,
       )
+      return await attachWorkflowExpectation(result, work, workDir)
     }
-    return executeOpenCodeTurn(
+    const result = await executeOpenCodeTurn(
       this.turnDeps(),
       work,
       signal,
@@ -201,6 +203,7 @@ export class AgentJobExecutor {
       skills,
       attachmentDelivery,
     )
+    return await attachWorkflowExpectation(result, work, workDir)
   }
 
   private turnDeps(): AgentJobTurnDeps {
@@ -383,4 +386,62 @@ function readSkillNames(payload: JsonObject | null): readonly string[] {
   const value = payload?.['skills']
   if (value === undefined || value === null) return []
   return Array.isArray(value) ? (value as string[]) : [String(value)]
+}
+
+/**
+ * Evaluate the frozen Workflow `expect` against the workspace after the
+ * agent turn settles and report the typed evaluation alongside the agent
+ * result (issue 559 T-003 / design D6).
+ *
+ * The task-level completion contract reaches the executor through the
+ * existing `WorkDispatch.Expect` field (`work.expect`) — the agent runtime
+ * never sees it. After the turn settles the executor reuses
+ * `evaluateCompletion` (file existence, file-backed markers, `failIf`, and
+ * the `_output` promise marker against the turn's final assistant text) and
+ * embeds the evaluation under `output.expectation` so it rides the existing
+ * AgentJob report channel into the terminal facts, and from there the
+ * typed workflow-terminal transport.
+ *
+ * The evaluation is a Workflow completion fact, not an Agent execution
+ * fact: the AgentJob terminal verdict stays `completed` even when the
+ * Workflow expectation is unsatisfied — the Workflow-owned finalizer owns
+ * the task decision. A failed turn carries no evaluation (mirroring the
+ * inline executor, which evaluates only after a successful action), and a
+ * dispatch without `expect` keeps its output untouched.
+ */
+async function attachWorkflowExpectation(
+  result: WorkItemResult,
+  work: DispatchWorkItem,
+  workDir: string,
+): Promise<WorkItemResult> {
+  const expect = work.expect
+  if (!expect || !isObject(expect) || Object.keys(expect).length === 0) return result
+  if (result.status !== 'completed') return result
+  const output = isObject(result.output) ? result.output : null
+  if (!output) return result
+
+  const finalAssistantText = typeof output['text'] === 'string' ? (output['text'] as string) : null
+  const evaluation = await evaluateCompletion(expect, workDir, finalAssistantText)
+  return {
+    ...result,
+    output: { ...output, expectation: serializeEvaluation(evaluation) },
+  }
+}
+
+function serializeEvaluation(evaluation: CompletionEvaluation): JsonObject {
+  return {
+    satisfied: evaluation.satisfied,
+    matched: evaluation.matched ?? null,
+    missingFiles: evaluation.missingFiles.map((file) => ({ path: file.path })),
+    missingMarkers: evaluation.missingMarkers.map((marker) => ({
+      path: marker.path,
+      contains: marker.contains,
+    })),
+    failIfMatches: evaluation.failIfMatches.map((match) => ({
+      marker: match.marker,
+      failIf: match.failIf,
+      path: match.path,
+    })),
+    message: evaluation.message,
+  }
 }

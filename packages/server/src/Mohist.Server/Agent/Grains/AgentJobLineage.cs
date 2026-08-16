@@ -157,6 +157,94 @@ public static class AgentJobLineage
             subject: jobKey);
     }
 
+    /// <summary>
+    /// Envelope for the workflow-originated terminal delivery
+    /// (<c>com.mohist.agent.job.workflow-terminal</c>). The payload is
+    /// fully typed from the frozen obligation: the invocation identity
+    /// (invocation / project / workflow run / task run / work id plus the
+    /// minted job / session / input / turn ids), the terminal facts
+    /// (status, output, failure reason / category, exit code, artifact
+    /// upload ids), the boundary completion evaluation, and the recorded
+    /// timestamp. The stable event id (<c>workflow-terminal:{jobKey}</c>)
+    /// makes duplicate or retried appends resolve against the same event
+    /// identity. The Agent facts never ride the Workflow task-report
+    /// endpoint — this event is the Agent-to-Workflow transport channel.
+    /// </summary>
+    public static CloudEvent BuildWorkflowTerminalEnvelope(
+        string jobKey,
+        PendingWorkflowTerminalDelivery payload,
+        IReadOnlyDictionary<string, string> extensions)
+    {
+        var data = JsonSerializer.SerializeToElement(new
+        {
+            invocationId = payload.InvocationId,
+            projectId = payload.ProjectId,
+            workflowRunId = payload.WorkflowRunId,
+            taskRunId = payload.TaskRunId,
+            workId = payload.WorkId,
+            jobId = payload.JobId,
+            sessionId = payload.SessionId,
+            inputId = payload.InputId,
+            turnId = payload.TurnId,
+            status = payload.Status.ToString().ToLowerInvariant(),
+            output = ParseOutputElement(payload.Output),
+            message = payload.Message,
+            failureReason = payload.FailureReason,
+            failureCategory = payload.FailureCategory,
+            exitCode = payload.ExitCode,
+            artifactUploadIds = payload.ArtifactUploadIds,
+            evaluation = SerializeEvaluation(payload.Evaluation),
+            recordedAt = payload.RecordedAt,
+        }, JSON.Options);
+        return new CloudEvent(
+            id: payload.EventId,
+            source: new Uri(AgentJobEventPersistence.AgentJobSource(jobKey), UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobWorkflowTerminal,
+            time: payload.RecordedAt,
+            data: data,
+            subject: jobKey,
+            extensions: extensions);
+    }
+
+    private static JsonElement? ParseOutputElement(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return null;
+        try
+        {
+            var element = JsonDocument.Parse(output).RootElement.Clone();
+            return element.ValueKind is JsonValueKind.Object or JsonValueKind.Array
+                ? element
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static object? SerializeEvaluation(AgentJobCompletionEvaluation? evaluation) =>
+        evaluation is null
+            ? null
+            : new
+            {
+                satisfied = evaluation.Satisfied,
+                matched = evaluation.Matched,
+                missingFiles = evaluation.MissingFiles.Select(path => new { path }).ToArray(),
+                missingMarkers = evaluation.MissingMarkers.Select(miss => new
+                {
+                    path = miss.Path,
+                    contains = miss.Contains,
+                }).ToArray(),
+                failIfMatches = evaluation.FailIfMatches.Select(match => new
+                {
+                    marker = match.Marker,
+                    failIf = match.FailIf,
+                    path = match.Path,
+                }).ToArray(),
+                message = evaluation.Message,
+            };
+
     public static string? ExtractAssistantText(string? output)
     {
         if (string.IsNullOrWhiteSpace(output))

@@ -151,3 +151,69 @@
 - `npm run test:fast`: all lanes green (typecheck, unit 2662, arch 68, wf
   178, cli 1848, web 4724, runner 1639).
 - `npm run format:check`: clean.
+
+## T-003 decisions / gotchas
+
+- `PendingWorkflowTerminalDelivery` is `AgentJobState` Id(34), staged by
+  `EnterTerminalStateAsync` (via `StageWorkflowTerminalDelivery`) ONLY when
+  `State.Input?.WorkflowInvocation` is non-null AND the status is a real
+  terminal (Completed/Failed/Cancelled — Unknown never stages). Direct and
+  routed-shaped launches (WorkflowRunId WITHOUT the discriminator) stage
+  nothing; grain spec covers both.
+- Event type `com.mohist.agent.job.workflow-terminal` (EventCatalog.ReverseDns
+  + `All` list), source `/mohist/agent-job/{jobKey}` (agent-job store dedups
+  on (source, eventId)), stable id `workflow-terminal:{jobKey}` via
+  `AgentJobSessionDeliveryIds.WorkflowTerminalEventId`. Envelope built by
+  `AgentJobLineage.BuildWorkflowTerminalEnvelope` + grain-side
+  `BuildWorkflowTerminalEnvelope` (AgentJob producer conformance: agentid
+  required; projectid/workflowrunid lineage stamped like the failure event).
+- Typed payload: invocation identity (invocationId/projectId/workflowRunId/
+  taskRunId/workId + jobId/sessionId/inputId/turnId), terminal facts (status,
+  message, output as parsed element, failureReason, failureCategory, exitCode,
+  artifactUploadIds), `evaluation` object, `recordedAt`. NOTE: `JSON.Options`
+  uses `JsonIgnoreCondition.WhenWritingNull` — null facts (failureReason on a
+  completed job, matched on unsatisfied) are OMITTED, specs must use
+  TryGetProperty/absence, not ValueKind.Null.
+- Evaluation transport (D6): the runner's `AgentJobExecutor` evaluates
+  `work.expect` (already parsed from `WorkDispatch.Expect` since T-002) after
+  the turn settles via `evaluateCompletion(work.expect, workDir, output.text)`
+  — only for completed turns with a non-empty object expect — and embeds the
+  typed evaluation under `output.expectation` (satisfied/matched/missingFiles/
+  missingMarkers/failIfMatches/message). The AgentJob verdict stays
+  `completed` even when unsatisfied. Server side,
+  `AgentJobCompletionEvaluationCodec.Parse(outputJson)` lifts `expectation`
+  into the typed record at staging time.
+- Emission plumbing mirrors `PendingSubagentTerminalEvent` exactly: emit from
+  OnActivateAsync (terminal branch), ReportResultAsync (stale branch),
+  EnterTerminalStateAsync (replay + fresh), ReceiveReminder (terminal branch);
+  include the obligation in every "pending exists"/unregister-condition check
+  (`ClearPendingSessionCloseAndMaybeReminderAsync` too). On append failure:
+  log + `EnsureRecoveryReminderAsync`, obligation retained; reminder/reactivation
+  retries; success clears + persists (exactly once).
+- New grain specs: `AgentJobWorkflowTerminalDeliverySpecs` (AgentJobGrain
+  fixture) — typed payload/stable id, discriminator gating (direct +
+  routed-shaped), append-failure → retained → reactivation emits once with the
+  SAME frozen RecordedAt, duplicate stale report + late FailAsync → no second
+  append/terminal unchanged, failed-terminal facts + unsatisfied evaluation,
+  Unknown does not stage, and "workflow-run event source stays silent" (agent
+  terminal never rides the Workflow report channel).
+- Runner tests: `agent-job-executor.spec.ts` new describe (6 tests: satisfied
+  evaluation with promise marker, unsatisfied keeps verdict completed, missing
+  markers typed, no-expect untouched, failed turn untouched) +
+  `server-connection-report.spec.ts` lock (agent-job report body has
+  ownerKind/agentJobId and NO workflowRunId).
+- Spec gotcha: `AgentJobGrainFixture` shares ONE RecordingEventStore across the
+  collection — global `Assert.DoesNotContain(Type == workflow-terminal)` saw
+  another spec's event under full-suite ordering; scope absence assertions by
+  source. (Fixed mid-run; full suite green.)
+- Path stays dark: only discriminator-carrying jobs stage the obligation, and
+  only the (inert, T-005) handoff activation creates those. The consuming
+  finalizer handler is T-004.
+
+## Verification status (T-003)
+
+- Full SpecTests: 3944/3944 green (7 new).
+- ArchTests 68/68; UnitTests 2662/2662.
+- `npm run test:fast`: all lanes green (typecheck, unit, arch, wf 178, cli
+  1848, web 4724, runner 1646 = 1639 + 7 new).
+- `npm run format:check`: clean (after `npm run format`).
