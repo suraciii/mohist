@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MarkdownReader, type MarkdownAttachment } from './MarkdownReader'
 import * as SharedUiBarrel from '@/shared/ui'
 import { setScopedProperty, setScopedValue } from '../../../../tests/support/scoped-property'
@@ -85,13 +85,12 @@ describe('MarkdownReader default rendering', () => {
     expect(screen.getByTestId('markdown-code-block')).toHaveTextContent('const x = 1')
   })
 
-  it('renders one-line fenced code as a block with copy-code support', () => {
-    render(<MarkdownReader content={'```\nconst x = 1\n```'} baseHeadingLevel={2} showCopyCode />)
+  it('renders one-line fenced code as a block', () => {
+    render(<MarkdownReader content={'```\nconst x = 1\n```'} baseHeadingLevel={2} />)
 
     const codeBlock = screen.getByTestId('markdown-code-block')
     expect(codeBlock).toHaveTextContent('const x = 1')
     expect(codeBlock.className).toContain('overflow-x-auto')
-    expect(screen.getByTestId('markdown-copy-code')).toBeInTheDocument()
   })
 
   it('preserves the inline-code visual styling from the previous MarkdownContent', () => {
@@ -252,37 +251,6 @@ describe('MarkdownReader code-block scrolling affordance', () => {
   })
 })
 
-describe('MarkdownReader copy-code affordance', () => {
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('renders a copy affordance when showCopyCode is enabled and writes the block text to the clipboard', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    setScopedValue(navigator, 'clipboard', { writeText })
-
-    const content = '```ts\nconst greet = () => "hi"\n```'
-    render(<MarkdownReader content={content} baseHeadingLevel={2} showCopyCode />)
-
-    const button = screen.getByTestId('markdown-copy-code')
-    expect(button).toBeInTheDocument()
-
-    fireEvent.click(button)
-
-    await waitFor(() => {
-      expect(button).toHaveAttribute('aria-label', 'Copied')
-    })
-    expect(writeText).toHaveBeenCalledTimes(1)
-    const written = writeText.mock.calls[0]?.[0] as string
-    expect(written.replace(/\n$/, '')).toBe('const greet = () => "hi"')
-  })
-
-  it('does not render a copy affordance when showCopyCode is omitted', () => {
-    render(<MarkdownReader content="```ts\nconst x = 1\n```" baseHeadingLevel={2} />)
-    expect(screen.queryByTestId('markdown-copy-code')).not.toBeInTheDocument()
-  })
-})
-
 describe('MarkdownReader table containment', () => {
   afterEach(() => {
     cleanup()
@@ -412,61 +380,5 @@ describe('MarkdownReader collapsible vs full modes', () => {
       expect(screen.queryByTestId('markdown-collapse-control')).not.toBeInTheDocument()
       expect(screen.getByTestId('markdown-reader-body').getAttribute('data-overflow')).toBe('free')
     })
-  })
-})
-
-describe('MarkdownReader optional affordances', () => {
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('renders a table of contents when showToc is enabled', () => {
-    const content = ['# One', '## Two', '### Three'].join('\n')
-    render(<MarkdownReader content={content} baseHeadingLevel={2} showToc />)
-
-    const toc = screen.getByTestId('markdown-toc')
-    expect(toc).toBeInTheDocument()
-    expect(toc).toHaveTextContent('One')
-    expect(toc).toHaveTextContent('Two')
-    expect(toc).toHaveTextContent('Three')
-  })
-
-  it('renders heading anchors when showHeadingAnchors is enabled', () => {
-    const content = '# Anchor target'
-    render(<MarkdownReader content={content} baseHeadingLevel={2} showHeadingAnchors />)
-
-    const heading = screen.getByRole('heading', { level: 2, name: /Anchor target/ })
-    const anchor = heading.querySelector('a')
-    expect(anchor).not.toBeNull()
-    expect(anchor).toHaveAttribute('href', '#anchor-target')
-  })
-
-  it('generates unique anchors and TOC links for duplicate heading text', () => {
-    render(<MarkdownReader content={'# Details\n\n## Details'} baseHeadingLevel={2} showToc showHeadingAnchors />)
-
-    const headings = screen.getAllByRole('heading', { name: /Details/ })
-    expect(headings.map((heading) => heading.id)).toEqual(['details', 'details-1'])
-
-    expect(screen.getByTestId('markdown-toc-link-details')).toHaveAttribute('href', '#details')
-    expect(screen.getByTestId('markdown-toc-link-details-1')).toHaveAttribute('href', '#details-1')
-  })
-
-  it('keeps TOC links aligned with formatted heading anchors', () => {
-    render(<MarkdownReader content={'# **Details**\n\n## **Details**'} baseHeadingLevel={2} showToc showHeadingAnchors />)
-
-    const headings = screen.getAllByRole('heading', { name: /Details/ })
-    expect(headings.map((heading) => heading.id)).toEqual(['details', 'details-1'])
-
-    expect(screen.getByTestId('markdown-toc-link-details')).toHaveAttribute('href', '#details')
-    expect(screen.getByTestId('markdown-toc-link-details-1')).toHaveAttribute('href', '#details-1')
-  })
-
-  it('does not render TOC or anchors when both are omitted', () => {
-    const content = '# Quiet heading'
-    render(<MarkdownReader content={content} baseHeadingLevel={2} />)
-
-    expect(screen.queryByTestId('markdown-toc')).not.toBeInTheDocument()
-    const heading = screen.getByRole('heading', { level: 2, name: 'Quiet heading' })
-    expect(heading.querySelector('a')).toBeNull()
   })
 })

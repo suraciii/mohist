@@ -4,7 +4,7 @@ import { PanelLeftIcon, XIcon } from "lucide-react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/shared/lib/utils"
-import { useIsMobile } from "@/shared/hooks/use-mobile"
+import { useMediaQuery } from "@/shared/lib/use-media-query"
 import { Button } from "@/shared/ui/components/button"
 import { Separator } from "@/shared/ui/components/separator"
 import { Skeleton } from "@/shared/ui/components/skeleton"
@@ -50,7 +50,7 @@ function SidebarProvider({
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }) {
-  const isMobile = useIsMobile()
+  const isMobile = useMediaQuery("(max-width: 767px)")
   const [openMobile, setOpenMobile] = React.useState(false)
 
   const [_open, _setOpen] = React.useState(defaultOpen)

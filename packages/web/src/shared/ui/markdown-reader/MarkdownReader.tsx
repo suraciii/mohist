@@ -4,15 +4,8 @@ import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from 
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/shared/ui/components/button'
 import { cn } from '@/shared/lib/utils'
-import {
-  buildHeadingOverrides,
-  collectHeadings,
-  type HeadingEntry,
-  type HeadingLevel,
-  type HeadingSlugger,
-} from './heading-remap'
+import { buildHeadingOverrides, type HeadingLevel } from './heading-remap'
 import { MarkdownTableWrapper, MarkdownTable } from './markdown-table'
-import { CopyCodeButton, extractTextFromChildren } from './copy-code-button'
 
 export type MarkdownReaderMode = 'full' | 'collapsible'
 
@@ -21,9 +14,6 @@ export type MarkdownReaderProps = {
   baseHeadingLevel?: HeadingLevel
   mode?: MarkdownReaderMode
   collapsedHeight?: number
-  showToc?: boolean
-  showHeadingAnchors?: boolean
-  showCopyCode?: boolean
   resolveAttachment?: (id: string) => MarkdownAttachment | null | undefined
   className?: string
 }
@@ -93,9 +83,8 @@ function MarkdownCodeBlock({
   children,
   className,
   node,
-  showCopyCode,
   ...props
-}: CodeProps & { showCopyCode: boolean }) {
+}: CodeProps) {
   const isBlock = useContext(CodeBlockContext)
   if (!isBlock) {
     return (
@@ -107,7 +96,6 @@ function MarkdownCodeBlock({
       </code>
     )
   }
-  const text = extractTextFromChildren(children)
   return (
     <code
       data-testid="markdown-code-block"
@@ -115,7 +103,6 @@ function MarkdownCodeBlock({
       {...props}
     >
       {children}
-      {showCopyCode && <CopyCodeButton text={text} />}
     </code>
   )
 }
@@ -214,17 +201,14 @@ function MarkdownParagraph({ children, ...props }: ParagraphProps) {
 }
 
 function buildReaderComponents(
-  slugger: HeadingSlugger,
   base: HeadingLevel,
-  showCopyCode: boolean,
-  showAnchors: boolean,
   resolveAttachment: MarkdownReaderProps['resolveAttachment'],
   onOpenLightbox: (attachment: MarkdownAttachment) => void,
 ): Components {
-  const headings = buildHeadingOverrides({ base, showAnchors, slugger })
+  const headings = buildHeadingOverrides({ base })
   return {
     ...headings,
-    code: (props) => <MarkdownCodeBlock {...props} showCopyCode={showCopyCode} />,
+    code: (props) => <MarkdownCodeBlock {...props} />,
     pre: MarkdownPre as Components['pre'],
     a: (props) => <MarkdownLink {...props} resolveAttachment={resolveAttachment} />,
     img: (props) => <MarkdownImage {...props} resolveAttachment={resolveAttachment} onOpenLightbox={onOpenLightbox} />,
@@ -304,40 +288,11 @@ function MarkdownAttachmentLightbox({ attachment, onDismiss }: { attachment: Mar
   )
 }
 
-function MarkdownToc({ entries }: { entries: HeadingEntry[] }) {
-  if (entries.length === 0) return null
-  return (
-    <nav
-      data-testid="markdown-toc"
-      aria-label="Table of contents"
-      className="my-3 rounded-md border border-gray-200 bg-gray-50/60 p-3 text-xs"
-    >
-      <p className="mb-2 font-semibold uppercase tracking-wide text-gray-500">On this page</p>
-      <ul className="space-y-1">
-        {entries.map((entry) => (
-          <li key={entry.id} style={{ paddingLeft: `${(entry.level - 1) * 12}px` }}>
-            <a
-              href={`#${entry.id}`}
-              className="text-gray-700 hover:text-blue-600"
-              data-testid={`markdown-toc-link-${entry.id}`}
-            >
-              {entry.text}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  )
-}
-
 export function MarkdownReader({
   content,
   baseHeadingLevel = 2,
   mode = 'full',
   collapsedHeight = 600,
-  showToc = false,
-  showHeadingAnchors = false,
-  showCopyCode = false,
   resolveAttachment,
   className,
 }: MarkdownReaderProps) {
@@ -347,14 +302,9 @@ export function MarkdownReader({
   const [lightboxAttachment, setLightboxAttachment] = useState<MarkdownAttachment | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
 
-  const { entries, slugger } = useMemo(
-    () => collectHeadings(content, baseHeadingLevel),
-    [content, baseHeadingLevel],
-  )
-
   const components = useMemo(
-    () => buildReaderComponents(slugger, baseHeadingLevel, showCopyCode, showHeadingAnchors, resolveAttachment, setLightboxAttachment),
-    [slugger, baseHeadingLevel, showCopyCode, showHeadingAnchors, resolveAttachment],
+    () => buildReaderComponents(baseHeadingLevel, resolveAttachment, setLightboxAttachment),
+    [baseHeadingLevel, resolveAttachment],
   )
   const urlTransform = useMemo(
     () => (resolveAttachment
@@ -399,7 +349,6 @@ export function MarkdownReader({
       data-base-heading-level={baseHeadingLevel}
       className={cn('markdown-reader prose prose-sm max-w-none text-gray-800', className)}
     >
-      {showToc && entries.length > 0 && <MarkdownToc entries={entries} />}
       <div
         ref={bodyRef}
         data-testid="markdown-reader-body"

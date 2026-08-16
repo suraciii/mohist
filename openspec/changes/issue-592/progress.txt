@@ -115,3 +115,8 @@ All three must-fix findings disposed of by fixing. No won't-fix dispositions.
 - Removed the unread `emptyStateKind` and constant-empty `issueTitle`, `siblingNav`, and `siblingSidebar` fields from the hook and shell. Removed the shell's duplicate header/sidebar branches, viewport hook usage, and inert `xl:flex-row` class; deleted the sibling-nav-only shell spec.
 - Switched `SessionDetailShell` and both surviving shell fixtures to the inferred alias. Fixtures now include the hook's required literal query-key and state-setter fields; old runtime-lineage, sibling, issue-title, and empty-state fields are absent.
 - Baseline T-004 coverage passed with 25 tests before edits. Focused post-change coverage passed with 21 tests; `tsc -b`, `npm run test:ci` (357 files, 4,500 tests), `git diff --check`, and the `rg -w` sweep for T-001 through T-004 removed symbols are green.
+
+### T-006 implementation (2026-08-16)
+- Repointed `IssueDetailPage` to `useMediaQuery('(max-width: 1023.98px)')` and the shared `SidebarProvider` to `useMediaQuery('(max-width: 767px)')`; deleted the two superseded viewport hooks and the emptied `shared/hooks` directory while leaving `use-media-query.ts` and its test seam/test unchanged.
+- Removed MarkdownReader's disabled TOC, heading-anchor, and copy-code paths; reduced `heading-remap.tsx` to heading-level remapping only, removed slugger-derived heading ids, deleted `copy-code-button.tsx`, and pruned the corresponding affordance test describes/prop usage.
+- Baseline affected coverage passed with 136 tests before edits. Focused post-change coverage passed with 129 tests; `tsc -b`, FSD/test-boundary checks, full Vitest (357 files, 4,493 tests), `git diff --check`, and the required T-006 word-boundary sweep are green.
