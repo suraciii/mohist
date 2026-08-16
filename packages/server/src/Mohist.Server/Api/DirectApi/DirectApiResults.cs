@@ -54,6 +54,23 @@ public static class DirectApiResults
     /// </summary>
     public static IResult ProjectionLag() => new ProjectionLagResult();
 
+    public static IResult CursorInvalid() =>
+        Error(
+            StatusCodes.Status400BadRequest,
+            DirectApiErrorCodes.CursorInvalid,
+            "The event cursor is invalid or is not bound to this request.");
+
+    public static IResult CursorExpired(long? earliestSequence, long? latestSequence) =>
+        Results.Json(
+            new DirectApiCursorExpiredEnvelope(
+                new DirectApiError(
+                    DirectApiErrorCodes.CursorExpired,
+                    "The event cursor is older than the retained public stream."),
+                earliestSequence,
+                latestSequence),
+            statusCode: StatusCodes.Status410Gone,
+            options: JSON.PublicApi);
+
     /// <summary>
     /// The stop lifecycle has not confirmed its fenced outcome yet. The
     /// mapping remains pending, so the caller must retry the same key rather
