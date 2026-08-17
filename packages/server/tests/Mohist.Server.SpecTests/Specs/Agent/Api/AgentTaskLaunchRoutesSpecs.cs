@@ -153,6 +153,66 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
+    public async Task TaskLaunch_ReplaysAcceptedOutcomeBeforeCheckingDriftedPreflightScope()
+    {
+        var projectId = await CreateProjectAsync("task-preflight-replay");
+        using var configured = await _fixture.Client.PutAsJsonAsync(
+            $"/api/projects/{projectId}/default-execution-config",
+            new { runtime = "pi", model = "provider/original", variant = "balanced" });
+        configured.EnsureSuccessStatusCode();
+
+        const string key = "task-preflight-replay-key";
+        var body = new { prompt = "replay the confirmed task" };
+        using var preflightRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-tasks/preflight")
+        {
+            Content = JsonContent.Create(body),
+        };
+        preflightRequest.Headers.Add("Idempotency-Key", key);
+        preflightRequest.Headers.Add("X-Mohist-Launch-Origin", "web");
+        using var preflight = await _fixture.Client.SendAsync(preflightRequest);
+        Assert.Equal(HttpStatusCode.OK, preflight.StatusCode);
+        var fingerprint = (await preflight.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("scopeFingerprint").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(fingerprint));
+
+        using var firstRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-tasks")
+        {
+            Content = JsonContent.Create(body),
+        };
+        firstRequest.Headers.Add("Idempotency-Key", key);
+        firstRequest.Headers.Add("X-Mohist-Launch-Origin", "web");
+        firstRequest.Headers.Add("X-Mohist-Agent-Preflight", fingerprint!);
+        using var first = await _fixture.Client.SendAsync(firstRequest);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var firstData = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        using var changedDefault = await _fixture.Client.PutAsJsonAsync(
+            $"/api/projects/{projectId}/default-execution-config",
+            new { runtime = "pi", model = "provider/changed", variant = "balanced" });
+        changedDefault.EnsureSuccessStatusCode();
+
+        using var replayRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-tasks")
+        {
+            Content = JsonContent.Create(body),
+        };
+        replayRequest.Headers.Add("Idempotency-Key", key);
+        replayRequest.Headers.Add("X-Mohist-Launch-Origin", "web");
+        replayRequest.Headers.Add("X-Mohist-Agent-Preflight", fingerprint!);
+        using var replay = await _fixture.Client.SendAsync(replayRequest);
+        Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
+        var replayData = (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal(firstData.GetProperty("agentId").GetString(), replayData.GetProperty("agentId").GetString());
+        Assert.Equal(firstData.GetProperty("sessionId").GetString(), replayData.GetProperty("sessionId").GetString());
+        Assert.Equal(firstData.GetProperty("jobId").GetString(), replayData.GetProperty("jobId").GetString());
+    }
+
+    [Fact]
     public async Task TaskLaunch_RejectsClosedFieldsAndMalformedHintsBeforeCreatingAgent()
     {
         var projectId = await CreateProjectAsync("task-validation");

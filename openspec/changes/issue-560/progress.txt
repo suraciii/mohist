@@ -467,3 +467,8 @@ The changes do not edit `review.md`. The latest focused verification passed: Ser
 Final `npm run verify` passed after the architecture/catalog repairs: docs, file-size, and format checks; solution/workspace builds; Workflow Definition 178, Server Unit 2,701, Server Spec 3,952, Server Architecture 68, CLI 1,860, Web 4,739, Runner 1,639, and Slack 70 tests. The final worktree is clean and `review.md` remains untouched.
 
 The final composer extension also gates selected existing-Agent launches through `/sessions/preflight`; server build, Server Architecture 68/68, Web typecheck, FSD boundaries, format, and 84 focused Web tests passed after that commit. A full verify rerun was not repeated after this additive extension.
+
+## Review repair: MF-6
+
+- Fixed the task launch replay ordering: `ResumeIdempotentAsync` now runs before the mutable preflight scope check, so an accepted/pending/recorded outcome is returned unchanged even after the Project default changes. Scope drift is checked only when no launch outcome exists to resume.
+- Added `TaskLaunch_ReplaysAcceptedOutcomeBeforeCheckingDriftedPreflightScope`, and verified the task-route spec class (13/13) plus the Server SpecTests build. `review.md` remains untouched.
