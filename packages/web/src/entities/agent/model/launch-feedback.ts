@@ -8,6 +8,7 @@ export type AgentLaunchFeedbackKind =
   | 'launch-conflict'
   | 'launch-pending'
   | 'execution-config-unresolvable'
+  | 'scope-changed'
 
 export interface AgentLaunchFeedback {
   kind: AgentLaunchFeedbackKind
@@ -83,6 +84,15 @@ export function getAgentLaunchErrorFeedback(
       title: 'Launch is still converging',
       message: 'The server is still determining the launch outcome.',
       nextAction: 'Retry with the same Idempotency-Key so the original outcome can be recovered.',
+    }
+  }
+
+  if (code === 'launch_scope_changed' || (status === 409 && message.includes('scope changed'))) {
+    return {
+      kind: 'scope-changed',
+      title: 'Execution scope changed',
+      message: 'The confirmed execution scope changed before launch; the task is unchanged.',
+      nextAction: 'Re-run the launch to review the updated scope, then confirm it, or adjust the task.',
     }
   }
 

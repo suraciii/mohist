@@ -103,12 +103,20 @@ describe('readAgentModelAndVariant', () => {
     ).toEqual({ model: null, variant: null, runtime: 'opencode' })
   })
 
-  it('omits the variant when no model is set', () => {
+  it('preserves a Variant-only definition (variant without model)', () => {
+    // A Variant without a Model is valid: the resolver fills the missing
+    // Model from the Project default, so the raw definition must keep the
+    // Variant for an unrelated edit to preserve it.
+    expect(
+      readAgentDefinitionModelAndVariant({
+        agentConfig: { variant: 'high' },
+      }),
+    ).toEqual({ model: null, variant: 'high', runtime: 'opencode' })
     expect(
       readAgentModelAndVariant({
         agentConfig: { variant: 'high' },
       }),
-    ).toEqual({ model: null, variant: null, runtime: 'opencode' })
+    ).toEqual({ model: null, variant: 'high', runtime: 'opencode' })
   })
 })
 
@@ -140,9 +148,19 @@ describe('writeAgentModelAndVariant', () => {
   })
 
   it('returns null when model is null regardless of legacy keys', () => {
-    // Dropping the model clears the agentConfig entirely; legacy keys
-    // are not preserved on the converged path.
+    // Dropping the model and variant clears the agentConfig entirely;
+    // legacy keys are not preserved on the converged path.
     expect(writeAgentModelAndVariant({ model: 'm', variant: 'high', type: 'opencode' }, null, null)).toBeNull()
+  })
+
+  it('preserves a Variant-only definition through a write', () => {
+    // An unrelated edit must not erase a raw Variant that has no Model;
+    // the Project default supplies the Model at launch.
+    expect(writeAgentModelAndVariant({ variant: 'high' }, null, 'high')).toEqual({ variant: 'high' })
+    expect(writeAgentModelAndVariant({ variant: 'high', runtime: 'pi' }, null, 'high', 'pi')).toEqual({
+      variant: 'high',
+      runtime: 'pi',
+    })
   })
 
   it('returns null when writing an empty config', () => {

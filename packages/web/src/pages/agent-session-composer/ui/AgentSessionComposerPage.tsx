@@ -603,7 +603,9 @@ export function AgentSessionComposerPage({
                 ? 'error-launch-pending'
                 : launchFeedback?.kind === 'execution-config-unresolvable'
                   ? 'error-execution-config'
-                  : 'error-execution-unavailable'
+                  : launchFeedback?.kind === 'scope-changed'
+                    ? 'error-scope-changed'
+                    : 'error-execution-unavailable'
 
   return (
     <div data-testid="agent-session-composer-page" className="flex-1 overflow-y-auto bg-background">

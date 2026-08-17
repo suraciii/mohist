@@ -272,6 +272,41 @@ describe('AgentSessionComposerPage', () => {
     expect(state.taskCalls[1].idempotencyKey).not.toBe(state.taskCalls[0].idempotencyKey)
   })
 
+  it('surfaces a scope-changed rejection on the task-first path and keeps the task', async () => {
+    state.launchError = {
+      error: 'The confirmed execution scope changed before launch.',
+      code: 'launch_scope_changed',
+    }
+    renderPage(['/agent-sessions/new?issue=42'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Keep this task' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    const feedback = await screen.findByTestId('error-scope-changed')
+    expect(feedback).toHaveAttribute('data-feedback-kind', 'scope-changed')
+    expect(feedback).toHaveTextContent(/scope changed/i)
+    expect(feedback).toHaveTextContent(/re-run the launch/i)
+    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
+    expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
+  })
+
+  it('surfaces a scope-changed rejection on the existing-Agent path and keeps the task', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.launchError = {
+      error: 'The confirmed execution scope changed before launch.',
+      code: 'launch_scope_changed',
+    }
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Analyze this scope' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    const feedback = await screen.findByTestId('error-scope-changed')
+    expect(feedback).toHaveAttribute('data-feedback-kind', 'scope-changed')
+    expect(feedback).toHaveTextContent(/re-run the launch/i)
+    expect(screen.getByTestId('prompt-textarea')).toHaveValue('Analyze this scope')
+  })
+
   it('calls mutate with correct args on launch when an Agent is selected', async () => {
     state.agentsData = [makeAgent('agent-1')]
     renderPage(['/agent-sessions/new?agent=agent-1'])

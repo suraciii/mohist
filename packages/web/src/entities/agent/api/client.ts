@@ -174,14 +174,10 @@ export function readAgentDefinitionModelAndVariant(agent: Pick<AgentInfo, 'agent
   if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
   const rawModel = typeof config.model === 'string' ? config.model : null
   const model = rawModel && rawModel.trim() ? rawModel : null
-  const runtime = config.runtime === 'opencode' || config.runtime === 'pi' ? config.runtime : DEFAULT_AGENT_RUNTIME
-  if (!model) return { model: null, variant: null, runtime }
   const rawVariant = typeof config.variant === 'string' ? config.variant : null
-  return {
-    model,
-    variant: rawVariant && rawVariant.trim() ? rawVariant : null,
-    runtime,
-  }
+  const variant = rawVariant && rawVariant.trim() ? rawVariant : null
+  const runtime = config.runtime === 'opencode' || config.runtime === 'pi' ? config.runtime : DEFAULT_AGENT_RUNTIME
+  return { model, variant, runtime }
 }
 
 export function readAgentModelAndVariant(
@@ -206,7 +202,13 @@ export function writeAgentModelAndVariant(
 ): Record<string, unknown> | null {
   const next: Record<string, unknown> = {}
   if (model === null) {
-    return runtime === DEFAULT_AGENT_RUNTIME ? null : { runtime }
+    // A Variant without a Model is a valid definition: the resolver fills
+    // the missing Model from the Project default. Preserve it unless the
+    // user explicitly cleared it — only an empty (null model, null variant,
+    // default runtime) result is written back as null.
+    if (variant !== null) next.variant = variant
+    if (runtime !== DEFAULT_AGENT_RUNTIME) next.runtime = runtime
+    return Object.keys(next).length === 0 ? null : next
   }
   next.model = model
   if (variant !== null) {

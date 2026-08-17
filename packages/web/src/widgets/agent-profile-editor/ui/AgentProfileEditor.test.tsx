@@ -268,6 +268,25 @@ describe('AgentProfileEditor', () => {
       expect(updateCall.data.agentConfig).toBeNull()
     })
 
+    it('preserves a Variant-only definition when saving an unrelated edit', async () => {
+      // A Variant without a Model is valid: the resolver fills the missing
+      // Model from the Project default. Saving an unrelated field must not
+      // erase the raw Variant (acceptance criterion 5, design D6).
+      const variantOnlyAgent: AgentInfo = {
+        ...existingAgent,
+        agentConfig: { variant: 'high' },
+      }
+      renderEditor({ agent: variantOnlyAgent })
+      await act(async () => {
+        fireEvent.change(screen.getByTestId('editor-description'), { target: { value: 'Updated purpose' } })
+        screen.getByTestId('editor-save').click()
+      })
+
+      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(updateCall.data.description).toBe('Updated purpose')
+      expect(updateCall.data.agentConfig).toEqual({ variant: 'high' })
+    })
+
     it('persists an updated variant and restores its active state from stored agentConfig', async () => {
       renderEditor({ agent: existingAgent })
       await waitFor(() => {
