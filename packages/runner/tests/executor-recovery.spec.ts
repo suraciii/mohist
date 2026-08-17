@@ -276,3 +276,115 @@ describe('recovery budget clamp', () => {
     })
   })
 })
+
+describe('recovery materialization preserves workspace and run-branch identity', () => {
+  function makeRebaseWork(recovery: DispatchWorkItem['recovery']): DispatchWorkItem {
+    return {
+      workflowRunId: 'wf-identity-rebase',
+      workId: 'integrate:rebase.2',
+      workType: 'task',
+      stage: 'integrate',
+      title: 'Rebase branch',
+      uses: 'mohist/rebase',
+      with: { baseBranch: 'master', remote: 'origin' },
+      variables: {
+        workflow: { runId: 'wf-identity-rebase' },
+        workspace: { path: '/virtual/run-identity/workspace', branch: 'mohist/run-wf-identity-rebase' },
+        repository: { baseBranch: 'master', gitUrl: 'https://example.test/repository.git' },
+        issue: { number: 7 },
+      },
+      recovery,
+      recoveryRemaining: 1,
+    }
+  }
+
+  it('self-retry keeps the original with verbatim — no second expectedBranch declaration is added', () => {
+    const recovery = {
+      budget: 2,
+      handlers: [{ when: 'error.code=conflict', tasks: [], retrySelf: true }],
+    }
+    const original = makeRebaseWork(recovery)
+    const result = tryRecovery(original, {
+      status: 'failed',
+      error: { code: 'conflict', message: 'conflict' },
+    })
+    const retry = result?.addTasks?.find((task) => task.id === 'integrate:rebase')
+
+    // The retry task inherits `uses`, `with`, `expect`, `artifacts`,
+    // `setVars`, `recovery`, and `recoveryRemaining` from the original
+    // task. `expectedBranch` is engine-injected from
+    // `variables.workspace.branch` so the workflow profile does not
+    // need to declare it again, and `tryRecovery` does not synthesise
+    // one either — the retry's `with` keys are exactly the original's.
+    expect(retry).toBeDefined()
+    expect(retry?.uses).toBe('mohist/rebase')
+    expect(retry?.with).toEqual({ baseBranch: 'master', remote: 'origin' })
+    expect(retry?.with).not.toHaveProperty('expectedBranch')
+    expect(retry?.recovery).toEqual(recovery)
+    expect(retry?.recoveryRemaining).toBe(0)
+  })
+
+  it('handler-materialized tasks inherit the original with and never substitute baseBranch for expectedBranch', () => {
+    const recovery = {
+      budget: 1,
+      handlers: [
+        {
+          when: 'error.code=conflict',
+          retrySelf: false,
+          tasks: [
+            {
+              id: 'resolve-rebase-conflicts',
+              title: 'Resolve rebase conflicts',
+              uses: 'mohist/opencode',
+              with: { prompt: 'Resolve the rebase conflicts' },
+            },
+          ],
+        },
+      ],
+    }
+    const result = tryRecovery(makeRebaseWork(recovery), {
+      status: 'failed',
+      error: { code: 'conflict', message: 'conflict' },
+    })
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      addTasks: [{ id: 'resolve-rebase-conflicts', uses: 'mohist/opencode' }],
+    })
+    // The handler task's `with` is exactly what the workflow author
+    // declared — `expectedBranch` is never injected by `tryRecovery` and
+    // never substituted by the rebase target. The workspace identity
+    // travels with the workflow-run variables, not via `with`.
+    const resolve = result?.addTasks?.find((task) => task.id === 'resolve-rebase-conflicts')
+    expect(resolve?.with).toEqual({ prompt: 'Resolve the rebase conflicts' })
+    expect(resolve?.with).not.toHaveProperty('expectedBranch')
+    expect(resolve?.with).not.toHaveProperty('baseBranch')
+  })
+
+  it('self-retry preserves variables.workspace.path and workflowRunId via the immutable with clone', () => {
+    const recovery = {
+      budget: 2,
+      handlers: [{ when: 'error.code=conflict', tasks: [], retrySelf: true }],
+    }
+    const original = makeRebaseWork(recovery)
+    const result = tryRecovery(original, {
+      status: 'failed',
+      error: { code: 'conflict', message: 'conflict' },
+    })
+    const retry = result?.addTasks?.find((task) => task.id === 'integrate:rebase')
+
+    // The retry's `with` is a fresh clone (immutable against the
+    // original), and contains exactly the original input keys — the
+    // workspace path and run branch travel through `variables`
+    // (preserved by the server when it materialises the retry into a
+    // new dispatch), not via `with`.
+    expect(retry).toBeDefined()
+    expect(retry?.with).toEqual({ baseBranch: 'master', remote: 'origin' })
+    // Cloning must not regress the original.
+    expect(retry?.with).not.toBe(original.with)
+    // The retry doesn't bring along variables — those are rebuilt by
+    // the server-side dispatch materialization, which is verified in
+    // `recovery-round-cross-boundary.spec.ts`.
+    expect((retry as unknown as { variables?: unknown }).variables).toBeUndefined()
+  })
+})

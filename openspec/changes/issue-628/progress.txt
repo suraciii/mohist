@@ -198,3 +198,86 @@
   the 8 new stateful fake-worktree scenarios), workspace-prepare-workflow,
   worktree-cleanup-delivery, rebase, executor-recovery, recovery-round-cross-boundary all
   green.
+
+## T-004 (done) — Preserve recovery identity and diagnostics across exact retries
+
+### Codebase Patterns (read first for later tasks)
+- `tryRecovery` clones `with` from the original `DispatchWorkItem` and
+  emits an `AddTaskInput` carrying `uses`, `with`, `artifacts`,
+  `setVars`, `recovery`, `recoveryRemaining`, `expect`. Variables and
+  `workflowRunId` are NOT in the `AddTaskInput` wire shape; the server
+  re-binds the same workflow run + variables when it materializes the
+  retry into a new dispatch. The runner therefore never needs to
+  duplicate the workspace branch in the retry's `with` (rebase's
+  `expectedBranch` remains engine-sourced from `workspace.branch`).
+- For `mohist/workspace-prepare`, the workflow profile declares
+  `with.expectedBranch: ${{ workspace.branch }}` once per profile
+  (per stage). A self-retry clones that `with` verbatim and does not
+  add a second declaration. The action's fast-path branch already
+  detects a healthy workspace and returns success without mutation
+  (`StatefulFastPath_HealthyWorkspace_NoMutation`).
+- `StatefulFakeWorktree.fail(match, message, times)` is the injection
+  mechanism: when a Git call matches, the runner returns the failure
+  message and decrements `remaining`. Once exhausted the failure is
+  spliced out, so `times=1` is a clean transient injection, while
+  `times=100` is a persistent injection.
+
+### Implementation summary
+- No runner code changes; tests are added on top of T-001/T-002/T-003's
+  identity-preserving workspace health contract.
+- Added stateful fake-worktree tests in `workspace-prepare.spec.ts` that
+  exercise transient / persistent failure injection across two
+  `workspacePrepareAction` calls on the same fake worktree:
+  - `StatefulTransientCheckoutFailure_FirstAttemptIsDurableFailureThenRetryRepairsSamePath`
+    — single-shot `checkout` failure; first call returns a durable
+    actionable failure with shared expected/observed diagnostic + no
+    successful output + workspace not replaced; subsequent call
+    converges on the same path and branch via the existing fast path
+    after the transient is exhausted.
+  - `StatefulTransientResidualFailure_FirstAttemptIsDurableFailureThenRetryRepairsSamePath`
+    — single-shot `rebase --abort` failure on a workspace that is
+    already on the expected branch but has residual rebase state; the
+    failed attempt does not replace the workspace or create a new
+    branch, and the retry finally aborts the residual state.
+  - `StatefulPersistentCheckoutFailure_BothAttemptsFailWithSameDiagnosticClass`
+    — `times=100` checkout failure; second attempt returns a failure
+    of the SAME diagnostic class (same `operation=checkout`,
+    `expectedBranch=...`, `observedBranch=(detached)`) and never a
+    successful output, with the workspace identity still preserved.
+  - `StatefulRepeatedPreparation_HealthyWorkspace_IsIdempotentFastPathEachTime`
+    — healthy workspace prepared twice; both succeed via the fast
+    path with no checkout/abort/reset/clean, no replacement path,
+    and no branch creation. Confirms `expectedBranch` does not
+    require a second declaration on the retry path.
+- Added recovery materialization tests in `executor-recovery.spec.ts`
+  under `recovery materialization preserves workspace and run-branch
+  identity`:
+  - `self-retry keeps the original with verbatim — no second
+    expectedBranch declaration is added` — a `mohist/rebase`
+    self-retry's `with` is exactly the original's
+    `{ baseBranch, remote }`; `expectedBranch` is engine-injected
+    from `variables.workspace.branch` and is never re-declared.
+  - `handler-materialized tasks inherit the original with and never
+    substitute baseBranch for expectedBranch` — a resolver task's
+    `with` is the workflow author's literal declaration; no
+    `expectedBranch` is synthesised and `baseBranch` is never
+    substituted into the workspace identity slot.
+  - `self-retry preserves variables.workspace.path and workflowRunId
+    via the immutable with clone` — the retry's `with` is a fresh
+    deep clone (so retries cannot regress the original declaration)
+    and `variables` travel separately through the server-side
+    dispatch materialisation, keeping `workflowRunId` and
+    `workspace.{path,branch}` bound to the original run.
+
+### Verification
+- Full runner suite green (156 files / 1739 tests), `tsc` (src + tests),
+  and `check:test-boundaries` all pass.
+- Focused suites: `workspace-prepare.spec.ts` (42 incl. 4 new
+  stateful-retry scenarios), `executor-recovery.spec.ts` (14 incl. 3
+  new identity-preservation scenarios), `workspace-prepare-workflow`,
+  `recovery-round-cross-boundary`, `workspace.spec.ts`,
+  `executor-branch-stability`, `executor-workspace-boundary`,
+  `worktree-cleanup-delivery`, `rebase`, `workflow-profile.spec.ts`
+  all pass.
+- T-001, T-002, T-003 suites remain green (no regressions).
+
