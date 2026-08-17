@@ -18,6 +18,7 @@ public static class DatabaseInitializer
         var logger = scope.ServiceProvider
             .GetService<ILoggerFactory>()?
             .CreateLogger(nameof(WorkflowRunStateDataUpgrader));
+        await SquashedMigrationHistory.RemapAsync(db, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
         await ProjectRepositoryDataUpgrader.UpgradeAsync(db, cancellationToken);
         await WorkflowRunStateDataUpgrader.UpgradeAsync(db, cancellationToken, logger: logger);

@@ -177,6 +177,7 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt (**WIP**), builtin fallback, Workflow key reference.
 - [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, presence and runner-lost closeout, stop settles by identity.
 - [task-log.md](task-log.md) — Task execution log collection pipeline, report channel, storage ownership, settlement-recorded terminal ownership.
+- [db-migrations.md](db-migrations.md) — EF Core migration authoring contract and the squash procedure: baseline, squash floor, history remap, equivalence verification.
 - [issue-list-read.md](issue-list-read.md) — Low-bandwidth issue-list reading and request isolation: list summary model, event invalidation, cold transport.
 - [web-ui.md](web-ui.md) — Web UI design boundary.
 - [session-timeline.md](session-timeline.md) — AgentSession timeline presentation model: transcript-fact-derived activity entries, phrasing and salience discipline, Mohist domain action recognition, raw view.

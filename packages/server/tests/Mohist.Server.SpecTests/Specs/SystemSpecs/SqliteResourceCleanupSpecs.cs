@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.SpecTests.Specs.Sessions;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -19,7 +20,7 @@ public sealed class SqliteResourceCleanupSpecs
         await using var db = database.CreateContext();
         var applied = await db.Database.GetAppliedMigrationsAsync();
         Assert.NotEmpty(applied);
-        Assert.Contains("20260902000000_AddRoutingRuleIdempotencyKey", applied);
+        Assert.Contains(SquashedMigrationHistory.BaselineId, applied);
     }
 
     [Fact]

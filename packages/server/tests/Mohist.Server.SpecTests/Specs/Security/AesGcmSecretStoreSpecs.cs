@@ -131,12 +131,12 @@ public class AesGcmSecretStoreSpecs
     }
 
     [Fact]
-    public async Task DatabaseSchema_AppliesConnectionSecretsMigration()
+    public async Task DatabaseSchema_AppliesSquashedBaseline()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         await using var db = database.CreateContext();
         var applied = await db.Database.GetAppliedMigrationsAsync();
-        Assert.Contains(applied, m => m == "20260729000000_AddConnectionSecrets");
+        Assert.Contains(applied, m => m == SquashedMigrationHistory.BaselineId);
     }
 
     [Fact]

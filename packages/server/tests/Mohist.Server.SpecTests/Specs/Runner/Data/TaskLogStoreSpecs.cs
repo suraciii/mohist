@@ -11,9 +11,6 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Data;
 
 public partial class TaskLogStoreSpecs : IAsyncLifetime
 {
-    private const string BeforeTerminalReceiptMigration = "20260902000000_AddRoutingRuleIdempotencyKey";
-    private const string TerminalReceiptMigration = "20260903000000_AddTaskLogTerminalReceipt";
-
     private readonly TestSqliteDatabase _database;
     private readonly TaskLogStore _store;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
@@ -30,51 +27,6 @@ public partial class TaskLogStoreSpecs : IAsyncLifetime
     {
         _database.Dispose();
         return ValueTask.CompletedTask;
-    }
-
-    [Fact]
-    public async Task TerminalReceiptMigration_UpgradesExistingSchemaAndSupportsAppend()
-    {
-        await using var database = TestSqliteDatabase.CreateEmpty();
-        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeTerminalReceiptMigration);
-
-        await using (var db = database.CreateContext())
-        {
-            await db.Database.MigrateAsync(TerminalReceiptMigration);
-            Assert.Contains(TerminalReceiptMigration, await db.Database.GetAppliedMigrationsAsync());
-
-            await db.Database.OpenConnectionAsync();
-            await using var command = db.Database.GetDbConnection().CreateCommand();
-            command.CommandText = "PRAGMA table_info('TaskLogBatches')";
-            await using var reader = await command.ExecuteReaderAsync();
-            var columns = new List<string>();
-            while (await reader.ReadAsync())
-                columns.Add(reader.GetString(1));
-
-            Assert.Contains("Terminal", columns);
-            Assert.Contains("TerminalDigest", columns);
-        }
-
-        var store = new TaskLogStore(
-            new TestDbContextFactory(database.Options),
-            new FakeTimeProvider(_timeProvider.GetUtcNow()));
-        var result = await store.AppendAsync(
-            "agent-job",
-            "migration-owner",
-            "migration-work",
-            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "migrated")],
-            truncated: false,
-            terminal: true);
-
-        Assert.Equal(TaskLogAppendResult.Changed, result);
-        var page = await store.QueryAsync(
-            "agent-job",
-            "migration-owner",
-            "migration-work",
-            afterSeq: null,
-            limit: 10);
-        Assert.Single(page.Lines);
-        Assert.Equal("migrated", page.Lines[0].Text);
     }
 
     [Fact]

@@ -1,11 +1,5 @@
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
@@ -107,43 +101,6 @@ public sealed class SlackManagerS0Specs
             SlackManagerTransportKind.Socket,
             SlackManagerReadiness.Ready,
             Start));
-    }
-
-    [Fact]
-    public async Task Manager_migration_preserves_historical_rows_and_reverts_on_sqlite()
-    {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-        MigratedSqliteTemplate.CopyTo(connection, "20260803100000_RemoveSlackManagerExternalId");
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
-            .Options;
-
-        await using (var database = new MohistDbContext(options))
-        {
-            await database.Database.ExecuteSqlRawAsync(
-                """
-                INSERT INTO "SlackWorkspaceEnrollments" ("Id", "WorkspaceTeamId", "Lifecycle", "ManagerCapability", "CapabilityReason", "LastVerifiedAt", "PlanCode", "ManagedAppLimit", "ManagerCredentialRef", "AuditJson", "CreatedAt", "UpdatedAt", "DeletedAt")
-                VALUES ('enrollment-history', 'T_HISTORY', 'active', 'available', NULL, NULL, 'unknown', 0, 'credential-history', '[]', '2026-08-04T00:00:00.0000000+00:00', '2026-08-04T00:00:00.0000000+00:00', NULL);
-                INSERT INTO "SlackOutboxRows" ("Id", "ProjectId", "ConnectionId", "WorkspaceTeamId", "ConversationId", "ThreadTs", "Kind", "State", "DispatchRef", "PayloadJson", "AttemptCount", "NextAttemptAt", "ClaimedAt", "ClaimedByAdapterId", "DeliveredAt", "DeliveryUncertainAt", "DeadLetteredAt", "LastError", "CreatedAt", "UpdatedAt")
-                VALUES ('outbox-history', 'project-history', 'connection-history', 'T_HISTORY', 'D_HISTORY', NULL, 'terminal_result', 'pending', 'history-dispatch', 'history-payload', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '2026-08-04T00:00:00.0000000+00:00', '2026-08-04T00:00:00.0000000+00:00');
-                """);
-            await database.Database.MigrateAsync();
-
-            var enrollment = await database.SlackWorkspaceEnrollments.SingleAsync(row => row.Id == "enrollment-history");
-            var outbox = await database.SlackOutboxRows.SingleAsync(row => row.Id == "outbox-history");
-            Assert.Equal("credential-history", enrollment.ManagerCredentialRef);
-            Assert.Equal(SlackDeliveryOwnerKinds.Connection, outbox.OwnerKind);
-            await Assert.ThrowsAsync<SqliteException>(() => database.Database.ExecuteSqlRawAsync(
-                "UPDATE \"SlackOutboxRows\" SET \"OwnerKind\" = 'invalid' WHERE \"Id\" = 'outbox-history'"));
-
-            await database.GetService<IMigrator>().MigrateAsync("20260803100000_RemoveSlackManagerExternalId");
-        }
-
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT \"OwnerKind\" FROM \"SlackOutboxRows\" LIMIT 1";
-        Assert.Throws<SqliteException>(() => command.ExecuteScalar());
     }
 
     [Fact]

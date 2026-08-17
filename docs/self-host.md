@@ -432,6 +432,12 @@ Back up the complete Server data root before an upgrade. Server applies EF Core
 schema migrations and required repository data upgrades at startup. A backup is
 the rollback boundary if migration or the new version fails.
 
+Older migrations are periodically squashed into a single baseline (see
+[`design/db-migrations.md`](../design/db-migrations.md)). A database last
+migrated by a build older than the squash floor cannot be upgraded directly:
+startup fails fast with an error naming the floor. In that case, first check
+out and start a build from before the squash once, then upgrade normally.
+
 For systemd:
 
 ```bash
