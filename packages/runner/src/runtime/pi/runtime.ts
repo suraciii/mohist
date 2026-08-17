@@ -467,7 +467,11 @@ export class PiRuntime {
    * bound session file surfaces as `missing-session` with a Reset hint
    * (no silent new session).
    */
-  async followup(request: PiFollowupRequest, observer?: PiTurnObserver): Promise<PiFollowupResult> {
+  async followup(
+    request: PiFollowupRequest,
+    observer?: PiTurnObserver,
+    signal?: AbortSignal,
+  ): Promise<PiFollowupResult> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     if (!request.prompt || request.prompt.trim().length === 0)
       return this.failure('invalid-input', 'Pi follow-up prompt must be non-empty')
@@ -476,6 +480,7 @@ export class PiRuntime {
       return this.failure('missing-session', 'Pi follow-up requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
     if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
+    if (signal?.aborted) return this.failure('interrupted', 'Pi follow-up was interrupted')
     const session = await this.resolveFollowupSession(path, request.target.workDir, request.managerExecution ?? null)
     if (!session.ok) return session.failure
     const configured = await this.applyFollowupOptions(session.value, request.options)
@@ -484,6 +489,7 @@ export class PiRuntime {
     if (session.value.isStreaming) {
       try {
         await session.value.steer(request.prompt)
+        if (signal?.aborted) return this.failure('interrupted', 'Pi follow-up was interrupted')
         return {
           ok: true,
           value: { runtimeSessionId: path, workDir: request.target.workDir },
@@ -500,6 +506,7 @@ export class PiRuntime {
       this.deps.masker ?? createCredentialMaskerFromEnvironment(),
     )
     const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
+    const waitForCompletion = signal !== undefined
     return new Promise<PiFollowupResult>((resolve) => {
       let settled = false
       const settle = (result: PiFollowupResult) => {
@@ -507,18 +514,32 @@ export class PiRuntime {
         settled = true
         resolve(result)
       }
+      const onAbort = () => {
+        void session.value.abort().catch(() => undefined)
+        settle(this.failure('interrupted', 'Pi follow-up was interrupted'))
+      }
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true })
+        if (signal.aborted) onAbort()
+      }
       void this.sessionLocks.run(path, async () => {
+        if (settled) {
+          signal?.removeEventListener('abort', onAbort)
+          return
+        }
         const unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
         try {
           await session.value.prompt(request.prompt, {
             expandPromptTemplates: false,
             preflight: (success) => {
               if (success) {
-                settle({
-                  ok: true,
-                  value: { runtimeSessionId: path, workDir: request.target.workDir },
-                  diagnostics: [],
-                })
+                if (!waitForCompletion) {
+                  settle({
+                    ok: true,
+                    value: { runtimeSessionId: path, workDir: request.target.workDir },
+                    diagnostics: [],
+                  })
+                }
               } else {
                 settle(
                   this.failure('turn-failed', 'Pi rejected follow-up reception (preflight rejected the prompt)', [
@@ -532,6 +553,13 @@ export class PiRuntime {
             },
           })
           report(projector.reconcile(session.value.messages))
+          if (waitForCompletion && !settled) {
+            settle({
+              ok: true,
+              value: { runtimeSessionId: path, workDir: request.target.workDir },
+              diagnostics: [],
+            })
+          }
         } catch (cause) {
           settle(
             this.failure('turn-failed', 'Pi follow-up prompt failed', [
@@ -540,6 +568,7 @@ export class PiRuntime {
           )
         } finally {
           unsubscribe()
+          signal?.removeEventListener('abort', onAbort)
         }
       })
     })
@@ -908,7 +937,7 @@ export class PiRuntime {
     }
   }
   private failure(
-    kind: 'invalid-input' | 'missing-session' | 'incompatible-runtime' | 'turn-failed' | 'conflict',
+    kind: 'invalid-input' | 'missing-session' | 'incompatible-runtime' | 'turn-failed' | 'interrupted' | 'conflict',
     messageText: string,
     diagnostics: readonly PiDiagnostic[] = [],
   ): PiResult<never> {

@@ -12,3 +12,11 @@
 - The advisory prompt is built from the existing `buildExecutionEnvelope`, validated Slack context, reply anchor, and inline collaboration skill. The injected advisory runner receives the original runtime kind, session id, work directory, context, observation tracker, and abort signal; the guard never authors or publishes reply content.
 - Added focused coverage in `packages/runner/tests/reply-guard.spec.ts` for Pi/OpenCode observation, rejected attempts, final-output-only turns, duplicate starts and terminal evaluations, default-two budgeting, explicit silence, supplied context, non-Slack bypass, unavailable/failure/timeout/interrupted paths, and late completion.
 - Verification passed: Runner source typecheck, test typecheck, test-boundary check, focused projection/reply-guard suites (24/24), and the full Runner suite (1696/1696 across 156 files).
+
+## T-002
+
+- Integrated `ReplyGuardCoordinator` into both initial AgentJob runtime branches after the original `runTurn` result and event sink drain. The projected `WorkItemResult` is captured first and returned unchanged after guard processing; runtime/session event reporting remains independent.
+- The same `ReplyActionObservationTracker` is fed synchronously by Pi and OpenCode initial/advisory observer events before Server event enqueue. Observers are installed even without an AgentSession sink so local reply-attempt detection remains authoritative for eligible turns.
+- Initial advisories call the existing `callFollowup` path with the current runtime session, original work directory, collaboration skill, internal prompt, and shared event sink/tracker. No second `session.input` is emitted. Optional follow-up signal propagation now allows OpenCode to use the coordinator signal and makes Pi idle advisory calls wait for prompt completion and abort on timeout/interruption; normal user follow-ups retain admission behavior.
+- Added `agent-job-reply-guard.spec.ts` covering Pi/OpenCode unpublished turns, two-reminder exhaustion, original accepted/rejected attempts, Agent reply during advisory, failure/timeout preservation, final-text-only behavior, and malformed/non-Slack bypass.
+- Post-integration verification passed: source/test typechecks and the focused AgentJob, reply-guard, OpenCode, and Pi runtime suites (119 tests; 120 after the added Pi attempt case).
