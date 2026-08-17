@@ -22,7 +22,7 @@ namespace Mohist.Server.Auth.Identity;
 /// <para>
 /// The resolution also records two facts for the direct external Agent
 /// API boundary (<c>/api/v1</c>): the credential carrier kind and, for a
-/// PAT, the resolved <see cref="Domain.ExternalAgentCaller"/>. On direct
+/// PAT, the resolved <see cref="ExternalAgentCaller"/>. On direct
 /// API paths this layer authenticates only: route scope and Project
 /// grant authorization belong to
 /// <see cref="ExternalAgentApiMiddleware"/>, which enforces

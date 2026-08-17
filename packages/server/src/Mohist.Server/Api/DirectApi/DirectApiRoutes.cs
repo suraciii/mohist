@@ -596,7 +596,7 @@ public static class DirectApiRoutes
                         ct),
                 };
             }
-            catch (AgentReadinessException)
+            catch (AgentExecutabilityException)
             {
                 outcome = outcome with
                 {

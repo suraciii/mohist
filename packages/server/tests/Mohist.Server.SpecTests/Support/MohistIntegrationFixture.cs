@@ -19,6 +19,7 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Logging;

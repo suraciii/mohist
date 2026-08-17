@@ -10,12 +10,24 @@ namespace Mohist.Server.Auth.Identity;
 /// routes require an issued PAT and an explicit durable Project grant.
 /// </summary>
 public sealed record ExternalAgentCaller(
-    string CredentialId,
+    string CallerKeyId,
     string PrincipalId,
     IReadOnlyList<Scope> Scopes,
     DirectApiProjectGrant? ProjectGrant)
 {
     public const string HttpContextItemKey = "mohist.externalAgentCaller";
+
+    public string CredentialId => CallerKeyId;
+
+    public bool IsDirectApiEnabled => ProjectGrant is { IsValid: true };
+
+    public bool AuthorizesProject(string projectId) => ProjectGrant is { IsValid: true } grant
+        && grant.Kind switch
+        {
+            DirectApiProjectGrantKind.OperatorAll => true,
+            DirectApiProjectGrantKind.Explicit => grant.AllowedProjectIds.Contains(projectId),
+            _ => false,
+        };
 
     public bool AllowsProject(string projectId) => ProjectGrant?.Kind switch
     {
