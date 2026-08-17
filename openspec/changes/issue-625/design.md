@@ -37,7 +37,7 @@ The existing system already provides the needed durability boundaries: `StageRun
 
 2. **Represent lane evidence as additive task-attempt state plus a derived status view.**
 
-   Add optional verification metadata to each recognized built-in lane `TaskRun` attempt: stable lane ID, lane order, configured budget in milliseconds, outcome, and diagnostic/error data. The task's existing `TaskRunStatus` remains `Completed` or `Failed`; `timeout` is a lane outcome, not a new generic task status. A shared server-side lane catalog identifies the six built-in IDs and their order, while the profile YAML remains authoritative for the command and timeout declaration.
+   Add optional verification metadata to each recognized built-in lane `TaskRun` attempt: stable lane ID, lane order, configured budget in milliseconds, outcome, and diagnostic/error data. The task's existing `TaskRunStatus` remains `Completed` or `Failed`; `timeout` is a lane outcome, not a new generic task status. A shared server-side lane catalog identifies the six built-in IDs and their order, while the profile definition captured at run binding remains authoritative for the command and timeout declaration.
 
    When a report is applied, the Server classifies a successful script report as `pass`, a normal script failure as `fail`, and `error.code=timeout` as `timeout`. It stores the outcome and diagnostics in the same state commit as the normal task transition and recovery handling. The existing `TaskRun.Id` and its `WorkId` remain the durable attempt identity, so a retry creates a new attempt for the same lane without replacing the old evidence.
 
