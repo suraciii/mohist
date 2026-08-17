@@ -8,8 +8,8 @@ After a recovered AgentSession is stopped without an authoritative result, the W
 - Keep the expired attempt addressable by its original WorkflowRun, TaskRun, Work, Runner, AgentSession, AgentTurn, and runtime identity for late authoritative result arbitration, but exclude it from redelivery, fresh claims, and active-slot accounting.
 - Make deadline cleanup idempotent across reminder replay, grain activation, and partial cleanup, including settlement dispatch state and other active-work reservations that would otherwise keep the work held.
 - Continue to expose the outcome as blocked/unknown with its persisted reason and deadline. The deadline MUST NOT infer success or failure, replay the old turn, auto-retry, or create replacement work.
-- Accept a late authoritative result only through the existing full identity fence. Apply the original result at most once; duplicate or stale receipts MUST have no side effects and MUST NOT reacquire the released work or Runner slot.
-- Add deterministic fake-time and failure-injection coverage for stop to unknown settlement, deadline release, exactly-once cleanup, slot availability, and late-result arbitration.
+- Accept a late authoritative result only through the existing full identity fence. Workflow Agent terminal reports use an additive `RunnerReportRequest` binding envelope carrying AgentSession, AgentTurn, runtime, and runtime-session identity; incomplete receipts are stale. Apply the original result at most once; duplicate or stale receipts MUST have no side effects and MUST NOT reacquire the released work or Runner slot. Non-Agent reports keep their existing ingress and validation behavior.
+- Add deterministic fake-time and failure-injection coverage for stop to unknown settlement, deadline release, exactly-once cleanup, slot availability, two concurrent unknown attempts, and late-result arbitration.
 
 ## Capabilities
 

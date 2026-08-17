@@ -35,6 +35,14 @@ After the release boundary is durably committed, the expired attempt MUST cease 
 - **THEN** the Runner MUST receive no redelivery or recovery dispatch for the expired attempt
 - **AND** the poll MUST NOT reserve a slot for that attempt
 
+#### Scenario: Two concurrent unknown attempts release at the same boundary
+- **WHEN** two Workflow Agent attempts are concurrently unknown on a Runner whose capacity is occupied by both attempts and fake time reaches their persisted deadlines
+- **THEN** each attempt SHALL transition to `blocked` and clear its active assignment in the same durable release operation that removes that attempt from Runner active-work and used-slot accounting
+- **AND** each blocked settlement SHALL preserve its own original WorkflowRun, TaskRun, Work, Runner, AgentSession, AgentTurn, runtime, runtime-session, reason, and deadline identity
+- **AND** injected failure in snapshot, reminder, or stage/resource cleanup MUST NOT retain either active slot or make either attempt reappear in `activeWorks`
+- **AND** another eligible work item SHALL be able to claim the released capacity
+- **AND** matching late receipts for either original attempt SHALL remain fenced to that identity and MUST NOT reoccupy a Runner slot
+
 #### Scenario: Deadline release frees other active-work reservations
 - **WHEN** deadline cleanup completes for an attempt that owns a stage lock, resource reservation, assignment lease, or equivalent active-work reservation
 - **THEN** each such reservation SHALL be released or excluded from active ownership
@@ -113,7 +121,13 @@ The system SHALL durably retain the original WorkflowRun route and the attempt's
 - **AND** the persisted reason, deadline, and blocked outcome SHALL remain unchanged
 
 ### Requirement: A late authoritative result SHALL settle the original attempt at most once
-The server SHALL accept a late authoritative Agent result only when it passes the existing full WorkflowRun and execution identity fence. A matching result SHALL settle the original blocked attempt exactly once using the normal success or failure semantics, then clear the unresolved settlement through the terminal result path. The late result MUST NOT reacquire the released assignment, dispatch state, stage or resource reservation, or Runner slot. Duplicate, stale, or superseded receipts MUST be acknowledged as stale and MUST have no side effects.
+The existing `POST /api/runner/{runnerId}/report` workflow ingress SHALL be the authoritative transport for Workflow Agent terminal results. Its additive nullable AgentSession, AgentTurn, runtime, and runtime-session fields, together with the WorkflowRun, TaskRun, Work, and Runner identities already in the envelope and route, SHALL form the complete fence. The server SHALL accept a late authoritative Agent result only when all four Agent fields are present and the receipt passes the existing full WorkflowRun and execution identity fence. A matching result SHALL settle the original blocked attempt exactly once using the normal success or failure semantics, then clear the unresolved settlement through the terminal result path. The late result MUST NOT reacquire the released assignment, dispatch state, stage or resource reservation, or Runner slot. Duplicate, stale, incomplete, or superseded receipts MUST be acknowledged as stale and MUST have no side effects. Non-Agent task and check reports SHALL continue through their existing report paths without requiring Agent binding fields.
+
+#### Scenario: An Agent receipt lacks the complete binding
+- **WHEN** a Workflow Agent terminal receipt is missing AgentSessionId, AgentTurnId, runtime, or runtime-session identity, even if its WorkflowRun, TaskRun, Work, and Runner identities match
+- **THEN** the receipt SHALL receive a stale acknowledgement
+- **AND** it MUST NOT bind or settle the task, mutate artifacts or output, emit a terminal event, advance the Workflow, or reacquire active ownership
+- **AND** the existing non-Agent report behavior SHALL remain unchanged
 
 #### Scenario: A matching authoritative success arrives after release
 - **WHEN** a result proving success arrives after the attempt is blocked and released and matches the complete persisted execution identity
