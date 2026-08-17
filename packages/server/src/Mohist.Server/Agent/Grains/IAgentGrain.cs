@@ -6,6 +6,7 @@ namespace Mohist.Server.Agent.Grains;
 public interface IAgentGrain : IGrainWithStringKey
 {
     Task<AgentInfo> CreateAsync(AgentCreateData data);
+    Task<AgentInfo?> AdoptTaskFirstAsync(string idempotencyKey, string requestFingerprint);
     Task<AgentInfo?> ShowAsync();
     Task<AgentInfo?> UpdateAsync(AgentUpdateData data);
     Task<AgentInfo?> ArchiveAsync();
@@ -24,7 +25,9 @@ public sealed record AgentCreateData(
     [property: Id(7)] IReadOnlyList<string>? AllowedSubagentAgentIds = null,
     [property: Id(8)] string? Avatar = null,
     [property: Id(9)] string? Purpose = null,
-    [property: Id(10)] IReadOnlyList<string>? Permissions = null);
+    [property: Id(10)] IReadOnlyList<string>? Permissions = null,
+    [property: Id(11)] string? TaskFirstIdempotencyKey = null,
+    [property: Id(12)] string? TaskFirstRequestFingerprint = null);
 
 [GenerateSerializer]
 public sealed record AgentUpdateData(
@@ -39,6 +42,32 @@ public sealed record AgentUpdateData(
     [property: Id(8)] string? Avatar = null,
     [property: Id(9)] string? Purpose = null,
     [property: Id(10)] IReadOnlyList<string>? Permissions = null);
+
+public sealed class AgentAlreadyExistsException : InvalidOperationException
+{
+    public AgentAlreadyExistsException(string projectId, string agentId)
+        : base($"Agent '{agentId}' already exists in project '{projectId}'.")
+    {
+        ProjectId = projectId;
+        AgentId = agentId;
+    }
+
+    public string ProjectId { get; }
+    public string AgentId { get; }
+}
+
+public sealed class AgentTaskIdempotencyConflictException : InvalidOperationException
+{
+    public AgentTaskIdempotencyConflictException(string projectId, string agentId)
+        : base($"The Idempotency-Key identifies a different task-first Agent definition in project '{projectId}'.")
+    {
+        ProjectId = projectId;
+        AgentId = agentId;
+    }
+
+    public string ProjectId { get; }
+    public string AgentId { get; }
+}
 
 public sealed class AgentNameConflictException : InvalidOperationException
 {

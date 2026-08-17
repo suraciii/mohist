@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
@@ -52,15 +53,22 @@ public sealed class AgentExecutabilityException : Exception
 public sealed class AgentReadinessService : IScopedService
 {
     private readonly AgentJobQuerier _jobs;
+    private readonly ProjectDefaultExecutionConfigReader _defaults;
 
-    public AgentReadinessService(AgentJobQuerier jobs) => _jobs = jobs;
+    public AgentReadinessService(AgentJobQuerier jobs, ProjectDefaultExecutionConfigReader defaults)
+    {
+        _jobs = jobs;
+        _defaults = defaults;
+    }
 
     public async Task<AgentExecutabilityResult> GetAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
     {
         if (IsBuiltInAgent(agent)) return Unknown();
-        var structuralGaps = StructuralGaps(agent);
-        if (structuralGaps.Count > 0) return NotConfigured(structuralGaps);
-        return Evaluate(agent, await _jobs.GetLatestExecutionAsync(projectId, agent.Id, ct));
+        // The Project default is read once per request scope (cached in the
+        // reader), so hydrating Readiness for an N-agent list costs one read.
+        var projectDefault = await _defaults.GetAsync(projectId, ct);
+        var history = await _jobs.GetLatestExecutionAsync(projectId, agent.Id, ct);
+        return Evaluate(agent, history, projectDefault);
     }
 
     public async Task EnsureLaunchableAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
@@ -70,70 +78,109 @@ public sealed class AgentReadinessService : IScopedService
             throw new AgentExecutabilityException(executability);
     }
 
-    public static AgentExecutabilityResult Evaluate(AgentInfo agent, AgentExecutionHistory? history)
+    public static AgentExecutabilityResult Evaluate(
+        AgentInfo agent,
+        AgentExecutionHistory? history,
+        ExecutionConfigHint? projectDefault = null)
     {
         if (IsBuiltInAgent(agent)) return Unknown();
-        var structuralGaps = StructuralGaps(agent);
+        var structuralGaps = StructuralGaps(agent, projectDefault);
         if (structuralGaps.Count > 0) return NotConfigured(structuralGaps);
-        if (history is null || !MatchesCurrentDefinition(agent, history.Input)) return Unknown();
+        if (history is null || !MatchesCurrentDefinition(agent, history.Input, projectDefault)) return Unknown();
         if (history.Status == AgentJobStatus.Completed) return Executable();
         return history.Status == AgentJobStatus.Failed && IsConfigurationFailure(history.FailureCategory)
             ? NotExecutable(agent, history.FailureCategory)
             : Unknown();
     }
 
-    private static List<AgentExecutabilityGap> StructuralGaps(AgentInfo agent)
+    /// <summary>
+    /// Structural gaps resolve Model and Variant by Agent definition, then
+    /// Project default — the same precedence rule as launch. A configured
+    /// default therefore resolves <c>model-missing</c> and
+    /// <c>variant-without-model</c>; definition errors
+    /// (<c>model-reference-malformed</c>, <c>runtime-invalid</c>) are
+    /// malformed explicit values and are never masked by a default.
+    /// </summary>
+    internal static List<AgentExecutabilityGap> StructuralGaps(AgentInfo agent, ExecutionConfigHint? projectDefault)
     {
         var gaps = new List<AgentExecutabilityGap>();
         if (string.IsNullOrWhiteSpace(agent.Instructions))
             gaps.Add(Gap(agent, "instructions-missing", "Instructions are missing.", "Add instructions in Agent settings."));
 
-        var (model, variant) = AgentLauncher.ResolveModelAndVariant(agent.AgentConfig);
         var reasoningEffort = AgentLauncher.ResolveReasoningEffort(agent.AgentConfig);
-        if (agent.AgentConfig is null
-            || agent.AgentConfig.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            gaps.Add(Gap(
-                agent,
-                "model-missing",
-                "A model is not configured.",
-                "Set a model in Agent settings."));
-            return gaps;
-        }
-        if (agent.AgentConfig.Value.ValueKind != JsonValueKind.Object)
-            return gaps;
+        var config = agent.AgentConfig is { ValueKind: JsonValueKind.Object } raw ? raw : (JsonElement?)null;
+        var resolved = ExecutionConfigResolver.Resolve(
+            callerHint: null,
+            definition: ExecutionConfigResolver.FromAgentConfig(config),
+            projectDefault: projectDefault);
 
-        if (string.IsNullOrWhiteSpace(model))
+        if (resolved.Model is null)
             gaps.Add(Gap(
                 agent,
                 "model-missing",
                 "A model is not configured.",
                 "Set a model in Agent settings."));
-        if (agent.AgentConfig is { ValueKind: JsonValueKind.Object } rawConfig
-            && rawConfig.TryGetProperty("variant", out var rawVariant)
-            && rawVariant.ValueKind == JsonValueKind.String)
-            variant = rawVariant.GetString();
-        if (!string.IsNullOrWhiteSpace(model) && !model.Contains('/', StringComparison.Ordinal))
+        else if (!resolved.Model.Contains('/', StringComparison.Ordinal))
             gaps.Add(Gap(agent, "model-reference-malformed", "The model reference must use provider/model format.", "Set a valid model in Agent settings."));
-        if (!string.IsNullOrWhiteSpace(variant) && string.IsNullOrWhiteSpace(model))
+        if (resolved.Model is null && resolved.Variant is not null)
             gaps.Add(Gap(agent, "variant-without-model", "A variant is set without a model.", "Set a model or remove the variant in Agent settings."));
-        if (!string.IsNullOrWhiteSpace(reasoningEffort) && string.IsNullOrWhiteSpace(model))
+        if (!string.IsNullOrWhiteSpace(reasoningEffort) && resolved.Model is null)
             gaps.Add(Gap(agent, "reasoning-effort-without-model", "A reasoning effort is set without a model.", "Set a model or remove the reasoning effort in Agent settings."));
-        if (agent.AgentConfig is { ValueKind: JsonValueKind.Object } config && AgentConfigSchema.ValidateRuntime(config) is not null)
+        if (config is not null && AgentConfigSchema.ValidateRuntime(config.Value) is not null)
             gaps.Add(Gap(agent, "runtime-invalid", "The configured runtime is not supported.", "Choose opencode or pi in Agent settings."));
         return gaps;
     }
 
-    private static bool MatchesCurrentDefinition(AgentInfo agent, AgentJobInput input)
+    /// <summary>
+    /// Compares the resolved execution tuple — definition, then Project
+    /// default — against the last execution's launch-time definition
+    /// snapshot, with both sides resolved under the same (current) default.
+    /// A Project-default change therefore cannot flip a completed
+    /// execution: an Agent whose definition is unchanged still matches.
+    ///
+    /// Older AgentJobInput records predate the AgentConfig snapshot and have
+    /// only the already-resolved dispatch fields. For those records, compare
+    /// fields the current definition explicitly supplies and leave
+    /// default-resolved fields free, preserving the pre-feature readiness
+    /// result while retaining the full tuple comparison for new launches.
+    /// </summary>
+    private static bool MatchesCurrentDefinition(
+        AgentInfo agent,
+        AgentJobInput input,
+        ExecutionConfigHint? projectDefault)
     {
-        var current = AgentLauncher.ResolveModelAndVariant(agent.AgentConfig);
+        var definition = ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig);
+        var current = ExecutionConfigResolver.Resolve(null, definition, projectDefault);
+        var launchDefinition = ExecutionConfigResolver.FromAgentConfig(input.AgentConfig);
+        var matchesExecution = launchDefinition is not null
+            ? MatchesResolvedTuple(
+                current,
+                ExecutionConfigResolver.Resolve(null, launchDefinition, projectDefault))
+            : MatchesLegacyDispatch(definition, current, input);
+
         return string.Equals(agent.Instructions, input.AgentInstructions ?? string.Empty, StringComparison.Ordinal)
-            && string.Equals(AgentLauncher.ResolveRuntime(agent.AgentConfig), input.Runtime ?? AgentConfigSchema.OpenCodeRuntime, StringComparison.Ordinal)
-            && string.Equals(current.Model, input.Model, StringComparison.Ordinal)
-            && string.Equals(current.Variant, input.Variant, StringComparison.Ordinal)
+            && matchesExecution
             && string.Equals(AgentLauncher.ResolveReasoningEffort(agent.AgentConfig), input.ReasoningEffort, StringComparison.Ordinal)
             && agent.Skills.SequenceEqual(input.Skills ?? [], StringComparer.Ordinal);
     }
+
+    private static bool MatchesResolvedTuple(
+        ResolvedExecutionConfig current,
+        ResolvedExecutionConfig atLaunch) =>
+        string.Equals(current.Runtime, atLaunch.Runtime, StringComparison.Ordinal)
+        && string.Equals(current.Model, atLaunch.Model, StringComparison.Ordinal)
+        && string.Equals(current.Variant, atLaunch.Variant, StringComparison.Ordinal);
+
+    private static bool MatchesLegacyDispatch(
+        ExecutionConfigHint? definition,
+        ResolvedExecutionConfig current,
+        AgentJobInput input) =>
+        (definition?.Runtime is null
+            || string.Equals(current.Runtime, input.Runtime ?? AgentConfigSchema.OpenCodeRuntime, StringComparison.Ordinal))
+        && (definition?.Model is null
+            || string.Equals(current.Model, input.Model, StringComparison.Ordinal))
+        && (definition?.Variant is null
+            || string.Equals(current.Variant, input.Variant, StringComparison.Ordinal));
 
     private static bool IsBuiltInAgent(AgentInfo agent) =>
         string.Equals(agent.Id, $"builtin:{BuiltInAgentCatalog.MohistSlackName}", StringComparison.Ordinal)
@@ -160,12 +207,12 @@ public sealed class AgentReadinessService : IScopedService
 
     private static string DescribeConfigurationFailure(string? category) =>
         category?.Contains("api_key", StringComparison.OrdinalIgnoreCase) == true
-        || category?.Contains("credential", StringComparison.OrdinalIgnoreCase) == true
-        || category?.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) == true
-            ? "The runtime could not authenticate with the configured provider."
-            : category?.Contains("model", StringComparison.OrdinalIgnoreCase) == true
-                ? "The configured model could not be used by the runtime."
-                : "The configured runtime rejected this Agent definition.";
+            || category?.Contains("credential", StringComparison.OrdinalIgnoreCase) == true
+            || category?.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) == true
+                ? "The runtime could not authenticate with the configured provider."
+                : category?.Contains("model", StringComparison.OrdinalIgnoreCase) == true
+                    ? "The configured model could not be used by the runtime."
+                    : "The configured runtime rejected this Agent definition.";
 
     private static AgentExecutabilityGap Gap(AgentInfo agent, string code, string message, string nextAction) => new(
         code,

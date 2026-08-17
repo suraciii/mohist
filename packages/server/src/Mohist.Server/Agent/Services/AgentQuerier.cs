@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
@@ -10,11 +12,16 @@ public class AgentQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly AgentReadinessService? _readiness;
+    private readonly ProjectDefaultExecutionConfigReader? _defaults;
 
-    public AgentQuerier(IDbContextFactory<MohistDbContext> dbFactory, AgentReadinessService? readiness = null)
+    public AgentQuerier(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        AgentReadinessService? readiness = null,
+        ProjectDefaultExecutionConfigReader? defaults = null)
     {
         _dbFactory = dbFactory;
         _readiness = readiness;
+        _defaults = defaults;
     }
 
     public async Task<AgentInfo?> GetByIdAsync(string projectId, string id, CancellationToken ct = default)
@@ -30,9 +37,9 @@ public class AgentQuerier : IScopedService
             .Where(agent => agent.ProjectId == projectId && agent.Id == id)
             .Select(ToInfo)
             .FirstOrDefault();
-        return agent is null || _readiness is null
-            ? agent
-            : agent with { Executability = await _readiness.GetAsync(projectId, agent, ct) };
+        return agent is null
+            ? null
+            : await HydrateAsync(projectId, agent, ct);
     }
 
     /// <summary>
@@ -58,9 +65,9 @@ public class AgentQuerier : IScopedService
                 && string.Equals(agent.Name, name, StringComparison.OrdinalIgnoreCase))
             .Select(ToInfo)
             .FirstOrDefault();
-        return agent is null || _readiness is null
-            ? agent
-            : agent with { Executability = await _readiness.GetAsync(projectId, agent) };
+        return agent is null
+            ? null
+            : await HydrateAsync(projectId, agent);
     }
 
     public async Task<IReadOnlyList<AgentInfo>> ListAsync(
@@ -70,12 +77,10 @@ public class AgentQuerier : IScopedService
         CancellationToken ct = default)
     {
         var infos = await ListDefinitionsAsync(projectId, status, all, ct);
-        if (_readiness is null)
-            return infos;
         var hydrated = new List<AgentInfo>(infos.Count);
         foreach (var info in infos)
         {
-            hydrated.Add(info with { Executability = await _readiness.GetAsync(projectId, info, ct) });
+            hydrated.Add(await HydrateAsync(projectId, info, ct));
         }
         return hydrated;
     }
@@ -108,6 +113,24 @@ public class AgentQuerier : IScopedService
             .Select(ToInfo)
             .ToList();
         return infos;
+    }
+
+    private async Task<AgentInfo> HydrateAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
+    {
+        var effective = ExecutionConfigResolver.Resolve(
+            callerHint: null,
+            definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
+            projectDefault: _defaults is null ? null : await _defaults.GetAsync(projectId, ct));
+        var hydrated = agent with
+        {
+            EffectiveExecutionConfig = new AgentEffectiveExecutionConfig(
+                effective.Runtime,
+                effective.Model,
+                effective.Variant),
+        };
+        return _readiness is null
+            ? hydrated
+            : hydrated with { Executability = await _readiness.GetAsync(projectId, hydrated, ct) };
     }
 
     public static AgentInfo ToInfo(Domain.Agent agent) => new(

@@ -155,7 +155,7 @@ enter the language.
 | `label` | `list`, `create`, `edit`, `delete` |
 | `workflow` | `list`, `view`, `create`, `edit`, `delete`, `validate`; `view --yaml` reads the raw Workflow Definition |
 | `run` | `list`, `view`, `watch`, `approve`, `reject`, `retry`, `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the current Definition of the Profile bound to the Run; `feedback list/view`; `variable list/get/set/unset`, where `list/get --effective` reads merged values |
-| `agent` | `list`, `view`, `create`, `edit`, `archive`, `restore`, `launch`, `spawn`, `install`; `job list/view`; `subscription list/create/edit/delete`; read-only `model list --runtime` |
+| `agent` | `list`, `view`, `start`, `create`, `edit`, `archive`, `restore`, `launch`, `spawn`, `install`; `job list/view`; `subscription list/create/edit/delete`; read-only `model list --runtime` |
 | `session` | `list`, `tree`, `view`, `transcript`, `followup`, `compact`, `reset`, `stop`, `detach`; `schedule create/list/cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`; `test` evaluates the complete routing table |
@@ -360,15 +360,32 @@ addressable, continuing conversation. It contains messages, context, and usage.
 The CLI must not use Session state as the AgentJob result. It must not interpret
 Job completion as a closed conversation or a delivered user goal.
 
-- `mo agent launch <agent>` creates an AgentJob, AgentSession, first
-  SessionInput, and first AgentTurn. It returns stable Agent, Job, Session,
-  Input, Turn, Workspace, and target identities, plus the canonical Session URL,
-  transcript URL, and composite observation URL. `--workspace <name>` binds the
-  new Session to an existing Workspace. Without it, the command binds the
-  current Project default Workspace. See [Workspace](#workspace). The command
-  accepts `--idempotency-key`. When omitted, it prints a generated key before
-  the request. After a lost response, the caller must retry with that key.
-- `mo agent create/edit` configures an Agent with typed `--runtime`, `--model`,
+- `mo agent start --prompt <task>` is the default task-first path when you
+  have work but do not need a preconfigured Agent. It creates the Agent and
+  launches its first AgentJob, AgentSession, SessionInput, and AgentTurn in one
+  accepted request. Use `--prompt-file` instead of `--prompt`, and optionally
+  pass `--attach`, `--name`, `--runtime`, `--model`, `--variant`, `--issue`,
+  `--epic`, `--repo`, and `--workspace`. A Project default execution
+  configuration supplies omitted execution hints; without one, pass the
+  execution hints explicitly. `--runtime` accepts `opencode` or `pi`, and
+  `--model` uses `provider/model`. The command sends the CLI launch origin and
+  returns the Agent, Job, Session, Input, Turn, Workspace, status, and canonical
+  Session, transcript, Job, and observation URLs. In table mode, an omitted
+  `--idempotency-key` is generated and printed before the request. Retry a lost
+  response with that same key; accepted replays return the original identities
+  and do not start another launch. Raw JSON mode prints the complete Server
+  response; task-first field subsets are not a separate output contract.
+- `mo agent launch <agent>` remains the definition-first path. It creates an
+  AgentJob, AgentSession, first SessionInput, and first AgentTurn from an
+  existing Agent profile. It returns stable Agent, Job, Session, Input, Turn,
+  Workspace, and target identities, plus the canonical Session URL, transcript
+  URL, and composite observation URL. `--workspace <name>` binds the new
+  Session to an existing Workspace. Without it, the command binds the current
+  Project default Workspace. See [Workspace](#workspace). The command accepts
+  `--idempotency-key`. When omitted, it prints a generated key before the
+  request. After a lost response, the caller must retry with that key.
+- `mo agent create/edit` remains the deliberate definition-first configuration
+  path. It configures an Agent with typed `--runtime`, `--model`,
   `--variant`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
   supplies the avatar. Mutually exclusive `--instructions` or
   `--instructions-file` supplies Instructions. `--runtime` accepts only

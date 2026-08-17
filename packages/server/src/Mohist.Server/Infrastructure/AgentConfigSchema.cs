@@ -144,6 +144,17 @@ public static class AgentConfigSchema
     }
 
     /// <summary>
+    /// The <c>provider/model</c> reference form shared by Agent definitions
+    /// (the Readiness <c>model-reference-malformed</c> gap) and the Project
+    /// default execution configuration (rejected at configuration time). A
+    /// null or whitespace model has no reference to check and is valid
+    /// here — missing-model gaps are a Readiness concern.
+    /// </summary>
+    public static bool HasProviderModelForm(string? model) =>
+        string.IsNullOrWhiteSpace(model)
+        || model.Contains('/', StringComparison.Ordinal);
+
+    /// <summary>
     /// Validate the <c>runtime</c> field on an already-deserialized
     /// dictionary. Same semantics as the JsonElement overload; an absent
     /// key is valid.

@@ -19,6 +19,11 @@ public class Agent
     public string Status { get; set; } = AgentStatus.Active;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    // Set only for task-first definitions. These facts survive a crash
+    // between definition creation and coordinator-plan persistence.
+    public string? TaskFirstIdempotencyKey { get; set; }
+    public string? TaskFirstRequestFingerprint { get; set; }
 }
 
 public static class AgentStatus

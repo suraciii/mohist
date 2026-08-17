@@ -99,10 +99,12 @@ Issue, and Workflow. They do not create three separate sets of state.
 - **Direct `mo` use**: Suitable for deterministic manual operations, scripts,
   and troubleshooting.
 
-To try a Mohist Agent directly, follow
-[Agents and AgentSessions](agent-sessions.md) to create and start one. To let a
-third-party External Agent use Mohist, install the Mohist Skill into a supported
-local Agent:
+To try a Mohist Agent directly, use the task-first startup path after selecting
+or creating a Project. `mo agent start` creates the Agent and launches its first
+work in one step. The definition-first `mo agent create` and `mo agent launch`
+commands remain available when you want to configure a reusable Agent before
+starting work. To let a third-party External Agent use Mohist, install the
+Mohist Skill into a supported local Agent:
 
 ```bash
 mo skill install
@@ -148,6 +150,35 @@ Create a Project with the CLI:
 mo project create my-app --path /path/to/your/repo
 mo project use my-app
 ```
+
+### Start your first Agent task (recommended)
+
+Task-first startup is the default first-run path when you have work to do but
+do not need to design an Agent first. If this Project has a default execution
+configuration, the task is enough:
+
+```bash
+mo agent start --prompt "Inspect this repository and report the highest-priority next step"
+```
+
+When the Project does not have a default, list available models and provide the
+execution hints explicitly:
+
+```bash
+mo agent model list --runtime opencode
+mo agent start \
+  --prompt "Inspect this repository and report the highest-priority next step" \
+  --runtime opencode --model provider/model
+```
+
+The command prints the Agent, AgentJob, AgentSession, first Input, first Turn,
+workspace, status, and canonical observation links. In table mode it also
+prints a generated idempotency key before the request when one was not supplied.
+Retry a lost response with the same key; an accepted retry returns the original
+identities without starting a second launch. Use
+[Agents and AgentSessions](agent-sessions.md) to refine the created Agent after
+launch. The definition-first `mo agent create` then `mo agent launch` flow
+remains the deliberate configuration path.
 
 An External Agent with the Mohist Skill can perform the same operation. For the
 manual fallback path, use the Web UI:

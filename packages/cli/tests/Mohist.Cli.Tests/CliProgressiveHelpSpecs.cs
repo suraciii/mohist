@@ -84,6 +84,7 @@ public sealed class CliProgressiveHelpSpecs
 
         Assert.Equal(0, agentExit);
         var agentHelp = output.ToString();
+        Assert.Contains("  start", agentHelp, StringComparison.Ordinal);
         Assert.Contains("  spawn", agentHelp, StringComparison.Ordinal);
         Assert.Contains("  subscription", agentHelp, StringComparison.Ordinal);
         Assert.DoesNotContain("Spawn an allowed child AgentSession from a parent session", agentHelp, StringComparison.Ordinal);

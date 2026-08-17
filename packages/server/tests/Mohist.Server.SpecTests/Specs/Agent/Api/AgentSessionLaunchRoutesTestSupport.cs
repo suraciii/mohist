@@ -94,7 +94,12 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             .GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
 
-        var dispatch = await PollDispatchOnceAsync(runnerId, agentJobId);
+        var dispatch = await TestWait.ForAsync(
+            () => PollDispatchOnceAsync(runnerId, agentJobId),
+            value => value is not null,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(100),
+            $"a polled dispatch for AgentJob '{agentJobId}' on runner '{runnerId}'");
 
         Assert.NotNull(dispatch);
         Assert.Equal(agentJobId, dispatch.AgentJobId);

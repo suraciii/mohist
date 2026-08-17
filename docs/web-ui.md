@@ -93,6 +93,32 @@ state, Ready, Needs setup, or Unknown Readiness, Runtime and model, active and
 queued work counts, and external Connection health. Runner availability and
 capacity are shown separately and cannot appear as Needs setup.
 
+The primary entry point for a Project without Agents is the task-first session
+composer at `/<project>/agent-sessions/new`. Enter the prompt, attachments, and
+context references first. The Agent field defaults to **New Agent for this task**;
+leaving it unchanged creates and launches a new Agent through one task-first
+request. Selecting an existing Agent keeps the definition-first launch path and
+uses that Agent's stored execution definition.
+
+Execution configuration follows the Project surface. A configured
+`defaultExecutionConfig` is shown as the **Recommended execution configuration**
+for tasks in the Project. It requires no extra question; **Adjust** opens the
+catalog-backed Runtime and Model selectors, and adjusted values are submitted as
+hints. When no Project default exists, the create-new path requires Runtime and
+Model inline. Models and variants come from the selected Runtime catalog, the
+same catalog used by the Agent definition editor.
+
+A successful launch opens the returned AgentSession URL. The session header links
+to the created Agent detail page, where name, description, Instructions, and
+Skills can be refined for later AgentJobs; an in-flight session keeps its launch
+snapshot. Conflicts identify the earlier idempotency attempt, pending launches
+say to retry with the same key, and unresolved execution configuration names
+both repairs: choose Runtime and Model or configure the Project default. The
+composer keeps the entered task and context while showing these rejections.
+
+The Agents empty state leads with **Start with a task**. **Configure an Agent**
+remains available as the secondary definition-first entry point.
+
 Agent details contain four continuous areas:
 
 1. **Definition:** Avatar, name, description, Instructions, Runtime, Model,

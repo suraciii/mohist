@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 
 namespace Mohist.Server.TestSupport;
 
@@ -15,6 +16,7 @@ public enum LaunchParticipantGate
     EnsureInitialLaunch,
     ParentLinkCommitted,
     SubmitJob,
+    ArchiveDefinition,
 }
 
 /// <summary>
@@ -34,11 +36,14 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
         new();
     private readonly ConcurrentDictionary<LaunchParticipantGate, ConcurrentQueue<string>> _participantIds =
         new();
+    private readonly ConcurrentDictionary<LaunchParticipantGate, string> _rejections =
+        new();
 
     public void FailNext(LaunchParticipantGate gate, int times = 1)
     {
         _commandIds.TryRemove(gate, out _);
         _participantIds.TryRemove(gate, out _);
+        _rejections.TryRemove(gate, out _);
         if (times <= 0)
         {
             StopFailing(gate);
@@ -50,10 +55,21 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
     public void StopFailing(LaunchParticipantGate gate) =>
         _remaining.TryRemove(gate, out _);
 
+    public void RejectNext(LaunchParticipantGate gate, string reason)
+    {
+        _commandIds.TryRemove(gate, out _);
+        _participantIds.TryRemove(gate, out _);
+        _rejections[gate] = reason;
+    }
+
+    public void StopRejecting(LaunchParticipantGate gate) =>
+        _rejections.TryRemove(gate, out _);
+
     public void ClearObservations()
     {
         _commandIds.Clear();
         _participantIds.Clear();
+        _rejections.Clear();
     }
 
     public IReadOnlyList<string> CommandIds(LaunchParticipantGate gate) =>
@@ -77,6 +93,9 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
     public Task OnSubmitJobAsync(string jobKey, string commandId) =>
         RecordAndMaybeThrow(LaunchParticipantGate.SubmitJob, jobKey, commandId);
 
+    public Task OnArchiveDefinitionAsync(string agentId, string commandId) =>
+        RecordAndMaybeThrow(LaunchParticipantGate.ArchiveDefinition, agentId, commandId);
+
     private Task RecordAndMaybeThrow(LaunchParticipantGate gate, string participantId, string commandId)
     {
         _participantIds.GetOrAdd(gate, _ => new()).Enqueue(participantId);
@@ -89,6 +108,8 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
                     $"Simulated participant failure at {gate}.");
             }
         }
+        if (_rejections.TryRemove(gate, out var reason))
+            throw new AgentSpawnPostPlanRejectedException(reason);
         return Task.CompletedTask;
     }
 }

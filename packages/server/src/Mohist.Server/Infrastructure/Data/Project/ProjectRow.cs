@@ -9,4 +9,12 @@ public class ProjectRow
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public long RepositoryRevision { get; set; }
     public string? LastRepositoryCommandJson { get; set; }
+
+    /// <summary>
+    /// Serialized Project default execution configuration
+    /// (<c>{ runtime, model, variant? }</c>) or null when no default is
+    /// configured. Nullable and additive — deployments without a default
+    /// keep null and observe no behavior change.
+    /// </summary>
+    public string? DefaultExecutionConfigJson { get; set; }
 }

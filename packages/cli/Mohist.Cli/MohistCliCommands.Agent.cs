@@ -27,6 +27,7 @@ internal static partial class AgentCommands
         agent.Subcommands.Add(BuildEdit(api));
         agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildLaunch(api));
+        agent.Subcommands.Add(BuildStart(api));
         agent.Subcommands.Add(BuildSpawn(api));
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
@@ -774,7 +775,7 @@ internal static partial class AgentCommands
             AllowMultipleArgumentsPerToken = true,
         };
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
-        var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
+        var epicRefOpt = new Option<int?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
         var repositoryRefOpt = new Option<string?>("--repo") { Description = "Optional context reference: record the repository on the session metadata" };
         var workspaceOpt = new Option<string?>("--workspace") { Description = "Bind to a named workspace" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
@@ -885,7 +886,6 @@ internal static partial class AgentCommands
         });
         return cmd;
     }
-
     private static Command BuildSpawn(MohistCliApi api)
     {
         var cmd = new Command(
@@ -948,20 +948,6 @@ internal static partial class AgentCommands
         }
 
         return cmd;
-    }
-
-    private static object? BuildLaunchContext(int? issue, string? epic, string? repository, string? workspace)
-    {
-        if (issue is null && string.IsNullOrWhiteSpace(epic) && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspace))
-            return null;
-
-        return new
-        {
-            issueNumber = issue,
-            epicNumber = string.IsNullOrWhiteSpace(epic) ? null : epic,
-            repository = string.IsNullOrWhiteSpace(repository) ? null : repository,
-            workspace = string.IsNullOrWhiteSpace(workspace) ? null : workspace,
-        };
     }
 
     private static void AddInstructionsInputValidation(

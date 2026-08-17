@@ -144,5 +144,6 @@ public class ProjectQuerier : ISingletonService
         Variables = variables ?? ProjectVariablesBag.Empty,
         CreatedAt = e.CreatedAt.ToString("o"),
         UpdatedAt = e.UpdatedAt.ToString("o"),
+        DefaultExecutionConfig = ExecutionConfigJson.Deserialize(e.DefaultExecutionConfigJson),
     };
 }

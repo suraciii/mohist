@@ -3,6 +3,12 @@ using System.Text.Json;
 namespace Mohist.Server.Agent.Services;
 
 [GenerateSerializer]
+public sealed record AgentEffectiveExecutionConfig(
+    [property: Id(0)] string Runtime,
+    [property: Id(1)] string? Model,
+    [property: Id(2)] string? Variant);
+
+[GenerateSerializer]
 public sealed record AgentInfo(
     [property: Id(0)]
     string Id,
@@ -35,4 +41,6 @@ public sealed record AgentInfo(
     [property: Id(14)]
     string? Purpose = null,
     [property: Id(15)]
-    IReadOnlyList<string>? Permissions = null);
+    IReadOnlyList<string>? Permissions = null,
+    [property: Id(16)]
+    AgentEffectiveExecutionConfig? EffectiveExecutionConfig = null);

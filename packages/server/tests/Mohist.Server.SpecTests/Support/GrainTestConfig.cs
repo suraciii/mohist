@@ -266,6 +266,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<ISlackConnectionHealthBackpressurer, NoopSlackConnectionHealthBackpressurer>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentQuerier>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentJobQuerier>();
+        siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Project.ProjectDefaultExecutionConfigReader>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentReadinessService>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();

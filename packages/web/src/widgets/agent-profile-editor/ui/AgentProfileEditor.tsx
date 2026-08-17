@@ -5,7 +5,7 @@ import {
   useCreateAgent,
   useUpdateAgent,
   useArchiveAgent,
-  readAgentModelAndVariant,
+  readAgentDefinitionModelAndVariant,
   writeAgentModelAndVariant,
 } from '../../../entities/agent'
 import type { AgentInfo, AgentCreateRequest, AgentUpdateRequest } from '../../../entities/agent'
@@ -57,10 +57,11 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
   const toProjectPath = useProjectPath()
   const { createAgent, updateAgent, archiveAgent } = operationsHook()
   const isEditing = !!agent
-  const initialModelVariant = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const initialModelVariant = useMemo(() => readAgentDefinitionModelAndVariant(agent), [agent])
 
   const [name, setName] = useState(agent?.name ?? '')
   const [purpose, setPurpose] = useState(agent?.purpose ?? '')
+  const [description, setDescription] = useState(agent?.description ?? '')
   const [instructions, setInstructions] = useState(agent?.instructions ?? '')
   const [skillsText, setSkillsText] = useState(agent?.skills?.join(', ') ?? '')
   const [permissionsText, setPermissionsText] = useState(agent?.permissions?.join(', ') ?? '')
@@ -68,6 +69,10 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
   const [variant, setVariant] = useState<string | null>(initialModelVariant.variant)
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(initialModelVariant.reasoningEffort)
   const [runtime, setRuntime] = useState<AgentRuntime>(initialModelVariant.runtime)
+  const [allowedSubagentAgentIds, setAllowedSubagentAgentIds] = useState<string[]>(agent?.allowedSubagentAgentIds ?? [])
+  const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState(
+    agent?.maxConcurrentRuns == null ? '' : String(agent.maxConcurrentRuns),
+  )
   const [errors, setErrors] = useState<FormErrors>({})
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 
@@ -99,15 +104,26 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
     if (Object.keys(validation).length > 0) return
 
     const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime, reasoningEffort)
+    const maxConcurrentRuns = maxConcurrentRunsText.trim() ? Number(maxConcurrentRunsText) : null
+    if (maxConcurrentRuns !== null && (!Number.isInteger(maxConcurrentRuns) || maxConcurrentRuns <= 0)) {
+      setErrors({
+        api: 'Max concurrent runs must be a positive whole number or empty.',
+      })
+      return
+    }
+    const collaborators = allowedSubagentAgentIds.length > 0 ? allowedSubagentAgentIds : null
 
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
         name: name.trim() || null,
         purpose: purpose.trim() || null,
+        description: description.trim() || null,
         instructions: instructions.trim() || null,
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
         agentConfig,
+        allowedSubagentAgentIds: collaborators,
+        maxConcurrentRuns,
       }
       updateAgent.mutate(
         { agentRef: agent.id, data: payload },
@@ -125,10 +141,13 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
       const payload: AgentCreateRequest = {
         name: name.trim(),
         purpose: purpose.trim() || null,
+        description: description.trim() || null,
         instructions: instructions.trim(),
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
         agentConfig,
+        allowedSubagentAgentIds: collaborators,
+        maxConcurrentRuns,
       }
       createAgent.mutate(payload, {
         onSuccess: (created) => {
@@ -224,6 +243,18 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
             </div>
 
             <div className="space-y-1.5">
+              <Label htmlFor="agent-description">Description</Label>
+              <Textarea
+                id="agent-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What is this Agent for?"
+                rows={2}
+                data-testid="editor-description"
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <Label htmlFor="agent-instructions">Instructions *</Label>
               <Textarea
                 id="agent-instructions"
@@ -315,6 +346,40 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 data-testid="editor-skills"
               />
               <p className="text-[10px] text-muted-foreground">Comma-separated list of skills.</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-collaborators">Allowed collaborators</Label>
+                <Input
+                  id="agent-collaborators"
+                  value={allowedSubagentAgentIds.join(', ')}
+                  onChange={(event) =>
+                    setAllowedSubagentAgentIds(
+                      event.target.value
+                        .split(',')
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                    )
+                  }
+                  placeholder="agent-id-1, agent-id-2"
+                  data-testid="editor-collaborators"
+                />
+                <p className="text-[10px] text-muted-foreground">Comma-separated Agent ids from this Project.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-max-concurrent-runs">Max concurrent runs</Label>
+                <Input
+                  id="agent-max-concurrent-runs"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={maxConcurrentRunsText}
+                  onChange={(event) => setMaxConcurrentRunsText(event.target.value)}
+                  placeholder="Unlimited"
+                  data-testid="editor-max-concurrent-runs"
+                />
+              </div>
             </div>
           </div>
 

@@ -18,6 +18,7 @@ public interface IAgentLaunchParticipantProbe
     Task OnEnsureInitialLaunchAsync(string sessionId, string commandId);
     Task OnParentLinkCommittedAsync(string edgeId, string commandId);
     Task OnSubmitJobAsync(string jobKey, string commandId);
+    Task OnArchiveDefinitionAsync(string agentId, string commandId);
 }
 
 public sealed class NoopAgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
@@ -33,4 +34,5 @@ public sealed class NoopAgentLaunchParticipantProbe : IAgentLaunchParticipantPro
     public Task OnEnsureInitialLaunchAsync(string sessionId, string commandId) => Task.CompletedTask;
     public Task OnParentLinkCommittedAsync(string edgeId, string commandId) => Task.CompletedTask;
     public Task OnSubmitJobAsync(string jobKey, string commandId) => Task.CompletedTask;
+    public Task OnArchiveDefinitionAsync(string agentId, string commandId) => Task.CompletedTask;
 }

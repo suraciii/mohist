@@ -522,6 +522,69 @@ public class ProjectGrain : Grain, IProjectGrain
         return _project.Variables;
     }
 
+    public async Task<ProjectInfo?> SetDefaultExecutionConfigAsync(ExecutionConfigHint config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (_project is null) return null;
+
+        var error = ValidateDefault(config);
+        if (error is not null)
+            throw new ArgumentException(error);
+
+        var normalized = new ExecutionConfigHint(
+            config.Runtime!.Trim(),
+            config.Model!.Trim(),
+            string.IsNullOrWhiteSpace(config.Variant) ? null : config.Variant.Trim());
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is null) return null;
+
+        var now = Now();
+        entry.DefaultExecutionConfigJson = ExecutionConfigJson.Serialize(normalized);
+        entry.UpdatedAt = now;
+        await db.SaveChangesAsync();
+
+        _project.DefaultExecutionConfig = normalized;
+        _project.UpdatedAt = now.UtcDateTime.ToString("o");
+        _log.LogInformation(
+            "Project {ProjectId} default execution configuration set (runtime={Runtime}, model={Model})",
+            GrainKey,
+            normalized.Runtime,
+            normalized.Model);
+        return _project;
+    }
+
+    /// <summary>
+    /// Value validation for the Project default. Runs the converged
+    /// <see cref="AgentConfigSchema"/> rules (closed keys, runtime enum,
+    /// string shapes) on the serialized selection, then the
+    /// <c>provider/model</c> form the schema leaves to its consumers. The
+    /// Project default owns Runtime and Model explicitly — an omitted field
+    /// is a configuration error, not a fallback opportunity.
+    /// </summary>
+    private static string? ValidateDefault(ExecutionConfigHint config)
+    {
+        if (string.IsNullOrWhiteSpace(config.Runtime))
+            return "runtime is required for the default execution configuration.";
+        if (string.IsNullOrWhiteSpace(config.Model))
+            return "model is required for the default execution configuration.";
+
+        var schemaError = AgentConfigSchema.Validate(
+            JSON.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["runtime"] = config.Runtime,
+                ["model"] = config.Model,
+                ["variant"] = config.Variant,
+            }));
+        if (schemaError is not null)
+            return schemaError;
+
+        return AgentConfigSchema.HasProviderModelForm(config.Model)
+            ? null
+            : "model must use the provider/model form (e.g. openai/gpt-5.6).";
+    }
+
     private async Task PersistVariablesAsync()
     {
         var now = Now();

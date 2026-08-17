@@ -109,6 +109,10 @@ internal sealed partial class TableRenderer
         var allowedSubagents = data["allowedSubagentAgentIds"] as JsonArray;
         var allowedSubagentText = allowedSubagents is null ? "" : string.Join(",", allowedSubagents.Select(s => s?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s)));
         var config = data["agentConfig"] as JsonObject;
+        var effective = data["effectiveExecutionConfig"] as JsonObject;
+        var effectiveRuntime = StringOf(effective, "runtime");
+        var effectiveModel = StringOf(effective, "model");
+        var effectiveVariant = StringOf(effective, "variant");
 
         _out.WriteLine($"id:                  {StringOf(data, "id")}");
         _out.WriteLine($"name:                {StringOf(data, "name")}");
@@ -116,9 +120,9 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"status:              {StringOf(data, "status")}");
         _out.WriteLine($"purpose:             {Truncate(StringOf(data, "purpose"), TitleSoftCap)}");
         _out.WriteLine($"description:         {Truncate(StringOf(data, "description"), TitleSoftCap)}");
-        _out.WriteLine($"runtime:             {StringOf(config, "runtime")}");
-        _out.WriteLine($"model:               {StringOf(config, "model")}");
-        _out.WriteLine($"variant:             {StringOf(config, "variant")}");
+        _out.WriteLine($"runtime:             {(!string.IsNullOrWhiteSpace(effectiveRuntime) ? effectiveRuntime : StringOf(config, "runtime"))}");
+        _out.WriteLine($"model:               {(!string.IsNullOrWhiteSpace(effectiveModel) ? effectiveModel : StringOf(config, "model"))}");
+        _out.WriteLine($"variant:             {(!string.IsNullOrWhiteSpace(effectiveVariant) ? effectiveVariant : StringOf(config, "variant"))}");
         _out.WriteLine($"max concurrent runs: {NumberOf(data, "maxConcurrentRuns")}");
         _out.WriteLine($"skills:              {skillText}");
         _out.WriteLine($"permissions:         {permissionText}");

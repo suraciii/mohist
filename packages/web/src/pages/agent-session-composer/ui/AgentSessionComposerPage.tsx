@@ -1,23 +1,38 @@
-import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon } from 'lucide-react'
+import { XIcon, AlertTriangleIcon, InfoIcon } from 'lucide-react'
 import {
   getAgentAvailabilityFeedback,
   getAgentLaunchErrorFeedback,
   useAgentListAvailability,
   useAgents,
   useLaunchAgentSession,
+  usePreflightAgentSession,
+  usePreflightAgentTask,
+  useStartAgentTask,
 } from '../../../entities/agent'
 import type {
   AgentAvailabilitySummaryEntry,
   AgentExecutabilityResult,
   AgentInfo,
   AgentSessionLaunchContext,
+  AgentSessionLaunchInput,
+  AgentSessionLaunchResponse,
+  AgentTaskLaunchInput,
+  AgentTaskPreflightResponse,
 } from '../../../entities/agent'
 import { extractAttachmentIds } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import {
+  AGENT_RUNTIME_OPENCODE,
+  AGENT_RUNTIME_PI,
+  useAvailableModelIds,
+  useModelVariants,
+  type AgentRuntime,
+} from '../../../entities/settings'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
+import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import {
   AttachmentResults,
   type AttachmentResultAccepted,
@@ -26,9 +41,16 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
-import { Badge } from '@/shared/ui/components/badge'
-import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
-import { cn } from '@/shared/lib/utils'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/ui/components/dialog'
+import { AgentSelector } from './AgentSelector'
+import { ModelSelect } from '../../../shared/ui/ModelSelect'
 
 interface ContextRef {
   type: 'issue' | 'epic' | 'repository' | 'workspace'
@@ -56,109 +78,71 @@ function ContextRefChip({ refItem, onRemove }: { refItem: ContextRef; onRemove: 
   )
 }
 
-function AgentSelector({
-  agents,
-  selectedRef,
-  onChange,
-  isLoading,
+function TaskExecutionConfigControls({
+  runtime,
+  model,
+  variant,
+  onRuntimeChange,
+  onModelChange,
+  onVariantChange,
 }: {
-  agents: AgentInfo[] | undefined
-  selectedRef: string
-  onChange: (ref: string) => void
-  isLoading: boolean
+  runtime: AgentRuntime
+  model: string | null
+  variant: string | null
+  onRuntimeChange: (runtime: AgentRuntime) => void
+  onModelChange: (model: string | null) => void
+  onVariantChange: (variant: string | null) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const selectedAgent = agents?.find((a) => a.id === selectedRef) ?? null
-
-  const filtered = useMemo(() => {
-    if (!agents) return []
-    if (!search.trim()) return agents
-    const q = search.toLowerCase()
-    return agents.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
-  }, [agents, search])
-
-  if (isLoading) {
-    return (
-      <Button variant="outline" className="w-full justify-between" disabled>
-        <span className="text-muted-foreground">Loading agents...</span>
-        <ChevronDownIcon className="size-4 text-muted-foreground" />
-      </Button>
-    )
-  }
+  const { data: availableModels } = useAvailableModelIds(runtime)
+  const modelVariants = useModelVariants(runtime)
+  const models = availableModels?.models ?? []
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button variant="outline" data-testid="agent-selector-trigger" className="w-full justify-between">
-            {selectedAgent ? (
-              <span className="truncate">{selectedAgent.name}</span>
-            ) : (
-              <span className="text-muted-foreground">Select an agent...</span>
-            )}
-            <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
-          </Button>
-        }
-      />
-      <PopoverContent className="w-80 p-0" align="start">
-        <div className="p-2">
-          <div className="relative">
-            <SearchIcon className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search agents..."
-              className="pl-8 h-8 text-sm"
-              data-testid="agent-search-input"
-            />
-          </div>
+    <div data-testid="execution-config-controls" className="space-y-3 rounded-lg border border-border bg-card p-4">
+      <div>
+        <p className="text-sm font-medium text-foreground">Execution configuration</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Choose the Runtime and a catalog model for this task. Variant is optional.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="task-runtime">Runtime</Label>
+          <select
+            id="task-runtime"
+            data-testid="task-runtime"
+            aria-label="Runtime"
+            value={runtime}
+            onChange={(event) => onRuntimeChange(event.target.value as AgentRuntime)}
+            className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+          >
+            <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+            <option value={AGENT_RUNTIME_PI}>Pi</option>
+          </select>
         </div>
-        <div className="max-h-64 overflow-y-auto border-t">
-          {filtered.length === 0 && (
-            <div className="px-3 py-4 text-center text-sm text-muted-foreground">No agents found</div>
-          )}
-          {filtered.map((agent) => {
-            const isSelected = agent.id === selectedRef
-            const isArchived = agent.status === 'archived'
-            return (
-              <div
-                key={agent.id}
-                role="button"
-                tabIndex={0}
-                data-testid={`agent-option-${agent.id}`}
-                data-agent-ref={agent.id}
-                data-archived={isArchived ? 'true' : 'false'}
-                onClick={() => {
-                  onChange(agent.id)
-                  setOpen(false)
-                  setSearch('')
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    onChange(agent.id)
-                    setOpen(false)
-                    setSearch('')
-                  }
-                }}
-                className={cn(
-                  'flex items-center gap-2 px-3 py-2 cursor-pointer text-sm',
-                  isSelected ? 'bg-muted' : 'hover:bg-muted',
-                )}
-              >
-                <BotIcon className={cn('size-4 shrink-0', isArchived ? 'text-muted-foreground' : 'text-blue-600')} />
-                <span className="flex-1 truncate font-medium">{agent.name}</span>
-                {isArchived && (
-                  <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 text-muted-foreground">
-                    Archived
-                  </Badge>
-                )}
-              </div>
-            )
-          })}
+        <div className="space-y-1.5">
+          <Label htmlFor="task-model">Model</Label>
+          <ModelSelect
+            id="task-model"
+            value={model}
+            placeholder={availableModels ? 'Select a catalog model' : 'Loading catalog models...'}
+            models={models}
+            onChange={(nextModel) => onModelChange(nextModel)}
+            onChangeVariant={onVariantChange}
+            modelVariants={modelVariants}
+            valueVariant={variant}
+            onChangeModelVariant={(nextModel, nextVariant) => {
+              onModelChange(nextModel)
+              onVariantChange(nextVariant)
+            }}
+            disabled={!availableModels}
+          />
         </div>
-      </PopoverContent>
-    </Popover>
+      </div>
+      <p data-testid="execution-config-catalog-hint" className="text-[11px] text-muted-foreground">
+        Models and variants come from the selected Runtime catalog.
+      </p>
+    </div>
   )
 }
 
@@ -166,12 +150,24 @@ export interface AgentSessionComposerPageComponents {
   AttachmentComposer: ComponentType<ComponentProps<typeof DefaultAttachmentComposer>>
 }
 
+type PendingPreflight = {
+  response: AgentTaskPreflightResponse
+  input: AgentTaskLaunchInput
+  agentRef?: string
+}
+
 export interface AgentSessionComposerData {
   agents: AgentInfo[] | undefined
   agentsLoading: boolean
   availability: AgentAvailabilitySummaryEntry[] | undefined
   availabilityLoading: boolean
-  launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error'>
+  launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error' | 'reset'>
+  preflightSessionMutation?: Pick<
+    ReturnType<typeof usePreflightAgentSession>,
+    'mutate' | 'isPending' | 'error' | 'reset'
+  >
+  preflightTaskMutation?: Pick<ReturnType<typeof usePreflightAgentTask>, 'mutate' | 'isPending' | 'error' | 'reset'>
+  startTaskMutation: Pick<ReturnType<typeof useStartAgentTask>, 'mutate' | 'isPending' | 'error' | 'reset'>
 }
 
 export type AgentSessionComposerDataHook = () => AgentSessionComposerData
@@ -185,6 +181,9 @@ const useDefaultData: AgentSessionComposerDataHook = () => {
     availability,
     availabilityLoading,
     launchMutation: useLaunchAgentSession(),
+    preflightSessionMutation: usePreflightAgentSession(),
+    preflightTaskMutation: usePreflightAgentTask(),
+    startTaskMutation: useStartAgentTask(),
   }
 }
 
@@ -203,10 +202,19 @@ export function AgentSessionComposerPage({
   useDocumentTitle('New Session — Mohist')
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { projectId } = useProject()
+  const { projectId, currentProject } = useProject()
   const [searchParams] = useSearchParams()
 
-  const { agents, agentsLoading, availability, availabilityLoading, launchMutation } = dataHook()
+  const {
+    agents,
+    agentsLoading,
+    availability,
+    availabilityLoading,
+    launchMutation,
+    preflightSessionMutation,
+    preflightTaskMutation,
+    startTaskMutation,
+  } = dataHook()
 
   const launchableAgents = useMemo(() => agents?.filter((a) => a.status !== 'archived') ?? [], [agents])
 
@@ -218,7 +226,12 @@ export function AgentSessionComposerPage({
     const epic = searchParams.get('epic')
     if (epic) refs.push({ type: 'epic', label: `Epic: ${epic}`, value: epic })
     const repo = searchParams.get('repo')
-    if (repo) refs.push({ type: 'repository', label: `Repository: ${repo}`, value: repo })
+    if (repo)
+      refs.push({
+        type: 'repository',
+        label: `Repository: ${repo}`,
+        value: repo,
+      })
     const ws = searchParams.get('ws')
     if (ws) refs.push({ type: 'workspace', label: `Workspace: ${ws}`, value: ws })
     return refs
@@ -226,12 +239,30 @@ export function AgentSessionComposerPage({
 
   const [prompt, setPrompt] = useState('')
   const [promptTouched, setPromptTouched] = useState(false)
+  const [executionRuntime, setExecutionRuntime] = useState<AgentRuntime>(AGENT_RUNTIME_OPENCODE)
+  const [executionModel, setExecutionModel] = useState<string | null>(null)
+  const [executionVariant, setExecutionVariant] = useState<string | null>(null)
+  const [executionConfigAdjusted, setExecutionConfigAdjusted] = useState(false)
+  const [allowedCollaboratorIds, setAllowedCollaboratorIds] = useState<string[]>([])
+  const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState('')
+  const [pendingPreflight, setPendingPreflight] = useState<PendingPreflight | null>(null)
+  const [lastPreflight, setLastPreflight] = useState<PendingPreflight | null>(null)
   const [launchAttachmentResult, setLaunchAttachmentResult] = useState<{
+    agentId: string
+    agentName: string
     accepted: AttachmentResultAccepted[]
     rejected: AttachmentResultRejected[]
     sessionPath: string
   } | null>(null)
   const launchKeyRef = useRef<string | null>(null)
+  const defaultExecutionConfig = currentProject?.defaultExecutionConfig ?? null
+
+  useEffect(() => {
+    if (executionConfigAdjusted || !defaultExecutionConfig) return
+    setExecutionRuntime(defaultExecutionConfig.runtime)
+    setExecutionModel(defaultExecutionConfig.model)
+    setExecutionVariant(defaultExecutionConfig.variant ?? null)
+  }, [defaultExecutionConfig, executionConfigAdjusted])
 
   const selectedAgent = useMemo(
     () => agents?.find((a) => a.id === selectedAgentRef) ?? null,
@@ -251,19 +282,116 @@ export function AgentSessionComposerPage({
   const attachmentIds = useMemo(() => extractAttachmentIds(prompt), [prompt])
   const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
 
+  const isCreatingAgent = !selectedAgentRef
+  const executionConfigResolvable = !!defaultExecutionConfig || !!executionModel
+  const executionControlsVisible = isCreatingAgent && (!defaultExecutionConfig || executionConfigAdjusted)
+  const concurrencyValue = maxConcurrentRunsText.trim() ? Number(maxConcurrentRunsText) : null
+  const concurrencyValid = concurrencyValue === null || (Number.isInteger(concurrencyValue) && concurrencyValue > 0)
+  const launchPending =
+    launchMutation.isPending ||
+    preflightSessionMutation?.isPending === true ||
+    preflightTaskMutation?.isPending === true ||
+    startTaskMutation.isPending
   const canLaunch =
     (!promptEmpty || attachmentIds.length > 0) &&
-    !!selectedAgentRef &&
-    !isArchived &&
-    !launchBlockedByExecutability &&
-    !launchMutation.isPending
+    (!isCreatingAgent || executionConfigResolvable) &&
+    concurrencyValid &&
+    (!selectedAgentRef || (!isArchived && !launchBlockedByExecutability)) &&
+    !launchPending
 
   const removeRef = useCallback((index: number) => {
     setContextRefs((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
+  const showPreflight = useCallback((preflight: PendingPreflight) => {
+    setLastPreflight(preflight)
+    setPendingPreflight(preflight)
+  }, [])
+
+  const handleLaunchSuccess = useCallback(
+    (data: AgentSessionLaunchResponse) => {
+      const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
+      const sessionPath =
+        data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
+      const accepted = data.attachments ?? []
+      const rejected = data.rejectedAttachments ?? []
+      launchKeyRef.current = null
+      setLastPreflight(null)
+      if (accepted.length > 0 || rejected.length > 0) {
+        setLaunchAttachmentResult({
+          agentId: data.agentId,
+          agentName: data.agentName,
+          accepted,
+          rejected,
+          sessionPath,
+        })
+        return
+      }
+      navigate(sessionPath)
+    },
+    [navigate, toProjectPath],
+  )
+
+  const handleConfirmPreflight = useCallback(() => {
+    if (!pendingPreflight || !launchKeyRef.current) return
+    const { response, input, agentRef } = pendingPreflight
+    setPendingPreflight(null)
+    if (agentRef) {
+      launchMutation.mutate(
+        {
+          agentRef,
+          ...input,
+          preflightFingerprint: response.scopeFingerprint,
+          idempotencyKey: launchKeyRef.current,
+        },
+        { onSuccess: handleLaunchSuccess },
+      )
+      return
+    }
+    startTaskMutation.mutate(
+      {
+        ...input,
+        preflightFingerprint: response.scopeFingerprint,
+        idempotencyKey: launchKeyRef.current,
+      },
+      { onSuccess: handleLaunchSuccess },
+    )
+  }, [handleLaunchSuccess, launchMutation, pendingPreflight, startTaskMutation])
+
+  const handleReviewChangedScope = useCallback(() => {
+    if (!lastPreflight || !launchKeyRef.current) return
+
+    launchMutation.reset()
+    preflightSessionMutation?.reset()
+    preflightTaskMutation?.reset()
+    startTaskMutation.reset()
+
+    if (lastPreflight.agentRef) {
+      if (!preflightSessionMutation) return
+      preflightSessionMutation.mutate(
+        {
+          agentRef: lastPreflight.agentRef,
+          ...lastPreflight.input,
+          idempotencyKey: launchKeyRef.current,
+        },
+        {
+          onSuccess: (response) => showPreflight({ ...lastPreflight, response }),
+        },
+      )
+      return
+    }
+
+    if (!preflightTaskMutation) return
+    preflightTaskMutation.mutate(
+      { ...lastPreflight.input, idempotencyKey: launchKeyRef.current },
+      {
+        onSuccess: (response) => showPreflight({ ...lastPreflight, response }),
+      },
+    )
+  }, [lastPreflight, launchMutation, preflightSessionMutation, preflightTaskMutation, showPreflight, startTaskMutation])
+
   const handleLaunch = useCallback(() => {
-    if (!canLaunch || !selectedAgent) return
+    if (!canLaunch) return
 
     const context: AgentSessionLaunchContext = {}
     for (const ref of contextRefs) {
@@ -272,47 +400,86 @@ export function AgentSessionComposerPage({
         if (ref.type === 'issue') context.issueNumber = number
         else context.epicNumber = number
       } else if (ref.type === 'repository') context.repository = ref.value
-      else if (ref.type === 'workspace') context.workspacePath = ref.value
+      else if (ref.type === 'workspace') {
+        if (selectedAgentRef) context.workspacePath = ref.value
+        else context.workspace = ref.value
+      }
     }
     const hasContext = Object.keys(context).length > 0
+    const idempotencyKey = (launchKeyRef.current ??= createIdempotencyKey())
+    const onSuccess = handleLaunchSuccess
 
-    launchMutation.mutate(
-      {
-        agentRef: selectedAgentRef,
+    if (selectedAgentRef) {
+      const sessionInput: AgentSessionLaunchInput = {
         prompt: prompt.trim(),
         context: hasContext ? context : null,
         attachments: attachmentIds,
-        idempotencyKey: (launchKeyRef.current ??= crypto.randomUUID()),
-      },
-      {
-        onSuccess: (data) => {
-          const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-          const sessionPath =
-            data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
-          const accepted = data.attachments ?? []
-          const rejected = data.rejectedAttachments ?? []
-          launchKeyRef.current = null
-          if (accepted.length > 0 || rejected.length > 0) {
-            setLaunchAttachmentResult({ accepted, rejected, sessionPath })
-            return
-          }
-          navigate(sessionPath)
+      }
+      if (!preflightSessionMutation) {
+        launchMutation.mutate({ agentRef: selectedAgentRef, ...sessionInput, idempotencyKey }, { onSuccess })
+        return
+      }
+      preflightSessionMutation.mutate(
+        { agentRef: selectedAgentRef, ...sessionInput, idempotencyKey },
+        {
+          onSuccess: (response) =>
+            showPreflight({
+              response,
+              input: sessionInput,
+              agentRef: selectedAgentRef,
+            }),
         },
-      },
-    )
+      )
+      return
+    }
+
+    const taskInput: AgentTaskLaunchInput = {
+      prompt: prompt.trim(),
+      context: hasContext ? context : null,
+      attachments: attachmentIds,
+    }
+    if (allowedCollaboratorIds.length > 0) taskInput.allowedSubagentAgentIds = allowedCollaboratorIds
+    if (maxConcurrentRunsText.trim()) taskInput.maxConcurrentRuns = Number(maxConcurrentRunsText)
+    if (!defaultExecutionConfig || executionConfigAdjusted) {
+      taskInput.runtime = executionRuntime
+      taskInput.model = executionModel
+      taskInput.variant = executionVariant
+    }
+    if (!preflightTaskMutation) {
+      startTaskMutation.mutate({ ...taskInput, idempotencyKey }, { onSuccess })
+    } else {
+      preflightTaskMutation.mutate(
+        { ...taskInput, idempotencyKey },
+        {
+          onSuccess: (response) => showPreflight({ response, input: taskInput }),
+        },
+      )
+    }
   }, [
     attachmentIds,
     canLaunch,
-    selectedAgent,
-    selectedAgentRef,
     contextRefs,
-    prompt,
+    defaultExecutionConfig,
+    executionConfigAdjusted,
+    executionModel,
+    executionRuntime,
+    executionVariant,
+    allowedCollaboratorIds,
+    maxConcurrentRunsText,
     launchMutation,
-    navigate,
+    handleLaunchSuccess,
+    preflightSessionMutation,
+    preflightTaskMutation,
+    prompt,
+    selectedAgentRef,
+    showPreflight,
+    startTaskMutation,
     toProjectPath,
   ])
 
-  const launchError = launchMutation.error
+  const launchError = selectedAgentRef
+    ? (preflightSessionMutation?.error ?? launchMutation.error)
+    : (preflightTaskMutation?.error ?? startTaskMutation.error)
   const launchFeedback = getAgentLaunchErrorFeedback(launchError, selectedExecutability)
   const isExecutabilityError = launchFeedback?.kind === 'not-configured' || launchFeedback?.kind === 'not-executable'
   const launchErrorData =
@@ -324,7 +491,11 @@ export function AgentSessionComposerPage({
                 code?: string
                 message?: string
                 nextAction?: string
-                fixEntryPoint?: { label?: string; path?: string; command?: string }
+                fixEntryPoint?: {
+                  label?: string
+                  path?: string
+                  command?: string
+                }
               }>
             }
           }
@@ -353,7 +524,15 @@ export function AgentSessionComposerPage({
             ? 'error-agent-not-executable'
             : launchFeedback?.kind === 'back-pressure'
               ? 'error-back-pressure'
-              : 'error-execution-unavailable'
+              : launchFeedback?.kind === 'launch-conflict'
+                ? 'error-launch-conflict'
+                : launchFeedback?.kind === 'launch-pending'
+                  ? 'error-launch-pending'
+                  : launchFeedback?.kind === 'launch-scope-changed'
+                    ? 'error-launch-scope-changed'
+                    : launchFeedback?.kind === 'execution-config-unresolvable'
+                      ? 'error-execution-config'
+                      : 'error-execution-unavailable'
 
   return (
     <div data-testid="agent-session-composer-page" className="flex-1 overflow-y-auto bg-background">
@@ -369,7 +548,7 @@ export function AgentSessionComposerPage({
           <div
             data-testid={launchErrorTestId}
             data-feedback-kind={launchFeedback.kind}
-            className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm ${launchFeedback.kind === 'not-configured' || launchFeedback.kind === 'not-executable' || launchFeedback.kind === 'execution-unavailable' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
+            className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm ${launchFeedback.kind === 'not-configured' || launchFeedback.kind === 'not-executable' || launchFeedback.kind === 'execution-unavailable' || launchFeedback.kind === 'execution-config-unresolvable' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
           >
             <div className="flex items-start gap-2">
               <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
@@ -378,6 +557,38 @@ export function AgentSessionComposerPage({
             <p className="ml-6 text-xs">
               {launchFeedback.message} {launchFeedback.nextAction}
             </p>
+            {launchFeedback.kind === 'launch-conflict' && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="reset-launch-key"
+                className="ml-6 w-fit"
+                onClick={() => {
+                  launchKeyRef.current = null
+                  setLastPreflight(null)
+                  if (selectedAgentRef) launchMutation.reset()
+                  else {
+                    preflightTaskMutation?.reset()
+                    startTaskMutation.reset()
+                  }
+                }}
+              >
+                Start with a new launch key
+              </Button>
+            )}
+            {launchFeedback.kind === 'launch-scope-changed' && lastPreflight && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="review-changed-launch-scope"
+                className="ml-6 w-fit"
+                onClick={handleReviewChangedScope}
+              >
+                Review updated scope
+              </Button>
+            )}
             {isExecutabilityError && gapsFromError && gapsFromError.length > 0 && (
               <ul className="ml-6 list-disc space-y-0.5">
                 {gapsFromError.map((gap) => (
@@ -420,6 +631,35 @@ export function AgentSessionComposerPage({
         )}
 
         <div className="space-y-1.5">
+          <Label htmlFor="prompt">
+            Prompt <span className="text-muted-foreground">(optional when files are attached)</span>
+          </Label>
+          <AttachmentComposer
+            projectId={projectId!}
+            value={prompt}
+            onChange={setPrompt}
+            onBlur={() => setPromptTouched(true)}
+            placeholder="Enter your prompt for the agent..."
+          />
+          {showPromptError && (
+            <p data-testid="prompt-error" className="text-xs text-destructive">
+              Prompt is required unless at least one file is attached.
+            </p>
+          )}
+        </div>
+
+        {contextRefs.length > 0 && (
+          <div className="space-y-1.5">
+            <Label>Context References</Label>
+            <div className="flex flex-wrap gap-2" data-testid="context-refs-list">
+              {contextRefs.map((ref, i) => (
+                <ContextRefChip key={`${ref.type}-${ref.value}`} refItem={ref} onRemove={() => removeRef(i)} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-1.5">
           <Label htmlFor="agent-select">Agent</Label>
           <AgentSelector
             agents={launchableAgents}
@@ -427,6 +667,10 @@ export function AgentSessionComposerPage({
             onChange={setSelectedAgentRef}
             isLoading={agentsLoading}
           />
+          <p className="text-xs text-muted-foreground">
+            Leave this as <span className="font-medium text-foreground">New Agent for this task</span> for a one-off
+            task, or select an existing Agent to use its definition.
+          </p>
           {isArchived && (
             <p data-testid="archived-warning" className="text-xs text-muted-foreground">
               This agent is archived and cannot be used to launch new sessions.
@@ -475,34 +719,92 @@ export function AgentSessionComposerPage({
           )}
         </div>
 
-        {contextRefs.length > 0 && (
-          <div className="space-y-1.5">
-            <Label>Context References</Label>
-            <div className="flex flex-wrap gap-2" data-testid="context-refs-list">
-              {contextRefs.map((ref, i) => (
-                <ContextRefChip key={`${ref.type}-${ref.value}`} refItem={ref} onRemove={() => removeRef(i)} />
-              ))}
+        {isCreatingAgent && (
+          <div data-testid="task-capability-controls" className="space-y-3 rounded-lg border border-border bg-card p-4">
+            <div>
+              <p className="text-sm font-medium text-foreground">Execution scope</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Choose collaborator Agents and an optional concurrency limit for the new Agent.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="task-collaborators">Allowed collaborators</Label>
+                <select
+                  id="task-collaborators"
+                  multiple
+                  value={allowedCollaboratorIds}
+                  onChange={(event) =>
+                    setAllowedCollaboratorIds(Array.from(event.target.selectedOptions, (option) => option.value))
+                  }
+                  className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  data-testid="task-collaborators"
+                >
+                  {launchableAgents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="task-max-concurrent-runs">Max concurrent runs</Label>
+                <Input
+                  id="task-max-concurrent-runs"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={maxConcurrentRunsText}
+                  onChange={(event) => setMaxConcurrentRunsText(event.target.value)}
+                  placeholder="Unlimited"
+                  data-testid="task-max-concurrent-runs"
+                />
+                {!concurrencyValid && (
+                  <p className="text-xs text-destructive">Use a positive whole number or leave this empty.</p>
+                )}
+              </div>
             </div>
           </div>
         )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="prompt">
-            Prompt <span className="text-muted-foreground">(optional when files are attached)</span>
-          </Label>
-          <AttachmentComposer
-            projectId={projectId!}
-            value={prompt}
-            onChange={setPrompt}
-            onBlur={() => setPromptTouched(true)}
-            placeholder="Enter your prompt for the agent..."
+        {isCreatingAgent && defaultExecutionConfig && !executionConfigAdjusted && (
+          <div data-testid="recommended-execution-config" className="rounded-lg border border-border bg-card p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Recommended execution configuration</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Project default for tasks in this Project</p>
+                <p className="mt-2 text-xs text-foreground">
+                  {defaultExecutionConfig.runtime === 'opencode' ? 'OpenCode' : 'Pi'} · {defaultExecutionConfig.model}
+                  {defaultExecutionConfig.variant ? ` · ${defaultExecutionConfig.variant}` : ''}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="adjust-execution-config"
+                onClick={() => setExecutionConfigAdjusted(true)}
+              >
+                Adjust
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {executionControlsVisible && (
+          <TaskExecutionConfigControls
+            runtime={executionRuntime}
+            model={executionModel}
+            variant={executionVariant}
+            onRuntimeChange={(runtime) => {
+              setExecutionRuntime(runtime)
+              setExecutionModel(null)
+              setExecutionVariant(null)
+            }}
+            onModelChange={setExecutionModel}
+            onVariantChange={setExecutionVariant}
           />
-          {showPromptError && (
-            <p data-testid="prompt-error" className="text-xs text-destructive">
-              Prompt is required unless at least one file is attached.
-            </p>
-          )}
-        </div>
+        )}
 
         {launchAttachmentResult && (
           <div data-testid="launch-attachment-results" className="space-y-3">
@@ -511,6 +813,13 @@ export function AgentSessionComposerPage({
               <p className="text-xs text-muted-foreground">The Agent received only the files marked accepted.</p>
             </div>
             <AttachmentResults accepted={launchAttachmentResult.accepted} rejected={launchAttachmentResult.rejected} />
+            <a
+              data-testid="launched-agent-link"
+              className="inline-flex text-xs font-medium text-primary underline underline-offset-2"
+              href={toProjectPath(`/agents/${encodeURIComponent(launchAttachmentResult.agentId)}`)}
+            >
+              Refine {launchAttachmentResult.agentName}
+            </a>
             <Button
               type="button"
               data-testid="open-launched-session"
@@ -531,10 +840,70 @@ export function AgentSessionComposerPage({
             disabled={!canLaunch}
             title={launchBlockedByExecutability ? 'Executability is blocked - fix the gaps first.' : undefined}
           >
-            {launchMutation.isPending ? 'Launching...' : 'Launch Session'}
+            {launchPending ? 'Launching...' : 'Launch Session'}
           </Button>
         </div>
       </div>
+
+      <Dialog open={pendingPreflight !== null} onOpenChange={(open) => !open && setPendingPreflight(null)}>
+        <DialogContent data-testid="agent-task-preflight-dialog" className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Confirm execution scope</DialogTitle>
+            <DialogDescription>
+              {pendingPreflight?.agentRef
+                ? 'Review the server-resolved scope before Mohist starts work.'
+                : 'Review the server-resolved scope before Mohist creates the Agent and starts work.'}
+            </DialogDescription>
+          </DialogHeader>
+          {pendingPreflight && (
+            <div className="space-y-3 text-sm" data-testid="agent-task-preflight-scope">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-4 gap-y-2">
+                <span className="text-muted-foreground">Agent</span>
+                <span className="font-medium">{pendingPreflight.response.agentName}</span>
+                <span className="text-muted-foreground">Execution</span>
+                <span>
+                  {pendingPreflight.response.execution.runtime} ·{' '}
+                  {pendingPreflight.response.execution.model ?? 'unresolved'}
+                  {pendingPreflight.response.execution.variant
+                    ? ` · ${pendingPreflight.response.execution.variant}`
+                    : ''}
+                </span>
+                <span className="text-muted-foreground">Workspace</span>
+                <span>{pendingPreflight.response.workspace}</span>
+                <span className="text-muted-foreground">Repository</span>
+                <span>{pendingPreflight.response.repository ?? 'Workspace repositories'}</span>
+                <span className="text-muted-foreground">Issue / Epic</span>
+                <span>
+                  {pendingPreflight.response.issueNumber ? `#${pendingPreflight.response.issueNumber}` : 'none'}
+                  {pendingPreflight.response.epicNumber ? ` / #${pendingPreflight.response.epicNumber}` : ''}
+                </span>
+                <span className="text-muted-foreground">Permission scope</span>
+                <span>{pendingPreflight.response.permissionScope}</span>
+                <span className="text-muted-foreground">Expected impact</span>
+                <span>{pendingPreflight.response.expectedImpact}</span>
+              </div>
+              {pendingPreflight.response.workspaceRepositories.length > 0 && (
+                <p className="border-t border-border pt-2 text-xs text-muted-foreground">
+                  Workspace repositories: {pendingPreflight.response.workspaceRepositories.join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPendingPreflight(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmPreflight}
+              disabled={launchMutation.isPending || startTaskMutation.isPending}
+              data-testid="confirm-agent-task-launch"
+            >
+              {launchMutation.isPending || startTaskMutation.isPending ? 'Launching...' : 'Confirm and launch'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

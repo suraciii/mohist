@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { readAgentModelAndVariant, unarchiveAgent, writeAgentModelAndVariant } from './client'
+import {
+  readAgentDefinitionModelAndVariant,
+  readAgentModelAndVariant,
+  unarchiveAgent,
+  writeAgentModelAndVariant,
+} from './client'
 
 useMswServer()
 
@@ -72,7 +77,11 @@ describe('readAgentModelAndVariant', () => {
   })
 
   it('returns null model and variant when agent config is not an object', () => {
-    expect(readAgentModelAndVariant({ agentConfig: 'not-an-object' as unknown as Record<string, unknown> })).toEqual({
+    expect(
+      readAgentModelAndVariant({
+        agentConfig: 'not-an-object' as unknown as Record<string, unknown>,
+      }),
+    ).toEqual({
       model: null,
       variant: null,
       reasoningEffort: null,
@@ -85,7 +94,29 @@ describe('readAgentModelAndVariant', () => {
       readAgentModelAndVariant({
         agentConfig: { model: 'anthropic/claude', variant: 'high' },
       }),
-    ).toEqual({ model: 'anthropic/claude', variant: 'high', reasoningEffort: null, runtime: 'opencode' })
+    ).toEqual({
+      model: 'anthropic/claude',
+      variant: 'high',
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
+  })
+
+  it('reads raw definition fields without materializing an effective default', () => {
+    const agent = {
+      agentConfig: null,
+      effectiveExecutionConfig: {
+        runtime: 'pi' as const,
+        model: 'provider/default',
+        variant: 'balanced',
+      },
+    }
+    expect(readAgentDefinitionModelAndVariant(agent)).toEqual({
+      model: null,
+      variant: null,
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 
   it('drops empty/whitespace model and variant', () => {
@@ -93,15 +124,25 @@ describe('readAgentModelAndVariant', () => {
       readAgentModelAndVariant({
         agentConfig: { model: '   ', variant: '' },
       }),
-    ).toEqual({ model: null, variant: null, reasoningEffort: null, runtime: 'opencode' })
+    ).toEqual({
+      model: null,
+      variant: null,
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 
-  it('omits the variant when no model is set', () => {
+  it('preserves the raw variant when no model is set', () => {
     expect(
       readAgentModelAndVariant({
         agentConfig: { variant: 'high' },
       }),
-    ).toEqual({ model: null, variant: null, reasoningEffort: null, runtime: 'opencode' })
+    ).toEqual({
+      model: null,
+      variant: 'high',
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 })
 
@@ -138,6 +179,10 @@ describe('writeAgentModelAndVariant', () => {
     expect(writeAgentModelAndVariant({ model: 'm', variant: 'high', type: 'opencode' }, null, null)).toBeNull()
   })
 
+  it('preserves a raw variant-only definition', () => {
+    expect(writeAgentModelAndVariant({ variant: 'high' }, null, 'high')).toEqual({ variant: 'high' })
+  })
+
   it('returns null when writing an empty config', () => {
     expect(writeAgentModelAndVariant({}, null, null)).toBeNull()
   })
@@ -147,7 +192,9 @@ describe('writeAgentModelAndVariant', () => {
   })
 
   it('preserves runtime through a read-modify-write round trip', () => {
-    const read = readAgentModelAndVariant({ agentConfig: { model: 'pi/model', variant: 'medium', runtime: 'pi' } })
+    const read = readAgentModelAndVariant({
+      agentConfig: { model: 'pi/model', variant: 'medium', runtime: 'pi' },
+    })
     expect(
       writeAgentModelAndVariant(
         { model: 'pi/model', variant: 'medium', runtime: 'pi' },
@@ -156,5 +203,22 @@ describe('writeAgentModelAndVariant', () => {
         read.runtime,
       ),
     ).toEqual({ model: 'pi/model', variant: 'high', runtime: 'pi' })
+  })
+
+  it('prefers the server effective execution projection over an empty raw config', () => {
+    const read = readAgentModelAndVariant({
+      agentConfig: null,
+      effectiveExecutionConfig: {
+        runtime: 'pi',
+        model: 'provider/model',
+        variant: 'balanced',
+      },
+    })
+    expect(read).toEqual({
+      model: 'provider/model',
+      variant: 'balanced',
+      reasoningEffort: null,
+      runtime: 'pi',
+    })
   })
 })

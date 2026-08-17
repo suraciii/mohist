@@ -1,6 +1,6 @@
 import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon } from 'lucide-react'
+import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon, PlayIcon } from 'lucide-react'
 import {
   getAgentAvailabilityFeedback,
   useAgentListAvailability,
@@ -23,14 +23,14 @@ const defaultComponents: AgentListPageComponents = {
 }
 
 function getAgentType(agent: AgentInfo): string {
-  const config = agent.agentConfig
-  if (config && typeof config === 'object' && 'type' in config) {
-    return String(config.type)
-  }
-  return 'opencode'
+  const { runtime } = readAgentModelAndVariant(agent)
+  return runtime === 'pi' ? 'pi' : 'opencode'
 }
 
-function getLifecycleStatus(agent: AgentInfo): { label: string; dotClass: string } {
+function getLifecycleStatus(agent: AgentInfo): {
+  label: string
+  dotClass: string
+} {
   if (agent.status === 'archived') {
     return { label: 'Archived', dotClass: 'bg-gray-400' }
   }
@@ -171,7 +171,7 @@ function AgentRow({
   )
 }
 
-function AgentEmptyState({ onCreateClick }: { onCreateClick: () => void }) {
+function AgentEmptyState({ onStartTask, onCreateClick }: { onStartTask: () => void; onCreateClick: () => void }) {
   return (
     <div
       data-testid="agents-empty-state"
@@ -180,13 +180,19 @@ function AgentEmptyState({ onCreateClick }: { onCreateClick: () => void }) {
       <BotIcon className="size-10 mx-auto text-muted-foreground/40 mb-3" />
       <p className="text-sm font-medium text-foreground mb-1">No agents defined</p>
       <p className="text-xs text-muted-foreground mb-4 max-w-sm mx-auto">
-        Agent profiles let you configure an instruction set, model, and skills for direct agent sessions outside of
-        issue workflows.
+        Start with the work you need done. Mohist will create an Agent for the task, or you can configure a profile
+        first.
       </p>
-      <Button onClick={onCreateClick} data-testid="agents-empty-create">
-        <PlusIcon />
-        Create Agent
-      </Button>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button onClick={onStartTask} data-testid="agents-empty-task">
+          <PlayIcon />
+          Start with a task
+        </Button>
+        <Button variant="outline" onClick={onCreateClick} data-testid="agents-empty-create">
+          <PlusIcon />
+          Configure an Agent
+        </Button>
+      </div>
     </div>
   )
 }
@@ -194,6 +200,8 @@ function AgentEmptyState({ onCreateClick }: { onCreateClick: () => void }) {
 export function AgentListPage({ components }: { components?: Partial<AgentListPageComponents> } = {}) {
   const { AgentProfileEditor } = { ...defaultComponents, ...components }
   useDocumentTitle('Agents — Mohist')
+  const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   const { data: agents, isLoading } = useAgents()
   const { data: availability, isLoading: availabilityLoading } = useAgentListAvailability()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -229,7 +237,10 @@ export function AgentListPage({ components }: { components?: Partial<AgentListPa
         </div>
 
         {!hasAgents ? (
-          <AgentEmptyState onCreateClick={() => setEditorOpen(true)} />
+          <AgentEmptyState
+            onStartTask={() => navigate(toProjectPath('/agent-sessions/new'))}
+            onCreateClick={() => setEditorOpen(true)}
+          />
         ) : (
           <div className="rounded-lg border border-border bg-card overflow-hidden" data-testid="agent-list">
             {activeAgents.length > 0 && (
