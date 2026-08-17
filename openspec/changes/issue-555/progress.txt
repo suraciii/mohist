@@ -969,3 +969,9 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   claim is still pending now returns `503 stop_pending` before reading a
   current public snapshot, and it never redelivers the stop. The focused stop
   suite passes (5).
+- MF-4 fixed for launch and follow-up: existing mappings are looked up before
+  mutable Agent/Session admission, while new keys still reject unavailable
+  resources without persisting a mapping. Pending launch retries resume the
+  canonical coordinator before an optional active-Agent fallback. Added
+  archive/invalidation replay regressions; focused launch and follow-up suites
+  pass (8 each).

@@ -85,6 +85,18 @@ public sealed class DirectApiIdempotencyService : IScopedService
         _timeProvider = timeProvider;
     }
 
+    public async Task<DirectApiIdempotencyMappingRow?> FindAsync(
+        string command,
+        string scopeKey,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.DirectApiIdempotencyMappings.AsNoTracking()
+            .FirstOrDefaultAsync(
+                row => row.Command == command && row.ScopeKey == scopeKey,
+                ct);
+    }
+
     public async Task<DirectApiMappingClaim> GetOrCreateAsync(
         string command,
         string scopeKey,

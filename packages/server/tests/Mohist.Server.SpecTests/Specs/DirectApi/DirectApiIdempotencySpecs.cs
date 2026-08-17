@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.DirectApi;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.DirectApi;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.DirectApi;
@@ -237,6 +238,38 @@ public sealed class DirectApiIdempotencySpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
+    public async Task CompletedLaunchReplaySurvivesAgentArchive()
+    {
+        var projectId = await SeedProjectAsync();
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await SeedAgentAsync(projectId, agentId, AgentStatus.Active, ready: true);
+        var token = await CreatePatAsync(projectId);
+        using var client = DirectClient(token);
+        const string key = "replay-after-archive";
+        const string body = "{\"text\":\"recover after archive\"}";
+
+        using var first = await PostLaunchUntilPublicAsync(client, projectId, agentId, body, key);
+        var originalJobId = first.RootElement.GetProperty("jobId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(originalJobId));
+
+        await ArchiveAgentAsync(projectId, agentId);
+
+        using var replay = Request(projectId, agentId, body, key);
+        using var response = await client.SendAsync(replay);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var replayBody = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(originalJobId, replayBody.RootElement.GetProperty("jobId").GetString());
+
+        await using var db = await fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(row =>
+            row.Command == DirectApiCommands.Launch
+            && row.ScopeKey == $"{projectId}|{agentId}|{key}"));
+        Assert.Equal(1, await db.AgentJobs.CountAsync(row => row.AgentId == agentId && row.ProjectId == projectId));
+    }
+
+    [Fact]
     public async Task ReplayUsesOneDurableMappingAndOneCanonicalLaunch()
     {
         var projectId = await SeedProjectAsync();
@@ -272,6 +305,44 @@ public sealed class DirectApiIdempotencySpecs(MohistIntegrationFixture fixture)
         Assert.False(string.IsNullOrWhiteSpace(outcome.GetProperty("jobId").GetString()));
         Assert.Equal(1, await db.AgentJobs.CountAsync(row => row.AgentId == agentId && row.ProjectId == projectId));
         Assert.Equal(1, await db.AgentSessions.CountAsync(row => row.LabelProjectId == projectId && row.LabelAgentId == agentId));
+    }
+
+    private async Task<JsonDocument> PostLaunchUntilPublicAsync(
+        HttpClient client,
+        string projectId,
+        string agentId,
+        string body,
+        string key)
+    {
+        var responseBody = await TestWait.ForAsync(
+            probe: async () =>
+            {
+                using var response = await client.SendAsync(Request(projectId, agentId, body, key));
+                if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+                    return null;
+
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                return await response.Content.ReadAsStringAsync();
+            },
+            isDone: body => body is not null,
+            timeout: TimeSpan.FromSeconds(30),
+            step: TimeSpan.FromMilliseconds(20),
+            description: "direct launch public observation to become current",
+            advance: () => fixture.Client.GetAsync("/api/health"));
+        return JsonDocument.Parse(responseBody!);
+    }
+
+    private async Task ArchiveAgentAsync(string projectId, string agentId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.Agents.SingleAsync(agent =>
+            agent.ProjectId == projectId && agent.Id == agentId);
+        var agent = JSON.Deserialize<AgentDomain>(row.State)
+            ?? throw new InvalidOperationException("The seeded Agent state is unreadable.");
+        agent.Status = AgentStatus.Archived;
+        row.State = JSON.Serialize(agent);
+        await db.SaveChangesAsync();
     }
 
     private HttpClient DirectClient(string token)

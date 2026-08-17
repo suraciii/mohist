@@ -235,35 +235,47 @@ public static class DirectApiRoutes
                 "The request body must be a JSON object containing only a non-empty text string.");
         }
 
-        var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
-        if (target is null
-            || !string.Equals(target.ProjectId, projectId, StringComparison.Ordinal)
-            || string.IsNullOrWhiteSpace(target.AgentId))
-        {
-            return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.SessionNotFound);
-        }
-
         var publicKey = key.Value!;
         var text = body.Text!;
         var inputId = DirectApiWriteValidation.FollowupInputId(sessionId, publicKey);
         var turnId = DirectApiWriteValidation.FollowupTurnId(sessionId, publicKey);
         var fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text);
         var scopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, publicKey);
-        var initialOutcome = new DirectApiFollowupOutcome(
-            SessionId: sessionId,
-            AgentId: target.AgentId,
-            InputId: inputId,
-            TurnId: turnId);
         var caller = context.Items[ExternalAgentCaller.HttpContextItemKey] as ExternalAgentCaller
             ?? throw new InvalidOperationException("The direct API caller was not resolved.");
-        var claim = await idempotency.GetOrCreateAsync(
+        var existing = await idempotency.FindAsync(
             DirectApiCommands.Followup,
             scopeKey,
-            caller.CallerKeyId,
-            fingerprint,
-            turnId: null,
-            JSON.Serialize(initialOutcome),
             ct);
+        DirectApiMappingClaim claim;
+        if (existing is null)
+        {
+            var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
+            if (target is null
+                || !string.Equals(target.ProjectId, projectId, StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(target.AgentId))
+            {
+                return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.SessionNotFound);
+            }
+
+            var initialOutcome = new DirectApiFollowupOutcome(
+                SessionId: sessionId,
+                AgentId: target.AgentId,
+                InputId: inputId,
+                TurnId: turnId);
+            claim = await idempotency.GetOrCreateAsync(
+                DirectApiCommands.Followup,
+                scopeKey,
+                caller.CallerKeyId,
+                fingerprint,
+                turnId: null,
+                JSON.Serialize(initialOutcome),
+                ct);
+        }
+        else
+        {
+            claim = new DirectApiMappingClaim(existing, Created: false);
+        }
 
         if (!string.Equals(claim.Mapping.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
@@ -456,32 +468,45 @@ public static class DirectApiRoutes
                 "The request body must be a JSON object containing only a non-empty text string.");
         }
 
-        var agent = await agents.GetByIdAsync(projectId, agentId, ct);
-        if (agent is null
-            || string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
-        {
-            return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.AgentNotFound);
-        }
-
         var publicKey = key.Value!;
         var text = body.Text!;
-        var fingerprint = DirectApiWriteValidation.LaunchFingerprint(projectId, agent.Id, text);
-        var scopeKey = DirectApiWriteValidation.LaunchScopeKey(projectId, agent.Id, publicKey);
+        var fingerprint = DirectApiWriteValidation.LaunchFingerprint(projectId, agentId, text);
+        var scopeKey = DirectApiWriteValidation.LaunchScopeKey(projectId, agentId, publicKey);
         var coordinatorKey = DirectApiWriteValidation.DerivedLaunchCoordinatorKey(
             projectId,
-            agent.Id,
+            agentId,
             publicKey);
-        var initialOutcome = new DirectApiLaunchOutcome(coordinatorKey);
         var caller = context.Items[ExternalAgentCaller.HttpContextItemKey] as ExternalAgentCaller
             ?? throw new InvalidOperationException("The direct API caller was not resolved.");
-        var claim = await idempotency.GetOrCreateAsync(
+        var existing = await idempotency.FindAsync(
             DirectApiCommands.Launch,
             scopeKey,
-            caller.CallerKeyId,
-            fingerprint,
-            turnId: null,
-            JSON.Serialize(initialOutcome),
             ct);
+        AgentInfo? agent = null;
+        DirectApiMappingClaim claim;
+        if (existing is null)
+        {
+            agent = await agents.GetByIdAsync(projectId, agentId, ct);
+            if (agent is null
+                || string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
+            {
+                return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.AgentNotFound);
+            }
+
+            var initialOutcome = new DirectApiLaunchOutcome(coordinatorKey);
+            claim = await idempotency.GetOrCreateAsync(
+                DirectApiCommands.Launch,
+                scopeKey,
+                caller.CallerKeyId,
+                fingerprint,
+                turnId: null,
+                JSON.Serialize(initialOutcome),
+                ct);
+        }
+        else
+        {
+            claim = new DirectApiMappingClaim(existing, Created: false);
+        }
 
         if (!string.Equals(claim.Mapping.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
@@ -493,13 +518,13 @@ public static class DirectApiRoutes
 
         var outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiLaunchOutcome>(claim.Mapping);
         if (claim.Mapping.State == DirectApiMappingStates.Rejected)
-            return RejectedLaunch(projectId, agent.Id, outcome, claim.Mapping.CompletedAt);
+            return RejectedLaunch(projectId, agentId, outcome, claim.Mapping.CompletedAt);
 
         if (claim.Mapping.State == DirectApiMappingStates.Pending)
         {
             var launchRequest = new AgentLaunchCoordinatorRequest(
                 Prompt: text,
-                AgentRef: agent.Id,
+                AgentRef: agentId,
                 Runtime: null,
                 WorkspacePath: null,
                 IssueNumber: null,
@@ -508,7 +533,7 @@ public static class DirectApiRoutes
                 Title: null,
                 ExactPromptFingerprint: true,
                 Origin: "direct-api",
-                TargetId: agent.Id);
+                TargetId: agentId);
             try
             {
                 var result = claim.Created
@@ -518,16 +543,34 @@ public static class DirectApiRoutes
                         outcome.CoordinatorKey,
                         launchRequest,
                         ct);
-                result ??= await launcher.LaunchIdempotentAsync(
-                    agent,
-                    text,
-                    new AgentLaunchContext(
-                        ProjectId: projectId,
-                        Origin: "direct-api",
-                        TargetId: agent.Id),
-                    idempotencyKey: outcome.CoordinatorKey,
-                    request: launchRequest,
-                    ct: ct);
+                if (result is null && agent is null)
+                {
+                    agent = await agents.GetByIdAsync(projectId, agentId, ct);
+                }
+
+                if (result is null
+                    && agent is not null
+                    && !string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
+                {
+                    result = await launcher.LaunchIdempotentAsync(
+                        agent,
+                        text,
+                        new AgentLaunchContext(
+                            ProjectId: projectId,
+                            Origin: "direct-api",
+                            TargetId: agentId),
+                        idempotencyKey: outcome.CoordinatorKey,
+                        request: launchRequest,
+                        ct: ct);
+                }
+
+                if (result is null)
+                {
+                    return DirectApiResults.Error(
+                        StatusCodes.Status503ServiceUnavailable,
+                        DirectApiErrorCodes.LaunchPending,
+                        "The launch is still being admitted; retry with the same Idempotency-Key.");
+                }
                 outcome = outcome with
                 {
                     JobId = result.JobKey,
@@ -572,7 +615,7 @@ public static class DirectApiRoutes
         }
 
         if (claim.Mapping.State == DirectApiMappingStates.Rejected)
-            return RejectedLaunch(projectId, agent.Id, outcome, claim.Mapping.CompletedAt);
+            return RejectedLaunch(projectId, agentId, outcome, claim.Mapping.CompletedAt);
 
         if (string.IsNullOrWhiteSpace(outcome.JobId))
         {

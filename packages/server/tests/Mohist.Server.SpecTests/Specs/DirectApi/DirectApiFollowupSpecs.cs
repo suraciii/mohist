@@ -155,6 +155,27 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
+    public async Task CompletedFollowupReplaySurvivesSessionTargetInvalidation()
+    {
+        var projectId = await SeedProjectAsync();
+        var sessionId = $"session-followup-replay-{Guid.NewGuid():N}";
+        await SeedSessionAsync(sessionId, projectId, "agent-canonical", AgentSessionActivity.Active);
+        var token = await CreatePatAsync(projectId);
+        using var client = DirectClient(token);
+        const string key = "followup-replay-after-invalidation";
+        const string text = "continue after target invalidation";
+
+        using var first = await PostObservationAsync(client, projectId, sessionId, key, text);
+        var originalInputId = first.RootElement.GetProperty("inputId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(originalInputId));
+
+        await InvalidateSessionTargetAsync(sessionId);
+
+        using var replayBody = await PostObservationAsync(client, projectId, sessionId, key, text);
+        Assert.Equal(originalInputId, replayBody.RootElement.GetProperty("inputId").GetString());
+    }
+
+    [Fact]
     public async Task SameKeyWithDifferentText_IsAStableConflictWithoutAnotherInput()
     {
         var projectId = await SeedProjectAsync();
@@ -518,6 +539,18 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
             Turns = turns,
         };
         await sessions.SaveAsync(session.Id, session);
+    }
+
+    private async Task InvalidateSessionTargetAsync(string sessionId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.AgentSessions.SingleAsync(session => session.Id == sessionId);
+        var session = AgentSessionJson.Deserialize(row)
+            ?? throw new InvalidOperationException("The seeded Session state is unreadable.");
+        session.Metadata = session.Metadata.WithLabel("mohist.io/source-kind", "invalidated");
+        row.State = JSON.Serialize(session);
+        await db.SaveChangesAsync();
     }
 
     private async Task<int> MappingCountAsync()
