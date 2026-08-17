@@ -243,6 +243,14 @@ public static class DirectApiRoutes
         var scopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, publicKey);
         var caller = context.Items[ExternalAgentCaller.HttpContextItemKey] as ExternalAgentCaller
             ?? throw new InvalidOperationException("The direct API caller was not resolved.");
+        // Idempotency mappings are keyed by session and caller key, not by
+        // project. Prove the canonical Session still belongs to the selected
+        // project before an existing mapping can be replayed or admitted.
+        if (await sessions.ResolveGenericFollowupTargetAsync(projectId, sessionId, ct) is null)
+        {
+            return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.SessionNotFound);
+        }
+
         var existing = await idempotency.FindAsync(
             DirectApiCommands.Followup,
             scopeKey,

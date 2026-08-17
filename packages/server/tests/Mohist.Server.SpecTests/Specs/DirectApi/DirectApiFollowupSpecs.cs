@@ -176,6 +176,36 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
+    public async Task ExistingFollowupMappingCannotBeReplayedThroughAnotherProject()
+    {
+        var ownerProjectId = await SeedProjectAsync();
+        var attackerProjectId = await SeedProjectAsync();
+        var sessionId = $"session-followup-cross-project-{Guid.NewGuid():N}";
+        await SeedSessionAsync(sessionId, ownerProjectId, "agent-canonical", AgentSessionActivity.Active);
+        var token = await CreatePatForProjectsAsync(ownerProjectId, attackerProjectId);
+        using var client = DirectClient(token);
+        const string key = "followup-cross-project";
+        const string text = "must remain project scoped";
+
+        using (var first = await PostObservationAsync(client, ownerProjectId, sessionId, key, text))
+        {
+            Assert.Equal(ownerProjectId, first.RootElement.GetProperty("projectId").GetString());
+        }
+
+        using var replay = Request(attackerProjectId, sessionId, key, text);
+        using var response = await client.SendAsync(replay);
+        await AssertErrorAsync(response, HttpStatusCode.NotFound, DirectApiErrorCodes.SessionNotFound);
+
+        await using var db = await fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
+            row.Command == DirectApiCommands.Followup
+            && row.ScopeKey == $"{sessionId}|{key}");
+        Assert.Equal(DirectApiMappingStates.Completed, mapping.State);
+    }
+
+    [Fact]
     public async Task SameKeyWithDifferentText_IsAStableConflictWithoutAnotherInput()
     {
         var projectId = await SeedProjectAsync();
@@ -403,6 +433,20 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
             name = $"direct-followup-{Guid.NewGuid():N}",
             scope,
             projectIds = new[] { projectId },
+            allProjects = false,
+        });
+        response.EnsureSuccessStatusCode();
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return body.RootElement.GetProperty("data").GetProperty("token").GetString()!;
+    }
+
+    private async Task<string> CreatePatForProjectsAsync(params string[] projectIds)
+    {
+        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
+        {
+            name = $"direct-followup-multi-project-{Guid.NewGuid():N}",
+            scope = "operator",
+            projectIds,
             allProjects = false,
         });
         response.EnsureSuccessStatusCode();
