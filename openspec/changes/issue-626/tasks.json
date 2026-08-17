@@ -1,0 +1,49 @@
+{
+  "project": "mohist-local",
+  "description": "Allow in-flight Workflow core/script tasks carrying the retired resourceProfile input to replay and self-recover without weakening the current Action contract.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Normalize retired core/script inputs at the Runner execution boundary",
+      "spec": "specs/workflow-replay-input-compatibility/spec.md#historical-resourceprofile-is-ignored-during-core-script-replay",
+      "description": "Add a small pure compatibility normalizer adjacent to Runner Action input validation and apply it to workflow-owned core/script task execution, including legacy dispatch envelopes with no explicit owner kind. Strip only the top-level resourceProfile key from the defensive execution copy before unresolved-reference checks, deferred rendering, validation, workspace and cleanup input construction, and handler invocation; keep the persisted DispatchWorkItem.with unchanged and exclude agent-job work and all other Actions. Extend the Runner execution and recovery coverage so direct redelivery and retrySelf continuations both execute with current core/script semantics while preserving raw declarations and recovery metadata.",
+      "acceptanceCriteria": [
+        "A workflow task using core/script with valid run, shell, and timeout values plus a historical resourceProfile field executes successfully, and the captured Action input contains no resourceProfile while preserving the supported values after normal rendering.",
+        "A historical resourceProfile value containing an unresolved template or otherwise invalid retired data is ignored as a whole before unresolved-reference detection and input validation; it cannot influence the command, shell, timeout, workspace, cleanup behavior, resource containment, or handler input.",
+        "The compatibility gate applies to workflow task dispatches, including an omitted or legacy ownerKind, and does not strip resourceProfile from agent-job dispatches, checks, other Actions, or any other input key.",
+        "Direct execution leaves DispatchWorkItem.with deeply equivalent in-memory content, including resourceProfile and supported templates; no persisted declaration or dispatch snapshot is mutated.",
+        "A failed historical core/script task with a matching retrySelf handler and positive recovery budget creates a continuation that preserves work identity semantics, title, uses, supported inputs and templates, artifacts, setVars, expect, recovery declaration, and all other task metadata while decrementing recoveryRemaining exactly once.",
+        "Executing the retrySelf continuation again removes resourceProfile from effective Action input, while an unrelated unknown input still produces the existing validation failure and invalid run, shell, or timeout values still produce the existing type validation failure, with no Action invocation in either rejection case.",
+        "The current core/script manifest and catalog remain strict: run is required, shell and timeout are optional, and resourceProfile is not declared or exposed as an execution capability.",
+        "Runner type checks and the focused executor, recovery, and action-contract regression suites pass, including coverage for direct replay, retrySelf replay, raw-input preservation, and strict rejection cases."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner execution-boundary compatibility normalization with direct-redelivery and retrySelf regression coverage under packages/runner/src/runtime and packages/runner/tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep tryRecovery's raw with cloning and existing budget arithmetic intact; the normalized map is an execution-local projection, not a replacement for historical Workflow state."
+    },
+    {
+      "id": "T-002",
+      "title": "Preserve historical Workflow declarations and strict Server validation",
+      "spec": "specs/workflow-replay-input-compatibility/spec.md#the-current-core-script-contract-remains-strict",
+      "description": "Verify and, where needed, harden the Server Workflow dispatch and definition-validation boundaries so persisted task declarations are serialized verbatim for redelivery and recovery while new Workflow definitions remain subject to the current core/script catalog contract. Add focused translator and profile-validation coverage for resourceProfile preservation, supported input declarations, task metadata and completion/recovery fields, and rejection of new resourceProfile usage without adding a migration, syntax, or generalized validator exception.",
+      "acceptanceCriteria": [
+        "WorkflowItemTranslator and the dispatch/redelivery path serialize a persisted core/script task's raw with declaration verbatim, including resourceProfile, run, shell, and timeout templates, while retaining the associated task metadata; no TaskRun, WorkItem, dispatch snapshot, or recovery declaration is rewritten in place.",
+        "Server dispatch tests verify that work and task-attempt identity, title, Action selection, artifacts, variables/setVars, expect, recovery declaration, and recovery budget remain present alongside the unchanged raw declaration used for replay.",
+        "A newly parsed Workflow definition declaring resourceProfile under core/script is rejected by the existing ActionContractValidator as an unknown input, and the current catalog/definition validation path does not make the retired field available to new definitions.",
+        "The Server contract remains strict for all other undeclared inputs and does not introduce a global exception for resourceProfile, a new workflow syntax, a public API change, or a database migration.",
+        "Focused Server unit/spec tests cover translator raw-declaration preservation, new-definition rejection, and the unchanged current core/script input contract; the relevant Server test projects pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server replay-preservation and Workflow profile-validation regression coverage in the WorkflowItemTranslator and ActionContractValidator test suites, with any required boundary fixes.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The Server remains the authority for rejecting new parsed definitions; compatibility belongs at Runner execution so raw historical JSON stays auditable and direct replay and retrySelf share one rule."
+    }
+  ]
+}
