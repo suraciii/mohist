@@ -1,0 +1,5 @@
+# Progress: Issue 625 plan review fixes
+
+- Reviewed the first self-review and mapped must-fix findings M-1, M-2, and M-3 to the plan artifacts.
+- M-1 fixed: T-002 now explicitly forbids adding, restoring, configuring, or referencing resource-containment mechanisms and related failure codes while preserving only the existing timeout, report, and Runner-slot behavior.
+- M-2 and M-3 remain in progress; the next edits will define the persisted-definition rollout boundary and the per-lane `fix-ci` recovery contract.

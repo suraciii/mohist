@@ -42,7 +42,7 @@
       "output": "Lane-scoped Runner timeout/reporting behavior with durable WorkResultJournal fencing and passing Runner execution and journal tests.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep existing process-group termination, result protocol, resource containment, and Runner slot policy unchanged."
+      "notes": "Do not add, restore, configure, or reference any per-work resource containment mechanism, resource profile, cgroup or memory limit, process-tree containment policy, resource budget, or resource-containment failure code. Preserve only the existing process-group termination, result protocol, and Runner slot policy."
     },
     {
       "id": "T-003",
