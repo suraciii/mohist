@@ -80,6 +80,7 @@ public class MohistOpenTelemetryRegistrationSpecs
     {
         var services = new ServiceCollection();
         services.AddMohistOpenTelemetry(BuildConfig(enabled: true, endpoint: "http://collector.test/otel"));
+        UseInMemoryOtlpExporters(services);
 
         using var provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetService<MeterProvider>());
@@ -100,6 +101,7 @@ public class MohistOpenTelemetryRegistrationSpecs
 
         var services = new ServiceCollection();
         services.AddMohistOpenTelemetry(config);
+        UseInMemoryOtlpExporters(services);
 
         using var provider = services.BuildServiceProvider();
         var tracerProvider = provider.GetService<TracerProvider>();
@@ -174,6 +176,30 @@ public class MohistOpenTelemetryRegistrationSpecs
                 ["Mohist:Otel:Endpoint"] = endpoint,
             })
             .Build();
+    }
+
+    private static void UseInMemoryOtlpExporters(IServiceCollection services)
+    {
+        services.PostConfigure<OtlpExporterOptions>("tracing", ConfigureInMemoryOtlpExporter);
+        services.PostConfigure<OtlpExporterOptions>("metrics", ConfigureInMemoryOtlpExporter);
+    }
+
+    private static void ConfigureInMemoryOtlpExporter(OtlpExporterOptions options)
+    {
+        options.ExportProcessorType = ExportProcessorType.Simple;
+        options.HttpClientFactory = () => new HttpClient(new SuccessfulOtlpExporterHandler());
+    }
+
+    private sealed class SuccessfulOtlpExporterHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(Array.Empty<byte>()),
+                RequestMessage = request,
+            });
     }
 
     /// <summary>
