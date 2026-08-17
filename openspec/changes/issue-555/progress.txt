@@ -965,3 +965,7 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   stable `queue_full` reason and a safe capacity message/error while retaining
   `status=queued` and `admission=blocked`. Added snapshot and event-payload
   assertions. Focused projection specs pass (18).
+- MF-3 fixed in the stop route: a matching retry whose frozen canonical stop
+  claim is still pending now returns `503 stop_pending` before reading a
+  current public snapshot, and it never redelivers the stop. The focused stop
+  suite passes (5).

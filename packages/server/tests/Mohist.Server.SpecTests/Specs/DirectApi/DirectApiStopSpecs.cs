@@ -203,11 +203,7 @@ public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
         // dispatch a replacement effect from the HTTP route.
         using (var retry = await client.SendAsync(StopRequest(projectId, turnId, "frozen-retry")))
         {
-            Assert.Contains(retry.StatusCode, new[]
-            {
-                HttpStatusCode.OK,
-                HttpStatusCode.ServiceUnavailable,
-            });
+            await AssertErrorAsync(retry, HttpStatusCode.ServiceUnavailable, DirectApiErrorCodes.StopPending);
         }
         Assert.Single(hub.Invocations);
 

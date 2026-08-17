@@ -126,7 +126,10 @@ internal static class DirectApiStopRoutes
             if (!claim.Created
                 && await HasMatchingCanonicalStopClaimAsync(session, frozen))
             {
-                return await ReadTurnObservationAsync(projectId, turnId, publicReads, ct);
+                // The matching durable mapping is still pending even when
+                // the public Turn snapshot is current. The canonical stop
+                // lifecycle must settle before this command can answer 200.
+                return DirectApiResults.StopPending();
             }
 
             var result = await AgentSessionStopOperations.StopAsync(
