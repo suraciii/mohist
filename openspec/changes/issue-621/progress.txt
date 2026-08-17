@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- Pi and OpenCode both project the Runner-owned normalized `tool_call.started` fact with `toolName` and `rawInput`; Pi shell input currently arrives from `args.command`, while OpenCode input arrives from `input.cmd`.
+- Slack eligibility must be validated through `readSlackExecutionContext`; its reply-anchor fields and collaboration-skill content hash are the existing validity boundary.
+- Runner runtime modules keep Pi and OpenCode as separate deep-module surfaces. The shared reply guard therefore accepts a small discriminated runtime handle and an injected advisory runner instead of introducing a generic runtime interface or a Server dependency.
+- Runner typecheck and tests require dependencies restored with `npm ci --ignore-scripts --no-audit --no-fund` in a clean workspace where `node_modules` is absent.
+
+## T-001
+
+- Added `ReplyActionObservationTracker` and `isReplyActionToolCallStarted` in `packages/runner/src/runtime/reply-guard.ts`. The predicate is restricted to normalized `tool_call.started` facts, recognizes the current Pi/OpenCode shell command fields, and records an attempt before completion facts can arrive. It ignores final text, unrelated tools, terminal facts, liveness, delivery, and outbox state.
+- Added `ReplyGuardCoordinator` with explicit `replyActionAttempted`, `remindersIssued`, and `not-evaluated`/`evaluating`/`advisory-running`/`closed` state. The default reminder budget is exactly two; state is claimed before each advisory and duplicate evaluations, attempts, failures, timeout, interruption, unavailable runtime, and late completion cannot open another opportunity.
+- The advisory prompt is built from the existing `buildExecutionEnvelope`, validated Slack context, reply anchor, and inline collaboration skill. The injected advisory runner receives the original runtime kind, session id, work directory, context, observation tracker, and abort signal; the guard never authors or publishes reply content.
+- Added focused coverage in `packages/runner/tests/reply-guard.spec.ts` for Pi/OpenCode observation, rejected attempts, final-output-only turns, duplicate starts and terminal evaluations, default-two budgeting, explicit silence, supplied context, non-Slack bypass, unavailable/failure/timeout/interrupted paths, and late completion.
+- Verification passed: Runner source typecheck, test typecheck, test-boundary check, focused projection/reply-guard suites (24/24), and the full Runner suite (1696/1696 across 156 files).
