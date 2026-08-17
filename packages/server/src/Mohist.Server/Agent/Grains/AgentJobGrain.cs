@@ -302,7 +302,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         // original immutable AgentJob snapshot; only coordinator identities
         // advance with the recovery generation.
         if (!string.IsNullOrWhiteSpace(input.AgentSessionId)
-            && !string.IsNullOrWhiteSpace(input.Prompt))
+            && (!string.IsNullOrWhiteSpace(input.Prompt)
+                || input.Attachments is { Count: > 0 }))
         {
             var session = _grains.GetGrain<IAgentSessionGrain>(input.AgentSessionId);
             if (!string.IsNullOrWhiteSpace(input.InitialTurnId))
@@ -328,17 +329,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 input.Attachments));
         }
 
-        State.RecoveryAttempts.Add(new AgentJobRecoveryAttempt(
-            State.RecoveryGeneration,
-            interruptedWorkId,
-            runnerId,
-            input.AgentSessionId,
-            input.InitialInputId,
-            input.InitialTurnId,
-            input.Runtime,
-            runtimeSessionId,
-            AgentJobStatus.RecoverablyInterrupted,
-            now));
+        RecordInterruptedAttempt(interruptedWorkId, now);
         State.RecoveryAttempts.Add(new AgentJobRecoveryAttempt(
             generation,
             workId,
@@ -416,6 +407,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal)
             return;
 
+        RecordInterruptedAttempt(State.InterruptedWorkId, _timeProvider.GetUtcNow());
         State.Status = AgentJobStatus.Interrupted;
         State.RecoveryTerminalReason = reason;
         State.UpdateInterruptionDeadlineAt = null;

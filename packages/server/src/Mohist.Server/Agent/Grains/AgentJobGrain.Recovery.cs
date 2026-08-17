@@ -405,6 +405,34 @@ public sealed partial class AgentJobGrain
         && State.UpdateInterruptionDeadlineAt is { } deadline
         && deadline <= _timeProvider.GetUtcNow();
 
+    public async Task<bool> MarkUpdateStopFailureAsync(
+        string runnerId,
+        string workId,
+        string updateOperationId,
+        string failure)
+    {
+        await HydrateAsync();
+        if (string.IsNullOrWhiteSpace(failure)
+            || State.Status != AgentJobStatus.RecoverablyInterrupted
+            || !string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(State.UpdateOperationId, updateOperationId, StringComparison.Ordinal)
+            || State.Interruption is null)
+        {
+            return false;
+        }
+
+        var transition = State.Interruption with { StopFailure = failure, RecordedAt = _timeProvider.GetUtcNow() };
+        State.Interruption = transition;
+        State.InterruptionHistory = AgentWorkInterruptionProjection.Apply(
+            State.InterruptionHistory,
+            transition).ToList();
+        QueueSessionInterruptionDelivery(State.Input?.AgentSessionId, transition);
+        await PersistAsync();
+        await DeliverPendingSessionInterruptionAsync();
+        return true;
+    }
+
     private void QueueSessionInterruptionDelivery(
         string? sessionId,
         AgentWorkInterruptionTransition transition)
