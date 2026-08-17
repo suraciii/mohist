@@ -24,3 +24,4 @@
 - Updated those tests to use the existing in-memory exporter pattern with a local successful HTTP handler and simple processing. The production registration and assertions remain unchanged.
 - Focused rebuild and rerun passed all 8 registration tests in 0.224s; the full canonical gate rerun passed all 9 tracks with 0 failing, 0 cancelled, 0 timed out, 0 over-budget tests, and all 3,875 Server specs passing.
 - The canonical run created no Git-visible changes; both issue-626 tasks are complete.
+- Independent repair verification: the focused registration suite passed all 8 tests in 0.206s and the Runner replay suite passed all 9 tests. One full canonical retry hit the server-spec 240s lane deadline without test failures while stale .NET processes were present; the exact partition then passed all 3,875 tests in 143.063s, and the final `npm run verify` passed all 9 tracks with 0 failures, cancellations, timeouts, or over-budget tests.
