@@ -979,3 +979,28 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   docs, file-size, format, build, 3,984 Server SpecTests, 2,676 Server unit
   tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724
   Web tests, 1,639 Runner tests, and 70 Slack tests.
+
+## Re-review MF-1 disposition (current task)
+
+- The re-review (`review.md`) reports MF-1: the follow-up route read the
+  durable idempotency mapping before proving the canonical Session belongs to
+  the selected Project. Follow-up scope keys are `sessionId|key` (no
+  project), so a PAT authorized for Project B could replay or admit a mapping
+  created under Project A without the canonical membership check.
+- FIXED in `DirectApiRoutes.FollowupAsync`: an existence-and-membership-only
+  canonical Session check via
+  `AgentSessionQuerier.ResolveGenericFollowupTargetAsync(projectId, sessionId)`
+  now runs on every request before `idempotency.FindAsync`. A missing or
+  foreign Session returns `404 session_not_found` and never reaches replay or
+  admission; the generic resolver intentionally ignores the mutable
+  Runner/source target so replay after target invalidation still works.
+- Added regression
+  `DirectApiFollowupSpecs.ExistingFollowupMappingCannotBeReplayedThroughAnotherProject`:
+  a follow-up mapping minted in Project A, replayed through Project B with the
+  same session/key/body, returns `404 session_not_found` and leaves the
+  original mapping untouched. `CompletedFollowupReplaySurvivesSessionTargetInvalidation`
+  still passes (replay after mutable target invalidation preserved).
+- Verified: focused `DirectApiFollowupSpecs` (9) passes; full Server SpecTests
+  3,985 pass (one transient projection-lag timeout on the replay-survival
+  test's first post cleared on rerun, unrelated to this change); 2,676 unit
+  tests, 69 architecture tests, and the solution build pass.
