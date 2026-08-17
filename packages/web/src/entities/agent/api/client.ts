@@ -165,9 +165,11 @@ export function unarchiveAgent(projectId: string, id: string) {
   })
 }
 
-export function readAgentDefinitionModelAndVariant(
-  agent: Pick<AgentInfo, 'agentConfig'> | null | undefined,
-): { model: string | null; variant: string | null; runtime: AgentRuntime } {
+export function readAgentDefinitionModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): {
+  model: string | null
+  variant: string | null
+  runtime: AgentRuntime
+} {
   const config = agent?.agentConfig
   if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
   const rawModel = typeof config.model === 'string' ? config.model : null
