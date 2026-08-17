@@ -174,12 +174,23 @@ public sealed class WorkflowRunQuerier
     /// the runner grain's dispatch-capacity gate so the per-runner slot
     /// budget accounts for work already picked up. Filters at the database
     /// layer on the STORED <c>Status</c> computed column, the assigned owner,
-    /// and the materialized active-work projection; never deserializes
-    /// <c>State</c>. Replaces
+    /// the materialized active-work projection, and the durable blocked
+    /// attention projection; never deserializes <c>State</c>. Replaces
     /// the previous <c>FindAssignedToAsync</c> +
     /// <c>GetCurrentWorkIdAsync</c> fan-out, which under the new state
     /// machine would have collapsed to zero (Ready excludes in-flight
     /// work).
+    ///
+    /// Issue-628 T-005: durably <c>Blocked</c> Agent settlements are
+    /// excluded from this count. The durable <c>WorkflowRunRow.AttentionStatus
+    /// = "blocked"</c> projection and the materialized active-work
+    /// projection (<c>ActiveWorkId</c>/<c>ActiveWorkerId</c>) are the
+    /// release boundary for Runner control-plane capacity: a single
+    /// boundary shared with <see cref="FindRunningAssignedToAsync"/>. A
+    /// pre-deadline <c>Unknown</c> attempt still counts because its row is
+    /// not yet marked blocked and still carries its active-work projection;
+    /// the same row is released exactly once the workflow commits the
+    /// <c>Unknown</c> → <c>Blocked</c> transition and clears the projection.
     /// </summary>
     public async Task<int> CountRunningAssignedToAsync(string workerId, CancellationToken ct = default)
     {
@@ -192,7 +203,8 @@ public sealed class WorkflowRunQuerier
             .Where(row => row.Status == StatusString(WorkflowRunStatus.Running)
                 && row.AssignedWorkerId == workerId
                 && row.ActiveWorkId != null
-                && row.ActiveWorkerId == workerId)
+                && row.ActiveWorkerId == workerId
+                && row.AttentionStatus != BlockedAttentionStatus)
             .Select(row => row.WorkflowRunId)
             .CountAsync(ct);
     }
@@ -206,6 +218,16 @@ public sealed class WorkflowRunQuerier
     /// active-work projection are returned, so blocked settlement rows cannot
     /// retain a redelivery slot. Filters at the DB layer; never deserializes
     /// <c>State</c>.
+    ///
+    /// Issue-628 T-005: durably <c>Blocked</c> Agent settlements are
+    /// excluded from the desired set. The same release boundary that
+    /// decrements the capacity count in <see cref="CountRunningAssignedToAsync"/>
+    /// (the materialized active-work projection plus the durable blocked
+    /// attention projection) also drops the run from
+    /// <c>DispatchService.AddMissingRedeliveriesAsync</c> and from the Runner
+    /// runtime <c>activeWorks</c> projection — none of these three
+    /// control-plane surfaces is allowed to re-release the same row on a
+    /// subsequent reminder, poll, or status read.
     /// </summary>
     public async Task<IReadOnlyList<string>> FindRunningAssignedToAsync(string workerId, CancellationToken ct = default)
     {
@@ -218,7 +240,8 @@ public sealed class WorkflowRunQuerier
             .Where(row => row.Status == StatusString(WorkflowRunStatus.Running)
                 && row.AssignedWorkerId == workerId
                 && row.ActiveWorkId != null
-                && row.ActiveWorkerId == workerId)
+                && row.ActiveWorkerId == workerId
+                && row.AttentionStatus != BlockedAttentionStatus)
             .Select(row => row.WorkflowRunId)
             .ToListAsync(ct);
     }
@@ -236,7 +259,7 @@ public sealed class WorkflowRunQuerier
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.AttentionStatus == "blocked");
+            .Where(row => row.AttentionStatus == BlockedAttentionStatus);
 
         if (!string.IsNullOrWhiteSpace(projectId))
             query = query.Where(row => row.MetadataProjectId == projectId);
@@ -248,6 +271,15 @@ public sealed class WorkflowRunQuerier
             .Select(row => row.WorkflowRunId)
             .ToListAsync(ct);
     }
+
+    /// <summary>
+    /// Single point of truth for the durable Agent-blocked attention
+    /// projection. Every control-plane query that excludes a durably
+    /// blocked run funnels through this constant so a future rename of
+    /// the projection column does not require touching multiple sites
+    /// (the same pattern as <see cref="StatusString"/>).
+    /// </summary>
+    private const string BlockedAttentionStatus = "blocked";
 
     // The STORED Status computed column is the lowercase JSON enum
     // value (D3). This helper is the single point that knows the

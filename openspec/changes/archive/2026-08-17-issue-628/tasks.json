@@ -1,0 +1,116 @@
+{
+  "project": "mohist-local",
+  "description": "Restore expected run-branch integrity during rebase recovery, workspace preparation, task boundaries, and exact retries without replacing workflow workspace identity.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Repair and verify workspaces on the expected run branch",
+      "spec": "specs/rebase-recovery-branch-integrity/spec.md#workspace-preparation-shall-repair-a-safe-branch-mismatch",
+      "description": "Introduce the small internal workspace-health snapshot/evaluator and align workspace preparation plus WorkspaceManager preparation and verification with it. Probe branch attachment, detached refs, worktree cleanliness, and all residual operation markers; abort residual operations in order with re-probes, clean dirty trees, check out the existing expected branch, and perform a complete final verification before success.",
+      "acceptanceCriteria": [
+        "A workspace already attached to the exact expected branch with a clean worktree and no rebase, merge, or cherry-pick state takes the fast path without mutation.",
+        "A detached or mismatched workspace is repaired only by using the existing expected branch; residual cleanup, reset/clean, checkout, and final verification occur in the required order, and success is returned only after the final probe confirms the complete invariant.",
+        "Abort failures, residual-state re-probe failures, checkout failures, probe failures, and post-repair dirty/branch/residual mismatches return failure diagnostics containing the expected branch, observed branch or detached ref, failed operation, and relevant workspace condition.",
+        "Stateful fake-worktree tests cover the clean fast path, detached repair, dirty mismatched repair, rebase/merge/cherry-pick cleanup and re-probe failures, checkout failure, and final health verification failure.",
+        "Workspace manager tests verify that preparation and verification use the same health contract and do not create a replacement workspace or branch during ordinary branch repair; the focused workspace-preparation and workspace-manager suites pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared internal workspace-health evaluation, updated workspace preparation and WorkspaceManager branch repair/verification, and passing fake-worktree regression tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep Git command adapters narrow and local to the existing action/runtime modules. The preparation state machine must not fetch, clone, force-create a branch, or replace the workspace."
+    },
+    {
+      "id": "T-002",
+      "title": "Enforce expected-branch integrity at rebase recovery completion",
+      "spec": "specs/rebase-recovery-branch-integrity/spec.md#expected-run-branch-is-the-recovery-completion-invariant",
+      "description": "Make the rebase action receive the expected run branch from the engine-sourced workspace variables while retaining baseBranch or its remote ref solely as the rebase target. Reuse the workspace-health evaluator after rebase and any squash so the action reports success only for the exact attached expected branch with a clean, non-residual workspace, while unresolved conflicts remain failures with their file information.",
+      "acceptanceCriteria": [
+        "The rebase action contract and engine input injection populate the expected branch from workspace.branch without requiring workflow authors to declare a second branch; baseBranch is never used as the workspace identity.",
+        "Successful local, remote, and squash rebases report success only when the final health snapshot is attached to the expected run branch, clean, and free of every residual operation marker.",
+        "A rebase that exits successfully but leaves detached HEAD or another branch returns a branch-integrity failure identifying expectedBranch and observedBranch or observedRef, and does not expose successful rebase output.",
+        "A rebase conflict returns the existing conflict failure with unresolved file names and is never represented as successful recovery; the action does not silently clean the conflict state needed by a resolver.",
+        "Rebase action tests use the stateful fake worktree to cover expected-branch success, detached and wrong-branch completion, conflicts, and final probe failures; Git action contract and workflow-profile tests verify hidden branch injection and pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Branch-integrity-aware `mohist/rebase`, engine-sourced expected-branch input coverage, and passing rebase, action-contract, and workflow-profile tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Do not change rebase target, fetch, squash, conflict-resolution, or rebase-status semantics beyond the completion invariant and its diagnostics."
+    },
+    {
+      "id": "T-003",
+      "title": "Reject invalid Git workspace state at task boundaries",
+      "spec": "specs/rebase-recovery-branch-integrity/spec.md#task-boundaries-shall-enforce-branch-integrity",
+      "description": "Align branch-stability and WorkExecutor start/end checks with the shared workspace-health semantics when an expected branch is defined. Fail closed before action invocation or before successful settlement for detached HEAD, branch mismatch, failed branch probes, or an unverified Git workspace. A branch-integrity failure must bypass automatic recovery follow-ups and remain a failed report, so the existing server contract cannot convert it into successful completion or advance follow-up tasks.",
+      "acceptanceCriteria": [
+        "A task-start probe observing detached HEAD, a mismatched branch, a failed branch probe, or an unverified expected workspace fails before the action is invoked and identifies the expected branch plus observed ref or probe failure when available.",
+        "A successful action whose task-end probe observes detached HEAD, a mismatched branch, or another failed health condition is converted to a branch-integrity failure before artifacts or work results can settle it as completed.",
+        "An action-level or end-boundary branch-integrity failure is returned with status failed and no addTasks; the executor does not call tryRecovery for that failure, so a matching handler or self-retry cannot reach the server as completed. Ordinary unresolved-conflict failures remain eligible for their configured recovery path.",
+        "Boundary diagnostics use the same expected/observed terminology and failed-condition details as action and workspace-preparation failures, and branch evidence is kept in the error rather than successful output.",
+        "Executor and branch-stability tests cover start rejection, end rejection, probe failure, detached-reference reporting, and preservation of existing behavior for actions without an expected workspace branch.",
+        "The focused executor branch-stability and workspace-boundary test suites pass with the new stateful fake-worktree scenarios."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared-semantics task-boundary enforcement in branch stability and WorkExecutor, with passing start/end boundary regression tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep both start and end probes. The end probe must run before artifact/worktree settlement can turn an action result into successful task completion."
+    },
+    {
+      "id": "T-004",
+      "title": "Preserve recovery identity and diagnostics across exact retries",
+      "spec": "specs/rebase-recovery-branch-integrity/spec.md#recovery-retries-shall-preserve-workspace-and-run-branch-identity",
+      "description": "Update recovery reporting and workspace identity/binding paths so branch-integrity failures remain durable WorkItemResult failures and cannot be turned into success by handler or retry materialization. Eligible recovery tasks and explicit exact retries must inherit the original workflow run, workspace path, expected branch, and branch reference, and a failed repair must never trigger a replacement workspace or a new branch.",
+      "acceptanceCriteria": [
+        "When an action or task boundary produces a branch-integrity failure, the result remains status failed with its original diagnostic, has no addTasks, and the server translator/lifecycle persists failure without CompleteTask or follow-up insertion; task-boundary validation still runs before settlement.",
+        "Materialized recovery tasks and exact self-retries preserve the original workflowRunId, workspace path, expected run branch, and branch binding without creating a replacement workspace or branch because repair failed.",
+        "A stateful fake-worktree test injects a transient checkout or residual-cleanup failure, verifies the first attempt is a durable actionable failure, removes the transient failure, and verifies an exact retry repairs the same path and branch; a persistent failure remains a failure of the same diagnostic class.",
+        "Repeated preparation of an already healthy workspace takes the idempotent fast path and issues no identity-changing commands, and recovery tests verify workspace/profile variables are inherited without a second branch declaration.",
+        "Recovery scheduling, executor recovery, workspace identity/manager, and workflow-profile regression suites pass together with the focused rebase and workspace-preparation suites."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Identity-preserving recovery scheduling and retry behavior with durable branch/workspace diagnostics, plus passing exact-retry and recovery integration tests.",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Use the existing WorkItemResult and ActionError paths; do not add a server persistence model or a new result-replay protocol."
+    },
+    {
+      "id": "T-005",
+      "title": "Release durably blocked settlements from Runner projections",
+      "spec": "specs/rebase-recovery-branch-integrity/spec.md#durable-blocked-settlement-shall-release-runner-projections-at-one-exactly-once-boundary",
+      "description": "Align the existing durable Agent result settlement and report adapter with the Runner control-plane projections. Keep an Unknown attempt active until its fake-time deadline, atomically project the committed Blocked attention state, and make the same committed boundary remove it from Runner activeWorks, used capacity, and missing-redelivery reconciliation while retaining the original assignment and task/work/Runner identity for a matching late authoritative report. Preserve unknown results as observations so a stale observation cannot be converted into a failed task report.",
+      "acceptanceCriteria": [
+        "Before the settlement deadline, an Unknown attempt remains visible in Runner activeWorks for its assigned runner and counts against used capacity; the implementation does not change configured slot totals or use manual stop as the release mechanism.",
+        "When fake time reaches the deadline, the workflow durably commits Unknown to Blocked and the post-commit Runner view, capacity calculation, and DispatchService.AddMissingRedeliveriesAsync desired set omit that run at the same exactly-once boundary; repeating the reminder, poll, or status read does not release or decrement it again.",
+        "WorkflowRunQuerier running-assigned and count-running queries filter the indexed blocked projection only after durable settlement and continue matching the assigned worker; blocked settlement does not clear the aggregate assignment or its original taskRunId/workId/runnerId identity.",
+        "A late report with the original taskRunId, workId, and runnerId is accepted by the authoritative workflow report path after Blocked and settles the original attempt without reintroducing it into activeWorks or capacity; a report with any mismatched identity is stale and leaves the blocked state and projections unchanged.",
+        "A matching late WorkResult with status unknown is handled only as a non-authoritative observation. When the blocked domain returns Stale, WorkflowReportService returns a stale acknowledgement and does not forward InboundReport.Unknown.Fallback to ReceiveTaskReportAsync; the blocked settlement, task/workflow state, event stream, activeWorks, capacity, and missing-redelivery desired set remain unchanged, with no TaskFailed event.",
+        "Fake-time server tests cover the pre-deadline Unknown lease, durable Blocked transition, one-time active-work/capacity release, no blocked redelivery, matching late authoritative settlement, matching blocked unknown observation, mismatched late-result fence, and unchanged slot configuration; the focused settlement, workflow report, workflow projection, dispatch, Runner runtime, and status suites pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Durable blocked-settlement projection release from Runner activeWorks, capacity, and missing redelivery, with identity-preserving late-result handling and passing fake-time server tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use the existing AttentionStatus projection and workflow settlement identity. Exclude only durably blocked rows from the Runner control-plane desired set; preserve pre-deadline Unknown leases and matching late authoritative reports. Treat InboundReport.Unknown.Fallback as non-authoritative data that must never be sent to task settlement after a stale observation. Do not increase slots, stop the runner, clear the assignment, or introduce a second settlement authority."
+    }
+  ]
+}

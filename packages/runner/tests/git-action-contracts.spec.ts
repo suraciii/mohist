@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDefaultRegistry } from '../src/actions/registry.js'
-import { validateActionInput } from '../src/actions/input-validation.js'
+import { validateActionInput, injectEngineInputs } from '../src/actions/input-validation.js'
 
 describe('local Git Action manifests', () => {
   it('declare the explicit delivery contract', () => {
@@ -26,6 +26,64 @@ describe('local Git Action manifests', () => {
     })
     expect(inputs('mohist/openspec-tasks')).toMatchObject({ task: { required: true } })
     expect(inputs('mohist/push')).not.toHaveProperty('baseBranch')
+  })
+
+  it('sources the rebase expected branch from workspace.branch without a second declaration', () => {
+    const registry = createDefaultRegistry()
+    const resolved = registry.resolve('mohist/rebase')
+    if (resolved.kind !== 'definition') throw new Error('Missing mohist/rebase')
+
+    const expectedBranch = resolved.definition.manifest.inputs.expectedBranch
+    expect(expectedBranch).toBeDefined()
+    expect(expectedBranch?.engineSource).toBe('workspace.branch')
+    expect(expectedBranch?.required).not.toBe(true)
+    // baseBranch stays the rebase target; it is never the workspace identity.
+    expect(resolved.definition.manifest.inputs.baseBranch?.engineSource).toBeUndefined()
+    expect(resolved.definition.manifest.inputs.baseBranch?.required).toBe(true)
+  })
+
+  it('keeps the engine-sourced rebase expected branch out of the public catalog', () => {
+    const registry = createDefaultRegistry()
+    const rebaseEntry = registry.catalog().actions.find((action) => action.name === 'mohist/rebase')
+
+    expect(rebaseEntry?.inputs.map((input) => input.name)).toContain('baseBranch')
+    expect(rebaseEntry?.inputs.map((input) => input.name)).not.toContain('expectedBranch')
+  })
+
+  it('injects the rebase expected branch from workspace.branch during engine input resolution', () => {
+    const resolved = createDefaultRegistry().resolve('mohist/rebase')
+    if (resolved.kind !== 'definition') throw new Error('Missing mohist/rebase')
+
+    const injected = injectEngineInputs(
+      resolved.definition.manifest,
+      { baseBranch: 'master', remote: 'origin' },
+      { workspace: { path: '/ws', branch: 'mohist/run-wr-inject-1' } },
+    )
+
+    expect(injected).toMatchObject({
+      baseBranch: 'master',
+      remote: 'origin',
+      expectedBranch: 'mohist/run-wr-inject-1',
+    })
+  })
+
+  it('omits the rebase expected branch when workspace.branch is unavailable', () => {
+    const resolved = createDefaultRegistry().resolve('mohist/rebase')
+    if (resolved.kind !== 'definition') throw new Error('Missing mohist/rebase')
+
+    const injected = injectEngineInputs(
+      resolved.definition.manifest,
+      { baseBranch: 'master' },
+      { workspace: { path: '/ws', branch: null } },
+    )
+
+    // A null workspace.branch is not a usable expected branch and is never
+    // substituted from baseBranch; validation treats the null as absent and
+    // the action turns the absence into an actionable failure.
+    expect(injected).toMatchObject({ baseBranch: 'master', expectedBranch: null })
+    const validated = validateActionInput(resolved.definition.manifest, injected)
+    expect(validated.kind).toBe('ok')
+    if (validated.kind === 'ok') expect(validated.input).not.toHaveProperty('expectedBranch')
   })
 
   it.each([
