@@ -1,239 +1,171 @@
-import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { BotIcon, Loader2Icon, ArchiveIcon } from "lucide-react";
+import { useState, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { BotIcon, Loader2Icon, ArchiveIcon } from 'lucide-react'
 import {
   useCreateAgent,
   useUpdateAgent,
   useArchiveAgent,
-  readAgentDefinitionModelAndVariant,
+  readAgentModelAndVariant,
   writeAgentModelAndVariant,
-} from "../../../entities/agent";
-import type {
-  AgentInfo,
-  AgentCreateRequest,
-  AgentUpdateRequest,
-} from "../../../entities/agent";
+} from '../../../entities/agent'
+import type { AgentInfo, AgentCreateRequest, AgentUpdateRequest } from '../../../entities/agent'
 import {
   AGENT_RUNTIME_OPENCODE,
   AGENT_RUNTIME_PI,
   useAvailableModelIds,
   useModelVariants,
   type AgentRuntime,
-} from "../../../entities/settings";
-import { useProjectPath } from "../../../entities/project";
-import { ModelSelect } from "../../../shared/ui/ModelSelect";
-import { Button } from "@/shared/ui/components/button";
-import { Input } from "@/shared/ui/components/input";
-import { Textarea } from "@/shared/ui/components/textarea";
-import { Label } from "@/shared/ui/components/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/shared/ui/components/dialog";
+} from '../../../entities/settings'
+import { useProjectPath } from '../../../entities/project'
+import { ModelSelect } from '../../../shared/ui/ModelSelect'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import { Textarea } from '@/shared/ui/components/textarea'
+import { Label } from '@/shared/ui/components/label'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
 
 interface Props {
-  agent?: AgentInfo | null;
-  open: boolean;
-  onClose: () => void;
-  onSaved?: (agent: AgentInfo) => void;
-  operationsHook?: AgentProfileEditorOperationsHook;
+  agent?: AgentInfo | null
+  open: boolean
+  onClose: () => void
+  onSaved?: (agent: AgentInfo) => void
+  operationsHook?: AgentProfileEditorOperationsHook
 }
 
 export interface AgentProfileEditorOperations {
-  createAgent: Pick<ReturnType<typeof useCreateAgent>, "mutate" | "isPending">;
-  updateAgent: Pick<ReturnType<typeof useUpdateAgent>, "mutate" | "isPending">;
-  archiveAgent: Pick<
-    ReturnType<typeof useArchiveAgent>,
-    "mutate" | "isPending"
-  >;
+  createAgent: Pick<ReturnType<typeof useCreateAgent>, 'mutate' | 'isPending'>
+  updateAgent: Pick<ReturnType<typeof useUpdateAgent>, 'mutate' | 'isPending'>
+  archiveAgent: Pick<ReturnType<typeof useArchiveAgent>, 'mutate' | 'isPending'>
 }
 
-export type AgentProfileEditorOperationsHook =
-  () => AgentProfileEditorOperations;
+export type AgentProfileEditorOperationsHook = () => AgentProfileEditorOperations
 
 const useDefaultOperations: AgentProfileEditorOperationsHook = () => ({
   createAgent: useCreateAgent(),
   updateAgent: useUpdateAgent(),
   archiveAgent: useArchiveAgent(),
-});
+})
 
 interface FormErrors {
-  name?: string;
-  instructions?: string;
-  api?: string;
+  name?: string
+  instructions?: string
+  api?: string
 }
 
-export function AgentProfileEditor({
-  agent,
-  open,
-  onClose,
-  onSaved,
-  operationsHook = useDefaultOperations,
-}: Props) {
-  const navigate = useNavigate();
-  const toProjectPath = useProjectPath();
-  const { createAgent, updateAgent, archiveAgent } = operationsHook();
-  const isEditing = !!agent;
-  const initialModelVariant = useMemo(
-    () => readAgentDefinitionModelAndVariant(agent),
-    [agent],
-  );
+export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHook = useDefaultOperations }: Props) {
+  const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
+  const { createAgent, updateAgent, archiveAgent } = operationsHook()
+  const isEditing = !!agent
+  const initialModelVariant = useMemo(() => readAgentModelAndVariant(agent), [agent])
 
-  const [name, setName] = useState(agent?.name ?? "");
-  const [purpose, setPurpose] = useState(agent?.purpose ?? "");
-  const [description, setDescription] = useState(agent?.description ?? "");
-  const [instructions, setInstructions] = useState(agent?.instructions ?? "");
-  const [skillsText, setSkillsText] = useState(agent?.skills?.join(", ") ?? "");
-  const [permissionsText, setPermissionsText] = useState(
-    agent?.permissions?.join(", ") ?? "",
-  );
-  const [model, setModel] = useState<string | null>(initialModelVariant.model);
-  const [variant, setVariant] = useState<string | null>(
-    initialModelVariant.variant,
-  );
-  const [reasoningEffort, setReasoningEffort] = useState<string | null>(
-    initialModelVariant.reasoningEffort,
-  );
-  const [runtime, setRuntime] = useState<AgentRuntime>(
-    initialModelVariant.runtime,
-  );
-  const [allowedSubagentAgentIds, setAllowedSubagentAgentIds] = useState<
-    string[]
-  >(agent?.allowedSubagentAgentIds ?? []);
-  const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState(
-    agent?.maxConcurrentRuns == null ? "" : String(agent.maxConcurrentRuns),
-  );
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [name, setName] = useState(agent?.name ?? '')
+  const [purpose, setPurpose] = useState(agent?.purpose ?? '')
+  const [instructions, setInstructions] = useState(agent?.instructions ?? '')
+  const [skillsText, setSkillsText] = useState(agent?.skills?.join(', ') ?? '')
+  const [permissionsText, setPermissionsText] = useState(agent?.permissions?.join(', ') ?? '')
+  const [model, setModel] = useState<string | null>(initialModelVariant.model)
+  const [variant, setVariant] = useState<string | null>(initialModelVariant.variant)
+  const [reasoningEffort, setReasoningEffort] = useState<string | null>(initialModelVariant.reasoningEffort)
+  const [runtime, setRuntime] = useState<AgentRuntime>(initialModelVariant.runtime)
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 
-  const isSaving = createAgent.isPending || updateAgent.isPending;
+  const isSaving = createAgent.isPending || updateAgent.isPending
 
-  const { data: availableModels } = useAvailableModelIds(runtime);
-  const modelVariantsMap = useModelVariants(runtime);
-  const reasoningEffortsMap =
-    runtime === AGENT_RUNTIME_PI ? modelVariantsMap : undefined;
+  const { data: availableModels } = useAvailableModelIds(runtime)
+  const modelVariantsMap = useModelVariants(runtime)
+  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? modelVariantsMap : undefined
 
-  const allModels: string[] = useMemo(
-    () => availableModels?.models ?? [],
-    [availableModels],
-  );
+  const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
   function validate(): FormErrors {
-    const errs: FormErrors = {};
-    if (!name.trim()) errs.name = "Name is required";
-    if (!instructions.trim()) errs.instructions = "Instructions are required";
-    return errs;
+    const errs: FormErrors = {}
+    if (!name.trim()) errs.name = 'Name is required'
+    if (!instructions.trim()) errs.instructions = 'Instructions are required'
+    return errs
   }
 
   function commaSeparatedValues(value: string): string[] {
     return value
-      .split(",")
+      .split(',')
       .map((entry) => entry.trim())
-      .filter(Boolean);
+      .filter(Boolean)
   }
 
   async function handleSave() {
-    const validation = validate();
-    setErrors(validation);
-    if (Object.keys(validation).length > 0) return;
+    const validation = validate()
+    setErrors(validation)
+    if (Object.keys(validation).length > 0) return
 
-    const agentConfig = writeAgentModelAndVariant(
-      agent?.agentConfig ?? null,
-      model,
-      variant,
-      runtime,
-      reasoningEffort,
-    );
-    const maxConcurrentRuns = maxConcurrentRunsText.trim()
-      ? Number(maxConcurrentRunsText)
-      : null;
-    if (
-      maxConcurrentRuns !== null &&
-      (!Number.isInteger(maxConcurrentRuns) || maxConcurrentRuns <= 0)
-    ) {
-      setErrors({
-        api: "Max concurrent runs must be a positive whole number or empty.",
-      });
-      return;
-    }
-    const collaborators =
-      allowedSubagentAgentIds.length > 0 ? allowedSubagentAgentIds : null;
+    const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime, reasoningEffort)
 
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
         name: name.trim() || null,
         purpose: purpose.trim() || null,
-        description: description.trim() || null,
         instructions: instructions.trim() || null,
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
         agentConfig,
-        allowedSubagentAgentIds: collaborators,
-        maxConcurrentRuns,
-      };
+      }
       updateAgent.mutate(
         { agentRef: agent.id, data: payload },
         {
           onSuccess: (updated) => {
-            onSaved?.(updated);
-            onClose();
+            onSaved?.(updated)
+            onClose()
           },
           onError: (err) => {
-            setErrors({ api: err.message });
+            setErrors({ api: err.message })
           },
         },
-      );
+      )
     } else {
       const payload: AgentCreateRequest = {
         name: name.trim(),
         purpose: purpose.trim() || null,
-        description: description.trim() || null,
         instructions: instructions.trim(),
         skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
         permissions: commaSeparatedValues(permissionsText),
         agentConfig,
-        allowedSubagentAgentIds: collaborators,
-        maxConcurrentRuns,
-      };
+      }
       createAgent.mutate(payload, {
         onSuccess: (created) => {
-          onSaved?.(created);
-          onClose();
-          navigate(toProjectPath(`/agents/${encodeURIComponent(created.id)}`));
+          onSaved?.(created)
+          onClose()
+          navigate(toProjectPath(`/agents/${encodeURIComponent(created.id)}`))
         },
         onError: (err) => {
-          setErrors({ api: err.message });
+          setErrors({ api: err.message })
         },
-      });
+      })
     }
   }
 
   function handleArchive() {
-    if (!agent) return;
+    if (!agent) return
     archiveAgent.mutate(agent.id, {
       onSuccess: () => {
-        setArchiveConfirmOpen(false);
-        onClose();
+        setArchiveConfirmOpen(false)
+        onClose()
       },
       onError: (err) => {
-        setErrors({ api: err.message });
+        setErrors({ api: err.message })
       },
-    });
+    })
   }
 
   const handleClose = useCallback(() => {
-    if (!isSaving) onClose();
-  }, [isSaving, onClose]);
+    if (!isSaving) onClose()
+  }, [isSaving, onClose])
 
   return (
     <>
       <Dialog
         open={open}
         onOpenChange={(open) => {
-          if (!open) handleClose();
+          if (!open) handleClose()
         }}
       >
         <DialogContent
@@ -243,12 +175,12 @@ export function AgentProfileEditor({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BotIcon className="size-4" />
-              {isEditing ? "Edit Agent" : "New Agent"}
+              {isEditing ? 'Edit Agent' : 'New Agent'}
             </DialogTitle>
             <DialogDescription>
               {isEditing
-                ? "Changes to Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch."
-                : "Create a task profile with purpose, instructions, permissions, and execution settings."}
+                ? 'Changes to Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch.'
+                : 'Create a task profile with purpose, instructions, permissions, and execution settings.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -270,13 +202,10 @@ export function AgentProfileEditor({
                 onChange={(e) => setName(e.target.value)}
                 placeholder="My Agent"
                 data-testid="editor-name"
-                className={errors.name ? "border-red-500" : ""}
+                className={errors.name ? 'border-red-500' : ''}
               />
               {errors.name && (
-                <p
-                  data-testid="editor-name-error"
-                  className="text-xs text-red-500"
-                >
+                <p data-testid="editor-name-error" className="text-xs text-red-500">
                   {errors.name}
                 </p>
               )}
@@ -295,18 +224,6 @@ export function AgentProfileEditor({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="agent-description">Description</Label>
-              <Textarea
-                id="agent-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What is this Agent for?"
-                rows={2}
-                data-testid="editor-description"
-              />
-            </div>
-
-            <div className="space-y-1.5">
               <Label htmlFor="agent-instructions">Instructions *</Label>
               <Textarea
                 id="agent-instructions"
@@ -315,13 +232,10 @@ export function AgentProfileEditor({
                 placeholder="You are a helpful assistant that..."
                 rows={4}
                 data-testid="editor-instructions"
-                className={errors.instructions ? "border-red-500" : ""}
+                className={errors.instructions ? 'border-red-500' : ''}
               />
               {errors.instructions && (
-                <p
-                  data-testid="editor-instructions-error"
-                  className="text-xs text-red-500"
-                >
+                <p data-testid="editor-instructions-error" className="text-xs text-red-500">
                   {errors.instructions}
                 </p>
               )}
@@ -336,9 +250,7 @@ export function AgentProfileEditor({
                 placeholder="repo:read, issue:write"
                 data-testid="editor-permissions"
               />
-              <p className="text-[10px] text-muted-foreground">
-                Comma-separated permission terms.
-              </p>
+              <p className="text-[10px] text-muted-foreground">Comma-separated permission terms.</p>
             </div>
 
             <div className="space-y-1.5">
@@ -349,10 +261,10 @@ export function AgentProfileEditor({
                 data-testid="agent-runtime"
                 value={runtime}
                 onChange={(event) => {
-                  setRuntime(event.target.value as AgentRuntime);
-                  setModel(null);
-                  setVariant(null);
-                  setReasoningEffort(null);
+                  setRuntime(event.target.value as AgentRuntime)
+                  setModel(null)
+                  setVariant(null)
+                  setReasoningEffort(null)
                 }}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
               >
@@ -371,24 +283,24 @@ export function AgentProfileEditor({
                 onChange={(m) => setModel(m)}
                 onChangeVariant={setVariant}
                 onClear={() => {
-                  setModel(null);
-                  setVariant(null);
-                  setReasoningEffort(null);
+                  setModel(null)
+                  setVariant(null)
+                  setReasoningEffort(null)
                 }}
                 allowClear={!!model}
                 modelVariants={modelVariantsMap}
                 valueVariant={variant}
                 onChangeModelVariant={(m, v) => {
-                  setModel(m);
-                  setVariant(v);
-                  setReasoningEffort(null);
+                  setModel(m)
+                  setVariant(v)
+                  setReasoningEffort(null)
                 }}
                 modelReasoningEfforts={reasoningEffortsMap}
                 valueReasoningEffort={reasoningEffort}
                 onChangeModelReasoningEffort={(m, effort) => {
-                  setModel(m);
-                  setReasoningEffort(effort);
-                  setVariant(null);
+                  setModel(m)
+                  setReasoningEffort(effort)
+                  setVariant(null)
                 }}
               />
             </div>
@@ -402,57 +314,13 @@ export function AgentProfileEditor({
                 placeholder="skill1, skill2, skill3"
                 data-testid="editor-skills"
               />
-              <p className="text-[10px] text-muted-foreground">
-                Comma-separated list of skills.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="agent-collaborators">
-                  Allowed collaborators
-                </Label>
-                <Input
-                  id="agent-collaborators"
-                  value={allowedSubagentAgentIds.join(", ")}
-                  onChange={(event) =>
-                    setAllowedSubagentAgentIds(
-                      event.target.value
-                        .split(",")
-                        .map((value) => value.trim())
-                        .filter(Boolean),
-                    )
-                  }
-                  placeholder="agent-id-1, agent-id-2"
-                  data-testid="editor-collaborators"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Comma-separated Agent ids from this Project.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="agent-max-concurrent-runs">
-                  Max concurrent runs
-                </Label>
-                <Input
-                  id="agent-max-concurrent-runs"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={maxConcurrentRunsText}
-                  onChange={(event) =>
-                    setMaxConcurrentRunsText(event.target.value)
-                  }
-                  placeholder="Unlimited"
-                  data-testid="editor-max-concurrent-runs"
-                />
-              </div>
+              <p className="text-[10px] text-muted-foreground">Comma-separated list of skills.</p>
             </div>
           </div>
 
           <div className="flex items-center justify-between gap-2 pt-2 border-t">
             <div>
-              {isEditing && agent?.status !== "archived" && (
+              {isEditing && agent?.status !== 'archived' && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -467,20 +335,12 @@ export function AgentProfileEditor({
               )}
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={handleClose}
-                disabled={isSaving}
-              >
+              <Button variant="outline" onClick={handleClose} disabled={isSaving}>
                 Cancel
               </Button>
-              <Button
-                onClick={handleSave}
-                disabled={isSaving}
-                data-testid="editor-save"
-              >
+              <Button onClick={handleSave} disabled={isSaving} data-testid="editor-save">
                 {isSaving && <Loader2Icon className="size-4 animate-spin" />}
-                {isEditing ? "Save Changes" : "Create Agent"}
+                {isEditing ? 'Save Changes' : 'Create Agent'}
               </Button>
             </div>
           </div>
@@ -492,17 +352,12 @@ export function AgentProfileEditor({
           <DialogHeader>
             <DialogTitle>Archive Agent</DialogTitle>
             <DialogDescription>
-              This agent will be marked as archived. It will leave the Active
-              group and cannot be used to start new sessions. You can restore it
-              from the agent detail page.
+              This agent will be marked as archived. It will leave the Active group and cannot be used to start new
+              sessions. You can restore it from the agent detail page.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              onClick={() => setArchiveConfirmOpen(false)}
-              disabled={archiveAgent.isPending}
-            >
+            <Button variant="outline" onClick={() => setArchiveConfirmOpen(false)} disabled={archiveAgent.isPending}>
               Cancel
             </Button>
             <Button
@@ -511,14 +366,12 @@ export function AgentProfileEditor({
               disabled={archiveAgent.isPending}
               data-testid="editor-archive-confirm"
             >
-              {archiveAgent.isPending && (
-                <Loader2Icon className="size-4 animate-spin" />
-              )}
+              {archiveAgent.isPending && <Loader2Icon className="size-4 animate-spin" />}
               Archive
             </Button>
           </div>
         </DialogContent>
       </Dialog>
     </>
-  );
+  )
 }

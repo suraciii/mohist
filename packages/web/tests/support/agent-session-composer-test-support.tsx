@@ -2,14 +2,11 @@ import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-q
 import { render } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../src/entities/project'
-import type { ProjectDefaultExecutionConfig } from '../../src/entities/project'
 import type {
   AgentAvailabilitySummaryEntry,
   AgentInfo,
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
-  AgentTaskLaunchInput,
-  AgentTaskPreflightResponse,
 } from '../../src/entities/agent'
 import {
   AgentSessionComposerPage,
@@ -21,23 +18,9 @@ export const state = {
   agentsData: [] as AgentInfo[],
   availabilityData: [] as AgentAvailabilitySummaryEntry[],
   launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
-  taskCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
-  preflightCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
-  sessionPreflightCalls: [] as Array<{
-    agentRef: string
-    body: AgentTaskLaunchInput
-    idempotencyKey?: string
-  }>,
-  enablePreflight: false,
-  enableSessionPreflight: false,
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
-  defaultExecutionConfig: {
-    runtime: 'opencode' as const,
-    model: 'openai/gpt-4o',
-    variant: null,
-  } as ProjectDefaultExecutionConfig | null,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -62,10 +45,9 @@ const dataHook: AgentSessionComposerDataHook = () => {
       context?: AgentSessionLaunchContext | null
       attachments?: string[]
       idempotencyKey?: string
-      preflightFingerprint?: string
     }
   >({
-    mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey, preflightFingerprint: _ignored }) => {
+    mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey }) => {
       state.launchCalls.push({ agentRef, body: { prompt, context, attachments }, idempotencyKey })
       if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
@@ -81,91 +63,12 @@ const dataHook: AgentSessionComposerDataHook = () => {
       } as AgentSessionLaunchResponse
     },
   })
-  const preflightSessionMutation = useMutation<
-    AgentTaskPreflightResponse,
-    Error,
-    {
-      agentRef: string
-      prompt: string
-      context?: AgentSessionLaunchContext | null
-      attachments?: string[]
-      idempotencyKey: string
-    }
-  >({
-    mutationFn: async ({ agentRef, idempotencyKey, ...input }) => {
-      state.sessionPreflightCalls.push({
-        agentRef,
-        body: input,
-        idempotencyKey,
-      })
-      return {
-        scopeFingerprint: 'scope-test',
-        agentName: `Agent ${agentRef}`,
-        execution: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
-        repository: 'org/repo',
-        workspace: 'review-workspace',
-        workspaceRepositories: ['org/repo'],
-        issueNumber: 42,
-        epicNumber: null,
-        permissionScope: 'project-workspace-write',
-        expectedImpact:
-          'Starts one AgentJob and AgentSession with write access to the selected workspace.',
-      }
-    },
-  })
-  const preflightTaskMutation = useMutation<
-    AgentTaskPreflightResponse,
-    Error,
-    AgentTaskLaunchInput & { idempotencyKey: string }
-  >({
-    mutationFn: async ({ idempotencyKey, ...input }) => {
-      state.preflightCalls.push({ body: input, idempotencyKey })
-      return {
-        scopeFingerprint: 'scope-test',
-        agentName: 'Task Agent',
-        execution: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
-        repository: 'org/repo',
-        workspace: 'review-workspace',
-        workspaceRepositories: ['org/repo'],
-        issueNumber: 42,
-        epicNumber: null,
-        permissionScope: 'project-workspace-write',
-        expectedImpact: 'Creates one Agent and starts one AgentJob and AgentSession.',
-      }
-    },
-  })
-  const startTaskMutation = useMutation<
-    AgentSessionLaunchResponse,
-    Error,
-    AgentTaskLaunchInput & { idempotencyKey?: string }
-  >({
-    mutationFn: async ({ idempotencyKey, preflightFingerprint: _ignored, ...input }) => {
-      state.taskCalls.push({ body: input, idempotencyKey })
-      if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
-        throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
-      }
-      return {
-        sessionId: 'sess-123',
-        agentId: 'agent-task-1',
-        agentName: 'Task Agent',
-        status: 'running',
-        transcriptUrl: '',
-        sessionUrl: '/Test/sessions/sess-123',
-        ...state.launchResponse,
-      } as AgentSessionLaunchResponse
-    },
-  })
   return {
     agents: state.agentsData,
     agentsLoading: false,
     availability: state.availabilityData,
     availabilityLoading: false,
     launchMutation,
-    preflightSessionMutation: state.enableSessionPreflight
-      ? preflightSessionMutation
-      : undefined,
-    preflightTaskMutation: state.enablePreflight ? preflightTaskMutation : undefined,
-    startTaskMutation,
   }
 }
 
@@ -210,7 +113,6 @@ export function renderPage(initialEntries = ['/agent-sessions/new']) {
             createdAt: '2026-01-01T00:00:00.000Z',
             updatedAt: '2026-01-01T00:00:00.000Z',
             repositories: [],
-            defaultExecutionConfig: state.defaultExecutionConfig,
           },
         ]}
       >

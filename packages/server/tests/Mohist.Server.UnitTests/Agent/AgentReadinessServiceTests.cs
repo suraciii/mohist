@@ -183,16 +183,15 @@ public sealed class AgentReadinessServiceTests
     private static readonly ExecutionConfigHint Default = new("pi", "b/two", null);
 
     [Fact]
-    public void ProjectDefault_ResolvesMissingModel_ToNotNeedsSetup()
+    public void ProjectDefault_ResolvesMissingModel_ToUnknown()
     {
         var result = AgentReadinessService.Evaluate(
             Agent() with { AgentConfig = null },
             null,
             Default);
 
-        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
         Assert.DoesNotContain(result.Gaps, gap => gap.Code == "model-missing");
-        Assert.Null(result.Setup);
     }
 
     [Fact]
@@ -212,10 +211,10 @@ public sealed class AgentReadinessServiceTests
     {
         var result = AgentReadinessService.Evaluate(Agent() with { AgentConfig = null }, null, null);
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
         var gap = Assert.Single(result.Gaps, g => g.Code == "model-missing");
-        Assert.Equal("Set a model in Agent settings.", gap.Action);
-        Assert.NotNull(result.Setup);
+        Assert.Equal("Set a model in Agent settings.", gap.NextAction);
+        Assert.Equal("/agents/agent-1", gap.FixEntryPoint.Path);
     }
 
     [Fact]
@@ -229,7 +228,7 @@ public sealed class AgentReadinessServiceTests
         // The completed execution matches the definition-resolved model, so
         // the Project default (b/two) neither changes the resolution nor the
         // conclusion.
-        Assert.Equal(AgentReadinessConclusions.Ready, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
     }
 
     [Fact]
@@ -240,7 +239,7 @@ public sealed class AgentReadinessServiceTests
             null,
             Default);
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
         Assert.Contains(result.Gaps, gap => gap.Code == "model-reference-malformed");
         Assert.DoesNotContain(result.Gaps, gap => gap.Code == "model-missing");
     }
@@ -253,7 +252,7 @@ public sealed class AgentReadinessServiceTests
             null,
             Default);
 
-        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
         Assert.Contains(result.Gaps, gap => gap.Code == "runtime-invalid");
     }
 
@@ -265,7 +264,7 @@ public sealed class AgentReadinessServiceTests
 
         var result = AgentReadinessService.Evaluate(agent, history, Default);
 
-        Assert.Equal(AgentReadinessConclusions.Ready, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
     }
 
     [Fact]
@@ -281,7 +280,7 @@ public sealed class AgentReadinessServiceTests
 
         var result = AgentReadinessService.Evaluate(agent, history, changedDefault);
 
-        Assert.Equal(AgentReadinessConclusions.Ready, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
     }
 
     [Fact]
@@ -292,7 +291,7 @@ public sealed class AgentReadinessServiceTests
 
         var result = AgentReadinessService.Evaluate(agent, history, Default);
 
-        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
     }
 
     [Fact]
@@ -303,7 +302,7 @@ public sealed class AgentReadinessServiceTests
 
         var result = AgentReadinessService.Evaluate(agent, history);
 
-        Assert.Equal(AgentReadinessConclusions.Ready, result.Conclusion);
+        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
     }
 
     [Fact]
