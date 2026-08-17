@@ -1,5 +1,5 @@
 ---
-status: wip
+status: shipped
 ---
 
 # External Agent API
@@ -423,6 +423,7 @@ safe public fields:
 | 409 | stop_outcome_unknown | A different stop key attempts to supersede a stop whose fenced outcome is still unknown. The caller must read the Turn; no new stop is issued. |
 | 410 | cursor_expired | The cursor was valid but falls before the retained public event floor. The response also includes safe earliestSequence and latestSequence values. The caller reloads current Input/Turn observations before starting at a new retained position. |
 | 503 | projection_lag | The canonical request/resource is known, but its required durable public projection checkpoint has not caught up. No new admission or effect occurs; retry the same key or read. |
+| 503 | stop_pending | A keyed stop remains fenced and its outcome is not confirmed. Retry the same keyed stop request; no replacement effect is issued. |
 
 Canonical admission rejection is not hidden as an HTTP transport failure. A
 well-formed keyed launch or follow-up that receives a durable rejection returns
@@ -651,13 +652,14 @@ The external API composes existing owners rather than making route shape decide 
 
 ## Status
 
-Frontmatter remains `wip` because this document specifies target behavior, not a shipped route
-surface. The current Server does not yet provide the PAT `ExternalAgentCaller` Project grant,
-Server-computed external idempotency mapping, public AgentJob read, durable checkpointed public
-projection, generation-aware cursor stream, or public-key-to-canonical-operation stop mapping and
-frozen target defined here.
+The `/api/v1` External Agent API is shipped. The seven routes use canonical
+Project, Agent, Job, Session, Input, and Turn IDs and expose only the public
+execution and Session-event contracts defined here. Bearer PAT authentication,
+persisted Project grants, route scopes, keyed launch/follow-up/stop writes,
+projection-backed Job/Input/Turn reads, five-state observations, and resumable
+Session events are part of the shipped boundary.
 
-The public contract remains deliberately narrow. Existing Web,
-CLI, Agent Connection, canonical Session, and product cascade-stop routes are not evidence that the
-direct `/api/v1` contract is implemented. No compatibility promise or source implementation is
-implied by this target specification.
+The boundary remains deliberately narrow. It does not expose Runner or Runtime
+selection, workspace or prompt content, transcripts, internal operations, or a
+Project-wide event stream. Existing Web, CLI, Agent Connection, and product
+cascade-stop routes remain separate adapters with their own contracts.

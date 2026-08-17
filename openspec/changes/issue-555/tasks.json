@@ -1,0 +1,188 @@
+{
+  "project": "mohist-local",
+  "description": "Ship the versioned /api/v1 External Agent API: Bearer-PAT caller authorization with persisted Project grants, server-owned idempotent launch/follow-up/stop writes, and a durable public execution projection with five-state reads and cursor-based resumable Session event streams.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Direct API authentication boundary and route group",
+      "spec": "specs/external-agent-caller-auth/spec.md#project-authorization-precedes-resource-lookup",
+      "description": "Extend AuthResolutionMiddleware to record the credential carrier kind (bearer vs cookie) and the resolved ExternalAgentCaller (callerKeyId = Credential.Id, principal, scopes, persisted DirectApiProjectGrant) in HttpContext.Items, and add an ExternalAgentApiMiddleware for the /api/v1 prefix that enforces bearer-only carrier, grant presence, route scope, and Project grant strictly before any endpoint delegate. Register the /api/v1/projects/{projectId}/... route group with RouteScopeRequirement metadata under Api/DirectApi/ and introduce the public error envelope { error: { code, message } } with the Bearer challenge on 401.",
+      "acceptanceCriteria": [
+        "An authenticated mohist_session cookie (or trusted Agent Connection identity) hitting any /api/v1 path returns 401 unauthenticated with WWW-Authenticate: Bearer and a non-classifying body that does not distinguish missing, expired, or revoked tokens.",
+        "An operator-scope PAT with no persisted Project grant returns 403 forbidden on every /api/v1 route, and that PAT remains usable on its existing control-plane surfaces.",
+        "Route scope is enforced per operation class: writes require operator (readonly write returns 403 before body validation, idempotency lookup, or admission), reads accept readonly|operator.",
+        "A Project outside the caller's explicit grant returns 403 forbidden even when the Project does not exist and before any resource lookup or idempotency read; operator_all is honored only as an explicitly persisted grant kind and never inferred from operator scope.",
+        "401/403 paths are verified to have zero side effects: no idempotency mapping read or write, no rejection tombstone, no Job/Session/Input/Turn reservation, no outbox item, no public event, no Runner or provider operation — pinned by pipeline-order SpecTests so future route additions cannot regress the ordering.",
+        "The /api/v1 group is registered in one place with middleware pinned to the path prefix and the seven route templates from design/agent-api.md carry RouteScopeRequirement metadata; endpoint delegates land in T-003 through T-007 without changing this pipeline.",
+        "The /api/v1 error envelope { error: { code, message } } is distinct from the control-plane success envelope, and no cookie or Agent Connection identity can substitute for the PAT anywhere under /api/v1.",
+        "SpecTests under packages/server/tests/Mohist.Server.SpecTests/Specs/DirectApi/ cover the pipeline order (cookie → 401, grant-less PAT → 403, readonly write → 403, out-of-grant Project → 403 not 404, zero-effect assertions) and npm run test:fast passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Auth pipeline extension (carrier kind + ExternalAgentCaller in HttpContext.Items), ExternalAgentApiMiddleware, /api/v1 route group with scope metadata and public error envelope, and passing pipeline-order SpecTests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not re-resolve the token in the new middleware; AuthResolutionMiddleware already loads the Credential (including the grant) and only needs to carry two more facts. Keep the middleware out of AuthResolutionMiddleware itself so the direct boundary stays independently testable. The Web launch route's coordinator scope (projectId, key) is untouched."
+    },
+    {
+      "id": "T-002",
+      "title": "Public execution projection engine and PublicExecutionRead snapshot",
+      "spec": "specs/public-execution-projection/spec.md#projection-commits-snapshot-journal-and-checkpoint-atomically",
+      "description": "Add the three public projection table families via one additive EF migration (public_execution_snapshots, public_session_events, public_stream_states under Infrastructure/Data/PublicApi/) and a PublicExecutionProjector hosted background service as their only writer. The projector polls AgentJobEventRow/AgentSessionEventRow and aggregate tables past per-feed checkpoints and commits snapshot upserts, public journal appends, sequence allocation, checkpoint advance, and generation bookkeeping in one EF transaction per batch. It computes the allowlisted PublicExecutionRead DTO (required members, explicit nulls) with the five-state precedence and terminal fences, anchors prepared launches on the Job id, emits session.context_reset only from durable reset facts, and switches stream generations atomically on rebuild.",
+      "acceptanceCriteria": [
+        "One additive EF migration creates the new tables only (no existing table changes) and applies on start; snapshots, journal entries, sequences, and checkpoints are committed in a single transaction per batch, verified by SpecTests asserting mutual consistency at one checkpoint.",
+        "The PublicExecutionRead serialization DTO under Api/DirectApi/ has required members for exactly the allowlisted key set (projectId … sequence) with explicit nulls; a round-trip contract test fails on any unknown key, and no internal read shape (AgentJobLaunchRead, SessionOperationRead, transcript facts) is ever serialized into it.",
+        "The five-state aggregate follows the fixed precedence (terminal fence → durable rejection → unknown → outcome_pending=running+blocked → queued+blocked → running > queued > accepted) computed only from consumed facts; unknown is never emitted from projection backlog.",
+        "A durable Job prepare fact publishes a Job-anchored status=accepted / jobStatus=preparing snapshot with null live Session/Input/Turn IDs; the matching Session acceptance or rejection fact replaces the null IDs on the same Job anchor; follow-up projection waits for the canonical Session Input/Turn fact.",
+        "Terminal fences hold: a fenced terminal snapshot stores its terminal fact internally and later stale outbox facts, delayed Runner results, or replayed projector input cannot revert it to non-terminal or replace its output, error, or sequence; completion and stop race through the same fence emitting at most one terminal public event.",
+        "Crash-recovery SpecTests simulate crash before commit (no partial snapshot, sequence, or checkpoint visible; replay produces the same outcome) and crash after commit (resume past the checkpoint, no second sequence for the same normalized source transition); no Runner, launch, follow-up, or stop effect is ever replayed by the projector.",
+        "First commit creates stream generation 1; ordinary restart and replay keep it; a rebuild builds a new generation's journal and flips active_generation atomically while the Session's next global sequence allocator is preserved so sequences are never reused or renumbered.",
+        "The public event vocabulary is exactly the seven execution types plus session.context_reset; execution events carry the PublicExecutionRead snapshot and context_reset carries only the six-key session payload with no Job/Input/Turn/output/error fields.",
+        "The projector is the only writer to these tables, uses a nudge channel plus a timer sweep for latency with checkpoint-driven correctness, and tolerates SQLite single-writer contention with small batches and busy-retry.",
+        "SpecTests under Specs/DirectApi/ (or Specs/PublicApi/) cover projection consistency, prepared-launch anchoring, fences, crash recovery, and generations; npm run test:fast passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Additive EF migration for the three public projection tables, PublicExecutionProjector hosted service with checkpointed atomic batches, PublicExecutionRead DTO with five-state precedence and terminal fences, and passing projection/crash-recovery SpecTests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "T-002 is independent of the /api/v1 boundary: the projector consumes only existing canonical journals and aggregates, so it can land and be tested before any route exists. The operator-triggered rebuild entrypoint itself is control-plane and may land separately; this task delivers generation switching machinery. Store the internal source-transition identity on journal rows for replay deduplication."
+    },
+    {
+      "id": "T-003",
+      "title": "Job, Input, and Turn public read routes with projection lag",
+      "spec": "specs/public-execution-read/spec.md#publicexecutionread-is-a-strict-allowlist",
+      "description": "Implement GET /api/v1/projects/{projectId}/agent-jobs/{jobId}, agent-inputs/{inputId}, and agent-turns/{turnId} served only from the persisted projection tables, with canonical resource Project-membership checks (404 job_not_found / input_not_found / turn_not_found) after the grant passes. Reads compare the relevant source head (cheap MAX(id) on the canonical journals for that Job/Session) against the stored checkpoint and return 503 projection_lag with Retry-After instead of stale state, sharing the lag-check and response-building plumbing that later command and event routes reuse.",
+      "acceptanceCriteria": [
+        "GET agent-jobs/{jobId} returns PublicExecutionRead anchored to the Job projection: a prepared Job returns 200 with jobId set, status=accepted, jobStatus=preparing, and null sessionId/inputId/turnId; a durable Session rejection returns 200 with status=terminal, outcome=rejected, a safe public error and reasonCode, and null live IDs; after acceptance the same read exposes the public Session/Input/Turn references and later projected status.",
+        "Input and Turn reads are anchored to the requested canonical record: a terminal Turn inside an active Session reports status=terminal with that Turn's outcome and sessionActivity=active as context, and an active Session never turns a terminal Job or Turn into running.",
+        "A resource absent from or not belonging to the authorized Project returns the matching 404 code (job_not_found, input_not_found, turn_not_found) only after the grant passes.",
+        "Every response contains every allowlisted key and no unlisted execution property; contract tests assert the absence of runtimeSessionId, Runner IDs, runtime names, binding epochs, connection IDs, leases, fences, operation IDs, attempt IDs, dispatch/retry details, prompt or input text, instructions, memory, tool state, workspace paths, attachments, raw payloads, transcript facts, and raw provider/Runner errors, and that error carries only a stable public code and safe message.",
+        "A read whose required source watermark is ahead of the stored checkpoint returns 503 projection_lag with Retry-After, no stale body and no effects; after the projector catches up the same read returns the current projection; lag is never surfaced as the five-state unknown.",
+        "Field vocabulary is validated: status in the five states, component fields in their public enums, output null or { \"text\": \"...\" } with only persisted public final output, reasonCode null or a stable safe public code, timestamps RFC 3339 UTC, observedAt always present.",
+        "An architecture rule in Mohist.Server.ArchTests asserts no internal read type is referenced from Api/DirectApi.",
+        "SpecTests under Specs/DirectApi/ cover anchoring, membership 404s, allowlist shape, and the lag path; npm run test:fast passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Three public read routes served from the projection with membership 404s, 503 projection_lag freshness gate with shared lag-check/response plumbing, allowlist contract tests, and the Api/DirectApi isolation architecture rule.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Build the shared lag-check and PublicExecutionRead response builder here: T-004 through T-007 reuse it for command responses, replay observations, and the events route. Lag detection is a transport condition compared in the same request as the read; it never mutates anything."
+    },
+    {
+      "id": "T-004",
+      "title": "Idempotency engine and the launch command",
+      "spec": "specs/external-write-idempotency/spec.md#durable-keyed-mappings-are-scoped-per-command",
+      "description": "Add the direct_api_idempotency_mappings table (command, scope_key, caller_key_id, fingerprint, state, outcome, frozen_target, timestamps; unique index on (command, scope_key) plus the filtered pending-stop index per design B, with the stop scope_key embedding callerKeyId for caller-scoped stop uniqueness) via one additive EF migration, the strict write-body reader and Idempotency-Key form validation, and the server-computed versioned SHA-256 fingerprint (StableToken hashing convention, text preserved byte-exactly). Implement POST .../agents/{agentId}/launch on top: resolve the Agent in the authorized Project, call IAgentLauncher.LaunchIdempotentAsync with the derived internal coordinator key StableToken(projectId|agentId|publicKey), complete the mapping to completed/rejected with canonical IDs, and answer replays, conflicts, and durable rejections from the mapping plus the public projection.",
+      "acceptanceCriteria": [
+        "A write without Idempotency-Key returns 400 idempotency_key_required and a key outside 1..128 printable ASCII returns 400 idempotency_key_invalid; neither creates a mapping row or any domain record, and the key is read only from the header.",
+        "Invalid JSON, unknown properties, duplicate JSON property names, and missing or empty text return 400 invalid_request before admission and before any mapping row exists; text is preserved byte-exactly (no trim, no case-fold), so 'Fix the bug' vs 'Fix the bug ' produce different fingerprints and the retry under the same key returns a stable 409 idempotency_key_reused with no new canonical record, public event, queue entry, outbox item, or external effect.",
+        "An identical replay of the same scope, key, and accepted body returns 200 with the original canonical Job/Session/Input/Turn IDs and their current public observation; a lost-response retry creates no second execution, queue entry, outbox item, or public event (verified by retrying three times and asserting exactly one Job/Session/Input/Turn group exists).",
+        "Launch resolves the Agent in the authorized Project with 404 agent_not_found for a missing or archived Agent; the derived internal coordinator key is deterministic across retries, stored on the mapping row, and lives in a distinct token namespace so the Web route's (projectId, key) grain identity is untouched.",
+        "A definitive admission rejection returns 200 with status=terminal and outcome=rejected plus a safe public error and reasonCode, is durable under the same key, and replays identically after capacity recovery without creating an execution, Input, or Turn (null live IDs).",
+        "The mapping row is durable before the 200 returns; a crash between insert and completion leaves state=pending and a retry re-enters the canonical operation through its own idempotent grain so at most one execution exists per scope.",
+        "The fingerprint input contains only the contract version, command discriminator, canonical route IDs, and the accepted body; the fingerprint and raw request are never exposed as public output, and Project/Agent are never caller-supplied in a write body.",
+        "SpecTests under Specs/DirectApi/ cover key validation, strict body parsing, replay/conflict/durable-rejection semantics, and the crash-between-insert-and-completion path; npm run test:fast passes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Idempotency mapping table with migrations and unique/filtered indexes, strict body reader, server-computed fingerprint, the launch route end-to-end with derived coordinator key, and passing idempotency SpecTests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Create the full table schema (including frozen_target and the partial pending-stop index via HasFilter — SQLite supports partial indexes) even though stop lands in T-006, to avoid a third migration. Command responses reuse T-003's lag-checked PublicExecutionRead response builder. Whitespace-only text is accepted: the spec rejects only empty strings and text is byte-significant."
+    },
+    {
+      "id": "T-005",
+      "title": "Follow-up input command with session-derived targeting",
+      "spec": "specs/external-write-idempotency/spec.md#replay-returns-the-original-mapping-and-current-observation",
+      "description": "Implement POST /api/v1/projects/{projectId}/agent-sessions/{sessionId}/inputs on the T-004 idempotency engine: resolve the Session with Project-membership 404, derive Project and Agent from the canonical Session (never from the body), pre-mint inputId/turnId deterministically from StableToken(sessionId|key|followup-input) so at most one Input/Turn pair exists per mapping, submit through the session grain, and return the mapped observation with replay, conflict, and durable-rejection semantics.",
+      "acceptanceCriteria": [
+        "A Session absent from or not belonging to the authorized Project returns 404 session_not_found after the grant passes; Project and Agent are resolved from the canonical Session and the fingerprint contains only the contract version, follow-up discriminator, canonical sessionId, and the accepted body, so derived values cannot be smuggled.",
+        "A retry with the same (sessionId, key) and identical body returns 200 with the same Input and Turn IDs and their current public observation, and no second Input or Turn exists for that mapping.",
+        "Key reuse with a different payload returns 409 idempotency_key_reused, stable across retries, with no new canonical record, public event, queue entry, outbox item, or external effect.",
+        "A definitive admission rejection returns 200 with status=terminal and outcome=rejected plus a safe public error and reasonCode, durable under the same key, with null Input and Turn IDs, and never turns into an acceptance on later retries.",
+        "A readonly PAT calling the route returns 403 before body validation or idempotency work (pipeline regression covered in specs), and the response is PublicExecutionRead with jobId null for a follow-up.",
+        "SpecTests under Specs/DirectApi/ cover session-derived targeting, replay, conflict, durable rejection, and readonly-scope fencing; npm run test:fast passes."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "The follow-up input route with session-derived Project/Agent, deterministic Input/Turn pre-minting, full replay/conflict/durable-rejection semantics, and passing follow-up SpecTests.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Reuse the T-004 mapping engine write path unchanged (scope_key sessionId|key). The follow-up scope does not carry caller binding beyond attribution; stop keys are the caller-bound ones."
+    },
+    {
+      "id": "T-006",
+      "title": "Fenced stop command and stop_outcome_unknown supersession block",
+      "spec": "specs/external-write-idempotency/spec.md#unresolved-stop-outcome-blocks-supersession",
+      "description": "Implement POST /api/v1/projects/{projectId}/agent-turns/{turnId}/stop with an empty body on the T-004 idempotency engine, reusing AgentSessionStopOperations unchanged: classify the Turn (already-terminal → durable no-op with no Runner call; queued → local cancel, launch turns route to job cancel; running → claim with expectedOperationId from the mapping, dispatch via ISessionStopDelivery, apply), freeze the target revision, context generation, binding, and deadline in frozen_target before the first Runner effect. The stop scope_key embeds callerKeyId (caller-scoped uniqueness per design B), so another caller presenting the same (turnId, key) never lands in the first caller's replay path, while the per-turn filtered pending index blocks any other stop request for the Turn — a different key or a different caller — with 409 stop_outcome_unknown while the outcome is unresolved.",
+      "acceptanceCriteria": [
+        "The stop body must be empty: any non-empty body returns 400 invalid_request before any mapping row or stop operation exists.",
+        "A stop for an already-terminal Turn returns 200 with the durable Turn observation and no Runner call; a queued Turn ends locally and is recorded cancelled without contacting Runtime.",
+        "For a running Turn the mapping row's frozen_target (turn revision, context generation, binding, deadline, operation ID) is written before the first Runner effect; a matching retry reads the frozen row, returns the original operation and outcome, and never re-reads the current binding to create a replacement deadline or effect.",
+        "While the first stop's outcome is unknown, a stop with a different key targeting the same Turn returns 409 stop_outcome_unknown via the filtered unique pending index and issues no new stop operation or external effect; the block persists until the fenced lifecycle resolves the pending mapping.",
+        "Stop mappings bind callerKeyId plus canonical projectId/sessionId/turnId through the caller-scoped stop scope: while caller A's stop for a Turn is unresolved, caller B — replaying A's key string or using a different key — receives 409 stop_outcome_unknown with nothing of B's persisted; once no unresolved stop remains for the Turn, B's key creates caller B's own durable mapping, which classification evaluates against the Turn's current state, and no caller is ever served another caller's mapping, outcome, or frozen target.",
+        "The response exposes only the public Turn observation and a safe reasonCode; no frozen target, binding, deadline, owner, lease, fence, or internal operation ID ever appears in the response.",
+        "An unknown delivery outcome leaves the mapping pending (exactly the state that blocks other keys), and the launch-turn queued case routes to job cancel per the existing canonical stop lifecycle.",
+        "SpecTests under Specs/DirectApi/ cover terminal no-op, queued local cancel, frozen-target retry, second-key 409, caller binding, and response privacy; npm run test:fast passes."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "The stop route on the fenced stop lifecycle with frozen targets, pending-stop supersession blocking, caller-bound keys, and passing stop SpecTests.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Do not modify AgentSessionStopOperations, the claim/apply fencing, or ISessionStopDelivery — this task only composes them behind the direct mapping. There is no internal-operation lookup route; response loss is recovered by replaying the same keyed POST."
+    },
+    {
+      "id": "T-007",
+      "title": "Public session event stream route and HMAC cursors",
+      "spec": "specs/public-session-event-stream/spec.md#cursors-are-opaque-bound-and-tamper-evident",
+      "description": "Implement GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events reading only that Session's persisted public projection: an HMAC-SHA256 base64url cursor codec (payload { projectId, sessionId, generation, afterPosition, version }, key persisted at first start alongside other server secrets), exclusive-after paging with optional limit (default 100, max 100), 400 cursor_invalid for malformed/tampered/cross-bound/wrong-generation cursors with no fallback, 410 cursor_expired with safe earliestSequence/latestSequence bounds, and closed-stream tombstone behavior for deleted Sessions.",
+      "acceptanceCriteria": [
+        "The route is sourced only from the persisted projection — no in-memory event bus, SignalR hub, Runner notification, or UI timeline defines its cursor, ordering, generation, or payload; a request without after returns events from the beginning of the retained stream, and pages contain only events with sequence greater than the cursor position (exclusive-after, no implicit inclusive replay).",
+        "limit defaults to 100 and is capped at 100 (limit=500 returns at most 100 events); the response carries sessionId, the ascending events page, nextCursor, and highWaterSequence, with nextCursor equal to the last event's cursor on a non-empty page and positioned at highWaterSequence on an empty page.",
+        "A cursor that is malformed, tampered with, undecodable, or bound to another Project, Session, or stream generation returns 400 cursor_invalid with no fallback and no event read attempted; an old-generation cursor after a rebuild is a wrong-generation cursor and is never translated into the rebuilt stream.",
+        "A valid current-generation cursor whose after position falls before the retained floor returns 410 cursor_expired with safe public earliestSequence and latestSequence; the Server never silently restarts at the beginning or the head for an expired or invalid cursor.",
+        "A deleted Session returns 410 cursor_expired with earliestSequence=null and the last safe latestSequence for a valid current-generation cursor during the tombstone window, 404 session_not_found without a valid cursor, and 400 cursor_invalid after the physical purge removes the tombstone; retention keeps every public event while the Session is retained (ordinary transcript compaction does not touch it).",
+        "Event payloads are allowlisted: each execution event carries sequence, cursor, type, occurredAt, and an execution object that is exactly PublicExecutionRead with the full key set; session.context_reset carries only the six session keys with no jobId, inputId, turnId, output, error, prompt, runtime, path, raw payload, or operation/binding data.",
+        "Sequences are strictly increasing positive integers across all generations, pages sort ascending, and duplicate page delivery returns identical content (client-side dedup by (sessionId, sequence) is documented in the route contract); a read ahead of the projection checkpoint returns 503 projection_lag consistent with T-003.",
+        "The HMAC key is persisted with the same durability as other server secrets; rotation invalidates all cursors as 400 cursor_invalid, which clients already treat as recoverable.",
+        "SpecTests under Specs/DirectApi/ cover cursor validity/expiry/tamper/cross-binding/generation, limit capping, empty-page positioning, tombstone lifecycle, payload allowlists, and lag; npm run test:fast passes."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "The per-Session events route with the HMAC cursor codec, exclusive-after paging with capped limits, 400/410 cursor semantics with safe bounds, tombstone lifecycle, and passing event-stream SpecTests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Cursors are stateless tokens — no per-issued-cursor rows. The tombstone's closed flag and earliest/latest sequence bounds live on public_stream_states from T-002; this task only reads them. End-to-end specs may drive events through the launch path (T-004) where convenient."
+    },
+    {
+      "id": "T-008",
+      "title": "Move agent-api and auth docs to shipped status",
+      "spec": "",
+      "description": "Update the design and user docs to reflect the shipped boundary: design/agent-api.md and design/auth.md move from wip target behavior to shipped (frontmatter plus status sections rewritten as shipped behavior), docs/agent-api.md's implementation-gap section is replaced with usage documentation for the seven routes, auth, idempotency, five-state reads, and cursor resume, docs/auth.md documents direct API consumption of PAT Project grants, and the README implementation table is updated.",
+      "acceptanceCriteria": [
+        "design/agent-api.md and design/auth.md frontmatter mark the documents shipped and their status sections describe the implemented behavior rather than target behavior, matching what T-001 through T-007 actually ship.",
+        "docs/agent-api.md contains no implementation-gap section claiming the API is unbuilt and instead documents the route table, Bearer PAT authentication and Project grants, Idempotency-Key semantics, the PublicExecutionRead shape and five-state aggregate, 503 projection_lag, and cursor-based event resume with 400/410 handling.",
+        "docs/auth.md documents that a PAT with a persisted Project grant can call /api/v1 directly, including the bearer-only and grant-before-lookup rules.",
+        "The README implementation table reflects the External Agent API as shipped.",
+        "npm run docs:check passes and the full npm run verify gate is green (this task owns the final coordinated verification)."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shipped-status design docs (design/agent-api.md, design/auth.md), rewritten usage docs (docs/agent-api.md, docs/auth.md), updated README implementation table, and a green npm run verify.",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007"],
+      "passes": false,
+      "notes": "curl-level examples are optional per the design's open questions; include them only if the usage section needs them. Do not describe the operator-triggered rebuild entrypoint as shipped unless it lands with this change."
+    }
+  ]
+}

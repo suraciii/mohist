@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.Infrastructure.Data.Events;
@@ -10,11 +11,33 @@ public class EventStore : IEventStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ILogger<EventStore> _log;
+    private readonly IPublicProjectionNudge? _publicProjectionNudge;
 
-    public EventStore(IDbContextFactory<MohistDbContext> dbFactory, ILogger<EventStore> log)
+    public EventStore(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        ILogger<EventStore> log,
+        IPublicProjectionNudge? publicProjectionNudge = null)
     {
         _dbFactory = dbFactory;
         _log = log;
+        _publicProjectionNudge = publicProjectionNudge;
+    }
+
+    /// <summary>
+    /// Best-effort latency nudge for the public execution projector
+    /// after a durable journal append; the projector's timer sweep is
+    /// the correctness safety net.
+    /// </summary>
+    private void NudgePublicProjectionBestEffort()
+    {
+        try
+        {
+            _publicProjectionNudge?.Nudge();
+        }
+        catch
+        {
+            // A nudge is advisory only.
+        }
     }
 
     public async Task AppendAsync(CloudEvent envelope, CancellationToken ct = default)
@@ -31,6 +54,7 @@ public class EventStore : IEventStore
             await AppendAsync(db, envelope, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            NudgePublicProjectionBestEffort();
             _log.LogInformation(
                 "[event-store] AppendAsync: persisted source={Source} type={Type} eventId={EventId}",
                 source, envelope.Type, envelope.Id);

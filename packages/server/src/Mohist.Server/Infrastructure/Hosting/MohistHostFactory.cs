@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Logging;
 using Mohist.Server.Otel;
@@ -142,6 +143,7 @@ public sealed class MohistHostFactory : IMohistHostFactory
         app.UseOtelSuppression();
         app.UseRuntimeRequestMetrics();
         app.UseMohistAuth();
+        app.UseExternalAgentApi();
         app.MapMohistApi();
         app.MapMohistWeb();
 

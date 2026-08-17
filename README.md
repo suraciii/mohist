@@ -82,14 +82,15 @@ the owner. See [Agent Event Routing](docs/event-routing.md) and
 | Available | Integration in progress | Not implemented or proposal |
 |---|---|---|
 | Five-stage Workflow, approval points, Epics, composite Issues, and sub-issues | Workflow Profile UI migration | Mobile PWA and Web Push proposal |
-| `mo` CLI, authenticated Web UI, direct Mohist Agent launch and sessions | PAT-authenticated External Agent API | |
+| `mo` CLI, authenticated Web UI, direct Mohist Agent launch and sessions, PAT-authenticated External Agent API | | |
 | Hermes notifications, event routing, Agent supervision, mentions, and Issue watch | Automatic observability anomaly notifications | |
 | Agent Skills execution and concurrency limits | | |
 | OpenCode / Pi Runtime, GitHub PR Profile, and Slack Agent Connections | | |
 | Metrics, route diagnostics, and the application log contract | | |
 
 The corresponding Issues track items that are in progress or have a finalized
-spec. See the "Implementation Gaps" section in each document.
+spec. Current capability notes live in each document's Status or implementation
+notes.
 
 ## Documentation
 

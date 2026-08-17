@@ -1,3 +1,7 @@
+---
+status: shipped
+---
+
 # Authentication and Identity
 
 Authentication in Mohist must preserve two properties that are easy to lose in
@@ -230,7 +234,7 @@ full once, must expire, defaults to 90 days, and cannot exceed one year. Active
 names are unique per Principal. Revocation is immediate; listing exposes only a
 recognizable prefix.
 
-The target issuance contract is:
+The issuance contract is:
 
 ```text literal
 mo auth token create --name <name> --scope operator|readonly [--ttl <hours>]
@@ -290,12 +294,13 @@ authorization approval; and session creation.
 
 Principal and Credential bootstrap, unified API and SignalR authentication, Web
 login, CLI device authorization and refresh-family protection, personal access
-tokens, Runner enrollment, Project-constrained integration credentials, Scope
-enforcement, actor attribution, and audit records are implemented.
+tokens, persisted direct API Project grants, Runner enrollment,
+Project-constrained integration credentials, Scope enforcement, actor
+attribution, and audit records are implemented.
 
-The direct external Agent API remains WIP under
-[#387](https://github.com/suraciii/mohist/issues/387). Its PAT ProjectGrant,
-`ExternalAgentCaller` resolution, grant-aware PAT issuance, and authorization
-before idempotency and admission are target behavior only. The direct API must
-not ship until this authentication slice and the public execution boundary in
-[agent-api.md](agent-api.md) are implemented together.
+The direct external Agent boundary is also shipped. Bearer PAT requests resolve
+to `ExternalAgentCaller`, and the `/api/v1` boundary enforces the persisted
+Project grant and route Scope before resource lookup, idempotency, or admission.
+PATs without a direct API grant retain their existing control-plane behavior but
+cannot use the direct API. The public route and observation contract is defined
+in [agent-api.md](agent-api.md).

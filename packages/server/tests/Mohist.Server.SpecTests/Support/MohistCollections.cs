@@ -82,6 +82,9 @@ public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
 [CollectionDefinition("IntegrationMisc")]
 public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("PublicSessionEventStream", DisableParallelization = true)]
+public class PublicSessionEventStreamCollection : ICollectionFixture<MohistIntegrationFixture>;
+
 [CollectionDefinition("RunnerEnrollment")]
 public class RunnerEnrollmentCollection : ICollectionFixture<MohistIntegrationFixture>;
 

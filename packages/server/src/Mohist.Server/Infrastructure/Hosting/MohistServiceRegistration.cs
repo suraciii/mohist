@@ -31,6 +31,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Grains;
@@ -117,7 +118,6 @@ public static class MohistServiceRegistration
         services.AddScoped<ISessionTreeStopTargetAdapter>(sp =>
             sp.GetRequiredService<SessionTreeStopTargetAdapter>());
         services.AddScoped<AgentLaunchObservationAssembler>();
-        services.AddScoped<DirectApiAgentJobReadStore>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
         services.AddScoped<IAgentExecutionIdentitySnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
@@ -163,7 +163,9 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowRunWorkProjection, WorkflowRunWorkProjection>();
         services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
         services.AddScoped<IWorkspaceStore, WorkspaceStore>();
-        services.AddScoped<IAgentSessionStore, AgentSessionStore>();
+        services.AddScoped<AgentSessionStore>();
+        services.AddScoped<IAgentSessionStore>(sp => sp.GetRequiredService<AgentSessionStore>());
+        services.AddScoped<IAgentSessionStreamRetention>(sp => sp.GetRequiredService<AgentSessionStore>());
         services.AddScoped<AgentSessionReconcileQuerier>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
@@ -228,6 +230,18 @@ public static class MohistServiceRegistration
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<DispatcherActivationService>();
         services.AddHostedService<EventPushWorker>();
+
+        // The public execution projection: one engine, one hosted
+        // writer, one nudge channel. Canonical write paths nudge the
+        // projector after their commits; the hosted loop's timer sweep
+        // is the safety net. Correctness never depends on the nudge.
+        services.AddSingleton<PublicApiProjectionEngine>();
+        services.AddSingleton<PublicSessionEventCursorCodec>();
+        services.AddHostedService<PublicSessionEventCursorSecretInitializer>();
+        services.AddSingleton<PublicProjectionNudge>();
+        services.AddSingleton<IPublicProjectionNudge>(sp => sp.GetRequiredService<PublicProjectionNudge>());
+        services.AddOptions<PublicProjectionOptions>();
+        services.AddHostedService<PublicExecutionProjector>();
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());

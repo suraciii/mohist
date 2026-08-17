@@ -22,6 +22,17 @@ public static class JSON
 
     public static readonly JsonSerializerOptions Indented = CloneIndented(Options);
 
+    /// <summary>
+    /// Options for the public external Agent API payloads (the public
+    /// execution read shape and its public event payloads). Distinct
+    /// contract from <see cref="Options"/>: property names are pinned
+    /// by <c>JsonPropertyName</c> attributes, every allowlisted key is
+    /// written — explicit nulls included, never ignored — and
+    /// timestamps are written as RFC 3339 UTC instants ending in
+    /// <c>Z</c>.
+    /// </summary>
+    public static readonly JsonSerializerOptions PublicApi = CreatePublicApiOptions();
+
     public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, Options);
 
     public static T? Deserialize<T>(string json) where T : class =>
@@ -58,6 +69,39 @@ public static class JSON
 
     private static JsonSerializerOptions CloneIndented(JsonSerializerOptions source) =>
         new(source) { WriteIndented = true };
+
+    private static JsonSerializerOptions CreatePublicApiOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = false,
+        };
+        options.Converters.Add(new UtcDateTimeOffsetConverter());
+        return options;
+    }
+
+    /// <summary>
+    /// Writes every timestamp as its UTC instant (<c>…Z</c>) so the
+    /// public contract is one stable RFC 3339 shape regardless of the
+    /// offset a canonical fact happened to carry.
+    /// </summary>
+    public sealed class UtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
+    {
+        public override DateTimeOffset Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options) =>
+            DateTimeOffset.Parse(
+                reader.GetString() ?? string.Empty,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind);
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            DateTimeOffset value,
+            JsonSerializerOptions options) =>
+            writer.WriteStringValue(value.UtcDateTime.ToString("O"));
+    }
 
     /// <summary>
     /// Options for deserializing wire-format payloads that tolerate

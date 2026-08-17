@@ -49,7 +49,7 @@ public sealed class AuthResolutionMiddlewareTests
     }
 
     [Fact]
-    public async Task SessionCookie_ResolvesThePrincipal()
+    public async Task SessionCookie_ResolvesThePrincipalAndRecordsCookieCarrier()
     {
         var middleware = NewMiddleware();
         var context = NewContext(request =>
@@ -59,6 +59,49 @@ public sealed class AuthResolutionMiddlewareTests
 
         var principal = Assert.IsType<MohistPrincipal>(context.Items[MohistPrincipal.HttpContextItemKey]);
         Assert.Equal(MohistPrincipal.AdminPrincipalId, principal.Id);
+        Assert.Equal(
+            CredentialCarrier.Cookie,
+            Assert.IsType<CredentialCarrier>(context.Items[CredentialCarrierResolution.HttpContextItemKey]));
+        Assert.False(context.Items.ContainsKey(ExternalAgentCaller.HttpContextItemKey));
+    }
+
+    [Fact]
+    public async Task BearerPat_RecordsCarrierAndExternalAgentCaller()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Pat);
+        var grant = DirectApiProjectGrant.Explicit(["proj_a"]);
+        var db = new FakeCredentialStore();
+        db.Add(new Credential(
+            "cred_direct",
+            "agent-direct",
+            CredentialKind.Pat,
+            CredentialToken.Hash(token),
+            [Scope.Operator],
+            "spec",
+            "moh_pat_ab",
+            null,
+            null,
+            null,
+            null,
+            new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero))
+        {
+            DirectApiProjectGrant = grant,
+        });
+        var middleware = NewMiddleware(db);
+        var context = NewContext(
+            request => request.Headers.Authorization = $"Bearer {token}",
+            path: "/api/v1/projects/proj_a/agent-jobs/job_1");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(
+            CredentialCarrier.Bearer,
+            Assert.IsType<CredentialCarrier>(context.Items[CredentialCarrierResolution.HttpContextItemKey]));
+        var caller = Assert.IsType<ExternalAgentCaller>(context.Items[ExternalAgentCaller.HttpContextItemKey]);
+        Assert.Equal("cred_direct", caller.CallerKeyId);
+        Assert.Equal("agent-direct", caller.PrincipalId);
+        Assert.Equal([Scope.Operator], caller.Scopes);
+        Assert.Equal(grant, caller.ProjectGrant);
     }
 
     [Fact]

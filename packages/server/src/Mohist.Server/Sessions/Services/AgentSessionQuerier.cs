@@ -19,7 +19,7 @@ namespace Mohist.Server.Sessions.Services;
 /// refers to a session and the run is the aggregate root that contains that task.
 /// No ownership relationship exists.
 /// </remarks>
-public class AgentSessionQuerier : IScopedService
+public partial class AgentSessionQuerier : IScopedService
 {
     private const string AgentLaunchSourceKind = "agent-launch";
     private const string AgentConnectionSourceKind = "agent-connection";
@@ -496,7 +496,9 @@ public class AgentSessionQuerier : IScopedService
             session.Runtime.WorkDir,
             string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
                 ? session.Settings.Definition
-                : null);
+                : null,
+            record.Label(AgentSessionQueryMetadataKeys.ProjectId),
+            record.Label(GenericAgentSessionMetadata.AgentId));
     }
 
     public async Task<SessionStopTarget?> ResolveStopTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
@@ -1171,17 +1173,6 @@ public sealed record GenericFollowupTarget(
     string RunnerId,
     string SessionId,
     bool IsActive);
-
-public sealed record CanonicalFollowupTarget(
-    string RunnerId,
-    string SessionId,
-    string SourceKind,
-    string? WorkflowRunId,
-    string? SessionName,
-    string? Runtime,
-    string? RuntimeSessionId,
-    string? WorkDir,
-    AgentExecutionDefinition? Definition = null);
 
 public sealed record SessionStopTarget(
     string RunnerId,

@@ -577,7 +577,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (string.IsNullOrWhiteSpace(command.Source))
             throw new ArgumentException("Source is required.", nameof(command));
 
-        var hasText = !string.IsNullOrWhiteSpace(command.Text);
+        var hasText = !string.IsNullOrEmpty(command.Text);
         var hasAttachments = command.Attachments is { Count: > 0 };
         if (!hasText && !hasAttachments)
         {
@@ -597,7 +597,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
 
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
-            throw new InvalidOperationException("A follow-up operation is already in progress.");
+            throw new FollowupOperationInProgressException(session.Id);
         if (session.Status.PendingStop is { IsActive: true } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
         if (session.Status.Activity == AgentSessionActivity.Unknown)
@@ -3086,7 +3086,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             throw new ArgumentException("Input id is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.TurnId))
             throw new ArgumentException("Turn id is required.", nameof(command));
-        if (string.IsNullOrWhiteSpace(command.Prompt)
+        if (string.IsNullOrEmpty(command.Prompt)
             && (command.Attachments is null || command.Attachments.Count == 0))
             throw new ArgumentException(
                 "Prompt is required unless at least one attachment is accepted.",

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Runner.Domain;
 
@@ -137,15 +138,35 @@ public class AgentJobStore : IAgentJobStore
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ILogger<AgentJobStore> _log;
     private readonly TimeProvider _timeProvider;
+    private readonly IPublicProjectionNudge? _publicProjectionNudge;
 
     public AgentJobStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         ILogger<AgentJobStore> log,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IPublicProjectionNudge? publicProjectionNudge = null)
     {
         _dbFactory = dbFactory;
         _log = log;
         _timeProvider = timeProvider;
+        _publicProjectionNudge = publicProjectionNudge;
+    }
+
+    /// <summary>
+    /// Best-effort latency nudge for the public execution projector
+    /// after a ledger commit; the projector's timer sweep is the
+    /// correctness safety net.
+    /// </summary>
+    private void NudgePublicProjectionBestEffort()
+    {
+        try
+        {
+            _publicProjectionNudge?.Nudge();
+        }
+        catch
+        {
+            // A nudge is advisory only.
+        }
     }
 
     public async Task<string?> LoadAsync(string key)
@@ -201,6 +222,7 @@ public class AgentJobStore : IAgentJobStore
         db.AgentJobs.Add(row);
         await StageTerminalLogOwnershipAsync(db, record, ct);
         await db.SaveChangesAsync(ct);
+        NudgePublicProjectionBestEffort();
         return ToRecord(row);
     }
 
@@ -232,6 +254,7 @@ public class AgentJobStore : IAgentJobStore
         StageDirectApiProjection(existing);
         await StageTerminalLogOwnershipAsync(db, record, ct);
         await db.SaveChangesAsync(ct);
+        NudgePublicProjectionBestEffort();
         return ToRecord(existing);
     }
 

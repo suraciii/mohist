@@ -78,7 +78,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             throw new ArgumentException("AgentId is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.AgentName))
             throw new ArgumentException("AgentName is required.", nameof(command));
-        if (string.IsNullOrWhiteSpace(command.Prompt)
+        if (string.IsNullOrEmpty(command.Prompt)
             && (command.Attachments is null || command.Attachments.Count == 0))
         {
             throw new ArgumentException(
