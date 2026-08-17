@@ -215,12 +215,8 @@ export function unarchiveAgent(projectId: string, id: string) {
   );
 }
 
-export function readAgentModelAndVariant(
-  agent:
-    | (Pick<AgentInfo, "agentConfig"> &
-        Partial<Pick<AgentInfo, "effectiveExecutionConfig">>)
-    | null
-    | undefined,
+export function readAgentDefinitionModelAndVariant(
+  agent: Pick<AgentInfo, "agentConfig"> | null | undefined,
 ): {
   model: string | null;
   variant: string | null;
@@ -242,6 +238,31 @@ export function readAgentModelAndVariant(
     config.reasoningEffort.trim()
       ? config.reasoningEffort
       : null;
+  const rawRuntime =
+    config?.runtime === "opencode" || config?.runtime === "pi"
+      ? config.runtime
+      : null;
+  return {
+    model: rawModel,
+    variant: rawVariant,
+    reasoningEffort: rawReasoningEffort,
+    runtime: rawRuntime ?? DEFAULT_AGENT_RUNTIME,
+  };
+}
+
+export function readAgentModelAndVariant(
+  agent:
+    | (Pick<AgentInfo, "agentConfig"> &
+        Partial<Pick<AgentInfo, "effectiveExecutionConfig">>)
+    | null
+    | undefined,
+): {
+  model: string | null;
+  variant: string | null;
+  reasoningEffort: string | null;
+  runtime: AgentRuntime;
+} {
+  const definition = readAgentDefinitionModelAndVariant(agent);
   const effective = agent?.effectiveExecutionConfig;
   const effectiveRuntime =
     effective?.runtime === "opencode" || effective?.runtime === "pi"
@@ -255,15 +276,11 @@ export function readAgentModelAndVariant(
     typeof effective?.variant === "string" && effective.variant.trim()
       ? effective.variant
       : null;
-  const rawRuntime =
-    config?.runtime === "opencode" || config?.runtime === "pi"
-      ? config.runtime
-      : null;
   return {
-    model: effectiveModel ?? rawModel,
-    variant: rawVariant ?? effectiveVariant,
-    reasoningEffort: rawReasoningEffort,
-    runtime: effectiveRuntime ?? rawRuntime ?? DEFAULT_AGENT_RUNTIME,
+    model: effectiveModel ?? definition.model,
+    variant: definition.variant ?? effectiveVariant,
+    reasoningEffort: definition.reasoningEffort,
+    runtime: effectiveRuntime ?? definition.runtime,
   };
 }
 
@@ -276,7 +293,10 @@ export function writeAgentModelAndVariant(
 ): Record<string, unknown> | null {
   const next: Record<string, unknown> = {};
   if (model === null) {
-    return runtime === DEFAULT_AGENT_RUNTIME ? null : { runtime };
+    if (variant !== null) next.variant = variant;
+    if (reasoningEffort !== null) next.reasoningEffort = reasoningEffort;
+    if (runtime !== DEFAULT_AGENT_RUNTIME) next.runtime = runtime;
+    return Object.keys(next).length > 0 ? next : null;
   }
   next.model = model;
   if (variant !== null) {

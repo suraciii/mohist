@@ -472,3 +472,8 @@ The final composer extension also gates selected existing-Agent launches through
 
 - Fixed the task launch replay ordering: `ResumeIdempotentAsync` now runs before the mutable preflight scope check, so an accepted/pending/recorded outcome is returned unchanged even after the Project default changes. Scope drift is checked only when no launch outcome exists to resume.
 - Added `TaskLaunch_ReplaysAcceptedOutcomeBeforeCheckingDriftedPreflightScope`, and verified the task-route spec class (13/13) plus the Server SpecTests build. `review.md` remains untouched.
+
+## Review repair: MF-7
+
+- Fixed the editor to initialize execution controls from raw `agentConfig` through `readAgentDefinitionModelAndVariant`; effective Project-default projections remain available to list/detail display readers but are no longer written during unrelated profile edits.
+- Added helper and editor regressions for a default-resolved Agent with no raw execution config. Web typecheck, FSD boundaries, test-boundary checks, and focused Web coverage (37/37) passed.

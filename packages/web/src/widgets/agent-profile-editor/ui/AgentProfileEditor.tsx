@@ -5,7 +5,7 @@ import {
   useCreateAgent,
   useUpdateAgent,
   useArchiveAgent,
-  readAgentModelAndVariant,
+  readAgentDefinitionModelAndVariant,
   writeAgentModelAndVariant,
 } from "../../../entities/agent";
 import type {
@@ -78,7 +78,7 @@ export function AgentProfileEditor({
   const { createAgent, updateAgent, archiveAgent } = operationsHook();
   const isEditing = !!agent;
   const initialModelVariant = useMemo(
-    () => readAgentModelAndVariant(agent),
+    () => readAgentDefinitionModelAndVariant(agent),
     [agent],
   );
 
