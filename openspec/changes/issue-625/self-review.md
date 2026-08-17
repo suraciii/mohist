@@ -1,143 +1,121 @@
 # Self-Review: Issue 625 Plan
 
-Round: **first review (full sweep)**. I re-read the canonical issue body and
-acceptance criteria from `mo issue view 625 --project
-proj_f6c141d63b6243bfbb481737b2243b87` before reviewing `proposal.md`,
-`design.md`, `tasks.json`, and both specification files. I also checked the
-current built-in profiles, Server workflow state/recovery paths, Runner script
-execution, result journaling, and the existing profile/resource contract tests.
+Round: **re-review**. I re-read the canonical issue body with `mo issue view
+625 --project proj_f6c141d63b6243bfbb481737b2243b87 --json body` before
+checking the updated `proposal.md`, `design.md`, `tasks.json`, and both
+specification files. I also verified the relevant current Server workflow
+binding, stage initialization, profile resolution, Runner script timeout, and
+result-journal paths.
 
 ## Verdict
 
-**FAIL** — the plan has must-fix problems that violate the issue's
-non-negotiable constraints and recovery/rollout goals. They are listed before
-observations.
+**FAIL** — one prior must-fix finding remains unresolved in the actual plan/codebase
+boundary. It is listed before observations.
 
 ## Must-Fix Findings
 
-### M-1 — T-002 preserves a mechanism the issue forbids and the repository has removed
+### M-2 remains unresolved — lane mode is not actually immutable or persisted
 
-`openspec/changes/issue-625/tasks.json:45` says to "Keep existing
-process-group termination, result protocol, **resource containment**, and Runner
-slot policy unchanged." This is not an accurate description of the current
-code and gives the builder an instruction to retain or restore exactly the
-mechanism prohibited by the issue: per-work resource profiles, cgroups, memory
-limits, process-tree containment, resource budgets, or resource-containment
-failure codes. The current repository explicitly tests the opposite: the
-Runner test at `packages/runner/src/actions/built-in-core.test.ts:7` verifies
-that no hidden resource profile is injected, and the built-in profile tests at
-`packages/server/tests/Mohist.Server.UnitTests/Issue/Profile/MohistGithubPrIssueWorkflowProfileTests.cs:291-292`
-and `MohistWorkflowDefinitionTests.cs:32` assert that `resourceProfile` is
-absent.
+The previous review's M-2 disposition says that lane behavior is selected from
+an immutable, persisted bound definition. The updated plan repeats that claim at
+`openspec/changes/issue-625/design.md:56,85,90-92` and in
+`openspec/changes/issue-625/tasks.json:59`, but neither the current code nor the
+task breakdown provides that definition snapshot or a persisted lane-mode
+marker.
 
-This violates the issue's **Non-Negotiable Operator Constraints** and the
-non-goal forbidding reintroduction of resource containment. The task note must
-be corrected to state that no resource-containment mechanism or related
-configuration/error code is to be added, restored, or referenced; only the
-existing timeout/process-group and Runner slot behavior may remain unchanged.
+The current `WorkflowRun` persists a profile ID and agent action, not the full
+workflow definition (`packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.cs:67-69`).
+`WorkflowRunBindingParticipant` creates and stores only a `WorkflowStructure`
+containing stage names and approval flags (`packages/server/src/Mohist.Server/Workflow/Grains/WorkflowRunBindingParticipant.cs:56-63`).
+The build task definitions are materialized later by
+`WorkflowStageInitializer`, which calls `LoadStageSpecsAsync`
+(`packages/server/src/Mohist.Server/Workflow/Grains/WorkflowStageInitializer.cs:48-57`),
+and that resolver deliberately reloads the current profile on each stage entry
+for hot reload (`packages/server/src/Mohist.Server/Workflow/Services/WorkflowDefinitionResolver.cs:88-118`).
 
-### M-2 — The migration order can block current and newly created runs
+Therefore, a run created with the old aggregate `verify` definition while it is
+still in `plan` can enter `build` after the new profiles are deployed and be
+materialized with the six new lanes. It has no persisted old build definition
+from which the Server can identify it as legacy. That can change its dispatch,
+recovery, gate, and historical task behavior, contrary to the issue's explicit
+non-goal: **"Retrying, rerunning, or mutating historical blocked WorkflowRuns."**
+It also contradicts the plan's required legacy behavior that an old aggregate
+run must retain its existing path without synthesized lane blockers or task
+rewrites.
 
-The design makes the all-six-lanes predicate treat a missing lane as blocking
-(`openspec/changes/issue-625/design.md:54-58`), but its migration plan deploys
-that Server gate before enabling the new profile definitions
-(`design.md:84-87`). Existing initialized runs retain the old aggregate
-`verify` task and have no lane history. Once the new Server behavior is live,
-those runs have six missing lanes and cannot complete the build stage. A new run
-created during the stated rollout window can have the same problem if it
-materializes the old definition. This is a regression against the issue's goal
-that a representative clean run advances to push/check and against the
-acceptance criteria requiring the gate to advance after all required lanes pass.
+This is a must-fix because the mixed-version rollout can still alter an
+already-created run, and the stated acceptance/rollout guarantee cannot be
+implemented by the listed tasks. The plan must add a concrete immutable boundary
+at run initialization, such as persisting the effective workflow definition (or
+an explicitly sufficient legacy/lane mode and the required stage definitions),
+make later stage initialization use that snapshot, and test a run bound before
+profile activation whose build stage starts afterward. Merely inspecting the
+currently materialized build tasks does not cover runs whose build stage has not
+yet been initialized.
 
-The design's proposed escape hatch is also not an implementation: it says
-operators may explicitly rerun the build stage, while the issue explicitly
-makes retrying, rerunning, or mutating historical blocked WorkflowRuns a
-**Non-Goal** (`design.md:79`, `design.md:94`). The plan needs one coherent
-rollout rule: for example, atomically activate the lane definitions with the
-gate, or make the gate apply only to a positively identified lane-enabled run
-until all old runs drain. It must also explicitly leave legacy blocked runs
-untouched rather than relying on an unspecified rerun policy.
+## Re-Review Dispositions
 
-### M-3 — Per-lane recovery is not specified in the profile task or the Server recovery contract
-
-The issue requires that a timed-out lane remain resumable at that lane and
-that recovery preserve earlier passes. The current recovery mechanism is
-declaration-driven: `core/script` failure is converted by the Runner into a
-completed scheduling result with inserted recovery/retry tasks when the task's
-`recovery` declaration applies (`packages/runner/src/runtime/recovery.ts:65-93`).
-The current aggregate profile has that recovery declaration on `verify`, but
-replacing `verify` with six tasks does not automatically give the six lane
-tasks
-that behavior.
-
-The plan only says recovery uses the declared `fix-ci` task "when applicable"
-(`openspec/changes/issue-625/design.md:60-64`). T-003's acceptance criteria
-(`tasks.json:53-57`) require lane IDs, commands, budgets, and removal of the
-aggregate task, but do not require each lane's recovery declaration or define
-which recovery operation creates the next attempt. T-004 then says to extend
-Server recovery without identifying a trigger/API/state transition that does
-so. Following the task literally can leave a timeout as an ordinary failed
-workflow task, with no declared repair/retry path, or can accidentally mark the
-Runner's recovery-scheduling report as a passed lane.
-
-This violates the issue's **Fix Shape** and acceptance criteria that a timed-out
-lane be resumable, earlier pass evidence be preserved, and recovery resume at
-the first unfinished lane. The plan must specify whether the same repair and
-retry policy is attached to every lane or whether Server owns a separate
-lane-recovery operation, including the exact ordering and the rule that the
-original `fail`/`timeout` evidence remains non-pass until a later lane attempt
-succeeds. Tests in T-003/T-004 must verify that contract.
+- **M-1 — fixed properly.** `tasks.json:45` now explicitly forbids adding,
+  restoring, configuring, or referencing resource-containment mechanisms and
+  related failure codes, while preserving only existing process-group
+  termination, report protocol, and Runner slot behavior. This matches the
+  issue's non-negotiable operator constraint.
+- **M-3 — fixed properly.** Every lane is required to carry the profile-specific
+  `fix-ci` recovery declaration (`design.md:64-68`, `tasks.json:57`). The plan
+  now classifies the preserved underlying timeout/failure instead of the
+  Runner's outer scheduling status, keeps the helper outside the lane catalog,
+  and requires a later direct same-lane success before `pass`. The associated
+  recovery scenarios and tests are explicit.
+- **M-2 — not fixed.** The claimed persisted-definition solution is not present
+  in the current state model or in any task that captures the definition at run
+  binding. The migration guarantee consequently still fails for runs that have
+  not reached `build`.
 
 ## Dimension Sweep
 
-- **Issue goals and acceptance criteria — checked, must-fix findings found.**
-  The six commands, independent budgets, durable outcomes, ordered gate,
-  preserved evidence, idempotent downstream effects, unchanged strictness, and
-  prohibited-mechanism constraints were compared directly with the issue. M-1
-  violates the operator constraint; M-2 and M-3 leave required rollout/recovery
-  behavior incomplete.
-- **Coverage — checked, must-fix gaps found.** The plan covers the nominal six
-  lanes and status projection, but does not cover a safe activation boundary
-  for legacy aggregate runs (M-2) or an explicit recovery definition/operation
-  for each replacement lane (M-3). The prohibited resource instruction is
-  also covered incorrectly (M-1).
-- **Correctness — checked, must-fix problems found.** Ordinary serial tasks and
-  the existing report fences are compatible with ordered execution, but the
-  stated migration order can make missing lanes permanently block old/current
-  runs, and the existing declaration-driven recovery semantics are not tied to
-  the six new lane tasks.
-- **Consistency with the current codebase and conventions — checked, must-fix
-  inconsistency found.** The plan correctly reuses `TaskRun`, `NextWork`, and
-  `WorkResultJournal`, but M-1 conflicts with the current no-resource-profile
-  tests. The plan also needs to account explicitly for the Runner's existing
-  conversion of recoverable failures into scheduling results when classifying
-  lane outcomes.
-- **Task breakdown, ordering, and verifiability — checked, must-fix gaps
-  found.** The dependency graph is acyclic and the broad work areas are
-  present, but T-003 does not make per-lane recovery testable and the migration
-  order in the design has no corresponding compatibility/activation task.
+- **Issue goals and acceptance criteria — checked, must-fix found.** The six
+  commands, independent budgets, durable lane outcomes, ordered gate, recovery
+  preservation, unchanged strictness, and downstream idempotency are addressed.
+  The rollout still violates the issue's no-historical-mutation non-goal for
+  already-created runs that have not initialized `build`.
+- **Coverage — checked, must-fix gap found.** The plan covers legacy state that
+  already has an aggregate task and new lane-enabled state, but not the
+  mixed-version case where an old run's future build stage is materialized after
+  profile activation. No task persists or tests the required mode/definition
+  boundary.
+- **Correctness — checked, must-fix found.** The lane classification and
+  recovery approach is coherent once a run's mode is known, but the stated mode
+  cannot be recovered from the current persisted run state at the point the
+  build stage is initialized.
+- **Consistency with the current codebase and conventions — checked,
+  must-fix inconsistency found.** The plan assumes immutable bound definitions,
+  while the current resolver intentionally reloads profile definitions per
+  stage. The plan must explicitly change or bypass that hot-reload path for the
+  captured run definition.
+- **Task breakdown, ordering, and verifiability — checked, must-fix gap found.**
+  T-001 through T-004 cover lane state, Runner behavior, profiles, and recovery,
+  but no task owns definition snapshotting/mode persistence or the required
+  pre-activation/post-build-initialization rollout test.
 
 ## Observations
 
-These do not affect the verdict:
+- The initial per-lane timeout values remain an open design question
+  (`design.md:80` and `design.md:99`). The task contract requires literal
+  positive finite values and an end-to-end clean run, so this remains a tuning
+  concern rather than an additional must-fix finding.
+- Whether to retain or remove the now-unused `vars.ci.verify` project variable
+  remains open (`design.md:84` and `design.md:100`). The issue requires only
+  that the aggregate task no longer be part of the built-in gate; either
+  compatible choice can satisfy that boundary.
+- The plan promises a link from a retry attempt to its failed attempt
+  (`design.md:68`), but does not name the persisted field or projection shape.
+  The lane ID, attempt identity, and diagnostics requirements are otherwise
+  covered, so this is an implementation-detail observation.
+- The structural lane predicate could affect a custom profile that happens to
+  use all six reserved IDs in the same order. Constraining the predicate to the
+  two built-in profile IDs would make the non-goal about arbitrary workflows
+  clearer, but this is outside the issue-blocking finding above.
 
-- The initial timeout values remain an open question (`design.md:74` and
-  `design.md:92`). T-003 does require positive finite literal values and T-004
-  can validate a clean run, so this is a tuning/verification concern rather
-  than a must-fix issue under the issue's stated criteria.
-- The plan leaves whether to retain or remove the now-unused `vars.ci.verify`
-  project variable unresolved (`design.md:78` and `design.md:93`). The issue
-  only requires that it no longer be part of the built-in gate, so either
-  choice can satisfy the stated scope if the contract tests make that boundary
-  explicit.
-- The design chooses a derived status projection instead of a new event stream
-  (`design.md:44`). That is compatible with the issue's requirement for an
-  observable result through workflow status or event projections, but the API
-  field placement and serialization compatibility should be pinned down during
-  implementation.
-- The plan's rollback note still mentions stopping or rerunning active lane
-  runs (`design.md:80-88`). Once M-2 is corrected, rollback should preserve the
-  issue's no-historical-mutation boundary and define only how new lane-enabled
-  runs are stopped or drained.
+`jq empty openspec/changes/issue-625/tasks.json` and `git diff --check` passed.
 
 <promise>FAIL</promise>
