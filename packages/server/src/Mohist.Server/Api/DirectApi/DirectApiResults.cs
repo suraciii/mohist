@@ -79,30 +79,6 @@ public static class DirectApiResults
             options: JSON.PublicApi);
 
     /// <summary>
-    /// The stop lifecycle has not confirmed its fenced outcome yet. The
-    /// mapping remains pending, so the caller must retry the same key rather
-    /// than treating the current projection as a completed command.
-    /// </summary>
-    public static IResult StopPending() => new StopPendingResult();
-
-    public static IResult CursorInvalid() =>
-        Error(
-            StatusCodes.Status400BadRequest,
-            DirectApiErrorCodes.CursorInvalid,
-            "The event cursor is invalid or is not bound to this request.");
-
-    public static IResult CursorExpired(long? earliestSequence, long? latestSequence) =>
-        Results.Json(
-            new DirectApiCursorExpiredEnvelope(
-                new DirectApiError(
-                    DirectApiErrorCodes.CursorExpired,
-                    "The event cursor is older than the retained public stream."),
-                earliestSequence,
-                latestSequence),
-            statusCode: StatusCodes.Status410Gone,
-            options: JSON.PublicApi);
-
-    /// <summary>
     /// The 503 projection-lag answer as a concrete result so the
     /// Retry-After hint rides on the same response as the error
     /// envelope without any secondary serialization path.
