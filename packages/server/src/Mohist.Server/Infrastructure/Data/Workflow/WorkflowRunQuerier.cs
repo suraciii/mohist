@@ -174,7 +174,8 @@ public sealed class WorkflowRunQuerier
     /// the runner grain's dispatch-capacity gate so the per-runner slot
     /// budget accounts for work already picked up. Filters at the database
     /// layer on the STORED <c>Status</c> computed column plus
-    /// <c>AssignedWorkerId</c>; never deserializes <c>State</c>. Replaces
+    /// <c>AssignedWorkerId</c> and excludes rows whose agent result is
+    /// durably blocked; never deserializes <c>State</c>. Replaces
     /// the previous <c>FindAssignedToAsync</c> +
     /// <c>GetCurrentWorkIdAsync</c> fan-out, which under the new state
     /// machine would have collapsed to zero (Ready excludes in-flight
@@ -188,7 +189,9 @@ public sealed class WorkflowRunQuerier
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedWorkerId == workerId)
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running)
+                && row.AssignedWorkerId == workerId
+                && (row.AttentionStatus == null || row.AttentionStatus != "blocked"))
             .Select(row => row.WorkflowRunId)
             .CountAsync(ct);
     }
@@ -198,8 +201,10 @@ public sealed class WorkflowRunQuerier
     /// (<c>Running</c>) and bound to <paramref name="workerId"/> — the
     /// <c>desired</c> set for poll reconciliation. The DispatchService loads
     /// each to resolve its current workId and render a redelivery dispatch when
-    /// the runner's reported set does not include it. Filters at the DB layer;
-    /// never deserializes <c>State</c>.
+    /// the runner's reported set does not include it. Blocked agent-result
+    /// rows are no longer active dispatch work even though their original
+    /// runner assignment remains for late-receipt identity checks. Filters at
+    /// the DB layer; never deserializes <c>State</c>.
     /// </summary>
     public async Task<IReadOnlyList<string>> FindRunningAssignedToAsync(string workerId, CancellationToken ct = default)
     {
@@ -209,7 +214,9 @@ public sealed class WorkflowRunQuerier
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedWorkerId == workerId)
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running)
+                && row.AssignedWorkerId == workerId
+                && (row.AttentionStatus == null || row.AttentionStatus != "blocked"))
             .Select(row => row.WorkflowRunId)
             .ToListAsync(ct);
     }

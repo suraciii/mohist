@@ -262,12 +262,42 @@ public class WorkflowRunQuerierSchedulingSpecs
             projectId: prefix,
             status: "Running",
             assignedWorkerId: runnerB);
+        await InsertRowAsync(
+            $"{prefix}-blocked-A",
+            projectId: prefix,
+            status: "Running",
+            assignedWorkerId: runnerA,
+            attentionStatus: "blocked");
 
         using var scope = _fixture.Services.CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
 
         Assert.Equal(2, await querier.CountRunningAssignedToAsync(runnerA));
         Assert.Equal(1, await querier.CountRunningAssignedToAsync(runnerB));
+    }
+
+    [Fact]
+    public async Task FindRunningAssignedToAsync_ExcludesBlockedAgentSettlementRows()
+    {
+        var prefix = NewPrefix("sched-find-blocked");
+        var runnerId = $"{prefix}-runner";
+
+        await InsertRowAsync(
+            $"{prefix}-running",
+            projectId: prefix,
+            status: "Running",
+            assignedWorkerId: runnerId);
+        await InsertRowAsync(
+            $"{prefix}-blocked",
+            projectId: prefix,
+            status: "Running",
+            assignedWorkerId: runnerId,
+            attentionStatus: "blocked");
+
+        using var scope = _fixture.Services.CreateScope();
+        var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
+
+        Assert.Equal(new[] { $"{prefix}-running" }, await querier.FindRunningAssignedToAsync(runnerId));
     }
 
     [Fact]
@@ -379,7 +409,8 @@ public class WorkflowRunQuerierSchedulingSpecs
         string projectId,
         string status,
         string? assignedWorkerId,
-        string? stateOverride = null)
+        string? stateOverride = null,
+        string? attentionStatus = null)
     {
         var state = stateOverride ?? BuildStatusJson(workflowRunId, projectId, status, assignedWorkerId);
         using var scope = _fixture.Services.CreateScope();
@@ -388,6 +419,7 @@ public class WorkflowRunQuerierSchedulingSpecs
         {
             WorkflowRunId = workflowRunId,
             State = state,
+            AttentionStatus = attentionStatus,
         });
         await db.SaveChangesAsync();
     }

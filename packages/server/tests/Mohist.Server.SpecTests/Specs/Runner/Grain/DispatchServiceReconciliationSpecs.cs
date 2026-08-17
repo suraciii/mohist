@@ -209,7 +209,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
-    public async Task Redelivery_BlockedUnresolvedAgentWork_StillRedeliversUntilAuthoritativeResult()
+    public async Task BlockedUnresolvedAgentWork_ReleasesDispatchAndFencesLateResult()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
@@ -234,9 +234,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var blocked = await LoadRunAsync(_workflowId!);
         Assert.Equal(AgentResultSettlementState.Blocked, Assert.Single(blocked.CurrentStage().Tasks).AgentResultSettlement!.State);
 
-        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.NotNull(redelivery.AgentRecovery);
-        Assert.Equal(first.WorkId, redelivery.WorkId);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
 
         Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
