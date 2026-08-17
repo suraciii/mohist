@@ -10,3 +10,10 @@
 - Added direct replay, omitted/current owner, retired unresolved/invalid data, strict unknown/type rejection, scope exclusions, manifest/catalog strictness, and retrySelf replay coverage.
 - Verification: Runner production typecheck, test typecheck, test-boundary check, focused suites (46 tests), and full Runner suite (156 files, 1,689 tests) passed.
 - The repository initially lacked installed JS dependencies; `npm ci --ignore-scripts` installed the locked workspace dependencies. It reported existing npm audit findings unrelated to this change.
+
+## T-002
+- Server inspection found the existing boundary already preserves persisted `TaskRun.WithInput` through `WorkItem`, `WorkflowItemTranslator`, and first-write dispatch snapshots; no production rewrite or validator exception was needed.
+- Added translator coverage for a persisted `core/script` declaration carrying `resourceProfile`, `run`, `shell`, and `timeout` templates, asserting task identity, title, Action, artifacts, variables, setVars, expect, recovery, budget, and in-memory state preservation.
+- Added snapshot-backed redelivery coverage asserting the full `WorkDispatch` and persisted `TaskRun` state remain unchanged after grain deactivation.
+- Added Server validator and parsed profile coverage proving the current `core/script` contract is exactly required `run` plus optional `shell` and `timeout`, and that new `resourceProfile` declarations are rejected as unknown input.
+- Verification: full `Mohist.Server.UnitTests` passed (2,769 tests); focused `WorkflowItemTranslatorSpecs` and `DispatchSnapshotPersistenceSpecs` passed (58 tests); focused validator/profile classes passed (69 tests). The full `Mohist.Server.SpecTests` run exceeded the 15-minute command limit without reporting a test failure, so it is recorded as incomplete rather than passed.
