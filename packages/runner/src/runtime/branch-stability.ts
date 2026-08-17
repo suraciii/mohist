@@ -1,9 +1,9 @@
-import { join } from "node:path"
-import type { JsonObject, DispatchWorkItem, WorkItemResult } from "../core/types.js"
-import { exists } from "../system/process.js"
-import { currentRunnerResources } from "../system/filesystem.js"
-import { git, type GitOptions } from "./git-probe.js"
-import type { TaskLogger } from "./task-log.js"
+import { join } from 'node:path'
+import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import { exists } from '../system/process.js'
+import { currentRunnerResources } from '../system/filesystem.js'
+import { git, type GitOptions } from './git-probe.js'
+import type { TaskLogger } from './task-log.js'
 import {
   DETACHED_HEAD_REF,
   isResidualFree,
@@ -14,7 +14,7 @@ import {
   type WorkspaceHealthSnapshot,
   type WorkspaceProbeFailure,
   type WorkspaceResidualState,
-} from "./workspace-health.js"
+} from './workspace-health.js'
 
 type GitResult = Awaited<ReturnType<typeof git>>
 
@@ -24,23 +24,23 @@ type GitResult = Awaited<ReturnType<typeof git>>
  * viewer can phase-distinguish the boundary probe from the action
  * itself.
  */
-export const BRANCH_CHECK_SOURCE = "branch-check"
+export const BRANCH_CHECK_SOURCE = 'branch-check'
 
 function branchCheckSink(log: TaskLogger | null | undefined) {
   return log ? { log, source: BRANCH_CHECK_SOURCE } : undefined
 }
 
 export interface BranchStabilityEvidence {
-  kind: "branch-stability"
-  boundary: "start" | "end"
+  kind: 'branch-stability'
+  boundary: 'start' | 'end'
   expectedBranch: string
   observedBranch: string
   observedRef?: string | null
 }
 
 export interface BranchInvariantViolationEvidence {
-  kind: "branch-invariant-violation"
-  boundary: "start" | "end"
+  kind: 'branch-invariant-violation'
+  boundary: 'start' | 'end'
   expectedBranch: string
   observedBranch: string
   observedRef?: string | null
@@ -63,26 +63,42 @@ export interface CurrentBranchResult {
 }
 
 export function expectedWorkspaceBranch(variables: JsonObject): string | null {
-  const workspace = variables["workspace"]
-  if (!workspace || typeof workspace !== "object" || Array.isArray(workspace)) return null
-  const branch = (workspace as JsonObject)["branch"]
-  return typeof branch === "string" && branch.length > 0 ? branch : null
+  const workspace = variables['workspace']
+  if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) return null
+  const branch = (workspace as JsonObject)['branch']
+  return typeof branch === 'string' && branch.length > 0 ? branch : null
 }
 
-export async function readCurrentBranch(workDir: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<CurrentBranchResult> {
+export async function readCurrentBranch(
+  workDir: string,
+  signal: AbortSignal,
+  log: TaskLogger | null = null,
+): Promise<CurrentBranchResult> {
   const sink = branchCheckSink(log)
-  const probe = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal, sink ? { sink } : undefined)
+  const probe = await git(workDir, ['rev-parse', '--abbrev-ref', 'HEAD'], signal, sink ? { sink } : undefined)
   if (!probe.success) {
-    const stderr = (probe.stderr ?? "").toLowerCase()
-    if (stderr.includes("not a git repository")) {
+    const stderr = (probe.stderr ?? '').toLowerCase()
+    if (stderr.includes('not a git repository')) {
       return { branch: null, ref: null, detached: false, nonGit: true, error: null }
     }
-    return { branch: null, ref: null, detached: false, nonGit: false, error: probe.combinedOutput || `exit ${probe.exitCode}` }
+    return {
+      branch: null,
+      ref: null,
+      detached: false,
+      nonGit: false,
+      error: probe.combinedOutput || `exit ${probe.exitCode}`,
+    }
   }
   const branch = probe.stdout.trim()
-  if (branch === "HEAD") {
-    const refProbe = await git(workDir, ["rev-parse", "HEAD"], signal, sink ? { sink } : undefined)
-    return { branch: null, ref: refProbe.success ? refProbe.stdout.trim() : null, detached: true, nonGit: false, error: null }
+  if (branch === 'HEAD') {
+    const refProbe = await git(workDir, ['rev-parse', 'HEAD'], signal, sink ? { sink } : undefined)
+    return {
+      branch: null,
+      ref: refProbe.success ? refProbe.stdout.trim() : null,
+      detached: true,
+      nonGit: false,
+      error: null,
+    }
   }
   return { branch, ref: branch, detached: false, nonGit: false, error: null }
 }
@@ -94,17 +110,19 @@ export function branchInvariantViolationFailure(
   const label = work.title?.trim() || work.uses || work.workId
   const message = (evidence.message ?? legacyBranchInvariantMessage(evidence, label)).slice(0, 4000)
   return {
-    status: "failed",
+    status: 'failed',
     message,
-    error: { code: "branch-invariant-violation", message },
+    error: { code: 'branch-invariant-violation', message },
   }
 }
 
 function legacyBranchInvariantMessage(evidence: BranchInvariantViolationEvidence, label: string): string {
-  const observed = evidence.observedBranch || `(detached at ${evidence.observedRef ?? "unknown"})`
-  const detail = evidence.detail ? `; ${evidence.detail}` : ""
-  return `branch-invariant violation at ${evidence.boundary} boundary for ${label}: ` +
+  const observed = evidence.observedBranch || `(detached at ${evidence.observedRef ?? 'unknown'})`
+  const detail = evidence.detail ? `; ${evidence.detail}` : ''
+  return (
+    `branch-invariant violation at ${evidence.boundary} boundary for ${label}: ` +
     `expected branch '${evidence.expectedBranch}', observed '${observed}'${detail}`
+  )
 }
 
 /**
@@ -135,32 +153,29 @@ export async function checkBranchStability(
   work: DispatchWorkItem,
   workDir: string,
   expectedBranch: string | null,
-  boundary: "start" | "end",
+  boundary: 'start' | 'end',
   signal: AbortSignal,
   log: TaskLogger | null = null,
-): Promise<
-  | { kind: "ok"; evidence: BranchStabilityEvidence }
-  | { kind: "violation"; result: WorkItemResult }
-> {
+): Promise<{ kind: 'ok'; evidence: BranchStabilityEvidence } | { kind: 'violation'; result: WorkItemResult }> {
   if (expectedBranch === null) {
     const observed = await readCurrentBranch(workDir, signal, log)
     const evidence: BranchStabilityEvidence = {
-      kind: "branch-stability",
+      kind: 'branch-stability',
       boundary,
-      expectedBranch: "",
-      observedBranch: observed.branch ?? "",
+      expectedBranch: '',
+      observedBranch: observed.branch ?? '',
       observedRef: observed.ref,
     }
-    return { kind: "ok", evidence }
+    return { kind: 'ok', evidence }
   }
 
   const snapshot = await captureHealthSnapshot(workDir, signal, log)
   const failure = snapshot.probeFailure
   if (failure) {
     return {
-      kind: "violation",
+      kind: 'violation',
       result: branchInvariantViolationFailure(work, {
-        kind: "branch-invariant-violation",
+        kind: 'branch-invariant-violation',
         boundary,
         expectedBranch,
         observedBranch: observedBranchLabel(snapshot),
@@ -172,9 +187,9 @@ export async function checkBranchStability(
   const aligned = snapshot.head.ref === expectedBranch
   if (!aligned) {
     return {
-      kind: "violation",
+      kind: 'violation',
       result: branchInvariantViolationFailure(work, {
-        kind: "branch-invariant-violation",
+        kind: 'branch-invariant-violation',
         boundary,
         expectedBranch,
         observedBranch: observedBranchLabel(snapshot),
@@ -197,9 +212,9 @@ export async function checkBranchStability(
   // worktree is deferred to worktree enforcement in both cases.
   if (boundary === 'end' && !isResidualFree(snapshot.residual)) {
     return {
-      kind: "violation",
+      kind: 'violation',
       result: branchInvariantViolationFailure(work, {
-        kind: "branch-invariant-violation",
+        kind: 'branch-invariant-violation',
         boundary,
         expectedBranch,
         observedBranch: observedBranchLabel(snapshot),
@@ -214,13 +229,13 @@ export async function checkBranchStability(
     }
   }
   const evidence: BranchStabilityEvidence = {
-    kind: "branch-stability",
+    kind: 'branch-stability',
     boundary,
     expectedBranch,
     observedBranch: snapshot.head.ref,
     observedRef: snapshot.head.ref,
   }
-  return { kind: "ok", evidence }
+  return { kind: 'ok', evidence }
 }
 
 /**
@@ -229,50 +244,60 @@ export async function checkBranchStability(
  * `mohist/workspace-prepare`, `mohist/rebase`, and `WorkspaceManager`,
  * using the executor's narrow git probe.
  */
-async function captureHealthSnapshot(workDir: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceHealthSnapshot> {
+async function captureHealthSnapshot(
+  workDir: string,
+  signal: AbortSignal,
+  log: TaskLogger | null = null,
+): Promise<WorkspaceHealthSnapshot> {
   const sink = branchCheckSink(log)
   const opts: GitOptions | undefined = sink ? { sink } : undefined
   const [residualProbe, headProbe, porcelainResult] = await Promise.all([
     probeResidual(workDir, signal, opts),
     captureHead(workDir, signal, opts),
-    git(workDir, ["status", "--porcelain"], signal, opts),
+    git(workDir, ['status', '--porcelain'], signal, opts),
   ])
-  const statusFailure = porcelainResult.success
-    ? null
-    : gitFailure("status", "git status --porcelain", porcelainResult)
+  const statusFailure = porcelainResult.success ? null : gitFailure('status', 'git status --porcelain', porcelainResult)
   return {
     residual: residualProbe.residual,
     head: headProbe.head,
-    porcelain: porcelainResult.success ? porcelainResult.stdout : "",
+    porcelain: porcelainResult.success ? porcelainResult.stdout : '',
     probeFailure: residualProbe.failure ?? headProbe.failure ?? statusFailure,
   }
 }
 
-async function captureHead(workDir: string, signal: AbortSignal, opts?: GitOptions): Promise<{ head: WorkspaceHeadState; failure: WorkspaceProbeFailure | null }> {
+async function captureHead(
+  workDir: string,
+  signal: AbortSignal,
+  opts?: GitOptions,
+): Promise<{ head: WorkspaceHeadState; failure: WorkspaceProbeFailure | null }> {
   const [headResult, refResult] = await Promise.all([
-    git(workDir, ["rev-parse", "HEAD"], signal, opts),
-    git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal, opts),
+    git(workDir, ['rev-parse', 'HEAD'], signal, opts),
+    git(workDir, ['rev-parse', '--abbrev-ref', 'HEAD'], signal, opts),
   ])
-  const commit = headResult.success ? headResult.stdout.trim() : ""
+  const commit = headResult.success ? headResult.stdout.trim() : ''
   let ref = DETACHED_HEAD_REF
   if (refResult.success) {
     const trimmed = refResult.stdout.trim()
-    if (trimmed !== "" && trimmed !== "HEAD") ref = trimmed
+    if (trimmed !== '' && trimmed !== 'HEAD') ref = trimmed
   }
   const failure = !headResult.success
-    ? gitFailure("head", "git rev-parse HEAD", headResult)
+    ? gitFailure('head', 'git rev-parse HEAD', headResult)
     : !refResult.success
-      ? gitFailure("head-ref", "git rev-parse --abbrev-ref HEAD", refResult)
+      ? gitFailure('head-ref', 'git rev-parse --abbrev-ref HEAD', refResult)
       : null
   return { head: { commit, ref }, failure }
 }
 
-async function probeResidual(workDir: string, signal: AbortSignal, opts?: GitOptions): Promise<{ residual: WorkspaceResidualState; failure: WorkspaceProbeFailure | null }> {
+async function probeResidual(
+  workDir: string,
+  signal: AbortSignal,
+  opts?: GitOptions,
+): Promise<{ residual: WorkspaceResidualState; failure: WorkspaceProbeFailure | null }> {
   const [rebaseMerge, rebaseApply, mergeHead, cherryPickHead] = await Promise.all([
-    probePathExists(workDir, "rebase-merge", signal, opts),
-    probePathExists(workDir, "rebase-apply", signal, opts),
-    probePathExists(workDir, "MERGE_HEAD", signal, opts),
-    probePathExists(workDir, "CHERRY_PICK_HEAD", signal, opts),
+    probePathExists(workDir, 'rebase-merge', signal, opts),
+    probePathExists(workDir, 'rebase-apply', signal, opts),
+    probePathExists(workDir, 'MERGE_HEAD', signal, opts),
+    probePathExists(workDir, 'CHERRY_PICK_HEAD', signal, opts),
   ])
   return {
     residual: {
@@ -285,10 +310,15 @@ async function probeResidual(workDir: string, signal: AbortSignal, opts?: GitOpt
   }
 }
 
-async function probePathExists(workDir: string, gitPath: string, signal: AbortSignal, opts?: GitOptions): Promise<{ exists: boolean; failure: WorkspaceProbeFailure | null }> {
-  const result = await git(workDir, ["rev-parse", "--git-path", gitPath], signal, opts)
+async function probePathExists(
+  workDir: string,
+  gitPath: string,
+  signal: AbortSignal,
+  opts?: GitOptions,
+): Promise<{ exists: boolean; failure: WorkspaceProbeFailure | null }> {
+  const result = await git(workDir, ['rev-parse', '--git-path', gitPath], signal, opts)
   if (!result.success) {
-    return { exists: false, failure: gitFailure("residual", `git rev-parse --git-path ${gitPath}`, result) }
+    return { exists: false, failure: gitFailure('residual', `git rev-parse --git-path ${gitPath}`, result) }
   }
   return { exists: pathExists(resolveGitPath(workDir, result.stdout.trim())), failure: null }
 }

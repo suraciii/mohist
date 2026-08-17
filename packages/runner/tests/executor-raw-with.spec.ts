@@ -161,64 +161,67 @@ describe('WorkExecutor action input boundary', () => {
   // non-git runner so the boundary invariant holds.
   vitestIt('assembles only namespaced dispatch roots and resolved workspace fields', async () => {
     const workDir = '/virtual/executor-raw-with'
-    await withTestRunnerResources(async () => {
-      let capturedInputs: JsonObject | null = null
-      const registry = new ActionRegistry([
-        defineTestAction(
-          'test/context-roots',
-          async (inputs) => {
-            capturedInputs = inputs
-            return { output: null }
-          },
+    await withTestRunnerResources(
+      async () => {
+        let capturedInputs: JsonObject | null = null
+        const registry = new ActionRegistry([
+          defineTestAction(
+            'test/context-roots',
+            async (inputs) => {
+              capturedInputs = inputs
+              return { output: null }
+            },
+            {
+              inputs: { context: { types: ['object'] } },
+            },
+          ),
+        ])
+        const executor = new WorkExecutor(
+          registry,
+          verifyOnlyWorkspaceManager({ path: workDir, branch: 'main' }),
+          {} as never,
+          workDir,
+        )
+
+        const result = await executor.execute(
           {
-            inputs: { context: { types: ['object'] } },
+            workflowRunId: 'wf-context-roots',
+            workId: 'work-context-roots',
+            workType: 'task',
+            uses: 'test/context-roots',
+            with: {
+              context: { value: '${{ vars.foo }}', path: '${{ workspace.path }}', branch: '${{ workspace.branch }}' },
+            },
+            variables: {
+              foo: 'bare',
+              runner: { os: 'fake' },
+              failure: { output: 'not available' },
+              workspace: { path: '/dispatch/path', branch: 'dispatch-branch' },
+              vars: { foo: 'namespaced' },
+            },
           },
-        ),
-      ])
-      const executor = new WorkExecutor(
-        registry,
-        verifyOnlyWorkspaceManager({ path: workDir, branch: 'main' }),
-        {} as never,
-        workDir,
-      )
+          new AbortController().signal,
+        )
 
-      const result = await executor.execute(
-        {
-          workflowRunId: 'wf-context-roots',
-          workId: 'work-context-roots',
-          workType: 'task',
-          uses: 'test/context-roots',
-          with: {
-            context: { value: '${{ vars.foo }}', path: '${{ workspace.path }}', branch: '${{ workspace.branch }}' },
+        expect(result.status).toBe('completed')
+        expect(capturedInputs).toEqual({ context: { value: 'namespaced', path: workDir, branch: 'main' } })
+
+        const unavailable = await executor.execute(
+          {
+            workflowRunId: 'wf-context-roots',
+            workId: 'work-context-roots-fail',
+            workType: 'task',
+            uses: 'test/context-roots',
+            with: { context: { value: '${{ foo }}' } },
+            variables: { foo: 'bare', vars: { foo: 'namespaced' }, workspace: { path: workDir } },
           },
-          variables: {
-            foo: 'bare',
-            runner: { os: 'fake' },
-            failure: { output: 'not available' },
-            workspace: { path: '/dispatch/path', branch: 'dispatch-branch' },
-            vars: { foo: 'namespaced' },
-          },
-        },
-        new AbortController().signal,
-      )
-
-      expect(result.status).toBe('completed')
-      expect(capturedInputs).toEqual({ context: { value: 'namespaced', path: workDir, branch: 'main' } })
-
-      const unavailable = await executor.execute(
-        {
-          workflowRunId: 'wf-context-roots',
-          workId: 'work-context-roots-fail',
-          workType: 'task',
-          uses: 'test/context-roots',
-          with: { context: { value: '${{ foo }}' } },
-          variables: { foo: 'bare', vars: { foo: 'namespaced' }, workspace: { path: workDir } },
-        },
-        new AbortController().signal,
-      )
-      expect(unavailable.status).toBe('failed')
-      expect(unavailable.message).toContain('${{ foo }}')
-    }, { gitRunner: cleanMainRunner })
+          new AbortController().signal,
+        )
+        expect(unavailable.status).toBe('failed')
+        expect(unavailable.message).toContain('${{ foo }}')
+      },
+      { gitRunner: cleanMainRunner },
+    )
   })
 
   it('derives optional engine-sourced inputs from the dispatch snapshot', async (workDir) => {

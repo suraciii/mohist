@@ -4,7 +4,15 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { JsonObject, DispatchWorkItem } from '../core/types.js'
 import { getSegments, stringAt } from '../core/json-path.js'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../actions/git.js'
-import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from '../system/process.js'
+import {
+  deleteDirectory,
+  ensureDir,
+  exists,
+  readText,
+  runCommand,
+  writeText,
+  type CommandResult,
+} from '../system/process.js'
 import { currentRunnerFileSystem, type RunnerDirectoryHandle } from '../system/filesystem.js'
 import type { WorkspaceBindingIdentity, WorkspaceRegistry } from './workspace-registry.js'
 import { createCredentialMaskerFromEnvironment, type TaskLogger } from './task-log.js'
@@ -453,7 +461,14 @@ export class WorkspaceManager {
     }
     const evaluation = evaluateWorkspaceHealth(verify, runBranch)
     if (!evaluation.healthy) {
-      throw this.healthFailure(displayPath, runBranch, verify, 'verify', `health verification failed: ${evaluation.condition}`, 1)
+      throw this.healthFailure(
+        displayPath,
+        runBranch,
+        verify,
+        'verify',
+        `health verification failed: ${evaluation.condition}`,
+        1,
+      )
     }
   }
 
@@ -472,7 +487,14 @@ export class WorkspaceManager {
     const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
 
     if (residual.rebaseMerge || residual.rebaseApply) {
-      const abort = await runCommand('git', ['-C', workspacePath, 'rebase', '--abort'], workspacePath, signal, undefined, lineOptions)
+      const abort = await runCommand(
+        'git',
+        ['-C', workspacePath, 'rebase', '--abort'],
+        workspacePath,
+        signal,
+        undefined,
+        lineOptions,
+      )
       if (abort.exitCode !== 0) {
         throw this.healthFailure(
           displayPath,
@@ -497,7 +519,14 @@ export class WorkspaceManager {
     }
 
     if (residual.mergeHead) {
-      const abort = await runCommand('git', ['-C', workspacePath, 'merge', '--abort'], workspacePath, signal, undefined, lineOptions)
+      const abort = await runCommand(
+        'git',
+        ['-C', workspacePath, 'merge', '--abort'],
+        workspacePath,
+        signal,
+        undefined,
+        lineOptions,
+      )
       if (abort.exitCode !== 0) {
         throw this.healthFailure(
           displayPath,
@@ -522,7 +551,14 @@ export class WorkspaceManager {
     }
 
     if (residual.cherryPickHead) {
-      const abort = await runCommand('git', ['-C', workspacePath, 'cherry-pick', '--abort'], workspacePath, signal, undefined, lineOptions)
+      const abort = await runCommand(
+        'git',
+        ['-C', workspacePath, 'cherry-pick', '--abort'],
+        workspacePath,
+        signal,
+        undefined,
+        lineOptions,
+      )
       if (abort.exitCode !== 0) {
         throw this.healthFailure(
           displayPath,
@@ -559,7 +595,14 @@ export class WorkspaceManager {
     const sink = workspacePrepSink(log)
     const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
     const [branchResult, headResult, statusResult, residual] = await Promise.all([
-      runCommand('git', ['-C', workspacePath, 'rev-parse', '--abbrev-ref', 'HEAD'], '.', signal, undefined, lineOptions),
+      runCommand(
+        'git',
+        ['-C', workspacePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+        '.',
+        signal,
+        undefined,
+        lineOptions,
+      ),
       runCommand('git', ['-C', workspacePath, 'rev-parse', 'HEAD'], '.', signal, undefined, lineOptions),
       runCommand('git', ['-C', workspacePath, 'status', '--porcelain'], '.', signal, undefined, lineOptions),
       this.detectResidualState(workspacePath, signal),
@@ -573,13 +616,14 @@ export class WorkspaceManager {
       commit: headResult.exitCode === 0 ? headResult.stdout.trim() : '',
       ref,
     }
-    const probeFailure = branchResult.exitCode !== 0
-      ? this.gitProbeFailure('head-ref', 'git rev-parse --abbrev-ref HEAD', branchResult, workspacePath, displayPath)
-      : headResult.exitCode !== 0
-        ? this.gitProbeFailure('head', 'git rev-parse HEAD', headResult, workspacePath, displayPath)
-        : statusResult.exitCode !== 0
-          ? this.gitProbeFailure('status', 'git status --porcelain', statusResult, workspacePath, displayPath)
-          : null
+    const probeFailure =
+      branchResult.exitCode !== 0
+        ? this.gitProbeFailure('head-ref', 'git rev-parse --abbrev-ref HEAD', branchResult, workspacePath, displayPath)
+        : headResult.exitCode !== 0
+          ? this.gitProbeFailure('head', 'git rev-parse HEAD', headResult, workspacePath, displayPath)
+          : statusResult.exitCode !== 0
+            ? this.gitProbeFailure('status', 'git status --porcelain', statusResult, workspacePath, displayPath)
+            : null
     return {
       residual,
       head,
@@ -611,19 +655,30 @@ export class WorkspaceManager {
         this.probeFailureThrow(displayPath, runBranch, snapshot)
       }
       if (!isResidualFree(snapshot.residual)) {
-        throw this.healthFailure(displayPath, runBranch, snapshot, 'verify', 'residual operation state remains after abort', 1)
+        throw this.healthFailure(
+          displayPath,
+          runBranch,
+          snapshot,
+          'verify',
+          'residual operation state remains after abort',
+          1,
+        )
       }
     }
     const evaluation = evaluateWorkspaceHealth(snapshot, runBranch)
     if (!evaluation.healthy) {
-      throw this.healthFailure(displayPath, runBranch, snapshot, 'verify', `health verification failed: ${evaluation.condition}`, 1)
+      throw this.healthFailure(
+        displayPath,
+        runBranch,
+        snapshot,
+        'verify',
+        `health verification failed: ${evaluation.condition}`,
+        1,
+      )
     }
   }
 
-  private async detectResidualState(
-    workspacePath: string,
-    _signal: AbortSignal,
-  ): Promise<WorkspaceResidualState> {
+  private async detectResidualState(workspacePath: string, _signal: AbortSignal): Promise<WorkspaceResidualState> {
     return {
       rebaseMerge: exists(join(workspacePath, '.git', 'rebase-merge')),
       rebaseApply: exists(join(workspacePath, '.git', 'rebase-apply')),
@@ -655,7 +710,11 @@ export class WorkspaceManager {
     detail: string | undefined,
     exitCode: number | null,
   ): WorkspaceBranchMismatchError {
-    const observedBranch = snapshot.probeFailure ? null : observedBranchLabel(snapshot) === '(detached)' ? null : observedBranchLabel(snapshot)
+    const observedBranch = snapshot.probeFailure
+      ? null
+      : observedBranchLabel(snapshot) === '(detached)'
+        ? null
+        : observedBranchLabel(snapshot)
     const observedRef = snapshot.probeFailure ? null : observedRefLabel(snapshot)
     return new WorkspaceBranchMismatchError(
       workspaceHealthDiagnostic({ operation, expectedBranch: runBranch, snapshot, detail }),
@@ -669,7 +728,14 @@ export class WorkspaceManager {
 
   private probeFailureThrow(displayPath: string, runBranch: string, snapshot: WorkspaceHealthSnapshot): never {
     const failure = snapshot.probeFailure
-    throw this.healthFailure(displayPath, runBranch, snapshot, failure?.step ?? 'probe', undefined, failure?.exitCode ?? null)
+    throw this.healthFailure(
+      displayPath,
+      runBranch,
+      snapshot,
+      failure?.step ?? 'probe',
+      undefined,
+      failure?.exitCode ?? null,
+    )
   }
 
   private assertExistingBinding(expected: WorkspaceBindingIdentity): void {

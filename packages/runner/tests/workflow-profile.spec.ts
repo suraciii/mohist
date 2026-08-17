@@ -1,13 +1,13 @@
-import { describe, expect, it } from "vitest"
-import { withTestRunnerResources } from "./support/test-resources.js"
+import { describe, expect, it } from 'vitest'
+import { withTestRunnerResources } from './support/test-resources.js'
 
 const profileFiles = {
-  "mohist/local": "/virtual/profiles/mohist-local.workflow.yaml",
-  "mohist/github-pr": "/virtual/profiles/mohist-github-pr.workflow.yaml",
+  'mohist/local': '/virtual/profiles/mohist-local.workflow.yaml',
+  'mohist/github-pr': '/virtual/profiles/mohist-github-pr.workflow.yaml',
 } as const
 
 const profileFixtures: Record<keyof typeof profileFiles, string> = {
-  "mohist/local": `approval:
+  'mohist/local': `approval:
   feedback:
     tasks:
       - id: apply-feedback
@@ -64,7 +64,7 @@ stages:
           target: \${{ repository.baseBranch }}
       - id: integrate:health
 `,
-  "mohist/github-pr": `approval:
+  'mohist/github-pr': `approval:
   feedback:
     tasks:
       - id: apply-feedback
@@ -107,20 +107,22 @@ stages:
 }
 
 async function readProfile(path: string): Promise<string> {
-  const fixture = Object.entries(profileFiles).find(([, fixturePath]) => fixturePath === path)?.[0] as keyof typeof profileFiles | undefined
+  const fixture = Object.entries(profileFiles).find(([, fixturePath]) => fixturePath === path)?.[0] as
+    | keyof typeof profileFiles
+    | undefined
   if (!fixture) throw new Error(`unknown profile fixture path: ${path}`)
   return await withTestRunnerResources(async (fileSystem) => {
     try {
       await fileSystem.writeText(path, profileFixtures[fixture])
       return await fileSystem.readText(path)
     } finally {
-      await fileSystem.deleteDirectory("/virtual/profiles")
-      if (fileSystem.exists("/virtual/profiles")) throw new Error("profile fixture directory was not cleaned")
+      await fileSystem.deleteDirectory('/virtual/profiles')
+      if (fileSystem.exists('/virtual/profiles')) throw new Error('profile fixture directory was not cleaned')
     }
   })
 }
 
-const allStages = ["plan", "build", "check", "integrate"] as const
+const allStages = ['plan', 'build', 'check', 'integrate'] as const
 
 function sliceStage(yaml: string, stageName: string): string {
   const startMarker = `  - stage: ${stageName}`
@@ -138,11 +140,11 @@ function sliceStage(yaml: string, stageName: string): string {
 }
 
 function sliceStageTasksList(stageBody: string): string {
-  const tasksStart = stageBody.indexOf("\n    tasks:\n")
-  if (tasksStart < 0) return ""
-  const after = stageBody.slice(tasksStart + "\n    tasks:\n".length)
+  const tasksStart = stageBody.indexOf('\n    tasks:\n')
+  if (tasksStart < 0) return ''
+  const after = stageBody.slice(tasksStart + '\n    tasks:\n'.length)
 
-  const checksIdx = after.indexOf("\n    checks:")
+  const checksIdx = after.indexOf('\n    checks:')
   const end = checksIdx >= 0 ? checksIdx : after.length
   return after.slice(0, end)
 }
@@ -173,7 +175,8 @@ function collectRecoverySections(yaml: string): string[] {
     sections.push(match[1])
   }
 
-  const repairTaskRegex = /\n\s+repairTask:\n([\s\S]*?)(?=\n\s+repairTask:|\n\s*-\s+name:|\n\s+checks:|\n\s*-\s+stage:|$)/g
+  const repairTaskRegex =
+    /\n\s+repairTask:\n([\s\S]*?)(?=\n\s+repairTask:|\n\s*-\s+name:|\n\s+checks:|\n\s*-\s+stage:|$)/g
   for (const match of yaml.matchAll(repairTaskRegex)) {
     sections.push(match[1])
   }
@@ -183,7 +186,7 @@ function collectRecoverySections(yaml: string): string[] {
 
 for (const [profileId, path] of Object.entries(profileFiles)) {
   describe(`${profileId} workflow profile`, () => {
-    it("parses as a non-empty UTF-8 file", async () => {
+    it('parses as a non-empty UTF-8 file', async () => {
       const yaml = await readProfile(path)
       expect(yaml.length).toBeGreaterThan(0)
     })
@@ -192,73 +195,76 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
       it(`first task of ${stageName} stage is workspace-prepare`, async () => {
         const yaml = await readProfile(path)
         const stage = sliceStage(yaml, stageName)
-        expect(firstStageTaskId(stage)).toBe("workspace-prepare")
-        expect(stage).toContain("expectedBranch: ${{ workspace.branch }}")
+        expect(firstStageTaskId(stage)).toBe('workspace-prepare')
+        expect(stage).toContain('expectedBranch: ${{ workspace.branch }}')
       })
 
       it(`workspace-prepare appears exactly once in ${stageName} stage task list`, async () => {
         const yaml = await readProfile(path)
         const stage = sliceStage(yaml, stageName)
         const tasksList = sliceStageTasksList(stage)
-        expect(countOccurrences(tasksList, "id: workspace-prepare")).toBe(1)
+        expect(countOccurrences(tasksList, 'id: workspace-prepare')).toBe(1)
       })
     }
 
-    it("does not inject workspace-prepare into any recovery or repairTask sequence", async () => {
+    it('does not inject workspace-prepare into any recovery or repairTask sequence', async () => {
       const yaml = await readProfile(path)
       const recoverySections = collectRecoverySections(yaml)
 
       expect(recoverySections.length).toBeGreaterThan(0)
 
       for (const section of recoverySections) {
-        expect(section).not.toContain("id: workspace-prepare")
+        expect(section).not.toContain('id: workspace-prepare')
       }
     })
   })
 }
 
-describe("mohist local workflow profile", () => {
-  it("IntegrateStage_UsesRebaseSquashThenPushWithoutPreparePublish", async () => {
-    const yaml = await readProfile(profileFiles["mohist/local"])
-    const integrate = yaml.slice(yaml.indexOf("  - stage: integrate"))
+describe('mohist local workflow profile', () => {
+  it('IntegrateStage_UsesRebaseSquashThenPushWithoutPreparePublish', async () => {
+    const yaml = await readProfile(profileFiles['mohist/local'])
+    const integrate = yaml.slice(yaml.indexOf('  - stage: integrate'))
 
-    expect(integrate).toContain("id: integrate:archive-change")
-    expect(integrate).toContain("id: integrate:rebase")
-    expect(integrate).toContain("uses: mohist/rebase")
-    expect(integrate).toContain("remote: origin")
-    expect(integrate).toContain("squash: true")
-    expect(integrate).toContain("messageFrom: issue.title")
-    expect(integrate).toContain("id: integrate:push")
-    expect(integrate).toContain("uses: mohist/push")
-    expect(integrate).toContain("source: ${{ workspace.branch }}")
-    expect(integrate).toContain("target: ${{ repository.baseBranch }}")
-    expect(integrate).not.toContain("mohist/prepare")
-    expect(integrate).not.toContain("mohist/publish")
-    expect(integrate.indexOf("id: integrate:rebase")).toBeLessThan(integrate.indexOf("id: integrate:push"))
-    expect(integrate.indexOf("id: integrate:push")).toBeLessThan(integrate.indexOf("id: integrate:health"))
+    expect(integrate).toContain('id: integrate:archive-change')
+    expect(integrate).toContain('id: integrate:rebase')
+    expect(integrate).toContain('uses: mohist/rebase')
+    expect(integrate).toContain('remote: origin')
+    expect(integrate).toContain('squash: true')
+    expect(integrate).toContain('messageFrom: issue.title')
+    expect(integrate).toContain('id: integrate:push')
+    expect(integrate).toContain('uses: mohist/push')
+    expect(integrate).toContain('source: ${{ workspace.branch }}')
+    expect(integrate).toContain('target: ${{ repository.baseBranch }}')
+    expect(integrate).not.toContain('mohist/prepare')
+    expect(integrate).not.toContain('mohist/publish')
+    expect(integrate.indexOf('id: integrate:rebase')).toBeLessThan(integrate.indexOf('id: integrate:push'))
+    expect(integrate.indexOf('id: integrate:push')).toBeLessThan(integrate.indexOf('id: integrate:health'))
   })
 
-  it("IntegrateStage_RebaseDoesNotDeclareExpectedBranch_EngineInjectsFromWorkspaceBranch", async () => {
-    const yaml = await readProfile(profileFiles["mohist/local"])
-    const integrate = yaml.slice(yaml.indexOf("  - stage: integrate"))
-    const rebaseTask = integrate.slice(integrate.indexOf("id: integrate:rebase"), integrate.indexOf("id: integrate:push"))
+  it('IntegrateStage_RebaseDoesNotDeclareExpectedBranch_EngineInjectsFromWorkspaceBranch', async () => {
+    const yaml = await readProfile(profileFiles['mohist/local'])
+    const integrate = yaml.slice(yaml.indexOf('  - stage: integrate'))
+    const rebaseTask = integrate.slice(
+      integrate.indexOf('id: integrate:rebase'),
+      integrate.indexOf('id: integrate:push'),
+    )
 
-    expect(rebaseTask).toContain("uses: mohist/rebase")
+    expect(rebaseTask).toContain('uses: mohist/rebase')
     // The expected run branch is engine-sourced from workspace.branch; the
     // profile must not declare a second branch for the rebase task and
     // must not treat baseBranch as the workspace identity.
-    expect(rebaseTask).not.toContain("expectedBranch")
-    expect(rebaseTask).toContain("remote: origin")
-    expect(rebaseTask).toContain("squash: true")
+    expect(rebaseTask).not.toContain('expectedBranch')
+    expect(rebaseTask).toContain('remote: origin')
+    expect(rebaseTask).toContain('squash: true')
   })
 
-  it("CheckStage_MergeReadyBindsAllGitInputs", async () => {
-    const yaml = await readProfile(profileFiles["mohist/local"])
-    const check = sliceStage(yaml, "check")
+  it('CheckStage_MergeReadyBindsAllGitInputs', async () => {
+    const yaml = await readProfile(profileFiles['mohist/local'])
+    const check = sliceStage(yaml, 'check')
 
-    expect(check).toContain("uses: mohist/merge-ready")
-    expect(check).toContain("baseBranch: ${{ repository.baseBranch }}")
-    expect(check).toContain("source: ${{ workspace.branch }}")
-    expect(check).toContain("remote: origin")
+    expect(check).toContain('uses: mohist/merge-ready')
+    expect(check).toContain('baseBranch: ${{ repository.baseBranch }}')
+    expect(check).toContain('source: ${{ workspace.branch }}')
+    expect(check).toContain('remote: origin')
   })
 })
