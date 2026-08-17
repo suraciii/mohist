@@ -1,0 +1,91 @@
+{
+  "project": "mohist-local",
+  "description": "Replace aggregate build verification with six ordered, independently bounded lanes whose results are durable and recoverable without repeating downstream workflow effects.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Persist verification lane evidence and enforce the build-stage gate",
+      "spec": "specs/verification-lanes/spec.md#lane-outcomes-are-durable-and-gate-stage-advancement",
+      "description": "Add the built-in six-lane catalog and additive verification metadata to Server workflow task attempts, including stable lane identity, order, configured budget, pass/fail/timeout outcome, attempt identity, and diagnostics. Classify existing task reports at the verification boundary, expose all lane states through the build-stage status projection, and make ordered dispatch and stage advancement require every required lane to have a durable pass without adding a generic third task report status.",
+      "acceptanceCriteria": [
+        "The Server catalog contains exactly the six stable lane IDs in declared order: verify-install, verify-dotnet, verify-web-typecheck, verify-web-tests, verify-runner-typecheck, and verify-runner-tests.",
+        "Each recognized lane attempt persists its lane ID, order, configured positive finite budget, outcome, TaskRun/WorkId identity, and failure or timeout diagnostics in the same state transition as the normal task result.",
+        "A successful script report classifies as pass, a normal script failure classifies as fail, and an error with code timeout classifies as timeout while TaskReportStatus remains limited to its existing protocol states.",
+        "Reloaded workflow status projects all six lanes, including pending or missing lanes, and preserves pass, fail, and timeout evidence and diagnostics; legacy workflow state without lane fields remains readable.",
+        "NextWork exposes verification lanes only in catalog order, does not expose a later lane before its predecessor passes, and the build stage cannot advance while any required lane is pending, missing, failed, or timed out.",
+        "Server unit and specification tests cover report classification, durable serialization and reload, status projection, ordered dispatch, all-pass gating, and compatibility with legacy state.",
+        "The affected Server test suites pass with warnings treated as errors."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server workflow lane catalog, durable TaskRun lane metadata, build-stage lane status projection, ordered verification gate, and passing Server lane-state tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use existing StageRun, TaskRun, WorkId, report fencing, and workflow serialization boundaries. Keep lane timeout as verification metadata rather than introducing TaskReportStatus.Timeout."
+    },
+    {
+      "id": "T-002",
+      "title": "Enforce lane-scoped script budgets and journal terminal results",
+      "spec": "specs/verification-recovery/spec.md#runner-timeout-and-result-reporting-are-lane-scoped",
+      "description": "Ensure the Runner passes each core/script lane budget to runCommand, terminates the command process group at that budget, and returns a structured timeout failure that the Server can attribute to the lane. Preserve exact terminal results in WorkResultJournal across persistence or report-delivery failures, retry delivery, and keep the work identity fenced so the same lane is never executed twice.",
+      "acceptanceCriteria": [
+        "A core/script invocation with a positive finite timeout passes that value to runCommand, and an over-budget command is process-group terminated with a timeout result rather than runner loss.",
+        "The timeout action result uses error code timeout and retains the lane command outcome and diagnostics needed by the Server lane projection; successful and ordinary failed scripts retain their existing strict behavior.",
+        "WorkResultJournal persists a returned lane result before report delivery, retains the exact result when persistence or delivery is unavailable, retries it later, and prevents a second execution for the same workflow work identity.",
+        "Runner tests cover timeout propagation, process-group termination, timeout error mapping, report retry, restart recovery, and duplicate-execution fencing.",
+        "Runner typecheck and the focused Runner action, process, host-reporting, host-recovery, and journal test suites pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Lane-scoped Runner timeout/reporting behavior with durable WorkResultJournal fencing and passing Runner execution and journal tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep existing process-group termination, result protocol, resource containment, and Runner slot policy unchanged."
+    },
+    {
+      "id": "T-003",
+      "title": "Replace aggregate CI verification with six bounded built-in lanes",
+      "spec": "specs/verification-lanes/spec.md#built-in-workflows-execute-verification-as-ordered-lanes",
+      "description": "Update the build stages in the built-in mohist/local and mohist/github-pr workflow profiles to use six stable core/script tasks in the required order. Give every lane an explicit positive finite timeout, preserve the exact existing commands and test scope, remove the aggregate vars.ci.verify task and former 300000 millisecond enclosing timeout, and extend profile contract tests to validate the rollout.",
+      "acceptanceCriteria": [
+        "Both built-in profile YAML files define verify-install, verify-dotnet, verify-web-typecheck, verify-web-tests, verify-runner-typecheck, and verify-runner-tests as ordered core/script tasks in the build stage.",
+        "The six task run values are exactly npm ci; dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false; npm run typecheck -w packages/web; npm run test:run -w packages/web; npm run typecheck -w packages/runner; and npm run test:run -w packages/runner -- --no-file-parallelism, respectively.",
+        "Every lane declares a literal positive finite timeout, the old aggregate 300000 millisecond timeout is absent from the build verification gate, and no timeout encloses all six lanes.",
+        "The built-in profiles do not add skips, allowlists, reduced test scopes, altered thresholds, resource-containment settings, or Runner slot-policy changes; the aggregate vars.ci.verify task is no longer referenced by the gate.",
+        "Profile definition and Runner workflow-profile tests inspect both built-in profiles for lane IDs, exact command strings, ordering, finite budgets, and absence of the aggregate timeout.",
+        "Both built-in profiles parse and validate successfully, and the affected profile contract tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated mohist-local.workflow.yaml and mohist-github-pr.workflow.yaml with six ordered bounded verification tasks and passing profile contract tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "The profile YAML remains authoritative for command text and timeout values. Retain or deprecate the unused project variable only according to the rollout decision; it must not remain part of the built-in gate."
+    },
+    {
+      "id": "T-004",
+      "title": "Recover the first non-passing lane without repeating downstream effects",
+      "spec": "specs/verification-recovery/spec.md#recovery-resumes-at-the-first-lane-without-a-durable-pass",
+      "description": "Extend Server recovery to preserve completed lane evidence and the original failed or timed-out diagnostics, create one new attempt for the first lane without a durable pass, and keep later lanes blocked until ordered recovery succeeds. Reconcile repeated recovery requests and stale reports against durable task/work identities, then verify through built-in workflow execution that downstream push, review, and merge work remains ordered and runs only once after all six lanes pass.",
+      "acceptanceCriteria": [
+        "When a later lane fails or times out, every earlier durable pass remains unchanged, the blocking lane retains its original outcome and diagnostics, and all later lanes remain pending or unstarted.",
+        "Recovery selects the first catalog lane whose authoritative outcome is not pass, creates a new attempt for that lane, does not rerun earlier passing lanes, and does not dispatch later lanes before the target and its predecessors pass.",
+        "Repeated recovery requests reconcile to one active or completed recovery attempt for the same durable identity; a late report from an old failed or timed-out attempt is acknowledged as stale and cannot overwrite the newer lane result.",
+        "The build gate remains closed until all six lanes have durable pass outcomes, and after recovery succeeds the existing downstream push, review, and merge task identities each have one durable completion with no duplicate side effects.",
+        "Server recovery tests cover preservation after a second-lane timeout, failed-lane repair diagnostics, first-non-passing selection, duplicate recovery, stale reports, and downstream gating.",
+        "End-to-end workflow tests cover a clean six-lane run and a timeout after an earlier pass for both built-in workflow profiles, including report-delivery retry and repeated recovery without duplicate downstream execution.",
+        "The affected Server, Runner, and workflow integration test suites pass with the existing build, typecheck, and test thresholds unchanged."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Idempotent ordered lane recovery with preserved evidence, stale-report fencing, downstream side-effect protection, and passing Server/end-to-end recovery tests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Use the existing Orleans grain serialization and task/work/runner report fences. Do not rewrite active legacy aggregate runs in place; keep additive state readers compatible with stored runs that have no lane history."
+    }
+  ]
+}
