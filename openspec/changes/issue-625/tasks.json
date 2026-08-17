@@ -6,13 +6,13 @@
       "id": "T-001",
       "title": "Persist verification lane evidence and enforce the build-stage gate",
       "spec": "specs/verification-lanes/spec.md#lane-outcomes-are-durable-and-gate-stage-advancement",
-      "description": "Add the built-in six-lane catalog and additive verification metadata to Server workflow task attempts, including stable lane identity, order, configured budget, pass/fail/timeout outcome, attempt identity, and diagnostics. Classify existing task reports at the verification boundary, expose all lane states through the build-stage status projection, and make ordered dispatch and stage advancement require every required lane to have a durable pass without adding a generic third task report status.",
+      "description": "Add the built-in six-lane catalog and additive verification metadata to Server workflow task attempts, including stable lane identity, order, configured budget, pass/fail/timeout outcome, attempt identity, and diagnostics. Classify existing task reports at the verification boundary, expose all lane states through the build-stage status projection, and make ordered dispatch and stage advancement require every required lane to have a durable pass for lane-enabled runs only, without adding a generic third task report status.",
       "acceptanceCriteria": [
         "The Server catalog contains exactly the six stable lane IDs in declared order: verify-install, verify-dotnet, verify-web-typecheck, verify-web-tests, verify-runner-typecheck, and verify-runner-tests.",
         "Each recognized lane attempt persists its lane ID, order, configured positive finite budget, outcome, TaskRun/WorkId identity, and failure or timeout diagnostics in the same state transition as the normal task result.",
         "A successful script report classifies as pass, a normal script failure classifies as fail, and an error with code timeout classifies as timeout while TaskReportStatus remains limited to its existing protocol states.",
-        "Reloaded workflow status projects all six lanes, including pending or missing lanes, and preserves pass, fail, and timeout evidence and diagnostics; legacy workflow state without lane fields remains readable.",
-        "NextWork exposes verification lanes only in catalog order, does not expose a later lane before its predecessor passes, and the build stage cannot advance while any required lane is pending, missing, failed, or timed out.",
+        "Reloaded workflow status projects all six lanes for lane-enabled runs, including pending or missing lanes, and preserves pass, fail, and timeout evidence and diagnostics; legacy workflow state without lane fields remains readable and is not made to wait for synthesized lanes.",
+        "For a lane-enabled run, NextWork exposes verification lanes only in catalog order, does not expose a later lane before its predecessor passes, and the build stage cannot advance while any required lane is pending, missing, failed, or timed out; a legacy aggregate run keeps its existing dispatch and gate behavior.",
         "Server unit and specification tests cover report classification, durable serialization and reload, status projection, ordered dispatch, all-pass gating, and compatibility with legacy state.",
         "The affected Server test suites pass with warnings treated as errors."
       ],
@@ -48,14 +48,15 @@
       "id": "T-003",
       "title": "Replace aggregate CI verification with six bounded built-in lanes",
       "spec": "specs/verification-lanes/spec.md#built-in-workflows-execute-verification-as-ordered-lanes",
-      "description": "Update the build stages in the built-in mohist/local and mohist/github-pr workflow profiles to use six stable core/script tasks in the required order. Give every lane an explicit positive finite timeout, preserve the exact existing commands and test scope, remove the aggregate vars.ci.verify task and former 300000 millisecond enclosing timeout, and extend profile contract tests to validate the rollout.",
+      "description": "Update the build stages in the built-in mohist/local and mohist/github-pr workflow profiles to use six stable core/script tasks in the required order. Give every lane an explicit positive finite timeout, preserve the exact existing commands and test scope, remove the aggregate vars.ci.verify task and former 300000 millisecond enclosing timeout, attach the existing profile-specific fix-ci recovery declaration to every lane, and extend profile contract tests to validate the rollout.",
       "acceptanceCriteria": [
         "Both built-in profile YAML files define verify-install, verify-dotnet, verify-web-typecheck, verify-web-tests, verify-runner-typecheck, and verify-runner-tests as ordered core/script tasks in the build stage.",
         "The six task run values are exactly npm ci; dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false; npm run typecheck -w packages/web; npm run test:run -w packages/web; npm run typecheck -w packages/runner; and npm run test:run -w packages/runner -- --no-file-parallelism, respectively.",
         "Every lane declares a literal positive finite timeout, the old aggregate 300000 millisecond timeout is absent from the build verification gate, and no timeout encloses all six lanes.",
         "The built-in profiles do not add skips, allowlists, reduced test scopes, altered thresholds, resource-containment settings, or Runner slot-policy changes; the aggregate vars.ci.verify task is no longer referenced by the gate.",
-        "Profile definition and Runner workflow-profile tests inspect both built-in profiles for lane IDs, exact command strings, ordering, finite budgets, and absence of the aggregate timeout.",
-        "Both built-in profiles parse and validate successfully, and the affected profile contract tests pass."
+        "Profile definition and Runner workflow-profile tests inspect both built-in profiles for lane IDs, exact command strings, ordering, finite budgets, absence of the aggregate timeout, and the same profile-specific fix-ci recovery declaration on every lane.",
+        "Both built-in profiles parse and validate successfully, and the affected profile contract tests pass.",
+        "The rollout contract identifies lane-enabled mode from the persisted bound definition, so legacy aggregate runs and runs initialized from an old definition during deployment remain on the legacy path without task rewrites, synthesized missing lanes, or reruns."
       ],
       "priority": 2,
       "mode": "AFK",

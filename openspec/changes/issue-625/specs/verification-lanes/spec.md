@@ -1,3 +1,18 @@
+### Requirement: Lane gating is scoped to the persisted workflow definition
+The Server SHALL determine whether the lane gate applies from the immutable workflow definition bound when the run is initialized. A run is lane-enabled only when its build stage contains the complete six-lane sequence in the declared order. A legacy run whose bound definition contains the aggregate `verify` task SHALL retain its existing aggregate dispatch, recovery, and stage-gate behavior; the Server SHALL NOT synthesize missing lane state, rewrite its task attempts, or make it wait for the new lanes.
+
+#### Scenario: Legacy aggregate runs are outside the lane gate
+- **WHEN** a run is loaded with a bound build definition containing the aggregate `verify` task and no six-lane sequence
+- **THEN** the Server uses the existing aggregate task behavior
+- **AND** it does not create six missing lane blockers
+- **AND** it does not mutate or rerun the historical aggregate task as part of lane activation
+
+#### Scenario: Runs initialized from the new definition use the lane gate
+- **WHEN** a run is initialized with a bound build definition containing the complete six-lane sequence
+- **THEN** the run is lane-enabled
+- **AND** the Server applies ordered lane dispatch and the all-lanes-pass gate to that run
+- **AND** a profile or Server deployment change cannot change the run's mode after initialization
+
 ### Requirement: Built-in workflows execute verification as ordered lanes
 The built-in `mohist/local` and `mohist/github-pr` build stages SHALL represent verification as six ordered, independently reportable lanes. The lanes SHALL run in this order: dependency installation with `npm ci`; .NET verification with `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false`; Web typecheck with `npm run typecheck -w packages/web`; Web tests with `npm run test:run -w packages/web`; Runner typecheck with `npm run typecheck -w packages/runner`; and Runner tests with `npm run test:run -w packages/runner -- --no-file-parallelism`. A later lane SHALL NOT begin until the preceding lane has passed.
 

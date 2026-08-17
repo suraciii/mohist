@@ -53,9 +53,11 @@ The existing system already provides the needed durability boundaries: `StageRun
 
 4. **Make the build gate explicitly require all lane passes.**
 
-   Stage advancement will retain the existing serial task behavior and additionally require the built-in verification lane catalog to contain six durable `pass` outcomes before the build stage can complete. A lane that is pending, missing, failed, or timed out keeps the gate closed. `NextWork` exposes only the first pending lane or its recovery work, so later verification tasks cannot be claimed out of order.
+   Stage advancement will retain the existing serial task behavior and additionally require the built-in verification lane catalog to contain six durable `pass` outcomes before the build stage can complete, but only for a lane-enabled run. A run is lane-enabled from its immutable, persisted bound workflow definition: its build stage contains the complete six-task sequence, with the recognized lane IDs in catalog order and each task using `core/script`. The check is made from the definition captured when the run was initialized, never from the currently deployed profile, so a mixed-version rollout cannot change a run's mode.
 
-   Checking only whether tasks are terminal was considered insufficient because a failed lane may have completed a recovery helper task, and a generic task state does not distinguish a timeout from another failure. The explicit lane predicate makes the gate depend on the durable verification evidence.
+   For a lane-enabled run, a lane that is pending, missing, failed, or timed out keeps the gate closed and `NextWork` exposes only the first pending lane or its recovery work. For a legacy run whose bound definition still has the aggregate `verify` task, the lane predicate is not evaluated, no missing lane state is synthesized, and existing aggregate dispatch, recovery, and stage advancement remain unchanged. In either mode, later verification tasks cannot be claimed out of order.
+
+   Checking only whether tasks are terminal was considered insufficient because a failed lane may have completed a recovery helper task, and a generic task state does not distinguish a timeout from another failure. The explicit lane predicate makes the gate depend on durable verification evidence without making legacy aggregate runs wait for lanes that do not exist.
 
 5. **Recover by creating one new attempt for the first non-passing lane.**
 
@@ -76,19 +78,18 @@ The existing system already provides the needed durability boundaries: `StageRun
 - `[Task status and lane outcome diverge while repair work runs] -> Update lane metadata and task lifecycle in one workflow commit, and make the build gate read lane outcomes rather than task status alone.`
 - `[Runner result persistence or delivery fails after a command returns] -> Retain the exact result in `WorkResultJournal`, block duplicate execution, and retry persistence/reporting before releasing the work fence.`
 - `[The aggregate CI variable remains configured with obsolete commands] -> Remove it from the built-in gate, validate literal commands in profile tests, and retain or deprecate the variable only for compatibility during the transition.`
-- `[Existing runs have the old aggregate task and no lane history] -> Do not rewrite active task attempts in place; keep legacy runs readable and require an explicit retry/rerun policy for converting an unfinished build.`
+- `[Existing runs have the old aggregate task and no lane history] -> Select lane behavior from the immutable bound definition. Keep legacy runs on their existing aggregate path, do not synthesize missing lane state, and do not rewrite, migrate, or rerun historical task attempts as part of this change.`
 - `[Rollback downgrades code while lane runs are active] -> Keep the additive state reader and lane-aware Server deployed until active lane runs drain, or stop/rerun those runs explicitly before reverting the profile and Server behavior.`
 
 ## Migration Plan
 
-1. Add the optional lane metadata, classification, gate, status projection, and idempotent recovery handling. Keep deserialization compatible with existing workflow state that has no lane fields.
-2. Verify Runner timeout propagation and journal behavior, then deploy the Runner and Server support before enabling new profile definitions.
-3. Update `mohist-local.workflow.yaml` and `mohist-github-pr.workflow.yaml` to the six ordered tasks, remove the aggregate `verify` task and enclosing timeout, and update profile contract tests.
-4. New workflow runs use six lanes. Runs already initialized with the aggregate task keep their recorded definition/state and are not silently rewritten; operators can finish legacy recovery or explicitly rerun the build stage under the new definition according to the run-control policy.
-5. To roll back, restore the previous built-in profile definitions and stop creating new lane runs. Keep the additive fields and readers so stored lane evidence remains readable; do not discard or replay downstream work during rollback.
+1. Add the optional lane metadata, classification, gate, status projection, and idempotent recovery handling. Keep deserialization compatible with existing workflow state that has no lane fields, and make the lane-aware branch depend on the complete lane sequence in the run's persisted bound definition.
+2. Verify Runner timeout propagation and journal behavior, then deploy the compatibility-aware Runner and Server support before enabling new profile definitions. During this mixed-version window, runs initialized from either the old or new definition follow the mode recorded in their own bound definition; no run can acquire a blocking set of missing lanes merely because the Server was upgraded.
+3. Update `mohist-local.workflow.yaml` and `mohist-github-pr.workflow.yaml` to the six ordered tasks, remove the aggregate `verify` task and enclosing timeout, and update profile contract tests. New runs initialized after profile activation become lane-enabled.
+4. Runs already initialized with the aggregate task, including runs initialized during the rollout window from an old definition, keep their recorded definition and existing aggregate behavior. This change does not rewrite their tasks, synthesize lane history, migrate their state, or rerun them; they remain outside the new lane gate and use existing legacy run controls.
+5. To roll back, restore the previous built-in profile definitions for new runs but keep the compatibility-aware Server readers and lane branch deployed until existing lane-enabled runs drain. Do not mutate persisted run definitions or replay downstream work during rollback.
 
 ## Open Questions
 
 - What initial timeout values meet cold-workspace and normal-load requirements for each lane on every supported Runner environment?
 - Should `vars.ci.verify` be retained as a deprecated, unused project variable for one release, or removed from the built-in CI variable contract immediately?
-- For an already-created run with the aggregate verification task, should the supported operator path be legacy retry only, explicit build-stage rerun, or a one-time state migration before rollout?
