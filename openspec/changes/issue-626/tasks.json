@@ -22,7 +22,7 @@
       "type": "WRITE",
       "output": "Runner execution-boundary compatibility normalization with direct-redelivery and retrySelf regression coverage under packages/runner/src/runtime and packages/runner/tests.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Keep tryRecovery's raw with cloning and existing budget arithmetic intact; the normalized map is an execution-local projection, not a replacement for historical Workflow state."
     },
     {
@@ -42,7 +42,7 @@
       "type": "WRITE",
       "output": "Server replay-preservation and Workflow profile-validation regression coverage in the WorkflowItemTranslator and ActionContractValidator test suites, with any required boundary fixes.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The Server remains the authority for rejecting new parsed definitions; compatibility belongs at Runner execution so raw historical JSON stays auditable and direct replay and retrySelf share one rule."
     }
   ]

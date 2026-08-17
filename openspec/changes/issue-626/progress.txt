@@ -22,4 +22,5 @@
 - Reproduced `npm run verify`: all 3,875 Server spec tests passed, but the duration gate failed on the 5-second per-spec cap for `Enabled_ConfiguresDispatcherMeterProviderAndMetricsExporter` and `Enabled_TracerProviderBuilt_IsResolvableAndCreatesInstrumentation` in `MohistOpenTelemetryRegistrationSpecs` (5.01s and 5.00s).
 - The two tests resolved and disposed real OTLP exporter providers pointed at `collector.test`; the exporter network attempt consumed the five-second timeout. This was a test isolation defect, not an issue-626 behavior failure.
 - Updated those tests to use the existing in-memory exporter pattern with a local successful HTTP handler and simple processing. The production registration and assertions remain unchanged.
-- Focused rebuild and rerun passed all 8 registration tests in 0.224s; the full canonical gate rerun remains pending.
+- Focused rebuild and rerun passed all 8 registration tests in 0.224s; the full canonical gate rerun passed all 9 tracks with 0 failing, 0 cancelled, 0 timed out, 0 over-budget tests, and all 3,875 Server specs passing.
+- The canonical run created no Git-visible changes; both issue-626 tasks are complete.
