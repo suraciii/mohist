@@ -31,6 +31,133 @@ class FakeGitRunner {
   beforeClone: (() => Promise<void>) | null = null
   beforeRemote: (() => Promise<void>) | null = null
   private readonly branches = new Map<string, Set<string>>()
+  private readonly failures: Array<{ match: (args: string[]) => boolean; message: string; remaining: number }> = []
+  /** Current branch per workspace; null means detached. */
+  private readonly currentBranch = new Map<string, string | null>()
+  /** Commit sha used for `rev-parse HEAD` (especially when detached). */
+  private readonly detachedRef = new Map<string, string>()
+  /** Porcelain output per workspace; '' (absent) means clean. */
+  private readonly dirty = new Map<string, string>()
+  /** Residual marker filenames per workspace, mirrored as `.git` files. */
+  private readonly residualFiles = new Map<string, Set<string>>()
+  /** Markers an abort must not clear (to simulate residual re-probe failures). */
+  private readonly stubbornMarkers = new Map<string, Set<string>>()
+
+  async setBranch(path: string, branch: string | null): Promise<void> {
+    this.ensureGitDir(path)
+    const preparing = this.preparingSibling(path)
+    if (branch === null) {
+      this.currentBranch.delete(path)
+      this.currentBranch.delete(preparing)
+    } else {
+      this.currentBranch.set(path, branch)
+      this.currentBranch.set(preparing, branch)
+    }
+  }
+
+  async setDetached(path: string, ref: string): Promise<void> {
+    this.ensureGitDir(path)
+    const preparing = this.preparingSibling(path)
+    this.currentBranch.delete(path)
+    this.currentBranch.delete(preparing)
+    this.detachedRef.set(path, ref)
+    this.detachedRef.set(preparing, ref)
+  }
+
+  async setDirty(path: string, porcelain: string): Promise<void> {
+    const preparing = this.preparingSibling(path)
+    if (porcelain.trim() === "") {
+      this.dirty.delete(path)
+      this.dirty.delete(preparing)
+    } else {
+      this.dirty.set(path, porcelain)
+      this.dirty.set(preparing, porcelain)
+    }
+  }
+
+  async ensureBranch(path: string, branch: string): Promise<void> {
+    this.ensureGitDir(path)
+    let set = this.branches.get(path)
+    if (!set) {
+      set = new Set<string>()
+      this.branches.set(path, set)
+    }
+    set.add(branch)
+  }
+
+  async setResidual(path: string, markers: string[]): Promise<void> {
+    this.ensureGitDir(path)
+    const preparing = this.preparingSibling(path)
+    let set = this.residualFiles.get(path)
+    let prepSet = this.residualFiles.get(preparing)
+    if (!set) {
+      set = new Set<string>()
+      this.residualFiles.set(path, set)
+    }
+    if (!prepSet) {
+      prepSet = new Set<string>()
+      this.residualFiles.set(preparing, prepSet)
+    }
+    for (const marker of markers) {
+      set.add(marker)
+      prepSet.add(marker)
+      await currentRunnerFileSystem().writeText(join(path, ".git", marker), "ref\n")
+    }
+  }
+
+  /** Markers that an abort command will not clear, simulating a re-probe failure. */
+  async makeStubborn(path: string, markers: string[]): Promise<void> {
+    const preparing = this.preparingSibling(path)
+    let set = this.stubbornMarkers.get(path)
+    let prepSet = this.stubbornMarkers.get(preparing)
+    if (!set) {
+      set = new Set<string>()
+      this.stubbornMarkers.set(path, set)
+    }
+    if (!prepSet) {
+      prepSet = new Set<string>()
+      this.stubbornMarkers.set(preparing, prepSet)
+    }
+    for (const marker of markers) {
+      set.add(marker)
+      prepSet.add(marker)
+      await currentRunnerFileSystem().writeText(join(path, ".git", marker), "ref\n")
+    }
+  }
+
+  residualMarkers(path: string): string[] {
+    return [...(this.residualFiles.get(path) ?? [])]
+  }
+
+  /** Inject a transient command failure for `times` matching calls. */
+  failCommand(match: (args: string[]) => boolean, message: string, times = 1): void {
+    this.failures.push({ match, message, remaining: times })
+  }
+
+  private ensureGitDir(path: string): void {
+    if (!currentRunnerFileSystem().exists(join(path, ".git"))) {
+      currentRunnerFileSystem().ensureDir(join(path, ".git", "info"))
+    }
+  }
+
+  private preparingSibling(path: string): string {
+    return `${path}.preparing`
+  }
+
+  private async clearResidual(path: string, markers: string[]): Promise<void> {
+    const set = this.residualFiles.get(path)
+    const stubborn = this.stubbornMarkers.get(path)
+    if (!set) return
+    for (const marker of markers) {
+      if (stubborn?.has(marker)) continue
+      set.delete(marker)
+      try {
+        await currentRunnerFileSystem().deleteFile(join(path, ".git", marker))
+      } catch {
+        // marker file already absent
+      }
+    }
+  }
 
   async run(
     command: string,
@@ -42,6 +169,13 @@ class FakeGitRunner {
   ): Promise<CommandResult> {
     this.calls.push({ command, args: [...args], cwd, timeoutMs: _options?.timeoutMs })
     if (command !== "git") throw new Error(`Unexpected command: ${command}`)
+
+    const transient = this.failures.find((failure) => failure.match(args))
+    if (transient) {
+      transient.remaining -= 1
+      if (transient.remaining <= 0) this.failures.splice(this.failures.indexOf(transient), 1)
+      return commandResult(1, "", transient.message)
+    }
 
     if (args[0] === "ls-remote") {
       if (this.lsRemoteResult) return this.lsRemoteResult
@@ -66,6 +200,10 @@ class FakeGitRunner {
       await currentRunnerFileSystem().ensureDir(join(workspacePath, ".git", "info"))
       await currentRunnerFileSystem().writeText(join(workspacePath, "README.md"), "base\n")
       this.branches.set(workspacePath, new Set())
+      this.currentBranch.set(workspacePath, null)
+      this.detachedRef.set(workspacePath, "fake-base-sha")
+      this.dirty.delete(workspacePath)
+      this.residualFiles.delete(workspacePath)
       return commandResult(0)
     }
 
@@ -74,8 +212,46 @@ class FakeGitRunner {
     const gitArgs = args.slice(2)
     let branches = this.branches.get(workspacePath)
     if (!branches) {
-      if (!currentRunnerFileSystem().exists(join(workspacePath, ".git"))) throw new Error(`Unknown fake workspace: ${workspacePath}`)
-      branches = new Set<string>()
+      // A prior clone + atomic rename (prepare) leaves all branch/head state
+      // under the `.preparing` sibling; adopt it the first time the final
+      // stable path is addressed so `hasRunBranch` and the health probes see
+      // the same worktree the clone produced. Adoption never overwrites state
+      // a test explicitly set on the final path.
+      const preparing = `${workspacePath}.preparing`
+      if (this.branches.has(preparing)) {
+        const preparedBranches = this.branches.get(preparing)!
+        for (const branch of preparedBranches) {
+          if (!branches) {
+            branches = new Set<string>()
+            this.branches.set(workspacePath, branches)
+          }
+          branches.add(branch)
+        }
+        this.branches.delete(preparing)
+        if (!this.currentBranch.has(workspacePath) && this.currentBranch.has(preparing)) {
+          this.currentBranch.set(workspacePath, this.currentBranch.get(preparing)!)
+        }
+        this.currentBranch.delete(preparing)
+        if (!this.detachedRef.has(workspacePath) && this.detachedRef.has(preparing)) {
+          this.detachedRef.set(workspacePath, this.detachedRef.get(preparing)!)
+        }
+        this.detachedRef.delete(preparing)
+        if (!this.dirty.has(workspacePath) && this.dirty.has(preparing)) {
+          this.dirty.set(workspacePath, this.dirty.get(preparing)!)
+        }
+        this.dirty.delete(preparing)
+        if (!this.residualFiles.has(workspacePath) && this.residualFiles.has(preparing)) {
+          this.residualFiles.set(workspacePath, this.residualFiles.get(preparing)!)
+        }
+        this.residualFiles.delete(preparing)
+        if (!this.stubbornMarkers.has(workspacePath) && this.stubbornMarkers.has(preparing)) {
+          this.stubbornMarkers.set(workspacePath, this.stubbornMarkers.get(preparing)!)
+        }
+        this.stubbornMarkers.delete(preparing)
+      } else if (!currentRunnerFileSystem().exists(join(workspacePath, ".git"))) {
+        throw new Error(`Unknown fake workspace: ${workspacePath}`)
+      }
+      branches = this.branches.get(workspacePath) ?? new Set<string>()
       this.branches.set(workspacePath, branches)
     }
 
@@ -97,7 +273,23 @@ class FakeGitRunner {
 
     if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--verify") {
       const branch = gitArgs[2]?.replace("refs/heads/", "")
-      return commandResult(0, "fake-sha\n")
+      return branches.has(branch ?? "")
+        ? commandResult(0, "fake-sha\n")
+        : commandResult(1, "", `fatal: Needed a single revision`)
+    }
+
+    if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--abbrev-ref") {
+      const branch = this.currentBranch.get(workspacePath) ?? null
+      return commandResult(0, branch === null ? "HEAD\n" : `${branch}\n`)
+    }
+
+    if (gitArgs[0] === "rev-parse" && gitArgs[1] === "HEAD") {
+      const ref = this.detachedRef.get(workspacePath) ?? this.currentBranch.get(workspacePath) ?? "fake-head-sha"
+      return commandResult(0, `${ref}\n`)
+    }
+
+    if (gitArgs[0] === "status" && gitArgs[1] === "--porcelain") {
+      return commandResult(0, this.dirty.get(workspacePath) ?? "")
     }
 
     if (gitArgs[0] === "show-ref" && gitArgs[1] === "--verify" && gitArgs[2] === "--quiet") {
@@ -110,6 +302,8 @@ class FakeGitRunner {
       const branch = gitArgs[2]
       if (!branch) throw new Error("git checkout -b needs a branch")
       branches.add(branch)
+      this.currentBranch.set(workspacePath, branch)
+      this.detachedRef.delete(workspacePath)
       return commandResult(0)
     }
 
@@ -118,10 +312,43 @@ class FakeGitRunner {
         this.failedCheckouts -= 1
         return commandResult(1, "", "checkout blocked by unfinished rebase")
       }
+      const branch = gitArgs[1]
+      if (branch && !branches.has(branch)) {
+        return commandResult(1, "", `error: pathspec '${branch}' did not match any file(s) known to git`)
+      }
+      if (branch) {
+        this.currentBranch.set(workspacePath, branch)
+        this.detachedRef.delete(workspacePath)
+      }
       return commandResult(0)
     }
 
-    if (gitArgs[0] === "rebase" || gitArgs[0] === "merge" || gitArgs[0] === "cherry-pick" || gitArgs[0] === "reset") {
+    if (gitArgs[0] === "rebase" && gitArgs[1] === "--abort") {
+      await this.clearResidual(workspacePath, ["rebase-merge", "rebase-apply"])
+      return commandResult(0)
+    }
+
+    if (gitArgs[0] === "merge" && gitArgs[1] === "--abort") {
+      await this.clearResidual(workspacePath, ["MERGE_HEAD"])
+      return commandResult(0)
+    }
+
+    if (gitArgs[0] === "cherry-pick" && gitArgs[1] === "--abort") {
+      await this.clearResidual(workspacePath, ["CHERRY_PICK_HEAD"])
+      return commandResult(0)
+    }
+
+    if (gitArgs[0] === "reset" && gitArgs[1] === "--hard") {
+      this.dirty.delete(workspacePath)
+      return commandResult(0)
+    }
+
+    if (gitArgs[0] === "clean" && gitArgs[1] === "-fd") {
+      this.dirty.delete(workspacePath)
+      return commandResult(0)
+    }
+
+    if (gitArgs[0] === "rebase" || gitArgs[0] === "merge" || gitArgs[0] === "cherry-pick") {
       return commandResult(0)
     }
 
@@ -277,7 +504,12 @@ describe("WorkspaceManager.prepare", () => {
     expect(second.path).toBe(first.path)
     expect(await fileSystem.readText(join(second.path, "draft.txt"))).toBe("draft\n")
     expect(gitRunner.commandArgs()).not.toContainEqual(["clone", "https://example.test/mohist.git", first.path])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(first.path), "checkout", "mohist/run-wr-1"])
+    // Healthy re-entry takes the shared-health fast path: no checkout, no reset,
+    // no abort — the already-attached clean workspace is left untouched.
+    expect(gitRunner.commandArgs()).not.toContainEqual(["-C", managedPath(first.path), "checkout", "mohist/run-wr-1"])
+    expect(gitRunner.commandArgs().some((args) => args.includes("-B"))).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("reset"))).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("--abort"))).toBe(false)
   })
 
   it("RestartWithNewRun_UsesADistinctRunWorkspace", async () => {
@@ -680,25 +912,41 @@ describe("WorkspaceManager.prepare", () => {
 })
 
 describe("WorkspaceManager.prepare recovery", () => {
-  it("FailedCheckout_AbortsResidualOperationAndResetsRunBranch", async () => {
+  it("TransientCheckoutFailure_FailsThenExactRetryRepairsSameWorkspace", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
     const item = work("wr-recover")
     const workspace = await manager.prepare(item, new AbortController().signal)
     gitRunner.calls.length = 0
+    // Simulate the #628 failure mode: the workspace ended up detached with a
+    // residual rebase, and the repair checkout transiently fails.
+    await gitRunner.setDetached(workspace.path, "detached-head-sha")
+    await gitRunner.setResidual(workspace.path, ["rebase-merge"])
     gitRunner.failedCheckouts = 1
 
-    const recovered = await manager.prepare(item, new AbortController().signal)
+    const failure = await manager.prepare(item, new AbortController().signal).catch((error) => error)
 
-    expect(recovered).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-recover" })
+    // First attempt is a durable, actionable failure identifying the expected
+    // branch, the observed detached ref, and the failed checkout operation.
+    expect(failure).toMatchObject({ kind: "branch-invariant-violation", expectedBranch: "mohist/run-wr-recover" })
+    expect(failure.message).toContain("operation=checkout")
+    expect(failure.message).toContain("expectedBranch=mohist/run-wr-recover")
+    expect(failure.message).toContain("observedRef=detached-head-sha")
+    // Residual rebase was aborted before the failing checkout; no replacement
+    // workspace or force-created branch was produced.
     expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "rebase", "--abort"])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "merge", "--abort"])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "cherry-pick", "--abort"])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "reset", "--hard", "mohist/run-wr-recover"])
     expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("-B"))).toBe(false)
+
+    // Exact retry after the transient checkout failure is removed repairs the
+    // same path and branch.
+    const recovered = await manager.prepare(item, new AbortController().signal)
+    expect(recovered).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-recover" })
+    expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("-B"))).toBe(false)
   })
 
-  it("CleanReentry_OnlyChecksOutRunBranch", async () => {
+  it("CleanReentry_TakesFastPathWithoutMutation", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
     const item = work("wr-clean")
@@ -708,11 +956,179 @@ describe("WorkspaceManager.prepare recovery", () => {
     const second = await manager.prepare(item, new AbortController().signal)
 
     expect(second).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-clean" })
-    expect(gitRunner.commandArgs()).toEqual([
-      ["-C", managedPath(workspace.path), "remote", "get-url", "origin"],
-      ["-C", managedPath(workspace.path), "rev-parse", "--verify", "refs/heads/mohist/run-wr-clean"],
-      ["-C", managedPath(workspace.path), "checkout", "mohist/run-wr-clean"],
-    ])
+    // Health probes run but the healthy workspace is left untouched: no
+    // checkout, no force-create, no clone, no abort, no reset.
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "rev-parse", "--abbrev-ref", "HEAD"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "status", "--porcelain"])
+    expect(gitRunner.commandArgs()).not.toContainEqual(["-C", managedPath(workspace.path), "checkout", "mohist/run-wr-clean"])
+    expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("-B"))).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("reset"))).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("--abort"))).toBe(false)
+  })
+})
+
+describe("WorkspaceManager health contract", () => {
+  it("DetachedWorkspace_RepairsByCheckoutWithoutReplacement", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-detached")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    await gitRunner.setDetached(workspace.path, "detached-head-sha")
+
+    const repaired = await manager.prepare(item, new AbortController().signal)
+
+    expect(repaired).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-detached" })
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "checkout", "mohist/run-wr-detached"])
+    // Repair uses only the existing expected branch: no clone, no force-create.
+    expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("-B"))).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("reset"))).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("--abort"))).toBe(false)
+  })
+
+  it("DirtyMismatchedWorkspace_RepairsInOrderResetCleanCheckout", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-dirty")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    await gitRunner.setBranch(workspace.path, "feature/other")
+    await gitRunner.setDirty(workspace.path, " M dirty.txt\n?? untracked.txt\n")
+
+    const repaired = await manager.prepare(item, new AbortController().signal)
+
+    expect(repaired).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-dirty" })
+    const args = gitRunner.commandArgs()
+    const resetIdx = args.findIndex((call) => call.includes("reset") && call.includes("--hard"))
+    const cleanIdx = args.findIndex((call) => call.includes("clean") && call.includes("-fd"))
+    const checkoutIdx = args.findIndex((call) => call[2] === "checkout" && call[3] === "mohist/run-wr-dirty")
+    expect(resetIdx).toBeGreaterThanOrEqual(0)
+    expect(cleanIdx).toBeGreaterThanOrEqual(0)
+    expect(checkoutIdx).toBeGreaterThanOrEqual(0)
+    expect(resetIdx).toBeLessThan(cleanIdx)
+    expect(cleanIdx).toBeLessThan(checkoutIdx)
+    expect(args.some((call) => call[0] === "clone")).toBe(false)
+    expect(args.some((call) => call.includes("-B"))).toBe(false)
+  })
+
+  it("ResidualRebase_AbortsAndReprobesBeforeRepair", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-rebase")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    await gitRunner.setDetached(workspace.path, "detached-head-sha")
+    await gitRunner.setResidual(workspace.path, ["rebase-merge"])
+
+    const repaired = await manager.prepare(item, new AbortController().signal)
+
+    expect(repaired).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-rebase" })
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "rebase", "--abort"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "checkout", "mohist/run-wr-rebase"])
+    expect(gitRunner.residualMarkers(workspace.path)).toEqual([])
+    expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
+  })
+
+  it("ResidualAbortReProbeFailure_ReturnsDurableFailure", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-stubborn")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    await gitRunner.setDetached(workspace.path, "detached-head-sha")
+    await gitRunner.setResidual(workspace.path, ["rebase-merge"])
+    await gitRunner.makeStubborn(workspace.path, ["rebase-merge"])
+
+    const failure = await manager.prepare(item, new AbortController().signal).catch((error) => error)
+
+    expect(failure).toMatchObject({ kind: "branch-invariant-violation", expectedBranch: "mohist/run-wr-stubborn" })
+    expect(failure.message).toContain("operation=abort-rebase")
+    expect(failure.message).toContain("still in progress")
+    expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
+    expect(gitRunner.commandArgs().some((args) => args.includes("-B"))).toBe(false)
+  })
+
+  it("Verify_RejectsDetachedHeadWithSharedDiagnostic", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-verify-detached")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    await gitRunner.setDetached(workspace.path, "detached-head-sha")
+
+    const failure = await manager.verify(item, new AbortController().signal).catch((error) => error)
+
+    expect(failure).toMatchObject({ kind: "branch-invariant-violation", expectedBranch: "mohist/run-wr-verify-detached" })
+    expect(failure.observedBranch).toBeNull()
+    expect(failure.observedRef).toBe("detached-head-sha")
+    expect(failure.message).toContain("operation=verify")
+    expect(failure.message).toContain("observedRef=detached-head-sha")
+  })
+
+  it("Verify_RejectsWrongBranchWithSharedDiagnostic", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-verify-branch")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    await gitRunner.setBranch(workspace.path, "feature/other")
+
+    const failure = await manager.verify(item, new AbortController().signal).catch((error) => error)
+
+    expect(failure).toMatchObject({ kind: "branch-invariant-violation", expectedBranch: "mohist/run-wr-verify-branch" })
+    expect(failure.observedBranch).toBe("feature/other")
+    expect(failure.message).toContain("observedBranch=feature/other")
+  })
+
+  it("Verify_BranchProbeFailure_ReturnsActionableDiagnostic", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-verify-probe")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    gitRunner.failCommand(
+      (args) => args[0] === "-C" && args[2] === "rev-parse" && args[3] === "--abbrev-ref",
+      "fatal: not a git repository",
+    )
+
+    const failure = await manager.verify(item, new AbortController().signal).catch((error) => error)
+
+    expect(failure).toMatchObject({ kind: "branch-invariant-violation", expectedBranch: "mohist/run-wr-verify-probe" })
+    expect(failure.message).toContain("git rev-parse --abbrev-ref HEAD failed")
+    expect(failure.message).toContain("expectedBranch=mohist/run-wr-verify-probe")
+  })
+
+  it("Verify_AbortsResidualThenPasses", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-verify-residual")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    await gitRunner.setResidual(workspace.path, ["MERGE_HEAD"])
+
+    const verified = await manager.verify(item, new AbortController().signal)
+
+    expect(verified).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-verify-residual" })
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "merge", "--abort"])
+    expect(gitRunner.residualMarkers(workspace.path)).toEqual([])
+  })
+
+  it("Verify_HealthyWorkspacePassesWithoutMutation", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-verify-healthy")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+
+    const verified = await manager.verify(item, new AbortController().signal)
+
+    expect(verified).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-verify-healthy" })
+    expect(gitRunner.commandArgs().some((call) => call.includes("checkout"))).toBe(false)
+    expect(gitRunner.commandArgs().some((call) => call.includes("reset"))).toBe(false)
+    expect(gitRunner.commandArgs().some((call) => call.includes("--abort"))).toBe(false)
+    expect(gitRunner.commandArgs().some((call) => call[0] === "clone")).toBe(false)
   })
 })
 

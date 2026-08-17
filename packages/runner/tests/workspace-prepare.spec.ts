@@ -7,6 +7,7 @@ import { withTestRunnerResources } from "./support/test-resources.js"
 import { MemoryFileSystem } from "./support/memory-filesystem.js"
 import type { JsonObject } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
+import { StatefulFakeWorktree } from "./support/fake-worktree.js"
 
 type GitCall = { workDir: string; args: string[] }
 
@@ -687,5 +688,230 @@ describe("mohist/workspace-prepare", () => {
       expect(call.timeoutMs, `git call ${call.args.join(" ")} should have no timeoutMs`).toBeUndefined()
     }
     expect(calls.length).toBeGreaterThan(0)
+  })
+})
+
+describe("mohist/workspace-prepare stateful fake worktree", () => {
+  function installFake(resources: WorkspacePrepareTestResources, fake: StatefulFakeWorktree): void {
+    resources.workspacePrepareGitRunner = fake.gitRunner
+    resources.workspacePrepareExistsChecker = fake.existsChecker
+  }
+
+  it("StatefulFastPath_HealthyWorkspace_NoMutation", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    expect(output).toMatchObject({
+      kind: "workspace-prepare",
+      status: "success",
+      expectedBranch: EXPECTED_BRANCH,
+      head: { ref: EXPECTED_BRANCH },
+      residual: { rebaseMerge: false, rebaseApply: false, mergeHead: false, cherryPickHead: false },
+      porcelain: "",
+    })
+    // The fast path issues no mutation commands.
+    expect(fake.hasCommand("checkout", EXPECTED_BRANCH)).toBe(false)
+    expect(fake.hasCommand("rebase --abort")).toBe(false)
+    expect(fake.hasCommand("merge --abort")).toBe(false)
+    expect(fake.hasCommand("cherry-pick --abort")).toBe(false)
+    expect(fake.hasCommand("reset --hard HEAD")).toBe(false)
+    expect(fake.hasCommand("clean -fd")).toBe(false)
+  })
+
+  it("StatefulDetachedRepair_ChecksOutExpectedBranchAndVerifies", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, { branch: null, commit: "detached-sha", branches: [EXPECTED_BRANCH] })
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    expect(fake.hasCommand("checkout", EXPECTED_BRANCH)).toBe(true)
+    // Success is reported only after the follow-up probe confirms the branch.
+    expect(output.head).toMatchObject({ ref: EXPECTED_BRANCH })
+    expect(output.porcelain).toBe("")
+    expect((output.residual as Record<string, unknown>).rebaseMerge).toBe(false)
+    // Clean detached repair is non-destructive.
+    expect(fake.hasCommand("reset --hard HEAD")).toBe(false)
+    expect(fake.hasCommand("clean -fd")).toBe(false)
+    expect(fake.hasCommand("rebase --abort")).toBe(false)
+  })
+
+  it("StatefulDirtyMismatchedRepair_OrderResetCleanCheckoutVerify", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, {
+      branch: "feature/other",
+      porcelain: " M dirty.txt\n?? untracked.txt\n",
+      branches: [EXPECTED_BRANCH, "feature/other"],
+    })
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    const calls = fake.calls.map((call) => call.args.join(" "))
+    const resetIdx = calls.findIndex((call) => call === "reset --hard HEAD")
+    const cleanIdx = calls.findIndex((call) => call === "clean -fd")
+    const checkoutIdx = calls.findIndex((call) => call === `checkout ${EXPECTED_BRANCH}`)
+    expect(resetIdx).toBeGreaterThanOrEqual(0)
+    expect(cleanIdx).toBeGreaterThanOrEqual(0)
+    expect(checkoutIdx).toBeGreaterThanOrEqual(0)
+    expect(resetIdx).toBeLessThan(cleanIdx)
+    expect(cleanIdx).toBeLessThan(checkoutIdx)
+    // Complete final probe confirms the invariant.
+    expect(output.head).toMatchObject({ ref: EXPECTED_BRANCH })
+    expect(output.porcelain).toBe("")
+    expect(fake.state(WORKSPACE_PATH)?.porcelain).toBe("")
+  })
+
+  it("StatefulRebaseCleanup_AbortsReprobesThenRepairs", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, {
+      branch: null,
+      commit: "detached-sha",
+      residual: { rebaseMerge: true },
+      branches: [EXPECTED_BRANCH],
+    })
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    expect(fake.hasCommand("rebase --abort")).toBe(true)
+    expect(fake.hasCommand("merge --abort")).toBe(false)
+    expect(fake.hasCommand("cherry-pick --abort")).toBe(false)
+    expect(fake.hasCommand("checkout", EXPECTED_BRANCH)).toBe(true)
+    // The abort was re-probed before repair continued.
+    expect(fake.state(WORKSPACE_PATH)?.residual.rebaseMerge).toBe(false)
+    expect(output.residual).toMatchObject({ rebaseMerge: false, rebaseApply: false })
+    expect(output.head).toMatchObject({ ref: EXPECTED_BRANCH })
+  })
+
+  it("StatefulMergeCherryPickCleanup_AbortsEachAndReprobes", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, {
+      branch: null,
+      commit: "detached-sha",
+      residual: { mergeHead: true, cherryPickHead: true },
+      branches: [EXPECTED_BRANCH],
+    })
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    expect(fake.hasCommand("merge --abort")).toBe(true)
+    expect(fake.hasCommand("cherry-pick --abort")).toBe(true)
+    expect(fake.state(WORKSPACE_PATH)?.residual.mergeHead).toBe(false)
+    expect(fake.state(WORKSPACE_PATH)?.residual.cherryPickHead).toBe(false)
+    expect(output.residual).toMatchObject({ mergeHead: false, cherryPickHead: false })
+  })
+
+  it("StatefulAbortFailure_DiagnosticHasExpectedObservedAndOperation", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, {
+      branch: null,
+      commit: "detached-sha",
+      residual: { mergeHead: true },
+      branches: [EXPECTED_BRANCH],
+    })
+    fake.fail((args) => args.join(" ") === "merge --abort", "fatal: could not abort merge")
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("operation=abort-merge")
+    expect(result.error?.message).toContain(`expectedBranch=${EXPECTED_BRANCH}`)
+    expect(result.error?.message).toContain("observedBranch=(detached)")
+    expect(result.error?.message).toContain("observedRef=detached-sha")
+    expect(result.error?.message).toContain("merge --abort failed")
+    expect(fake.hasCommand("checkout", EXPECTED_BRANCH)).toBe(false)
+    expect(fake.hasCommand("reset --hard HEAD")).toBe(false)
+  })
+
+  it("StatefulResidualReProbeFailure_DiagnosticAndNoCheckout", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, {
+      branch: null,
+      commit: "detached-sha",
+      residual: { cherryPickHead: true },
+      branches: [EXPECTED_BRANCH],
+    })
+    fake.abortLeavesResidual = true
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("operation=abort-cherry-pick")
+    expect(result.error?.message).toContain("still in progress")
+    expect(fake.hasCommand("checkout", EXPECTED_BRANCH)).toBe(false)
+    expect(fake.hasCommand("reset --hard HEAD")).toBe(false)
+  })
+
+  it("StatefulCheckoutFailure_DiagnosticHasExpectedObservedAndOperation", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    // The expected branch does not exist, so checkout cannot attach.
+    fake.configure(WORKSPACE_PATH, { branch: null, commit: "detached-sha", branches: [] })
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("operation=checkout")
+    expect(result.error?.message).toContain(`expectedBranch=${EXPECTED_BRANCH}`)
+    expect(result.error?.message).toContain("observedBranch=(detached)")
+    expect(result.error?.message).toContain("observedRef=detached-sha")
+    expect(result.error?.message).toContain(`git checkout ${EXPECTED_BRANCH} failed`)
+    expect(fake.hasCommand("reset --hard HEAD")).toBe(false)
+    expect(fake.hasCommand("clean -fd")).toBe(false)
+  })
+
+  it("StatefulFinalVerifyFailure_DirtyAfterCleanup", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, {
+      branch: EXPECTED_BRANCH,
+      porcelain: " M still-dirty.txt\n",
+      branches: [EXPECTED_BRANCH],
+    })
+    fake.resetCleanIneffective = true
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("operation=verify")
+    expect(result.error?.message).toContain(`expectedBranch=${EXPECTED_BRANCH}`)
+    expect(result.error?.message).toContain("dirty=true")
+    expect(fake.hasCommand("reset --hard HEAD")).toBe(true)
+    expect(fake.hasCommand("clean -fd")).toBe(true)
+  })
+
+  it("StatefulFinalVerifyFailure_WrongBranchAfterCheckout", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_PATH, {
+      branch: "feature/other",
+      branches: [EXPECTED_BRANCH, "feature/other"],
+      checkoutAttaches: false,
+    })
+    installFake(resources, fake)
+
+    const result = await callAction(workspacePrepareAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(fake.hasCommand("checkout", EXPECTED_BRANCH)).toBe(true)
+    expect(result.error?.message).toContain("operation=verify")
+    expect(result.error?.message).toContain(`expectedBranch=${EXPECTED_BRANCH}`)
+    expect(result.error?.message).toContain("observedBranch=feature/other")
   })
 })

@@ -1,0 +1,61 @@
+# Issue 628 progress — Workflow rebase recovery must restore the expected branch
+
+## T-001 (done) — Repair and verify workspaces on the expected run branch
+
+### Codebase Patterns (read first for later tasks)
+
+- **Shared health module**: `packages/runner/src/runtime/workspace-health.ts` owns the
+  semantic model + evaluator + diagnostics. NO git process adapters live there — each
+  consumer keeps its own narrow runner (`workspace-prepare` action uses
+  `RunnerGitRunner`/`workspacePrepareGitRunner` + `workspacePrepareExistsChecker`;
+  `WorkspaceManager` uses `runCommand` + direct `exists` file checks). Both share
+  `evaluateWorkspaceHealth(snapshot, expectedBranch)` and
+  `workspaceHealthDiagnostic({operation, expectedBranch, snapshot, detail})`.
+- **Health snapshot fields**: `{ residual: {rebaseMerge,rebaseApply,mergeHead,cherryPickHead},
+  head: {commit, ref}, porcelain, probeFailure: {step,message,exitCode}|null }`.
+  `ref` is the branch name or `(detached)`; a probe failure makes `healthy=false`.
+- **Diagnostic format** (assert on these stable fields): `workspace health failure:
+  operation=<step> expectedBranch=... observedBranch=... observedRef=... dirty=...
+  residual=<rebase,merge,cherry-pick|none>; <condition>[; <detail>]`.
+- **State machine order** (both action and manager reentry): probe → fast path (exact
+  branch + clean + no residual = no mutation) → abort residual ops in fixed order
+  (rebase → merge → cherry-pick), re-probe each → reset+clean dirty tree → checkout the
+  existing expected branch (never `-B`, never clone/fetch) → complete final probe; only
+  then success.
+- **Manager wiring**: `WorkspaceManager.prepare` reentry goes through
+  `reenterRunBranch` (now the full health-repair machine); `verify` goes through
+  `assertHealthyWorkspace` (probe → abort residual with re-probes → evaluate; throws
+  `WorkspaceBranchMismatchError` carrying the shared diagnostic). Both use
+  `captureHealthSnapshot` (sanitizes fd→display paths).
+- **Probe-failure detail dedup**: when `snapshot.probeFailure` exists, the condition
+  label already contains the probe message, so call sites pass `detail=undefined`
+  (via `probeFailureResult` / `probeFailureThrow`) to avoid duplication.
+
+### Gotchas discovered
+
+- **workspace.spec.ts FakeGitRunner**: extended to be a stateful fake worktree. Health
+  probes (`rev-parse --abbrev-ref HEAD`, `rev-parse HEAD`, `status --porcelain`) +
+  direct `.git/<marker>` files for residual detection (manager uses `exists()` on real
+  FS). Clone writes state under `<path>.preparing`; prepare renames to the stable path,
+  so the fake ADOPTS the `.preparing` sibling state on the first `-C <stable>` call.
+  Adoption must be **non-overwriting** — tests mutate state via `setDetached` /
+  `setBranch` / `setDirty` / `setResidual`, which mirror mutations onto the
+  `.preparing` sibling too so adoption can't undo them.
+- **`path.join(w, ".git", "")` drops the trailing slash** → residual exists-checker
+  must strip via `startsWith(gitDir + "/")` not `startsWith(join(...))`.
+- **`StatefulFakeWorktree`** (`tests/support/fake-worktree.ts`): reusable for the
+  `workspace-prepare` action (wired as `workspacePrepareGitRunner` +
+  `workspacePrepareExistsChecker`) — flags `abortLeavesResidual`, `resetCleanIneffective`,
+  per-state `checkoutAttaches` (checkout exits 0 but doesn't attach → final verify
+  branch-mismatch), plus `fail(match, msg, times)` transient injection.
+- Old manager fallback "on checkout failure, abort+reset and retry" was REMOVED —
+  checkout failure is now a durable failure (exact retry converges). Old
+  `runHealthGate`/`verifyWorkspaceBranch` replaced by the shared-contract methods.
+
+### Verification
+
+- Full runner suite green (155 files / 1699 tests), `tsc` (src + tests), and
+  `check:test-boundaries` all pass.
+- Focused suites: workspace-prepare.spec.ts (38), workspace.spec.ts (42 incl. new
+  health-contract block), workspace-prepare-workflow, git-action-contracts,
+  executor-workspace-boundary, executor-branch-stability.
