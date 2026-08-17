@@ -1,7 +1,11 @@
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
@@ -59,6 +63,57 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
             (await LoadRunAsync(_workflowId!)).CurrentStage().Tasks.Single().AgentResultSettlement!.State);
         Assert.Contains(await EventStore.ListAsync(_workflowId!), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.AgentTaskUpdateInterrupted);
+    }
+
+    [Fact]
+    public async Task UpdateInterrupt_MissingSessionRetainsVisibilityDeliveryUntilSessionMaterializes()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var task = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var sessionId = $"missing-session-{Guid.NewGuid():N}";
+        var operationId = $"runner-update:{Guid.NewGuid():N}";
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+            new AgentExecutionBinding(
+                task.Id,
+                work.WorkId,
+                runnerId,
+                sessionId,
+                "turn-missing-session",
+                "opencode",
+                "runtime-missing-session")));
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+
+        var pending = (await LoadRunAsync(_workflowId!)).PendingSessionInterruptionDeliveries;
+        Assert.Equal(2, pending.Count);
+        Assert.All(pending, delivery => Assert.Equal(sessionId, delivery.SessionId));
+        Assert.Null(await Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync());
+
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            runnerId,
+            "opencode",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = TestProjectId(_workflowId!),
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+        await workflow.ReceiveReminder(WorkflowGrain.AgentSessionInterruptionReminderName, default);
+
+        var repaired = await session.GetAsync();
+        Assert.NotNull(repaired);
+        Assert.Contains(repaired!.InterruptionHistory!, transition =>
+            transition.State == AgentWorkInterruptionStates.Interrupted
+            && transition.UpdateOperationId == operationId);
+        Assert.Empty((await LoadRunAsync(_workflowId!)).PendingSessionInterruptionDeliveries);
     }
 
     [Fact]

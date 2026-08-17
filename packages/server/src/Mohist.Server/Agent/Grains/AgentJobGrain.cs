@@ -1843,16 +1843,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }
 
-    private async Task ApplySessionInterruptionAsync(
-        string? sessionId,
-        AgentWorkInterruptionTransition transition)
-    {
-        if (string.IsNullOrWhiteSpace(sessionId)) return;
-        var session = _grains.GetGrain<IAgentSessionGrain>(sessionId);
-        if (await session.GetAsync() is null) return;
-        await session.ApplyInterruptionAsync(transition);
-    }
-
     private async Task EmitUpdateInterruptionEventAsync(PendingUpdateInterruptionEvent obligation)
     {
         try

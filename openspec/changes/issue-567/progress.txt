@@ -943,3 +943,17 @@ Channel decision (grounded in live source):
   and the focused update/recovery/reconciliation/settlement classes passed
   50/50. Verification created no Git-visible changes; no further production
   or test-code change was necessary.
+
+## Review MF-1 Missing-Session Delivery Repair
+
+- Workflow and AgentJob Session interruption queues now retain their head item
+  when the bound Session grain has no persisted state; queue entries are
+  removed only after `ApplyInterruptionAsync` succeeds. The Workflow reminder
+  remains registered while items are retained, and AgentJob recovery reminders
+  retry pending visibility before status-specific recovery work.
+- Added deterministic Workflow and AgentJob specs covering a non-materialized
+  Session, retained `interrupting`/`interrupted` visibility obligations,
+  subsequent Session materialization, and reminder-driven replay.
+- Focused verification passed `RunnerUpdateInterruptSpecs` 4/4 and
+  `AgentJobGrainSpecs` 23/23. The SpecTests project builds with zero warnings
+  and errors. `review.md` remains untouched.

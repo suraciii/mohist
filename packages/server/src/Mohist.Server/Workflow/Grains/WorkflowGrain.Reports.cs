@@ -811,12 +811,15 @@ public partial class WorkflowGrain
         while (_run.PendingSessionInterruptionDeliveries.Count > 0)
         {
             var pending = _run.PendingSessionInterruptionDeliveries[0];
-            await ApplySessionInterruptionAsync(pending.SessionId, pending.Transition);
+            if (!await ApplySessionInterruptionAsync(pending.SessionId, pending.Transition))
+                break;
+
             _run.PendingSessionInterruptionDeliveries.RemoveAt(0);
             await SaveRunAsync();
         }
 
-        await RemoveAgentSessionInterruptionReminderAsync();
+        if (_run.PendingSessionInterruptionDeliveries.Count == 0)
+            await RemoveAgentSessionInterruptionReminderAsync();
     }
 
     private async Task RepairSessionInterruptionForReceiptAsync(RuntimeRecoveryReceipt receipt)
@@ -842,14 +845,15 @@ public partial class WorkflowGrain
         await ApplySessionInterruptionAsync(sessionId, transition);
     }
 
-    private async Task ApplySessionInterruptionAsync(
+    private async Task<bool> ApplySessionInterruptionAsync(
         string? sessionId,
         AgentWorkInterruptionTransition transition)
     {
-        if (string.IsNullOrWhiteSpace(sessionId)) return;
+        if (string.IsNullOrWhiteSpace(sessionId)) return true;
         var session = GrainFactory.GetGrain<IAgentSessionGrain>(sessionId);
-        if (await session.GetAsync() is null) return;
+        if (await session.GetAsync() is null) return false;
         await session.ApplyInterruptionAsync(transition);
+        return true;
     }
 
     private async Task RepairTerminalResultOperationAsync(RuntimeRecoveryReceipt receipt)

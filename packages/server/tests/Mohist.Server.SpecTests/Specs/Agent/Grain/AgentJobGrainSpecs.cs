@@ -236,6 +236,53 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task MissingSessionRetainsVisibilityDeliveryUntilSessionMaterializes()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-missing-session-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-missing-session-{Guid.NewGuid():N}";
+        var sessionId = $"missing-session-{Guid.NewGuid():N}";
+        var inputId = $"input-missing-session-{Guid.NewGuid():N}";
+        var turnId = $"turn-missing-session-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+
+        await job.SubmitAsync(new AgentJobInput(
+            "repair missing AgentJob session visibility",
+            ProjectId: projectId,
+            Runtime: "opencode",
+            AgentId: "agent-test",
+            AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
+            PinnedRunnerId: runnerId));
+        await WaitForRunningAsync(job);
+        var running = await job.GetRuntimeSnapshotAsync();
+        var workId = running.CurrentWorkId!;
+        var operationId = $"runner-update:missing-session-{Guid.NewGuid():N}";
+
+        Assert.Null(await session.GetAsync());
+        Assert.True(await job.MarkUpdateInterruptedAsync(runnerId, workId, operationId));
+
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            runnerId,
+            "opencode",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+        await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
+        var repaired = await session.GetAsync();
+        Assert.NotNull(repaired);
+        Assert.Contains(repaired!.InterruptionHistory!, transition =>
+            transition.State == AgentWorkInterruptionStates.Interrupted
+            && transition.UpdateOperationId == operationId);
+    }
+
+    [Fact]
     public async Task RecoveryTerminalReplayRepairsOperationAfterOwnerCommitWriteFailure()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(

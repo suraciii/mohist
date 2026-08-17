@@ -9,6 +9,9 @@ public sealed partial class AgentJobGrain
 
         await HydrateAsync();
 
+        if (State.PendingSessionInterruptionDeliveries is { Count: > 0 })
+            await DeliverPendingSessionInterruptionAsync();
+
         if (IsTerminal)
         {
             await DeliverPendingSessionInterruptionAsync();

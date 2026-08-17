@@ -1,6 +1,7 @@
 using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -383,51 +384,7 @@ public sealed partial class AgentJobGrain
             State.RecoveryAttempts[index] = attempt;
     }
 
-    private async Task DeliverPendingSessionInterruptionAsync()
-    {
-        State.PendingSessionInterruptionDeliveries ??= [];
-        while (State.PendingSessionInterruptionDeliveries.Count > 0)
-        {
-            var pending = State.PendingSessionInterruptionDeliveries[0];
-            await ApplySessionInterruptionAsync(pending.SessionId, pending.Transition);
-            State.PendingSessionInterruptionDeliveries.RemoveAt(0);
-            await PersistAsync();
-        }
-    }
 
-    private async Task RepairSessionInterruptionForReceiptAsync(RuntimeRecoveryReceipt receipt)
-    {
-        await DeliverPendingSessionInterruptionAsync();
-        if (State.Interruption is not { } transition)
-            return;
-
-        await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, transition);
-    }
-
-    private void QueueSessionInterruptionDelivery(
-        string? sessionId,
-        AgentWorkInterruptionTransition transition)
-    {
-        if (string.IsNullOrWhiteSpace(sessionId))
-            return;
-
-        State.PendingSessionInterruptionDeliveries ??= [];
-        var existing = State.PendingSessionInterruptionDeliveries.FirstOrDefault(delivery =>
-            string.Equals(delivery.SessionId, sessionId, StringComparison.Ordinal)
-            && string.Equals(delivery.Transition.IdentityKey, transition.IdentityKey, StringComparison.Ordinal)
-            && string.Equals(delivery.Transition.State, transition.State, StringComparison.Ordinal));
-        if (existing is null)
-        {
-            State.PendingSessionInterruptionDeliveries.Add(
-                new PendingAgentSessionInterruption(sessionId, transition));
-        }
-        else if (string.IsNullOrWhiteSpace(existing.Transition.StopFailure)
-            && !string.IsNullOrWhiteSpace(transition.StopFailure))
-        {
-            var index = State.PendingSessionInterruptionDeliveries.IndexOf(existing);
-            State.PendingSessionInterruptionDeliveries[index] = existing with { Transition = transition };
-        }
-    }
     private TimeSpan ResolveUpdateInterruptionTimeout() =>
         _options.UpdateInterruptionTimeout > TimeSpan.Zero
             ? _options.UpdateInterruptionTimeout
@@ -447,6 +404,40 @@ public sealed partial class AgentJobGrain
         State.Status == AgentJobStatus.RecoverablyInterrupted
         && State.UpdateInterruptionDeadlineAt is { } deadline
         && deadline <= _timeProvider.GetUtcNow();
+
+    private async Task DeliverPendingSessionInterruptionAsync()
+    {
+        State.PendingSessionInterruptionDeliveries ??= [];
+        while (State.PendingSessionInterruptionDeliveries.Count > 0)
+        {
+            var pending = State.PendingSessionInterruptionDeliveries[0];
+            if (!await ApplySessionInterruptionAsync(pending.SessionId, pending.Transition))
+                break;
+
+            State.PendingSessionInterruptionDeliveries.RemoveAt(0);
+            await PersistAsync();
+        }
+    }
+
+    private async Task RepairSessionInterruptionForReceiptAsync(RuntimeRecoveryReceipt receipt)
+    {
+        await DeliverPendingSessionInterruptionAsync();
+        if (State.Interruption is not { } transition)
+            return;
+
+        await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, transition);
+    }
+
+    private async Task<bool> ApplySessionInterruptionAsync(
+        string? sessionId,
+        AgentWorkInterruptionTransition transition)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return true;
+        var session = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        if (await session.GetAsync() is null) return false;
+        await session.ApplyInterruptionAsync(transition);
+        return true;
+    }
 
     private async Task EnsureRecoveryReminderAsync()
     {
