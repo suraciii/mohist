@@ -23,6 +23,24 @@ export interface FakeWorktreeResidual {
   cherryPickHead?: boolean
 }
 
+/**
+ * Simulated outcome of the `rebase <ref>` command. Git keeps HEAD on the
+ * current branch after a successful rebase; `successBranch` lets tests
+ * force a detached (`null`) or wrong-branch completion, and
+ * `conflictFiles` simulates an unresolved conflict that leaves the rebase
+ * in progress on a detached HEAD.
+ */
+export interface FakeRebaseSimulation {
+  /** When false, `rebase <ref>` fails without leaving conflict markers. */
+  succeeds?: boolean
+  /** Branch HEAD is on after a successful rebase; null = detached. Undefined = keep the current branch. */
+  successBranch?: string | null
+  /** Commit sha after a successful rebase (default derived from the branch). */
+  successCommit?: string
+  /** When non-empty, `rebase <ref>` fails with these unresolved files and leaves rebase-merge residual + detached HEAD. */
+  conflictFiles?: string[]
+}
+
 export interface FakeWorktreeState {
   /** Current branch name; null means detached. */
   branch: string | null
@@ -35,6 +53,8 @@ export interface FakeWorktreeState {
   branches?: string[]
   /** When false, `checkout <branch>` reports success but leaves HEAD unchanged. */
   checkoutAttaches?: boolean
+  /** Extra refs resolved by `rev-parse <name>` (e.g. base refs). */
+  revs?: Record<string, string>
 }
 
 export interface FakeWorktreeCall {
@@ -59,6 +79,7 @@ interface InternalState {
   residual: Required<FakeWorktreeResidual>
   branches: string[]
   checkoutAttaches: boolean
+  revs: Record<string, string>
 }
 
 export class StatefulFakeWorktree {
@@ -69,6 +90,8 @@ export class StatefulFakeWorktree {
   abortLeavesResidual = false
   /** When true, `reset --hard HEAD` / `clean -fd` report success but keep the dirt. */
   resetCleanIneffective = false
+  /** Simulated outcome of the `rebase <ref>` command (undefined = keep the current branch on success). */
+  rebaseSimulation?: FakeRebaseSimulation
 
   configure(workDir: string, state: FakeWorktreeState): void {
     this.states.set(workDir, {
@@ -78,6 +101,7 @@ export class StatefulFakeWorktree {
       residual: { ...DEFAULT_RESIDUAL, ...(state.residual ?? {}) },
       branches: [...(state.branches ?? [])],
       checkoutAttaches: state.checkoutAttaches ?? true,
+      revs: { ...(state.revs ?? {}) },
     })
   }
 
@@ -163,6 +187,31 @@ export class StatefulFakeWorktree {
       if (!this.resetCleanIneffective) state.porcelain = ""
       return ok("Removing untracked files\n")
     }
+    if (command === "diff --name-only --diff-filter=U") {
+      const files = this.rebaseSimulation?.conflictFiles ?? []
+      return ok(files.length ? `${files.join("\n")}\n` : "")
+    }
+    if (command === "add .") {
+      state.porcelain = ""
+      return ok("")
+    }
+    if (args[0] === "commit") {
+      state.porcelain = ""
+      return ok(`[${state.branch ?? "detached"} abc123] ${args.slice(2).join(" ")}\n`)
+    }
+    if (args[0] === "reset" && args[1] === "--soft") {
+      return ok("")
+    }
+    if (args[0] === "fetch") {
+      return ok("From https://example.com/repo\n * branch -> FETCH_HEAD")
+    }
+    if (args[0] === "rebase" && args[1] !== "--abort") {
+      return this.handleRebase(state)
+    }
+    if (args[0] === "rev-parse" && args[1] !== "--git-path" && args[1] !== "HEAD" && args[1] !== "--abbrev-ref") {
+      const sha = state.revs[args[1] ?? ""]
+      return sha ? ok(`${sha}\n`) : failure(`fatal: ambiguous argument '${args[1]}'`)
+    }
     if (args[0] === "checkout") {
       const branch = args[1]
       if (!branch) return failure("checkout requires a branch")
@@ -176,6 +225,24 @@ export class StatefulFakeWorktree {
       return ok(`Switched to branch '${branch}'\n`)
     }
     return failure(`unexpected git call: ${command}`)
+  }
+
+  private handleRebase(state: Required<FakeWorktreeState>): FakeGitResult {
+    const sim = this.rebaseSimulation
+    if (sim?.conflictFiles && sim.conflictFiles.length > 0) {
+      state.residual.rebaseMerge = true
+      state.branch = null
+      state.commit = "conflict-head-sha"
+      return failure(`CONFLICT (content): Merge conflict in ${sim.conflictFiles[0]}`)
+    }
+    if (sim?.succeeds === false) {
+      return failure("fatal: rebase failed")
+    }
+    if (sim && "successBranch" in sim) {
+      state.branch = sim.successBranch ?? null
+      state.commit = sim.successCommit ?? (state.branch === null ? "detached-after-rebase" : `${state.branch}-rebase-head-sha`)
+    }
+    return ok("Successfully rebased and updated refs/heads/mo/issue-217.")
   }
 }
 

@@ -238,6 +238,20 @@ describe("mohist local workflow profile", () => {
     expect(integrate.indexOf("id: integrate:push")).toBeLessThan(integrate.indexOf("id: integrate:health"))
   })
 
+  it("IntegrateStage_RebaseDoesNotDeclareExpectedBranch_EngineInjectsFromWorkspaceBranch", async () => {
+    const yaml = await readProfile(profileFiles["mohist/local"])
+    const integrate = yaml.slice(yaml.indexOf("  - stage: integrate"))
+    const rebaseTask = integrate.slice(integrate.indexOf("id: integrate:rebase"), integrate.indexOf("id: integrate:push"))
+
+    expect(rebaseTask).toContain("uses: mohist/rebase")
+    // The expected run branch is engine-sourced from workspace.branch; the
+    // profile must not declare a second branch for the rebase task and
+    // must not treat baseBranch as the workspace identity.
+    expect(rebaseTask).not.toContain("expectedBranch")
+    expect(rebaseTask).toContain("remote: origin")
+    expect(rebaseTask).toContain("squash: true")
+  })
+
   it("CheckStage_MergeReadyBindsAllGitInputs", async () => {
     const yaml = await readProfile(profileFiles["mohist/local"])
     const check = sliceStage(yaml, "check")

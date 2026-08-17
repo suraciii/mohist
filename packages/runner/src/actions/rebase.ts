@@ -7,6 +7,15 @@ import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "
 import { isIssueFieldSource } from "./issue-fields.js"
 import { fail, succeed } from "./action-result.js"
 import { currentRunnerResources, type RunnerGitRunner } from "../system/filesystem.js"
+import {
+  DETACHED_HEAD_REF,
+  evaluateWorkspaceHealth,
+  workspaceHealthDiagnostic,
+  type WorkspaceHeadState,
+  type WorkspaceHealthSnapshot,
+  type WorkspaceProbeFailure,
+  type WorkspaceResidualState,
+} from "../runtime/workspace-health.js"
 
 type GitRunner = RunnerGitRunner
 type GitResult = Awaited<ReturnType<GitRunner>>
@@ -44,6 +53,13 @@ export type RebaseGitResult = GitResult
 export async function rebaseAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const baseBranch = stringInput(inputs, "baseBranch")
   if (!baseBranch) return fail("invalid-input", "Rebase requires input 'baseBranch'")
+  const expectedBranch = stringInput(inputs, "expectedBranch")
+  if (!expectedBranch) {
+    return fail(
+      "invalid-input",
+      "Rebase requires the engine-sourced 'expectedBranch' input resolved from workspace.branch; baseBranch is the rebase target and can never substitute for the expected run branch",
+    )
+  }
   const remote = stringInput(inputs, "remote") ?? null
   const squash = booleanInput(inputs, "squash") === true
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
@@ -85,6 +101,7 @@ export async function rebaseAction(inputs: JsonObject, host: ActionHost): Promis
     const afterSha = after.success ? after.stdout.trim() : null
     return await runSquashIfRequested({
       host,
+      expectedBranch,
       baseBranch,
       remote,
       baseRef,
@@ -128,6 +145,7 @@ async function resolveSquashMessage(inputs: JsonObject, host: ActionHost): Promi
 
 interface SquashRequest {
   host: ActionHost
+  expectedBranch: string
   baseBranch: string
   remote: string | null
   baseRef: string
@@ -143,6 +161,8 @@ interface SquashRequest {
 
 async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
   if (!req.squash) {
+    const integrity = await verifyRebaseCompletion(req.host, req.expectedBranch)
+    if (integrity) return integrity
     return rebaseOutput(
       req.rebaseSucceeded,
       req.baseBranch,
@@ -215,6 +235,8 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
   const squashedHead = await git(req.host.workDir, ["rev-parse", "HEAD"], req.host.signal, sinkOptions(req.host))
   const squashedHeadSha = squashedHead.success ? squashedHead.stdout.trim() : null
   const squashOutput = [req.rebaseOutput, softReset.combinedOutput, commit.combinedOutput].filter(Boolean).join("\n\n")
+  const integrity = await verifyRebaseCompletion(req.host, req.expectedBranch)
+  if (integrity) return integrity
   return rebaseOutput(
     true,
     req.baseBranch,
@@ -371,6 +393,128 @@ async function conflictFiles(host: ActionHost, opts?: GitOptions) {
   const status = await git(host.workDir, ["diff", "--name-only", "--diff-filter=U"], host.signal, opts)
   if (!status.success || !status.stdout.trim()) return []
   return [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
+}
+
+interface PathProbe {
+  exists: boolean
+  failure: WorkspaceProbeFailure | null
+}
+
+interface HeadProbe {
+  head: WorkspaceHeadState
+  failure: WorkspaceProbeFailure | null
+}
+
+interface ResidualProbe {
+  residual: WorkspaceResidualState
+  failure: WorkspaceProbeFailure | null
+}
+
+/**
+ * Capture the shared workspace-health snapshot used by the completion
+ * invariant. The snapshot records residual rebase / merge / cherry-pick
+ * markers, the attached branch or detached ref, worktree status, and any
+ * probe failure — exactly the model `workspace-prepare` and
+ * `WorkspaceManager` share.
+ */
+async function captureHealthSnapshot(workDir: string, signal: AbortSignal, opts?: GitOptions): Promise<WorkspaceHealthSnapshot> {
+  const [residualProbe, headProbe, porcelainResult] = await Promise.all([
+    probeResidual(workDir, signal, opts),
+    captureHead(workDir, signal, opts),
+    git(workDir, ["status", "--porcelain"], signal, opts),
+  ])
+  const statusFailure = porcelainResult.success
+    ? null
+    : gitFailure("status", "git status --porcelain", porcelainResult)
+  return {
+    residual: residualProbe.residual,
+    head: headProbe.head,
+    porcelain: porcelainResult.success ? porcelainResult.stdout : "",
+    probeFailure: residualProbe.failure ?? headProbe.failure ?? statusFailure,
+  }
+}
+
+async function captureHead(workDir: string, signal: AbortSignal, opts?: GitOptions): Promise<HeadProbe> {
+  const [headResult, refResult] = await Promise.all([
+    git(workDir, ["rev-parse", "HEAD"], signal, opts),
+    git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal, opts),
+  ])
+  const commit = headResult.success ? headResult.stdout.trim() : ""
+  let ref = DETACHED_HEAD_REF
+  if (refResult.success) {
+    const trimmed = refResult.stdout.trim()
+    if (trimmed !== "" && trimmed !== "HEAD") ref = trimmed
+  }
+  const failure = !headResult.success
+    ? gitFailure("head", "git rev-parse HEAD", headResult)
+    : !refResult.success
+      ? gitFailure("head-ref", "git rev-parse --abbrev-ref HEAD", refResult)
+      : null
+  return { head: { commit, ref }, failure }
+}
+
+async function probeResidual(workDir: string, signal: AbortSignal, opts?: GitOptions): Promise<ResidualProbe> {
+  const [rebaseMerge, rebaseApply, mergeHead, cherryPickHead] = await Promise.all([
+    probePathExists(workDir, "rebase-merge", signal, opts),
+    probePathExists(workDir, "rebase-apply", signal, opts),
+    probePathExists(workDir, "MERGE_HEAD", signal, opts),
+    probePathExists(workDir, "CHERRY_PICK_HEAD", signal, opts),
+  ])
+  return {
+    residual: {
+      rebaseMerge: rebaseMerge.exists,
+      rebaseApply: rebaseApply.exists,
+      mergeHead: mergeHead.exists,
+      cherryPickHead: cherryPickHead.exists,
+    },
+    failure: rebaseMerge.failure ?? rebaseApply.failure ?? mergeHead.failure ?? cherryPickHead.failure,
+  }
+}
+
+async function probePathExists(workDir: string, gitPath: string, signal: AbortSignal, opts?: GitOptions): Promise<PathProbe> {
+  const result = await git(workDir, ["rev-parse", "--git-path", gitPath], signal, opts)
+  if (!result.success) {
+    return { exists: false, failure: gitFailure("residual", `git rev-parse --git-path ${gitPath}`, result) }
+  }
+  return { exists: pathExists(resolveGitPath(workDir, result.stdout.trim())), failure: null }
+}
+
+function gitFailure(step: string, command: string, result: GitResult): WorkspaceProbeFailure {
+  return {
+    step,
+    message: `${command} failed: ${result.combinedOutput || `exit ${result.exitCode}`}`,
+    exitCode: result.exitCode,
+  }
+}
+
+/**
+ * Completion invariant: after a successful rebase (and any squash) the
+ * workspace must be attached to exactly the expected run branch, clean,
+ * and free of every residual operation marker. Returns an ActionResult
+ * branch-integrity failure when the invariant does not hold, or null when
+ * the recovery is complete and may be reported as successful.
+ */
+async function verifyRebaseCompletion(host: ActionHost, expectedBranch: string): Promise<ActionResult | null> {
+  const snapshot = await captureHealthSnapshot(host.workDir, host.signal, sinkOptions(host))
+  if (snapshot.probeFailure) {
+    return rebaseIntegrityFailure(expectedBranch, snapshot, snapshot.probeFailure.step, undefined, snapshot.probeFailure.exitCode)
+  }
+  const evaluation = evaluateWorkspaceHealth(snapshot, expectedBranch)
+  if (!evaluation.healthy) {
+    return rebaseIntegrityFailure(expectedBranch, snapshot, "verify", `Health verification failed: ${evaluation.condition}`, 1)
+  }
+  return null
+}
+
+function rebaseIntegrityFailure(
+  expectedBranch: string,
+  snapshot: WorkspaceHealthSnapshot,
+  operation: string,
+  detail: string | undefined,
+  exitCode: number | null,
+): ActionResult {
+  const message = workspaceHealthDiagnostic({ operation, expectedBranch, snapshot, detail })
+  return fail("branch-invariant-violation", message, { exitCode: exitCode ?? 1 })
 }
 
 async function verifyRebaseComplete(host: ActionHost, baseBranch: string) {

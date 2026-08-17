@@ -7,6 +7,7 @@ import type { ActionTestContext as ActionContext } from "./support/action-test-c
 import { callAction } from "./support/call-action.js"
 import { withTestRunnerResources } from "./support/test-resources.js"
 import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { StatefulFakeWorktree } from "./support/fake-worktree.js"
 
 type RebaseTestResources = {
   fileSystem: RunnerFileSystem
@@ -14,6 +15,8 @@ type RebaseTestResources = {
   rebaseExistsChecker?: (path: string) => boolean
   issueFieldCommandRunner?: (command: string, args: string[], cwd: string, signal: AbortSignal) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 }
+
+const EXPECTED_BRANCH = "mohist/run-wr-rebase-1"
 
 function it(name: string, body: (resources: RebaseTestResources) => Promise<void> | void): void {
   vitestIt(name, async () => {
@@ -27,7 +30,17 @@ function useRebaseExistsChecker(resources: RebaseTestResources, checker: (path: 
 }
 
 function installRebaseGitRunner(resources: RebaseTestResources, runner: RunnerGitRunner): void {
-  resources.rebaseGitRunner = runner
+  // The rebase completion invariant probes the shared workspace health
+  // snapshot after a successful rebase and squash. These three probes are
+  // part of that contract and are answered for every scenario here; the
+  // scenario-specific runner keeps handling the rebase/fetch/commit flow.
+  resources.rebaseGitRunner = async (workDir, args, signal, options) => {
+    const command = args.join(" ")
+    if (command === "rev-parse --git-path MERGE_HEAD") return ok("/fake/worktree/.git/MERGE_HEAD\n")
+    if (command === "rev-parse --git-path CHERRY_PICK_HEAD") return ok("/fake/worktree/.git/CHERRY_PICK_HEAD\n")
+    if (command === "rev-parse --abbrev-ref HEAD") return ok(`${EXPECTED_BRANCH}\n`)
+    return runner(workDir, args, signal, options)
+  }
 }
 
 function installIssueFieldCommandRunner(
@@ -73,6 +86,11 @@ describe("mohist/rebase", () => {
       "rev-parse HEAD",
       "rebase master",
       "rev-parse HEAD",
+      // Completion invariant probes: residual, head, and worktree status.
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "rev-parse HEAD",
+      "status --porcelain",
     ])
     expect(calls).not.toContain("fetch origin master")
     expect(calls).not.toContain("rebase origin/master")
@@ -131,6 +149,11 @@ describe("mohist/rebase", () => {
       "rev-parse HEAD",
       "rebase origin/master",
       "rev-parse HEAD",
+      // Completion invariant probes.
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "rev-parse HEAD",
+      "status --porcelain",
     ])
     expect(calls).not.toContain("rebase master")
     expect(output).toMatchObject({
@@ -247,6 +270,11 @@ describe("mohist/rebase", () => {
       "reset --soft baseSha",
       "commit -m Complete issue #217",
       "rev-parse HEAD",
+      // Completion invariant probes after the squash commit.
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "rev-parse HEAD",
+      "status --porcelain",
     ])
     expect(calls).not.toContain("checkout master")
     expect(calls).not.toContain("checkout origin/master")
@@ -474,6 +502,7 @@ describe("mohist/rebase", () => {
 
   it("DirtyWorktreeBeforeRebase_CommitsPendingChangesThenRebases", async (resources) => {
     const calls: string[] = []
+    let pendingCommitted = false
     useRebaseExistsChecker(resources, () => false)
     installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
@@ -483,12 +512,13 @@ describe("mohist/rebase", () => {
         case "rev-parse --git-path rebase-apply":
           return ok("/fake/worktree/.git/rebase-apply\n")
         case "status --porcelain":
-          return ok(" M packages/runner/src/actions/opencode.ts\n")
+          return ok(pendingCommitted ? "" : " M packages/runner/src/actions/opencode.ts\n")
         case "rev-parse master":
           return ok("baseSha\n")
         case "add .":
           return ok("")
         case "commit -m Prepare rebase onto master":
+          pendingCommitted = true
           return ok("[issue abc123] Prepare rebase onto master")
         case "rev-parse HEAD":
           return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
@@ -513,6 +543,11 @@ describe("mohist/rebase", () => {
       "rev-parse HEAD",
       "rebase master",
       "rev-parse HEAD",
+      // Completion invariant probes confirm the committed worktree is clean.
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "rev-parse HEAD",
+      "status --porcelain",
     ])
     expect(output).toMatchObject({
       beforeHeadSha: "before",
@@ -523,7 +558,8 @@ describe("mohist/rebase", () => {
 
   it("StaleRebaseStateBeforeRebase_AbortsBeforeStartingFreshRebase", async (resources) => {
     const calls: string[] = []
-    useRebaseExistsChecker(resources, (path) => path === "/fake/worktree/.git/rebase-merge")
+    let rebaseStatePresent = true
+    useRebaseExistsChecker(resources, (path) => path === "/fake/worktree/.git/rebase-merge" && rebaseStatePresent)
     installRebaseGitRunner(resources, async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
@@ -532,6 +568,7 @@ describe("mohist/rebase", () => {
         case "rev-parse --git-path rebase-apply":
           return ok("/fake/worktree/.git/rebase-apply\n")
         case "rebase --abort":
+          rebaseStatePresent = false
           return ok("aborted")
         case "rev-parse master":
           return ok("baseSha\n")
@@ -829,6 +866,185 @@ describe("mohist/rebase", () => {
   })
 })
 
+describe("mohist/rebase stateful fake worktree", () => {
+  function installFake(resources: RebaseTestResources, fake: StatefulFakeWorktree): void {
+    resources.rebaseGitRunner = fake.gitRunner
+    resources.rebaseExistsChecker = fake.existsChecker
+  }
+
+  it("StatefulExpectedBranchSuccess_LocalRebaseReportsCompletedAfterVerify", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context())
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    expect(output).toMatchObject({
+      kind: "rebase",
+      status: "completed",
+      baseRef: "master",
+      rebased: true,
+      conflicts: [],
+    })
+    expect(fake.hasCommand("rebase master")).toBe(true)
+    // The completion invariant was probed and the workspace stayed attached.
+    expect(fake.state("/fake/worktree")?.branch).toBe(EXPECTED_BRANCH)
+    expect(fake.state("/fake/worktree")?.porcelain).toBe("")
+    expect(fake.state("/fake/worktree")?.residual.rebaseMerge).toBe(false)
+  })
+
+  it("StatefulExpectedBranchSuccess_RemoteRebaseReportsCompletedAfterVerify", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { "origin/master": "baseShaRemote" },
+    })
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context({ baseBranch: "master", remote: "origin" }))
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    expect(output).toMatchObject({ baseRef: "origin/master", rebased: true })
+    expect(fake.hasCommand("fetch origin master")).toBe(true)
+    expect(fake.hasCommand("rebase origin/master")).toBe(true)
+    expect(fake.state("/fake/worktree")?.branch).toBe(EXPECTED_BRANCH)
+  })
+
+  it("StatefulExpectedBranchSuccess_SquashReportsCompletedOnlyAfterVerify", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context({ squash: true, message: "Squash it" }))
+    const output = result.output as Record<string, unknown>
+
+    expect(result.error).toBeUndefined()
+    expect(output).toMatchObject({ squashed: true, rebased: true })
+    expect(fake.hasCommand("reset --soft baseSha")).toBe(true)
+    expect(fake.hasCommand("commit -m Squash it")).toBe(true)
+    // Success is reported only after the completion invariant probes pass.
+    expect(fake.state("/fake/worktree")?.branch).toBe(EXPECTED_BRANCH)
+    expect(fake.state("/fake/worktree")?.porcelain).toBe("")
+  })
+
+  it("StatefulDetachedCompletion_ReportsBranchIntegrityFailureWithoutSuccessOutput", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+    // The rebase command itself succeeds but leaves HEAD detached.
+    fake.rebaseSimulation = { successBranch: null }
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "branch-invariant-violation" })
+    expect(result.error?.message).toContain(`expectedBranch=${EXPECTED_BRANCH}`)
+    expect(result.error?.message).toContain("observedBranch=(detached)")
+    expect(result.error?.message).toContain("observedRef=detached-after-rebase")
+    // Successful rebase output is never exposed.
+    expect(result.output).toBeUndefined()
+  })
+
+  it("StatefulDetachedCompletionAfterSquash_ReportsBranchIntegrityFailure", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+    fake.rebaseSimulation = { successBranch: null }
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context({ squash: true, message: "Squash it" }))
+
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "branch-invariant-violation" })
+    expect(result.error?.message).toContain("observedBranch=(detached)")
+    expect(result.output).toBeUndefined()
+  })
+
+  it("StatefulWrongBranchCompletion_ReportsBranchIntegrityFailure", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH, "feature/other"],
+      revs: { master: "baseSha" },
+    })
+    fake.rebaseSimulation = { successBranch: "feature/other" }
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "branch-invariant-violation" })
+    expect(result.error?.message).toContain(`expectedBranch=${EXPECTED_BRANCH}`)
+    expect(result.error?.message).toContain("observedBranch=feature/other")
+    expect(result.error?.message).toContain("observedRef=feature/other")
+    expect(result.output).toBeUndefined()
+  })
+
+  it("StatefulConflict_ReturnsConflictFailureAndLeavesResidualForResolver", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+    fake.rebaseSimulation = { conflictFiles: ["packages/runner/src/actions/rebase.ts"] }
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "conflict" })
+    expect(result.error?.message).toContain("unresolved conflicts")
+    expect(result.error?.message).toContain("packages/runner/src/actions/rebase.ts")
+    // The conflict state is preserved for a resolver — never cleaned and
+    // never represented as successful recovery.
+    expect(result.output).toBeUndefined()
+    expect(fake.state("/fake/worktree")?.residual.rebaseMerge).toBe(true)
+    expect(fake.hasCommand("rebase --abort")).toBe(false)
+  })
+
+  it("StatefulFinalProbeFailure_ReportsBranchIntegrityFailureWithoutSuccessOutput", async (resources) => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure("/fake/worktree", {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+    // The branch probe runs only as part of the completion snapshot, so
+    // failing it exercises the final-probe failure path after a successful
+    // rebase.
+    fake.fail((args) => args.join(" ") === "rev-parse --abbrev-ref HEAD", "fatal: not a git repository")
+    installFake(resources, fake)
+
+    const result = await callAction(rebaseAction, context())
+
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "branch-invariant-violation" })
+    expect(result.error?.message).toContain("git rev-parse --abbrev-ref HEAD failed")
+    expect(result.error?.message).toContain("operation=head-ref")
+    expect(result.output).toBeUndefined()
+  })
+})
+
 function context(withOverrides: JsonObject = {}, variables: JsonObject = {}, recovery: JsonObject | null = null): ActionContext {
   return {
     workflowRunId: "workflow-1",
@@ -837,10 +1053,11 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}, rec
     stage: "check",
     title: "Rebase onto master",
     uses: "mohist/rebase",
-    with: { baseBranch: "master", ...withOverrides },
+    with: { baseBranch: "master", expectedBranch: EXPECTED_BRANCH, ...withOverrides },
     variables: {
       project: { id: "proj_1" },
       issue: { number: 217 },
+      workspace: { path: "/fake/worktree", branch: EXPECTED_BRANCH, changeDir: null },
       ...variables,
     },
     workDir: "/fake/worktree",

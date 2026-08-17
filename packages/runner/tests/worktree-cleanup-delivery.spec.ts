@@ -127,6 +127,7 @@ function rebaseContext(worktree: FakeWorktree, overrides: JsonObject = {}, varia
       remote: "origin",
       squash: true,
       message: "Complete worktree cleanup",
+      expectedBranch: worktree.branch,
       ...overrides,
     },
     variables: {
@@ -180,6 +181,12 @@ function installRebaseMockGit(resources: WorktreeTestResources, calls: string[])
         return gitOk("/fake/worktree/.git/rebase-merge\n")
       case "rev-parse --git-path rebase-apply":
         return gitOk("/fake/worktree/.git/rebase-apply\n")
+      case "rev-parse --git-path MERGE_HEAD":
+        return gitOk("/fake/worktree/.git/MERGE_HEAD\n")
+      case "rev-parse --git-path CHERRY_PICK_HEAD":
+        return gitOk("/fake/worktree/.git/CHERRY_PICK_HEAD\n")
+      case "rev-parse --abbrev-ref HEAD":
+        return gitOk("mo/worktree-cleanup\n")
       case "fetch origin master":
         return gitOk("From origin\n * branch            master     -> FETCH_HEAD")
       case "rev-parse origin/master":
@@ -266,6 +273,14 @@ describe("worktree cleanup before delivery", () => {
       "reset --soft base-sha",
       "commit -m Complete worktree cleanup",
       "rev-parse HEAD",
+      // Completion invariant probes after the squash commit.
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "rev-parse --git-path MERGE_HEAD",
+      "rev-parse --git-path CHERRY_PICK_HEAD",
+      "rev-parse HEAD",
+      "rev-parse --abbrev-ref HEAD",
+      "status --porcelain",
     ])
     expect(rebaseOutput).toMatchObject({
       kind: "rebase",

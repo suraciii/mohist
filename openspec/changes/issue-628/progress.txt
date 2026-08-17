@@ -59,3 +59,76 @@
 - Focused suites: workspace-prepare.spec.ts (38), workspace.spec.ts (42 incl. new
   health-contract block), workspace-prepare-workflow, git-action-contracts,
   executor-workspace-boundary, executor-branch-stability.
+
+## T-002 (done) — Enforce expected-branch integrity at rebase recovery completion
+
+### Codebase Patterns (read first for later tasks)
+
+- **Engine-sourced rebase input**: `mohist/rebase` manifest gained
+  `expectedBranch: { types: ['string'], engineSource: 'workspace.branch' }`
+  (NOT required — `define-action` forbids required+engineSource). The executor's
+  `injectEngineInputs` populates it from `variables.workspace.branch`; the action
+  reads it via `stringInput(inputs, "expectedBranch")`. `baseBranch` stays the
+  rebase target and is never the workspace identity. If the engine value is
+  missing/null the action returns `invalid-input` (validated-input nulls are
+  dropped as absent) — never a baseBranch substitution.
+- **Completion invariant in rebase.ts**: after a successful rebase AND after any
+  squash, `runSquashIfRequested` calls `verifyRebaseCompletion(host, expectedBranch)`
+  which captures the shared health snapshot (`captureHealthSnapshot`, all 4
+  residual markers + head + porcelain) and evaluates with `evaluateWorkspaceHealth`.
+  Unhealthy → `fail("branch-invariant-violation", workspaceHealthDiagnostic({
+  operation:"verify", expectedBranch, snapshot, detail }))` with NO output
+  (successful rebase output is never exposed). Declared the new error code in the
+  rebase manifest so `normalizeActionResult` doesn't rewrite it to unexpected-error.
+- **Conflict path unchanged**: unresolved rebase conflicts still return the
+  existing `conflict` failure with file names and `rebaseLeftInProgress: true` —
+  the action never aborts/cleans the conflict state a resolver needs.
+- **StatefulFakeWorktree extended for rebase** (`tests/support/fake-worktree.ts`):
+  new `rebaseSimulation` ({ succeeds?, successBranch?: string|null, successCommit?,
+  conflictFiles? }) plus handlers for `fetch`, `rebase <ref>` (non-abort),
+  `diff --name-only --diff-filter=U`, `add .`, `commit`, `reset --soft`, and
+  generic `rev-parse <ref>` via a per-state `revs` map. A successful rebase keeps
+  HEAD on the current branch unless `successBranch` forces detached/null or
+  another branch. Conflict leaves `residual.rebaseMerge` + detached HEAD.
+- **Test wiring for rebase.spec.ts**: `installRebaseGitRunner` now wraps the
+  scenario runner to answer the three new completion probes that don't exist in
+  the pre-rebase flow (`rev-parse --git-path MERGE_HEAD`, `CHERRY_PICK_HEAD`,
+  `rev-parse --abbrev-ref HEAD`), keeping the underlying `calls` array focused on
+  rebase flow. `context()` gained `expectedBranch` in `with` + `workspace.branch`
+  in variables. Exact call assertions include the trailing health probe block
+  (rebase-merge, rebase-apply, [MERGE_HEAD], [CHERRY_PICK_HEAD], HEAD,
+  [--abbrev-ref], status).
+
+### Gotchas discovered
+
+- **Health probes land AFTER the rebase command in every success path**, so tests
+  with exact `calls` arrays and `rev-parse HEAD` count-based responses now see an
+  extra HEAD/status/git-path probe; make status stateful when a test simulates a
+  dirty pre-rebase tree (commitPendingChanges) followed by a clean post-rebase
+  tree, otherwise the completion probe reports dirty → branch-invariant failure.
+- **Dirty-after-rebase is a branch-invariant failure**: the completion invariant
+  requires clean + non-residual, so the `DirtyWorktreeBeforeRebase` fixed-stub test
+  had to be made stateful (dirty only before the prepare commit).
+- **Probe-failure detail dedup applies to rebase too**: when
+  `snapshot.probeFailure` exists, pass `detail=undefined` to the diagnostic (the
+  condition label already carries the probe message).
+- **biome `format:check` is NOT a passing gate** for this repo — the runner test
+  files already use double quotes and were failing at HEAD (T-001 left 6 files
+  non-clean). Follow the existing file style; avoid introducing NEW long-line
+  format errors (built-ins.ts descriptions had to be wrapped to stay clean).
+- **Server rebase recovery dispatch** (`IssueRoutes.Helpers.BuildRebaseTaskWith`)
+  sends only `{ baseBranch, remote }`; the runner engine injects `expectedBranch`
+  from workspace.branch at execution, so no server change was needed. Server
+  ActionContractValidator tests use synthetic catalogs and are unaffected.
+
+### Verification
+
+- Full runner suite green (155 files / 1714 tests), `tsc` (src + tests), and
+  `check:test-boundaries` all pass.
+- rebase.spec.ts: 28 tests (20 existing updated + 8 new stateful fake-worktree:
+  local/remote/squash expected-branch success, detached completion, detached after
+  squash, wrong-branch completion, conflict leaves residual for resolver, final
+  probe failure). git-action-contracts: engineSource + catalog-hiding + injection
+  + null-workspace tests. workflow-profile: rebase task declares no expectedBranch.
+  workspace-prepare-workflow: executor-level engine injection + detached failure.
+  worktree-cleanup-delivery: rebase context/mock updated for completion probes.

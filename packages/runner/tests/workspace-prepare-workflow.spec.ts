@@ -1,8 +1,10 @@
 import { describe, expect, it as vitestIt } from "vitest"
 import { workspacePrepareAction } from "../src/actions/workspace-prepare.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
+import { createDefaultRegistry } from "../src/actions/registry.js"
 import type { GitRunner } from "../src/runtime/git-probe.js"
 import type { RunnerResourceContext } from "../src/system/filesystem.js"
+import { StatefulFakeWorktree } from "./support/fake-worktree.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
@@ -229,6 +231,66 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
         expect(call.timeoutMs, `git call ${call.command} should have no timeoutMs`).toBeUndefined()
       }
       expect(calls.length).toBeGreaterThan(0)
+    })
+  })
+})
+
+describe("rebase workflow engine injection", () => {
+  function installFake(resources: Omit<RunnerResourceContext, "fileSystem">, fake: StatefulFakeWorktree): void {
+    ;(resources as { rebaseGitRunner?: unknown }).rebaseGitRunner = fake.gitRunner
+    ;(resources as { rebaseExistsChecker?: unknown }).rebaseExistsChecker = fake.existsChecker
+  }
+
+  vitestIt("EngineInjectsExpectedBranchFromWorkspaceBranch_CompletesOnExpectedBranch", async () => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(workspacePath, {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+
+    const resources: Omit<RunnerResourceContext, "fileSystem"> = { gitRunner: installExecutorGitProbe() }
+    installFake(resources, fake)
+
+    await withResources(resources, async () => {
+      const executor = buildExecutor(createDefaultRegistry())
+      // The task declares only the rebase target; the expected run branch is
+      // engine-injected from workspace.branch and the action never treats
+      // baseBranch as the workspace identity.
+      const result = await executor.execute(
+        work("integrate:rebase", "mohist/rebase", { with: { baseBranch: "master" } }),
+        new AbortController().signal,
+      )
+
+      expect(result.status).toBe("completed")
+      expect(fake.hasCommand("rebase master")).toBe(true)
+      expect(fake.state(workspacePath)?.branch).toBe(EXPECTED_BRANCH)
+    })
+  })
+
+  vitestIt("DetachedCompletion_ReturnsDurableBranchIntegrityFailure", async () => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(workspacePath, {
+      branch: EXPECTED_BRANCH,
+      branches: [EXPECTED_BRANCH],
+      revs: { master: "baseSha" },
+    })
+    fake.rebaseSimulation = { successBranch: null }
+
+    const resources: Omit<RunnerResourceContext, "fileSystem"> = { gitRunner: installExecutorGitProbe() }
+    installFake(resources, fake)
+
+    await withResources(resources, async () => {
+      const executor = buildExecutor(createDefaultRegistry())
+      const result = await executor.execute(
+        work("integrate:rebase", "mohist/rebase", { with: { baseBranch: "master" } }),
+        new AbortController().signal,
+      )
+
+      expect(result.status).toBe("failed")
+      expect(result.error).toMatchObject({ code: "branch-invariant-violation" })
+      expect(result.message).toContain(`expectedBranch=${EXPECTED_BRANCH}`)
+      expect(result.message).toContain("observedBranch=(detached)")
     })
   })
 })
