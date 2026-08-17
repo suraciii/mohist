@@ -18,6 +18,15 @@ describe('getAgentLaunchErrorFeedback task-first outcomes', () => {
     })
   })
 
+  it('maps scope drift to an explicit renewed review', () => {
+    expect(
+      getAgentLaunchErrorFeedback({ code: 'launch_scope_changed' }),
+    ).toMatchObject({
+      kind: 'launch-scope-changed',
+      nextAction: expect.stringMatching(/Review the updated scope/i),
+    })
+  })
+
   it('identifies an idempotency conflict as a new-key decision', () => {
     expect(getAgentLaunchErrorFeedback({ code: 'launch_idempotency_conflict' })).toMatchObject({
       kind: 'launch-conflict',

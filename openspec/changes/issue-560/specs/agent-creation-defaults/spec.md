@@ -123,6 +123,25 @@ any default.
 - **WHEN** an Agent sets a variant but no model and the Project default supplies a model
 - **THEN** Readiness contains no `variant-without-model` gap
 
+### Requirement: Raw Agent execution fields survive unrelated profile edits
+
+The Agent profile editor SHALL distinguish the persisted `agentConfig` from the
+server's effective execution projection. The editor SHALL initialize its
+execution controls from the raw definition, while list and detail displays MAY
+use the effective projection. Saving a non-execution profile edit MUST NOT
+materialize effective defaults into `agentConfig` or discard a raw execution
+field that is valid on its own.
+
+#### Scenario: A variant-only definition is retained
+
+- **WHEN** an Agent persists only `variant: balanced`, the Project default supplies a model, and the user changes only description, Purpose, Instructions, Skills, permissions, collaborators, or concurrency
+- **THEN** the update retains `agentConfig.variant: balanced` without adding an effective model or runtime
+
+#### Scenario: An explicit execution edit converges the definition
+
+- **WHEN** the user explicitly changes Runtime, Model, Variant, or reasoning effort in the profile editor
+- **THEN** the update writes the selected execution fields as the Agent's raw definition
+
 #### Scenario: Without a default the gap remains
 
 - **WHEN** an Agent has no model configured and the Project has no default execution configuration

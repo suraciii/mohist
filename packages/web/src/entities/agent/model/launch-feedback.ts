@@ -8,6 +8,7 @@ export type AgentLaunchFeedbackKind =
   | "execution-unavailable"
   | "launch-conflict"
   | "launch-pending"
+  | "launch-scope-changed"
   | "execution-config-unresolvable";
 
 export interface AgentLaunchFeedback {
@@ -95,6 +96,16 @@ export function getAgentLaunchErrorFeedback(
       message: "The server is still determining the launch outcome.",
       nextAction:
         "Retry with the same Idempotency-Key so the original outcome can be recovered.",
+    };
+  }
+
+  if (code === "launch_scope_changed") {
+    return {
+      kind: "launch-scope-changed",
+      title: "Launch scope changed",
+      message:
+        "The execution scope changed after it was reviewed and was not started.",
+      nextAction: "Review the updated scope, then confirm the launch again.",
     };
   }
 

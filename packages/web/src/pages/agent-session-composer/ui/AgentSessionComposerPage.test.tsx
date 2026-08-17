@@ -17,7 +17,9 @@ describe("AgentSessionComposerPage", () => {
     state.launchCalls.length = 0;
     state.taskCalls.length = 0;
     state.preflightCalls.length = 0;
+    state.sessionPreflightCalls.length = 0;
     state.enablePreflight = false;
+    state.enableSessionPreflight = false;
     state.defaultExecutionConfig = {
       runtime: "opencode",
       model: "openai/gpt-4o",
@@ -163,6 +165,92 @@ describe("AgentSessionComposerPage", () => {
     expect(state.taskCalls[0].body).not.toHaveProperty("preflightFingerprint");
     expect(await screen.findByTestId("current-path")).toHaveTextContent(
       "/Test/sessions/sess-123",
+    );
+  });
+
+  it("re-runs task preflight after a confirmed scope changes without starting work", async () => {
+    state.enablePreflight = true;
+    state.launchError = {
+      error: "The confirmed execution scope changed before launch.",
+      code: "launch_scope_changed",
+    };
+    renderPage(["/agent-sessions/new?issue=42"]);
+    fireEvent.change(screen.getByTestId("prompt-textarea"), {
+      target: { value: "Keep this task att:attachment-1" },
+    });
+    fireEvent.click(screen.getByTestId("launch-button"));
+
+    await waitFor(() => expect(state.preflightCalls).toHaveLength(1));
+    fireEvent.click(screen.getByTestId("confirm-agent-task-launch"));
+    await waitFor(() => expect(state.taskCalls).toHaveLength(1));
+
+    const feedback = await screen.findByTestId("error-launch-scope-changed");
+    expect(feedback).toHaveAttribute(
+      "data-feedback-kind",
+      "launch-scope-changed",
+    );
+    expect(screen.getByTestId("prompt-textarea")).toHaveValue(
+      "Keep this task att:attachment-1",
+    );
+    expect(screen.getByTestId("context-ref-chip-issue")).toHaveTextContent(
+      "Issue #42",
+    );
+
+    fireEvent.click(screen.getByTestId("review-changed-launch-scope"));
+    await waitFor(() => expect(state.preflightCalls).toHaveLength(2));
+    expect(state.taskCalls).toHaveLength(1);
+    expect(state.preflightCalls[1].body.attachments).toEqual(["attachment-1"]);
+    expect(
+      await screen.findByTestId("agent-task-preflight-dialog"),
+    ).toBeInTheDocument();
+    expect(state.preflightCalls[1].idempotencyKey).toBe(
+      state.preflightCalls[0].idempotencyKey,
+    );
+  });
+
+  it("re-runs existing-Agent preflight after a confirmed scope changes", async () => {
+    state.agentsData = [makeAgent("agent-1")];
+    state.enableSessionPreflight = true;
+    state.launchError = {
+      error: "The confirmed execution scope changed before launch.",
+      code: "launch_scope_changed",
+    };
+    renderPage(["/agent-sessions/new?agent=agent-1&issue=42"]);
+    fireEvent.change(screen.getByTestId("prompt-textarea"), {
+      target: { value: "Keep the selected Agent att:attachment-2" },
+    });
+    fireEvent.click(screen.getByTestId("launch-button"));
+
+    await waitFor(() => expect(state.sessionPreflightCalls).toHaveLength(1));
+    fireEvent.click(screen.getByTestId("confirm-agent-task-launch"));
+    await waitFor(() => expect(state.launchCalls).toHaveLength(1));
+
+    const feedback = await screen.findByTestId("error-launch-scope-changed");
+    expect(feedback).toHaveAttribute(
+      "data-feedback-kind",
+      "launch-scope-changed",
+    );
+    expect(screen.getByTestId("agent-selector-trigger")).toHaveTextContent(
+      "Agent agent-1",
+    );
+    expect(screen.getByTestId("prompt-textarea")).toHaveValue(
+      "Keep the selected Agent att:attachment-2",
+    );
+    expect(screen.getByTestId("context-ref-chip-issue")).toHaveTextContent(
+      "Issue #42",
+    );
+
+    fireEvent.click(screen.getByTestId("review-changed-launch-scope"));
+    await waitFor(() => expect(state.sessionPreflightCalls).toHaveLength(2));
+    expect(state.launchCalls).toHaveLength(1);
+    expect(state.sessionPreflightCalls[1].body.attachments).toEqual([
+      "attachment-2",
+    ]);
+    expect(
+      await screen.findByTestId("agent-task-preflight-dialog"),
+    ).toBeInTheDocument();
+    expect(state.sessionPreflightCalls[1].idempotencyKey).toBe(
+      state.sessionPreflightCalls[0].idempotencyKey,
     );
   });
 

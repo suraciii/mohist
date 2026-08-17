@@ -31,6 +31,7 @@ import type {
   AgentExecutabilityResult,
   AgentInfo,
   AgentSessionLaunchContext,
+  AgentSessionLaunchInput,
   AgentSessionLaunchResponse,
   AgentTaskLaunchInput,
   AgentTaskPreflightResponse,
@@ -345,6 +346,12 @@ export interface AgentSessionComposerPageComponents {
   >;
 }
 
+type PendingPreflight = {
+  response: AgentTaskPreflightResponse;
+  input: AgentTaskLaunchInput;
+  agentRef?: string;
+};
+
 export interface AgentSessionComposerData {
   agents: AgentInfo[] | undefined;
   agentsLoading: boolean;
@@ -455,11 +462,11 @@ export function AgentSessionComposerPage({
     string[]
   >([]);
   const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState("");
-  const [pendingPreflight, setPendingPreflight] = useState<{
-    response: AgentTaskPreflightResponse;
-    input: AgentTaskLaunchInput;
-    agentRef?: string;
-  } | null>(null);
+  const [pendingPreflight, setPendingPreflight] =
+    useState<PendingPreflight | null>(null);
+  const [lastPreflight, setLastPreflight] = useState<PendingPreflight | null>(
+    null,
+  );
   const [launchAttachmentResult, setLaunchAttachmentResult] = useState<{
     agentId: string;
     agentName: string;
@@ -525,6 +532,11 @@ export function AgentSessionComposerPage({
     setContextRefs((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const showPreflight = useCallback((preflight: PendingPreflight) => {
+    setLastPreflight(preflight);
+    setPendingPreflight(preflight);
+  }, []);
+
   const handleLaunchSuccess = useCallback(
     (data: AgentSessionLaunchResponse) => {
       const fallbackJobQuery = data.jobId
@@ -536,6 +548,7 @@ export function AgentSessionComposerPage({
       const accepted = data.attachments ?? [];
       const rejected = data.rejectedAttachments ?? [];
       launchKeyRef.current = null;
+      setLastPreflight(null);
       if (accepted.length > 0 || rejected.length > 0) {
         setLaunchAttachmentResult({
           agentId: data.agentId,
@@ -582,6 +595,46 @@ export function AgentSessionComposerPage({
     startTaskMutation,
   ]);
 
+  const handleReviewChangedScope = useCallback(() => {
+    if (!lastPreflight || !launchKeyRef.current) return;
+
+    launchMutation.reset();
+    preflightSessionMutation?.reset();
+    preflightTaskMutation?.reset();
+    startTaskMutation.reset();
+
+    if (lastPreflight.agentRef) {
+      if (!preflightSessionMutation) return;
+      preflightSessionMutation.mutate(
+        {
+          agentRef: lastPreflight.agentRef,
+          ...lastPreflight.input,
+          idempotencyKey: launchKeyRef.current,
+        },
+        {
+          onSuccess: (response) =>
+            showPreflight({ ...lastPreflight, response }),
+        },
+      );
+      return;
+    }
+
+    if (!preflightTaskMutation) return;
+    preflightTaskMutation.mutate(
+      { ...lastPreflight.input, idempotencyKey: launchKeyRef.current },
+      {
+        onSuccess: (response) => showPreflight({ ...lastPreflight, response }),
+      },
+    );
+  }, [
+    lastPreflight,
+    launchMutation,
+    preflightSessionMutation,
+    preflightTaskMutation,
+    showPreflight,
+    startTaskMutation,
+  ]);
+
   const handleLaunch = useCallback(() => {
     if (!canLaunch) return;
 
@@ -606,7 +659,7 @@ export function AgentSessionComposerPage({
     const onSuccess = handleLaunchSuccess;
 
     if (selectedAgentRef) {
-      const sessionInput: AgentTaskLaunchInput = {
+      const sessionInput: AgentSessionLaunchInput = {
         prompt: prompt.trim(),
         context: hasContext ? context : null,
         attachments: attachmentIds,
@@ -622,7 +675,7 @@ export function AgentSessionComposerPage({
         { agentRef: selectedAgentRef, ...sessionInput, idempotencyKey },
         {
           onSuccess: (response) =>
-            setPendingPreflight({
+            showPreflight({
               response,
               input: sessionInput,
               agentRef: selectedAgentRef,
@@ -653,7 +706,7 @@ export function AgentSessionComposerPage({
         { ...taskInput, idempotencyKey },
         {
           onSuccess: (response) =>
-            setPendingPreflight({ response, input: taskInput }),
+            showPreflight({ response, input: taskInput }),
         },
       );
     }
@@ -674,6 +727,7 @@ export function AgentSessionComposerPage({
     preflightTaskMutation,
     prompt,
     selectedAgentRef,
+    showPreflight,
     startTaskMutation,
     toProjectPath,
   ]);
@@ -738,9 +792,11 @@ export function AgentSessionComposerPage({
                 ? "error-launch-conflict"
                 : launchFeedback?.kind === "launch-pending"
                   ? "error-launch-pending"
-                  : launchFeedback?.kind === "execution-config-unresolvable"
-                    ? "error-execution-config"
-                    : "error-execution-unavailable";
+                  : launchFeedback?.kind === "launch-scope-changed"
+                    ? "error-launch-scope-changed"
+                    : launchFeedback?.kind === "execution-config-unresolvable"
+                      ? "error-execution-config"
+                      : "error-execution-unavailable";
 
   return (
     <div
@@ -778,6 +834,7 @@ export function AgentSessionComposerPage({
                 className="ml-6 w-fit"
                 onClick={() => {
                   launchKeyRef.current = null;
+                  setLastPreflight(null);
                   if (selectedAgentRef) launchMutation.reset();
                   else {
                     preflightTaskMutation?.reset();
@@ -788,6 +845,19 @@ export function AgentSessionComposerPage({
                 Start with a new launch key
               </Button>
             )}
+            {launchFeedback.kind === "launch-scope-changed" &&
+              lastPreflight && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="review-changed-launch-scope"
+                  className="ml-6 w-fit"
+                  onClick={handleReviewChangedScope}
+                >
+                  Review updated scope
+                </Button>
+              )}
             {isExecutabilityError &&
               gapsFromError &&
               gapsFromError.length > 0 && (
@@ -1148,8 +1218,9 @@ export function AgentSessionComposerPage({
           <DialogHeader>
             <DialogTitle>Confirm execution scope</DialogTitle>
             <DialogDescription>
-              Review the server-resolved scope before Mohist creates the Agent
-              and starts work.
+              {pendingPreflight?.agentRef
+                ? "Review the server-resolved scope before Mohist starts work."
+                : "Review the server-resolved scope before Mohist creates the Agent and starts work."}
             </DialogDescription>
           </DialogHeader>
           {pendingPreflight && (
@@ -1210,10 +1281,10 @@ export function AgentSessionComposerPage({
             <Button
               type="button"
               onClick={handleConfirmPreflight}
-              disabled={startTaskMutation.isPending}
+              disabled={launchMutation.isPending || startTaskMutation.isPending}
               data-testid="confirm-agent-task-launch"
             >
-              {startTaskMutation.isPending
+              {launchMutation.isPending || startTaskMutation.isPending
                 ? "Launching..."
                 : "Confirm and launch"}
             </Button>
