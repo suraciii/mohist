@@ -900,11 +900,6 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
 
 }
 
-[GenerateSerializer]
-public sealed class AgentLaunchCoordinatorState
-{
-    [Id(0)] public AgentLaunchCoordinatorPlan? Plan { get; set; }
-}
 
 /// <summary>
 /// Public envelope the coordinator route forwards. Carries the

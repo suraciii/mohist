@@ -33,8 +33,14 @@ export interface AgentInfo {
   description: string
   instructions: string
   agentConfig: Record<string, unknown> | null
+  effectiveExecutionConfig?: {
+    runtime: AgentRuntime
+    model: string | null
+    variant: string | null
+  } | null
   skills: string[]
   permissions: string[]
+  allowedSubagentAgentIds?: string[] | null
   maxConcurrentRuns: number | null
   status: string
   createdAt: string
@@ -51,6 +57,7 @@ export interface AgentCreateRequest {
   skills?: string[] | null
   permissions?: string[]
   maxConcurrentRuns?: number | null
+  allowedSubagentAgentIds?: string[] | null
 }
 
 export interface AgentUpdateRequest {
@@ -62,6 +69,7 @@ export interface AgentUpdateRequest {
   skills?: string[] | null
   permissions?: string[]
   maxConcurrentRuns?: number | null
+  allowedSubagentAgentIds?: string[] | null
 }
 
 export interface AgentAvailabilityCapacity {
@@ -167,26 +175,46 @@ export function unarchiveAgent(projectId: string, id: string) {
   })
 }
 
-export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): {
+export function readAgentDefinitionModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): {
   model: string | null
   variant: string | null
   reasoningEffort: string | null
   runtime: AgentRuntime
 } {
   const config = agent?.agentConfig
-  if (!config || typeof config !== 'object')
-    return { model: null, variant: null, reasoningEffort: null, runtime: DEFAULT_AGENT_RUNTIME }
-  const rawModel = typeof config.model === 'string' ? config.model : null
-  const model = rawModel && rawModel.trim() ? rawModel : null
-  const runtime = config.runtime === 'opencode' || config.runtime === 'pi' ? config.runtime : DEFAULT_AGENT_RUNTIME
-  if (!model) return { model: null, variant: null, reasoningEffort: null, runtime }
-  const rawVariant = typeof config.variant === 'string' ? config.variant : null
+  const rawModel = config && typeof config.model === 'string' && config.model.trim() ? config.model : null
+  const rawVariant = config && typeof config.variant === 'string' && config.variant.trim() ? config.variant : null
+  const rawReasoningEffort =
+    config && typeof config.reasoningEffort === 'string' && config.reasoningEffort.trim()
+      ? config.reasoningEffort
+      : null
+  const rawRuntime = config?.runtime === 'opencode' || config?.runtime === 'pi' ? config.runtime : null
   return {
-    model,
-    variant: rawVariant && rawVariant.trim() ? rawVariant : null,
-    reasoningEffort:
-      typeof config.reasoningEffort === 'string' && config.reasoningEffort.trim() ? config.reasoningEffort : null,
-    runtime,
+    model: rawModel,
+    variant: rawVariant,
+    reasoningEffort: rawReasoningEffort,
+    runtime: rawRuntime ?? DEFAULT_AGENT_RUNTIME,
+  }
+}
+
+export function readAgentModelAndVariant(
+  agent: (Pick<AgentInfo, 'agentConfig'> & Partial<Pick<AgentInfo, 'effectiveExecutionConfig'>>) | null | undefined,
+): {
+  model: string | null
+  variant: string | null
+  reasoningEffort: string | null
+  runtime: AgentRuntime
+} {
+  const definition = readAgentDefinitionModelAndVariant(agent)
+  const effective = agent?.effectiveExecutionConfig
+  const effectiveRuntime = effective?.runtime === 'opencode' || effective?.runtime === 'pi' ? effective.runtime : null
+  const effectiveModel = typeof effective?.model === 'string' && effective.model.trim() ? effective.model : null
+  const effectiveVariant = typeof effective?.variant === 'string' && effective.variant.trim() ? effective.variant : null
+  return {
+    model: effectiveModel ?? definition.model,
+    variant: definition.variant ?? effectiveVariant,
+    reasoningEffort: definition.reasoningEffort,
+    runtime: effectiveRuntime ?? definition.runtime,
   }
 }
 
@@ -199,7 +227,10 @@ export function writeAgentModelAndVariant(
 ): Record<string, unknown> | null {
   const next: Record<string, unknown> = {}
   if (model === null) {
-    return runtime === DEFAULT_AGENT_RUNTIME ? null : { runtime }
+    if (variant !== null) next.variant = variant
+    if (reasoningEffort !== null) next.reasoningEffort = reasoningEffort
+    if (runtime !== DEFAULT_AGENT_RUNTIME) next.runtime = runtime
+    return Object.keys(next).length > 0 ? next : null
   }
   next.model = model
   if (variant !== null) {
