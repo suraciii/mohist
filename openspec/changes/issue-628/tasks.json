@@ -95,13 +95,14 @@
       "id": "T-005",
       "title": "Release durably blocked settlements from Runner projections",
       "spec": "specs/rebase-recovery-branch-integrity/spec.md#durable-blocked-settlement-shall-release-runner-projections-at-one-exactly-once-boundary",
-      "description": "Align the existing durable Agent result settlement with the Runner control-plane projections. Keep an Unknown attempt active until its fake-time deadline, atomically project the committed Blocked attention state, and make the same committed boundary remove it from Runner activeWorks, used capacity, and missing-redelivery reconciliation while retaining the original assignment and task/work/Runner identity for a matching late report.",
+      "description": "Align the existing durable Agent result settlement and report adapter with the Runner control-plane projections. Keep an Unknown attempt active until its fake-time deadline, atomically project the committed Blocked attention state, and make the same committed boundary remove it from Runner activeWorks, used capacity, and missing-redelivery reconciliation while retaining the original assignment and task/work/Runner identity for a matching late authoritative report. Preserve unknown results as observations so a stale observation cannot be converted into a failed task report.",
       "acceptanceCriteria": [
         "Before the settlement deadline, an Unknown attempt remains visible in Runner activeWorks for its assigned runner and counts against used capacity; the implementation does not change configured slot totals or use manual stop as the release mechanism.",
         "When fake time reaches the deadline, the workflow durably commits Unknown to Blocked and the post-commit Runner view, capacity calculation, and DispatchService.AddMissingRedeliveriesAsync desired set omit that run at the same exactly-once boundary; repeating the reminder, poll, or status read does not release or decrement it again.",
         "WorkflowRunQuerier running-assigned and count-running queries filter the indexed blocked projection only after durable settlement and continue matching the assigned worker; blocked settlement does not clear the aggregate assignment or its original taskRunId/workId/runnerId identity.",
         "A late report with the original taskRunId, workId, and runnerId is accepted by the authoritative workflow report path after Blocked and settles the original attempt without reintroducing it into activeWorks or capacity; a report with any mismatched identity is stale and leaves the blocked state and projections unchanged.",
-        "Fake-time server tests cover the pre-deadline Unknown lease, durable Blocked transition, one-time active-work/capacity release, no blocked redelivery, matching late settlement, mismatched late-result fence, and unchanged slot configuration; the focused settlement, workflow projection, dispatch, Runner runtime, and status suites pass."
+        "A matching late WorkResult with status unknown is handled only as a non-authoritative observation. When the blocked domain returns Stale, WorkflowReportService returns a stale acknowledgement and does not forward InboundReport.Unknown.Fallback to ReceiveTaskReportAsync; the blocked settlement, task/workflow state, event stream, activeWorks, capacity, and missing-redelivery desired set remain unchanged, with no TaskFailed event.",
+        "Fake-time server tests cover the pre-deadline Unknown lease, durable Blocked transition, one-time active-work/capacity release, no blocked redelivery, matching late authoritative settlement, matching blocked unknown observation, mismatched late-result fence, and unchanged slot configuration; the focused settlement, workflow report, workflow projection, dispatch, Runner runtime, and status suites pass."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -109,7 +110,7 @@
       "output": "Durable blocked-settlement projection release from Runner activeWorks, capacity, and missing redelivery, with identity-preserving late-result handling and passing fake-time server tests.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Use the existing AttentionStatus projection and workflow settlement identity. Exclude only durably blocked rows from the Runner control-plane desired set; preserve pre-deadline Unknown leases and matching late authoritative reports. Do not increase slots, stop the runner, clear the assignment, or introduce a second settlement authority."
+      "notes": "Use the existing AttentionStatus projection and workflow settlement identity. Exclude only durably blocked rows from the Runner control-plane desired set; preserve pre-deadline Unknown leases and matching late authoritative reports. Treat InboundReport.Unknown.Fallback as non-authoritative data that must never be sent to task settlement after a stale observation. Do not increase slots, stop the runner, clear the assignment, or introduce a second settlement authority."
     }
   ]
 }

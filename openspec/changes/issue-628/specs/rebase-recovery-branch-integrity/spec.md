@@ -85,7 +85,7 @@ A `branch-invariant-violation` from an action's final health check or from the e
 ### Requirement: Durable blocked settlement SHALL release Runner projections at one exactly-once boundary
 When an Agent result settlement reaches its deadline, the workflow SHALL durably commit the `Unknown` to `Blocked` transition before the Runner control plane removes that attempt from live projections. The same committed boundary SHALL make the run absent from Runner `activeWorks`, reduce used capacity, and exclude it from missing-redelivery reconciliation. This is a projection release, not a Runner slot-policy change.
 
-Before the deadline, an `Unknown` attempt SHALL remain represented as active work for its assigned Runner and SHALL retain its capacity reservation. After durable `Blocked`, the workflow SHALL retain the assignment and task/work/Runner settlement identity for a matching late authoritative report, while a mismatched report SHALL remain stale. Repeated reminders, polls, and status reads SHALL not release the same active work more than once.
+Before the deadline, an `Unknown` attempt SHALL remain represented as active work for its assigned Runner and SHALL retain its capacity reservation. After durable `Blocked`, the workflow SHALL retain the assignment and task/work/Runner settlement identity for a matching late authoritative report, while a mismatched report SHALL remain stale. An inbound `unknown` result SHALL remain a non-authoritative observation: when `ObserveAgentResultUnknownAsync` returns `Stale`, report handling SHALL return `stale` and SHALL NOT forward `InboundReport.Unknown.Fallback` to `ReceiveTaskReportAsync`. Repeated reminders, polls, and status reads SHALL not release the same active work more than once.
 
 #### Scenario: Fake-time deadline releases active work and capacity once
 - **WHEN** fake time is before the settlement deadline and the attempt is `Unknown`
@@ -105,6 +105,13 @@ Before the deadline, an `Unknown` attempt SHALL remain represented as active wor
 - **WHEN** a late report carries a different task, work, or Runner identity after the attempt is durably `Blocked`
 - **THEN** the workflow SHALL reject it as stale
 - **AND** it SHALL not clear or revive the blocked settlement or alter Runner projections
+
+#### Scenario: Blocked settlement fences a matching non-authoritative unknown report
+- **WHEN** a matching report for a durably `Blocked` attempt has `unknown` status
+- **THEN** `WorkflowReportService` SHALL submit it only to the observation path
+- **AND** when that observation is rejected as stale, the service SHALL return a stale acknowledgement without forwarding the translator's failed fallback task report
+- **AND** the workflow SHALL not emit `TaskFailed`, mutate the blocked settlement, or reintroduce the attempt into Runner `activeWorks`, capacity, or missing-redelivery reconciliation
+- **AND** only an explicitly authoritative matching success or failure report MAY enter task settlement
 
 ### Requirement: Branch-recovery failures SHALL carry durable actionable diagnostics
 When the runner cannot restore the expected branch or establish a clean non-residual workspace, the existing workflow result failure SHALL carry a durable diagnostic that identifies the expected branch, the observed branch or detached reference, the relevant workspace state, and the operation that failed. The diagnostic SHALL be available to an exact retry without relying on inferred action output.
