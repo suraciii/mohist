@@ -1,4 +1,5 @@
 using Mohist.Server.Api;
+using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Events.Hub;
@@ -11,6 +12,7 @@ public static class MohistApiRegistration
     public static WebApplication MapMohistApi(this WebApplication app)
     {
         app.UseApiExceptionHandler();
+        app.MapDirectApiRoutes();
         app.MapHealthRoutes();
         app.MapStatusRoutes();
         app.MapAuthSessionRoutes();
@@ -45,7 +47,6 @@ public static class MohistApiRegistration
         app.MapAgentRoutes();
         app.MapAgentJobRoutes();
         app.MapAgentJobReadRoutes();
-        app.MapDirectApiAgentJobReadRoutes();
         app.MapAgentSessionLaunchRoutes();
         app.MapAgentSessionTreeRoutes();
         app.MapAgentSessionSpawnRoutes();

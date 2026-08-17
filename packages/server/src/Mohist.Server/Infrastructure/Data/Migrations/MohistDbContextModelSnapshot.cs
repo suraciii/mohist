@@ -1722,6 +1722,221 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Projects");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.DirectApi.DirectApiIdempotencyMappingRow", b =>
+                {
+                    b.Property<string>("Command")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ScopeKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CallerKeyId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("Fingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("State")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("Outcome")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FrozenTarget")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TurnId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Command", "ScopeKey");
+
+                    b.HasIndex("Command", "ScopeKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_direct_api_idempotency_mappings_Command_ScopeKey");
+
+                    b.HasIndex("TurnId")
+                        .IsUnique()
+                        .HasFilter("\"Command\" = 'stop' AND \"State\" IN ('pending')")
+                        .HasDatabaseName("UX_direct_api_idempotency_mappings_PendingStop_TurnId");
+
+                    b.ToTable("direct_api_idempotency_mappings", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicExecutionSnapshotRow", b =>
+                {
+                    b.Property<string>("AnchorType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnchorId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("AgentId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotJson")
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("TerminalFact")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TerminalOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TerminalAt")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("TerminalSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LastSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AnchorType", "AnchorId");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("IX_public_execution_snapshots_SessionId");
+
+                    b.HasIndex("SessionId", "LastSequence")
+                        .HasDatabaseName("IX_public_execution_snapshots_SessionId_LastSequence");
+
+                    b.ToTable("public_execution_snapshots", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicProjectionCheckpointRow", b =>
+                {
+                    b.Property<string>("Feed")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Watermark")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Feed", "SourceKey");
+
+                    b.ToTable("public_projection_checkpoints", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicSessionEventRow", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("OccurredAt")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("SourceTransition")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SessionId", "Generation", "Sequence");
+
+                    b.HasIndex("SessionId", "Generation", "SourceTransition")
+                        .IsUnique()
+                        .HasDatabaseName("UX_public_session_events_Transition");
+
+                    b.HasIndex("SessionId", "Generation", "Sequence")
+                        .HasDatabaseName("IX_public_session_events_SessionId_Generation_Sequence");
+
+                    b.ToTable("public_session_events", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.PublicApi.PublicStreamStateRow", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ActiveGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("NextSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("EarliestSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LatestSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Closed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SessionId");
+
+                    b.ToTable("public_stream_states", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.RunnerRow", b =>
                 {
                     b.Property<string>("Id")
@@ -1879,10 +2094,56 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.ToTable("StoredSecrets", null, t =>
                         {
-                            t.HasCheckConstraint("CK_StoredSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')");
-                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKindKind", "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR (\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR (\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken'))");
-                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKind", "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app')");
+                            t.HasCheckConstraint("CK_StoredSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken', 'publicApiCursorKey')");
+                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKindKind", "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR (\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR (\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'server' AND \"Kind\" = 'publicApiCursorKey')");
+                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKind", "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app', 'server')");
                         });
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionLifecycleTransitionRow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("SourceTransition")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("EventType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("AnchorKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("AnchorId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<string>("SnapshotJson")
+                        .HasColumnType("TEXT")
+                        .IsRequired();
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId", "Id")
+                        .HasDatabaseName("IX_AgentSessionLifecycleTransitions_SessionId_Id");
+
+                    b.ToTable("AgentSessionLifecycleTransitions", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>

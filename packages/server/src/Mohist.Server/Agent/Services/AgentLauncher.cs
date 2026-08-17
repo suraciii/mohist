@@ -246,7 +246,10 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         var hasAttachments = attachments is { Count: > 0 };
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(trimmedPrompt) && !hasAttachments)
+        var hasText = string.Equals(request.Origin, "direct-api", StringComparison.Ordinal)
+            ? !string.IsNullOrEmpty(prompt)
+            : !string.IsNullOrWhiteSpace(trimmedPrompt);
+        if (!hasText && !hasAttachments)
         {
             throw new ArgumentException(
                 "Prompt must not be empty or whitespace unless at least one attachment is accepted.",

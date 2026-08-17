@@ -112,27 +112,42 @@ when it must create or change work.
 
 ## Direct Agent Calls Need a Project Grant
 
-The [External Agent API](agent-api.md) is intended for headless callers that
+The [External Agent API](agent-api.md) is available for headless callers that
 launch or continue Agent work directly. A general PAT Scope is not enough for
-this private-Project boundary. The token must also name the Projects it can use.
+this private-Project boundary. The PAT must also carry a persisted Project grant.
 
-The target issuance forms are:
+Create a PAT with an explicit grant for one or more Projects:
 
-```bash
+~~~text literal
 mo auth token create --name release-agent --scope operator --ttl 720h --project proj_123
+mo auth token create --name observer --scope readonly --ttl 720h --project proj_123
+~~~
+
+An operator PAT may use the explicit `operator_all` grant instead:
+
+~~~text literal
 mo auth token create --name owner-agent --scope operator --ttl 720h --all-projects
-```
+~~~
 
 Repeat `--project` to grant more than one Project. Use `--all-projects` only with
 operator Scope. These choices are mutually exclusive, and Mohist never infers
-all-Project access from operator Scope alone.
+all-Project access from operator Scope alone. A PAT without either grant remains
+usable on existing control-plane routes but cannot use the direct API.
 
-Mohist will authenticate the PAT and check its Scope and Project grant before it
-looks for a matching prior request or creates work. This order prevents an
-unauthorized caller from discovering private resources through retries, status
-differences, or request identifiers. A PAT without a Project grant can continue
-to use its existing control-plane access, but it cannot use the direct external
-Agent boundary.
+Call `/api/v1` with the PAT as a Bearer token. A Web session cookie, Runner or
+service credential, and trusted Agent Connection identity cannot substitute for
+the PAT. Cookie-only and otherwise unusable direct requests return `401` with a
+`WWW-Authenticate: Bearer` challenge and do not reveal whether a token was
+missing, expired, or revoked.
+
+For a usable PAT, Mohist resolves the persisted `ExternalAgentCaller`, checks
+its route Scope, and checks the selected Project grant before it looks up a
+Project, Agent, Job, Session, Input, or Turn, or reads an idempotency mapping.
+An out-of-grant Project returns `403 forbidden` even when that Project does not
+exist. Only after the grant passes can a missing or foreign resource return its
+resource-specific `404`. Failed authentication and authorization do not create
+or read request mappings, rejection records, execution records, outbox items,
+or public events.
 
 ## Web UI Uses a Revocable Session
 
@@ -180,15 +195,8 @@ reads data.
 The explicit Project grant on an external Agent PAT is only a credential safety
 boundary. It does not introduce any of these broader identity models.
 
-## Implementation Gaps
-
 The single-administrator model, local bootstrap, authenticated Web UI, remote
-CLI device authorization and renewal, personal access tokens, Runner and
-integration credentials, capability enforcement, attribution, and audit records
-are implemented.
-
-Project grants for personal access tokens and the direct External Agent API are
-target behavior only. They remain tracked by
-[#387](https://github.com/suraciii/mohist/issues/387). The `--project` and
-`--all-projects` examples above will become executable with that work; do not use
-them as current installation steps.
+CLI device authorization and renewal, personal access tokens, persisted direct
+API Project grants, Runner and integration credentials, capability enforcement,
+attribution, and audit records are implemented. See [External Agent API](agent-api.md)
+for the direct route, idempotency, public observation, and event-resume contract.

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Project.Services;
@@ -18,10 +19,23 @@ namespace Mohist.Server.Auth.Identity;
 /// <c>invalid_token</c> challenge and never distinguishes missing,
 /// expired, or revoked credentials. Tokens in the query string are always
 /// rejected (RFC 6750 §2.3).
+/// <para>
+/// The resolution also records two facts for the direct external Agent
+/// API boundary (<c>/api/v1</c>): the credential carrier kind and, for a
+/// PAT, the resolved <see cref="ExternalAgentCaller"/>. On direct
+/// API paths this layer authenticates only: route scope and Project
+/// grant authorization belong to
+/// <see cref="ExternalAgentApiMiddleware"/>, which enforces
+/// them with the direct API's own error envelope strictly before any
+/// endpoint runs.
+/// </para>
 /// </summary>
 public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
 {
     public const string SessionCookieName = "mohist_session";
+
+    /// <summary>The path prefix of the direct external Agent API.</summary>
+    public const string DirectApiPathPrefix = ExternalAgentApiMiddleware.PathPrefix;
 
     private const string AuthorizationHeader = "Authorization";
     private const string BearerScheme = "Bearer ";
@@ -52,45 +66,38 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
             return;
         }
 
-        var isDirectApi = path.StartsWithSegments("/api/v1", StringComparison.Ordinal);
+        // On the direct API this layer authenticates only; scope, grant,
+        // and Project authorization — with the direct API's error
+        // envelope — are owned by ExternalAgentApiMiddleware, which runs
+        // immediately after this one.
+        var directApi = IsDirectApiPath(path);
+
         if (QueryCarriesToken(context.Request.Query)
-            || ResolveToken(context.Request, allowSessionCookie: !isDirectApi) is not { } token)
+            || ResolvePresentedCredential(context.Request) is not { } presented)
         {
-            await RejectAsync(context);
+            await RejectAsync(context, directApi);
             return;
         }
 
-        ExternalAgentCaller? externalAgentCaller = null;
-        MohistPrincipal? principal;
-        if (isDirectApi)
-        {
-            externalAgentCaller = await ResolveExternalAgentCallerAsync(token, context.RequestAborted);
-            principal = externalAgentCaller is null
-                ? null
-                : new MohistPrincipal(
-                    externalAgentCaller.PrincipalId,
-                    PrincipalKind.Agent,
-                    externalAgentCaller.PrincipalId,
-                    externalAgentCaller.Scopes);
-        }
-        else
-        {
-            principal = _fileCredentials.TryResolve(token)
-                ?? await ResolveFromStoreAsync(token, context, context.RequestAborted);
-        }
-
+        var principal = _fileCredentials.TryResolve(presented.Token)
+            ?? await ResolveFromStoreAsync(presented.Token, context, context.RequestAborted);
         if (principal is null)
         {
-            await RejectAsync(context);
+            await RejectAsync(context, directApi);
             return;
         }
 
         context.Items[MohistPrincipal.HttpContextItemKey] = principal;
-        if (externalAgentCaller is not null)
-            context.Items[ExternalAgentCaller.HttpContextItemKey] = externalAgentCaller;
+        context.Items[CredentialCarrierResolution.HttpContextItemKey] = presented.Carrier;
         context.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.Name, principal.Id)],
             "mohist"));
+
+        if (directApi)
+        {
+            await next(context);
+            return;
+        }
 
         var required = ResolveRequiredScopes(context);
         if (!ScopeSatisfaction.Satisfies(required, principal.Scopes, EffectiveMethod(context)))
@@ -238,29 +245,20 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         if (credential.Kind == CredentialKind.Integration)
             await RecordIntegrationConstraintAsync(context, credential);
 
+        if (credential.Kind == CredentialKind.Pat)
+        {
+            // The direct external Agent API caller facts the credential
+            // already carries; grant enforcement (403 when absent) is the
+            // direct boundary's call, recorded here so that boundary never
+            // needs to re-resolve the token.
+            context.Items[ExternalAgentCaller.HttpContextItemKey] = new ExternalAgentCaller(
+                credential.Id,
+                credential.PrincipalId,
+                credential.Scopes,
+                credential.DirectApiProjectGrant);
+        }
+
         return ToPrincipal(credential);
-    }
-
-    private async Task<ExternalAgentCaller?> ResolveExternalAgentCallerAsync(
-        string token,
-        CancellationToken ct)
-    {
-        if (!CredentialToken.TryParse(token, out _))
-            return null;
-
-        var credential = await _credentials.FindActiveAsync(CredentialToken.Hash(token), ct);
-        if (credential is not { Kind: CredentialKind.Pat })
-            return null;
-
-        var grant = credential.DirectApiProjectGrant is { IsValid: true } candidate
-            ? candidate
-            : null;
-
-        return new ExternalAgentCaller(
-            credential.Id,
-            credential.PrincipalId,
-            credential.Scopes,
-            grant);
     }
 
     /// <summary>
@@ -300,6 +298,9 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         || path.StartsWithSegments("/hubs", StringComparison.Ordinal)
         || path.StartsWithSegments("/otel/api", StringComparison.Ordinal);
 
+    internal static bool IsDirectApiPath(PathString path) =>
+        path.StartsWithSegments(DirectApiPathPrefix, StringComparison.Ordinal);
+
     private static bool QueryCarriesToken(IQueryCollection query)
     {
         foreach (var key in query.Keys)
@@ -311,7 +312,7 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         return false;
     }
 
-    private static string? ResolveToken(HttpRequest request, bool allowSessionCookie)
+    private static PresentedCredential? ResolvePresentedCredential(HttpRequest request)
     {
         if (request.Headers.TryGetValue(AuthorizationHeader, out var authorization))
         {
@@ -325,23 +326,35 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
             }
 
             var token = header[BearerScheme.Length..].Trim();
-            return token.Length == 0 || token.Contains(' ') ? null : token;
+            return token.Length == 0 || token.Contains(' ')
+                ? null
+                : new PresentedCredential(token, CredentialCarrier.Bearer);
         }
 
-        return allowSessionCookie
-            && request.Cookies.TryGetValue(SessionCookieName, out var cookie)
+        return request.Cookies.TryGetValue(SessionCookieName, out var cookie)
             && !string.IsNullOrWhiteSpace(cookie)
-            ? cookie
+            ? new PresentedCredential(cookie, CredentialCarrier.Cookie)
             : null;
     }
 
-    private static async Task RejectAsync(HttpContext context)
+    private static async Task RejectAsync(HttpContext context, bool directApi)
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        if (directApi)
+        {
+            // The direct API's own, non-classifying 401: same body and
+            // challenge for every failure, written by the same writer the
+            // direct boundary uses so the two can never drift.
+            await DirectApiAuthResponses.WriteUnauthenticatedAsync(context);
+            return;
+        }
+
         context.Response.Headers.WWWAuthenticate = WwwAuthenticateChallenge;
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(RejectionBody);
     }
+
+    private sealed record PresentedCredential(string Token, CredentialCarrier Carrier);
 }
 
 public static class AuthResolutionMiddlewareExtensions

@@ -19,6 +19,7 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Logging;
@@ -297,6 +298,11 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<TimeProvider>(_timeProvider);
             services.PostConfigure<OtlpExporterOptions>("tracing", ConfigureInMemoryOtlpExporter);
             services.PostConfigure<OtlpExporterOptions>("metrics", ConfigureInMemoryOtlpExporter);
+            // Checkpoint-rewind specs need a stable observation window;
+            // explicit nudge calls drive their recovery without the hosted
+            // timer repairing the checkpoint before the lag assertion.
+            services.Configure<PublicProjectionOptions>(options =>
+                options.SweepInterval = TimeSpan.FromHours(1));
             services.RemoveAll<IAgentJobDispatchObserver>();
             services.AddSingleton<AgentJobDispatchProbe>();
             services.AddSingleton<IAgentJobDispatchObserver>(provider => provider.GetRequiredService<AgentJobDispatchProbe>());

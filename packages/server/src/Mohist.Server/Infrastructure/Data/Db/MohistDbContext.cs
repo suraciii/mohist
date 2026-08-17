@@ -55,6 +55,7 @@ public partial class MohistDbContext : DbContext
     public DbSet<WorkflowProfileRecordRow> WorkflowProfileRecords { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
+    public DbSet<AgentSessionLifecycleTransitionRow> AgentSessionLifecycleTransitions { get; set; } = null!;
     public DbSet<SessionTreeGraphRevisionRow> SessionTreeGraphRevisions { get; set; } = null!;
     public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
     public DbSet<AgentSessionTranscriptPartRow> AgentSessionTranscriptParts { get; set; } = null!;
@@ -255,6 +256,21 @@ public partial class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_WorkflowRunEvents_Source_Id_DispatchedAt");
+        });
+
+        modelBuilder.Entity<AgentSessionLifecycleTransitionRow>(entity =>
+        {
+            entity.ToTable("AgentSessionLifecycleTransitions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.SourceTransition).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.EventType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.AnchorKind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.AnchorId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SnapshotJson).IsRequired();
+            entity.Property(e => e.OccurredAt).IsRequired();
+            entity.HasIndex(e => new { e.SessionId, e.Id })
+                .HasDatabaseName("IX_AgentSessionLifecycleTransitions_SessionId_Id");
         });
 
         modelBuilder.Entity<AgentSessionRow>(entity =>
@@ -1845,16 +1861,17 @@ public partial class MohistDbContext : DbContext
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_StoredSecrets_OwnerKind",
-                "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app')"));
+                "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app', 'server')"));
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_StoredSecrets_Kind",
-                "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')"));
+                "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken', 'publicApiCursorKey')"));
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_StoredSecrets_OwnerKindKind",
                 "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR " +
                 "(\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR " +
                 "(\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR " +
-                "(\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken'))"));
+                "(\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR " +
+                "(\"OwnerKind\" = 'server' AND \"Kind\" = 'publicApiCursorKey')"));
             entity.HasIndex(e => new { e.OwnerKind, e.OwnerScope, e.OwnerId })
                 .HasDatabaseName("IX_StoredSecrets_Owner");
         });
@@ -2075,36 +2092,7 @@ public partial class MohistDbContext : DbContext
         });
 
         ConfigureAdditionalModels(modelBuilder);
-    }
-
-    private static bool DictionaryEqual(Dictionary<string, string>? left, Dictionary<string, string>? right)
-    {
-        if (ReferenceEquals(left, right)) return true;
-        if (left is null || right is null || left.Count != right.Count) return false;
-        foreach (var (key, value) in left)
-        {
-            if (!right.TryGetValue(key, out var rightValue) || !string.Equals(value, rightValue, StringComparison.Ordinal))
-                return false;
-        }
-        return true;
-    }
-
-    // Build a json_extract stored-column expression whose
-    // path is keyed by a label-name constant. Returning the expression from
-    // one helper means a rename in GenericAgentSessionMetadata is a
-    // compile-time error rather than a silent SQL/metadata drift.
-    private static string JsonExtractLabel(string key) =>
-        $$"""json_extract("State", '$.metadata.labels."{{key}}"')""";
-
-    private static int DictionaryHash(Dictionary<string, string>? value)
-    {
-        if (value is null) return 0;
-        var hash = new HashCode();
-        foreach (var entry in value.OrderBy(entry => entry.Key, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key, StringComparer.Ordinal);
-            hash.Add(entry.Value, StringComparer.Ordinal);
-        }
-        return hash.ToHashCode();
+        ConfigurePublicApiModels(modelBuilder);
+        ConfigureDirectApiModels(modelBuilder);
     }
 }
