@@ -482,3 +482,8 @@ The final composer extension also gates selected existing-Agent launches through
 
 - Fixed `mo agent start --epic` by using `int?` for the CLI option and numeric `context.epicNumber` serialization. The existing definition-first launch option and shared builder now use the same typed contract.
 - Updated CLI coverage to assert the numeric JSON value and added a task-route spec accepting a real numeric Epic context. CLI tests passed 1,860/1,860; the task-route specs passed 14/14; Server and CLI builds passed.
+
+## Review repair verification
+
+- The repository formatter was run and committed as `f258f1498`; `npm run verify` then passed completely: docs, file-size, format, solution/workspace builds, Workflow Definition 178, Server Unit 2,701, Server Spec 3,954, Server Architecture 68, CLI 1,860, Web 4,741, Runner 1,639, and Slack 70 tests.
+- Final `git status`, `git diff --check`, and the `review.md` path check are clean. `review.md` was not edited.
