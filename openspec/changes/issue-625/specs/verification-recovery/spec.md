@@ -1,3 +1,19 @@
+### Requirement: Every lane has a declared repair-and-retry recovery path
+Each built-in verification lane SHALL declare the same profile-specific `fix-ci` recovery contract that the aggregate verification task currently uses: recovery budget `2`, an unconditional handler that adds `recover:fix-ci`, the existing profile action/session/prompt/options and expectation fields, and `retrySelf: true`. The Runner's recovery scheduling result MAY have outer status `completed` and `addTasks`, but the Server SHALL classify the preserved underlying error as the lane outcome. The `recover:fix-ci` helper is not a verification lane and SHALL NOT make the lane pass; only a later direct successful attempt of that lane may produce `pass`.
+
+#### Scenario: Recovery scheduling does not turn a timeout into a pass
+- **WHEN** a lane times out and the Runner returns a recovery scheduling result with `status=completed`, `addTasks`, and `error.code=timeout`
+- **THEN** the original lane attempt remains durably classified as `timeout`
+- **AND** the `recover:fix-ci` task is recorded separately from the lane catalog
+- **AND** the retry lane attempt has the same lane identity, order, budget, and recovery declaration with a new attempt identity
+- **AND** the lane remains non-pass until that retry reports direct success
+
+#### Scenario: Recovery scheduling preserves an ordinary lane failure
+- **WHEN** a lane fails normally and the Runner returns a recovery scheduling result with the original script error
+- **THEN** the original lane attempt remains durably classified as `fail`
+- **AND** completion of the repair helper does not classify the lane as `pass`
+- **AND** a later direct successful attempt is required to change the authoritative lane outcome to `pass`
+
 ### Requirement: Failed and timed-out lanes remain recoverable
 A failed or timed-out verification lane SHALL remain a recoverable lane outcome. Recovery MUST retain every earlier lane result with a durable `pass` outcome and MUST preserve the failed or timed-out outcome and its diagnostics for reporting. Recovery SHALL NOT reset the whole verification sequence or discard completed evidence.
 
