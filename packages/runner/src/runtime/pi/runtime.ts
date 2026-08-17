@@ -445,27 +445,12 @@ export class PiRuntime {
   /**
    * Follow-up against a bound Pi Session.
    *
-   * Branches on the physical Pi session's `isStreaming`:
-   *  - Busy → `await session.steer(text)`. The running turn's
-   *    projection is owned by the active `runTurn` subscription; this
-   *    method does not start a new turn. Resolves accepted. `steer`
-   *    does not acquire the per-session prompt mutex (it injects into
-   *    a running turn).
-   *  - Idle → acquire the per-session prompt mutex (D10), set up a
-   *    `createPiProjector` subscription, and call
-   *    `session.prompt(text, { expandPromptTemplates: false, preflight })`.
-   *    The Follow-up resolves as accepted when `preflight(true)` fires
-   *    (Pi confirmed reception), and as a failure when `preflight(false)`
-   *    fires (Pi rejected reception — missing model or credentials) or
-   *    when `prompt()` throws. A background continuation holds the
-   *    mutex and the subscription until `prompt()` resolves, then
-   *    tears both down. No automatic retry — a preflight-rejected
-   *    Follow-up stays rejected.
-   *
-   * Both branches keep the physical Pi Session binding unchanged
-   * (`runtimeSessionId` is returned as the persisted path). A missing
-   * bound session file surfaces as `missing-session` with a Reset hint
-   * (no silent new session).
+   * A caller without an abort signal receives admission once Pi accepts the
+   * prompt and gets a completion handle in the success facts. The handle is
+   * settled only after the prompt continuation (idle) or the active session
+   * turn (streaming) is terminal and projected events have been reconciled.
+   * Internal bounded calls pass a signal and await that terminal result
+   * directly.
    */
   async followup(
     request: PiFollowupRequest,
@@ -487,91 +472,189 @@ export class PiRuntime {
     if (configured) return configured
 
     if (session.value.isStreaming) {
+      const terminal = this.waitForPiTerminal(session.value, path, request.target.workDir, observer, signal, false)
       try {
         await session.value.steer(request.prompt)
         if (signal?.aborted) return this.failure('interrupted', 'Pi follow-up was interrupted')
+        if (signal) return await terminal.completion
         return {
           ok: true,
-          value: { runtimeSessionId: path, workDir: request.target.workDir },
+          value: { runtimeSessionId: path, workDir: request.target.workDir, completion: terminal.completion },
           diagnostics: [],
         }
       } catch (cause) {
+        terminal.cancel()
         return this.failure('turn-failed', 'Pi steer failed', [diagnostic('steer-failed', this.mask(message(cause)))])
       }
     }
 
+    const completion = this.startIdleFollowup(path, session.value, request, observer, signal)
+    if (signal) return await completion.terminal
+
+    const admission = await completion.admission
+    if (!admission.ok) return admission
+    return {
+      ...admission,
+      value: { ...admission.value, completion: completion.terminal },
+    }
+  }
+
+  private startIdleFollowup(
+    path: string,
+    session: PiSdkSession,
+    request: PiFollowupRequest,
+    observer: PiTurnObserver | undefined,
+    signal: AbortSignal | undefined,
+  ): {
+    readonly admission: Promise<PiFollowupResult>
+    readonly terminal: Promise<PiFollowupResult>
+  } {
     const projector = createPiProjector(
       path,
       request.target.workDir,
       this.deps.masker ?? createCredentialMaskerFromEnvironment(),
     )
     const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
-    const waitForCompletion = signal !== undefined
-    return new Promise<PiFollowupResult>((resolve) => {
+    let settleAdmission!: (result: PiFollowupResult) => void
+    let settleTerminal!: (result: PiFollowupResult) => void
+    let admissionSettled = false
+    const admission = new Promise<PiFollowupResult>((resolve) => {
+      settleAdmission = resolve
+    })
+    const terminal = new Promise<PiFollowupResult>((resolve) => {
+      settleTerminal = resolve
+    })
+    const settleAdmissionOnce = (result: PiFollowupResult) => {
+      if (admissionSettled) return
+      admissionSettled = true
+      settleAdmission(result)
+    }
+
+    let aborting = false
+    const onAbort = () => {
+      if (aborting) return
+      aborting = true
+      void session.abort().catch(() => undefined)
+      const interrupted = this.failure('interrupted', 'Pi follow-up was interrupted')
+      settleAdmissionOnce(interrupted)
+      settleTerminal(interrupted)
+    }
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) onAbort()
+    }
+
+    const operation = this.sessionLocks.run(path, async () => {
+      if (aborting) return this.failure('interrupted', 'Pi follow-up was interrupted')
+      const unsubscribe = session.subscribe((event) => report(projector.project(event)))
+      let preflightAccepted = false
+      try {
+        await session.prompt(request.prompt, {
+          expandPromptTemplates: false,
+          preflight: (success) => {
+            if (success) {
+              preflightAccepted = true
+              settleAdmissionOnce({
+                ok: true,
+                value: { runtimeSessionId: path, workDir: request.target.workDir },
+                diagnostics: [],
+              })
+              return
+            }
+            settleAdmissionOnce(
+              this.failure('turn-failed', 'Pi rejected follow-up reception (preflight rejected the prompt)', [
+                diagnostic(
+                  'preflight-rejected',
+                  'Pi preflight rejected the follow-up prompt — model or credentials missing',
+                ),
+              ]),
+            )
+          },
+        })
+        report(projector.reconcile(session.messages))
+        const terminalResult: PiFollowupResult = {
+          ok: true,
+          value: {
+            runtimeSessionId: path,
+            workDir: request.target.workDir,
+            finalAssistantText: finalText(session.messages),
+          },
+          diagnostics: [],
+        }
+        if (!preflightAccepted) settleAdmissionOnce(terminalResult)
+        return terminalResult
+      } catch (cause) {
+        const failure = this.failure('turn-failed', 'Pi follow-up prompt failed', [
+          diagnostic('prompt-failed', this.mask(message(cause))),
+        ])
+        settleAdmissionOnce(failure)
+        return failure
+      } finally {
+        unsubscribe()
+        if (signal) signal.removeEventListener('abort', onAbort)
+      }
+    })
+    void operation.then(settleTerminal, (cause) => {
+      const failure = this.failure('turn-failed', 'Pi follow-up prompt failed', [
+        diagnostic('prompt-failed', this.mask(message(cause))),
+      ])
+      settleAdmissionOnce(failure)
+      settleTerminal(failure)
+    })
+
+    return { admission, terminal }
+  }
+
+  private waitForPiTerminal(
+    session: PiSdkSession,
+    path: string,
+    workDir: string,
+    observer: PiTurnObserver | undefined,
+    signal: AbortSignal | undefined,
+    checkImmediately = true,
+  ): { readonly completion: Promise<PiFollowupResult>; readonly cancel: () => void } {
+    const projector = createPiProjector(path, workDir, this.deps.masker ?? createCredentialMaskerFromEnvironment())
+    const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
+    let cancel!: () => void
+    const completion = new Promise<PiFollowupResult>((resolve) => {
       let settled = false
-      const settle = (result: PiFollowupResult) => {
+      let timer: ReturnType<typeof setInterval> | null = null
+      let unsubscribe = () => {}
+      const finish = (result: PiFollowupResult) => {
         if (settled) return
         settled = true
+        if (timer) clearInterval(timer)
+        unsubscribe()
+        signal?.removeEventListener('abort', onAbort)
         resolve(result)
       }
-      const onAbort = () => {
-        void session.value.abort().catch(() => undefined)
-        settle(this.failure('interrupted', 'Pi follow-up was interrupted'))
+      const check = () => {
+        if (settled || session.isStreaming) return
+        report(projector.reconcile(session.messages))
+        finish({
+          ok: true,
+          value: { runtimeSessionId: path, workDir, finalAssistantText: finalText(session.messages) },
+          diagnostics: [],
+        })
       }
+      const onAbort = () => {
+        void session.abort().catch(() => undefined)
+        finish(this.failure('interrupted', 'Pi follow-up was interrupted'))
+      }
+      cancel = () => finish(this.failure('interrupted', 'Pi follow-up was interrupted'))
+      unsubscribe = session.subscribe((event) => {
+        report(projector.project(event))
+        check()
+      })
       if (signal) {
         signal.addEventListener('abort', onAbort, { once: true })
         if (signal.aborted) onAbort()
       }
-      void this.sessionLocks.run(path, async () => {
-        if (settled) {
-          signal?.removeEventListener('abort', onAbort)
-          return
-        }
-        const unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
-        try {
-          await session.value.prompt(request.prompt, {
-            expandPromptTemplates: false,
-            preflight: (success) => {
-              if (success) {
-                if (!waitForCompletion) {
-                  settle({
-                    ok: true,
-                    value: { runtimeSessionId: path, workDir: request.target.workDir },
-                    diagnostics: [],
-                  })
-                }
-              } else {
-                settle(
-                  this.failure('turn-failed', 'Pi rejected follow-up reception (preflight rejected the prompt)', [
-                    diagnostic(
-                      'preflight-rejected',
-                      'Pi preflight rejected the follow-up prompt — model or credentials missing',
-                    ),
-                  ]),
-                )
-              }
-            },
-          })
-          report(projector.reconcile(session.value.messages))
-          if (waitForCompletion && !settled) {
-            settle({
-              ok: true,
-              value: { runtimeSessionId: path, workDir: request.target.workDir },
-              diagnostics: [],
-            })
-          }
-        } catch (cause) {
-          settle(
-            this.failure('turn-failed', 'Pi follow-up prompt failed', [
-              diagnostic('prompt-failed', this.mask(message(cause))),
-            ]),
-          )
-        } finally {
-          unsubscribe()
-          signal?.removeEventListener('abort', onAbort)
-        }
-      })
+      timer = setInterval(check, 100)
+      timer.unref?.()
+      if (checkImmediately) check()
     })
+    return { completion, cancel }
   }
 
   private async applyFollowupOptions(

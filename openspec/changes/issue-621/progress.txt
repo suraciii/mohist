@@ -20,3 +20,11 @@
 - Initial advisories call the existing `callFollowup` path with the current runtime session, original work directory, collaboration skill, internal prompt, and shared event sink/tracker. No second `session.input` is emitted. Optional follow-up signal propagation now allows OpenCode to use the coordinator signal and makes Pi idle advisory calls wait for prompt completion and abort on timeout/interruption; normal user follow-ups retain admission behavior.
 - Added `agent-job-reply-guard.spec.ts` covering Pi/OpenCode unpublished turns, two-reminder exhaustion, original accepted/rejected attempts, Agent reply during advisory, failure/timeout preservation, final-text-only behavior, and malformed/non-Slack bypass.
 - Post-integration verification passed: source/test typechecks and the focused AgentJob, reply-guard, OpenCode, and Pi runtime suites (119 tests; 120 after the added Pi attempt case).
+
+## T-003
+
+- Pi `followup` now separates admission from terminal completion. Unsignalled user follow-ups resolve at `preflight(true)` or after `steer`, carrying an internal completion promise that settles after the idle prompt continuation or active streaming Session reaches terminal state and projected events are reconciled. Signal-bearing internal advisories continue to await terminal completion directly.
+- Pi streaming follow-up observation subscribes before `steer`, so reply-action starts emitted immediately after steering are included in the shared Runner tracker; failed steering cancels the watcher without leaving a live subscription.
+- Follow-up handler completion now awaits the Pi completion handle, flushes the shared observer, evaluates the shared reply guard, and records terminal `session.activity` through a one-shot finalizer. Admission acknowledgement, durable `session.input`, operation journal behavior, output payload, and non-Slack behavior remain unchanged.
+- Added follow-up boundary coverage for OpenCode terminal gating and two silent reminders, Pi idle admission gating and Agent reply during advisory, rejected reply-action suppression, advisory failure preservation, Pi idle/streaming completion handles, and post-steer observation.
+- Verification passed: Runner source/test typechecks, test-boundary check, and focused follow-up/runtime/guard suites (112 tests before the terminal watcher race fix; 113 after).
