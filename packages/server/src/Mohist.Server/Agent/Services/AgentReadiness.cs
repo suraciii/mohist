@@ -44,22 +44,63 @@ public static class AgentReadinessDeriver
     }
 }
 
-public sealed record AgentConnectionDispatchDecision(bool Accepted, string Kind, string? Reason)
+public sealed record AgentConnectionDispatchDecision(
+    bool Accepted,
+    string Kind,
+    string? Reason,
+    AgentExecutabilityResult? Executability = null,
+    bool ConnectionUnavailable = false)
 {
-    public static AgentConnectionDispatchDecision For(string executability) => executability switch
+    public static AgentConnectionDispatchDecision For(string executability) =>
+        For(new AgentExecutabilityResult(executability, [], null));
+
+    public static AgentConnectionDispatchDecision For(AgentExecutabilityResult executability) => executability.State switch
     {
         AgentExecutabilityStates.NotConfigured => new(
             false,
             "agent_not_configured",
-            "Agent setup is incomplete. Fix the Agent definition before dispatching a task."),
+            "Agent setup is incomplete. Fix the Agent definition before dispatching a task.",
+            executability),
         AgentExecutabilityStates.NotExecutable => new(
             false,
             "agent_not_executable",
-            "The current Agent definition was rejected by its execution configuration. Update it before dispatching a task."),
+            "The current Agent definition was rejected by its execution configuration. Update it before dispatching a task.",
+            executability),
         AgentExecutabilityStates.Unknown => new(
             true,
             "accepted",
-            "Agent executability is unknown; the task is accepted and awaiting Runner verification."),
-        _ => new(true, "accepted", null),
+            "Agent executability is unknown; the task is accepted and awaiting Runner verification.",
+            executability),
+        _ => new(true, "accepted", null, executability),
     };
+
+    public static AgentConnectionDispatchDecision ForConnection(AgentConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        if (connection.DesiredState == DesiredStateKind.Disabled)
+            return new(true, "accepted", null);
+
+        if (connection.ConnectionHealth == ConnectionHealthKind.Degraded
+            && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason))
+        {
+            return new(
+                false,
+                "backpressured",
+                "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                ConnectionUnavailable: true);
+        }
+
+        if (connection.SetupProgress != SetupProgressKind.Complete
+            || connection.ConnectionHealth is ConnectionHealthKind.Unhealthy or ConnectionHealthKind.Degraded
+            || connection.OfflineGapAt is not null)
+        {
+            return new(
+                false,
+                "connection_unavailable",
+                "This Slack Connection is not ready to accept new tasks.",
+                ConnectionUnavailable: true);
+        }
+
+        return new(true, "accepted", null);
+    }
 }

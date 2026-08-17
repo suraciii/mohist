@@ -465,6 +465,62 @@ public sealed partial class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
+    public async Task Blocked_agent_root_and_first_unbound_thread_mention_nudge_without_work()
+    {
+        var connection = await CreateConnectionAsync();
+        await SetAgentConfigAsync(connection, null);
+
+        var root = await PostChannelAsync(
+            connection,
+            "C-channel-blocked",
+            "1710000000.000900",
+            threadTs: null,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> blocked root task");
+        Assert.Equal("agent_not_configured", root.GetProperty("kind").GetString());
+
+        var thread = await PostChannelAsync(
+            connection,
+            "C-channel-blocked",
+            "1710000000.000910",
+            threadTs: "1710000000.000900",
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> blocked thread task");
+        Assert.Equal("agent_not_configured", thread.GetProperty("kind").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "C-channel-blocked")
+            .ToListAsync());
+        Assert.Empty(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == connection.Id)
+            .ToListAsync());
+        Assert.Empty(await db.AgentJobs
+            .Where(row => row.ProjectId == connection.ProjectId)
+            .ToListAsync());
+
+        var nudges = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "C-channel-blocked"
+                && row.DispatchRef != null
+                && EF.Functions.Like(row.DispatchRef, "slack-setup-nudge:%"))
+            .ToListAsync();
+        Assert.Equal(2, nudges.Count);
+        Assert.Null(nudges.Single(row => row.DispatchRef!.EndsWith("1710000000.000900", StringComparison.Ordinal)).ThreadTs);
+        Assert.Equal("1710000000.000900", nudges.Single(row => row.DispatchRef!.EndsWith("1710000000.000910", StringComparison.Ordinal)).ThreadTs);
+        Assert.All(nudges, row =>
+        {
+            var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
+            Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
+            Assert.Contains("Agent is not ready", payload.Text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("model-missing", row.PayloadJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("mo agent edit", row.PayloadJson, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task Backpressured_channel_returns_visible_rejection_without_accepting_work()
     {
         var connection = await CreateConnectionAsync();
@@ -508,10 +564,16 @@ public sealed partial class SlackChannelThreadIngressSpecs
         Assert.Empty(await dbVerify.AgentSessions
             .Where(row => row.LabelConnectionId == connection.Id)
             .ToListAsync());
-        Assert.Empty(await dbVerify.SlackOutboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-channel-backpressured")
-            .ToListAsync());
+        var nudge = await dbVerify.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "C-channel-backpressured"
+            && row.Kind == SlackOutboxKinds.UserAction
+            && row.DispatchRef == $"slack-setup-nudge:{connection.Id}:T123/C-channel-backpressured/1710000000.000450");
+        var nudgePayload = SlackDeliveryPayload.Parse(nudge.PayloadJson);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, nudgePayload.Operation);
+        Assert.Equal("T123/C-channel-backpressured/1710000000.000450", nudgePayload.ClientMessageId);
+        Assert.Contains("Connection is not ready", nudgePayload.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(SlackProviderBackpressureReasons.OutboxOverflow, nudge.PayloadJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -558,10 +620,16 @@ public sealed partial class SlackChannelThreadIngressSpecs
         Assert.Empty(await dbVerify.AgentSessions
             .Where(row => row.LabelConnectionId == connection.Id)
             .ToListAsync());
-        Assert.Empty(await dbVerify.SlackOutboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "D-channel-backpressured")
-            .ToListAsync());
+        var nudge = await dbVerify.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "D-channel-backpressured"
+            && row.Kind == SlackOutboxKinds.UserAction
+            && row.DispatchRef == $"slack-setup-nudge:{connection.Id}:T123/D-channel-backpressured/1710000000.000455");
+        var nudgePayload = SlackDeliveryPayload.Parse(nudge.PayloadJson);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, nudgePayload.Operation);
+        Assert.Equal("T123/D-channel-backpressured/1710000000.000455", nudgePayload.ClientMessageId);
+        Assert.Contains("Connection is not ready", nudgePayload.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(SlackProviderBackpressureReasons.InboxOverflow, nudge.PayloadJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -809,6 +877,17 @@ public sealed partial class SlackChannelThreadIngressSpecs
         Assert.Equal(originalSessionId, reloaded);
     }
 
+    private async Task SetAgentConfigAsync(AgentConnection connection, JsonElement? config)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.Agents.SingleAsync(agent => agent.Id == connection.AgentId);
+        var agent = AgentStore.Deserialize(row.State)!;
+        agent.AgentConfig = config;
+        row.State = AgentStore.Serialize(agent);
+        await db.SaveChangesAsync();
+    }
+
     private async Task<JsonElement> PostChannelAsync(
         AgentConnection connection,
         string conversationId,
@@ -948,6 +1027,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
         {
             Id = id,
             ProjectId = projectId,
+            AgentId = agentId,
             WorkspaceTeamId = "T123",
             BotUserId = botUserId,
         };

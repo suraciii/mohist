@@ -928,6 +928,34 @@ public static partial class SlackConnectionRoutes
             JsonSerializer.Serialize(new { text }),
             threadTs), ct);
 
+    private static async Task EnqueueSetupNudgeAsync(
+        SlackOutboxStore outbox,
+        string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity identity,
+        AgentConnectionDispatchDecision decision,
+        string? threadTs,
+        CancellationToken ct)
+    {
+        var text = decision.ConnectionUnavailable
+            ? "This Slack Connection is not ready to accept the task. Please contact the Connection owner or a Mohist operator."
+            : "This Agent is not ready to accept the task. Please contact the Agent owner or a Mohist operator.";
+        var dispatchRef = $"slack-setup-nudge:{connection.Id}:{identity.AsKey()}";
+        var payload = new SlackDeliveryPayload(
+            SlackDeliveryOperations.PostMessage,
+            Text: text,
+            ClientMessageId: identity.AsKey());
+        await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
+            projectId,
+            connection.Id,
+            connection.WorkspaceTeamId,
+            identity.ConversationId,
+            SlackOutboxKinds.UserAction,
+            dispatchRef,
+            JsonSerializer.Serialize(payload),
+            threadTs), ct);
+    }
+
     private static string RemoveBotMention(string text, string botUserId)
     {
         if (string.IsNullOrWhiteSpace(botUserId))
@@ -1261,13 +1289,6 @@ public static partial class SlackConnectionRoutes
             return ApiResults.Ok(new { kind = "rejected", reason = decision.Reason });
         }
 
-        if (IsBackpressured(connection))
-            return ApiResults.Ok(new
-            {
-                kind = "backpressured",
-                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
-            });
-
         var prompt = RemoveBotMention(body.Text ?? string.Empty, connection.BotUserId);
         if (string.IsNullOrWhiteSpace(prompt) && body.Files.Count == 0)
         {
@@ -1284,45 +1305,74 @@ public static partial class SlackConnectionRoutes
             return ApiResults.Ok(new { kind = "rejected", reason });
         }
 
-        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
-        if (agent is null)
-            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
-
-        var dispatchDecision = await ResolveInboundDispatchDecisionAsync(req.Services, projectId, agent, ct);
-        if (!dispatchDecision.Accepted)
-        {
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                dispatchDecision.Reason!, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
-        }
-
-        var routeDraft = await ResolveInboxRouteDraftAsync(
-            projectId,
-            connection.Id,
-            body.ConversationId,
-            isNewTask,
-            req.DmMapping,
-            ct);
-
+        var acceptedReplay = await req.Inbox.FindAcceptedAsync(projectId, connection.Id, req.Identity, ct);
         SlackProviderInboxAcceptResult accepted;
-        try
+        SlackProviderInboxRoute route;
+        AgentInfo? agent = null;
+
+        if (acceptedReplay is not null)
         {
-            accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
-                projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
+            accepted = new SlackProviderInboxAcceptResult(acceptedReplay.Id, AlreadyExisted: true);
+            route = acceptedReplay.Route;
         }
-        catch (SlackProviderInboxCapacityExceededException)
+        else
         {
-            return ApiResults.Ok(new
+            var routeDraft = await ResolveInboxRouteDraftAsync(
+                projectId,
+                connection.Id,
+                body.ConversationId,
+                isNewTask,
+                req.DmMapping,
+                ct);
+
+            if (routeDraft.Kind is SlackProviderInboxRouteKinds.Launch or SlackProviderInboxRouteKinds.NewTaskLaunch)
             {
-                kind = "backpressured",
-                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
-            });
+                var admission = await ResolveNewLaunchAdmissionAsync(
+                    req.Services, projectId, connection, req.Agents, ct);
+                if (!admission.Decision.Accepted)
+                {
+                    if (admission.Agent is null && !admission.Decision.ConnectionUnavailable)
+                        return ApiResults.Fail(admission.Decision.Reason!, 409, admission.Decision.Kind);
+                    await EnqueueSetupNudgeAsync(
+                        req.Outbox,
+                        projectId,
+                        connection,
+                        req.Identity,
+                        admission.Decision,
+                        body.ThreadTs,
+                        ct);
+                    return ApiResults.Ok(new { kind = admission.Decision.Kind, reason = admission.Decision.Reason });
+                }
+                agent = admission.Agent;
+            }
+
+            try
+            {
+                accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
+                    projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
+            }
+            catch (SlackProviderInboxCapacityExceededException)
+            {
+                return ApiResults.Ok(new
+                {
+                    kind = "backpressured",
+                    reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                });
+            }
+
+            if (!accepted.AlreadyExisted)
+                await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
+
+            route = await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct);
         }
 
-        if (!accepted.AlreadyExisted)
-            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
-
-        var route = await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct);
+        if (route.Kind is SlackProviderInboxRouteKinds.Launch or SlackProviderInboxRouteKinds.NewTaskLaunch
+            && agent is null)
+        {
+            agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId, ct);
+            if (agent is null)
+                return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+        }
 
         if (route.Kind is SlackProviderInboxRouteKinds.Launch or SlackProviderInboxRouteKinds.NewTaskLaunch)
         {
@@ -1598,6 +1648,27 @@ public static partial class SlackConnectionRoutes
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
+            var acceptedReplay = await req.Inbox.FindAcceptedAsync(projectId, connection.Id, req.Identity, ct);
+            if (acceptedReplay is not null)
+                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct, null, acceptedReplay);
+
+            var admission = await ResolveNewLaunchAdmissionAsync(
+                req.Services, projectId, connection, req.Agents, ct);
+            if (!admission.Decision.Accepted)
+            {
+                if (admission.Agent is null && !admission.Decision.ConnectionUnavailable)
+                    return ApiResults.Fail(admission.Decision.Reason!, 409, admission.Decision.Kind);
+                await EnqueueSetupNudgeAsync(
+                    req.Outbox,
+                    projectId,
+                    connection,
+                    req.Identity,
+                    admission.Decision,
+                    body.ThreadTs,
+                    ct);
+                return ApiResults.Ok(new { kind = admission.Decision.Kind, reason = admission.Decision.Reason });
+            }
+
             var historyOutcome = await ReadThreadHistoryIfAnyAsync(req, rootTs, ct);
 
             if (historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Refused)
@@ -1610,7 +1681,7 @@ public static partial class SlackConnectionRoutes
             var startupContext = historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Imported
                 ? BuildStartupContext(req, historyOutcome.Messages)
                 : null;
-            return await LaunchChannelRootAsync(req, prompt, rootTs, startupContext, ct);
+            return await LaunchChannelRootAsync(req, prompt, rootTs, startupContext, ct, admission);
         }
 
         if (threadBindings.Count >= 2)
@@ -1864,96 +1935,119 @@ public static partial class SlackConnectionRoutes
         return ApiResults.Ok(new { kind = "rejected", reason });
     }
 
-    private static bool IsBackpressured(AgentConnection connection) =>
-        connection.ConnectionHealth == Agent.Domain.ConnectionHealthKind.Degraded
-        && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
-
     private static async Task<IResult> LaunchChannelRootAsync(
         HandleChannelIngressRequest req,
         string prompt,
         string rootTs,
         AgentStartupContext? startupContext,
-        CancellationToken ct)
+        CancellationToken ct,
+        SlackLaunchAdmission? admission = null,
+        SlackProviderInboxAcceptedMessage? acceptedReplay = null)
     {
         var body = req.Body;
         var projectId = req.ProjectId;
         var connection = req.Connection;
         var dispatchRef = $"slack-thread:{body.TeamId}:{body.ConversationId}:{rootTs}";
 
-        if (IsBackpressured(connection))
-            return ApiResults.Ok(new
-            {
-                kind = "backpressured",
-                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
-            });
-
-        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
-        if (agent is null)
-            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
-
-        var dispatchDecision = await ResolveInboundDispatchDecisionAsync(req.Services, projectId, agent, ct);
-        if (!dispatchDecision.Accepted)
+        acceptedReplay ??= await req.Inbox.FindAcceptedAsync(projectId, connection.Id, req.Identity, ct);
+        if (acceptedReplay is not null
+            && acceptedReplay.Route.Kind == SlackProviderInboxRouteKinds.FollowupThread
+            && !string.IsNullOrWhiteSpace(acceptedReplay.Route.SessionId))
         {
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                dispatchDecision.Reason!, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+            return await DispatchChannelFollowupAsync(
+                req, acceptedReplay.Route.SessionId!, prompt, ct);
         }
 
-        var reservation = await req.ThreadLaunchReservations.ReserveAsync(
-            projectId,
-            body.TeamId,
-            connection.Id,
-            body.ConversationId,
-            rootTs,
-            body.MessageTs,
-            req.SenderSlackUserId,
-            ct);
-        if (reservation.Kind == SlackThreadLaunchReservationKind.InProgress)
-            return ApiResults.Conflict(
-                "Another launch is already being established for this Slack thread; retry this message.",
-                "slack_thread_launch_in_progress");
-        if (reservation.Kind == SlackThreadLaunchReservationKind.Bound)
+        admission ??= acceptedReplay is null
+            ? await ResolveNewLaunchAdmissionAsync(req.Services, projectId, connection, req.Agents, ct)
+            : null;
+        if (acceptedReplay is null && admission is not null && !admission.Decision.Accepted)
         {
-            await req.ThreadMapping.UpsertAsync(
+            if (admission.Agent is null && !admission.Decision.ConnectionUnavailable)
+                return ApiResults.Fail(admission.Decision.Reason!, 409, admission.Decision.Kind);
+            await EnqueueSetupNudgeAsync(
+                req.Outbox,
+                projectId,
+                connection,
+                req.Identity,
+                admission.Decision,
+                body.ThreadTs,
+                ct);
+            return ApiResults.Ok(new { kind = admission.Decision.Kind, reason = admission.Decision.Reason });
+        }
+
+        AgentInfo? agent = admission?.Agent;
+        var existingRoute = acceptedReplay?.Route;
+        SlackThreadLaunchReservation? reservation = null;
+        if (acceptedReplay is null || string.IsNullOrWhiteSpace(existingRoute?.SessionId))
+        {
+            reservation = await req.ThreadLaunchReservations.ReserveAsync(
                 projectId,
                 body.TeamId,
                 connection.Id,
                 body.ConversationId,
                 rootTs,
+                body.MessageTs,
                 req.SenderSlackUserId,
-                reservation.SessionId!,
-                rootTs,
                 ct);
-            return await DispatchChannelFollowupAsync(req, reservation.SessionId!, prompt, ct);
-        }
-
-        var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.LaunchThread);
-        SlackProviderInboxAcceptResult accepted;
-        try
-        {
-            accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
-                projectId, connection.Id, req.Identity, req.SenderSlackUserId, rootTs), routeDraft, ct);
-        }
-        catch (SlackProviderInboxCapacityExceededException)
-        {
-            return ApiResults.Ok(new
+            if (reservation.Kind == SlackThreadLaunchReservationKind.InProgress)
+                return ApiResults.Conflict(
+                    "Another launch is already being established for this Slack thread; retry this message.",
+                    "slack_thread_launch_in_progress");
+            if (reservation.Kind == SlackThreadLaunchReservationKind.Bound)
             {
-                kind = "backpressured",
-                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
-            });
+                await req.ThreadMapping.UpsertAsync(
+                    projectId,
+                    body.TeamId,
+                    connection.Id,
+                    body.ConversationId,
+                    rootTs,
+                    req.SenderSlackUserId,
+                    reservation.SessionId!,
+                    rootTs,
+                    ct);
+                return await DispatchChannelFollowupAsync(req, reservation.SessionId!, prompt, ct);
+            }
         }
 
-        if (!accepted.AlreadyExisted)
-            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
+        SlackProviderInboxAcceptResult accepted;
+        if (acceptedReplay is not null)
+        {
+            accepted = new SlackProviderInboxAcceptResult(acceptedReplay.Id, AlreadyExisted: true);
+        }
+        else
+        {
+            var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.LaunchThread);
+            try
+            {
+                accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
+                    projectId, connection.Id, req.Identity, req.SenderSlackUserId, rootTs), routeDraft, ct);
+            }
+            catch (SlackProviderInboxCapacityExceededException)
+            {
+                return ApiResults.Ok(new
+                {
+                    kind = "backpressured",
+                    reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                });
+            }
 
-        AgentLaunchResult? launch = null;
-        SlackAttachmentBinding? attachmentBinding = null;
-        var existingRoute = accepted.AlreadyExisted
+            if (!accepted.AlreadyExisted)
+                await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
+        }
+
+        existingRoute ??= accepted.AlreadyExisted
             ? await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)
             : null;
-        var sessionId = existingRoute?.SessionId ?? reservation.SessionId;
+        var sessionId = existingRoute?.SessionId ?? reservation?.SessionId;
+        AgentLaunchResult? launch = null;
+        SlackAttachmentBinding? attachmentBinding = null;
         if (string.IsNullOrWhiteSpace(sessionId))
         {
+            agent ??= await req.Agents.GetByIdAsync(projectId, connection.AgentId, ct);
+            if (agent is null)
+                return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+
             var launchIds = PreMintSlackLaunchIds(projectId, req.Identity);
             attachmentBinding = await req.AttachmentBinder.PrepareAsync(
                 projectId,
@@ -1983,7 +2077,7 @@ public static partial class SlackConnectionRoutes
                 var workspaceName = await req.Services.GetRequiredService<InteractionWorkspaceProvisioner>()
                     .EnsureSlackWorkspaceAsync(projectId, body.TeamId, body.ConversationId, time.GetUtcNow());
                 launch = await req.Launcher.LaunchConnectionAsync(
-                    agent,
+                    agent!,
                     prompt,
                     new ConnectionLaunchOrigin(
                         connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
@@ -2017,14 +2111,17 @@ public static partial class SlackConnectionRoutes
             sessionId = bindResult.SessionId;
             if (bindResult.AlreadyExisted)
                 sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId, ct);
-            await req.ThreadLaunchReservations.BindSessionAsync(
-                projectId,
-                body.TeamId,
-                connection.Id,
-                body.ConversationId,
-                rootTs,
-                sessionId,
-                ct);
+            if (reservation is not null)
+            {
+                await req.ThreadLaunchReservations.BindSessionAsync(
+                    projectId,
+                    body.TeamId,
+                    connection.Id,
+                    body.ConversationId,
+                    rootTs,
+                    sessionId,
+                    ct);
+            }
         }
 
         await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
@@ -2115,13 +2212,6 @@ public static partial class SlackConnectionRoutes
         var projectId = req.ProjectId;
         var connection = req.Connection;
         var dispatchRef = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
-
-        if (IsBackpressured(connection))
-            return ApiResults.Ok(new
-            {
-                kind = "backpressured",
-                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
-            });
 
         if (string.IsNullOrWhiteSpace(prompt))
         {

@@ -6,6 +6,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -18,7 +19,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed partial class SlackChannelThreadIngressSpecs
 {
     [Fact]
-    public async Task Accepted_ingress_clears_offline_gap_after_reconnect()
+    public async Task Offline_gap_blocks_new_ingress_without_clearing_gap()
     {
         var connection = await CreateConnectionAsync();
         var runnerId = $"slack-gap-clear-{Guid.NewGuid():N}";
@@ -67,14 +68,21 @@ public sealed partial class SlackChannelThreadIngressSpecs
             });
             response.EnsureSuccessStatusCode();
             using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            jobKey = payload.RootElement.GetProperty("data").GetProperty("jobKey").GetString();
-            Assert.False(string.IsNullOrWhiteSpace(jobKey));
+            var data = payload.RootElement.GetProperty("data");
+            Assert.Equal("connection_unavailable", data.GetProperty("kind").GetString());
+            Assert.False(data.TryGetProperty("jobKey", out _));
 
             await using var verify = _fixture.Services.CreateAsyncScope();
             var verifyDb = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
             var reloaded = await verifyDb.AgentConnections.AsNoTracking()
                 .SingleAsync(row => row.Id == connection.Id);
-            Assert.Null(reloaded.OfflineGapAt);
+            Assert.NotNull(reloaded.OfflineGapAt);
+            var nudge = await verifyDb.SlackOutboxRows.SingleAsync(row =>
+                row.ConnectionId == connection.Id
+                && row.ConversationId == "D-gap-clear"
+                && row.DispatchRef == $"slack-setup-nudge:{connection.Id}:T123/D-gap-clear/1710000000.000600");
+            Assert.Equal(SlackOutboxKinds.UserAction, nudge.Kind);
+            Assert.Equal(SlackDeliveryOperations.PostMessage, SlackDeliveryPayload.Parse(nudge.PayloadJson).Operation);
         }
         finally
         {

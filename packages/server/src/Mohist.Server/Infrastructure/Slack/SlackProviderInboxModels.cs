@@ -21,6 +21,10 @@ public sealed record SlackProviderInboxDraft(
 /// </summary>
 public sealed record SlackProviderInboxAcceptResult(string Id, bool AlreadyExisted);
 
+public sealed record SlackProviderInboxAcceptedMessage(
+    string Id,
+    SlackProviderInboxRoute Route);
+
 public static class SlackProviderInboxRouteKinds
 {
     public const string Launch = "launch";

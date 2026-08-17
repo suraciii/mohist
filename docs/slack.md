@@ -298,6 +298,23 @@ delegations.
 New work starts from a DM when the conversation has no current Session, or from
 a channel root message that mentions the Bot.
 
+#### Setup Mode
+
+Before a new launch is admitted, Mohist checks the Slack Connection and then the
+bound Agent. If either is not ready, Slack receives one Server-authored message
+that says the Agent or Slack Connection is not ready to accept the task and
+points the caller to the responsible owner or operator. It does not expose
+health reasons, readiness gap codes, configuration or credential details,
+repair paths, or commands, and it never claims that execution started.
+
+Owners and authorized operators can inspect the detailed Agent readiness gaps,
+next actions, and repair entry points in the Agent and Connection diagnostic
+surfaces. Agent readiness is independent from Slack Connection health and
+installation state: a Connection can be healthy while its Agent needs setup,
+and a Connection can be unavailable while the Agent remains executable.
+Existing DM sessions and bound channel threads continue through their persisted
+Session route; setup mode applies only to new launches.
+
 After removing the mention, the message must contain task text or a usable
 attachment. A bare mention gets a question, not an AgentJob. An attachment
 alone is valid input; Mohist invents no hidden prompt.

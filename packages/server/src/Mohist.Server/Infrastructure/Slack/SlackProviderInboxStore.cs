@@ -135,6 +135,38 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
         }
     }
 
+    public async Task<SlackProviderInboxAcceptedMessage?> FindAcceptedAsync(
+        string projectId,
+        string connectionId,
+        SlackMessageIdentity identity,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        var identityError = identity.Validate();
+        if (identityError.Length != 0)
+            throw new ArgumentException(identityError, nameof(identity));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(candidate => candidate.ProjectId == projectId
+                && candidate.ConnectionId == connectionId
+                && candidate.SlackMessageIdentity == identity.AsKey())
+            .Select(candidate => new
+            {
+                candidate.Id,
+                candidate.RouteKind,
+                candidate.RouteSessionId,
+                candidate.RouteTurnId,
+            })
+            .SingleOrDefaultAsync(ct);
+        return row is null || row.RouteKind is null
+            ? null
+            : new SlackProviderInboxAcceptedMessage(
+                row.Id,
+                new SlackProviderInboxRoute(row.RouteKind, row.RouteSessionId, row.RouteTurnId));
+    }
+
     public async Task<SlackProviderInboxRoute> GetRouteAsync(
         string projectId,
         string id,
