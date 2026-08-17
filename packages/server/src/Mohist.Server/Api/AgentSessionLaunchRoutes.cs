@@ -57,6 +57,110 @@ public static class AgentSessionLaunchRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/agents/{agentRef}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
+        group.MapPost("/sessions/preflight", async (
+            HttpContext context,
+            string agentRef,
+            AgentSessionLaunchBody body,
+            AgentQuerier agentQuerier,
+            IssueQuerier issueQuerier,
+            EpicQuerier epicQuerier,
+            IGrainFactory grains,
+            InteractionWorkspaceProvisioner provisioner,
+            CancellationToken ct) =>
+        {
+            if (body is null)
+                return ApiResults.BadRequest("request body is required", "body_required");
+            if (body.BindingError is not null)
+                return ApiResults.BadRequest(body.BindingError, "validation_failed");
+            if (body.UndeclaredFields.Count > 0)
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}",
+                    "unsupported_field",
+                    new { fields = body.UndeclaredFields.ToArray() });
+
+            var idempotencyKey = ReadIdempotencyKey(context.Request);
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                return ApiResults.BadRequest("Idempotency-Key is required for manual agent preflight", "idempotency_key_required");
+
+            var project = context.GetResolvedProject();
+            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
+            if (agent is null)
+                return ApiResults.NotFound($"Agent '{agentRef}' not found");
+            if (string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
+                return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
+
+            var hasText = !string.IsNullOrWhiteSpace(body.Prompt);
+            if (!hasText && body.Attachments is not { Count: > 0 })
+                return ApiResults.BadRequest(
+                    "input requires non-empty prompt or at least one accepted attachment",
+                    "input_required",
+                    new { fields = new[] { "prompt", "attachments" } });
+
+            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier, grains);
+            if (contextError is not null)
+                return contextError;
+
+            var ownershipIdentity = $"{project.Id}\n{idempotencyKey}";
+            var preMintedSessionId = $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}";
+            var launchOrigin = ReadLaunchOrigin(context.Request);
+            var suppliedWorkspace = body.Context?.Workspace?.Trim();
+            var workspaceName = suppliedWorkspace is { Length: > 0 }
+                ? suppliedWorkspace
+                : launchOrigin == "cli"
+                    ? await provisioner.ResolveCliWorkspaceNameAsync(project.Id)
+                    : await provisioner.ResolveWebWorkspaceNameAsync(project.Id, preMintedSessionId);
+
+            IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories = null;
+            if (!string.IsNullOrWhiteSpace(workspaceName))
+            {
+                var workspace = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                    Infrastructure.Orleans.GrainKey.Workspace(project.Id, workspaceName)).GetAsync();
+                if (workspace is { RepositoryNames.Count: > 0 })
+                {
+                    workspaceRepositories = workspace.RepositoryNames
+                        .Select(name => project.Repositories.FirstOrDefault(repository =>
+                            string.Equals(repository.Name, name, StringComparison.OrdinalIgnoreCase)))
+                        .Where(repository => repository is not null)
+                        .Select(repository => new WorkspaceRepositorySnapshot(
+                            repository!.Name,
+                            repository.GitUrl,
+                            repository.ResolvedBaseBranch))
+                        .ToArray();
+                }
+            }
+
+            var launchRequest = new AgentLaunchCoordinatorRequest(
+                Prompt: body.Prompt?.Trim() ?? string.Empty,
+                AgentRef: agentRef,
+                Runtime: null,
+                WorkspacePath: body.Context?.WorkspacePath,
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                Repository: body.Context?.Repository,
+                Title: null,
+                AttachmentIds: body.Attachments?.ToArray(),
+                WorkspaceName: workspaceName,
+                Origin: launchOrigin,
+                TargetId: body.Context?.TargetId?.Trim() is { Length: > 0 } targetId ? targetId : agent.Id,
+                WorkspaceRepositories: workspaceRepositories);
+            var execution = ExecutionConfigResolver.Resolve(
+                callerHint: null,
+                definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
+                projectDefault: project.DefaultExecutionConfig);
+
+            return ApiResults.Ok(new AgentTaskPreflightResponse(
+                ScopeFingerprint: AgentTaskRoutes.BuildScopeFingerprint(launchRequest, execution, workspaceRepositories),
+                AgentName: agent.Name,
+                Execution: new AgentEffectiveExecutionConfig(execution.Runtime, execution.Model, execution.Variant),
+                Repository: body.Context?.Repository?.Trim(),
+                Workspace: workspaceName,
+                WorkspaceRepositories: workspaceRepositories?.Select(repository => repository.Name).ToArray() ?? [],
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                PermissionScope: "project-workspace-write",
+                ExpectedImpact: "Starts one AgentJob and AgentSession with write access to the selected workspace."));
+        });
+
         group.MapPost("/sessions", async (
             HttpContext context,
             string projectRef,
@@ -226,6 +330,26 @@ public static class AgentSessionLaunchRoutes
             catch (AgentExecutabilityException ex)
             {
                 return ExecutabilityRejected(ex);
+            }
+
+            var preflightFingerprint = context.Request.Headers["X-Mohist-Agent-Preflight"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(preflightFingerprint))
+            {
+                var execution = ExecutionConfigResolver.Resolve(
+                    callerHint: null,
+                    definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
+                    projectDefault: project.DefaultExecutionConfig);
+                var actualScopeFingerprint = AgentTaskRoutes.BuildScopeFingerprint(
+                    launchRequest,
+                    execution,
+                    workspaceRepositories);
+                if (!string.Equals(preflightFingerprint.Trim(), actualScopeFingerprint, StringComparison.Ordinal))
+                {
+                    return ApiResults.Conflict(
+                        "The confirmed execution scope changed before launch. Run preflight again and confirm the new scope.",
+                        "launch_scope_changed",
+                        new { preflightFingerprint = actualScopeFingerprint });
+                }
             }
 
             // The route mints every identity used by attachment ownership.

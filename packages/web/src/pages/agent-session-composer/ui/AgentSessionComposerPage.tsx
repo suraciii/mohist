@@ -22,6 +22,7 @@ import {
   useAgentListAvailability,
   useAgents,
   useLaunchAgentSession,
+  usePreflightAgentSession,
   usePreflightAgentTask,
   useStartAgentTask,
 } from "../../../entities/agent";
@@ -353,6 +354,10 @@ export interface AgentSessionComposerData {
     ReturnType<typeof useLaunchAgentSession>,
     "mutate" | "isPending" | "error" | "reset"
   >;
+  preflightSessionMutation?: Pick<
+    ReturnType<typeof usePreflightAgentSession>,
+    "mutate" | "isPending" | "error" | "reset"
+  >;
   preflightTaskMutation?: Pick<
     ReturnType<typeof usePreflightAgentTask>,
     "mutate" | "isPending" | "error" | "reset"
@@ -375,6 +380,7 @@ const useDefaultData: AgentSessionComposerDataHook = () => {
     availability,
     availabilityLoading,
     launchMutation: useLaunchAgentSession(),
+    preflightSessionMutation: usePreflightAgentSession(),
     preflightTaskMutation: usePreflightAgentTask(),
     startTaskMutation: useStartAgentTask(),
   };
@@ -404,6 +410,7 @@ export function AgentSessionComposerPage({
     availability,
     availabilityLoading,
     launchMutation,
+    preflightSessionMutation,
     preflightTaskMutation,
     startTaskMutation,
   } = dataHook();
@@ -451,6 +458,7 @@ export function AgentSessionComposerPage({
   const [pendingPreflight, setPendingPreflight] = useState<{
     response: AgentTaskPreflightResponse;
     input: AgentTaskLaunchInput;
+    agentRef?: string;
   } | null>(null);
   const [launchAttachmentResult, setLaunchAttachmentResult] = useState<{
     agentId: string;
@@ -503,6 +511,7 @@ export function AgentSessionComposerPage({
     (Number.isInteger(concurrencyValue) && concurrencyValue > 0);
   const launchPending =
     launchMutation.isPending ||
+    preflightSessionMutation?.isPending === true ||
     preflightTaskMutation?.isPending === true ||
     startTaskMutation.isPending;
   const canLaunch =
@@ -544,8 +553,20 @@ export function AgentSessionComposerPage({
 
   const handleConfirmPreflight = useCallback(() => {
     if (!pendingPreflight || !launchKeyRef.current) return;
-    const { response, input } = pendingPreflight;
+    const { response, input, agentRef } = pendingPreflight;
     setPendingPreflight(null);
+    if (agentRef) {
+      launchMutation.mutate(
+        {
+          agentRef,
+          ...input,
+          preflightFingerprint: response.scopeFingerprint,
+          idempotencyKey: launchKeyRef.current,
+        },
+        { onSuccess: handleLaunchSuccess },
+      );
+      return;
+    }
     startTaskMutation.mutate(
       {
         ...input,
@@ -554,7 +575,12 @@ export function AgentSessionComposerPage({
       },
       { onSuccess: handleLaunchSuccess },
     );
-  }, [handleLaunchSuccess, pendingPreflight, startTaskMutation]);
+  }, [
+    handleLaunchSuccess,
+    launchMutation,
+    pendingPreflight,
+    startTaskMutation,
+  ]);
 
   const handleLaunch = useCallback(() => {
     if (!canLaunch) return;
@@ -580,15 +606,28 @@ export function AgentSessionComposerPage({
     const onSuccess = handleLaunchSuccess;
 
     if (selectedAgentRef) {
-      launchMutation.mutate(
+      const sessionInput: AgentTaskLaunchInput = {
+        prompt: prompt.trim(),
+        context: hasContext ? context : null,
+        attachments: attachmentIds,
+      };
+      if (!preflightSessionMutation) {
+        launchMutation.mutate(
+          { agentRef: selectedAgentRef, ...sessionInput, idempotencyKey },
+          { onSuccess },
+        );
+        return;
+      }
+      preflightSessionMutation.mutate(
+        { agentRef: selectedAgentRef, ...sessionInput, idempotencyKey },
         {
-          agentRef: selectedAgentRef,
-          prompt: prompt.trim(),
-          context: hasContext ? context : null,
-          attachments: attachmentIds,
-          idempotencyKey,
+          onSuccess: (response) =>
+            setPendingPreflight({
+              response,
+              input: sessionInput,
+              agentRef: selectedAgentRef,
+            }),
         },
-        { onSuccess },
       );
       return;
     }
@@ -631,6 +670,7 @@ export function AgentSessionComposerPage({
     maxConcurrentRunsText,
     launchMutation,
     handleLaunchSuccess,
+    preflightSessionMutation,
     preflightTaskMutation,
     prompt,
     selectedAgentRef,
@@ -639,7 +679,7 @@ export function AgentSessionComposerPage({
   ]);
 
   const launchError = selectedAgentRef
-    ? launchMutation.error
+    ? (preflightSessionMutation?.error ?? launchMutation.error)
     : (preflightTaskMutation?.error ?? startTaskMutation.error);
   const launchFeedback = getAgentLaunchErrorFeedback(
     launchError,
