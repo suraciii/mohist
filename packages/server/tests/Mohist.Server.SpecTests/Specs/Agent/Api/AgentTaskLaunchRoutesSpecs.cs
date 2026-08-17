@@ -473,6 +473,25 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
+    public async Task TaskLaunch_AcceptsNumericEpicContext()
+    {
+        var projectId = await CreateProjectAsync("task-epic-context");
+        var epicNumber = await CreateEpicAsync(projectId, "Task context epic");
+
+        using var response = await PostTaskAsync(
+            projectId,
+            new
+            {
+                prompt = "launch in an epic context",
+                model = "provider/task",
+                context = new { epicNumber },
+            },
+            "task-epic-context-key");
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
     public async Task TaskLaunch_UnknownContextMatchesDefinitionFirstNotFoundBoundary()
     {
         var projectId = await CreateProjectAsync("task-context");

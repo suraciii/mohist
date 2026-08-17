@@ -477,3 +477,8 @@ The final composer extension also gates selected existing-Agent launches through
 
 - Fixed the editor to initialize execution controls from raw `agentConfig` through `readAgentDefinitionModelAndVariant`; effective Project-default projections remain available to list/detail display readers but are no longer written during unrelated profile edits.
 - Added helper and editor regressions for a default-resolved Agent with no raw execution config. Web typecheck, FSD boundaries, test-boundary checks, and focused Web coverage (37/37) passed.
+
+## Review repair: MF-8
+
+- Fixed `mo agent start --epic` by using `int?` for the CLI option and numeric `context.epicNumber` serialization. The existing definition-first launch option and shared builder now use the same typed contract.
+- Updated CLI coverage to assert the numeric JSON value and added a task-route spec accepting a real numeric Epic context. CLI tests passed 1,860/1,860; the task-route specs passed 14/14; Server and CLI builds passed.

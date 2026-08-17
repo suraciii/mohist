@@ -24,7 +24,7 @@ internal static partial class AgentCommands
         var modelOpt = new Option<string?>("--model") { Description = "Model identifier in provider/model form" };
         var variantOpt = new Option<string?>("--variant") { Description = "Runtime-specific model variant" };
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
-        var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
+        var epicRefOpt = new Option<int?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
         var repositoryRefOpt = new Option<string?>("--repo") { Description = "Optional context reference: record the repository on the session metadata" };
         var workspaceOpt = new Option<string?>("--workspace") { Description = "Bind to a named workspace" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
