@@ -805,10 +805,7 @@ public partial class WorkflowGrain
 
         _run.PendingSessionInterruptionDeliveries ??= [];
         if (_run.PendingSessionInterruptionDeliveries.Count == 0)
-        {
-            await RemoveAgentSessionInterruptionReminderAsync();
             return;
-        }
 
         await EnsureAgentSessionInterruptionReminderAsync();
         while (_run.PendingSessionInterruptionDeliveries.Count > 0)

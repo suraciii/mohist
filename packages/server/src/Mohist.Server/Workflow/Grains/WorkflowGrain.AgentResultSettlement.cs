@@ -166,8 +166,8 @@ public partial class WorkflowGrain
         }
         catch (ArgumentNullException)
         {
-            // Reminder-less hosts (mocked grains in specs) have no registry;
-            // the delivery obligation is still satisfied in-memory.
+            // Directly constructed grain tests have no reminder registry. A
+            // missing registry cannot leave a durable delivery outstanding.
         }
     }
 
