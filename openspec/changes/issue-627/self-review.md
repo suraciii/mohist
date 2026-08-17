@@ -2,52 +2,55 @@
 
 ## Verdict
 
-FAIL. The plan has must-fix gaps relative to the issue's late-result and concurrent-capacity acceptance requirements.
+PASS. No must-fix problem remains in the plan relative to issue 627 and its acceptance criteria.
 
-## Must-Fix Findings
+## Re-Review Dispositions
 
-### 1. The authoritative late-result ingress is undecided
+### 1. Authoritative late-result ingress
 
-`design.md:70-76` requires a complete WorkflowRun/task/work/Runner/AgentSession/AgentTurn/runtime/runtime-session fence, but `design.md:115` leaves the authoritative transport undecided between additive `RunnerReportRequest` fields and an AgentSession callback. `tasks.json` T-004 (`:73-90`) repeats that choice as a human decision required before implementation.
+Fixed properly. `design.md:70-78` now selects the existing `POST /api/runner/{runnerId}/report` route, defines the additive `RunnerReportRequest` binding fields, requires the complete Agent binding for terminal Agent reports, preserves the non-Agent paths, and describes how the Runner journal and Workflow binding path carry the same executed-turn identity. `tasks.json` T-004 (`:72-94`) and the capability spec (`spec.md:123-130`) make that contract and its stale side-effect-free behavior executable. The previous open transport choice is removed from `design.md`.
 
-This is acceptance-critical, not an implementation detail. The current code confirms the gap: `RunnerReportRequest` has no Agent execution binding (`packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:1003-1016`), `WorkflowReportService` converts a runner result directly into `ReceiveTaskReportAsync` using only runner/work/task identity (`packages/server/src/Mohist.Server/Runner/Services/WorkflowReportService.cs:38-64`), and that grain path can report a blocked attempt before any full binding check (`packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.Reports.cs:250-295`).
+### 2. Concurrent unknown attempts
 
-This violates the issue requirement that a late result be accepted only through the existing identity fence and that insufficiently identified receipts not be accepted. It also leaves T-004's first acceptance criterion unverifiable. The plan must settle the authoritative ingress and its additive wire contract before implementation, including how the runner/session supplies every required binding field and how non-Agent reports remain unchanged.
-
-### 2. The required concurrent-unknown release regression is not explicit
-
-The issue comments add a live acceptance case for two concurrent unknown works (`cmt_d3521c321c484460a14f3a5a878b086a`) and require the post-deadline blocked settlement and Runner active-work/capacity release to be the same exactly-once boundary (`cmt_bb464b719dcd4705935b688fff4c02fd`).
-
-The plan's test scenarios are all singular: `design.md:88-93` describes "an attempt," "a capacity-full Runner," and "the old attempt," while T-001 through T-004 in `tasks.json:11-15`, `:32-35`, and `:76-79` never require two unknown attempts to cross the deadline together. A test of one released workflow plus one different eligible workflow does not prove that both concurrent unknown rows disappear from `activeWorks` and used-slot accounting, nor that repeated settlement of either row cannot release or retain capacity twice.
-
-This leaves the added live acceptance incomplete: the plan must add an explicit fake-time/failure-injection scenario with two concurrent unknown attempts, assert both blocked transitions and both original identities, assert the corresponding Runner active-work and capacity projections are released at the same durable boundary, then verify another work item can claim capacity and matching late receipts remain identity-fenced and non-reoccupying.
+Fixed properly. The design test protocol (`design.md:94`), T-001/T-002/T-004 acceptance criteria (`tasks.json:15`, `:34`, and `:82-83`), and the capability scenario (`spec.md:38-44`) now require two concurrent unknown attempts on one capacity-limited Runner, both durable blocked transitions, both identity tuples, same-boundary active-work and slot release, cleanup failure coverage, replacement capacity, and non-reoccupying late receipts.
 
 ## Review Dimensions
 
 ### Issue Basis
 
-Checked, no issue. The issue body and all current comments were read before the artifacts. The review basis is the durable deadline transition, active-work/slot release, preservation of unknown/stop identity and disposition, full-fence late-result arbitration, and deterministic fake-time/failure-injection coverage. The comments' concurrent-work and same-boundary requirements are included above.
+Checked, no issue. I read the complete issue body and all current comments before judging the artifacts. The review basis is the durable unknown deadline, active-work and Runner-slot release, preservation of unknown/stop identity and disposition, full-fence late-result arbitration, and deterministic fake-time/failure-injection coverage. The two-concurrent-attempt and same-boundary requirements from the issue comments are included in the revised plan.
 
 ### Coverage
 
-FAIL due to findings 1 and 2. The proposal, design, and capability spec cover the main state, cleanup, projection, and late-result behaviors. However, the late-result transport needed to satisfy the full-fence criterion is unresolved, and the explicit concurrent regression added by the issue comments is absent from the task acceptance criteria.
+Checked, no issue. The proposal, design, capability spec, and task list cover:
+
+- exactly-once Unknown-to-Blocked deadline settlement and assignment release;
+- preservation of task/run lifecycle state, execution identity, stop facts, reason, and deadline;
+- exclusion from claims, redelivery, active-work projections, and Runner capacity;
+- idempotent snapshot, reminder, stage/resource cleanup and repair of legacy blocked assignments;
+- blocked/unknown status, Issue/Inbox attention, event replay, and reason/detail projections;
+- full-fence late success/failure arbitration with duplicate, incomplete, mismatched, and physical-only receipts;
+- the explicit two-concurrent-unknown live regression; and
+- fake-time, grain replay, failure-injection, capacity, API, projection, and non-Agent regression tests.
 
 ### Correctness
 
-FAIL due to finding 1. The assignment-removal approach is consistent with the current Runner queries and projections, and the design correctly keeps task/work/Runner and Agent identity facts after release. It cannot yet be judged correct for late results because the current runner report path accepts only the partial tuple and the plan has not selected the replacement ingress or specified its end-to-end arbitration contract.
+Checked, no issue. The selected release boundary combines the Blocked settlement transition and assignment removal in one durable run save while retaining the task/work/Runner and Agent execution facts needed for late routing. Keeping task and WorkflowRun lifecycle status Running is consistent with the plan's blocked-settlement projection model, while `HasUnresolvedAgentResult` and `HasDispatchableWork` prevent replacement claims.
+
+The active-work plan follows the current assignment-based ownership model and updates the grain read model, persisted work projection, database queries, Runner status/capacity, and polling behavior. Cleanup is explicitly ordered after the durable boundary and is independently retried. The late-result path reconciles due deadlines first, requires the complete execution tuple, applies only the original task outcome, and forbids ownership reacquisition or side effects for stale receipts.
 
 ### Current-Code Consistency
 
-Checked, no additional issue. The plan names real boundaries in the current codebase: `WorkflowRun.Assignment`, `WorkflowRunWorkProjectionBuilder`, `WorkflowRunQuerier`, `RunnerGrain` runtime status, `DispatchService`, the settlement reminder, and the existing `AgentExecutionBinding` observation path. The planned nullable/additive protocol extension is compatible with the repository's serialized record conventions once the authoritative path is decided.
+Checked, no issue. The plan targets real current boundaries: `WorkflowRun.Assignment`, `BlockUnresolvedAgentResult`, `WorkflowGrain` settlement reconciliation, `WorkflowRunQuerier`, `WorkflowRunWorkProjectionBuilder`, `WorkflowReadModel`, `RunnerGrain`, `DispatchService`, `WorkflowReportService`, `RunnerReportRequest`, `AgentExecutionBinding`, and the durable Runner result journal. The proposed serialized and HTTP additions are nullable/additive and the plan explicitly preserves the existing non-Agent report behavior.
 
 ### Task Breakdown
 
-FAIL. Ordering is checked, no issue: T-001 establishes the durable boundary, T-002 handles active-work/capacity projections, T-003 handles consumer projections, and T-004 depends on T-001/T-002 for late-result arbitration. Completeness and verifiability are not sufficient because T-004 is blocked on an unresolved HITL choice and no task makes the two-concurrent-unknown, same-boundary assertion mandatory.
+Checked, no issue. T-001 establishes the durable state boundary and cleanup contract. T-002 depends on it and updates active-work and capacity behavior. T-003 independently updates blocked consumer projections after T-001. T-004 depends on the state and ownership changes before implementing late-result arbitration. Each task links to a capability requirement and includes verifiable state, projection, race, failure-injection, or ingress assertions; the revised concurrent regression is no longer implicit.
 
 ## Observations
 
-- `design.md:114` leaves the public blocked `Reason` shape open. The normative requirement is clear enough to implement as stable category plus persisted reason/detail, so this is an observation rather than a must-fix finding.
-- `design.md:116-117` leaves workspace routing after assignment release and the maintenance sweep/metrics question open. These are operational follow-ups unless implementation reveals a workflow-goal regression; they do not change the required capacity and identity behavior.
-- The current `DispatchService` unions runner-reported work keys into poll capacity after database active-work reconciliation (`packages/server/src/Mohist.Server/Runner/Services/DispatchService.cs:84-96`). T-002 should explicitly test a stale reported key after release and define whether it is filtered or acknowledged, because otherwise a local stale report can still reduce poll spare capacity even when the released workflow is absent from server active-work projections. This is recorded as an observation because the issue's direct live evidence is the server-side `activeWorks`/used-slot projection, which T-002 explicitly covers.
+- `design.md:115-119` leaves the public blocked `Reason` shape, workspace routing after assignment release, and maintenance-sweep/metrics treatment open. The normative behavior is still sufficiently defined as a stable blocked category plus persisted reason/detail and deadline, so these do not block the issue goals.
+- `DispatchService` currently unions runner-reported `inFlight` and `awaitingAck` keys into poll capacity after server-side active-work reconciliation. T-002 covers stale snapshots and post-release polling, but implementation tests should also include a stale reported work key so a released workflow cannot reduce spare poll capacity solely because the Runner has not yet cleared its local report. This is an edge-consistency observation, not a must-fix against the issue's server-side activeWorks and used-slot acceptance.
+- The migration rollback text (`design.md:107-113`) correctly preserves cleared assignments and non-dispatchability, but a pre-change server binary still has the old partial report ingress. Rollback should therefore be operationally coordinated with the full-fence report contract; this does not affect the forward plan's selected ingress or acceptance coverage.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
