@@ -141,6 +141,73 @@ public sealed class PublicExecutionProjectionSpecs : IAsyncDisposable
     }
 
     [Fact]
+    public async Task LifecycleHistoryHead_MakesACompressedCycleReadAsProjectionLag()
+    {
+        await _harness.SeedJobAsync("job_lifecycle_lag", "proj_pub", "agent_pub", "session_lifecycle_lag", "input_lifecycle_lag", "turn_lifecycle_lag");
+
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_lifecycle_lag", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_lifecycle_lag", "job_lifecycle_lag", recordedAt: T0)],
+            turns: [PublicProjectionTestSupport.Turn("turn_lifecycle_lag", "input_lifecycle_lag", "job_lifecycle_lag", AgentTurnStatus.Queued, recordedAt: T0)]));
+        Assert.True(await _harness.Engine.ProcessPendingAsync());
+
+        var reads = new PublicExecutionReadQuerier(_harness.DbFactory);
+        Assert.False(await reads.IsSessionProjectionBehindAsync("session_lifecycle_lag"));
+
+        // The Session returns to its original digest before the next sweep,
+        // but the durable lifecycle feed still contains both transitions.
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_lifecycle_lag", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_lifecycle_lag", "job_lifecycle_lag", recordedAt: T0)],
+            turns: [PublicProjectionTestSupport.Turn("turn_lifecycle_lag", "input_lifecycle_lag", "job_lifecycle_lag", AgentTurnStatus.Executing, recordedAt: T0, updatedAt: T0.AddSeconds(1))]));
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_lifecycle_lag", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_lifecycle_lag", "job_lifecycle_lag", recordedAt: T0)],
+            turns: [PublicProjectionTestSupport.Turn("turn_lifecycle_lag", "input_lifecycle_lag", "job_lifecycle_lag", AgentTurnStatus.Queued, recordedAt: T0)]));
+
+        Assert.True(await reads.IsSessionProjectionBehindAsync("session_lifecycle_lag"));
+    }
+
+    [Fact]
+    public async Task RetryableDispatchBlock_ProjectsSafeQueueFullReasonAndError()
+    {
+        await _harness.SeedJobAsync(
+            "job_blocked_public",
+            "proj_pub",
+            "agent_pub",
+            "session_blocked_public",
+            "input_blocked_public",
+            "turn_blocked_public",
+            waitingReason: "capacity-full");
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_blocked_public", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_blocked_public", "job_blocked_public")],
+            turns: [PublicProjectionTestSupport.Turn("turn_blocked_public", "input_blocked_public", "job_blocked_public", AgentTurnStatus.Queued)]));
+
+        Assert.True(await _harness.Engine.ProcessPendingAsync());
+
+        var snapshot = ParseSnapshot((await _harness.SnapshotAsync("turn", "turn_blocked_public"))!);
+        Assert.Equal(PublicExecutionFieldValues.StatusQueued, snapshot.Status);
+        Assert.Equal(PublicExecutionFieldValues.AdmissionBlocked, snapshot.Admission);
+        Assert.Equal(PublicExecutionFieldValues.Reasons.QueueFull, snapshot.ReasonCode);
+        Assert.NotNull(snapshot.Error);
+        Assert.Equal(PublicExecutionFieldValues.Reasons.QueueFull, snapshot.Error!.Code);
+        Assert.Equal("The execution is waiting for available capacity.", snapshot.Error.Message);
+
+        var eventPayload = JsonSerializer.Deserialize<PublicExecutionRead>(
+            (await _harness.EventsAsync("session_blocked_public"))
+                .Single(row => row.Type == PublicSessionEventTypes.TurnQueued)
+                .PayloadJson,
+            JSON.PublicApi)!;
+        Assert.Equal(PublicExecutionFieldValues.Reasons.QueueFull, eventPayload.ReasonCode);
+        Assert.Equal(PublicExecutionFieldValues.Reasons.QueueFull, eventPayload.Error!.Code);
+    }
+
+    [Fact]
     public async Task LifecycleHistory_PreservesCompressedQueuedRunningAndTerminalTransitions()
     {
         await _harness.SeedJobAsync("job_history_1", "proj_pub", "agent_pub", "session_history_1", "input_history_1", "turn_history_1");

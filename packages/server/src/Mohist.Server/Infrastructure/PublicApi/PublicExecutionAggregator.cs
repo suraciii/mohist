@@ -215,9 +215,11 @@ internal static class PublicExecutionAggregator
             InputStatus: inputStatus,
             TurnStatus: turnStatus,
             Outcome: null,
-            ReasonCode: null,
+            ReasonCode: dispatchBlocked && joined
+                ? PublicExecutionFieldValues.Reasons.QueueFull
+                : null,
             Output: null,
-            Error: null,
+            Error: dispatchBlocked && joined ? QueueFullError() : null,
             AcceptedAt: job.SubmittedAt ?? facts.SessionCreatedAt,
             QueuedAt: job.ReadySince,
             StartedAt: job.RunningSince,
@@ -259,9 +261,9 @@ internal static class PublicExecutionAggregator
             InputStatus: MapInputStatus(input.Acceptance),
             TurnStatus: turnStatus,
             Outcome: null,
-            ReasonCode: null,
+            ReasonCode: dispatchBlocked ? PublicExecutionFieldValues.Reasons.QueueFull : null,
             Output: null,
-            Error: null,
+            Error: dispatchBlocked ? QueueFullError() : null,
             AcceptedAt: input.RecordedAt,
             QueuedAt: turn?.RecordedAt,
             StartedAt: job?.RunningSince,
@@ -299,9 +301,9 @@ internal static class PublicExecutionAggregator
             InputStatus: input is null ? null : MapInputStatus(input.Acceptance),
             TurnStatus: MapTurnStatus(turn.Status, facts.PendingStopActive),
             Outcome: null,
-            ReasonCode: null,
+            ReasonCode: dispatchBlocked ? PublicExecutionFieldValues.Reasons.QueueFull : null,
             Output: null,
-            Error: null,
+            Error: dispatchBlocked ? QueueFullError() : null,
             AcceptedAt: input?.RecordedAt,
             QueuedAt: turn.RecordedAt,
             StartedAt: job?.RunningSince,
@@ -342,9 +344,9 @@ internal static class PublicExecutionAggregator
             InputStatus: contextInput is null ? null : MapInputStatus(contextInput.Acceptance),
             TurnStatus: turnStatus,
             Outcome: null,
-            ReasonCode: null,
+            ReasonCode: dispatchBlocked ? PublicExecutionFieldValues.Reasons.QueueFull : null,
             Output: null,
-            Error: null,
+            Error: dispatchBlocked ? QueueFullError() : null,
             AcceptedAt: contextInput?.RecordedAt ?? facts.SessionCreatedAt,
             QueuedAt: contextTurn?.RecordedAt,
             StartedAt: job?.RunningSince,
@@ -809,6 +811,12 @@ internal static class PublicExecutionAggregator
     {
         Code = PublicExecutionFieldValues.OutcomeRejected,
         Message = "The request was not accepted.",
+    };
+
+    public static PublicExecutionError QueueFullError() => new()
+    {
+        Code = PublicExecutionFieldValues.Reasons.QueueFull,
+        Message = "The execution is waiting for available capacity.",
     };
 
     // --- fact lookups ---

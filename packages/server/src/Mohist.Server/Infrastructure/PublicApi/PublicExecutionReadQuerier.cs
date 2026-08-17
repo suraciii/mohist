@@ -285,8 +285,8 @@ public sealed class PublicExecutionReadQuerier : IScopedService
     /// <summary>
     /// Collects the feeds the projection engine consumes for one
     /// Session target: the Session ledger's consumed state digest, the
-    /// Session journal head, and every joined Job's ledger revision and
-    /// journal head.
+    /// Session journal and lifecycle-history heads, and every joined Job's
+    /// ledger revision and journal head.
     /// </summary>
     private static async Task AddSessionFeedsAsync(
         MohistDbContext db,
@@ -316,6 +316,13 @@ public sealed class PublicExecutionReadQuerier : IScopedService
                 db.AgentSessionEvents,
                 AgentSessionEventPersistence.AgentSessionSource(session.Id),
                 ct));
+        AddJournalFeed(
+            feeds,
+            PublicProjectionFeeds.AgentSessionLifecycle,
+            session.Id,
+            await db.AgentSessionLifecycleTransitions.AsNoTracking()
+                .Where(row => row.SessionId == session.Id)
+                .MaxAsync(row => (long?)row.Id, ct));
 
         var jobs = await db.AgentJobs.AsNoTracking()
             .Where(row => row.AgentSessionId == sessionId)

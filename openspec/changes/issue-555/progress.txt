@@ -953,3 +953,15 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   builds, 3,980 Server SpecTests, 2,676 Server unit tests, 69 architecture
   tests, 178 workflow tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner
   tests, and 70 Slack tests.
+
+## Must-fix disposition work (current task)
+
+- MF-1 fixed in the projection read path: Session freshness now compares the
+  durable lifecycle-history head with the `AgentSessionLifecycle` checkpoint,
+  so compressed transitions cannot be hidden when the mutable Session digest
+  returns to an earlier value. Added a projection regression covering the
+  queued -> running -> queued cycle before the next sweep.
+- MF-2 fixed in the public aggregator: retryable dispatch blocks map to the
+  stable `queue_full` reason and a safe capacity message/error while retaining
+  `status=queued` and `admission=blocked`. Added snapshot and event-payload
+  assertions. Focused projection specs pass (18).
