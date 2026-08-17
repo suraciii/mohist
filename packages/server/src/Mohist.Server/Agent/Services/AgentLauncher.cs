@@ -3,6 +3,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
@@ -46,6 +47,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     private readonly AgentReadinessService _readiness;
     private readonly AgentExecutionSnapshotResolver _snapshots;
     private readonly AgentSpawnAdmissionService _spawnAdmission;
+    private readonly ProjectDefaultExecutionConfigReader _defaults;
 
     public AgentLauncher(
         AgentSessionResolver sessions,
@@ -53,7 +55,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         TimeProvider timeProvider,
         AgentReadinessService readiness,
         AgentExecutionSnapshotResolver snapshots,
-        AgentSpawnAdmissionService spawnAdmission)
+        AgentSpawnAdmissionService spawnAdmission,
+        ProjectDefaultExecutionConfigReader defaults)
     {
         _sessions = sessions;
         _grains = grains;
@@ -61,6 +64,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         _readiness = readiness;
         _snapshots = snapshots;
         _spawnAdmission = spawnAdmission;
+        _defaults = defaults;
     }
 
     public async Task<AgentLaunchResult> LaunchAsync(
@@ -161,7 +165,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
-        CancellationToken ct = default) =>
+        CancellationToken ct = default,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        bool definitionCreatedByLaunch = false) =>
         LaunchIdempotentCoreAsync(
             agent,
             prompt,
@@ -174,7 +180,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             preMintedTurnId,
             ct: ct,
             definitionOverride: null,
-            skipLaunchability: false);
+            skipLaunchability: false,
+            attachmentResults: attachmentResults,
+            definitionCreatedByLaunch: definitionCreatedByLaunch);
 
     private async Task<AgentLaunchResult> LaunchIdempotentCoreAsync(
         AgentInfo agent,
@@ -197,7 +205,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? parentLinkEdgeId = null,
         string? pinnedRunnerId = null,
         AgentExecutionDefinition? definitionOverride = null,
-        bool skipLaunchability = false)
+        bool skipLaunchability = false,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        bool definitionCreatedByLaunch = false)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(context);
@@ -320,7 +330,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentExpectedBindingEpoch: parentExpectedBindingEpoch,
             ParentLinkEdgeId: parentLinkEdgeId,
             SpawnRequestFingerprint: spawnRequestFingerprint,
-            WorkspaceRepositories: request.WorkspaceRepositories));
+            WorkspaceRepositories: request.WorkspaceRepositories,
+            AttachmentResults: attachmentResults,
+            DefinitionCreatedByLaunch: definitionCreatedByLaunch));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
@@ -329,7 +341,11 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             TurnId: outcome.TurnId,
             AgentId: outcome.AgentId,
             AgentName: outcome.AgentName,
-            ParentLinkEdgeId: outcome.ParentLinkEdgeId);
+            ParentLinkEdgeId: outcome.ParentLinkEdgeId,
+            WorkspaceName: outcome.WorkspaceName,
+            Origin: outcome.Origin,
+            TargetId: outcome.TargetId,
+            AttachmentResults: outcome.AttachmentResults);
     }
 
     public async Task<AgentLaunchResult> LaunchSubagentAsync(
@@ -500,7 +516,11 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 InputId: outcome.InputId,
                 TurnId: outcome.TurnId,
                 AgentId: outcome.AgentId,
-                AgentName: outcome.AgentName);
+                AgentName: outcome.AgentName,
+                WorkspaceName: outcome.WorkspaceName,
+                Origin: outcome.Origin,
+                TargetId: outcome.TargetId,
+                AttachmentResults: outcome.AttachmentResults);
     }
 
     private (string SessionId, string JobKey) ResolveSessionAndJobKeys(
@@ -730,7 +750,29 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     private async Task<AgentExecutionDefinition> ResolveDefinitionAsync(AgentInfo agent)
     {
         var resolved = await _snapshots.ResolveAsync(agent.ProjectId, agent.Id);
-        return resolved ?? ResolveExecutionDefinition(agent);
+        var definition = resolved ?? ResolveExecutionDefinition(agent);
+
+        // Definition-first launch resolution folds the Project default in as
+        // the second source (the same precedence rule Readiness applies), so
+        // an Agent Readiness reports launchable dispatches with the model
+        // Readiness resolved. Resolution happens once, here, and the result
+        // is stamped onto the durable launch snapshot — later default edits
+        // cannot change an in-flight launch. No default configured: zero
+        // behavior change.
+        var projectDefault = await _defaults.GetAsync(agent.ProjectId);
+        if (projectDefault is null)
+            return definition;
+
+        var selection = ExecutionConfigResolver.Resolve(
+            callerHint: null,
+            definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
+            projectDefault: projectDefault);
+        return definition with
+        {
+            Runtime = selection.Runtime,
+            Model = selection.Model,
+            Variant = selection.Variant,
+        };
     }
 
     private static AgentSessionStartup BuildStartup(

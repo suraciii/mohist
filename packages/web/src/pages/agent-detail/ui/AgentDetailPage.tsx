@@ -62,7 +62,9 @@ export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
 
 const useDefaultData: AgentDetailPageDataHook = (agentId) => {
   const { data: agent, isLoading, isError } = useAgent(agentId)
-  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId })
+  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({
+    agentRef: agentId,
+  })
   const { data: detailStatus, isLoading: detailStatusLoading } = useAgentDetailStatus(agentId)
   return {
     agent,
@@ -343,7 +345,10 @@ export function AgentDetailPage({
   components?: Partial<AgentDetailPageComponents>
   dataHook?: AgentDetailPageDataHook
 } = {}) {
-  const { AgentProfileEditor, SubscriptionsSection, ConnectionsSection } = { ...defaultComponents, ...components }
+  const { AgentProfileEditor, SubscriptionsSection, ConnectionsSection } = {
+    ...defaultComponents,
+    ...components,
+  }
   const { agentId } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -561,6 +566,15 @@ export function AgentDetailPage({
                   <span className="text-xs text-muted-foreground">Max concurrent runs</span>
                   <span data-testid="agent-detail-max-concurrent-runs" className="text-xs font-medium text-foreground">
                     {agent.maxConcurrentRuns ?? 'Unlimited'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="text-xs text-muted-foreground">Allowed collaborators</span>
+                  <span
+                    data-testid="agent-detail-collaborators"
+                    className="text-right text-xs font-medium text-foreground"
+                  >
+                    {agent.allowedSubagentAgentIds?.length ? agent.allowedSubagentAgentIds.join(', ') : 'None'}
                   </span>
                 </div>
                 <p

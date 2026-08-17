@@ -57,6 +57,110 @@ public static class AgentSessionLaunchRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/agents/{agentRef}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
+        group.MapPost("/sessions/preflight", async (
+            HttpContext context,
+            string agentRef,
+            AgentSessionLaunchBody body,
+            AgentQuerier agentQuerier,
+            IssueQuerier issueQuerier,
+            EpicQuerier epicQuerier,
+            IGrainFactory grains,
+            InteractionWorkspaceProvisioner provisioner,
+            CancellationToken ct) =>
+        {
+            if (body is null)
+                return ApiResults.BadRequest("request body is required", "body_required");
+            if (body.BindingError is not null)
+                return ApiResults.BadRequest(body.BindingError, "validation_failed");
+            if (body.UndeclaredFields.Count > 0)
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}",
+                    "unsupported_field",
+                    new { fields = body.UndeclaredFields.ToArray() });
+
+            var idempotencyKey = ReadIdempotencyKey(context.Request);
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                return ApiResults.BadRequest("Idempotency-Key is required for manual agent preflight", "idempotency_key_required");
+
+            var project = context.GetResolvedProject();
+            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
+            if (agent is null)
+                return ApiResults.NotFound($"Agent '{agentRef}' not found");
+            if (string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
+                return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
+
+            var hasText = !string.IsNullOrWhiteSpace(body.Prompt);
+            if (!hasText && body.Attachments is not { Count: > 0 })
+                return ApiResults.BadRequest(
+                    "input requires non-empty prompt or at least one accepted attachment",
+                    "input_required",
+                    new { fields = new[] { "prompt", "attachments" } });
+
+            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier, grains);
+            if (contextError is not null)
+                return contextError;
+
+            var ownershipIdentity = $"{project.Id}\n{idempotencyKey}";
+            var preMintedSessionId = $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}";
+            var launchOrigin = ReadLaunchOrigin(context.Request);
+            var suppliedWorkspace = body.Context?.Workspace?.Trim();
+            var workspaceName = suppliedWorkspace is { Length: > 0 }
+                ? suppliedWorkspace
+                : launchOrigin == "cli"
+                    ? await provisioner.ResolveCliWorkspaceNameAsync(project.Id)
+                    : await provisioner.ResolveWebWorkspaceNameAsync(project.Id, preMintedSessionId);
+
+            IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories = null;
+            if (!string.IsNullOrWhiteSpace(workspaceName))
+            {
+                var workspace = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                    Infrastructure.Orleans.GrainKey.Workspace(project.Id, workspaceName)).GetAsync();
+                if (workspace is { RepositoryNames.Count: > 0 })
+                {
+                    workspaceRepositories = workspace.RepositoryNames
+                        .Select(name => project.Repositories.FirstOrDefault(repository =>
+                            string.Equals(repository.Name, name, StringComparison.OrdinalIgnoreCase)))
+                        .Where(repository => repository is not null)
+                        .Select(repository => new WorkspaceRepositorySnapshot(
+                            repository!.Name,
+                            repository.GitUrl,
+                            repository.ResolvedBaseBranch))
+                        .ToArray();
+                }
+            }
+
+            var launchRequest = new AgentLaunchCoordinatorRequest(
+                Prompt: body.Prompt?.Trim() ?? string.Empty,
+                AgentRef: agentRef,
+                Runtime: null,
+                WorkspacePath: body.Context?.WorkspacePath,
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                Repository: body.Context?.Repository,
+                Title: null,
+                AttachmentIds: body.Attachments?.ToArray(),
+                WorkspaceName: workspaceName,
+                Origin: launchOrigin,
+                TargetId: body.Context?.TargetId?.Trim() is { Length: > 0 } targetId ? targetId : agent.Id,
+                WorkspaceRepositories: workspaceRepositories);
+            var execution = ExecutionConfigResolver.Resolve(
+                callerHint: null,
+                definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
+                projectDefault: project.DefaultExecutionConfig);
+
+            return ApiResults.Ok(new AgentTaskPreflightResponse(
+                ScopeFingerprint: AgentTaskRoutes.BuildScopeFingerprint(launchRequest, execution, workspaceRepositories),
+                AgentName: agent.Name,
+                Execution: new AgentEffectiveExecutionConfig(execution.Runtime, execution.Model, execution.Variant),
+                Repository: body.Context?.Repository?.Trim(),
+                Workspace: workspaceName,
+                WorkspaceRepositories: workspaceRepositories?.Select(repository => repository.Name).ToArray() ?? [],
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                PermissionScope: "project-workspace-write",
+                ExpectedImpact: "Starts one AgentJob and AgentSession with write access to the selected workspace."));
+        });
+
         group.MapPost("/sessions", async (
             HttpContext context,
             string projectRef,
@@ -79,6 +183,9 @@ public static class AgentSessionLaunchRoutes
                     "request body is required",
                     "body_required");
             }
+
+            if (body.BindingError is not null)
+                return ApiResults.BadRequest(body.BindingError, "validation_failed");
 
             if (body.UndeclaredFields.Count > 0)
             {
@@ -180,6 +287,14 @@ public static class AgentSessionLaunchRoutes
             {
                 return LaunchSetupPending(ex);
             }
+            catch (AgentSpawnPreplanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
+            catch (AgentSpawnPostPlanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
             catch (AgentExecutabilityException ex)
             {
                 return ExecutabilityRejected(ex);
@@ -215,6 +330,26 @@ public static class AgentSessionLaunchRoutes
             catch (AgentExecutabilityException ex)
             {
                 return ExecutabilityRejected(ex);
+            }
+
+            var preflightFingerprint = context.Request.Headers["X-Mohist-Agent-Preflight"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(preflightFingerprint))
+            {
+                var execution = ExecutionConfigResolver.Resolve(
+                    callerHint: null,
+                    definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
+                    projectDefault: project.DefaultExecutionConfig);
+                var actualScopeFingerprint = AgentTaskRoutes.BuildScopeFingerprint(
+                    launchRequest,
+                    execution,
+                    workspaceRepositories);
+                if (!string.Equals(preflightFingerprint.Trim(), actualScopeFingerprint, StringComparison.Ordinal))
+                {
+                    return ApiResults.Conflict(
+                        "The confirmed execution scope changed before launch. Run preflight again and confirm the new scope.",
+                        "launch_scope_changed",
+                        new { preflightFingerprint = actualScopeFingerprint });
+                }
             }
 
             // The route mints every identity used by attachment ownership.
@@ -319,6 +454,14 @@ public static class AgentSessionLaunchRoutes
                 retainNewlyBoundAttachments = true;
                 return LaunchSetupPending(ex);
             }
+            catch (AgentSpawnPreplanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
+            catch (AgentSpawnPostPlanRejectedException ex)
+            {
+                return LaunchRejected(ex);
+            }
             catch (AgentExecutabilityException ex)
             {
                 return ExecutabilityRejected(ex);
@@ -335,7 +478,7 @@ public static class AgentSessionLaunchRoutes
         return app;
     }
 
-    private static object BuildAttachmentResultDto(AgentInputAttachmentAcceptance acceptance) =>
+    internal static object BuildAttachmentResultDto(AgentInputAttachmentAcceptance acceptance) =>
         acceptance.IsAccepted
             ? (object)new
             {
@@ -353,7 +496,7 @@ public static class AgentSessionLaunchRoutes
                 message = acceptance.RejectionMessage,
             };
 
-    private static IResult AcceptedLaunch(
+    internal static IResult AcceptedLaunch(
         string projectId,
         string projectName,
         AgentLaunchResult result,
@@ -401,7 +544,7 @@ public static class AgentSessionLaunchRoutes
                 statusCode: 201);
     }
 
-    private static string ReadLaunchOrigin(HttpRequest request)
+    internal static string ReadLaunchOrigin(HttpRequest request)
     {
         if (request.Headers.TryGetValue("X-Mohist-Launch-Origin", out var values)
             && values.Count > 0
@@ -415,21 +558,30 @@ public static class AgentSessionLaunchRoutes
         return "web";
     }
 
-    private static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
+    internal static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
         ApiResults.Fail(
             exception.Message,
             StatusCodes.Status503ServiceUnavailable,
             "launch_setup_pending",
             new { idempotencyKey = exception.IdempotencyKey });
 
-    private static IResult ExecutabilityRejected(AgentExecutabilityException exception) =>
+    internal static IResult ExecutabilityRejected(AgentExecutabilityException exception) =>
         ApiResults.Fail(
             exception.Message,
             StatusCodes.Status409Conflict,
             exception.ErrorCode,
             exception.Result);
 
-    private static async Task<IResult?> ValidateContextAsync(
+    internal static IResult LaunchRejected(AgentSpawnPreplanRejectedException exception) =>
+        LaunchRejected(exception.Message, exception.Reason);
+
+    internal static IResult LaunchRejected(AgentSpawnPostPlanRejectedException exception) =>
+        LaunchRejected(exception.Message, exception.Reason);
+
+    private static IResult LaunchRejected(string message, string reason) =>
+        ApiResults.Conflict(message, "launch_rejected", new { reason });
+
+    internal static async Task<IResult?> ValidateContextAsync(
         AgentSessionLaunchContextRef? context,
         string projectId,
         IssueQuerier issueQuerier,
@@ -465,7 +617,7 @@ public static class AgentSessionLaunchRoutes
 
         return null;
     }
-    private static string? ReadIdempotencyKey(HttpRequest request)
+    internal static string? ReadIdempotencyKey(HttpRequest request)
     {
         if (!request.Headers.TryGetValue("Idempotency-Key", out var values))
             return null;
@@ -490,7 +642,8 @@ public sealed record AgentSessionLaunchBody(
     AgentSessionLaunchContextRef? Context,
     IReadOnlyList<string>? Attachments,
     IReadOnlyList<string> UndeclaredFields,
-    JsonElement Raw)
+    JsonElement Raw,
+    string? BindingError = null)
 {
     public static async ValueTask<AgentSessionLaunchBody?> BindAsync(HttpContext context)
     {
@@ -498,9 +651,9 @@ public sealed record AgentSessionLaunchBody(
         {
             return await BindCoreAsync(context);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return new AgentSessionLaunchBody(null, null, null, [], default);
+            return new AgentSessionLaunchBody(null, null, null, [], default, ex.Message);
         }
     }
 
@@ -535,16 +688,10 @@ public sealed record AgentSessionLaunchBody(
         if (raw.TryGetProperty("context", out var ctxElement)
             && ctxElement.ValueKind == JsonValueKind.Object)
         {
-            ctx = new AgentSessionLaunchContextRef(
-                IssueNumber: TryReadPositiveInt(ctxElement, "issueNumber"),
-                EpicNumber: TryReadPositiveInt(ctxElement, "epicNumber"),
-                Repository: TryReadString(ctxElement, "repository"),
-                Workspace: TryReadString(ctxElement, "workspace"),
-                WorkspacePath: TryReadString(ctxElement, "workspacePath"),
-                TargetId: TryReadString(ctxElement, "targetId"));
+            ctx = ReadContext(ctxElement);
         }
 
-        var attachments = TryReadAttachments(raw);
+        var attachments = ReadAttachments(raw);
 
         return new AgentSessionLaunchBody(
             Prompt: prompt,
@@ -554,7 +701,7 @@ public sealed record AgentSessionLaunchBody(
             Raw: raw);
     }
 
-    private static IReadOnlyList<string>? TryReadAttachments(JsonElement parent)
+    internal static IReadOnlyList<string>? ReadAttachments(JsonElement parent)
     {
         if (!parent.TryGetProperty("attachments", out var attachmentsElement)
             || attachmentsElement.ValueKind == JsonValueKind.Null)
@@ -585,14 +732,14 @@ public sealed record AgentSessionLaunchBody(
         return ids.Count == 0 ? null : ids;
     }
 
-    private static string? TryReadString(JsonElement parent, string name) =>
+    internal static string? TryReadString(JsonElement parent, string name) =>
         !parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null
             ? null
             : value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : throw new JsonException($"context.{name} must be a string");
 
-    private static int? TryReadPositiveInt(JsonElement parent, string name)
+    internal static int? TryReadPositiveInt(JsonElement parent, string name)
     {
         if (!parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
             return null;
@@ -600,6 +747,15 @@ public sealed record AgentSessionLaunchBody(
             throw new JsonException($"context.{name} must be an integer");
         return number;
     }
+
+    internal static AgentSessionLaunchContextRef ReadContext(JsonElement context) =>
+        new(
+            IssueNumber: TryReadPositiveInt(context, "issueNumber"),
+            EpicNumber: TryReadPositiveInt(context, "epicNumber"),
+            Repository: TryReadString(context, "repository"),
+            Workspace: TryReadString(context, "workspace"),
+            WorkspacePath: TryReadString(context, "workspacePath"),
+            TargetId: TryReadString(context, "targetId"));
 }
 
 public sealed record AgentSessionLaunchContextRef(

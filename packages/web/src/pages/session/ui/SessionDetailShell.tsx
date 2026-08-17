@@ -564,7 +564,17 @@ function SessionHeader({
         <span className="font-medium text-foreground">
           {meta.source === 'workflow' ? 'Workflow Session' : 'Agent Session'}
         </span>
-        {meta.agentName && <span>Agent: {meta.agentName}</span>}
+        {meta.agentName && meta.agentId ? (
+          <Link
+            to={toProjectPath(`/agents/${encodeURIComponent(meta.agentId)}`)}
+            data-testid="session-agent-link"
+            className="text-info hover:text-info/80 transition-colors"
+          >
+            Agent: {meta.agentName}
+          </Link>
+        ) : meta.agentName ? (
+          <span>Agent: {meta.agentName}</span>
+        ) : null}
         {meta.origin && <span data-testid="session-origin">Origin: {meta.origin}</span>}
         {meta.sessionName && meta.source === 'workflow' && <span>Work: {meta.sessionName}</span>}
         {meta.workflowRunId && <span>Workflow run: {meta.workflowRunId}</span>}

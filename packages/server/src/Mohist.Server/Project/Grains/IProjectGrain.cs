@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 
@@ -23,6 +24,15 @@ public interface IProjectGrain : IGrainWithStringKey
     Task<ProjectVariablesBag?> DeleteVariableAsync(string name);
     Task<ProjectVariablesBag?> PatchStageVariableAsync(string stage, string name, JsonElement value);
     Task<ProjectVariablesBag?> DeleteStageVariableAsync(string stage, string name);
+
+    /// <summary>
+    /// Replace the Project default execution configuration. Validates via
+    /// <see cref="AgentConfigSchema"/> plus the <c>provider/model</c> form;
+    /// an invalid default throws <see cref="ArgumentException"/> and leaves
+    /// any previous default untouched. A success replaces the prior value
+    /// (one default per Project) and returns the updated Project.
+    /// </summary>
+    Task<ProjectInfo?> SetDefaultExecutionConfigAsync(ExecutionConfigHint config);
 }
 
 public enum ProjectRepositoryRemovalOutcome
