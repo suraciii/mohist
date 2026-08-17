@@ -95,7 +95,7 @@ public partial class CliAgentCommandSpecs
         Assert.Equal("provider/model", body["model"]?.GetValue<string>());
         Assert.Equal("balanced", body["variant"]?.GetValue<string>());
         Assert.Equal(42, body["context"]?["issueNumber"]?.GetValue<int>());
-        Assert.Equal("7", body["context"]?["epicNumber"]?.GetValue<string>());
+        Assert.Equal(7, body["context"]?["epicNumber"]?.GetValue<int>());
         Assert.Equal("server", body["context"]?["repository"]?.GetValue<string>());
         Assert.Equal("review", body["context"]?["workspace"]?.GetValue<string>());
 
