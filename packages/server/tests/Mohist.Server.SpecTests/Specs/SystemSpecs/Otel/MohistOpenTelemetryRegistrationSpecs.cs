@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
@@ -80,6 +81,7 @@ public class MohistOpenTelemetryRegistrationSpecs
     {
         var services = new ServiceCollection();
         services.AddMohistOpenTelemetry(BuildConfig(enabled: true, endpoint: "http://collector.test/otel"));
+        ConfigureInMemoryExporterTransport(services);
 
         using var provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetService<MeterProvider>());
@@ -100,6 +102,7 @@ public class MohistOpenTelemetryRegistrationSpecs
 
         var services = new ServiceCollection();
         services.AddMohistOpenTelemetry(config);
+        ConfigureInMemoryExporterTransport(services);
 
         using var provider = services.BuildServiceProvider();
         var tracerProvider = provider.GetService<TracerProvider>();
@@ -163,6 +166,20 @@ public class MohistOpenTelemetryRegistrationSpecs
         Assert.Single(recordedActivities);
         Assert.Equal("test-span", recordedActivities[0].OperationName);
         Assert.Equal("ok", recordedActivities[0].GetTagItem("test.marker"));
+    }
+
+    private static void ConfigureInMemoryExporterTransport(IServiceCollection services)
+    {
+        services.PostConfigure<OtlpExporterOptions>("tracing", options =>
+        {
+            options.ExportProcessorType = ExportProcessorType.Simple;
+            options.HttpClientFactory = () => new HttpClient(new InMemoryOtlpExporterHandler());
+        });
+        services.PostConfigure<OtlpExporterOptions>("metrics", options =>
+        {
+            options.ExportProcessorType = ExportProcessorType.Simple;
+            options.HttpClientFactory = () => new HttpClient(new InMemoryOtlpExporterHandler());
+        });
     }
 
     private static IConfiguration BuildConfig(bool enabled, string endpoint = "http://localhost:4318/otel")
