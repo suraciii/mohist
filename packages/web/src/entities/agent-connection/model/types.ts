@@ -1,3 +1,22 @@
+export interface AgentExecutabilityFixEntryPoint {
+  label: string
+  path: string
+  command: string
+}
+
+export interface AgentExecutabilityGap {
+  code: string
+  message: string
+  nextAction: string
+  fixEntryPoint: AgentExecutabilityFixEntryPoint
+}
+
+export interface AgentExecutabilityResult {
+  state: string
+  gaps: AgentExecutabilityGap[]
+  pendingLaunchNote?: string | null
+}
+
 export interface ConnectionIdentityFacts {
   verificationStatus: string
   verifiedBotName: string | null
@@ -26,6 +45,7 @@ export interface ConnectionDiagnostic {
   reason: string
   nextAction: string
   facts: ConnectionDiagnosticFacts
+  executability?: AgentExecutabilityResult | null
 }
 
 export interface AgentConnectionDto {
@@ -45,6 +65,7 @@ export interface AgentConnectionDto {
   connectionHealth: string
   healthReason: string | null
   agentReadiness: string
+  executability?: AgentExecutabilityResult | null
   ownerSlackUserId: string | null
   accessPolicy: string
   lastHeartbeatAt: string | null

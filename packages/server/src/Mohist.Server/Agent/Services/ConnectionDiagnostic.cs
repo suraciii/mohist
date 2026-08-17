@@ -34,13 +34,15 @@ public sealed record DiagnosticInputs(
     bool AdapterOnline = true,
     string OwnerAvailability = OwnerAvailabilityKind.Unknown,
     string AgentReadiness = AgentReadinessKind.Unknown,
-    string? AgentName = null);
+    string? AgentName = null,
+    AgentExecutabilityResult? Executability = null);
 
 public sealed record ConnectionDiagnosticResult(
     string PrimaryState,
     string Reason,
     string NextAction,
-    ConnectionDiagnosticFacts Facts);
+    ConnectionDiagnosticFacts Facts,
+    AgentExecutabilityResult? Executability = null);
 
 public sealed record ConnectionDiagnosticFacts(
     string SetupProgress,
@@ -90,22 +92,29 @@ public static class ConnectionDiagnostic
             identity,
             connection.OfflineGapAt);
 
+        ConnectionDiagnosticResult Result(
+            string primaryState,
+            string reason,
+            string nextAction,
+            ConnectionDiagnosticFacts _) =>
+            new(primaryState, reason, nextAction, facts, inputs.Executability);
+
         if (!string.Equals(connection.SetupProgress, SetupProgressKind.Complete, StringComparison.Ordinal))
-            return new(
+            return Result(
                 ConnectionDiagnosticState.SetupIncomplete,
                 $"Slack setup is incomplete at '{connection.SetupProgress}'.",
                 "Advance the current setup step.",
                 facts);
 
         if (IsCredentialFailure(connection))
-            return new(
+            return Result(
                 ConnectionDiagnosticState.CredentialsInvalid,
                 connection.HealthReason ?? "Stored Slack credentials failed verification.",
                 "Rotate credentials.",
                 facts);
 
         if (!inputs.AdapterOnline || IsServiceFailure(connection))
-            return new(
+            return Result(
                 ConnectionDiagnosticState.ServiceOffline,
                 IsServiceFailure(connection)
                     ? connection.HealthReason ?? "Slack service could not be reached."
@@ -114,41 +123,41 @@ public static class ConnectionDiagnostic
                 facts);
 
         if (IsBackpressured(connection))
-            return new(
+            return Result(
                 ConnectionDiagnosticState.Backpressured,
                 DescribeBackpressure(connection.HealthReason),
                 "Wait for the backlog to drain / retry input shortly.",
                 facts);
 
         if (string.Equals(inputs.OwnerAvailability, OwnerAvailabilityKind.Unavailable, StringComparison.Ordinal))
-            return new(
+            return Result(
                 ConnectionDiagnosticState.OwnerUnavailable,
                 "The current Slack Owner is no longer an eligible workspace member.",
                 "Transfer ownership.",
                 facts);
 
         if (string.Equals(inputs.AgentReadiness, AgentReadinessKind.NeedsSetup, StringComparison.Ordinal))
-            return new(
+            return Result(
                 ConnectionDiagnosticState.AgentNeedsSetup,
                 "The bound Agent is missing required runtime configuration.",
                 "Configure Agent runtime/model.",
                 facts);
 
         if (string.Equals(connection.DesiredState, DesiredStateKind.Disabled, StringComparison.Ordinal))
-            return new(
+            return Result(
                 ConnectionDiagnosticState.Disabled,
                 "The Connection is disabled by operator choice.",
                 "Enable the Connection.",
                 facts);
 
         if (identity.HasDrift)
-            return new(
+            return Result(
                 ConnectionDiagnosticState.IdentityDrift,
                 DescribeIdentityDrift(identity),
                 "Review the name/avatar difference.",
                 facts);
 
-        return new(
+        return Result(
             ConnectionDiagnosticState.Healthy,
             "The Connection is ready and operating normally.",
             "No action needed.",

@@ -186,7 +186,7 @@ export const useReadOnlyOperations: ConnectionDiagnosticPageOperationsHook = () 
 
 function label(value: string | null | undefined) {
   if (!value) return 'Unknown'
-  return value.replaceAll('_', ' ')
+  return value.replaceAll('_', ' ').replaceAll('-', ' ')
 }
 
 function display(value: string | boolean | null | undefined) {
@@ -432,6 +432,39 @@ export function ConnectionDiagnosticPage({
               resendDeliveryMutation.mutate(deliveryId)
             }}
           />
+        )}
+
+        {data.executability && (
+          <details className="border-y border-border py-3" data-testid="connection-diagnostic-executability">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">Agent executability</summary>
+            <div className="mt-3 space-y-4 text-sm">
+              <dl className="divide-y divide-border">
+                <FactRow name="State" value={label(data.executability.state)} />
+                {data.executability.pendingLaunchNote && (
+                  <FactRow name="Pending launch note" value={data.executability.pendingLaunchNote} />
+                )}
+              </dl>
+              {data.executability.gaps.length === 0 ? (
+                <p className="text-muted-foreground">No canonical Agent gaps.</p>
+              ) : (
+                <ol className="space-y-4">
+                  {data.executability.gaps.map((gap) => (
+                    <li key={gap.code} className="space-y-1 border-l-2 border-amber-400 pl-3">
+                      <p className="font-medium text-foreground">{gap.code}</p>
+                      <p className="text-muted-foreground">{gap.message}</p>
+                      <p className="text-foreground"><span className="font-medium">Next action:</span> {gap.nextAction}</p>
+                      <p className="text-muted-foreground">
+                        <span className="font-medium text-foreground">Fix:</span> {gap.fixEntryPoint.label} ({gap.fixEntryPoint.path})
+                      </p>
+                      <code className="block break-all rounded bg-muted px-2 py-1 text-xs text-foreground">
+                        {gap.fixEntryPoint.command}
+                      </code>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </details>
         )}
 
         <details className="border-y border-border py-3" data-testid="connection-diagnostic-facts">

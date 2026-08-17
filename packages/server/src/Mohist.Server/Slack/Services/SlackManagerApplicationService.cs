@@ -153,6 +153,13 @@ public sealed class SlackManagerApplicationService : IScopedService
                 connection.DeletedAt))
             .ToListAsync(ct);
 
+        for (var i = 0; i < connections.Count; i++)
+        {
+            var connection = connections[i];
+            var agent = await _agents.GetByIdAsync(connection.ProjectId, connection.AgentId, ct);
+            connections[i] = connection with { Executability = agent?.Executability };
+        }
+
         var credentialProvisioned = await HasManagerCredentialAsync(enrollment, ct);
         return new(
             ProjectEnrollment(enrollment, credentialProvisioned),
@@ -370,7 +377,8 @@ public sealed class SlackManagerApplicationService : IScopedService
         connection.AgentReadiness,
         connection.OwnerSlackUserId,
         connection.AccessPolicy,
-        connection.DeletedAt);
+        connection.DeletedAt,
+        connection.Executability);
 
     private static SlackManagerEnrollmentProjection ProjectEnrollment(
         SlackWorkspaceEnrollment enrollment,
@@ -512,7 +520,8 @@ public sealed record SlackManagerConnectionStatus(
     string ConnectionHealth,
     string? HealthReason,
     string AgentReadiness,
-    DateTimeOffset? DeletedAt);
+    DateTimeOffset? DeletedAt,
+    AgentExecutabilityResult? Executability = null);
 
 public sealed record SlackManagerAgentOption(
     string AgentId,
@@ -543,7 +552,8 @@ public sealed record SlackManagerConnectionProjection(
     string AgentReadiness,
     string? OwnerSlackUserId,
     string AccessPolicy,
-    DateTimeOffset? DeletedAt);
+    DateTimeOffset? DeletedAt,
+    AgentExecutabilityResult? Executability = null);
 
 public sealed record SlackManagerAppProjection(
     string Id,

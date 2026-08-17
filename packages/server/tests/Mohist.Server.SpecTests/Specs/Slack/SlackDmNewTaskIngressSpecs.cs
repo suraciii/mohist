@@ -8,6 +8,7 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
@@ -145,6 +146,45 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
                 && row.ConversationId == "D-DM-BLOCKED"
                 && row.DispatchRef == $"slack-setup-nudge:{connection.Id}:T123/D-DM-BLOCKED/1710000000.000250")
             .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Not_executable_dm_nudge_does_not_copy_privileged_readiness_detail()
+    {
+        var connection = await CreateConnectionAsync();
+        using var config = JsonDocument.Parse("{\"model\":\"provider/model\",\"runtime\":\"opencode\"}");
+        await SetAgentConfigAsync(connection, config.RootElement.Clone());
+        await SeedConfigurationFailureAsync(connection);
+
+        var result = await PostIngressAsync(
+            connection,
+            "D-DM-NOT-EXECUTABLE",
+            "1710000000.000275",
+            "blocked credentials task");
+
+        Assert.Equal("agent_not_executable", result.GetProperty("kind").GetString());
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var nudge = await db.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "D-DM-NOT-EXECUTABLE"
+            && row.Kind == SlackOutboxKinds.UserAction);
+        var payload = SlackDeliveryPayload.Parse(nudge.PayloadJson);
+        Assert.Contains("Agent is not ready", payload.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("owner", payload.Text, StringComparison.OrdinalIgnoreCase);
+        foreach (var privilegedDetail in new[]
+        {
+            "execution-config-failure",
+            "could not authenticate",
+            "unauthorized",
+            "provider/model",
+            "/agents/",
+            "mo agent edit",
+            "xoxb-",
+        })
+        {
+            Assert.DoesNotContain(privilegedDetail, nudge.PayloadJson, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [Fact]
@@ -393,6 +433,47 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             .Select(row => row.PayloadJson)
             .SingleAsync();
         Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(payload).Operation);
+    }
+
+    private async Task SeedConfigurationFailureAsync(AgentConnection connection)
+    {
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var jobKey = $"slack-readiness-failed-{Guid.NewGuid():N}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        db.AgentJobs.Add(new AgentJobRow
+        {
+            JobKey = jobKey,
+            State = JSON.Serialize(new AgentJobState
+            {
+                Status = AgentJobStatus.Failed,
+                SubmittedAt = now,
+                TerminalAt = now,
+                Input = new AgentJobInput(
+                    Prompt: "previous credentials task",
+                    Model: "provider/model",
+                    ProjectId: connection.ProjectId,
+                    Runtime: "opencode",
+                    AgentId: connection.AgentId,
+                    AgentInstructions: "Handle Slack requests.",
+                    Skills: []),
+                PendingSessionClose = new PendingSessionClose(
+                    $"agent-job:{jobKey}:terminal",
+                    AgentJobStatus.Failed.ToString(),
+                    1,
+                    "unauthorized",
+                    "unauthorized",
+                    now),
+            }),
+            ProjectId = connection.ProjectId,
+            AgentId = connection.AgentId,
+            Status = AgentJobStatus.Failed.ToString().ToLowerInvariant(),
+            SubmittedAt = now.ToString("O"),
+            TerminalAt = now.ToString("O"),
+            LaunchVisibility = "visible",
+        });
+        await db.SaveChangesAsync();
     }
 
     private async Task SetAgentConfigAsync(AgentConnection connection, JsonElement? config)

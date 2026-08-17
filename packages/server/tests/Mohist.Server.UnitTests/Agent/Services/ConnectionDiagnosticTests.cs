@@ -145,6 +145,30 @@ public sealed class ConnectionDiagnosticTests
     }
 
     [Fact]
+    public void Compute_projects_canonical_executability_without_replacing_connection_facts()
+    {
+        var executability = new AgentExecutabilityResult(
+            AgentExecutabilityStates.NotExecutable,
+            [new AgentExecutabilityGap(
+                "execution-config-failure",
+                "The runtime rejected the configuration.",
+                "Update the Agent execution settings.",
+                new AgentExecutabilityFixEntryPoint("Agent settings", "/agents/agent-1", "mo agent edit agent-1"))],
+            "A retry will verify the updated definition.");
+
+        var result = ConnectionDiagnostic.Compute(
+            HealthyConnection(),
+            new DiagnosticInputs(
+                AgentReadiness: AgentReadinessKind.Ready,
+                Executability: executability));
+
+        Assert.Equal(executability, result.Executability);
+        Assert.Equal(AgentReadinessKind.Ready, result.Facts.AgentReadiness);
+        Assert.Equal(ConnectionHealthKind.Healthy, result.Facts.ConnectionHealth);
+        Assert.Equal(ConnectionDiagnosticState.Healthy, result.PrimaryState);
+    }
+
+    [Fact]
     public void Compute_does_not_report_drift_before_the_first_verification()
     {
         var result = ConnectionDiagnostic.Compute(

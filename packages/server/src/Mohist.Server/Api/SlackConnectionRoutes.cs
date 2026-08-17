@@ -162,7 +162,8 @@ public static partial class SlackConnectionRoutes
                     verifier.IsAdapterOnline(connection),
                     ownerAvailability,
                     agentReadiness,
-                    agent?.Name));
+                    agent?.Name,
+                    agent?.Executability));
             return ApiResults.Ok(result);
         });
 

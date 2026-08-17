@@ -100,7 +100,19 @@ public sealed class SlackManagerToolExecutor : IScopedService
         foreach (var connection in status.Connections)
         {
             builder.Append('\n').Append(connection.ProjectId).Append('/').Append(connection.AgentId)
-                .Append(": ").Append(connection.DesiredState).Append('/').Append(connection.ConnectionHealth);
+                .Append(": ").Append(connection.DesiredState).Append('/').Append(connection.ConnectionHealth)
+                .Append("; Agent executability=").Append(connection.Executability?.State ?? "unknown");
+            if (connection.Executability?.PendingLaunchNote is { } pendingLaunchNote)
+                builder.Append("; pending launch note=").Append(pendingLaunchNote);
+            foreach (var gap in connection.Executability?.Gaps ?? [])
+            {
+                builder.Append("\n  gap ").Append(gap.Code)
+                    .Append(": ").Append(gap.Message)
+                    .Append(" Next action: ").Append(gap.NextAction)
+                    .Append(" Fix: ").Append(gap.FixEntryPoint.Label)
+                    .Append(" (").Append(gap.FixEntryPoint.Path)
+                    .Append(") ").Append(gap.FixEntryPoint.Command);
+            }
         }
         return builder.ToString();
     }

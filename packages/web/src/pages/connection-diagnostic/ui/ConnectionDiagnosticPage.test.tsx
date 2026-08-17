@@ -13,6 +13,20 @@ const diagnostic: ConnectionDiagnostic = {
   primaryState: 'owner_unavailable',
   reason: 'The current Slack Owner is no longer an eligible workspace member.',
   nextAction: 'Transfer ownership.',
+  executability: {
+    state: 'not-executable',
+    gaps: [{
+      code: 'execution-config-failure',
+      message: 'The runtime rejected the configuration.',
+      nextAction: 'Update the Agent execution settings.',
+      fixEntryPoint: {
+        label: 'Agent settings',
+        path: '/agents/agent-1',
+        command: 'mo agent edit agent-1',
+      },
+    }],
+    pendingLaunchNote: 'A retry will verify the updated definition.',
+  },
   facts: {
     setupProgress: 'complete',
     desiredState: 'enabled',
@@ -66,6 +80,16 @@ describe('ConnectionDiagnosticPage', () => {
     expect(facts).toHaveTextContent('Slack Bot')
     expect(facts).toHaveTextContent('https://slack.example/icon.png')
     expect(facts).toHaveTextContent('presentation name, avatar')
+
+    fireEvent.click(screen.getByText('Agent executability'))
+    const executability = screen.getByTestId('connection-diagnostic-executability')
+    expect(executability).toHaveAttribute('open')
+    expect(executability).toHaveTextContent('not executable')
+    expect(executability).toHaveTextContent('execution-config-failure')
+    expect(executability).toHaveTextContent('The runtime rejected the configuration.')
+    expect(executability).toHaveTextContent('Update the Agent execution settings.')
+    expect(executability).toHaveTextContent('/agents/agent-1')
+    expect(executability).toHaveTextContent('mo agent edit agent-1')
   })
 
   it('renders loading and error states', () => {

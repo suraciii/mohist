@@ -49,10 +49,16 @@ public sealed class AgentConnectionStore : IScopedService, ISlackAgentAppBinding
             query = query.Where(c => c.DeletedAt == null);
         var rows = await query.OrderBy(c => c.Id).ToListAsync(ct);
         var agents = await _agentQuerier.ListAsync(projectId, all: true);
-        var readinessByAgentId = agents.ToDictionary(
+        var agentFactsById = agents.ToDictionary(
             agent => agent.Id,
-            agent => AgentReadinessDeriver.Derive(agent.AgentConfig));
-        return rows.Select(row => ToDomain(row, readinessByAgentId.GetValueOrDefault(row.AgentId))).ToList();
+            agent => (
+                LegacyReadiness: AgentReadinessDeriver.Derive(agent.AgentConfig),
+                Executability: agent.Executability));
+        return rows.Select(row =>
+        {
+            var facts = agentFactsById.GetValueOrDefault(row.AgentId);
+            return ToDomain(row, facts.LegacyReadiness, facts.Executability);
+        }).ToList();
     }
 
     public async Task<AgentConnection?> GetAsync(string projectId, string id, CancellationToken ct = default)
@@ -64,7 +70,10 @@ public sealed class AgentConnectionStore : IScopedService, ISlackAgentAppBinding
             .FirstOrDefaultAsync(c => c.ProjectId == projectId && c.Id == id, ct);
         if (row is null) return null;
         var agent = await _agentQuerier.GetByIdAsync(projectId, row.AgentId);
-        return ToDomain(row, agent is null ? null : AgentReadinessDeriver.Derive(agent.AgentConfig));
+        return ToDomain(
+            row,
+            agent is null ? null : AgentReadinessDeriver.Derive(agent.AgentConfig),
+            agent?.Executability);
     }
 
     public async Task<IReadOnlyList<SlackAdapterConnection>> ListForAdapterAsync(CancellationToken ct = default)
@@ -418,7 +427,10 @@ public sealed class AgentConnectionStore : IScopedService, ISlackAgentAppBinding
         !string.IsNullOrWhiteSpace(row.AppId)
         && !string.IsNullOrWhiteSpace(row.BotUserId);
 
-    private static AgentConnection ToDomain(AgentConnectionRow row, string? derivedReadiness = null) => new()
+    private static AgentConnection ToDomain(
+        AgentConnectionRow row,
+        string? derivedReadiness = null,
+        AgentExecutabilityResult? executability = null) => new()
     {
         Id = row.Id,
         ProjectId = row.ProjectId,
@@ -436,6 +448,7 @@ public sealed class AgentConnectionStore : IScopedService, ISlackAgentAppBinding
         ConnectionHealth = row.ConnectionHealth,
         HealthReason = row.HealthReason,
         AgentReadiness = derivedReadiness ?? row.AgentReadiness,
+        Executability = executability,
         OwnerSlackUserId = row.OwnerSlackUserId,
         AccessPolicy = string.IsNullOrEmpty(row.AccessPolicy) ? AccessPolicyKind.OwnerOnly : row.AccessPolicy,
         LastHeartbeatAt = row.LastHeartbeatAt,

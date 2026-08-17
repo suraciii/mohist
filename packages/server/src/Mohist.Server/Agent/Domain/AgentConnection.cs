@@ -1,3 +1,5 @@
+using Mohist.Server.Agent.Services;
+
 namespace Mohist.Server.Agent.Domain;
 
 public sealed class AgentConnection
@@ -18,6 +20,8 @@ public sealed class AgentConnection
     public string ConnectionHealth { get; set; } = ConnectionHealthKind.Healthy;
     public string? HealthReason { get; set; }
     public string AgentReadiness { get; set; } = AgentReadinessKind.Unknown;
+    // Computed on read from AgentReadinessService; never persisted as a Connection fact.
+    public AgentExecutabilityResult? Executability { get; set; }
     public string? OwnerSlackUserId { get; set; }
     public string AccessPolicy { get; set; } = AccessPolicyKind.OwnerOnly;
     public DateTimeOffset? LastHeartbeatAt { get; set; }
