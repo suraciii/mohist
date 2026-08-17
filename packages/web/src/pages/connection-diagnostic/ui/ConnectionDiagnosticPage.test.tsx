@@ -15,16 +15,18 @@ const diagnostic: ConnectionDiagnostic = {
   nextAction: 'Transfer ownership.',
   executability: {
     state: 'not-executable',
-    gaps: [{
-      code: 'execution-config-failure',
-      message: 'The runtime rejected the configuration.',
-      nextAction: 'Update the Agent execution settings.',
-      fixEntryPoint: {
-        label: 'Agent settings',
-        path: '/agents/agent-1',
-        command: 'mo agent edit agent-1',
+    gaps: [
+      {
+        code: 'execution-config-failure',
+        message: 'The runtime rejected the configuration.',
+        nextAction: 'Update the Agent execution settings.',
+        fixEntryPoint: {
+          label: 'Agent settings',
+          path: '/agents/agent-1',
+          command: 'mo agent edit agent-1',
+        },
       },
-    }],
+    ],
     pendingLaunchNote: 'A retry will verify the updated definition.',
   },
   facts: {

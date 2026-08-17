@@ -197,7 +197,8 @@ function display(value: string | boolean | null | undefined) {
 function SummaryIcon({ state }: { state: string }) {
   if (state === 'healthy') return <CheckCircle2Icon className="size-5 text-success" />
   if (state === 'disabled') return <CircleOffIcon className="size-5 text-muted-foreground" />
-  if (state === 'agent_needs_setup' || state === 'setup_incomplete') return <Settings2Icon className="size-5 text-warning" />
+  if (state === 'agent_needs_setup' || state === 'setup_incomplete')
+    return <Settings2Icon className="size-5 text-warning" />
   return <AlertCircleIcon className="size-5 text-danger" />
 }
 
@@ -237,7 +238,16 @@ export function ConnectionDiagnosticPage({
   const { connectionId } = useParams<{ connectionId: string }>()
   const { data, isLoading, error } = dataHook(connectionId)
   const ops = operationsHook(connectionId, data?.facts.setupProgress === 'complete')
-  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation, deliveriesQuery, resendDeliveryMutation, clearOfflineGapMutation } = ops
+  const {
+    connectionDetailQuery,
+    configureMutation,
+    claimOwnerMutation,
+    accessStateQuery,
+    manageAccessMutation,
+    deliveriesQuery,
+    resendDeliveryMutation,
+    clearOfflineGapMutation,
+  } = ops
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
 
   const configureResetRef = useRef<() => void>(() => undefined)
@@ -259,12 +269,17 @@ export function ConnectionDiagnosticPage({
   }, [])
 
   if (isLoading) {
-    return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading connection...</div>
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading connection...</div>
+    )
   }
 
   if (error || !data) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-danger" data-testid="connection-diagnostic-error">
+      <div
+        className="flex flex-1 items-center justify-center text-sm text-danger"
+        data-testid="connection-diagnostic-error"
+      >
         {error?.message ?? 'Connection was not found.'}
       </div>
     )
@@ -287,11 +302,25 @@ export function ConnectionDiagnosticPage({
           <h1 className="mt-1 break-all text-2xl font-semibold text-foreground">{connectionId}</h1>
         </header>
 
-        <CardSection title="Current status" icon={<SummaryIcon state={data.primaryState} />} tone={data.primaryState === 'healthy' ? 'green' : 'default'}>
+        <CardSection
+          title="Current status"
+          icon={<SummaryIcon state={data.primaryState} />}
+          tone={data.primaryState === 'healthy' ? 'green' : 'default'}
+        >
           <div className="space-y-3">
-            <div className="text-lg font-medium capitalize text-foreground" data-testid="connection-diagnostic-primary-state">{label(data.primaryState)}</div>
-            <p className="text-sm text-muted-foreground" data-testid="connection-diagnostic-reason">{data.reason}</p>
-            <div className="border-l-2 border-info pl-3 text-sm font-medium text-foreground" data-testid="connection-diagnostic-next-action">
+            <div
+              className="text-lg font-medium capitalize text-foreground"
+              data-testid="connection-diagnostic-primary-state"
+            >
+              {label(data.primaryState)}
+            </div>
+            <p className="text-sm text-muted-foreground" data-testid="connection-diagnostic-reason">
+              {data.reason}
+            </p>
+            <div
+              className="border-l-2 border-info pl-3 text-sm font-medium text-foreground"
+              data-testid="connection-diagnostic-next-action"
+            >
               {data.nextAction}
             </div>
           </div>
@@ -303,12 +332,11 @@ export function ConnectionDiagnosticPage({
           <CardSection title="Possible messages missed" tone="amber">
             <div className="space-y-2" data-testid="offline-gap-notice">
               <p className="text-sm text-foreground">
-                The Slack adapter was offline long enough that Slack may have discarded events
-                from the outage window. Some messages may have been missed.
+                The Slack adapter was offline long enough that Slack may have discarded events from the outage window.
+                Some messages may have been missed.
               </p>
               <p className="text-sm text-muted-foreground">
-                Resend any critical delegations — Mohist cannot guarantee all events from the
-                outage were received.
+                Resend any critical delegations — Mohist cannot guarantee all events from the outage were received.
               </p>
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
@@ -329,8 +357,8 @@ export function ConnectionDiagnosticPage({
           <CardSection title="Setup progress" tone="amber">
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                Setup is owned by the server. Closing, refreshing, or returning on another device resumes at
-                the current step.
+                Setup is owned by the server. Closing, refreshing, or returning on another device resumes at the current
+                step.
               </p>
               <SetupStepList setupProgress={setupProgress} />
             </div>
@@ -368,24 +396,18 @@ export function ConnectionDiagnosticPage({
 
         {setupProgress === 'waiting_for_slack_service' && (
           <CardSection title="Step 2 — Waiting for Slack service" tone="amber">
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="connection-setup-waiting-for-service"
-            >
-              Credentials are saved. Mohist is waiting for the Slack service (mohist-slack) to come online and
-              verify the tokens. Progress is preserved; no action is needed here.
+            <p className="text-sm text-muted-foreground" data-testid="connection-setup-waiting-for-service">
+              Credentials are saved. Mohist is waiting for the Slack service (mohist-slack) to come online and verify
+              the tokens. Progress is preserved; no action is needed here.
             </p>
           </CardSection>
         )}
 
         {setupProgress === 'fix_slack_setup' && (
           <CardSection title="Step 3 — Fix Slack setup" tone="amber">
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="connection-setup-fix-step"
-            >
-              The Slack service reported a problem with this Connection. Re-check the credentials and the
-              workspace install, then wait for the service to re-verify.
+            <p className="text-sm text-muted-foreground" data-testid="connection-setup-fix-step">
+              The Slack service reported a problem with this Connection. Re-check the credentials and the workspace
+              install, then wait for the service to re-verify.
             </p>
           </CardSection>
         )}
@@ -452,9 +474,12 @@ export function ConnectionDiagnosticPage({
                     <li key={gap.code} className="space-y-1 border-l-2 border-amber-400 pl-3">
                       <p className="font-medium text-foreground">{gap.code}</p>
                       <p className="text-muted-foreground">{gap.message}</p>
-                      <p className="text-foreground"><span className="font-medium">Next action:</span> {gap.nextAction}</p>
+                      <p className="text-foreground">
+                        <span className="font-medium">Next action:</span> {gap.nextAction}
+                      </p>
                       <p className="text-muted-foreground">
-                        <span className="font-medium text-foreground">Fix:</span> {gap.fixEntryPoint.label} ({gap.fixEntryPoint.path})
+                        <span className="font-medium text-foreground">Fix:</span> {gap.fixEntryPoint.label} (
+                        {gap.fixEntryPoint.path})
                       </p>
                       <code className="block break-all rounded bg-muted px-2 py-1 text-xs text-foreground">
                         {gap.fixEntryPoint.command}
