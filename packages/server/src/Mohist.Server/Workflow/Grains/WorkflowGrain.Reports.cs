@@ -76,8 +76,10 @@ public partial class WorkflowGrain
         }
         else if (existingTask?.AgentInterruption is { } existingTransition && existingSettlement is not null)
         {
-            // Older persisted runs may not have a delivery obligation. The
-            // owner retry still repairs the idempotent Session projection.
+            // Older persisted runs may not have a delivery obligation. Drain
+            // any durable queue first, then repair the idempotent projection
+            // directly when no queue entry exists.
+            await DeliverPendingSessionInterruptionAsync();
             await ApplySessionInterruptionAsync(existingSettlement.AgentSessionId, existingTransition);
         }
 

@@ -22,6 +22,7 @@ public abstract class AgentJobGrainTestSupport
     protected AgentJobGrainTestSupport(AgentJobGrainFixture fixture)
     {
         _fixture = fixture;
+        _fixture.SessionStatePersistence.Reset();
         _fixture.DispatchObserver.Reset();
         _fixture.LaunchFaults.ClearObservations();
     }

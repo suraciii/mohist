@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Contracts;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -170,6 +171,68 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         Assert.Equal("{\"error\":\"x\"}", terminal.Output);
         Assert.Equal(1, terminal.ExitCode);
         Assert.Equal("boom", terminal.FailureReason);
+    }
+
+    [Fact]
+    public async Task SessionInterruptionDeliveryFailure_IsRepairedByIdempotentOwnerRetry()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-session-repair-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-session-repair-{Guid.NewGuid():N}";
+        var sessionId = $"agent-session-session-repair-{Guid.NewGuid():N}";
+        var inputId = $"input-session-repair-{Guid.NewGuid():N}";
+        var turnId = $"turn-session-repair-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId,
+            turnId,
+            "repair AgentJob session visibility",
+            "agent-job",
+            jobKey,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["mohist.io/project-id"] = projectId,
+                ["mohist.io/source-kind"] = "agent-launch",
+                ["mohist.io/agent-id"] = "agent-test",
+            }),
+            Runtime: "opencode"));
+
+        var job = JobGrain(jobKey);
+        await job.SubmitAsync(new AgentJobInput(
+            "repair AgentJob session visibility",
+            ProjectId: projectId,
+            Runtime: "opencode",
+            AgentId: "agent-test",
+            AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
+            PinnedRunnerId: runnerId));
+        await WaitForRunningAsync(job);
+        var running = await job.GetRuntimeSnapshotAsync();
+        var workId = running.CurrentWorkId!;
+        var operationId = $"runner-update:agent-job-session-repair-{Guid.NewGuid():N}";
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(
+            runnerId,
+            workId,
+            sessionId,
+            $"runtime-session-{Guid.NewGuid():N}"));
+
+        _fixture.SessionStatePersistence.QueueFailures(1);
+        await Assert.ThrowsAnyAsync<Exception>(() => job.MarkUpdateInterruptedAsync(
+            runnerId,
+            workId,
+            operationId));
+
+        Assert.Equal(AgentJobStatus.RecoverablyInterrupted, await job.GetStatusAsync());
+        _fixture.SessionStatePersistence.Reset();
+        Assert.True(await job.MarkUpdateInterruptedAsync(runnerId, workId, operationId));
+
+        var repaired = await session.GetAsync();
+        Assert.NotNull(repaired);
+        Assert.Equal(AgentWorkInterruptionStates.Interrupted,
+            Assert.Single(repaired!.InterruptionHistory!).State);
+        var repairedTurn = Assert.Single(await session.ListTurnsAsync());
+        Assert.Equal(AgentWorkInterruptionStates.Interrupted, repairedTurn.Interruption?.State);
     }
 
     [Fact]

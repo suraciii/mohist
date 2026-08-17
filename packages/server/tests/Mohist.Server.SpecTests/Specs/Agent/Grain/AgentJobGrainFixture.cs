@@ -40,6 +40,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public RecordingSessionStopDelivery StopDelivery { get; } = new();
     public RecordingSessionWorkPort WorkPort { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
+    public AgentSessionStatePersistenceFailureProbe SessionStatePersistence { get; } = new();
     public RunnerUpdateOperationWriteFailureProbe OperationWriteFailures =>
         Cluster.GetSiloServiceProvider(null).GetRequiredService<RunnerUpdateOperationWriteFailureProbe>();
 
@@ -73,6 +74,13 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                 _sharedEventStore,
                 TimeProvider,
                 Persistence);
+            siloBuilder.Services.AddSingleton(SessionStatePersistence);
+            siloBuilder.Services.RemoveAll<IAgentSessionStore>();
+            siloBuilder.Services.AddScoped<AgentSessionStore>();
+            siloBuilder.Services.AddScoped<IAgentSessionStore>(services =>
+                new FailingAgentSessionStore(
+                    services.GetRequiredService<AgentSessionStore>(),
+                    services.GetRequiredService<AgentSessionStatePersistenceFailureProbe>()));
             siloBuilder.Services.RemoveAll<ISessionStopDelivery>();
             siloBuilder.Services.AddSingleton<ISessionStopDelivery>(StopDelivery);
             siloBuilder.Services.RemoveAll<ISessionWorkPort>();
