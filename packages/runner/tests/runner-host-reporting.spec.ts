@@ -365,7 +365,15 @@ describe('RunnerHost', () => {
 
     const fenced = new WorkResultJournal('/virtual/mohist-runner-test')
     await fenced.load()
-    expect(fenced.started()).toEqual([{ work, state: 'started' }])
+    // The redelivered started fence is reconciled without execution: the
+    // terminal record is reported and retired once the server acknowledges.
+    expect(fenced.started()).toEqual([])
+    expect(fenced.completed()).toEqual([])
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ workId: work.workId }),
+      expect.objectContaining({ status: 'failed', message: 'runner-restarted' }),
+      expect.any(AbortSignal),
+    )
     expect(blockingAction).not.toHaveBeenCalled()
   })
 
