@@ -1,45 +1,48 @@
 # Review
 
-This is a re-review of the current change. The issue details were read with `mo issue view 555 --project proj_f6c141d63b6243bfbb481737b2243b87`; its rendered body is empty, so the acceptance contract was re-read from `proposal.md`, `design.md`, and all five capability specs under this change. Product files were reviewed against those requirements; the files under `openspec/changes/issue-555/` are workflow artifacts.
+This is a re-review. The issue details were read with `mo issue view 555 --project proj_f6c141d63b6243bfbb481737b2243b87`; its rendered body is empty, so the acceptance contract was checked against `proposal.md`, `design.md`, and all five capability specs. The prior review's product findings were verified against the current tree. Only `review.md` changed after that review; no product fix has addressed the remaining finding.
 
 ## Must-fix Findings
 
 ### MF-1: Follow-up replay bypasses canonical Project membership
 
-**Where:** `packages/server/src/Mohist.Server/Api/DirectApi/DirectApiRoutes.cs:242-277`, especially the existing-mapping branch at `:246-277`.
+**Where:** `packages/server/src/Mohist.Server/Api/DirectApi/DirectApiRoutes.cs:246-277`, especially the existing-mapping branch at `:246-250` and `:271-277`.
 
-The follow-up scope is `(sessionId, Idempotency-Key)`, so a mapping created while the route selected Project A can also be found when a caller selects Project B. The route validates the body and then calls `idempotency.FindAsync` before resolving the canonical Session. When `existing` is non-null, it constructs the claim directly and never calls `sessions.ResolveCanonicalFollowupTargetAsync`; the canonical Project-membership check exists only in the `existing is null` branch at `:251-263`.
+Follow-up mappings are scoped by `sessionId|Idempotency-Key`, without `projectId`. The route validates the body and calls `idempotency.FindAsync` before it calls `sessions.ResolveCanonicalFollowupTargetAsync`. When a mapping already exists, the route constructs the claim directly and never performs the canonical Session lookup or Project-membership check.
 
-A caller whose PAT is authorized for both Projects can therefore reuse a known Session ID and key through Project B and hit Project A's existing mapping. For a completed mapping this can return a rejection observation using the selected Project ID without proving that the Session belongs to it. For a pending mapping it can call `AcceptFollowupAsync` on the canonical Session without a Project-membership check, potentially admitting work into a Session owned by another Project. A different body can also be classified as `idempotency_key_reused` from the other Project's mapping rather than as `session_not_found`.
+For example, after a mapping for a Session in Project A exists, a PAT authorized for Project B can submit that Session ID and the same key through Project B. With the same body, the request enters replay; with a different body, it receives `409 idempotency_key_reused` based on Project A's mapping. If the mapping is still pending, the route calls `AcceptFollowupAsync` on the canonical Session without verifying that it belongs to the selected Project. These outcomes are possible even though the selected Project passed the middleware grant check.
 
-This violates the `external-agent-caller-auth` requirement that canonical resource Project membership match the selected Project and the `external-write-idempotency`/T-005 acceptance criterion that a Session absent from or not belonging to the authorized Project returns `404 session_not_found` after the grant passes. It also violates the required ordering that resource ownership is checked before the idempotency mapping is used. The replay fix must retain the ability to replay after mutable target invalidation, but it still needs a membership-only canonical check on every request (or an equivalent durable binding check) before consuming the existing mapping; a foreign or missing Session must not reach replay or admission.
+This violates the `external-agent-caller-auth` requirement **Project authorization precedes resource lookup**, which requires canonical resource Project membership to match the selected Project. It violates the `external-write-idempotency` requirement **Durable keyed mappings are scoped per command** and its follow-up requirement that a Session absent from or not belonging to the authorized Project returns `404 session_not_found`. It also violates T-005 acceptance criterion 1 in `tasks.json`, and the design's required ordering that ownership is checked before idempotency is used.
+
+The fix must preserve replay after mutable target invalidation, which is covered by `DirectApiFollowupSpecs.CompletedFollowupReplaySurvivesSessionTargetInvalidation`. Add an existence-and-membership-only canonical Session check on every request before reading the mapping, or an equivalent check that cannot be bypassed by replay. Do not require the mutable Runner/source target to remain valid for an existing mapping, but a missing or foreign Session must return `404 session_not_found` and must never reach replay or admission.
 
 ## Previous Findings
 
-The four findings from the previous review were checked against the current tree:
+The prior findings were checked against the current unchanged product tree:
 
-- The projection-lag freshness gap for compressed Session lifecycle transitions is fixed. `PublicExecutionReadQuerier.AddSessionFeedsAsync` now compares the `AgentSessionLifecycle` head at `:291-326`, and `PublicExecutionProjectionSpecs.LifecycleHistoryHead_MakesACompressedCycleReadAsProjectionLag` covers the regression.
-- Retryable queued dispatch states now expose `queue_full` as both a safe reason and error. `PublicExecutionAggregator` sets these fields at `:218-222`, `:264-266`, `:304-306`, and `:347-349`, with the public projection regression covered by `RetryableDispatchBlock_ProjectsSafeQueueFullReasonAndError`.
-- A matching retry while a stop remains unresolved now returns `stop_pending` at `DirectApiStopRoutes.cs:127-133` instead of treating a current public snapshot as a completed command. The stop spec asserts the `503` response and no replacement delivery.
-- Replay after an Agent archive and after follow-up target invalidation now finds the durable mapping before the mutable write-target lookup. The launch path does this at `DirectApiRoutes.cs:481-508`, and the focused replay specs cover both intended recovery cases. That fix is behaviorally correct for those cases, but its follow-up branch introduced the Project-membership bypass reported above.
+- The compressed Session lifecycle projection-lag gap remains fixed. `PublicExecutionReadQuerier` compares the lifecycle head, with regression coverage in `PublicExecutionProjectionSpecs.LifecycleHistoryHead_MakesACompressedCycleReadAsProjectionLag`.
+- Retryable queued dispatch states still project the safe `queue_full` reason and error, with the corresponding projection regression test.
+- A matching stop retry while a stop is unresolved still returns `stop_pending` and does not create a replacement delivery.
+- Launch replay after Agent archival and follow-up replay after mutable target invalidation still load the durable mapping before the mutable operation lookup.
+- Lifecycle-history persistence and deleted-Session public-stream tombstone behavior remain covered; no regression was introduced.
 
-The earlier lifecycle-history compression and deleted-Session tombstone findings were also rechecked: lifecycle transitions are persisted by `AgentSessionStore`, and deletion closes the public stream while purge removes the tombstone only through the retention operation. No additional must-fix regression was found there.
+MF-1 is not fixed: the follow-up route's mapping lookup still precedes its canonical Project-membership check.
 
 ## Dimension Checks
 
-- **Issue contract and acceptance criteria:** FAIL. The direct boundary, projection, reads, keyed writes, stop fencing, event cursors, and shipped documentation are present, but MF-1 violates the follow-up ownership and replay criteria.
-- **Coverage:** FAIL. The current suites cover follow-up replay after target invalidation, but no test exercises an existing `(sessionId, key)` mapping replayed through a different authorized Project. That case can admit or expose the wrong Project's mapping.
-- **Correctness:** FAIL for MF-1. The valid replay path and the cross-Project replay path are indistinguishable once `FindAsync` returns a row because the route skips canonical ownership resolution.
-- **Consistency with the surrounding codebase:** checked, no additional issue found. The middleware, projection, persistence, public serialization, and canonical stop composition follow the local conventions; the ownership omission is described above.
-- **Tests and verification:** checked. `npm run test:fast` passed all seven lanes, the focused follow-up suite passed all 8 tests, and `npm run verify` passed docs, file-size, format, build, 3,984 Server SpecTests, 2,676 Server unit tests, 1,848 CLI tests, 4,724 Web tests, 1,639 Runner tests, and 70 Slack tests. The green suite does not cover MF-1's cross-Project replay scenario.
+- **Issue contract and acceptance criteria:** FAIL. MF-1 violates the follow-up ownership and idempotency ordering criteria above.
+- **Coverage:** FAIL. `DirectApiFollowupSpecs` covers a missing/foreign Session before any mapping exists and replay after target invalidation, but no test covers an existing `(sessionId, key)` mapping submitted through a different selected Project.
+- **Correctness:** FAIL for MF-1. Existing mappings can be classified or admitted without proving that the canonical Session belongs to the selected Project.
+- **Consistency with the surrounding codebase:** checked, no additional issue found. The direct middleware, public projection/read boundary, and canonical stop composition remain consistent; the ownership omission is the exception described above.
+- **Tests and verification:** checked. The recorded full `npm run verify` and focused suites passed in the prior review state, but the green suite does not exercise MF-1's cross-Project replay case. No product files changed after that verification.
 
 ## Observations
 
-- `20260909000000_AddPublicApiCursorSecret.cs` rebuilds the existing `StoredSecrets` table to extend its check constraints for the persisted cursor key. It copies existing rows, but this migration deserves deployment testing against populated secret stores. This does not add another must-fix finding here.
-- The queued projection maps several retryable internal wait reasons (`capacity-full`, `concurrency-limit`, and `no-online-runner`) to the single safe public reason `queue_full`. That is consistent with the current public vocabulary and is recorded only as an implementation detail, not a release blocker.
+- `20260909000000_AddPublicApiCursorSecret.cs` rebuilds the existing `StoredSecrets` table while copying rows to extend its constraints. Deployment testing against populated secret stores remains advisable, but this is not a must-fix for the issue criteria.
+- Several retryable internal queue or capacity conditions intentionally map to the single safe public reason `queue_full`; this is consistent with the specified public vocabulary.
 
 ## Verdict
 
-**FAIL** — MF-1 remains a must-fix ownership and idempotency correctness problem relative to the issue acceptance criteria.
+**FAIL** - MF-1 remains an unresolved canonical Project-membership and idempotency correctness problem relative to the issue acceptance criteria.
 
 <promise>FAIL</promise>
