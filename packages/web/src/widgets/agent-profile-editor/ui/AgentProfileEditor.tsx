@@ -310,7 +310,14 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 <Input
                   id="agent-collaborators"
                   value={allowedSubagentAgentIds.join(', ')}
-                  onChange={(event) => setAllowedSubagentAgentIds(event.target.value.split(',').map((value) => value.trim()).filter(Boolean))}
+                  onChange={(event) =>
+                    setAllowedSubagentAgentIds(
+                      event.target.value
+                        .split(',')
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                    )
+                  }
                   placeholder="agent-id-1, agent-id-2"
                   data-testid="editor-collaborators"
                 />

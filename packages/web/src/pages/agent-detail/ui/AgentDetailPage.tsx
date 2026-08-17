@@ -139,10 +139,28 @@ function ReadinessCard({
 
   const tone =
     conclusion === 'Ready'
-      ? { borderClass: 'border-emerald-200', iconBg: 'bg-emerald-100', iconClass: 'text-emerald-600', icon: <CheckCircleIcon className="size-4" />, labelClass: 'text-emerald-700' }
+      ? {
+          borderClass: 'border-emerald-200',
+          iconBg: 'bg-emerald-100',
+          iconClass: 'text-emerald-600',
+          icon: <CheckCircleIcon className="size-4" />,
+          labelClass: 'text-emerald-700',
+        }
       : conclusion === 'Needs setup'
-        ? { borderClass: 'border-red-200', iconBg: 'bg-red-100', iconClass: 'text-red-600', icon: <AlertTriangleIcon className="size-4" />, labelClass: 'text-red-700' }
-        : { borderClass: 'border-amber-200', iconBg: 'bg-amber-100', iconClass: 'text-amber-600', icon: <AlertCircleIcon className="size-4" />, labelClass: 'text-amber-700' }
+        ? {
+            borderClass: 'border-red-200',
+            iconBg: 'bg-red-100',
+            iconClass: 'text-red-600',
+            icon: <AlertTriangleIcon className="size-4" />,
+            labelClass: 'text-red-700',
+          }
+        : {
+            borderClass: 'border-amber-200',
+            iconBg: 'bg-amber-100',
+            iconClass: 'text-amber-600',
+            icon: <AlertCircleIcon className="size-4" />,
+            labelClass: 'text-amber-700',
+          }
 
   return (
     <div
@@ -151,7 +169,9 @@ function ReadinessCard({
       className={`rounded-lg border ${tone.borderClass} bg-card p-4 space-y-2`}
     >
       <div className="flex items-center gap-2">
-        <span className={`inline-flex items-center justify-center size-6 rounded-full ${tone.iconBg} ${tone.iconClass}`}>
+        <span
+          className={`inline-flex items-center justify-center size-6 rounded-full ${tone.iconBg} ${tone.iconClass}`}
+        >
           {tone.icon}
         </span>
         <div className="flex flex-col">
@@ -177,7 +197,11 @@ function ReadinessCard({
       )}
       {conclusion === 'Needs setup' && setup && (
         <p data-testid="agent-detail-readiness-setup" className="text-xs text-muted-foreground">
-          Fix in <a className="font-medium text-foreground underline" href={toProjectPath(setup.path)}>{setup.label}</a>.
+          Fix in{' '}
+          <a className="font-medium text-foreground underline" href={toProjectPath(setup.path)}>
+            {setup.label}
+          </a>
+          .
         </p>
       )}
       {conclusion === 'Unknown' && (
@@ -231,7 +255,9 @@ function AvailabilityCard({
       className={`rounded-lg border ${canStartNow ? 'border-emerald-200' : 'border-amber-200'} bg-card p-4 space-y-2`}
     >
       <div className="flex items-center gap-2">
-        <span className={`inline-flex items-center justify-center size-6 rounded-full ${canStartNow ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+        <span
+          className={`inline-flex items-center justify-center size-6 rounded-full ${canStartNow ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}
+        >
           {canStartNow ? <CheckCircleIcon className="size-4" /> : <HourglassIcon className="size-4" />}
         </span>
         <div className="flex flex-col">
@@ -302,12 +328,8 @@ function SessionSection({
           className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
         >
           {statusIcon(s.activity ?? 'unknown')}
-          <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">
-            {s.agentName}
-          </span>
-          <span className="text-xs text-muted-foreground shrink-0">
-            {s.resolvedModel ?? 'unknown'}
-          </span>
+          <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">{s.agentName}</span>
+          <span className="text-xs text-muted-foreground shrink-0">{s.resolvedModel ?? 'unknown'}</span>
           <span className="text-[10px] text-muted-foreground/60 shrink-0">
             {formatTime(s.lastActivityAt ?? s.createdAt)}
           </span>
@@ -352,18 +374,9 @@ export function AgentDetailPage({
   const isUnknownReadiness = readinessConclusion === 'Unknown'
   const launchBlockedByReadiness = isNeedsSetup
 
-  const runningSessions = useMemo(
-    () => allSessions.filter((s) => s.activity === 'active'),
-    [allSessions],
-  )
-  const failedSessions = useMemo(
-    () => allSessions.filter((s) => s.activity === 'unknown'),
-    [allSessions],
-  )
-  const endedSessions = useMemo(
-    () => allSessions.filter((s) => s.activity === 'idle'),
-    [allSessions],
-  )
+  const runningSessions = useMemo(() => allSessions.filter((s) => s.activity === 'active'), [allSessions])
+  const failedSessions = useMemo(() => allSessions.filter((s) => s.activity === 'unknown'), [allSessions])
+  const endedSessions = useMemo(() => allSessions.filter((s) => s.activity === 'idle'), [allSessions])
   const recentSessions = useMemo(
     () =>
       [...allSessions]
@@ -407,15 +420,13 @@ export function AgentDetailPage({
   }
 
   return (
-    <div
-      data-testid="agent-detail-page"
-      data-agent-id={agent.id}
-      className="flex-1 overflow-y-auto bg-background"
-    >
+    <div data-testid="agent-detail-page" data-agent-id={agent.id} className="flex-1 overflow-y-auto bg-background">
       <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-4 min-w-0">
-            <div className={`flex items-center justify-center size-12 rounded-xl shrink-0 ${isArchived ? 'bg-muted' : 'bg-blue-50'}`}>
+            <div
+              className={`flex items-center justify-center size-12 rounded-xl shrink-0 ${isArchived ? 'bg-muted' : 'bg-blue-50'}`}
+            >
               <BotIcon className={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
             </div>
             <div className="min-w-0">
@@ -424,16 +435,20 @@ export function AgentDetailPage({
                 <Badge
                   data-testid="agent-detail-lifecycle"
                   variant="outline"
-                  className={isArchived
-                    ? 'text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30'
-                    : 'text-[10px] px-1.5 py-0 h-4 text-emerald-700 border-emerald-300'}
+                  className={
+                    isArchived
+                      ? 'text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30'
+                      : 'text-[10px] px-1.5 py-0 h-4 text-emerald-700 border-emerald-300'
+                  }
                 >
                   {isArchived ? (
                     <>
                       <ArchiveIcon className="size-3 mr-0.5" />
                       Archived
                     </>
-                  ) : 'Active'}
+                  ) : (
+                    'Active'
+                  )}
                 </Badge>
               </div>
               <p data-testid="agent-detail-purpose" className="mt-0.5 text-xs text-muted-foreground">
@@ -446,12 +461,7 @@ export function AgentDetailPage({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditorOpen(true)}
-              data-testid="agent-detail-edit"
-            >
+            <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)} data-testid="agent-detail-edit">
               <PencilIcon />
               Edit
             </Button>
@@ -490,7 +500,8 @@ export function AgentDetailPage({
                 data-testid="agent-detail-unknown-launch-hint"
                 className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
               >
-                Readiness is <span className="font-semibold">Unknown</span> — the launch will proceed and will wait for the server to validate execution.
+                Readiness is <span className="font-semibold">Unknown</span> — the launch will proceed and will wait for
+                the server to validate execution.
               </p>
             )}
 
@@ -500,9 +511,7 @@ export function AgentDetailPage({
                 data-testid="agent-detail-instructions"
                 className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed"
               >
-                {agent.instructions || (
-                  <span className="italic text-muted-foreground/50">No instructions set</span>
-                )}
+                {agent.instructions || <span className="italic text-muted-foreground/50">No instructions set</span>}
               </div>
             </div>
 
@@ -565,12 +574,19 @@ export function AgentDetailPage({
                 </div>
                 <div className="flex justify-between items-start gap-3">
                   <span className="text-xs text-muted-foreground">Allowed collaborators</span>
-                  <span data-testid="agent-detail-collaborators" className="text-right text-xs font-medium text-foreground">
+                  <span
+                    data-testid="agent-detail-collaborators"
+                    className="text-right text-xs font-medium text-foreground"
+                  >
                     {agent.allowedSubagentAgentIds?.length ? agent.allowedSubagentAgentIds.join(', ') : 'None'}
                   </span>
                 </div>
-                <p data-testid="agent-detail-edit-timing" className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground">
-                  Instructions, Runtime, Model, Variant, and Skills edits apply only to Jobs created after saving. Executions already in progress keep the configuration from launch.
+                <p
+                  data-testid="agent-detail-edit-timing"
+                  className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground"
+                >
+                  Instructions, Runtime, Model, Variant, and Skills edits apply only to Jobs created after saving.
+                  Executions already in progress keep the configuration from launch.
                 </p>
               </div>
             </div>
@@ -618,11 +634,7 @@ export function AgentDetailPage({
                     data-testid="agent-detail-unarchive-btn"
                     disabled={unarchiveAgent.isPending}
                   >
-                    {unarchiveAgent.isPending ? (
-                      <Loader2Icon className="size-4 animate-spin" />
-                    ) : (
-                      <RotateCcwIcon />
-                    )}
+                    {unarchiveAgent.isPending ? <Loader2Icon className="size-4 animate-spin" /> : <RotateCcwIcon />}
                     Unarchive
                   </Button>
                 )}
@@ -648,8 +660,8 @@ export function AgentDetailPage({
           <DialogHeader>
             <DialogTitle>Archive Agent</DialogTitle>
             <DialogDescription>
-              This agent will leave the Active group and will not be launchable for new sessions.
-              It remains visible in the Archived group and can be restored from this page.
+              This agent will leave the Active group and will not be launchable for new sessions. It remains visible in
+              the Archived group and can be restored from this page.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 pt-2">

@@ -41,7 +41,14 @@ import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
 import { Badge } from '@/shared/ui/components/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/ui/components/dialog'
 import { cn } from '@/shared/lib/utils'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 
@@ -396,7 +403,8 @@ export function AgentSessionComposerPage({
   const executionControlsVisible = isCreatingAgent && (!defaultExecutionConfig || executionConfigAdjusted)
   const concurrencyValue = maxConcurrentRunsText.trim() ? Number(maxConcurrentRunsText) : null
   const concurrencyValid = concurrencyValue === null || (Number.isInteger(concurrencyValue) && concurrencyValue > 0)
-  const launchPending = launchMutation.isPending || preflightTaskMutation?.isPending === true || startTaskMutation.isPending
+  const launchPending =
+    launchMutation.isPending || preflightTaskMutation?.isPending === true || startTaskMutation.isPending
   const canLaunch =
     (!promptEmpty || attachmentIds.length > 0) &&
     (!isCreatingAgent || executionConfigResolvable) &&
@@ -408,25 +416,28 @@ export function AgentSessionComposerPage({
     setContextRefs((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
-  const handleLaunchSuccess = useCallback((data: AgentSessionLaunchResponse) => {
-    const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-    const sessionPath =
-      data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
-    const accepted = data.attachments ?? []
-    const rejected = data.rejectedAttachments ?? []
-    launchKeyRef.current = null
-    if (accepted.length > 0 || rejected.length > 0) {
-      setLaunchAttachmentResult({
-        agentId: data.agentId,
-        agentName: data.agentName,
-        accepted,
-        rejected,
-        sessionPath,
-      })
-      return
-    }
-    navigate(sessionPath)
-  }, [navigate, toProjectPath])
+  const handleLaunchSuccess = useCallback(
+    (data: AgentSessionLaunchResponse) => {
+      const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
+      const sessionPath =
+        data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
+      const accepted = data.attachments ?? []
+      const rejected = data.rejectedAttachments ?? []
+      launchKeyRef.current = null
+      if (accepted.length > 0 || rejected.length > 0) {
+        setLaunchAttachmentResult({
+          agentId: data.agentId,
+          agentName: data.agentName,
+          accepted,
+          rejected,
+          sessionPath,
+        })
+        return
+      }
+      navigate(sessionPath)
+    },
+    [navigate, toProjectPath],
+  )
 
   const handleConfirmPreflight = useCallback(() => {
     if (!pendingPreflight || !launchKeyRef.current) return
@@ -518,7 +529,7 @@ export function AgentSessionComposerPage({
 
   const launchError = selectedAgentRef
     ? launchMutation.error
-    : preflightTaskMutation?.error ?? startTaskMutation.error
+    : (preflightTaskMutation?.error ?? startTaskMutation.error)
   const launchFeedback = getAgentLaunchErrorFeedback(launchError, selectedReadiness)
   const isNeedsSetupError = launchFeedback?.kind === 'needs-setup'
   const launchErrorData =
@@ -737,7 +748,9 @@ export function AgentSessionComposerPage({
           <div data-testid="task-capability-controls" className="space-y-3 rounded-lg border border-border bg-card p-4">
             <div>
               <p className="text-sm font-medium text-foreground">Execution scope</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Choose collaborator Agents and an optional concurrency limit for the new Agent.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Choose collaborator Agents and an optional concurrency limit for the new Agent.
+              </p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -746,12 +759,16 @@ export function AgentSessionComposerPage({
                   id="task-collaborators"
                   multiple
                   value={allowedCollaboratorIds}
-                  onChange={(event) => setAllowedCollaboratorIds(Array.from(event.target.selectedOptions, (option) => option.value))}
+                  onChange={(event) =>
+                    setAllowedCollaboratorIds(Array.from(event.target.selectedOptions, (option) => option.value))
+                  }
                   className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
                   data-testid="task-collaborators"
                 >
                   {launchableAgents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>{agent.name}</option>
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -767,7 +784,9 @@ export function AgentSessionComposerPage({
                   placeholder="Unlimited"
                   data-testid="task-max-concurrent-runs"
                 />
-                {!concurrencyValid && <p className="text-xs text-destructive">Use a positive whole number or leave this empty.</p>}
+                {!concurrencyValid && (
+                  <p className="text-xs text-destructive">Use a positive whole number or leave this empty.</p>
+                )}
               </div>
             </div>
           </div>
@@ -865,13 +884,22 @@ export function AgentSessionComposerPage({
                 <span className="text-muted-foreground">Agent</span>
                 <span className="font-medium">{pendingPreflight.response.agentName}</span>
                 <span className="text-muted-foreground">Execution</span>
-                <span>{pendingPreflight.response.execution.runtime} · {pendingPreflight.response.execution.model ?? 'unresolved'}{pendingPreflight.response.execution.variant ? ` · ${pendingPreflight.response.execution.variant}` : ''}</span>
+                <span>
+                  {pendingPreflight.response.execution.runtime} ·{' '}
+                  {pendingPreflight.response.execution.model ?? 'unresolved'}
+                  {pendingPreflight.response.execution.variant
+                    ? ` · ${pendingPreflight.response.execution.variant}`
+                    : ''}
+                </span>
                 <span className="text-muted-foreground">Workspace</span>
                 <span>{pendingPreflight.response.workspace}</span>
                 <span className="text-muted-foreground">Repository</span>
                 <span>{pendingPreflight.response.repository ?? 'Workspace repositories'}</span>
                 <span className="text-muted-foreground">Issue / Epic</span>
-                <span>{pendingPreflight.response.issueNumber ? `#${pendingPreflight.response.issueNumber}` : 'none'}{pendingPreflight.response.epicNumber ? ` / #${pendingPreflight.response.epicNumber}` : ''}</span>
+                <span>
+                  {pendingPreflight.response.issueNumber ? `#${pendingPreflight.response.issueNumber}` : 'none'}
+                  {pendingPreflight.response.epicNumber ? ` / #${pendingPreflight.response.epicNumber}` : ''}
+                </span>
                 <span className="text-muted-foreground">Permission scope</span>
                 <span>{pendingPreflight.response.permissionScope}</span>
                 <span className="text-muted-foreground">Expected impact</span>
@@ -885,8 +913,15 @@ export function AgentSessionComposerPage({
             </div>
           )}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPendingPreflight(null)}>Cancel</Button>
-            <Button type="button" onClick={handleConfirmPreflight} disabled={startTaskMutation.isPending} data-testid="confirm-agent-task-launch">
+            <Button type="button" variant="outline" onClick={() => setPendingPreflight(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmPreflight}
+              disabled={startTaskMutation.isPending}
+              data-testid="confirm-agent-task-launch"
+            >
               {startTaskMutation.isPending ? 'Launching...' : 'Confirm and launch'}
             </Button>
           </DialogFooter>

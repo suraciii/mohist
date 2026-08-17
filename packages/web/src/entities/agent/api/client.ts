@@ -105,9 +105,7 @@ export function getAgentStatus(projectId?: string | null) {
 }
 
 export function getAgentDetailStatus(projectId: string, agentRef: string) {
-  return request<AgentStatusDetailResponse>(
-    projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/status`),
-  )
+  return request<AgentStatusDetailResponse>(projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/status`))
 }
 
 export function getAgentSessions(params?: { status?: string; limit?: number; projectId?: string | null }) {
@@ -182,9 +180,7 @@ export function readAgentModelAndVariant(
   if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
   const rawModel = typeof config.model === 'string' ? config.model : null
   const model = rawModel && rawModel.trim() ? rawModel : null
-  const runtime = config.runtime === 'opencode' || config.runtime === 'pi'
-    ? config.runtime
-    : DEFAULT_AGENT_RUNTIME
+  const runtime = config.runtime === 'opencode' || config.runtime === 'pi' ? config.runtime : DEFAULT_AGENT_RUNTIME
   if (!model) return { model: null, variant: null, runtime }
   const rawVariant = typeof config.variant === 'string' ? config.variant : null
   return {

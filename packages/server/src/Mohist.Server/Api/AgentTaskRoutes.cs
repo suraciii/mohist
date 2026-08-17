@@ -8,7 +8,6 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
@@ -51,7 +50,6 @@ public static class AgentTaskRoutes
             IssueQuerier issueQuerier,
             EpicQuerier epicQuerier,
             AgentTaskDefinitionFactory definitions,
-            ProjectDefaultExecutionConfigReader defaults,
             IGrainFactory grains,
             InteractionWorkspaceProvisioner provisioner,
             CancellationToken ct) =>
@@ -118,7 +116,7 @@ public static class AgentTaskRoutes
                 NormalizeOptional(body.Runtime),
                 NormalizeOptional(body.Model),
                 NormalizeOptional(body.Variant));
-            var projectDefault = await defaults.GetAsync(project.Id, ct);
+            var projectDefault = project.DefaultExecutionConfig;
             var resolved = ExecutionConfigResolver.Resolve(callerHint, null, projectDefault);
             if (string.IsNullOrWhiteSpace(resolved.Model))
                 return ExecutionConfigUnresolvable();
@@ -175,7 +173,6 @@ public static class AgentTaskRoutes
             IAgentLauncher launcher,
             AttachmentService attachments,
             AgentTaskDefinitionFactory definitions,
-            ProjectDefaultExecutionConfigReader defaults,
             IGrainFactory grains,
             InteractionWorkspaceProvisioner provisioner,
             TimeProvider timeProvider,
@@ -232,7 +229,7 @@ public static class AgentTaskRoutes
             var preflightFingerprint = context.Request.Headers["X-Mohist-Agent-Preflight"].FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(preflightFingerprint))
             {
-                var projectDefault = await defaults.GetAsync(project.Id, ct);
+                var projectDefault = project.DefaultExecutionConfig;
                 var resolved = ExecutionConfigResolver.Resolve(
                     new ExecutionConfigHint(
                         NormalizeOptional(body.Runtime),
