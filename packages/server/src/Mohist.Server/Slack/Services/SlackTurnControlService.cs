@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Api;
@@ -16,7 +14,8 @@ namespace Mohist.Server.Slack.Services;
 public sealed class SlackTurnControlService : IScopedService
 {
     public const string StopActionId = "mohist_stop_turn";
-    private const string StopAction = "stop";
+    public const string RetryActionId = "mohist_retry_turn";
+    public const string SelectionActionId = "mohist_select_connection";
     private static readonly TimeSpan StopActionLifetime = TimeSpan.FromMinutes(5);
 
     private readonly ISecretStore _secrets;
@@ -42,6 +41,28 @@ public sealed class SlackTurnControlService : IScopedService
         _time = time;
     }
 
+    public Task<SlackStopAction?> CreateStopActionAsync(
+        AgentConnection connection,
+        string sessionId,
+        string turnId,
+        string inputId,
+        string dispatchRef,
+        string actorSlackUserId,
+        SlackMessageIdentity source,
+        string? threadTs,
+        CancellationToken ct = default) =>
+        CreateStopActionAsync(
+            connection,
+            sessionId,
+            turnId,
+            inputId,
+            dispatchRef,
+            actorSlackUserId,
+            source,
+            threadTs,
+            originalDirectMessage: false,
+            ct);
+
     public async Task<SlackStopAction?> CreateStopActionAsync(
         AgentConnection connection,
         string sessionId,
@@ -51,6 +72,7 @@ public sealed class SlackTurnControlService : IScopedService
         string actorSlackUserId,
         SlackMessageIdentity source,
         string? threadTs,
+        bool originalDirectMessage,
         CancellationToken ct = default)
     {
         var session = _grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -69,8 +91,8 @@ public sealed class SlackTurnControlService : IScopedService
 
         var expiresAt = _time.GetUtcNow().Add(StopActionLifetime);
         var payload = new SlackStopActionPayload(
-            Version: "v1",
-            Action: StopAction,
+            Version: SlackActionCodec.Version,
+            Action: SlackActionCodec.StopAction,
             ConnectionId: connection.Id,
             SessionId: sessionId,
             TurnId: turnId,
@@ -83,33 +105,46 @@ public sealed class SlackTurnControlService : IScopedService
             ThreadTs: threadTs,
             Nonce: Guid.NewGuid().ToString("N"),
             ExpiresAt: expiresAt,
-            Signature: null);
-        var signature = await TrySignAsync(connection, payload, ct);
-        if (signature is null)
+            Signature: null)
+        {
+            WorkspaceTeamId = source.WorkspaceTeamId,
+            OriginalDirectMessage = originalDirectMessage,
+        };
+        var value = await CreateSignedActionValueAsync(connection, payload, ct);
+        if (value is null)
             return null;
 
-        var value = JSON.Serialize(payload with { Signature = signature });
         return new SlackStopAction(StopActionId, value, expiresAt, BuildStopBlocks(value));
     }
+
+    public Task<SlackTurnControlResult> HandleAsync(
+        string projectId,
+        AgentConnection connection,
+        SlackInteractionRequest request,
+        CancellationToken ct = default) =>
+        HandleAsync(projectId, connection, request, interactionLeaseContext: null, ct);
 
     public async Task<SlackTurnControlResult> HandleAsync(
         string projectId,
         AgentConnection connection,
         SlackInteractionRequest request,
+        SlackInteractionLeaseContext? interactionLeaseContext,
         CancellationToken ct = default)
     {
         if (!string.Equals(request.EventType, "block_actions", StringComparison.Ordinal)
             || !string.Equals(request.ActionId, StopActionId, StringComparison.Ordinal))
             return Rejected("unsupported_action", "This action is not supported.");
 
-        var payload = await VerifyAsync(connection, request.ActionValue, ct);
-        if (payload is null)
+        var payload = await VerifySignedActionAsync<SlackStopActionPayload>(connection, request.ActionValue, ct);
+        if (payload is null || !string.Equals(payload.Action, SlackActionCodec.StopAction, StringComparison.Ordinal))
             return Rejected("invalid_action", "This Stop action is invalid.");
         if (payload.ExpiresAt <= _time.GetUtcNow())
             return Rejected("expired", "This Stop action has expired.");
         if (!string.Equals(payload.ConnectionId, connection.Id, StringComparison.Ordinal)
+            || !string.Equals(payload.WorkspaceTeamId, connection.WorkspaceTeamId, StringComparison.Ordinal)
             || !string.Equals(request.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal)
-            || !string.Equals(payload.ConversationId, request.ConversationId, StringComparison.Ordinal))
+            || !string.Equals(payload.ConversationId, request.ConversationId, StringComparison.Ordinal)
+            || !string.Equals(payload.ThreadTs, request.ThreadTs, StringComparison.Ordinal))
             return Rejected("stale_action", "This Stop action no longer matches the active Slack Connection.");
         if (!string.Equals(payload.ActorSlackUserId, request.ActorSlackUserId, StringComparison.Ordinal))
             return Rejected("unauthorized", "This Stop action belongs to a different Slack member.");
@@ -178,43 +213,27 @@ public sealed class SlackTurnControlService : IScopedService
         };
     }
 
-    private async Task<string?> TrySignAsync(
+    public async Task<string?> CreateSignedActionValueAsync(
         AgentConnection connection,
-        SlackStopActionPayload payload,
-        CancellationToken ct)
+        ISlackActionPayload payload,
+        CancellationToken ct = default)
     {
         var key = await LoadSigningKeyAsync(connection, ct);
-        return key is null
-            ? null
-            : Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(Canonical(payload))));
+        if (key is null)
+            return null;
+        var signature = SlackActionCodec.Sign(payload, key);
+        return SlackActionCodec.SerializeWithSignature(payload, signature);
     }
 
-    private async Task<SlackStopActionPayload?> VerifyAsync(
+    public async Task<T?> VerifySignedActionAsync<T>(
         AgentConnection connection,
         string actionValue,
-        CancellationToken ct)
+        CancellationToken ct = default)
+        where T : class, ISlackActionPayload
     {
-        SlackStopActionPayload? payload;
-        try
-        {
-            payload = JSON.Deserialize<SlackStopActionPayload>(actionValue);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        if (payload is null
-            || !string.Equals(payload.Version, "v1", StringComparison.Ordinal)
-            || !string.Equals(payload.Action, StopAction, StringComparison.Ordinal)
-            || string.IsNullOrWhiteSpace(payload.Signature)
-            || string.IsNullOrWhiteSpace(payload.Nonce))
-            return null;
-
-        var expected = await TrySignAsync(connection, payload with { Signature = null }, ct);
-        return expected is not null && CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(expected),
-            Encoding.UTF8.GetBytes(payload.Signature))
+        var key = await LoadSigningKeyAsync(connection, ct);
+        return key is not null
+            && SlackActionCodec.TryVerify(actionValue, key, out T? payload)
             ? payload
             : null;
     }
@@ -240,23 +259,6 @@ public sealed class SlackTurnControlService : IScopedService
     private static bool CanControl(AgentConnection connection, string? initiator, string actorSlackUserId) =>
         string.Equals(connection.OwnerSlackUserId, actorSlackUserId, StringComparison.Ordinal)
         || string.Equals(initiator, actorSlackUserId, StringComparison.Ordinal);
-
-    private static string Canonical(SlackStopActionPayload payload) => string.Join(
-        "\n",
-        payload.Version,
-        payload.Action,
-        payload.ConnectionId,
-        payload.SessionId,
-        payload.TurnId,
-        payload.InputId,
-        payload.DispatchRef,
-        payload.ActorSlackUserId,
-        payload.InitiatorSlackUserId,
-        payload.ConversationId,
-        payload.MessageTs,
-        payload.ThreadTs ?? string.Empty,
-        payload.Nonce,
-        payload.ExpiresAt.ToUnixTimeMilliseconds());
 
     private static SlackTurnControlResult Rejected(string state, string text) =>
         new(state, text, BuildPresentationBlocks(text));
@@ -296,27 +298,8 @@ public sealed class SlackTurnControlService : IScopedService
         });
 }
 
-public sealed record SlackStopAction(
-    string ActionId,
-    string ActionValue,
-    DateTimeOffset ExpiresAt,
-    JsonElement Blocks);
-
-public sealed record SlackTurnControlResult(string State, string Text, JsonElement Blocks);
-
-public sealed record SlackStopActionPayload(
-    string Version,
-    string Action,
-    string ConnectionId,
-    string SessionId,
-    string TurnId,
-    string InputId,
-    string DispatchRef,
-    string ActorSlackUserId,
-    string InitiatorSlackUserId,
-    string ConversationId,
-    string MessageTs,
-    string? ThreadTs,
-    string Nonce,
-    DateTimeOffset ExpiresAt,
-    string? Signature);
+public sealed record SlackTurnControlResult(
+    string State,
+    string Text,
+    JsonElement Blocks,
+    string? ResultReference = null);

@@ -251,6 +251,43 @@ public sealed class SlackAdapterLeaseService(
     }
 
     /// <summary>
+    /// Resolves the current runtime proof for a target under one authenticated
+    /// adapter identity. The returned token resolver is fenced to the target
+    /// lease selected here; callers cannot use the context to authorize a
+    /// different Connection.
+    /// </summary>
+    public async Task<SlackLeaseContext?> ResolveCurrentRuntimeLeaseContextAsync(
+        string operatorId,
+        SlackLeaseTargetRef targetRef,
+        string adapterId,
+        CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adapterId);
+
+        var active = await store.GetActiveAsync(targetRef.TargetKey, ct);
+        var now = timeProvider.GetUtcNow();
+        if (active is null
+            || active.Kind != SlackLeaseKind.Runtime
+            || !string.Equals(active.AdapterId, adapterId, StringComparison.Ordinal)
+            || active.ExpiresAt <= now
+            || !await ValidateRuntimeLeaseAsync(operatorId, targetRef, active.LeaseId, adapterId, ct))
+            return null;
+
+        return new SlackLeaseContext(
+            operatorId,
+            active.LeaseId,
+            adapterId,
+            (requestedTarget, tokenCt) => string.Equals(
+                    requestedTarget.TargetKey,
+                    targetRef.TargetKey,
+                    StringComparison.Ordinal)
+                ? ResolveRuntimeLeaseBotTokenAsync(operatorId, targetRef, active.LeaseId, adapterId, tokenCt)
+                : Task.FromResult<string?>(null));
+    }
+
+    /// <summary>
     /// Route-level gate for a Manager target addressed by enrollment id (the
     /// manager adapter delivery routes). Resolves the stored workspace team
     /// inside the target provider so the caller never touches storage, then

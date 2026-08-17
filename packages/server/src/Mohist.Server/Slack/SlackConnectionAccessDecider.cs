@@ -41,6 +41,16 @@ public sealed record SlackLeaseContext(
     Func<SlackLeaseTargetRef, CancellationToken, Task<string?>> ResolveVerifiedBotToken);
 
 /// <summary>
+/// Authorization context for a Server-handled Slack interaction. The
+/// receiving lease is the proof for the Connection that owns the prompt or
+/// status message. Target resolution is kept on the Server so a selected
+/// Connection gets a separately validated lease and credential resolver.
+/// </summary>
+public sealed record SlackInteractionLeaseContext(
+    SlackLeaseContext Receiving,
+    Func<SlackLeaseTargetRef, CancellationToken, Task<SlackLeaseContext?>> ResolveCurrentTarget);
+
+/// <summary>
 /// Single decision point for who may invoke a Slack-bound Agent in a
 /// channel or DM. The decision reads current
 /// <see cref="AgentConnection.AccessPolicy"/> on every call; it caches

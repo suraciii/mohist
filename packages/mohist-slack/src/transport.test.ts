@@ -61,7 +61,7 @@ describe("HttpAdapterTransport", () => {
                 ? { leaseId: "lease", kind: "runtime", generation: 2, expiresAt: "2026-01-01T00:10:00Z" }
                 : url.endsWith("/slack-manager/ingress") ? { kind: "accepted" }
                   : url.endsWith("/ingress") ? { kind: "accepted" }
-                    : url.endsWith("/interactions") ? { state: "stop_requested" }
+                    : url.endsWith("/interactions") ? { state: "accepted", resultReference: "slack-operation:1" }
                       : url.endsWith("/claim-uncertain")
                         ? { id: "manager-uncertain", ownerKind: "manager", conversationId: "D_MANAGER", threadTs: null, payloadJson: '{"text":"uncertain"}' }
                         : url.endsWith("/claim")
@@ -102,7 +102,10 @@ describe("HttpAdapterTransport", () => {
     await expect(transport.reportHello(ref, "lease", "A1", signal)).resolves.toBe("verified")
     await expect(transport.ingress(ref, envelope, "lease", "a", signal)).resolves.toEqual({ kind: "accepted" })
     await expect(transport.ingress(manager, envelope, "lease", "a", signal)).resolves.toEqual({ kind: "accepted" })
-    await expect(transport.interaction(ref, interaction, "lease", "a", signal)).resolves.toEqual({ state: "stop_requested" })
+    await expect(transport.interaction(ref, interaction, "lease", "a", signal)).resolves.toEqual({
+      state: "accepted",
+      resultReference: "slack-operation:1",
+    })
     await expect(transport.claimDelivery(ref, "lease", "a", signal)).resolves.toEqual({
       id: "delivery-1",
       ownerKind: "connection",

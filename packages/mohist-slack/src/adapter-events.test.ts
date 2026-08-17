@@ -47,6 +47,51 @@ describe('mohist-slack adapter', () => {
     expect(JSON.stringify(interaction)).not.toContain('xoxb-secret')
   })
 
+  it('rejects block_actions envelopes that are not normalized to one action', () => {
+    expect(() => normalizeSlackInteraction({
+      type: 'block_actions',
+      api_app_id: 'A1',
+      trigger_id: 'trigger-many',
+      team: { id: 'T1' },
+      user: { id: 'U1' },
+      container: { channel_id: 'C1', message_ts: '123.456' },
+      actions: [
+        { action_id: 'mohist_retry_turn', value: 'retry' },
+        { action_id: 'mohist_select_connection', value: 'selection' },
+      ],
+    })).toThrow('exactly one action')
+  })
+
+  it('forwards Retry and selection action values byte-for-byte without Slack payload fields', () => {
+    const actionValue = '{"action":"select_connection","nonce":"n-1","signature":"sig-1"}'
+    const interaction = normalizeSlackInteraction({
+      type: 'block_actions',
+      api_app_id: 'A1',
+      trigger_id: 'trigger-selection',
+      team: { id: 'T1' },
+      user: { id: 'U1' },
+      container: { channel_id: 'C1', message_ts: '123.456', thread_ts: '123.000' },
+      actions: [{ action_id: 'mohist_select_connection', value: actionValue }],
+      token: 'xoxb-secret',
+      raw_payload: 'must-not-cross-the-boundary',
+    })
+
+    expect(interaction).toEqual({
+      eventType: 'block_actions',
+      apiAppId: 'A1',
+      interactionId: 'trigger-selection',
+      teamId: 'T1',
+      conversationId: 'C1',
+      messageTs: '123.456',
+      threadTs: '123.000',
+      actorSlackUserId: 'U1',
+      actionId: 'mohist_select_connection',
+      actionValue,
+    })
+    expect(JSON.stringify(interaction)).not.toContain('xoxb-secret')
+    expect(JSON.stringify(interaction)).not.toContain('raw_payload')
+  })
+
   it('acknowledges an interaction before waiting for Server processing', async () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: 'p', connectionId: 'c' }]

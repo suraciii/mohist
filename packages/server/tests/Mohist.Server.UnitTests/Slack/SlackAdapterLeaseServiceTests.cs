@@ -211,6 +211,33 @@ public sealed class SlackAdapterLeaseServiceTests
         Assert.Contains(manager.TargetKey, provider.RejectedTargets);
     }
 
+    [Fact]
+    public async Task ResolveCurrentRuntimeLeaseContext_is_target_fenced_and_uses_the_current_same_adapter_lease()
+    {
+        var lease = NewService(out var provider, out var secrets, out _);
+        var targetA = new SlackLeaseTargetRef.Connection("project-1", "connection-a");
+        var targetB = new SlackLeaseTargetRef.Connection("project-1", "connection-b");
+        provider.Add(Target(targetA, "A-A", active: true, appToken: true, botToken: true, verified: true, secrets));
+        provider.Add(Target(targetB, "A-B", active: true, appToken: true, botToken: true, verified: true, secrets));
+        secrets.Put(targetA, SecretKind.AppToken, "xapp-a");
+        secrets.Put(targetA, SecretKind.BotToken, "xoxb-a");
+        secrets.Put(targetB, SecretKind.AppToken, "xapp-b");
+        secrets.Put(targetB, SecretKind.BotToken, "xoxb-b");
+
+        var targetBLease = await lease.AcquireRuntimeLeaseAsync("operator-1", targetB, "adapter-a");
+        Assert.NotNull(targetBLease);
+        var context = await lease.ResolveCurrentRuntimeLeaseContextAsync("operator-1", targetB, "adapter-a");
+
+        Assert.NotNull(context);
+        Assert.Equal(targetBLease!.LeaseId, context!.LeaseId);
+        Assert.Equal("xoxb-b", await context.ResolveVerifiedBotToken(targetB, CancellationToken.None));
+        Assert.Null(await context.ResolveVerifiedBotToken(targetA, CancellationToken.None));
+
+        var takeover = await lease.AcquireRuntimeLeaseAsync("operator-1", targetB, "adapter-b");
+        Assert.NotNull(takeover);
+        Assert.Null(await lease.ResolveCurrentRuntimeLeaseContextAsync("operator-1", targetB, "adapter-a"));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

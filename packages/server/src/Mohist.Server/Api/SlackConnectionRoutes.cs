@@ -786,6 +786,7 @@ public static partial class SlackConnectionRoutes
         string? threadTs,
         AgentLaunchResult launch,
         string actorSlackUserId,
+        bool originalDirectMessage,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(launch.SessionId) || string.IsNullOrWhiteSpace(launch.TurnId))
@@ -808,6 +809,7 @@ public static partial class SlackConnectionRoutes
             actorSlackUserId,
             source,
             threadTs,
+            originalDirectMessage,
             ct);
 
         var blocks = await BuildSessionStatusBlocksAsync(
@@ -1409,6 +1411,7 @@ public static partial class SlackConnectionRoutes
                     body.ThreadTs,
                     launch,
                     req.SenderSlackUserId,
+                    body.IsDirectMessage,
                     ct);
             }
             await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -1450,6 +1453,7 @@ public static partial class SlackConnectionRoutes
                 req.SenderSlackUserId,
                 req.Identity,
                 body.ThreadTs,
+                body.IsDirectMessage,
                 ct);
             var blocks = await BuildSessionStatusBlocksAsync(
                 req.Services,
@@ -2040,6 +2044,7 @@ public static partial class SlackConnectionRoutes
                 rootTs,
                 launch,
                 req.SenderSlackUserId,
+                body.IsDirectMessage,
                 ct);
         }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -2177,6 +2182,7 @@ public static partial class SlackConnectionRoutes
                 req.SenderSlackUserId,
                 req.Identity,
                 body.ThreadTs,
+                body.IsDirectMessage,
                 ct);
             var blocks = await BuildSessionStatusBlocksAsync(
                 req.Services,

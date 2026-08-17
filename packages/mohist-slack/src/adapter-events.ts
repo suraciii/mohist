@@ -60,7 +60,8 @@ export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelo
   const conversationId = stringValue(container?.channel_id)
   const messageTs = stringValue(container?.message_ts)
   const actions = Array.isArray(payload.actions) ? payload.actions : []
-  const action = actions.length > 0 && isRecord(actions[0]) ? actions[0] : undefined
+  if (actions.length !== 1) throw new Error('Slack interaction must contain exactly one action')
+  const action = isRecord(actions[0]) ? actions[0] : undefined
   const interactionId =
     stringValue(payload.trigger_id) ?? stringValue(action?.action_ts) ?? stringValue(payload, 'event_id')
   const actionId = stringValue(action?.action_id)

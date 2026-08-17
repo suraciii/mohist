@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 
@@ -30,9 +31,10 @@ public static class SlackInteractionRoutes
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
+            var receivingTarget = new SlackLeaseTargetRef.Connection(projectId, connectionId);
             if (!await leases.ValidateRuntimeLeaseAsync(
                     operatorId,
-                    new SlackLeaseTargetRef.Connection(projectId, connectionId),
+                    receivingTarget,
                     request?.LeaseId ?? string.Empty,
                     request?.AdapterId ?? string.Empty,
                     ct))
@@ -43,7 +45,8 @@ public static class SlackInteractionRoutes
             }
             if (request is null)
                 return ApiResults.BadRequest("Interaction is required.", "interaction_missing");
-            if (string.IsNullOrWhiteSpace(request.InteractionId)
+            if (!string.Equals(request.EventType, "block_actions", StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(request.InteractionId)
                 || string.IsNullOrWhiteSpace(request.TeamId)
                 || string.IsNullOrWhiteSpace(request.ConversationId)
                 || string.IsNullOrWhiteSpace(request.MessageTs)
@@ -58,26 +61,51 @@ public static class SlackInteractionRoutes
             if (connection.DesiredState == Agent.Domain.DesiredStateKind.Disabled)
                 return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
 
-            var result = await controls.HandleAsync(projectId, connection, request, ct);
-            if (!string.Equals(result.State, "replayed", StringComparison.Ordinal))
-            {
-                await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
-                    projectId,
-                    connection.Id,
-                    connection.WorkspaceTeamId,
-                    request.ConversationId,
-                    SlackOutboxKinds.UserAction,
-                    ActionDispatchRef(request.ActionValue),
-                    JsonSerializer.Serialize(new SlackDeliveryPayload(
-                        SlackDeliveryOperations.ChatUpdate,
-                        result.Text,
-                        ProviderMessageIdentity: new SlackProviderMessageIdentity(
-                            request.ConversationId,
-                            request.MessageTs),
-                        Blocks: result.Blocks)),
-                    request.ThreadTs), ct);
-            }
-            return ApiResults.Ok(new { state = result.State });
+            var interactionLeaseContext = new SlackInteractionLeaseContext(
+                new SlackLeaseContext(
+                    operatorId,
+                    request.LeaseId,
+                    request.AdapterId,
+                    (targetRef, tokenCt) => string.Equals(
+                            targetRef.TargetKey,
+                            receivingTarget.TargetKey,
+                            StringComparison.Ordinal)
+                        ? leases.ResolveRuntimeLeaseBotTokenAsync(
+                            operatorId,
+                            receivingTarget,
+                            request.LeaseId,
+                            request.AdapterId,
+                            tokenCt)
+                        : Task.FromResult<string?>(null)),
+                (targetRef, targetCt) => leases.ResolveCurrentRuntimeLeaseContextAsync(
+                    operatorId,
+                    targetRef,
+                    request.AdapterId,
+                    targetCt));
+
+            var result = await controls.HandleAsync(
+                projectId,
+                connection,
+                request,
+                interactionLeaseContext,
+                ct);
+            var resultReference = result.ResultReference ?? ActionDispatchRef(request.ActionValue);
+            await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
+                projectId,
+                connection.Id,
+                connection.WorkspaceTeamId,
+                request.ConversationId,
+                SlackOutboxKinds.UserAction,
+                resultReference,
+                JsonSerializer.Serialize(new SlackDeliveryPayload(
+                    SlackDeliveryOperations.ChatUpdate,
+                    result.Text,
+                    ProviderMessageIdentity: new SlackProviderMessageIdentity(
+                        request.ConversationId,
+                        request.MessageTs),
+                    Blocks: result.Blocks)),
+                request.ThreadTs), ct);
+            return ApiResults.Ok(new { state = result.State, resultReference });
         });
 
         return app;
@@ -89,7 +117,7 @@ public static class SlackInteractionRoutes
 
 public sealed class SlackInteractionRequest
 {
-    public string EventType { get; init; } = "block_actions";
+    public string EventType { get; init; } = string.Empty;
     public string InteractionId { get; init; } = string.Empty;
     public string TeamId { get; init; } = string.Empty;
     public string ConversationId { get; init; } = string.Empty;

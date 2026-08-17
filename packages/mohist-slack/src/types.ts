@@ -93,6 +93,7 @@ export type IngressResult =
 
 export interface InteractionResult {
   readonly state: string
+  readonly resultReference?: string
 }
 
 export interface Delivery {
