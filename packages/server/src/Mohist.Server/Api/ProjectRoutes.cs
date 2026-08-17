@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Mohist.Server.Issue.Grains.Coordinator;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Runner.Grains;
@@ -560,6 +561,30 @@ public static class ProjectRoutes
             }
         });
 
+        // Replace-on-set write surface for the Project default execution
+        // configuration. PUT and PATCH share one closed field set (runtime,
+        // model, variant); a success replaces any prior default and returns
+        // the updated Project (the read surface is GET /{projectRef}).
+        byRef.MapPut("/default-execution-config", async (
+            HttpContext context,
+            ProjectDefaultExecutionConfigBody? body,
+            IGrainFactory grains) =>
+        {
+            var rejection = await SetDefaultExecutionConfigAsync(context, body, grains);
+            return rejection ?? Results.Ok(
+                await grains.GetGrain<IProjectGrain>(context.GetResolvedProject().Id).GetAsync());
+        });
+
+        byRef.MapPatch("/default-execution-config", async (
+            HttpContext context,
+            ProjectDefaultExecutionConfigBody? body,
+            IGrainFactory grains) =>
+        {
+            var rejection = await SetDefaultExecutionConfigAsync(context, body, grains);
+            return rejection ?? Results.Ok(
+                await grains.GetGrain<IProjectGrain>(context.GetResolvedProject().Id).GetAsync());
+        });
+
         byRef.MapGet("/variables", async (HttpContext context, ProjectVariableStore variableStore) =>
         {
             var project = context.GetResolvedProject();
@@ -688,6 +713,39 @@ public static class ProjectRoutes
     private static bool IsSupplied(JsonElement value) =>
         value.ValueKind != JsonValueKind.Undefined;
 
+    private static async Task<IResult?> SetDefaultExecutionConfigAsync(
+        HttpContext context,
+        ProjectDefaultExecutionConfigBody? body,
+        IGrainFactory grains)
+    {
+        if (body is null)
+            return ApiResults.BadRequest("request body is required", "body_required");
+
+        if (body.UndeclaredFields.Count > 0)
+        {
+            return ApiResults.BadRequest(
+                $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; " +
+                "the default execution configuration accepts only runtime, model, and variant.",
+                "unsupported_field",
+                new { fields = body.UndeclaredFields.ToArray() });
+        }
+
+        try
+        {
+            var updated = await grains
+                .GetGrain<IProjectGrain>(context.GetResolvedProject().Id)
+                .SetDefaultExecutionConfigAsync(new ExecutionConfigHint(
+                    body.Runtime,
+                    body.Model,
+                    body.Variant));
+            return updated is null ? ApiResults.NotFound("Project not found") : null;
+        }
+        catch (ArgumentException ex)
+        {
+            return ApiResults.BadRequest(ex.Message, "invalid_default_execution_config");
+        }
+    }
+
     private static bool TryGetForbiddenLocalRepositoryField(
         JsonElement path,
         JsonElement remote,
@@ -780,6 +838,70 @@ public record UpdateRepositoryRequest(
 public sealed record SetDefaultWorkflowProfileRequest(string ProfileId);
 public sealed record ToggleWorkflowProfileRequest(string ProfileId);
 public sealed record WorkflowProfileAgentActionRequest(string? AgentAction);
+
+/// <summary>
+/// Raw-JSON presence-bound body for
+/// <c>PUT/PATCH /api/projects/{projectRef}/default-execution-config</c>.
+/// Records every top-level JSON property name so the route can reject
+/// undeclared fields before any state changes. The closed set is
+/// <c>runtime</c>, <c>model</c>, and optional <c>variant</c>; value rules
+/// (runtime ∈ {opencode, pi}, model in <c>provider/model</c> form) are owned
+/// by <c>IProjectGrain.SetDefaultExecutionConfigAsync</c>.
+/// </summary>
+public sealed record ProjectDefaultExecutionConfigBody(
+    string? Runtime,
+    string? Model,
+    string? Variant,
+    IReadOnlyList<string> UndeclaredFields)
+{
+    internal static readonly IReadOnlySet<string> AllowedFields = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "runtime",
+        "model",
+        "variant",
+    };
+
+    public static async ValueTask<ProjectDefaultExecutionConfigBody?> BindAsync(HttpContext context)
+    {
+        try
+        {
+            return await BindCoreAsync(context);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static async ValueTask<ProjectDefaultExecutionConfigBody> BindCoreAsync(HttpContext context)
+    {
+        var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
+        if (raw.ValueKind != JsonValueKind.Object)
+            throw new JsonException("the default execution configuration must be a JSON object");
+
+        var undeclared = new List<string>();
+        foreach (var property in raw.EnumerateObject())
+        {
+            if (!AllowedFields.Contains(property.Name))
+                undeclared.Add(property.Name);
+        }
+
+        return new ProjectDefaultExecutionConfigBody(
+            Runtime: ReadString(raw, "runtime"),
+            Model: ReadString(raw, "model"),
+            Variant: ReadString(raw, "variant"),
+            UndeclaredFields: undeclared);
+    }
+
+    private static string? ReadString(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        if (value.ValueKind != JsonValueKind.String)
+            throw new JsonException($"{name} must be a string");
+        return value.GetString();
+    }
+}
 
 public sealed record WorkflowProfileSaveRequest(
     string ProfileId,

@@ -103,6 +103,35 @@ public class AgentGrainSpecs
     }
 
     [Fact]
+    public async Task TaskFirstCreate_is_first_writer_wins_and_adopts_only_matching_fingerprint()
+    {
+        await using var database = CreateModelSchemaDatabase();
+        await using var context = database.CreateDbContext();
+        var factory = database.Factory;
+        var grain = CreateGrain(factory, "project_1", "agent_task_first");
+
+        var first = await grain.CreateAsync(NewCreate(
+            "project_1",
+            "first",
+            taskFirstIdempotencyKey: "same-key",
+            taskFirstRequestFingerprint: "first-fingerprint"));
+        var replay = await grain.CreateAsync(NewCreate(
+            "project_1",
+            "different-name",
+            taskFirstIdempotencyKey: "same-key",
+            taskFirstRequestFingerprint: "first-fingerprint"));
+
+        Assert.Equal(first.Id, replay.Id);
+        Assert.Equal(first.Name, replay.Name);
+        Assert.Equal(first.Instructions, replay.Instructions);
+        await Assert.ThrowsAsync<AgentTaskIdempotencyConflictException>(() => grain.CreateAsync(NewCreate(
+            "project_1",
+            "different-name",
+            taskFirstIdempotencyKey: "same-key",
+            taskFirstRequestFingerprint: "changed-fingerprint")));
+    }
+
+    [Fact]
     public async Task Create_establishes_agent_principal_that_outlives_archive()
     {
         await using var database = CreateModelSchemaDatabase();
@@ -273,14 +302,20 @@ public class AgentGrainSpecs
             new PrincipalStore(factory, timeProvider));
     }
 
-    private static AgentCreateData NewCreate(string projectId, string name) => new(
+    private static AgentCreateData NewCreate(
+        string projectId,
+        string name,
+        string? taskFirstIdempotencyKey = null,
+        string? taskFirstRequestFingerprint = null) => new(
         projectId,
         name,
         null,
         "instructions",
         JsonDocument.Parse("{\"type\":\"opencode\"}").RootElement.Clone(),
         [],
-        null);
+        null,
+        TaskFirstIdempotencyKey: taskFirstIdempotencyKey,
+        TaskFirstRequestFingerprint: taskFirstRequestFingerprint);
 
     private static readonly HashSet<string> UpdateFields =
     [

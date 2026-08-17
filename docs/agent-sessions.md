@@ -106,7 +106,7 @@ A Mohist Agent is a first-class resource in a Project. It stores:
 | Description | When should this Agent be selected? | Used only for discovery and selection; not included in execution Instructions |
 | Instructions | What role does the Agent have, how does it work, and when does it stop? | Fixed when each new AgentJob starts |
 | Runtime | Which execution backend runs the Agent? | Owned by the Agent; an ordinary client cannot override it for one request |
-| Model / Variant | Which model and reasoning level does the Agent use? | Owned by the Agent; uses the Runtime default when not configured |
+| Model / Variant | Which model and reasoning level does the Agent use? | Owned by the Agent; a missing Model or Variant falls back to the Project default execution configuration, then to the Runtime default |
 | Skills | Which capability descriptions load at startup? | Fixed with the AgentJob; an entry point cannot add or remove them for one request |
 | Max concurrent runs | How many executions can this Agent run at once, including launches and follow-ups? | Applies to subsequent scheduling immediately; lowering it does not stop running executions, and excess work queues |
 | State | Can the Agent accept new delegations? | An archived Agent rejects new delegations; existing Sessions remain readable and can continue |
@@ -116,6 +116,41 @@ Do not put them in Instructions or copy them to an Agent or Agent Connection.
 An Agent references only a Runtime, Model, and Variant. Readiness summarizes
 whether those references can currently execute and directs a missing credential
 to the single settings entry point.
+
+### Project Default Execution Configuration
+
+A Project can hold one default execution configuration: a Runtime, a Model,
+and an optional Variant. It states what tasks in the Project run on when an
+entry point does not supply an execution configuration and the Agent
+definition leaves a field unset. Each execution field resolves by one
+precedence rule:
+
+1. The caller-supplied value, when an entry point accepts one;
+2. The Agent definition's value;
+3. The Project default.
+
+A Runtime that resolves from no source defaults to `opencode` under the
+existing rule. An explicitly malformed value is never masked by a
+lower-precedence source: an unsupported Runtime or a Model outside the
+`provider/model` form remains a configuration gap and blocks launch even
+when a Project default is configured.
+
+Configure the default through the Project settings surface
+(`PUT /api/projects/{projectRef}/default-execution-config` with
+`runtime`, `model`, and optional `variant`; the Project read reports
+`defaultExecutionConfig`, null when unset). Setting a new default replaces
+the previous one; an invalid default is rejected and leaves the previous
+default untouched. The default resolves at launch, so each AgentJob stores
+the configuration it launched with and later default changes never change
+an in-flight or completed execution.
+
+With a default configured, an Agent without a Model (or with a Variant but
+no Model) is no longer structurally Needs setup: Readiness reports Ready or
+Unknown, and a launch dispatches with the model the default resolved. Without
+a default, the gap remains Needs setup with its actionable repair. Removing
+or changing the default re-introduces or re-resolves the gap accordingly,
+but a Readiness conclusion confirmed by a completed execution is not flipped
+by a default change alone.
 
 A delegation can include context references such as an Issue, Epic, or
 Repository, but context is not Agent configuration. An ordinary client can
@@ -159,6 +194,13 @@ to change a Ready Agent to Needs setup. Work can be accepted and queued. The
 Web UI, CLI, and Agent Connections present the unified Mohist conclusion and do
 not maintain separate Runtime judgment rules.
 
+Structural gaps resolve Model and Variant by Agent definition, then Project
+default. When a configured Project default resolves a missing Model or a
+Variant set without a Model, those gaps do not appear and the conclusion
+follows the existing history rules (Ready or Unknown). Definition errors — an
+unsupported Runtime or a Model outside the `provider/model` form — remain gaps
+regardless of any Project default.
+
 Availability states whether a new execution can start now. After a Runner or
 capacity recovers, a queued AgentJob can briefly show "waiting for scheduling"
 until its next scheduling attempt starts. This is not a new configuration gap
@@ -201,10 +243,21 @@ Web UI invoke the same product capabilities.
 
 ## Launch Entry Points
 
+A task-first launch is available when the caller has a task but does not yet
+need to configure an Agent. `POST /api/projects/{projectRef}/agent-tasks`
+accepts exactly these JSON fields: `prompt`, `attachments`, `context`, `name`,
+`runtime`, `model`, and `variant`. `context` uses the same `issueNumber`,
+`epicNumber`, `repository`, `workspace`, `workspacePath`, and `targetId`
+references as a definition-first launch. The request must include an
+`Idempotency-Key` header. The Server derives missing definition fields,
+materializes the resolved execution configuration, creates the Agent, and then
+uses the canonical AgentJob and AgentSession launch pipeline.
+
 | Entry point | New delegation | Mohist behavior |
 |---|---|---|
-| Web UI | Select an Agent and enter a task with optional context | Creates an AgentJob, AgentSession, first Input, and first Turn, then opens the session page |
-| CLI | `mo agent launch <agent>` | Creates the same AgentJob, AgentSession, first Input, and first Turn and returns their IDs |
+| Web UI | Start with a task and optional context | Creates a derived Agent, AgentJob, AgentSession, first Input, and first Turn, then opens the session page |
+| CLI | `mo agent start --prompt <task>` | Creates the derived Agent and returns the same AgentJob, AgentSession, first Input, and first Turn identities |
+| Web UI / CLI | Select or name an existing Agent | Uses the unchanged definition-first launch path |
 | Agent Connection | The first task in a Slack direct message, an explicit New task, or a new root mention in a channel | Delivers the message to the connected Agent without changing Agent configuration |
 | Event routing | A matching event and response prompt | Creates an AgentJob and AgentSession for the event |
 | Issue comment mention | Comment content after `@<agent-name>` | Uses the comment as the task and associates its Issue context |
@@ -215,6 +268,15 @@ supervise and advance this Issue." For continuous attention, the Agent adds the
 Issue to its watch list with `mo issue watch add`. Every launch entry point
 creates an AgentJob and fixes the Agent Instructions and configuration for that
 work. Later Agent edits do not change work that has started.
+
+Task-first replay uses the same key space as definition-first launches. A retry
+with the same key and caller-visible inputs returns the original Agent, Job,
+Session, Input, Turn, workspace, attachment result, and canonical URLs. A
+changed prompt, context, attachment list, name, runtime, model, or variant
+returns `409 launch_idempotency_conflict`; a still-converging launch returns
+`503 launch_setup_pending` and the same key. A recorded rejection is replayed
+as the same rejection. Callers must retry a pending launch with the original
+key, not generate a new task.
 
 A Mohist Agent's central role is proxy. It occupies a production-line position
 that the owner could occupy and acts through the same commands and Approval

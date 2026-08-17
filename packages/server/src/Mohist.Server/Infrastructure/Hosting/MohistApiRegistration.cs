@@ -43,6 +43,7 @@ public static class MohistApiRegistration
         app.MapEpicRoutes();
         app.MapInboxRoutes();
         app.MapAgentDefinitionRoutes();
+        app.MapAgentTaskRoutes();
         app.MapAgentSubscriptionRoutes();
         app.MapAgentRoutes();
         app.MapAgentJobRoutes();

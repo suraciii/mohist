@@ -49,6 +49,20 @@ public class AgentGrain : Grain, IAgentGrain
         if (!string.Equals(projectId, data.ProjectId, StringComparison.Ordinal))
             throw new InvalidOperationException("Agent project does not match grain key");
 
+        if (_agent is not null)
+        {
+            if (string.IsNullOrWhiteSpace(data.TaskFirstIdempotencyKey)
+                || !string.Equals(_agent.TaskFirstIdempotencyKey, data.TaskFirstIdempotencyKey, StringComparison.Ordinal))
+            {
+                throw new AgentAlreadyExistsException(projectId, agentId);
+            }
+
+            if (!string.Equals(_agent.TaskFirstRequestFingerprint, data.TaskFirstRequestFingerprint, StringComparison.Ordinal))
+                throw new AgentTaskIdempotencyConflictException(projectId, agentId);
+
+            return AgentQuerier.ToInfo(_agent);
+        }
+
         await EnsureNameAvailableAsync(projectId, data.Name, exceptAgentId: null);
 
         var now = _timeProvider.GetUtcNow();
@@ -69,6 +83,8 @@ public class AgentGrain : Grain, IAgentGrain
             Status = AgentStatus.Active,
             CreatedAt = now,
             UpdatedAt = now,
+            TaskFirstIdempotencyKey = data.TaskFirstIdempotencyKey,
+            TaskFirstRequestFingerprint = data.TaskFirstRequestFingerprint,
         };
 
         await _agentStore.SaveAsync(CurrentKey(), _agent);
@@ -78,6 +94,20 @@ public class AgentGrain : Grain, IAgentGrain
         // Idempotent, so a retried create cannot duplicate the row.
         await _principals.EnsureAgentPrincipalAsync(agentId, data.Name);
         return AgentQuerier.ToInfo(_agent);
+    }
+
+    public Task<AgentInfo?> AdoptTaskFirstAsync(string idempotencyKey, string requestFingerprint)
+    {
+        if (_agent is null)
+            return Task.FromResult<AgentInfo?>(null);
+
+        if (!string.Equals(_agent.TaskFirstIdempotencyKey, idempotencyKey, StringComparison.Ordinal)
+            || !string.Equals(_agent.TaskFirstRequestFingerprint, requestFingerprint, StringComparison.Ordinal))
+        {
+            throw new AgentTaskIdempotencyConflictException(_agent.ProjectId, _agent.Id);
+        }
+
+        return Task.FromResult<AgentInfo?>(AgentQuerier.ToInfo(_agent));
     }
 
     public Task<AgentInfo?> ShowAsync() =>

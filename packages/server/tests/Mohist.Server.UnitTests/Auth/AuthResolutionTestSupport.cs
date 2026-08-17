@@ -145,7 +145,8 @@ internal static class AuthResolutionTestSupport
                     "CreatedAt" TEXT NOT NULL,
                     "UpdatedAt" TEXT NOT NULL,
                     "RepositoryRevision" INTEGER NOT NULL,
-                    "LastRepositoryCommandJson" TEXT NULL
+                    "LastRepositoryCommandJson" TEXT NULL,
+                    "DefaultExecutionConfigJson" TEXT NULL
                 );
                 CREATE TABLE "ProjectWorkflowProfiles" (
                     "ProjectId" TEXT NOT NULL CONSTRAINT "PK_ProjectWorkflowProfiles" PRIMARY KEY,

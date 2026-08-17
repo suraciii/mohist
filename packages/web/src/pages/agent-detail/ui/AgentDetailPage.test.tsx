@@ -6,6 +6,7 @@ import { ProjectProvider } from '../../../entities/project'
 import type {
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
+  AgentTaskLaunchInput,
   AgentInfo,
   AgentSessionListItemDto,
   AgentStatusDetailResponse,
@@ -99,12 +100,30 @@ const composerDataHook: AgentSessionComposerDataHook = () => {
       sessionUrl: '/Test/sessions/session-from-detail',
     }),
   })
+  const startTaskMutation = useMutation<
+    AgentSessionLaunchResponse,
+    Error,
+    AgentTaskLaunchInput & { idempotencyKey?: string }
+  >({
+    mutationFn: async () => ({
+      sessionId: 'session-from-task',
+      agentId: 'agent-task',
+      agentName: 'Task Agent',
+      workspaceId: 'web-current',
+      targetId: 'agent-task',
+      origin: 'web',
+      status: 'queued',
+      transcriptUrl: '',
+      sessionUrl: '/Test/sessions/session-from-task',
+    }),
+  })
   return {
     agents: state.agent ? [state.agent] : [],
     agentsLoading: false,
     availability: [],
     availabilityLoading: false,
     launchMutation,
+    startTaskMutation,
   }
 }
 
