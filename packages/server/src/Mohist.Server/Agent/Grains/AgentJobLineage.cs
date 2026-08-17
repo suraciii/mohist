@@ -122,6 +122,10 @@ public static class AgentJobLineage
             artifactCount = payload.ArtifactCount,
             exitCode = payload.ExitCode,
             assistantText = ExtractAssistantText(payload.Output),
+            sessionId = payload.SessionId,
+            inputId = payload.InputId,
+            turnId = payload.TurnId,
+            originalDirectMessage = payload.OriginalDirectMessage,
         }, JSON.Options);
         return new CloudEvent(
             id: payload.EventId,

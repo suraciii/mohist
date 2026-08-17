@@ -427,6 +427,13 @@ public sealed record AgentSessionRecoveryOutcome(
     bool WasCompacted);
 
 [GenerateSerializer]
+public enum AgentSessionFollowupAssignmentMode
+{
+    Normal,
+    ForceNewTurnForRetry,
+}
+
+[GenerateSerializer]
 public sealed record AgentSessionFollowupLease(
     [property: Id(0)] string OperationId,
     [property: Id(1)] string RuntimeSessionId,
@@ -575,7 +582,8 @@ public sealed record AgentSessionInputProvenance(
     [property: Id(3)] string? ThreadId,
     [property: Id(4)] string MemberId,
     [property: Id(5)] string MessageId,
-    [property: Id(6)] string? ConnectionId = null);
+    [property: Id(6)] string? ConnectionId = null,
+    [property: Id(7)] bool OriginalDirectMessage = false);
 
 [GenerateSerializer]
 public sealed record AgentSessionInputRecord(

@@ -48,6 +48,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command);
     Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync();
+    Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchAsync(string operationId);
     Task ReleaseFollowupDispatchAsync(string operationId);
     Task MarkFollowupTurnExecutingAsync(string operationId);
     Task MarkFollowupTurnTerminalAsync(
@@ -127,6 +128,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync();
 
     Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
+    Task<AgentSessionRetrySource?> ResolveRetrySourceAsync(string inputId, string turnId);
 
     /// <summary>
     /// Create a scheduled input (or replay an existing schedule for the
@@ -359,7 +361,9 @@ public sealed record AcceptFollowupCommand(
     /// free after <see cref="PreMintedTurnId"/>).
     /// </summary>
     [property: Id(6)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
-    [property: Id(7)] AgentSessionInputProvenance? Provenance = null);
+    [property: Id(7)] AgentSessionInputProvenance? Provenance = null,
+    [property: Id(8)] AgentSessionFollowupAssignmentMode AssignmentMode = AgentSessionFollowupAssignmentMode.Normal,
+    [property: Id(9)] string? PreMintedOperationId = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(
@@ -489,6 +493,12 @@ public sealed record AgentInitialLaunchSnapshot(
     [property: Id(0)] string SessionId,
     [property: Id(1)] AgentSessionInputRecord? Input,
     [property: Id(2)] AgentTurnRecord? Turn);
+
+[GenerateSerializer]
+public sealed record AgentSessionRetrySource(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] AgentSessionInputRecord Input,
+    [property: Id(2)] AgentTurnRecord Turn);
 
 /// <summary>
 /// Command body for <see cref="IAgentSessionGrain.RecordFollowupTurnAsync"/>.

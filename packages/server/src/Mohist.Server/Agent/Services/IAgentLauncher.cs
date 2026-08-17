@@ -125,6 +125,17 @@ public interface IAgentLauncher
         string? preMintedTurnId = null,
         CancellationToken ct = default);
 
+    Task<AgentLaunchResult> LaunchConnectionRetryAsync(
+        AgentInfo agent,
+        string prompt,
+        ConnectionLaunchOrigin origin,
+        string retryDispatchKey,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
+        CancellationToken ct = default);
+
     Task<AgentLaunchResult?> ResumeIdempotentAsync(
         string projectId,
         string idempotencyKey,
@@ -245,4 +256,5 @@ public sealed record ConnectionLaunchOrigin(
     [property: Orleans.Id(2)] string SlackUserId,
     [property: Orleans.Id(3)] string ConversationId,
     [property: Orleans.Id(4)] string MessageTs,
-    [property: Orleans.Id(5)] string? ThreadTs = null);
+    [property: Orleans.Id(5)] string? ThreadTs = null,
+    [property: Orleans.Id(6)] bool OriginalDirectMessage = false);

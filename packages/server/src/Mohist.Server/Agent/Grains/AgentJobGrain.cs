@@ -1754,7 +1754,11 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             artifactUploadIds?.Length ?? 0,
             exitCode,
             _timeProvider.GetUtcNow(),
-            output);
+            output,
+            State.Input?.AgentSessionId,
+            State.Input?.InitialInputId,
+            State.Input?.InitialTurnId,
+            State.ManualPlan?.ConnectionOrigin?.OriginalDirectMessage ?? false);
     }
 
     private async Task EmitTerminalDeliveryEventAsync(PendingTerminalDeliveryEvent pending)

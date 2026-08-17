@@ -2462,6 +2462,49 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("SlackAmbiguousPrompts", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackRetryOperationRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+                    b.Property<string>("ActionKey").IsRequired().HasMaxLength(128).HasColumnType("TEXT");
+                    b.Property<string>("ActorSlackUserId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("AttemptKind").IsRequired().HasMaxLength(32).HasColumnType("TEXT");
+                    b.Property<string>("ConnectionId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("ConversationId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
+                    b.Property<string>("DispatchRef").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("FailedInputId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("FailedTurnId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("FollowupOperationId").HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("MessageTs").IsRequired().HasMaxLength(64).HasColumnType("TEXT");
+                    b.Property<bool>("OriginalDirectMessage").HasColumnType("INTEGER");
+                    b.Property<string>("Outcome").HasMaxLength(32).HasColumnType("TEXT");
+                    b.Property<string>("PreMintedInputId").HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("PreMintedSessionId").HasMaxLength(512).HasColumnType("TEXT");
+                    b.Property<string>("PreMintedTurnId").HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("ProjectId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<DateTimeOffset?>("RecoveryLeaseExpiresAt").HasColumnType("TEXT");
+                    b.Property<string>("RecoveryLeaseId").HasMaxLength(128).HasColumnType("TEXT");
+                    b.Property<string>("ResultInputId").HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("ResultReason").HasMaxLength(1024).HasColumnType("TEXT");
+                    b.Property<string>("ResultSessionId").HasMaxLength(512).HasColumnType("TEXT");
+                    b.Property<string>("ResultTurnId").HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("RetryDispatchKey").IsRequired().HasMaxLength(512).HasColumnType("TEXT");
+                    b.Property<string>("SessionId").IsRequired().HasMaxLength(512).HasColumnType("TEXT");
+                    b.Property<string>("State").IsRequired().HasMaxLength(32).HasColumnType("TEXT");
+                    b.Property<string>("ThreadTs").HasMaxLength(64).HasColumnType("TEXT");
+                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
+                    b.Property<string>("WorkspaceTeamId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.HasKey("Id");
+                    b.HasIndex("ProjectId", "ActionKey").IsUnique().HasDatabaseName("UX_SlackRetryOperations_ProjectId_ActionKey");
+                    b.HasIndex("State", "RecoveryLeaseExpiresAt").HasDatabaseName("IX_SlackRetryOperations_State_RecoveryLeaseExpiresAt");
+                    b.ToTable("SlackRetryOperations", (string)null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SlackRetryOperations_State", "\"State\" IN ('dispatch-pending', 'completed')");
+                        });
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAgentAppBindingObligationRow", b =>
                 {
                     b.Property<string>("Id")

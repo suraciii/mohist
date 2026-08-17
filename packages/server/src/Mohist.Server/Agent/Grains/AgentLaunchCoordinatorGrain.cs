@@ -552,7 +552,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                     ThreadId: provenanceOrigin.ThreadTs,
                     MemberId: provenanceOrigin.SlackUserId,
                     MessageId: provenanceOrigin.MessageTs,
-                    ConnectionId: provenanceOrigin.ConnectionId)
+                    ConnectionId: provenanceOrigin.ConnectionId,
+                    OriginalDirectMessage: provenanceOrigin.OriginalDirectMessage)
                 : null,
             StartupContext: plan.StartupContext,
             Definition: new AgentExecutionDefinition(

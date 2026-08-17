@@ -117,6 +117,7 @@ public partial class MohistDbContext : DbContext
 
     public DbSet<SlackThreadLaunchReservationRow> SlackThreadLaunchReservations { get; set; } = null!;
     public DbSet<SlackAmbiguousPromptRow> SlackAmbiguousPrompts { get; set; } = null!;
+    public DbSet<SlackRetryOperationRow> SlackRetryOperations { get; set; } = null!;
     public DbSet<SlackAdapterLeaseRow> SlackAdapterLeases { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
@@ -2031,6 +2032,45 @@ public partial class MohistDbContext : DbContext
                 .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");
             entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
+        });
+
+        modelBuilder.Entity<SlackRetryOperationRow>(entity =>
+        {
+            entity.ToTable("SlackRetryOperations", table =>
+                table.HasCheckConstraint(
+                    "CK_SlackRetryOperations_State",
+                    "\"State\" IN ('dispatch-pending', 'completed')"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(80).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ActionKey).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.FailedInputId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.FailedTurnId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.DispatchRef).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.MessageTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64);
+            entity.Property(e => e.ActorSlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.RetryDispatchKey).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.AttemptKind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.PreMintedSessionId).HasMaxLength(512);
+            entity.Property(e => e.PreMintedInputId).HasMaxLength(256);
+            entity.Property(e => e.PreMintedTurnId).HasMaxLength(256);
+            entity.Property(e => e.FollowupOperationId).HasMaxLength(256);
+            entity.Property(e => e.State).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Outcome).HasMaxLength(32);
+            entity.Property(e => e.ResultReason).HasMaxLength(1024);
+            entity.Property(e => e.RecoveryLeaseId).HasMaxLength(128);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.ActionKey })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackRetryOperations_ProjectId_ActionKey");
+            entity.HasIndex(e => new { e.State, e.RecoveryLeaseExpiresAt })
+                .HasDatabaseName("IX_SlackRetryOperations_State_RecoveryLeaseExpiresAt");
         });
 
         modelBuilder.Entity<SlackConnectionAllowedMemberRow>(entity =>

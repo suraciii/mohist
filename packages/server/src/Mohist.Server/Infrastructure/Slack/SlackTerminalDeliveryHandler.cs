@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Services;
@@ -75,19 +77,39 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         var progressDispatchRef = delivery.JobKey.StartsWith("agent-session-followup:", StringComparison.Ordinal)
             ? $"{delivery.JobKey}:progress"
             : null;
-        await projection.FinalizeLivenessAsync(
-            projectId,
-            delivery.ConnectionId,
-            source,
-            delivery.ThreadTs ?? delivery.MessageTs,
-            delivery.Status,
-            progressDispatchRef,
-            ct);
+        var retryAction = await CreateRetryActionAsync(scope.ServiceProvider, projectId, delivery, source, ct);
+        if (string.Equals(delivery.Status, "failed", StringComparison.Ordinal)
+            && retryAction is not null)
+        {
+            await projection.EnqueueTerminalAsync(
+                projectId,
+                delivery.ConnectionId,
+                source,
+                delivery.ThreadTs ?? delivery.MessageTs,
+                delivery.Status,
+                Render(delivery),
+                terminalDispatchRef: $"{delivery.JobKey}:terminal",
+                progressDispatchRef: progressDispatchRef,
+                blocks: retryAction?.Blocks,
+                ct: ct);
+        }
+        else
+        {
+            await projection.FinalizeLivenessAsync(
+                projectId,
+                delivery.ConnectionId,
+                source,
+                delivery.ThreadTs ?? delivery.MessageTs,
+                delivery.Status,
+                progressDispatchRef,
+                ct);
+        }
 
         _log.LogInformation(
-            "Finalized Slack liveness for AgentJob {JobKey} on connection {ConnectionId} (reply body is owned by the Agent reply action)",
+            "Finalized Slack liveness for AgentJob {JobKey} on connection {ConnectionId} (retry={Retry})",
             delivery.JobKey,
-            delivery.ConnectionId);
+            delivery.ConnectionId,
+            retryAction is not null);
     }
 
     public static string Render(SlackTerminalDelivery delivery)
@@ -140,6 +162,41 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         }
     }
 
+    private static async Task<SlackRetryAction?> CreateRetryActionAsync(
+        IServiceProvider services,
+        string projectId,
+        SlackTerminalDelivery delivery,
+        SlackMessageIdentity source,
+        CancellationToken ct)
+    {
+        if (!string.Equals(delivery.Status, "failed", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(delivery.SessionId)
+            || string.IsNullOrWhiteSpace(delivery.InputId)
+            || string.IsNullOrWhiteSpace(delivery.TurnId)
+            || string.IsNullOrWhiteSpace(delivery.SlackUserId)
+            || delivery.OriginalDirectMessage is null)
+            return null;
+
+        var connection = await services.GetRequiredService<AgentConnectionStore>()
+            .GetAsync(projectId, delivery.ConnectionId, ct);
+        if (connection is null || connection.DesiredState == Agent.Domain.DesiredStateKind.Disabled)
+            return null;
+
+        var progressDispatchRef = delivery.JobKey.StartsWith("agent-session-followup:", StringComparison.Ordinal)
+            ? $"{delivery.JobKey}:progress"
+            : SlackStatusProjection.DispatchRef(source, "progress");
+        return await services.GetRequiredService<SlackTurnControlService>().CreateRetryActionAsync(
+            connection,
+            delivery.SessionId,
+            delivery.InputId,
+            delivery.TurnId,
+            progressDispatchRef,
+            delivery.SlackUserId,
+            source,
+            delivery.ThreadTs,
+            ct);
+    }
+
     private static string BuildEvidence(SlackTerminalDelivery delivery)
     {
         var facts = new List<string>();
@@ -182,7 +239,11 @@ public sealed record SlackTerminalDelivery(
     string? ThreadTs = null,
     string? MessageTs = null,
     string? SlackUserId = null,
-    string? AssistantText = null)
+    string? AssistantText = null,
+    string? SessionId = null,
+    string? InputId = null,
+    string? TurnId = null,
+    bool? OriginalDirectMessage = null)
 {
     public void Validate()
     {

@@ -410,7 +410,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             skipLaunchability: true);
     }
 
-    public async Task<AgentLaunchResult> LaunchConnectionAsync(
+    public Task<AgentLaunchResult> LaunchConnectionAsync(
         AgentInfo agent,
         string prompt,
         ConnectionLaunchOrigin origin,
@@ -421,7 +421,61 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
+        CancellationToken ct = default) =>
+        LaunchConnectionWithKeyAsync(
+            agent,
+            prompt,
+            origin,
+            retryDispatchKey: null,
+            workspaceName,
+            startupContext,
+            attachments,
+            attachmentIds,
+            preMintedSessionId,
+            preMintedInputId,
+            preMintedTurnId,
+            ct);
+
+    public Task<AgentLaunchResult> LaunchConnectionRetryAsync(
+        AgentInfo agent,
+        string prompt,
+        ConnectionLaunchOrigin origin,
+        string retryDispatchKey,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
         CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(retryDispatchKey);
+        return LaunchConnectionWithKeyAsync(
+            agent,
+            prompt,
+            origin,
+            retryDispatchKey,
+            workspaceName: null,
+            startupContext: null,
+            attachments,
+            attachmentIds: attachments?.Select(attachment => attachment.Id).ToArray(),
+            preMintedSessionId,
+            preMintedInputId,
+            preMintedTurnId,
+            ct);
+    }
+
+    private async Task<AgentLaunchResult> LaunchConnectionWithKeyAsync(
+        AgentInfo agent,
+        string prompt,
+        ConnectionLaunchOrigin origin,
+        string? retryDispatchKey,
+        string? workspaceName,
+        AgentStartupContext? startupContext,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments,
+        IReadOnlyList<string>? attachmentIds,
+        string? preMintedSessionId,
+        string? preMintedInputId,
+        string? preMintedTurnId,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(origin);
@@ -430,7 +484,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         await EnsureLaunchableAsync(agent, ct);
 
         var context = new AgentLaunchContext(agent.ProjectId);
-        var key = $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
+        var key = retryDispatchKey
+            ?? $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
         var definition = ResolveExecutionDefinition(agent);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()

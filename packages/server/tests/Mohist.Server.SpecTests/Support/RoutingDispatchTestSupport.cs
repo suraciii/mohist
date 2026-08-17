@@ -511,6 +511,18 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the connection launch path.");
 
+    public Task<AgentLaunchResult> LaunchConnectionRetryAsync(
+        AgentInfo agent,
+        string prompt,
+        ConnectionLaunchOrigin origin,
+        string retryDispatchKey,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("RecordingAgentLauncher does not exercise the connection retry path.");
+
     public Task<AgentLaunchResult?> ResumeIdempotentAsync(
         string projectId,
         string idempotencyKey,

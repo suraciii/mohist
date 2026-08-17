@@ -952,7 +952,8 @@ public static partial class SlackConnectionRoutes
             ThreadId: threadTs,
             MemberId: body.SenderSlackUserId!,
             MessageId: body.MessageTs,
-            ConnectionId: connectionId);
+            ConnectionId: connectionId,
+            OriginalDirectMessage: body.IsDirectMessage);
 
     /// <summary>
     /// Sender kind surfaced by the adapter on the normalized envelope.
@@ -1370,7 +1371,8 @@ public static partial class SlackConnectionRoutes
                         agent!,
                         launchPrompt,
                         new ConnectionLaunchOrigin(
-                            connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
+                            connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs,
+                            OriginalDirectMessage: body.IsDirectMessage),
                         workspaceName: workspaceName,
                         startupContext: null,
                         attachments: attachmentBinding.AcceptedDescriptors,
@@ -1990,7 +1992,8 @@ public static partial class SlackConnectionRoutes
                     agent,
                     prompt,
                     new ConnectionLaunchOrigin(
-                        connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
+                        connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs,
+                        OriginalDirectMessage: body.IsDirectMessage),
                     workspaceName: workspaceName,
                     startupContext: startupContext,
                     attachments: attachmentBinding.AcceptedDescriptors,

@@ -24,16 +24,26 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
 
     public async Task DispatchNextAsync(string projectId, string sessionId, CancellationToken ct)
     {
+        await DispatchCoreAsync(projectId, sessionId, operationId: null, ct);
+    }
+
+    public Task<bool> DispatchAsync(string projectId, string sessionId, string operationId, CancellationToken ct) =>
+        DispatchCoreAsync(projectId, sessionId, operationId, ct);
+
+    private async Task<bool> DispatchCoreAsync(string projectId, string sessionId, string? operationId, CancellationToken ct)
+    {
         var target = await _sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
         if (target is null || string.IsNullOrWhiteSpace(target.RunnerId)
             || string.IsNullOrWhiteSpace(target.Runtime)
             || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
-            return;
+            return false;
 
         var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        var dispatch = operationId is null
+            ? await grain.BeginNextFollowupDispatchAsync()
+            : await grain.BeginFollowupDispatchAsync(operationId);
         if (dispatch is null)
-            return;
+            return false;
 
         FollowupDeliveryResult result;
         try
@@ -62,7 +72,11 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
             throw;
         }
         if (!result.Accepted)
+        {
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            return false;
+        }
+        return true;
     }
 
     private static AgentSlackExecutionContext? SlackExecutionContextFor(

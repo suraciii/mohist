@@ -650,7 +650,10 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var result = session.AcceptFollowup(
             inputId: inputId,
             turnId: turnId,
-            operationId: Guid.NewGuid().ToString("N"),
+            operationId: string.IsNullOrWhiteSpace(command.PreMintedOperationId)
+                ? Guid.NewGuid().ToString("N")
+                : command.PreMintedOperationId!,
+            forceNewTurn: command.AssignmentMode == AgentSessionFollowupAssignmentMode.ForceNewTurnForRetry,
             text: command.Text ?? string.Empty,
             source: command.Source,
             idempotencyKey: key,
@@ -1033,23 +1036,51 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var session = await GetRequiredAsync();
         var turns = session.Status.Turns ?? [];
         if (turns.Any(turn => turn.Status == AgentTurnStatus.Executing)) return null;
-        var leases = GetPendingFollowups(session).ToList();
         var turn = turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued);
-        if (turn is null) return null;
-        var index = leases.FindIndex(lease => string.Equals(lease.TurnId, turn.Id, StringComparison.Ordinal));
-        if (index < 0 || leases[index].Dispatching) return null;
+        if (turn is null)
+            return null;
+        var lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
+            string.Equals(candidate.TurnId, turn.Id, StringComparison.Ordinal));
+        return lease is null ? null : await BeginFollowupDispatchCoreAsync(session, lease.OperationId);
+    }
+
+    public async Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchAsync(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+            return null;
+        var session = await GetRequiredAsync();
+        return await BeginFollowupDispatchCoreAsync(session, operationId);
+    }
+
+    private async Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchCoreAsync(
+        AgentSession session,
+        string operationId)
+    {
+        var turns = session.Status.Turns ?? [];
+        if (turns.Any(turn => turn.Status == AgentTurnStatus.Executing))
+            return null;
+        var leases = GetPendingFollowups(session).ToList();
+        var index = leases.FindIndex(lease => string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0 || leases[index].Dispatching)
+            return null;
 
         var lease = leases[index];
+        var turn = turns.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, lease.TurnId, StringComparison.Ordinal)
+            && string.IsNullOrEmpty(candidate.JobId)
+            && candidate.Status == AgentTurnStatus.Queued);
+        if (turn is null)
+            return null;
         if (!await AcquireFollowupDispatchPermitAsync(session, lease))
             return null;
 
         leases = GetPendingFollowups(session).ToList();
         index = leases.FindIndex(candidate =>
-            string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal));
+            string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
         if (index < 0)
             return null;
         lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
-            string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal)) ?? lease;
+            string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal)) ?? lease;
 
         var inputs = (session.Status.Inputs ?? []).ToDictionary(input => input.Id, StringComparer.Ordinal);
         var texts = turn.InputIds.Select(id => inputs[id].Text).ToArray();
@@ -4038,6 +4069,22 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             : Array.Empty<AgentTurnRecord>();
     }
 
+    public async Task<AgentSessionRetrySource?> ResolveRetrySourceAsync(string inputId, string turnId)
+    {
+        if (string.IsNullOrWhiteSpace(inputId) || string.IsNullOrWhiteSpace(turnId))
+            return null;
+
+        var session = await GetRequiredAsync();
+        var input = (session.Status.Inputs ?? []).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, inputId, StringComparison.Ordinal));
+        var turn = (session.Status.Turns ?? []).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, turnId, StringComparison.Ordinal)
+            && candidate.InputIds.Contains(inputId, StringComparer.Ordinal));
+        return input is null || turn is null
+            ? null
+            : new AgentSessionRetrySource(SessionId, input, CopyTurnForBoundary(turn));
+    }
+
     private static AgentTurnRecord CopyTurnForBoundary(AgentTurnRecord turn) =>
         turn with { InputIds = turn.InputIds.ToArray() };
 
@@ -4098,11 +4145,10 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var threadTs = metadata.Label(AgentSessionQueryMetadataKeys.SlackThreadTs);
         var title = metadata.Label(AgentSessionQueryMetadataKeys.Title);
         var projectId = metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
-        var status = turn.Status switch
-        {
-            AgentTurnStatus.Cancelled => "failed",
-            _ => turn.Status.ToString().ToLowerInvariant(),
-        };
+        var input = (session.Status.Inputs ?? [])
+            .FirstOrDefault(candidate => turn.InputIds.Contains(candidate.Id, StringComparer.Ordinal));
+        var provenance = input?.Provenance;
+        var status = turn.Status.ToString().ToLowerInvariant();
 
         var delivery = new
         {
@@ -4113,14 +4159,18 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             slackUserId = (string?)metadata.Label(AgentSessionQueryMetadataKeys.SlackUserId),
             conversationId,
             threadTs,
-            messageTs = (string?)null,
+            messageTs = provenance?.MessageId,
             status,
             message = turn.Result?.Message,
-            failureReason = (string?)null,
-            failureCategory = (string?)null,
+            failureReason = turn.Result?.FailureReason,
+            failureCategory = turn.Result?.FailureCategory,
             artifactCount = 0,
-            exitCode = (int?)null,
+            exitCode = turn.Result?.ExitCode,
             assistantText = AgentJobLineage.ExtractAssistantText(turn.Result?.Output),
+            sessionId = session.Id,
+            inputId = input?.Id,
+            turnId = turn.Id,
+            originalDirectMessage = provenance?.OriginalDirectMessage ?? false,
         };
         var data = JsonSerializer.SerializeToElement(delivery, CloudEvent.JsonOptions);
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);

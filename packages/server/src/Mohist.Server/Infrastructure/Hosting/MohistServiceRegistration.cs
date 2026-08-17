@@ -266,6 +266,7 @@ public static class MohistServiceRegistration
             sp.GetRequiredService<SlackConnectionHealthBackpressurer>());
         services.AddScoped<SlackOutboxDispatcherService>();
         services.AddHostedService<SlackOutboxDispatcherActivationService>();
+        services.AddHostedService<SlackActionRecoveryActivationService>();
         services.AddHostedService<SlackAgentAppBindingObligationWorker>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();

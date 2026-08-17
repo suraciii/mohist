@@ -210,7 +210,11 @@ public sealed record PendingTerminalDeliveryEvent(
     [property: Id(7)] int ArtifactCount,
     [property: Id(8)] int? ExitCode,
     [property: Id(9)] DateTimeOffset RecordedAt,
-    [property: Id(10)] string? Output = null);
+    [property: Id(10)] string? Output = null,
+    [property: Id(11)] string? SessionId = null,
+    [property: Id(12)] string? InputId = null,
+    [property: Id(13)] string? TurnId = null,
+    [property: Id(14)] bool OriginalDirectMessage = false);
 
 [GenerateSerializer]
 public sealed record PendingSubagentTerminalEvent(
