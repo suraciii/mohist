@@ -33,3 +33,4 @@
 
 - The first canonical `npm run verify` stopped in `npm run format:check` before build or tests. Biome reported formatting drift in `agent-job-turn.ts`, `followup-handler.ts`, and `agent-job-reply-guard.spec.ts`; the worktree remained clean and the canonical diagnostics were written under `/tmp`.
 - Ran the repository formatter, which normalized the three task files. Focused format, Runner source/test typechecks, test-boundary validation, and the reply-guard/AgentJob/Pi/follow-up suites now pass (49 tests).
+- The next canonical run passed docs and formatting but stopped at the file-size ratchet: `packages/runner/src/runtime/pi/runtime.ts` had grown from 994 to 1106 lines, above the 1000-line limit. Extracted the Pi idle/streaming follow-up completion machinery into `pi/followup.ts`; `runtime.ts` is now 961 lines, and the file-size check plus focused Pi/AgentJob/follow-up checks pass (41 tests).
