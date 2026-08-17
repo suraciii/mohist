@@ -957,3 +957,6 @@ Channel decision (grounded in live source):
 - Focused verification passed `RunnerUpdateInterruptSpecs` 4/4 and
   `AgentJobGrainSpecs` 23/23. The SpecTests project builds with zero warnings
   and errors. `review.md` remains untouched.
+- Full `npm run verify` passed: build 0 warnings/errors, Workflow 178, CLI
+  1,856, Server Unit 2,674, Server Spec 3,950, Arch 68, Web 4,727, Runner
+  1,662, and Slack 70.
