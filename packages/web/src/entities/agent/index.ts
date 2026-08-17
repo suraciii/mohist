@@ -48,9 +48,10 @@ export {
 export type {
   AgentCreateRequest,
   AgentInfo,
-  AgentReadinessGap,
-  AgentReadinessResult,
-  AgentReadinessSetup,
+  AgentExecutabilityFixEntryPoint,
+  AgentExecutabilityGap,
+  AgentExecutabilityResult,
+  AgentExecutabilityState,
   AgentStatusDetailResponse,
   AgentAvailabilityResponse,
   AgentAvailabilitySummaryEntry,

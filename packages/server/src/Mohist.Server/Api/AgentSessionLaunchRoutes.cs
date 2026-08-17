@@ -295,9 +295,9 @@ public static class AgentSessionLaunchRoutes
             {
                 return LaunchRejected(ex);
             }
-            catch (AgentReadinessException ex)
+            catch (AgentExecutabilityException ex)
             {
-                return ReadinessRejected(ex);
+                return ExecutabilityRejected(ex);
             }
 
             var hasAttachments = body.Attachments is { Count: > 0 };
@@ -327,9 +327,9 @@ public static class AgentSessionLaunchRoutes
             {
                 await readiness.EnsureLaunchableAsync(project.Id, agent, ct);
             }
-            catch (AgentReadinessException ex)
+            catch (AgentExecutabilityException ex)
             {
-                return ReadinessRejected(ex);
+                return ExecutabilityRejected(ex);
             }
 
             var preflightFingerprint = context.Request.Headers["X-Mohist-Agent-Preflight"].FirstOrDefault();
@@ -462,9 +462,9 @@ public static class AgentSessionLaunchRoutes
             {
                 return LaunchRejected(ex);
             }
-            catch (AgentReadinessException ex)
+            catch (AgentExecutabilityException ex)
             {
-                return ReadinessRejected(ex);
+                return ExecutabilityRejected(ex);
             }
             finally
             {
@@ -565,11 +565,11 @@ public static class AgentSessionLaunchRoutes
             "launch_setup_pending",
             new { idempotencyKey = exception.IdempotencyKey });
 
-    internal static IResult ReadinessRejected(AgentReadinessException exception) =>
+    internal static IResult ExecutabilityRejected(AgentExecutabilityException exception) =>
         ApiResults.Fail(
             exception.Message,
             StatusCodes.Status409Conflict,
-            "agent_needs_setup",
+            exception.ErrorCode,
             exception.Result);
 
     internal static IResult LaunchRejected(AgentSpawnPreplanRejectedException exception) =>

@@ -127,13 +127,14 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(49)] string? Origin = null,
     [property: Id(50)] string? TargetId = null,
+    [property: Id(51)] string? ReasoningEffort = null,
     /// <summary>
     /// The complete attachment verdict set returned by the first request.
     /// Persisting both accepted and rejected files makes a replay project
     /// the original response instead of re-validating mutable attachment
     /// state.
     /// </summary>
-    [property: Id(51)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    [property: Id(52)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
     /// <summary>
     /// True only for a task-first launch whose Agent definition was created
     /// by the route before the canonical launch plan. The coordinator uses
@@ -141,7 +142,7 @@ public sealed record AgentLaunchCoordinatorPlan(
     /// reaches a terminal rejection. Missing on older plans, and therefore
     /// false for every definition-first launch.
     /// </summary>
-    [property: Id(52)] bool DefinitionCreatedByLaunch = false);
+    [property: Id(53)] bool DefinitionCreatedByLaunch = false);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The

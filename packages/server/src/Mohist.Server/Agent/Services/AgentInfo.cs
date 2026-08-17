@@ -33,10 +33,14 @@ public sealed record AgentInfo(
     [property: Id(10)]
     string UpdatedAt,
     [property: Id(11)]
-    AgentReadinessResult? Readiness = null,
+    AgentExecutabilityResult? Executability = null,
     [property: Id(12)]
     IReadOnlyList<string>? AllowedSubagentAgentIds = null,
     [property: Id(13)]
     string? Avatar = null,
     [property: Id(14)]
+    string? Purpose = null,
+    [property: Id(15)]
+    IReadOnlyList<string>? Permissions = null,
+    [property: Id(16)]
     AgentEffectiveExecutionConfig? EffectiveExecutionConfig = null);

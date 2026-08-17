@@ -23,7 +23,13 @@ export const state = {
   launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
   taskCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
   preflightCalls: [] as Array<{ body: AgentTaskLaunchInput; idempotencyKey?: string }>,
+  sessionPreflightCalls: [] as Array<{
+    agentRef: string
+    body: AgentTaskLaunchInput
+    idempotencyKey?: string
+  }>,
   enablePreflight: false,
+  enableSessionPreflight: false,
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
@@ -56,9 +62,10 @@ const dataHook: AgentSessionComposerDataHook = () => {
       context?: AgentSessionLaunchContext | null
       attachments?: string[]
       idempotencyKey?: string
+      preflightFingerprint?: string
     }
   >({
-    mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey }) => {
+    mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey, preflightFingerprint: _ignored }) => {
       state.launchCalls.push({ agentRef, body: { prompt, context, attachments }, idempotencyKey })
       if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
@@ -72,6 +79,37 @@ const dataHook: AgentSessionComposerDataHook = () => {
         sessionUrl: '/Test/sessions/sess-123',
         ...state.launchResponse,
       } as AgentSessionLaunchResponse
+    },
+  })
+  const preflightSessionMutation = useMutation<
+    AgentTaskPreflightResponse,
+    Error,
+    {
+      agentRef: string
+      prompt: string
+      context?: AgentSessionLaunchContext | null
+      attachments?: string[]
+      idempotencyKey: string
+    }
+  >({
+    mutationFn: async ({ agentRef, idempotencyKey, ...input }) => {
+      state.sessionPreflightCalls.push({
+        agentRef,
+        body: input,
+        idempotencyKey,
+      })
+      return {
+        scopeFingerprint: 'scope-test',
+        agentName: `Agent ${agentRef}`,
+        execution: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
+        repository: 'org/repo',
+        workspace: 'review-workspace',
+        workspaceRepositories: ['org/repo'],
+        issueNumber: 42,
+        epicNumber: null,
+        permissionScope: 'project-workspace-write',
+        expectedImpact: 'Starts one AgentJob and AgentSession with write access to the selected workspace.',
+      }
     },
   })
   const preflightTaskMutation = useMutation<
@@ -122,6 +160,7 @@ const dataHook: AgentSessionComposerDataHook = () => {
     availability: state.availabilityData,
     availabilityLoading: false,
     launchMutation,
+    preflightSessionMutation: state.enableSessionPreflight ? preflightSessionMutation : undefined,
     preflightTaskMutation: state.enablePreflight ? preflightTaskMutation : undefined,
     startTaskMutation,
   }
@@ -136,10 +175,12 @@ export function makeAgent(id: string, overrides: Partial<AgentInfo> = {}): Agent
     id,
     projectId: 'proj-1',
     name: `Agent ${id}`,
+    purpose: null,
     description: '',
     instructions: '',
     agentConfig: null,
     skills: [],
+    permissions: [],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-01-01T00:00:00.000Z',

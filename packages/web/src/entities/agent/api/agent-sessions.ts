@@ -19,7 +19,6 @@ export interface AgentSessionListContextRefsDto {
   issueNumber?: number | null
   epicNumber?: number | null
   repository?: string | null
-  workspacePath?: string | null
   workspaceName?: string | null
 }
 
@@ -157,6 +156,7 @@ export interface AgentLaunchObservationDto {
     exitCode?: number | null
   } | null
   observationUrl: string
+  recoveryDeadlineAt?: string | null
 }
 
 export type AgentLaunchObservationMeaning = 'observe' | 'result' | 'reconcile'

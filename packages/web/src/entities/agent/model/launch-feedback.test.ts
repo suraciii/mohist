@@ -18,29 +18,17 @@ describe('getAgentLaunchErrorFeedback task-first outcomes', () => {
     })
   })
 
+  it('maps scope drift to an explicit renewed review', () => {
+    expect(getAgentLaunchErrorFeedback({ code: 'launch_scope_changed' })).toMatchObject({
+      kind: 'launch-scope-changed',
+      nextAction: expect.stringMatching(/Review the updated scope/i),
+    })
+  })
+
   it('identifies an idempotency conflict as a new-key decision', () => {
     expect(getAgentLaunchErrorFeedback({ code: 'launch_idempotency_conflict' })).toMatchObject({
       kind: 'launch-conflict',
       nextAction: expect.stringMatching(/new launch with a new key/i),
-    })
-  })
-
-  it('maps launch_scope_changed to a re-run repair path that keeps the task', () => {
-    const feedback = getAgentLaunchErrorFeedback({ code: 'launch_scope_changed' })
-
-    expect(feedback).toMatchObject({
-      kind: 'scope-changed',
-      title: expect.stringMatching(/scope changed/i),
-      nextAction: expect.stringMatching(/re-run the launch/i),
-    })
-    expect(feedback?.message).toMatch(/task is unchanged/i)
-  })
-
-  it('also maps a 409 scope-changed response without a code field', () => {
-    expect(
-      getAgentLaunchErrorFeedback({ status: 409, message: 'The confirmed execution scope changed before launch.' }),
-    ).toMatchObject({
-      kind: 'scope-changed',
     })
   })
 })

@@ -16,7 +16,7 @@ internal sealed record ResourceDescriptor(
 internal static class ResourceOutputCatalog
 {
     private static readonly IReadOnlyList<string> AgentFields =
-        ["id", "projectId", "name", "avatar", "description", "instructions", "agentConfig", "effectiveExecutionConfig", "skills", "allowedSubagentAgentIds", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "readiness"];
+        ["id", "projectId", "name", "avatar", "purpose", "description", "instructions", "agentConfig", "effectiveExecutionConfig", "skills", "permissions", "allowedSubagentAgentIds", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "executability"];
 
     public static ResourceDescriptor For(string? tableShape)
     {
@@ -63,7 +63,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.EpicList => ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "progress", "pauseReason"],
             MohistCliApi.TableShape.EpicShow => ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "linkedIssues", "progress", "nextIssueNumber", "nextIssueReason", "pauseReason"],
             MohistCliApi.TableShape.EpicLink or MohistCliApi.TableShape.EpicUnlink => ["identifier", "status", "issueNumber", "owningEpicNumber", "owningEpicTitle"],
-            MohistCliApi.TableShape.IssueList => ["number", "title", "status", "health", "projectId", "projectName", "labels", "priority", "risk", "createdAt", "updatedAt", "archivedAt", "completedAt", "approvalState", "blockedReason", "workflowRunId", "workflowStage", "workflowStatus", "workflowStageProgress", "workflowProfileId", "prerequisiteNumbers", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName", "repository", "repositoryProblem", "epic", "parentIssueRef", "childIssuesSummary", "children", "watching", "muted"],
+            MohistCliApi.TableShape.IssueList => ["number", "title", "status", "health", "projectId", "projectName", "labels", "priority", "risk", "createdAt", "updatedAt", "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage", "workflowStatus", "workflowStageProgress", "workflowProfileId", "prerequisiteNumbers", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName", "repository", "repositoryProblem", "epic", "parentIssueRef", "childIssuesSummary", "children", "watching", "muted"],
             MohistCliApi.TableShape.Issue => ["number", "title", "body", "status", "health", "projectId", "projectName", "labels", "priority", "risk", "model", "modelVariant", "agentConfig", "stageModels", "stageModelVariants", "createdAt", "updatedAt", "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage", "workflowStatus", "workflowStageProgress", "workflowProfileId", "workflowProfileMode", "prerequisiteNumbers", "comments", "attachments", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName", "repository", "repositoryProblem", "epic", "parentIssueRef", "childIssuesSummary", "children", "feedback", "watching", "muted"],
             MohistCliApi.TableShape.RepoList => ["name", "gitUrl", "baseBranch", "isDefault", "resolvedBaseBranch"],
             MohistCliApi.TableShape.FeedbackList or MohistCliApi.TableShape.FeedbackShow =>
@@ -82,8 +82,9 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.AgentSessionTranscript => ["turns", "partCount", "lastActivityAt", "activity", "status"],
             MohistCliApi.TableShape.AgentSessionLaunch => ["jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "workspaceId", "targetId", "origin", "status", "attachments", "rejectedAttachments", "sessionUrl", "transcriptUrl", "jobUrl", "observationUrl"],
             MohistCliApi.TableShape.AgentSessionSpawn => ["jobId", "sessionId", "turnId", "parentSessionId", "edgeId"],
-            MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt"],
-            MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode", "executionDefinition"],
+            MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt", "failureReason", "recoveryDeadlineAt"],
+            MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode", "executionDefinition", "recoveryDeadlineAt"],
+            MohistCliApi.TableShape.AgentLaunchObservation => ["jobId", "jobStatus", "jobMessage", "jobOutput", "jobArtifactUploadIds", "jobFailureReason", "jobExitCode", "sessionId", "sessionActivity", "sessionRuntime", "transcriptUrl", "inputId", "inputAcceptance", "turnId", "turnStatus", "turnResult", "observationUrl", "recoveryDeadlineAt"],
             MohistCliApi.TableShape.AgentSessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
             MohistCliApi.TableShape.AgentSessionStop => ["state", "interruptUnconfirmed"],
             MohistCliApi.TableShape.SessionList =>
@@ -119,7 +120,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.WorkflowProfileDetail => ["projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource", "agentAction", "agentRuntime", "stages"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "projectId", "name", "position", "match", "agentId", "responsePrompt", "continue", "status", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.AgentSubscription => ["id", "projectId", "agentId", "name", "match", "responsePrompt", "continue", "position", "status", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.AgentSubscriptionList => ["subscriptions", "state", "agentStatus", "readiness", "connection"],
+            MohistCliApi.TableShape.AgentSubscriptionList => ["subscriptions", "state", "agentStatus", "executability", "connection"],
             MohistCliApi.TableShape.WebhookSubscription or MohistCliApi.TableShape.WebhookSubscriptionList =>
                 ["id", "projectId", "name", "match", "targetUrl", "status", "eventSelectionMode", "eventTypes", "authType", "hasSecret", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.WebhookDeliveryFailureList =>

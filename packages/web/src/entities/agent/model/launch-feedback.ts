@@ -1,14 +1,15 @@
-import type { AgentReadinessResult } from '../api/client'
+import type { AgentExecutabilityResult } from '../api/client'
 
 export type AgentLaunchFeedbackKind =
   | 'back-pressure'
   | 'runner-offline'
-  | 'needs-setup'
+  | 'not-configured'
+  | 'not-executable'
   | 'execution-unavailable'
   | 'launch-conflict'
   | 'launch-pending'
+  | 'launch-scope-changed'
   | 'execution-config-unresolvable'
-  | 'scope-changed'
 
 export interface AgentLaunchFeedback {
   kind: AgentLaunchFeedbackKind
@@ -61,7 +62,7 @@ type LaunchErrorLike = {
 
 export function getAgentLaunchErrorFeedback(
   error: unknown,
-  readiness?: AgentReadinessResult | null,
+  executability?: AgentExecutabilityResult | null,
 ): AgentLaunchFeedback | null {
   const candidate = error as LaunchErrorLike | null
   const code = typeof candidate?.code === 'string' ? candidate.code.toLowerCase() : ''
@@ -87,12 +88,12 @@ export function getAgentLaunchErrorFeedback(
     }
   }
 
-  if (code === 'launch_scope_changed' || (status === 409 && message.includes('scope changed'))) {
+  if (code === 'launch_scope_changed') {
     return {
-      kind: 'scope-changed',
-      title: 'Execution scope changed',
-      message: 'The confirmed execution scope changed before launch; the task is unchanged.',
-      nextAction: 'Re-run the launch to review the updated scope, then confirm it, or adjust the task.',
+      kind: 'launch-scope-changed',
+      title: 'Launch scope changed',
+      message: 'The execution scope changed after it was reviewed and was not started.',
+      nextAction: 'Review the updated scope, then confirm the launch again.',
     }
   }
 
@@ -105,12 +106,21 @@ export function getAgentLaunchErrorFeedback(
     }
   }
 
-  if (code === 'agent_needs_setup' || readiness?.conclusion === 'Needs setup') {
+  if (code === 'agent_not_configured' || executability?.state === 'not-configured') {
     return {
-      kind: 'needs-setup',
-      title: 'Configuration needs setup',
+      kind: 'not-configured',
+      title: 'Agent is not configured',
       message: "The server has not accepted this Agent's execution definition.",
       nextAction: 'Fix the listed gaps in Agent settings, then retry the launch.',
+    }
+  }
+
+  if (code === 'agent_not_executable' || executability?.state === 'not-executable') {
+    return {
+      kind: 'not-executable',
+      title: 'Agent is not executable',
+      message: 'The current execution configuration was rejected by the runtime.',
+      nextAction: 'Update the Agent execution settings, then retry the launch.',
     }
   }
 

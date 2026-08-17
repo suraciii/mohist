@@ -52,7 +52,7 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal("balanced", agentData.GetProperty("effectiveExecutionConfig").GetProperty("variant").GetString());
         Assert.False(string.IsNullOrWhiteSpace(agentData.GetProperty("instructions").GetString()));
         Assert.False(string.IsNullOrWhiteSpace(agentData.GetProperty("description").GetString()));
-        Assert.NotEqual("Needs setup", agentData.GetProperty("readiness").GetProperty("conclusion").GetString());
+        Assert.NotEqual("not-configured", agentData.GetProperty("executability").GetProperty("state").GetString());
 
         using var replay = await PostTaskAsync(projectId, body, key);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);

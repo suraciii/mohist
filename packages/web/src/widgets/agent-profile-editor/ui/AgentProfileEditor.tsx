@@ -60,11 +60,14 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
   const initialModelVariant = useMemo(() => readAgentDefinitionModelAndVariant(agent), [agent])
 
   const [name, setName] = useState(agent?.name ?? '')
+  const [purpose, setPurpose] = useState(agent?.purpose ?? '')
   const [description, setDescription] = useState(agent?.description ?? '')
   const [instructions, setInstructions] = useState(agent?.instructions ?? '')
   const [skillsText, setSkillsText] = useState(agent?.skills?.join(', ') ?? '')
+  const [permissionsText, setPermissionsText] = useState(agent?.permissions?.join(', ') ?? '')
   const [model, setModel] = useState<string | null>(initialModelVariant.model)
   const [variant, setVariant] = useState<string | null>(initialModelVariant.variant)
+  const [reasoningEffort, setReasoningEffort] = useState<string | null>(initialModelVariant.reasoningEffort)
   const [runtime, setRuntime] = useState<AgentRuntime>(initialModelVariant.runtime)
   const [allowedSubagentAgentIds, setAllowedSubagentAgentIds] = useState<string[]>(agent?.allowedSubagentAgentIds ?? [])
   const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState(
@@ -77,6 +80,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
 
   const { data: availableModels } = useAvailableModelIds(runtime)
   const modelVariantsMap = useModelVariants(runtime)
+  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? modelVariantsMap : undefined
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
@@ -87,15 +91,24 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
     return errs
   }
 
+  function commaSeparatedValues(value: string): string[] {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  }
+
   async function handleSave() {
     const validation = validate()
     setErrors(validation)
     if (Object.keys(validation).length > 0) return
 
-    const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime)
+    const agentConfig = writeAgentModelAndVariant(agent?.agentConfig ?? null, model, variant, runtime, reasoningEffort)
     const maxConcurrentRuns = maxConcurrentRunsText.trim() ? Number(maxConcurrentRunsText) : null
     if (maxConcurrentRuns !== null && (!Number.isInteger(maxConcurrentRuns) || maxConcurrentRuns <= 0)) {
-      setErrors({ api: 'Max concurrent runs must be a positive whole number or empty.' })
+      setErrors({
+        api: 'Max concurrent runs must be a positive whole number or empty.',
+      })
       return
     }
     const collaborators = allowedSubagentAgentIds.length > 0 ? allowedSubagentAgentIds : null
@@ -103,14 +116,11 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
         name: name.trim() || null,
+        purpose: purpose.trim() || null,
         description: description.trim() || null,
         instructions: instructions.trim() || null,
-        skills: skillsText.trim()
-          ? skillsText
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : null,
+        skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
+        permissions: commaSeparatedValues(permissionsText),
         agentConfig,
         allowedSubagentAgentIds: collaborators,
         maxConcurrentRuns,
@@ -130,14 +140,11 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
     } else {
       const payload: AgentCreateRequest = {
         name: name.trim(),
+        purpose: purpose.trim() || null,
         description: description.trim() || null,
         instructions: instructions.trim(),
-        skills: skillsText.trim()
-          ? skillsText
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : null,
+        skills: skillsText.trim() ? commaSeparatedValues(skillsText) : null,
+        permissions: commaSeparatedValues(permissionsText),
         agentConfig,
         allowedSubagentAgentIds: collaborators,
         maxConcurrentRuns,
@@ -180,7 +187,10 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
           if (!open) handleClose()
         }}
       >
-        <DialogContent className="sm:max-w-lg" data-testid="agent-profile-editor">
+        <DialogContent
+          className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-lg"
+          data-testid="agent-profile-editor"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BotIcon className="size-4" />
@@ -188,8 +198,8 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
             </DialogTitle>
             <DialogDescription>
               {isEditing
-                ? 'Changes to Instructions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch.'
-                : 'Create a new agent profile with instructions, model, and skills.'}
+                ? 'Changes to Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch.'
+                : 'Create a task profile with purpose, instructions, permissions, and execution settings.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -202,25 +212,6 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 {errors.api}
               </div>
             )}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-runtime">Execution backend</Label>
-              <select
-                id="agent-runtime"
-                aria-label="Execution backend"
-                data-testid="agent-runtime"
-                value={runtime}
-                onChange={(event) => {
-                  setRuntime(event.target.value as AgentRuntime)
-                  setModel(null)
-                  setVariant(null)
-                }}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-              >
-                <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
-                <option value={AGENT_RUNTIME_PI}>Pi</option>
-              </select>
-            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="agent-name">Name *</Label>
@@ -237,6 +228,18 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                   {errors.name}
                 </p>
               )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-purpose">Purpose</Label>
+              <Textarea
+                id="agent-purpose"
+                value={purpose}
+                onChange={(event) => setPurpose(event.target.value)}
+                placeholder="Review pull requests before release"
+                rows={2}
+                data-testid="editor-purpose"
+              />
             </div>
 
             <div className="space-y-1.5">
@@ -270,6 +273,38 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
             </div>
 
             <div className="space-y-1.5">
+              <Label htmlFor="agent-permissions">Declared permissions</Label>
+              <Input
+                id="agent-permissions"
+                value={permissionsText}
+                onChange={(event) => setPermissionsText(event.target.value)}
+                placeholder="repo:read, issue:write"
+                data-testid="editor-permissions"
+              />
+              <p className="text-[10px] text-muted-foreground">Comma-separated permission terms.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-runtime">Execution backend</Label>
+              <select
+                id="agent-runtime"
+                aria-label="Execution backend"
+                data-testid="agent-runtime"
+                value={runtime}
+                onChange={(event) => {
+                  setRuntime(event.target.value as AgentRuntime)
+                  setModel(null)
+                  setVariant(null)
+                  setReasoningEffort(null)
+                }}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+              >
+                <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+                <option value={AGENT_RUNTIME_PI}>Pi</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
               <Label>Model</Label>
               <ModelSelect
                 id="agent-model"
@@ -281,6 +316,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 onClear={() => {
                   setModel(null)
                   setVariant(null)
+                  setReasoningEffort(null)
                 }}
                 allowClear={!!model}
                 modelVariants={modelVariantsMap}
@@ -288,6 +324,14 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 onChangeModelVariant={(m, v) => {
                   setModel(m)
                   setVariant(v)
+                  setReasoningEffort(null)
+                }}
+                modelReasoningEfforts={reasoningEffortsMap}
+                valueReasoningEffort={reasoningEffort}
+                onChangeModelReasoningEffort={(m, effort) => {
+                  setModel(m)
+                  setReasoningEffort(effort)
+                  setVariant(null)
                 }}
               />
             </div>

@@ -269,9 +269,9 @@ public static class AgentTaskRoutes
             {
                 return AgentSessionLaunchRoutes.LaunchRejected(ex);
             }
-            catch (AgentReadinessException ex)
+            catch (AgentExecutabilityException ex)
             {
-                return AgentSessionLaunchRoutes.ReadinessRejected(ex);
+                return AgentSessionLaunchRoutes.ExecutabilityRejected(ex);
             }
 
             if (!string.IsNullOrWhiteSpace(preflightFingerprint))
@@ -581,9 +581,9 @@ public static class AgentTaskRoutes
             {
                 return AgentSessionLaunchRoutes.LaunchRejected(ex);
             }
-            catch (AgentReadinessException ex)
+            catch (AgentExecutabilityException ex)
             {
-                return AgentSessionLaunchRoutes.ReadinessRejected(ex);
+                return AgentSessionLaunchRoutes.ExecutabilityRejected(ex);
             }
             finally
             {

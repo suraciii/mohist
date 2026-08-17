@@ -26,7 +26,10 @@ useMswServer(
   http.get(AGENTS_PATH, () => HttpResponse.json({ success: true, data: [] })),
   http.get(AVAILABILITY_PATH, () => HttpResponse.json({ success: true, data: [] })),
   http.get(STATUS_PATH, () =>
-    HttpResponse.json({ success: true, data: { running: false, capacity: { active: 0, max: 8 } } }),
+    HttpResponse.json({
+      success: true,
+      data: { running: false, capacity: { active: 0, max: 8 } },
+    }),
   ),
 )
 
@@ -74,10 +77,12 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
     id: 'agent-1',
     projectId: 'proj-1',
     name: 'Test Agent',
+    purpose: 'A test purpose',
     description: 'A test agent',
     instructions: 'Do stuff',
     agentConfig: null,
     skills: [],
+    permissions: [],
     maxConcurrentRuns: null,
     status: 'active',
     createdAt: '2026-06-01T00:00:00.000Z',
@@ -152,7 +157,11 @@ describe('AgentListPage', () => {
         makeAgent({
           id: 'defaulted-pi',
           name: 'Defaulted Pi',
-          effectiveExecutionConfig: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
+          effectiveExecutionConfig: {
+            runtime: 'pi',
+            model: 'provider/model',
+            variant: 'balanced',
+          },
         }),
       ])
       renderPage()
@@ -162,41 +171,62 @@ describe('AgentListPage', () => {
       expect(row).toHaveTextContent('balanced')
     })
 
-    it('renders purpose and the server Readiness conclusion distinctly', async () => {
+    it('renders purpose and the server Executability state distinctly', async () => {
       mockAgents([
         makeAgent({
           id: 'ready',
           name: 'Ready Agent',
-          description: 'Reviews pull requests',
-          readiness: { conclusion: 'Ready', gaps: [], setup: null },
+          purpose: 'Reviews pull requests',
+          executability: {
+            state: 'executable',
+            gaps: [],
+            pendingLaunchNote: null,
+          },
         }),
         makeAgent({
           id: 'setup',
           name: 'Setup Agent',
-          description: 'Needs configuration',
-          readiness: { conclusion: 'Needs setup', gaps: [], setup: null },
+          purpose: 'Needs configuration',
+          executability: {
+            state: 'not-configured',
+            gaps: [],
+            pendingLaunchNote: null,
+          },
         }),
-        makeAgent({ id: 'unknown', name: 'Unknown Agent', description: '', readiness: null }),
+        makeAgent({
+          id: 'unknown',
+          name: 'Unknown Agent',
+          purpose: null,
+          executability: null,
+        }),
       ])
       renderPage()
 
       const readyRow = await screen.findByTestId('agent-row-ready')
       expect(within(readyRow).getByTestId('agent-purpose-ready')).toHaveTextContent('Reviews pull requests')
-      expect(within(readyRow).getByTestId('agent-readiness-ready')).toHaveTextContent('Readiness: Ready')
-      expect(within(screen.getByTestId('agent-row-setup')).getByTestId('agent-readiness-setup')).toHaveTextContent(
-        'Readiness: Needs setup',
+      expect(within(readyRow).getByTestId('agent-executability-ready')).toHaveTextContent('Executability: executable')
+      expect(within(screen.getByTestId('agent-row-setup')).getByTestId('agent-executability-setup')).toHaveTextContent(
+        'Executability: not-configured',
       )
-      expect(within(screen.getByTestId('agent-row-unknown')).getByTestId('agent-readiness-unknown')).toHaveTextContent(
-        'Readiness: Unknown',
-      )
+      expect(
+        within(screen.getByTestId('agent-row-unknown')).getByTestId('agent-executability-unknown'),
+      ).toHaveTextContent('Executability: unknown')
       expect(within(screen.getByTestId('agent-row-unknown')).getByTestId('agent-purpose-unknown')).toHaveTextContent(
         'No purpose set',
       )
     })
 
-    it('renders server Availability and active/queued workload without turning waiting into setup', async () => {
+    it('renders server Availability and active/queued workload without changing executability', async () => {
       mockAgents([
-        makeAgent({ id: 'offline', name: 'Offline Ready', readiness: { conclusion: 'Ready', gaps: [], setup: null } }),
+        makeAgent({
+          id: 'offline',
+          name: 'Offline Ready',
+          executability: {
+            state: 'executable',
+            gaps: [],
+            pendingLaunchNote: null,
+          },
+        }),
       ])
       mockAvailability([
         makeAvailability({
@@ -210,7 +240,7 @@ describe('AgentListPage', () => {
       renderPage()
 
       const row = await screen.findByTestId('agent-row-offline')
-      expect(within(row).getByTestId('agent-readiness-offline')).toHaveTextContent('Readiness: Ready')
+      expect(within(row).getByTestId('agent-executability-offline')).toHaveTextContent('Executability: executable')
       expect(within(row).getByTestId('agent-availability-offline')).toHaveTextContent('Availability: Runner offline')
       expect(within(row).getByTestId('agent-availability-guidance-offline')).toHaveAttribute(
         'data-feedback-kind',
@@ -218,7 +248,7 @@ describe('AgentListPage', () => {
       )
       expect(within(row).getByTestId('agent-availability-guidance-offline')).toHaveTextContent(/connect a runner/i)
       expect(within(row).getByTestId('agent-workload-offline')).toHaveTextContent('Active: 2, Queued: 3')
-      expect(within(row).getByTestId('agent-readiness-offline')).not.toHaveTextContent('Needs setup')
+      expect(within(row).getByTestId('agent-executability-offline')).not.toHaveTextContent('not-configured')
     })
 
     it.each([
@@ -226,7 +256,16 @@ describe('AgentListPage', () => {
       ['concurrency-limit', 'Wait for an active run to finish'],
       ['dispatch-pending', 'Wait for dispatch to complete'],
     ])('gives an actionable next step for %s Availability', async (waitingReason, nextAction) => {
-      mockAgents([makeAgent({ id: 'waiting', readiness: { conclusion: 'Ready', gaps: [], setup: null } })])
+      mockAgents([
+        makeAgent({
+          id: 'waiting',
+          executability: {
+            state: 'executable',
+            gaps: [],
+            pendingLaunchNote: null,
+          },
+        }),
+      ])
       mockAvailability([
         makeAvailability({
           agentId: 'waiting',
@@ -253,7 +292,11 @@ describe('AgentListPage', () => {
             success: true,
             data: [
               makeAvailability({ agentId: 'a1' }),
-              makeAvailability({ agentId: 'a2', activeRuns: 1, queuedCount: 2 }),
+              makeAvailability({
+                agentId: 'a2',
+                activeRuns: 1,
+                queuedCount: 2,
+              }),
             ],
           })
         }),
@@ -268,14 +311,23 @@ describe('AgentListPage', () => {
     })
 
     it('shows loading Availability while the summary is unresolved', async () => {
-      mockAgents([makeAgent({ id: 'pending', readiness: { conclusion: 'Ready', gaps: [], setup: null } })])
+      mockAgents([
+        makeAgent({
+          id: 'pending',
+          executability: {
+            state: 'executable',
+            gaps: [],
+            pendingLaunchNote: null,
+          },
+        }),
+      ])
       server.use(http.get(AVAILABILITY_PATH, () => new Promise(() => {})))
       renderPage()
 
       const row = await screen.findByTestId('agent-row-pending')
       expect(within(row).getByTestId('agent-availability-pending')).toHaveTextContent('Availability: Loading')
-      expect(within(row).getByTestId('agent-readiness-pending')).toHaveTextContent('Readiness: Ready')
-      expect(within(row).getByTestId('agent-readiness-pending')).not.toHaveTextContent('Needs setup')
+      expect(within(row).getByTestId('agent-executability-pending')).toHaveTextContent('Executability: executable')
+      expect(within(row).getByTestId('agent-executability-pending')).not.toHaveTextContent('not-configured')
     })
 
     it('distinguishes archived agents with opacity and badge', async () => {
@@ -335,8 +387,16 @@ describe('AgentListPage', () => {
     it('lists archived agents under an "Archived (n)" section whose count matches', async () => {
       mockAgents([
         makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
-        makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
-        makeAgent({ id: 'b-archived', name: 'Archived Two', status: 'archived' }),
+        makeAgent({
+          id: 'a-archived',
+          name: 'Archived One',
+          status: 'archived',
+        }),
+        makeAgent({
+          id: 'b-archived',
+          name: 'Archived Two',
+          status: 'archived',
+        }),
       ])
       renderPage()
       const section = await screen.findByTestId('archived-section')
@@ -349,7 +409,11 @@ describe('AgentListPage', () => {
     it('renders archived rows with reduced opacity (visually distinct) and an Archived badge', async () => {
       mockAgents([
         makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
-        makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
+        makeAgent({
+          id: 'a-archived',
+          name: 'Archived One',
+          status: 'archived',
+        }),
       ])
       renderPage()
       const archivedRow = await screen.findByTestId('agent-row-a-archived')
@@ -363,7 +427,11 @@ describe('AgentListPage', () => {
     it('archived rows navigate into the detail page like active rows', async () => {
       mockAgents([
         makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
-        makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
+        makeAgent({
+          id: 'a-archived',
+          name: 'Archived One',
+          status: 'archived',
+        }),
       ])
       renderPage()
       await screen.findByTestId('agent-row-a-archived')

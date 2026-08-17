@@ -25,8 +25,8 @@ import {
 } from '../../../entities/agent'
 import type {
   AgentAvailabilityResponse,
+  AgentExecutabilityResult,
   AgentInfo,
-  AgentReadinessResult,
   AgentSessionListItemDto,
   AgentStatusDetailResponse,
   AgentWaitingWorkItem,
@@ -62,7 +62,9 @@ export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
 
 const useDefaultData: AgentDetailPageDataHook = (agentId) => {
   const { data: agent, isLoading, isError } = useAgent(agentId)
-  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId })
+  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({
+    agentRef: agentId,
+  })
   const { data: detailStatus, isLoading: detailStatusLoading } = useAgentDetailStatus(agentId)
   return {
     agent,
@@ -126,19 +128,18 @@ function describeWaitingReason(reason: string | null | undefined): string {
   }
 }
 
-function ReadinessCard({
-  readiness,
+function ExecutabilityCard({
+  executability,
   toProjectPath,
 }: {
-  readiness: AgentReadinessResult | undefined
+  executability: AgentExecutabilityResult | undefined
   toProjectPath: (path: string) => string
 }) {
-  const conclusion = readiness?.conclusion ?? 'Unknown'
-  const gaps = readiness?.gaps ?? []
-  const setup = readiness?.setup ?? null
+  const state = executability?.state ?? 'unknown'
+  const gaps = executability?.gaps ?? []
 
   const tone =
-    conclusion === 'Ready'
+    state === 'executable'
       ? {
           borderClass: 'border-emerald-200',
           iconBg: 'bg-emerald-100',
@@ -146,7 +147,7 @@ function ReadinessCard({
           icon: <CheckCircleIcon className="size-4" />,
           labelClass: 'text-emerald-700',
         }
-      : conclusion === 'Needs setup'
+      : state === 'not-configured' || state === 'not-executable'
         ? {
             borderClass: 'border-red-200',
             iconBg: 'bg-red-100',
@@ -164,8 +165,8 @@ function ReadinessCard({
 
   return (
     <div
-      data-testid="agent-detail-readiness"
-      data-conclusion={conclusion}
+      data-testid="agent-detail-executability"
+      data-state={state}
       className={`rounded-lg border ${tone.borderClass} bg-card p-4 space-y-2`}
     >
       <div className="flex items-center gap-2">
@@ -175,38 +176,36 @@ function ReadinessCard({
           {tone.icon}
         </span>
         <div className="flex flex-col">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Readiness</span>
-          <span data-testid="agent-detail-readiness-conclusion" className={`text-sm font-semibold ${tone.labelClass}`}>
-            {conclusion}
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Executability</span>
+          <span data-testid="agent-detail-executability-state" className={`text-sm font-semibold ${tone.labelClass}`}>
+            {state}
           </span>
         </div>
       </div>
-      {conclusion === 'Needs setup' && gaps.length > 0 && (
-        <ul data-testid="agent-detail-readiness-gaps" className="space-y-1">
+      {gaps.length > 0 && (
+        <ul data-testid="agent-detail-executability-gaps" className="space-y-1">
           {gaps.map((gap) => (
             <li
               key={gap.code}
-              data-testid={`agent-detail-readiness-gap-${gap.code}`}
+              data-testid={`agent-detail-executability-gap-${gap.code}`}
               className="rounded-md border border-red-100 bg-red-50/50 px-2 py-1.5 text-xs text-red-900"
             >
               <p className="font-medium">{gap.message}</p>
-              <p className="text-red-700/80 mt-0.5">{gap.action}</p>
+              <p className="text-red-700/80 mt-0.5">{gap.nextAction}</p>
+              <p className="text-red-700/80 mt-0.5">
+                Fix in{' '}
+                <a className="font-medium underline" href={toProjectPath(gap.fixEntryPoint.path)}>
+                  {gap.fixEntryPoint.label}
+                </a>{' '}
+                ({gap.fixEntryPoint.command}).
+              </p>
             </li>
           ))}
         </ul>
       )}
-      {conclusion === 'Needs setup' && setup && (
-        <p data-testid="agent-detail-readiness-setup" className="text-xs text-muted-foreground">
-          Fix in{' '}
-          <a className="font-medium text-foreground underline" href={toProjectPath(setup.path)}>
-            {setup.label}
-          </a>
-          .
-        </p>
-      )}
-      {conclusion === 'Unknown' && (
-        <p data-testid="agent-detail-readiness-hint" className="text-xs text-muted-foreground">
-          The server has not yet confirmed this Agent. New work will wait for validation.
+      {state === 'unknown' && executability?.pendingLaunchNote && (
+        <p data-testid="agent-detail-executability-pending-note" className="text-xs text-muted-foreground">
+          {executability.pendingLaunchNote}
         </p>
       )}
     </div>
@@ -346,7 +345,10 @@ export function AgentDetailPage({
   components?: Partial<AgentDetailPageComponents>
   dataHook?: AgentDetailPageDataHook
 } = {}) {
-  const { AgentProfileEditor, SubscriptionsSection, ConnectionsSection } = { ...defaultComponents, ...components }
+  const { AgentProfileEditor, SubscriptionsSection, ConnectionsSection } = {
+    ...defaultComponents,
+    ...components,
+  }
   const { agentId } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -368,11 +370,10 @@ export function AgentDetailPage({
 
   const { model, variant, runtime } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const isArchived = agent?.status === 'archived'
-  const readiness = agent?.readiness
-  const readinessConclusion = readiness?.conclusion ?? 'Unknown'
-  const isNeedsSetup = readinessConclusion === 'Needs setup'
-  const isUnknownReadiness = readinessConclusion === 'Unknown'
-  const launchBlockedByReadiness = isNeedsSetup
+  const executability = agent?.executability
+  const executabilityState = executability?.state ?? 'unknown'
+  const launchBlockedByExecutability =
+    executabilityState === 'not-configured' || executabilityState === 'not-executable'
 
   const runningSessions = useMemo(() => allSessions.filter((s) => s.activity === 'active'), [allSessions])
   const failedSessions = useMemo(() => allSessions.filter((s) => s.activity === 'unknown'), [allSessions])
@@ -452,8 +453,13 @@ export function AgentDetailPage({
                 </Badge>
               </div>
               <p data-testid="agent-detail-purpose" className="mt-0.5 text-xs text-muted-foreground">
-                {agent.description?.trim() || 'No purpose set'}
+                {agent.purpose?.trim() || 'No purpose set'}
               </p>
+              {agent.description.trim() && (
+                <p data-testid="agent-detail-description" className="mt-0.5 text-xs text-muted-foreground">
+                  {agent.description}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground mt-0.5">
                 {model ? `Model · ${model}` : 'Model · Default'}
                 {variant && ` · ${variant}`}
@@ -470,8 +476,8 @@ export function AgentDetailPage({
                 size="sm"
                 onClick={() => navigate(toProjectPath(`/agent-sessions/new?agent=${encodeURIComponent(agent.id)}`))}
                 data-testid="agent-detail-new-session"
-                disabled={launchBlockedByReadiness}
-                title={launchBlockedByReadiness ? 'Readiness is Needs setup — fix the gaps first.' : undefined}
+                disabled={launchBlockedByExecutability}
+                title={launchBlockedByExecutability ? 'Executability is blocked — fix the gaps first.' : undefined}
               >
                 <PlayIcon />
                 New Session
@@ -493,17 +499,7 @@ export function AgentDetailPage({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
-            <ReadinessCard readiness={readiness ?? undefined} toProjectPath={toProjectPath} />
-
-            {!launchBlockedByReadiness && isUnknownReadiness && (
-              <p
-                data-testid="agent-detail-unknown-launch-hint"
-                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
-              >
-                Readiness is <span className="font-semibold">Unknown</span> — the launch will proceed and will wait for
-                the server to validate execution.
-              </p>
-            )}
+            <ExecutabilityCard executability={executability ?? undefined} toProjectPath={toProjectPath} />
 
             <div className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-medium text-foreground mb-3">Instructions</h3>
@@ -585,8 +581,8 @@ export function AgentDetailPage({
                   data-testid="agent-detail-edit-timing"
                   className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground"
                 >
-                  Instructions, Runtime, Model, Variant, and Skills edits apply only to Jobs created after saving.
-                  Executions already in progress keep the configuration from launch.
+                  Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills edits apply only to Jobs
+                  created after saving. Executions already in progress keep the configuration from launch.
                 </p>
               </div>
             </div>
@@ -603,6 +599,23 @@ export function AgentDetailPage({
                 </div>
               ) : (
                 <span className="text-xs text-muted-foreground/50 italic">No skills configured</span>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground mb-3">Declared permissions</h3>
+              {agent.permissions.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5" data-testid="agent-detail-permissions">
+                  {agent.permissions.map((permission) => (
+                    <Badge key={permission} variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                      {permission}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <span data-testid="agent-detail-permissions" className="text-xs text-muted-foreground/50 italic">
+                  No permissions declared
+                </span>
               )}
             </div>
 

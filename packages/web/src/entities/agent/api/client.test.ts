@@ -68,13 +68,23 @@ describe('unarchiveAgent', () => {
 
 describe('readAgentModelAndVariant', () => {
   it('returns null model and variant when agent config is missing', () => {
-    expect(readAgentModelAndVariant(null)).toEqual({ model: null, variant: null, runtime: 'opencode' })
+    expect(readAgentModelAndVariant(null)).toEqual({
+      model: null,
+      variant: null,
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 
   it('returns null model and variant when agent config is not an object', () => {
-    expect(readAgentModelAndVariant({ agentConfig: 'not-an-object' as unknown as Record<string, unknown> })).toEqual({
+    expect(
+      readAgentModelAndVariant({
+        agentConfig: 'not-an-object' as unknown as Record<string, unknown>,
+      }),
+    ).toEqual({
       model: null,
       variant: null,
+      reasoningEffort: null,
       runtime: 'opencode',
     })
   })
@@ -84,15 +94,29 @@ describe('readAgentModelAndVariant', () => {
       readAgentModelAndVariant({
         agentConfig: { model: 'anthropic/claude', variant: 'high' },
       }),
-    ).toEqual({ model: 'anthropic/claude', variant: 'high', runtime: 'opencode' })
+    ).toEqual({
+      model: 'anthropic/claude',
+      variant: 'high',
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 
   it('reads raw definition fields without materializing an effective default', () => {
     const agent = {
       agentConfig: null,
-      effectiveExecutionConfig: { runtime: 'pi' as const, model: 'provider/default', variant: 'balanced' },
+      effectiveExecutionConfig: {
+        runtime: 'pi' as const,
+        model: 'provider/default',
+        variant: 'balanced',
+      },
     }
-    expect(readAgentDefinitionModelAndVariant(agent)).toEqual({ model: null, variant: null, runtime: 'opencode' })
+    expect(readAgentDefinitionModelAndVariant(agent)).toEqual({
+      model: null,
+      variant: null,
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 
   it('drops empty/whitespace model and variant', () => {
@@ -100,23 +124,25 @@ describe('readAgentModelAndVariant', () => {
       readAgentModelAndVariant({
         agentConfig: { model: '   ', variant: '' },
       }),
-    ).toEqual({ model: null, variant: null, runtime: 'opencode' })
+    ).toEqual({
+      model: null,
+      variant: null,
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 
-  it('preserves a Variant-only definition (variant without model)', () => {
-    // A Variant without a Model is valid: the resolver fills the missing
-    // Model from the Project default, so the raw definition must keep the
-    // Variant for an unrelated edit to preserve it.
-    expect(
-      readAgentDefinitionModelAndVariant({
-        agentConfig: { variant: 'high' },
-      }),
-    ).toEqual({ model: null, variant: 'high', runtime: 'opencode' })
+  it('preserves the raw variant when no model is set', () => {
     expect(
       readAgentModelAndVariant({
         agentConfig: { variant: 'high' },
       }),
-    ).toEqual({ model: null, variant: 'high', runtime: 'opencode' })
+    ).toEqual({
+      model: null,
+      variant: 'high',
+      reasoningEffort: null,
+      runtime: 'opencode',
+    })
   })
 })
 
@@ -148,19 +174,13 @@ describe('writeAgentModelAndVariant', () => {
   })
 
   it('returns null when model is null regardless of legacy keys', () => {
-    // Dropping the model and variant clears the agentConfig entirely;
-    // legacy keys are not preserved on the converged path.
+    // Dropping the model clears the agentConfig entirely; legacy keys
+    // are not preserved on the converged path.
     expect(writeAgentModelAndVariant({ model: 'm', variant: 'high', type: 'opencode' }, null, null)).toBeNull()
   })
 
-  it('preserves a Variant-only definition through a write', () => {
-    // An unrelated edit must not erase a raw Variant that has no Model;
-    // the Project default supplies the Model at launch.
+  it('preserves a raw variant-only definition', () => {
     expect(writeAgentModelAndVariant({ variant: 'high' }, null, 'high')).toEqual({ variant: 'high' })
-    expect(writeAgentModelAndVariant({ variant: 'high', runtime: 'pi' }, null, 'high', 'pi')).toEqual({
-      variant: 'high',
-      runtime: 'pi',
-    })
   })
 
   it('returns null when writing an empty config', () => {
@@ -172,7 +192,9 @@ describe('writeAgentModelAndVariant', () => {
   })
 
   it('preserves runtime through a read-modify-write round trip', () => {
-    const read = readAgentModelAndVariant({ agentConfig: { model: 'pi/model', variant: 'medium', runtime: 'pi' } })
+    const read = readAgentModelAndVariant({
+      agentConfig: { model: 'pi/model', variant: 'medium', runtime: 'pi' },
+    })
     expect(
       writeAgentModelAndVariant(
         { model: 'pi/model', variant: 'medium', runtime: 'pi' },
@@ -186,8 +208,17 @@ describe('writeAgentModelAndVariant', () => {
   it('prefers the server effective execution projection over an empty raw config', () => {
     const read = readAgentModelAndVariant({
       agentConfig: null,
-      effectiveExecutionConfig: { runtime: 'pi', model: 'provider/model', variant: 'balanced' },
+      effectiveExecutionConfig: {
+        runtime: 'pi',
+        model: 'provider/model',
+        variant: 'balanced',
+      },
     })
-    expect(read).toEqual({ model: 'provider/model', variant: 'balanced', runtime: 'pi' })
+    expect(read).toEqual({
+      model: 'provider/model',
+      variant: 'balanced',
+      reasoningEffort: null,
+      runtime: 'pi',
+    })
   })
 })

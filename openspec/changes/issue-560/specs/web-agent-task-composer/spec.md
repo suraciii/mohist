@@ -74,6 +74,31 @@ lost.
 - **THEN** the composer shows the rejection reason with its repair path
 - **AND** the entered prompt and context references remain in the composer
 
+### Requirement: Scope confirmation recovers explicitly from scope drift
+
+Before an irreversible task-first or selected-Agent launch, the composer SHALL
+present the server-resolved execution scope for explicit confirmation. If the
+Server rejects the confirmed launch with `409 launch_scope_changed`, the
+composer SHALL preserve the selected Agent, prompt, attachments, and context;
+it SHALL show that the reviewed scope is stale and offer an explicit action to
+run preflight again with the same composed request and idempotency key. It MUST
+NOT automatically retry the launch. The refreshed scope SHALL be shown for a
+new confirmation before the next launch attempt.
+
+#### Scenario: Task-first scope drift requires a fresh confirmation
+
+- **WHEN** a task-first launch is rejected with `launch_scope_changed` after the user confirms its preflight scope
+- **THEN** the composer retains the composed task and offers to review the refreshed scope
+- **AND** selecting that action runs task preflight without starting work
+- **AND** the user must confirm the refreshed scope before the task-first launch is submitted again
+
+#### Scenario: Existing-Agent scope drift requires a fresh confirmation
+
+- **WHEN** a selected-Agent launch is rejected with `launch_scope_changed` after the user confirms its preflight scope
+- **THEN** the composer retains the selected Agent and composed task and offers to review the refreshed scope
+- **AND** selecting that action runs selected-Agent preflight without starting work
+- **AND** the user must confirm the refreshed scope before the definition-first launch is submitted again
+
 ### Requirement: Refinement after launch
 
 After a task-first launch the created Agent SHALL remain refinable through the

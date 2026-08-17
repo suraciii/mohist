@@ -4,27 +4,32 @@ import type { AgentActivity, AgentSessionInfo, AgentStatus } from '../model/type
 type AgentRuntime = 'opencode' | 'pi'
 const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'opencode'
 
-export interface AgentReadinessGap {
-  code: string
-  message: string
-  action: string
-}
+export type AgentExecutabilityState = 'not-configured' | 'not-executable' | 'unknown' | 'executable'
 
-export interface AgentReadinessSetup {
+export interface AgentExecutabilityFixEntryPoint {
   label: string
   path: string
+  command: string
 }
 
-export interface AgentReadinessResult {
-  conclusion: 'Ready' | 'Needs setup' | 'Unknown'
-  gaps: AgentReadinessGap[]
-  setup: AgentReadinessSetup | null
+export interface AgentExecutabilityGap {
+  code: string
+  message: string
+  nextAction: string
+  fixEntryPoint: AgentExecutabilityFixEntryPoint
+}
+
+export interface AgentExecutabilityResult {
+  state: AgentExecutabilityState
+  gaps: AgentExecutabilityGap[]
+  pendingLaunchNote: string | null
 }
 
 export interface AgentInfo {
   id: string
   projectId: string
   name: string
+  purpose: string | null
   description: string
   instructions: string
   agentConfig: Record<string, unknown> | null
@@ -34,30 +39,35 @@ export interface AgentInfo {
     variant: string | null
   } | null
   skills: string[]
+  permissions: string[]
   allowedSubagentAgentIds?: string[] | null
   maxConcurrentRuns: number | null
   status: string
   createdAt: string
   updatedAt: string
-  readiness?: AgentReadinessResult | null
+  executability?: AgentExecutabilityResult | null
 }
 
 export interface AgentCreateRequest {
   name: string
+  purpose?: string | null
   description?: string | null
   instructions: string
   agentConfig?: Record<string, unknown> | null
   skills?: string[] | null
+  permissions?: string[]
   maxConcurrentRuns?: number | null
   allowedSubagentAgentIds?: string[] | null
 }
 
 export interface AgentUpdateRequest {
   name?: string | null
+  purpose?: string | null
   description?: string | null
   instructions?: string | null
   agentConfig?: Record<string, unknown> | null
   skills?: string[] | null
+  permissions?: string[]
   maxConcurrentRuns?: number | null
   allowedSubagentAgentIds?: string[] | null
 }
@@ -168,30 +178,44 @@ export function unarchiveAgent(projectId: string, id: string) {
 export function readAgentDefinitionModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): {
   model: string | null
   variant: string | null
+  reasoningEffort: string | null
   runtime: AgentRuntime
 } {
   const config = agent?.agentConfig
-  if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
-  const rawModel = typeof config.model === 'string' ? config.model : null
-  const model = rawModel && rawModel.trim() ? rawModel : null
-  const rawVariant = typeof config.variant === 'string' ? config.variant : null
-  const variant = rawVariant && rawVariant.trim() ? rawVariant : null
-  const runtime = config.runtime === 'opencode' || config.runtime === 'pi' ? config.runtime : DEFAULT_AGENT_RUNTIME
-  return { model, variant, runtime }
+  const rawModel = config && typeof config.model === 'string' && config.model.trim() ? config.model : null
+  const rawVariant = config && typeof config.variant === 'string' && config.variant.trim() ? config.variant : null
+  const rawReasoningEffort =
+    config && typeof config.reasoningEffort === 'string' && config.reasoningEffort.trim()
+      ? config.reasoningEffort
+      : null
+  const rawRuntime = config?.runtime === 'opencode' || config?.runtime === 'pi' ? config.runtime : null
+  return {
+    model: rawModel,
+    variant: rawVariant,
+    reasoningEffort: rawReasoningEffort,
+    runtime: rawRuntime ?? DEFAULT_AGENT_RUNTIME,
+  }
 }
 
 export function readAgentModelAndVariant(
   agent: (Pick<AgentInfo, 'agentConfig'> & Partial<Pick<AgentInfo, 'effectiveExecutionConfig'>>) | null | undefined,
-): { model: string | null; variant: string | null; runtime: AgentRuntime } {
+): {
+  model: string | null
+  variant: string | null
+  reasoningEffort: string | null
+  runtime: AgentRuntime
+} {
+  const definition = readAgentDefinitionModelAndVariant(agent)
   const effective = agent?.effectiveExecutionConfig
-  if (effective && (effective.runtime === 'opencode' || effective.runtime === 'pi')) {
-    return {
-      model: typeof effective.model === 'string' && effective.model.trim() ? effective.model : null,
-      variant: typeof effective.variant === 'string' && effective.variant.trim() ? effective.variant : null,
-      runtime: effective.runtime,
-    }
+  const effectiveRuntime = effective?.runtime === 'opencode' || effective?.runtime === 'pi' ? effective.runtime : null
+  const effectiveModel = typeof effective?.model === 'string' && effective.model.trim() ? effective.model : null
+  const effectiveVariant = typeof effective?.variant === 'string' && effective.variant.trim() ? effective.variant : null
+  return {
+    model: effectiveModel ?? definition.model,
+    variant: definition.variant ?? effectiveVariant,
+    reasoningEffort: definition.reasoningEffort,
+    runtime: effectiveRuntime ?? definition.runtime,
   }
-  return readAgentDefinitionModelAndVariant(agent)
 }
 
 export function writeAgentModelAndVariant(
@@ -199,20 +223,21 @@ export function writeAgentModelAndVariant(
   model: string | null,
   variant: string | null,
   runtime: AgentRuntime = DEFAULT_AGENT_RUNTIME,
+  reasoningEffort: string | null = null,
 ): Record<string, unknown> | null {
   const next: Record<string, unknown> = {}
   if (model === null) {
-    // A Variant without a Model is a valid definition: the resolver fills
-    // the missing Model from the Project default. Preserve it unless the
-    // user explicitly cleared it — only an empty (null model, null variant,
-    // default runtime) result is written back as null.
     if (variant !== null) next.variant = variant
+    if (reasoningEffort !== null) next.reasoningEffort = reasoningEffort
     if (runtime !== DEFAULT_AGENT_RUNTIME) next.runtime = runtime
-    return Object.keys(next).length === 0 ? null : next
+    return Object.keys(next).length > 0 ? next : null
   }
   next.model = model
   if (variant !== null) {
     next.variant = variant
+  }
+  if (reasoningEffort !== null) {
+    next.reasoningEffort = reasoningEffort
   }
   next.runtime = runtime
   return next

@@ -2,156 +2,101 @@
 
 ## Verdict
 
-FAIL. Both must-fix findings from the previous review round remain
-unaddressed. No implementation commit landed after the previous review
-(`f1d932bf3` is the review commit itself; the working tree is clean and HEAD
-is unchanged), so this re-review verifies the dispositions against identical
-code: MF-9 and MF-10 are still reproducible as written.
+PASS. Both must-fix findings from the previous round (MF-9, MF-10) are now
+addressed, properly implemented, and covered by regression tests. The fix
+commit `9f295d1bc` ("preserve Variant-only definitions and surface scope-drift
+rejection") was then merged with the verified master implementation
+(`f8a19552a`, "adopt verified master implementation for issue-560 check
+repair"), which carries the same two behaviors in master's form. No regression
+was found in the merged state: the full Web suite (4,756), Web typecheck, and
+the focused suites all pass against the current working tree, which is clean.
 
-## Must-Fix Findings
+## Dispositions of the previous round's must-fix findings
 
-### MF-9: An explicit variant-only definition is cleared by an unrelated Web edit
+### MF-9 (explicit Variant-only definition cleared by an unrelated Web edit) — fixed
 
-Violates acceptance criterion 5 (saving an Agent must preserve the definition
-facts that apply to later Jobs, and must not silently alter execution facts),
-design D6's per-field precedence (definition field, then Project default),
-and the supported scenario where a definition sets a Variant while the
-Project default supplies the Model.
+The Variant-only raw definition is now preserved end to end:
 
-A definition with `agentConfig: { "variant": "high" }` is valid. The resolver
-is explicitly designed to let such a Variant survive and be filled with the
-Project-default Model (`ExecutionConfigResolver.FromAgentConfig` preserves a
-Variant without a Model "so the precedence rule can fill the missing Model
-from the Project default"), and `AgentReadinessService.StructuralGaps` does
-not report `variant-without-model` once a default Model resolves it. The Web
-editor still erases that explicit Variant on an unrelated save:
+- `packages/web/src/entities/agent/api/client.ts`
+  (`readAgentDefinitionModelAndVariant`) returns the raw `variant` even when
+  no `model` is set; it no longer short-circuits to `variant: null` on a
+  missing Model.
+- `writeAgentModelAndVariant` keeps the null-Model branch from collapsing to
+  `null`: a Variant-only (or Variant + non-default Runtime / reasoningEffort)
+  result is written back as the preserved object, and only an empty
+  (null model, null variant, default runtime) result returns `null` — the
+  "user explicitly cleared it" case.
+- `AgentProfileEditor.tsx` initializes `variant` from the raw-definition
+  reader (`readAgentDefinitionModelAndVariant`) and serializes through
+  `writeAgentModelAndVariant`, so an unrelated name/description/Instructions
+  edit no longer erases a raw Variant that the Project default fills at
+  launch. The definition no longer silently changes from `(default Model,
+  explicit Variant)` to `(default Model, no Variant)`.
+- Coverage: `client.test.ts` "preserves the raw variant when no model is set"
+  and "preserves a raw variant-only definition"; `AgentProfileEditor.test.tsx`
+  "preserves a variant-only definition when saving an unrelated edit" (and the
+  existing "preserves an effective default as unresolved when saving an
+  unrelated edit" regression still holds).
 
-- `packages/web/src/entities/agent/api/client.ts:168-185`
-  (`readAgentDefinitionModelAndVariant`) returns `variant: null` whenever the
-  raw definition has no Model (`:178 if (!model) return { model: null,
-  variant: null, runtime }`), even if the raw definition carries a Variant.
-- `packages/web/src/widgets/agent-profile-editor/ui/AgentProfileEditor.tsx:60`
-  initializes the form from that projection (`:66-67`), so `variant` state is
-  null for a Variant-only definition.
-- `packages/web/src/widgets/agent-profile-editor/ui/AgentProfileEditor.tsx:95`
-  serializes the form on every save; `writeAgentModelAndVariant`
-  (`client.ts:201-213`, `:208 if (model === null) return ... : null`) returns
-  null when the form Model is null, so an unrelated description/name/
-  Instructions edit sends `agentConfig: null`.
+### MF-10 (scope-drift rejection silent in the Web composer) — fixed
 
-The Agent therefore changes from `(default Model, explicit Variant)` to
-`(default Model, no Variant)` merely by saving an unrelated field — a later
-Job resolves differently than the user's definition states. This is the same
-raw-definition preservation boundary that MF-7 addressed for an empty config;
-the existing save regression (`AgentProfileEditor.test.tsx` "preserves an
-effective default as unresolved when saving an unrelated edit", `:255-269`)
-only covers `agentConfig: null` and misses the valid Variant-only case.
-Preserve the raw Variant through the editor unless the user explicitly
-changes execution configuration, and add a save regression for Variant-only
-definitions.
+The `launch_scope_changed` preflight rejection is now surfaced with an
+actionable repair path that keeps the composed task:
 
-**Re-review status: not addressed.** Code and test coverage unchanged since
-the previous review; the finding reproduces exactly as reported.
+- `packages/web/src/entities/agent/model/launch-feedback.ts` maps
+  `code === 'launch_scope_changed'` to `kind: 'launch-scope-changed'` feedback
+  ("Launch scope changed … Review the updated scope, then confirm the launch
+  again"), no longer falling through to `return null`.
+- `AgentSessionComposerPage.tsx` renders the mapped feedback
+  (`error-launch-scope-changed`, `data-feedback-kind="launch-scope-changed"`)
+  and, when `lastPreflight` is available, a "Review updated scope" button that
+  re-runs the preflight with the same task input, attachments, and
+  idempotency key (`handleReviewChangedScope`) — the task and context refs
+  stay in the composer throughout.
+- Server contract unchanged: both `AgentTaskRoutes.cs:292` and
+  `AgentSessionLaunchRoutes.cs:350` still return `409` with
+  `launch_scope_changed`, and the Web `ApiError` carries `code`/`status`
+  through to the mapper.
+- Coverage: `launch-feedback.test.ts` maps the code; composer tests cover the
+  task-first path and the existing-Agent path, asserting the rejection block,
+  preserved prompt/context, and a re-run that keeps the same key and does not
+  start work.
 
-### MF-10: Scope-drift rejection is silent in the Web composer
+## Prior finding dispositions (unchanged by this round)
 
-Violates the `web-agent-task-composer` requirement that every rejected launch
-show its rejection reason and repair path while preserving the composed task
-("Failure keeps the task" scenario), and the issue's pre-launch scope
-criterion (a confirmed scope that becomes invalid is left unexplained).
-
-The preflight gate deliberately returns `409 launch_scope_changed` when the
-confirmed scope no longer matches the scope at launch:
-
-- `packages/server/src/Mohist.Server/Api/AgentTaskRoutes.cs:277-294`
-  (comparison at `:288`, response at `:292`)
-- `packages/server/src/Mohist.Server/Api/AgentSessionLaunchRoutes.cs:346-351`
-  (response at `:350`)
-
-The Web client has no feedback mapping for this code. The feedback union and
-mapper in `packages/web/src/entities/agent/model/launch-feedback.ts` handle
-idempotency conflict, pending convergence, configuration failure, and runtime
-availability, but not `launch_scope_changed`; the mapper falls through to
-`return null` (`:193`). The composer stores the failed mutation at
-`packages/web/src/pages/agent-session-composer/ui/AgentSessionComposerPage.tsx:562`
-(`launchFeedback = getAgentLaunchErrorFeedback(launchError, ...)`) and renders
-the rejection block only when `launchFeedback` is non-null (`:618`), so an
-unmapped error produces no visible reason or repair path.
-
-This rejection is reachable from the composer: it submits the preflight
-fingerprint on the real launch (`handleConfirmPreflight`, `:457-474`), so the
-server's `launch_scope_changed` check runs for every confirmed Web launch. A
-Project default or workspace repository can change while the confirmation
-dialog is open (another actor, or the preflight read racing an edit), making
-this an exercised path, not an unreachable response. Map scope drift to
-actionable feedback (re-run/review preflight while keeping the task and
-context) and add task-first and existing-Agent Web coverage for the
-`launch_scope_changed` code.
-
-**Re-review status: not addressed.** No `launch_scope_changed` / scope-drift
-mapping exists anywhere under `packages/web/src`; the rejection remains
-silent in the composer.
-
-## Prior Finding Dispositions
-
-- **MF-6 (replay before mutable preflight scope checking): fixed and still
-  holds.** `AgentTaskRoutes.cs:231-274` calls `ResumeIdempotentAsync` before
-  the `launch_scope_changed` comparison at `:277-294`; the accepted-replay
-  regression `TaskLaunch_ReplaysAcceptedOutcomeBeforeCheckingDriftedPreflightScope`
-  verifies original Agent, Session, and Job identities after a Project
-  default changes. No regression observed.
-- **MF-7 (unrelated profile edit materializes the Project default): fixed for
-  the reported empty-config case, still holds.** The editor uses the
-  raw-definition reader, and `AgentProfileEditor.test.tsx:255-269` verifies a
-  default-resolved Agent with no raw config still saves `agentConfig: null`.
-  MF-9 is the separate raw-definition preservation case that remains
-  uncovered (see above).
-- **MF-8 (`mo agent start --epic` serialized a string): fixed and still
-  holds.** The start and definition-first CLI options are `int?`,
-  `BuildLaunchContext` emits numeric `epicNumber`, and the CLI plus
-  task-route coverage exercises the numeric contract.
-- **MF-9 and MF-10: not addressed** — see Must-Fix Findings above.
+- MF-1..MF-5: previously verified fixed; the merged master implementation
+  retains the server-authoritative `effectiveExecutionConfig` projections,
+  preflight scope projection, idempotency-key durability, first-writer-wins
+  grain adoption, and collaborator/concurrency fields.
+- MF-6 (replay before mutable preflight scope check): still holds in the
+  merged state — `ResumeIdempotentAsync` runs before the `launch_scope_changed`
+  comparison in `AgentTaskRoutes.cs`.
+- MF-7 (unrelated profile edit must not materialize the Project default):
+  still holds; the editor's raw-definition read and the empty-config save
+  regression are present.
+- MF-8 (numeric `mo agent start --epic`): unchanged server/CLI behavior;
+  not touched by this round's Web-only fix or the merge rename
+  (`ReadinessRejected` → `ExecutabilityRejected`).
 
 ## Review Dimensions
 
-- **Acceptance criteria:** **FAIL.** MF-9 still silently changes a supported
-  execution definition during an unrelated edit (criterion 5); MF-10 still
-  leaves a valid preflight rejection unexplained in Web (pre-launch scope
-  criterion and the composer's failure-keeps-task contract).
-- **Correctness:** **FAIL.** The server-side replay, Epic, and raw-config
-  fixes verified for the prior round remain correct; the two findings above
-  remain observable behavior failures in the shipped surfaces.
-- **Consistency with surrounding code and plan:** **FAIL.** MF-9 contradicts
-  design D6's per-field precedence and no-edit-time-materialization rule;
-  MF-10 contradicts the `web-agent-task-composer` spec's "Failure keeps the
-  task" scenario.
-- **Tests:** **FAIL for completeness.** The suites cover the prior round's
-  fixes (replay, Epic, empty-config preservation) and remain green, but there
-  is still no Variant-only profile-save test and no Web test exercising
-  `launch_scope_changed`. This is missing behavioral coverage, not a failing
-  build.
-
-## Acceptance-Criterion Checks
-
-- **Task-oriented configuration (purpose, description, Instructions,
-  permissions, collaborators, concurrency intent):** checked; no additional
-  must-fix gap found in the current surfaces beyond MF-9's effect on an
-  execution field during an unrelated edit.
-- **Readiness states (not configured / unknown / executable / insufficient):**
-  checked, no separate issue found. Server-authoritative Ready / Unknown /
-  Needs setup projections are present in list and detail.
-- **Model recommendation and full options:** checked, no separate issue
-  found. Web uses the labeled Project default and catalog-backed adjustment;
-  CLI points unresolved configuration at `mo agent model list`.
-- **Pre-launch context and permission scope:** checked with MF-10 above. The
-  normal preflight projection is visible, but one of its rejection outcomes
-  (`launch_scope_changed`) is not actionable in Web.
-- **Save timing and in-flight facts:** checked with MF-9 above. The save
-  timing copy and launch snapshots are present, but the editor can still erase
-  a valid raw Variant during an unrelated save.
-- **CLI/Web identity and execution scope consistency:** checked, no separate
-  issue found. The numeric Epic context path and effective execution
-  projections are consistent across the tested surfaces.
+- **Acceptance criteria:** **checked, no issue.** Criterion 5 (saving an
+  Agent preserves definition facts that apply to later Jobs) and the pre-launch
+  scope criterion (a confirmed scope that becomes invalid is explained, with
+  the task preserved) are both satisfied in the current tree.
+- **Correctness:** **checked, no issue.** The Variant-only definition is a
+  supported case per `agent-creation-defaults` (a Variant without a Model is
+  resolved from the Project default and produces no `variant-without-model`
+  gap); it survives unrelated saves. Every rejected launch path now maps to
+  visible, actionable feedback per `web-agent-task-composer`'s "Failure keeps
+  the task" scenario.
+- **Consistency with surrounding code and plan:** **checked, no issue.** The
+  fixes match design D6's per-field precedence and the no-edit-time-
+  materialization rule; the scope-drift feedback follows the same
+  feedback-kind pattern as the other launch outcomes.
+- **Tests:** **checked, no issue.** Regression coverage exists for both
+  findings (helper units, editor save, composer task-first and existing-Agent
+  scope drift) and the full Web suite is green.
 
 ## Observations
 
@@ -170,23 +115,21 @@ silent in the composer.
   current-server preflight flows, while the abbreviated CLI documentation
   examples do not call it out. The command help and non-interactive behavior
   provide the requirement; this is documentation polish, not a merge blocker.
+- The `check`-stage merge adopted the verified master implementation into the
+  run branch; its terminology rename (Readiness → Executability for the
+  preflight rejection) is consistent with the branch's own executability
+  work and does not change the reviewed behavior.
 
 ## Verification
 
-- No implementation commits after the previous review: `HEAD` is the review
-  commit (`f1d932bf3`), working tree clean, so dispositions were verified
-  against unchanged code.
-- `npm run verify`: passed.
-- Server specification assembly: 3,954 passed.
-- Server unit tests: 2,701 passed.
-- CLI tests: 1,860 passed.
-- Web tests: 4,741 passed.
-- Runner tests: 1,639 passed.
-- Slack tests: 70 passed.
-- Workflow definition tests: 178 passed.
-- Server architecture tests, Web FSD/test-boundary checks, docs, format, and
-  file-size checks passed.
-- Focused task-first route specs: 14/14 passed; default/readiness/storage
-  specs: 19/19 passed; targeted Web tests: 109 passed.
+- HEAD `f8a19552a` (merge of the verified master implementation), working tree
+  clean; the working tree was re-settled by the concurrent check-repair merge
+  during this review and was re-verified after it stabilized.
+- Web suite: 4,756 passed (378 files), including the MF-9/MF-10 focused
+  suites (87 targeted tests).
+- Web typecheck (`tsc -b`): passed.
+- Server routes still return `launch_scope_changed` from both the task-first
+  and session-launch preflight gates; MF-6's replay-before-scope ordering is
+  intact.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>

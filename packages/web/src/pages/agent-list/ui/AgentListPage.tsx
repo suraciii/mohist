@@ -27,7 +27,10 @@ function getAgentType(agent: AgentInfo): string {
   return runtime === 'pi' ? 'pi' : 'opencode'
 }
 
-function getLifecycleStatus(agent: AgentInfo): { label: string; dotClass: string } {
+function getLifecycleStatus(agent: AgentInfo): {
+  label: string
+  dotClass: string
+} {
   if (agent.status === 'archived') {
     return { label: 'Archived', dotClass: 'bg-gray-400' }
   }
@@ -49,7 +52,8 @@ function AgentRow({
   const agentType = useMemo(() => getAgentType(agent), [agent])
   const lifecycle = useMemo(() => getLifecycleStatus(agent), [agent])
   const isArchived = agent.status === 'archived'
-  const readiness = agent.readiness?.conclusion ?? 'Unknown'
+  const executability = agent.executability?.state ?? 'unknown'
+  const leadingGap = agent.executability?.gaps[0]
   const availabilityFeedback =
     !isArchived && availability && !availability.canStartNow
       ? getAgentAvailabilityFeedback(availability.waitingReason)
@@ -99,7 +103,7 @@ function AgentRow({
               )}
             </div>
             <p data-testid={`agent-purpose-${agent.id}`} className="mt-2 text-xs text-muted-foreground">
-              {agent.description?.trim() || 'No purpose set'}
+              {agent.purpose?.trim() || 'No purpose set'}
             </p>
           </div>
 
@@ -112,18 +116,23 @@ function AgentRow({
 
       <div className="mt-3 grid grid-cols-1 gap-1.5 border-t border-border/60 pt-3 text-xs sm:grid-cols-3">
         <span
-          data-testid={`agent-readiness-${agent.id}`}
-          data-conclusion={readiness}
+          data-testid={`agent-executability-${agent.id}`}
+          data-state={executability}
           className={
-            readiness === 'Ready'
+            executability === 'executable'
               ? 'text-emerald-700'
-              : readiness === 'Needs setup'
-                ? 'text-amber-700'
-                : 'text-muted-foreground'
+              : executability === 'unknown'
+                ? 'text-muted-foreground'
+                : 'text-amber-700'
           }
         >
-          Readiness: {readiness}
+          Executability: {executability}
         </span>
+        {leadingGap && (
+          <p data-testid={`agent-executability-guidance-${agent.id}`} className="text-muted-foreground">
+            {leadingGap.nextAction}
+          </p>
+        )}
         <div>
           <span
             data-testid={`agent-availability-${agent.id}`}

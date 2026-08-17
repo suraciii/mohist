@@ -78,7 +78,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             throw new ArgumentException("AgentId is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.AgentName))
             throw new ArgumentException("AgentName is required.", nameof(command));
-        if (string.IsNullOrWhiteSpace(command.Prompt)
+        if (string.IsNullOrEmpty(command.Prompt)
             && (command.Attachments is null || command.Attachments.Count == 0))
         {
             throw new ArgumentException(
@@ -131,6 +131,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 Model: command.Model,
                 Variant: command.Variant,
                 Runtime: command.Runtime,
+                ReasoningEffort: command.ReasoningEffort,
                 Prompt: command.Prompt,
                 WorkspaceName: command.WorkspaceName,
                 WorkspacePath: command.WorkspacePath,
@@ -342,6 +343,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             AgentInstructions: plan.AgentInstructions,
             AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
             Variant: plan.Variant,
+            ReasoningEffort: plan.ReasoningEffort,
             IssueNumber: plan.IssueNumber,
             EpicNumber: plan.EpicNumber,
             WorkflowRunId: null,
@@ -576,7 +578,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 plan.Model,
                 plan.Variant,
                 [],
-                plan.AllowedSubagents),
+                plan.AllowedSubagents,
+                plan.ReasoningEffort),
             AgentSessionStartup: plan.AgentSessionStartup,
             LaunchVisibility: plan.ParentSessionId is null
                 ? AgentLaunchVisibility.Visible
@@ -897,11 +900,6 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
 
 }
 
-[GenerateSerializer]
-public sealed class AgentLaunchCoordinatorState
-{
-    [Id(0)] public AgentLaunchCoordinatorPlan? Plan { get; set; }
-}
 
 /// <summary>
 /// Public envelope the coordinator route forwards. Carries the
@@ -985,14 +983,15 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(36)] string? Origin = null,
     [property: Id(37)] string? TargetId = null,
+    [property: Id(38)] string? ReasoningEffort = null,
     /// <summary>
     /// Response attachment verdicts captured before the coordinator plan
     /// was committed. This is append-only so older envelopes deserialize
     /// with no response metadata.
     /// </summary>
-    [property: Id(38)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    [property: Id(39)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
     /// <summary>
     /// Marks a task-first envelope whose definition was created before the
     /// canonical launch plan. Append-only Orleans field id.
     /// </summary>
-    [property: Id(39)] bool DefinitionCreatedByLaunch = false);
+    [property: Id(40)] bool DefinitionCreatedByLaunch = false);
