@@ -28,3 +28,8 @@
 - Follow-up handler completion now awaits the Pi completion handle, flushes the shared observer, evaluates the shared reply guard, and records terminal `session.activity` through a one-shot finalizer. Admission acknowledgement, durable `session.input`, operation journal behavior, output payload, and non-Slack behavior remain unchanged.
 - Added follow-up boundary coverage for OpenCode terminal gating and two silent reminders, Pi idle admission gating and Agent reply during advisory, rejected reply-action suppression, advisory failure preservation, Pi idle/streaming completion handles, and post-steer observation.
 - Verification passed: Runner source/test typechecks, test-boundary check, and focused follow-up/runtime/guard suites (112 tests before the terminal watcher race fix; 113 after).
+
+## Verification repair
+
+- The first canonical `npm run verify` stopped in `npm run format:check` before build or tests. Biome reported formatting drift in `agent-job-turn.ts`, `followup-handler.ts`, and `agent-job-reply-guard.spec.ts`; the worktree remained clean and the canonical diagnostics were written under `/tmp`.
+- Ran the repository formatter, which normalized the three task files. Focused format, Runner source/test typechecks, test-boundary validation, and the reply-guard/AgentJob/Pi/follow-up suites now pass (49 tests).

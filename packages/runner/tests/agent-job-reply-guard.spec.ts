@@ -145,12 +145,14 @@ function replyPiEvent(): PiRuntimeEvent {
   }
 }
 
-function makeOpenCodeRuntime(options: {
-  turnResult?: RuntimeResult<RuntimeTurnResult>
-  turnEvents?: RuntimeTurnEvent[]
-  followupMode?: FollowupMode
-  followupEvents?: RuntimeTurnEvent[]
-} = {}) {
+function makeOpenCodeRuntime(
+  options: {
+    turnResult?: RuntimeResult<RuntimeTurnResult>
+    turnEvents?: RuntimeTurnEvent[]
+    followupMode?: FollowupMode
+    followupEvents?: RuntimeTurnEvent[]
+  } = {},
+) {
   const runTurnCalls: RuntimeTurnRequest[] = []
   const followupCalls: RuntimeTurnRequest[] = []
   const turnResult = options.turnResult ?? successOpenCodeResult()
@@ -185,12 +187,14 @@ function makeOpenCodeRuntime(options: {
   return { runtime: runtime as OpenCodeRuntime, runTurnCalls, followupCalls }
 }
 
-function makePiRuntime(options: {
-  turnResult?: PiResult<PiTurnResult>
-  turnEvents?: PiRuntimeEvent[]
-  followupMode?: FollowupMode
-  followupEvents?: PiRuntimeEvent[]
-} = {}) {
+function makePiRuntime(
+  options: {
+    turnResult?: PiResult<PiTurnResult>
+    turnEvents?: PiRuntimeEvent[]
+    followupMode?: FollowupMode
+    followupEvents?: PiRuntimeEvent[]
+  } = {},
+) {
   const runTurnCalls: PiTurnRequest[] = []
   const followupCalls: PiTurnRequest[] = []
   const turnResult = options.turnResult ?? successPiResult()
@@ -223,7 +227,12 @@ function makePiRuntime(options: {
         return await new Promise<PiResult<never>>((resolve) => {
           signal?.addEventListener(
             'abort',
-            () => resolve({ ok: false, error: { kind: 'interrupted', message: 'advisory interrupted', diagnostics: [] }, diagnostics: [] }),
+            () =>
+              resolve({
+                ok: false,
+                error: { kind: 'interrupted', message: 'advisory interrupted', diagnostics: [] },
+                diagnostics: [],
+              }),
             { once: true },
           )
         })
@@ -241,7 +250,9 @@ function makePiRuntime(options: {
 test('guards an unpublished initial OpenCode turn with two bounded reminders and preserves its result', async () => {
   const runtime = makeOpenCodeRuntime({ followupMode: 'silent' })
   const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
-    buildWork({ with: { prompt: 'Inspect the change.', runtime: 'opencode', slackExecutionContext: slackExecutionContext() } }),
+    buildWork({
+      with: { prompt: 'Inspect the change.', runtime: 'opencode', slackExecutionContext: slackExecutionContext() },
+    }),
     new AbortController().signal,
   )
 
@@ -255,13 +266,17 @@ test('guards an unpublished initial OpenCode turn with two bounded reminders and
   expect(runtime.followupCalls.every((request) => request.target.runtimeSessionId === SESSION_ID)).toBe(true)
   expect(runtime.followupCalls.every((request) => request.target.workDir === WORK_DIR)).toBe(true)
   expect(runtime.followupCalls.every((request) => request.prompt.includes('deliberately remain silent'))).toBe(true)
-  expect(runtime.followupCalls.every((request) => request.options?.skills?.[0]?.name === 'mohist-slack-collaboration')).toBe(true)
+  expect(
+    runtime.followupCalls.every((request) => request.options?.skills?.[0]?.name === 'mohist-slack-collaboration'),
+  ).toBe(true)
 })
 
 test('guards an unpublished initial Pi turn through the same follow-up path', async () => {
   const runtime = makePiRuntime({ followupMode: 'silent' })
   const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
-    buildWork({ with: { prompt: 'Inspect the change.', runtime: 'pi', slackExecutionContext: slackExecutionContext() } }),
+    buildWork({
+      with: { prompt: 'Inspect the change.', runtime: 'pi', slackExecutionContext: slackExecutionContext() },
+    }),
     new AbortController().signal,
   )
 
@@ -288,7 +303,9 @@ test('does not advise after an accepted or rejected reply action attempt', async
 test('does not advise after a Pi reply action attempt even when the action later fails', async () => {
   const runtime = makePiRuntime({ turnEvents: [replyPiEvent()] })
   const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
-    buildWork({ with: { prompt: 'Publish the Pi result.', runtime: 'pi', slackExecutionContext: slackExecutionContext() } }),
+    buildWork({
+      with: { prompt: 'Publish the Pi result.', runtime: 'pi', slackExecutionContext: slackExecutionContext() },
+    }),
     new AbortController().signal,
   )
 
@@ -350,7 +367,9 @@ test('bypasses the guard for absent and malformed Slack contexts', async () => {
   const workItems = [
     { work: buildWork({ with: { prompt: 'No Slack guard.' } }), status: 'completed' },
     {
-      work: buildWork({ with: { prompt: 'Malformed Slack guard.', slackExecutionContext: { version: 1, replyAnchor: {} } } }),
+      work: buildWork({
+        with: { prompt: 'Malformed Slack guard.', slackExecutionContext: { version: 1, replyAnchor: {} } },
+      }),
       status: 'failed',
     },
   ] as const
