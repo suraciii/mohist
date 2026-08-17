@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Workflow.Definition;
+using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Runner.Grains;
 using Orleans;
@@ -109,7 +110,17 @@ public sealed class WorkflowRun
     /// the task result again.
     /// </summary>
     public List<AppliedRuntimeRecoveryReceipt> AppliedRecoveryReceipts { get; set; } = new();
+    /// <summary>
+    /// Cross-grain Session visibility deliveries are persisted with the
+    /// owner transition and removed only after the Session acknowledges the
+    /// idempotent transition. This closes the owner-commit/Session-write gap.
+    /// </summary>
+    public List<PendingAgentSessionInterruption> PendingSessionInterruptionDeliveries { get; set; } = new();
 
     public bool IsAssigned => Assignment is not null;
     public string? AssignedTo => Assignment?.WorkerId;
 }
+
+public sealed record PendingAgentSessionInterruption(
+    string SessionId,
+    AgentWorkInterruptionTransition Transition);

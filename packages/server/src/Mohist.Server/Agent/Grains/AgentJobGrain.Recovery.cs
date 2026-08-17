@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 
@@ -169,11 +170,12 @@ public sealed partial class AgentJobGrain
             }
 
             // The receipt ledger may have been persisted just before the
-            // operation-grain write. Repair that cross-grain acknowledgement
-            // before returning the stored answer, so an exact replay cannot
-            // leave the update permanently unresolved.
+            // Session or operation-grain write. Repair both cross-grain
+            // obligations before returning the stored answer, so an exact
+            // replay cannot leave recovery visibility unresolved.
             if (prior.Status == RuntimeRecoveryReceiptAckStatuses.Accepted)
             {
+                await RepairSessionInterruptionForReceiptAsync(receipt);
                 if (receipt.Payload?.Type.Trim().Equals(
                         RuntimeRecoveryReceiptPayloadTypes.UpdateInterrupted,
                         StringComparison.OrdinalIgnoreCase) == true)
@@ -209,6 +211,7 @@ public sealed partial class AgentJobGrain
                     RuntimeRecoveryReceiptFingerprint.For(payload.NormalizedTerminalResult!),
                     StringComparison.OrdinalIgnoreCase))
             {
+                await RepairSessionInterruptionForReceiptAsync(receipt);
                 await RepairTerminalReceiptOperationAsync(receipt);
             }
 
@@ -302,6 +305,7 @@ public sealed partial class AgentJobGrain
             RuntimeRecoveryReceiptAckStatuses.Accepted,
             reason));
         await PersistAsync();
+        await DeliverPendingSessionInterruptionAsync();
         await SettleUpdateOperationWorkAsync(receipt);
         if (canContinue)
             await TryAdmitAsync();
@@ -379,6 +383,51 @@ public sealed partial class AgentJobGrain
             State.RecoveryAttempts[index] = attempt;
     }
 
+    private async Task DeliverPendingSessionInterruptionAsync()
+    {
+        State.PendingSessionInterruptionDeliveries ??= [];
+        while (State.PendingSessionInterruptionDeliveries.Count > 0)
+        {
+            var pending = State.PendingSessionInterruptionDeliveries[0];
+            await ApplySessionInterruptionAsync(pending.SessionId, pending.Transition);
+            State.PendingSessionInterruptionDeliveries.RemoveAt(0);
+            await PersistAsync();
+        }
+    }
+
+    private async Task RepairSessionInterruptionForReceiptAsync(RuntimeRecoveryReceipt receipt)
+    {
+        await DeliverPendingSessionInterruptionAsync();
+        if (State.Interruption is not { } transition)
+            return;
+
+        await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, transition);
+    }
+
+    private void QueueSessionInterruptionDelivery(
+        string? sessionId,
+        AgentWorkInterruptionTransition transition)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return;
+
+        State.PendingSessionInterruptionDeliveries ??= [];
+        var existing = State.PendingSessionInterruptionDeliveries.FirstOrDefault(delivery =>
+            string.Equals(delivery.SessionId, sessionId, StringComparison.Ordinal)
+            && string.Equals(delivery.Transition.IdentityKey, transition.IdentityKey, StringComparison.Ordinal)
+            && string.Equals(delivery.Transition.State, transition.State, StringComparison.Ordinal));
+        if (existing is null)
+        {
+            State.PendingSessionInterruptionDeliveries.Add(
+                new PendingAgentSessionInterruption(sessionId, transition));
+        }
+        else if (string.IsNullOrWhiteSpace(existing.Transition.StopFailure)
+            && !string.IsNullOrWhiteSpace(transition.StopFailure))
+        {
+            var index = State.PendingSessionInterruptionDeliveries.IndexOf(existing);
+            State.PendingSessionInterruptionDeliveries[index] = existing with { Transition = transition };
+        }
+    }
     private TimeSpan ResolveUpdateInterruptionTimeout() =>
         _options.UpdateInterruptionTimeout > TimeSpan.Zero
             ? _options.UpdateInterruptionTimeout

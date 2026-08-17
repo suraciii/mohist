@@ -96,6 +96,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     {
         await HydrateAsync();
 
+        if (State.PendingSessionInterruptionDeliveries is { Count: > 0 })
+            await DeliverPendingSessionInterruptionAsync();
+
         if (IsTerminal && State.TerminalResult is not null)
             _terminalCompletion.TrySetResult(State.TerminalResult);
 
@@ -170,12 +173,14 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 return;
             }
 
+            await DeliverPendingSessionInterruptionAsync();
             if (State.PendingUpdateInterruptionEvent is { } pending)
                 await EmitUpdateInterruptionEventAsync(pending);
             // Keep the reminder armed until the receipt deadline even after
             // the interruption event has been durably delivered.
             if (State.PendingUpdateInterruptionEvent is null
-                && State.UpdateInterruptionDeadlineAt is null)
+                && State.UpdateInterruptionDeadlineAt is null
+                && State.PendingSessionInterruptionDeliveries is not { Count: > 0 })
                 await UnregisterSelfAsync(RecoveryReminderName);
 
             return;

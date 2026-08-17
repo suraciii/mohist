@@ -11,6 +11,7 @@ public sealed partial class AgentJobGrain
 
         if (IsTerminal)
         {
+            await DeliverPendingSessionInterruptionAsync();
             await TryReleaseConcurrencyPermitAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
@@ -20,10 +21,14 @@ public sealed partial class AgentJobGrain
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
+            if (State.PendingUpdateInterruptionEvent is not null)
+                await EmitUpdateInterruptionEventAsync(State.PendingUpdateInterruptionEvent);
             if (State.PendingSessionClose is null
                 && State.PendingFailureEvent is null
                 && State.PendingTerminalDeliveryEvent is null
                 && State.PendingSubagentTerminalEvent is null
+                && State.PendingUpdateInterruptionEvent is null
+                && State.PendingSessionInterruptionDeliveries is not { Count: > 0 }
                 && !State.ConcurrencyReleasePending)
             {
                 await UnregisterSelfAsync(reminderName);
@@ -67,12 +72,14 @@ public sealed partial class AgentJobGrain
                 return;
             }
 
+            await DeliverPendingSessionInterruptionAsync();
             if (State.PendingUpdateInterruptionEvent is { } pending)
                 await EmitUpdateInterruptionEventAsync(pending);
             // Keep the reminder armed until the receipt deadline even after
             // the interruption event has been durably delivered.
             if (State.PendingUpdateInterruptionEvent is null
-                && State.UpdateInterruptionDeadlineAt is null)
+                && State.UpdateInterruptionDeadlineAt is null
+                && State.PendingSessionInterruptionDeliveries is not { Count: > 0 })
                 await UnregisterSelfAsync(reminderName);
             return;
         }

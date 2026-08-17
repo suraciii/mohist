@@ -61,6 +61,10 @@ public partial class WorkflowGrain
                 "The Runner will deliver a confirmed interruption receipt; the replacement dispatch will then resume this work.",
                 interruptedAtValue);
             existingTask.AgentInterruption = transition;
+            QueueSessionInterruptionDelivery(
+                settlement.AgentSessionId,
+                transition with { State = AgentWorkInterruptionStates.Interrupting });
+            QueueSessionInterruptionDelivery(settlement.AgentSessionId, transition);
             await CommitAsync([
                 new AgentTaskInterruptionLifecycleChanged(
                     stage.Id,
@@ -68,10 +72,13 @@ public partial class WorkflowGrain
                     transition with { State = AgentWorkInterruptionStates.Interrupting }),
                 new AgentTaskUpdateInterrupted(stage.Id, taskRunId, workId, updateOperationId),
                 new AgentTaskInterruptionLifecycleChanged(stage.Id, taskRunId, transition)]);
-            await ApplySessionInterruptionAsync(
-                settlement.AgentSessionId,
-                transition with { State = AgentWorkInterruptionStates.Interrupting });
-            await ApplySessionInterruptionAsync(settlement.AgentSessionId, transition);
+            await DeliverPendingSessionInterruptionAsync();
+        }
+        else if (existingTask?.AgentInterruption is { } existingTransition && existingSettlement is not null)
+        {
+            // Older persisted runs may not have a delivery obligation. The
+            // owner retry still repairs the idempotent Session projection.
+            await ApplySessionInterruptionAsync(existingSettlement.AgentSessionId, existingTransition);
         }
 
         // A receipt can arrive at any time before this deadline. If it does
@@ -109,11 +116,12 @@ public partial class WorkflowGrain
 
         var transition = task.AgentInterruption with { StopFailure = failure, RecordedAt = Now() };
         task.AgentInterruption = transition;
+        QueueSessionInterruptionDelivery(settlement.AgentSessionId, transition);
         var stage = _run.Stages.Single(candidate => candidate.Tasks.Contains(task));
         await CommitAsync([
             new AgentTaskInterruptionLifecycleChanged(stage.Id, task.Id, transition)
         ]);
-        await ApplySessionInterruptionAsync(settlement.AgentSessionId, transition);
+        await DeliverPendingSessionInterruptionAsync();
         return ReportAck.Accepted;
     }
 
@@ -360,10 +368,10 @@ public partial class WorkflowGrain
                     "receipt-id-reused");
             }
 
-            // The Workflow commit is authoritative. Repair the operation
-            // ledger on an acknowledgement replay in case the process failed
-            // after committing the replacement but before marking the fence
-            // entry settled.
+            // The Workflow commit is authoritative. Repair both the
+            // cross-grain Session projection and the operation ledger before
+            // returning an acknowledgement replay.
+            await RepairSessionInterruptionForReceiptAsync(receipt);
             if (receipt.Payload?.Type.Trim().Equals(
                     RuntimeRecoveryReceiptPayloadTypes.UpdateInterrupted,
                     StringComparison.OrdinalIgnoreCase) == true
@@ -443,14 +451,15 @@ public partial class WorkflowGrain
                 requestFingerprint,
                 RuntimeRecoveryReceiptAckStatuses.Accepted,
                 "replacement-created"));
+            QueueSessionInterruptionDelivery(
+                settlement.AgentSessionId,
+                recoveringTransition);
             await CommitAsync([
                 new AgentTaskInterruptionLifecycleChanged(
                     replacement.StageId,
                     replacement.ReplacementTaskRunId,
                     recoveringTransition)]);
-            await ApplySessionInterruptionAsync(
-                settlement.AgentSessionId,
-                recoveringTransition);
+            await DeliverPendingSessionInterruptionAsync();
             await SettleUpdateOperationWorkAsync(receipt, payload.UpdateOperationId!);
             _log.LogInformation(
                 "run {run} recovered interrupted task {task}: generation={generation} work={work} turn={turn}",
@@ -533,6 +542,7 @@ public partial class WorkflowGrain
                 RecordedAt = Now(),
             };
             task.AgentInterruption = recovered;
+            QueueSessionInterruptionDelivery(settlement.AgentSessionId, recovered);
             events.Add(new AgentTaskInterruptionLifecycleChanged(
                 activeWork.Item.Stage,
                 receipt.TaskRunId,
@@ -544,16 +554,13 @@ public partial class WorkflowGrain
             requestFingerprint,
             RuntimeRecoveryReceiptAckStatuses.Accepted));
         await CommitAsync(events);
+        await DeliverPendingSessionInterruptionAsync();
         if (wasUpdateInterrupted)
         {
-            if (task.AgentInterruption is not null)
-                await ApplySessionInterruptionAsync(settlement.AgentSessionId, task.AgentInterruption!);
             await SettleUpdateOperationWorkAsync(receipt, settlement.UpdateOperationId!);
         }
         else if (replacementRecoveryTransition is not null)
         {
-            if (task.AgentInterruption is not null)
-                await ApplySessionInterruptionAsync(settlement.AgentSessionId, task.AgentInterruption);
             if (recoveryOriginal?.AgentResultSettlement is { } originalSettlement
                 && recoveryOriginal.AgentResultSettlement.TaskRunId is { } originalTaskRunId)
             {
@@ -662,6 +669,7 @@ public partial class WorkflowGrain
                 RecordedAt = Now(),
             };
             task.AgentInterruption = recovered;
+            QueueSessionInterruptionDelivery(recoverySessionId, recovered);
             events.Add(new AgentTaskInterruptionLifecycleChanged(
                 activeWork.Item.Stage,
                 activeWork.TaskRunId,
@@ -669,9 +677,9 @@ public partial class WorkflowGrain
         }
 
         await CommitAsync(events);
+        await DeliverPendingSessionInterruptionAsync();
         if (recoveringTransition is not null)
         {
-            await ApplySessionInterruptionAsync(recoverySessionId, task.AgentInterruption!);
             if (recoveryOriginal?.WorkId is { } originalWorkId
                 && recoveryOriginal.AgentResultSettlement?.TaskRunId is { } originalTaskRunId)
             {
@@ -761,6 +769,78 @@ public partial class WorkflowGrain
         if (hadRunnerLossInterruption)
             await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return ReportAck.Accepted;
+    }
+
+    private void QueueSessionInterruptionDelivery(
+        string? sessionId,
+        AgentWorkInterruptionTransition transition)
+    {
+        if (_run is null || string.IsNullOrWhiteSpace(sessionId))
+            return;
+
+        _run.PendingSessionInterruptionDeliveries ??= [];
+        var existing = _run.PendingSessionInterruptionDeliveries.FirstOrDefault(delivery =>
+            string.Equals(delivery.SessionId, sessionId, StringComparison.Ordinal)
+            && string.Equals(delivery.Transition.IdentityKey, transition.IdentityKey, StringComparison.Ordinal)
+            && string.Equals(delivery.Transition.State, transition.State, StringComparison.Ordinal));
+        if (existing is null)
+        {
+            _run.PendingSessionInterruptionDeliveries.Add(
+                new PendingAgentSessionInterruption(sessionId, transition));
+        }
+        else if (string.IsNullOrWhiteSpace(existing.Transition.StopFailure)
+            && !string.IsNullOrWhiteSpace(transition.StopFailure))
+        {
+            var index = _run.PendingSessionInterruptionDeliveries.IndexOf(existing);
+            _run.PendingSessionInterruptionDeliveries[index] = existing with { Transition = transition };
+        }
+    }
+
+    private async Task DeliverPendingSessionInterruptionAsync()
+    {
+        if (_run is null)
+            return;
+
+        _run.PendingSessionInterruptionDeliveries ??= [];
+        if (_run.PendingSessionInterruptionDeliveries.Count == 0)
+        {
+            await RemoveAgentSessionInterruptionReminderAsync();
+            return;
+        }
+
+        await EnsureAgentSessionInterruptionReminderAsync();
+        while (_run.PendingSessionInterruptionDeliveries.Count > 0)
+        {
+            var pending = _run.PendingSessionInterruptionDeliveries[0];
+            await ApplySessionInterruptionAsync(pending.SessionId, pending.Transition);
+            _run.PendingSessionInterruptionDeliveries.RemoveAt(0);
+            await SaveRunAsync();
+        }
+
+        await RemoveAgentSessionInterruptionReminderAsync();
+    }
+
+    private async Task RepairSessionInterruptionForReceiptAsync(RuntimeRecoveryReceipt receipt)
+    {
+        await DeliverPendingSessionInterruptionAsync();
+        if (_run is null)
+            return;
+
+        var task = _run.FindTaskForRecoveryReceipt(receipt.TaskRunId, receipt.WorkId);
+        if (task?.AgentInterruption is not { } transition)
+            return;
+
+        var sessionId = task.AgentResultSettlement?.AgentSessionId;
+        if (string.IsNullOrWhiteSpace(sessionId) && transition.RecoveryGeneration > 0)
+        {
+            sessionId = _run.Stages
+                .SelectMany(stage => stage.Tasks)
+                .Where(candidate => candidate.Id != task.Id)
+                .Select(candidate => candidate.AgentResultSettlement?.AgentSessionId)
+                .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+        }
+
+        await ApplySessionInterruptionAsync(sessionId, transition);
     }
 
     private async Task ApplySessionInterruptionAsync(

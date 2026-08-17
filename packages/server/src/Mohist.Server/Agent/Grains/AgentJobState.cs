@@ -2,6 +2,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -83,7 +84,19 @@ public sealed class AgentJobState
     [Id(42)] public DateTimeOffset? UpdateInterruptionDeadlineAt { get; set; }
     [Id(43)] public AgentWorkInterruptionTransition? Interruption { get; set; }
     [Id(44)] public List<AgentWorkInterruptionTransition> InterruptionHistory { get; set; } = [];
+    /// <summary>
+    /// Cross-grain Session visibility deliveries are persisted with the
+    /// owner transition and removed only after the Session acknowledges the
+    /// idempotent transition. This closes the owner-commit/Session-write gap.
+    /// </summary>
+    [Id(45)] public List<PendingAgentSessionInterruption> PendingSessionInterruptionDeliveries { get; set; } = [];
 }
+
+
+[GenerateSerializer]
+public sealed record PendingAgentSessionInterruption(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] AgentWorkInterruptionTransition Transition);
 
 
 [GenerateSerializer]
