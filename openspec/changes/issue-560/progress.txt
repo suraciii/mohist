@@ -465,3 +465,5 @@ open question, tasks.json T-004 (criteria/notes) + T-005 (guidance).
 The changes do not edit `review.md`. The latest focused verification passed: Server SpecTests 3,952/3,952, CLI tests 1,860/1,860, Web targeted tests 75/75, Web typecheck, and the FSD boundary check.
 
 Final `npm run verify` passed after the architecture/catalog repairs: docs, file-size, and format checks; solution/workspace builds; Workflow Definition 178, Server Unit 2,701, Server Spec 3,952, Server Architecture 68, CLI 1,860, Web 4,739, Runner 1,639, and Slack 70 tests. The final worktree is clean and `review.md` remains untouched.
+
+The final composer extension also gates selected existing-Agent launches through `/sessions/preflight`; server build, Server Architecture 68/68, Web typecheck, FSD boundaries, format, and 84 focused Web tests passed after that commit. A full verify rerun was not repeated after this additive extension.
