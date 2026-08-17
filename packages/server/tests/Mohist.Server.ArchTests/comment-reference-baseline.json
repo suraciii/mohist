@@ -1,2 +1,4 @@
 {
+  "Infrastructure/Data/Workflow/WorkflowRunQuerier.cs": 2,
+  "Runner/Services/WorkflowReportService.cs": 1
 }

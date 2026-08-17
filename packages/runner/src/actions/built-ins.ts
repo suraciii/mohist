@@ -231,7 +231,13 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: 'mohist/rebase',
       description: 'Rebase the current branch onto a base branch with optional squash',
       inputs: {
-        baseBranch: { types: ['string'], required: true, description: 'Base branch name' },
+        baseBranch: { types: ['string'], required: true, description: 'Base branch name (rebase target)' },
+        expectedBranch: {
+          types: ['string'],
+          engineSource: 'workspace.branch',
+          description:
+            'Expected workspace run branch; engine-sourced from workspace.branch and never derived from baseBranch',
+        },
         remote: { types: ['string'], description: 'Git remote name' },
         squash: { types: ['boolean'], default: false, description: 'Squash the rebased commits into one' },
         message: { types: ['string'], description: 'Literal squash commit message' },
@@ -262,6 +268,11 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: 'rebase-failed', description: 'Rebase failed for an unspecified reason' },
         { code: 'conflict', description: 'Rebase encountered conflicts' },
         { code: 'squash-failed', description: 'Squash step failed' },
+        {
+          code: 'branch-invariant-violation',
+          description:
+            'Rebase completed but the workspace is not on the expected run branch or is not clean/non-residual',
+        },
       ],
       capabilities: ['issue-fields'],
     },

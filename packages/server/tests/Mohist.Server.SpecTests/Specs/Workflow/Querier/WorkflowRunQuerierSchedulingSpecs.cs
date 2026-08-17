@@ -467,5 +467,126 @@ public class WorkflowRunQuerierSchedulingSpecs
                 [])]);
     }
 
+    [Fact]
+    public async Task FindRunningAssignedToAsync_ExcludesDurablyBlockedAttentionRows()
+    {
+        // Issue-628 T-005: the durable Agent-blocked attention projection is
+        // the sole exactly-once release boundary for Runner control-plane
+        // capacity. The desired redelivery set must exclude any row whose
+        // <c>AttentionStatus</c> is <c>blocked</c> while preserving the
+        // assigned worker match for non-blocked rows. Blocked rows here keep
+        // their active-work projection set on purpose: with the merged
+        // release boundary (materialized active-work projection plus durable
+        // blocked attention), the <c>AttentionStatus</c> condition must be
+        // the deciding factor even when another control-plane surface writes
+        // a stale active-work projection.
+        var prefix = NewPrefix("sched-blocked-running");
+        var runnerId = $"{prefix}-runner";
+        var otherRunnerId = $"{prefix}-other-runner";
+
+        await InsertAttentionRowAsync($"{prefix}-running-active", "Running", runnerId, attentionStatus: null, activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-running-blocked-this", "Running", runnerId, attentionStatus: "blocked", activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-running-blocked-other", "Running", otherRunnerId, attentionStatus: "blocked", activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-ready-this", "Ready", runnerId, attentionStatus: null);
+
+        using var scope = _fixture.Services.CreateScope();
+        var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
+
+        var forThisRunner = await querier.FindRunningAssignedToAsync(runnerId);
+
+        Assert.Equal(
+            new[] { $"{prefix}-running-active" },
+            forThisRunner);
+        Assert.DoesNotContain($"{prefix}-running-blocked-this", forThisRunner);
+
+        var forOtherRunner = await querier.FindRunningAssignedToAsync(otherRunnerId);
+        Assert.DoesNotContain($"{prefix}-running-blocked-other", forOtherRunner);
+    }
+
+    [Fact]
+    public async Task CountRunningAssignedToAsync_ExcludesDurablyBlockedAttentionRows()
+    {
+        // Issue-628 T-005: <c>CountRunningAssignedToAsync</c> shares the
+        // single release boundary with <c>FindRunningAssignedToAsync</c>;
+        // durably blocked rows must decrement the count without altering
+        // the configured slot totals. As above, the blocked rows keep their
+        // active-work projection so the <c>AttentionStatus</c> condition
+        // alone must release them.
+        var prefix = NewPrefix("sched-count-blocked");
+        var runnerId = $"{prefix}-runner";
+        var otherRunnerId = $"{prefix}-other-runner";
+
+        await InsertAttentionRowAsync($"{prefix}-running-active-1", "Running", runnerId, attentionStatus: null, activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-running-active-2", "Running", runnerId, attentionStatus: null, activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-running-blocked-1", "Running", runnerId, attentionStatus: "blocked", activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-running-blocked-2", "Running", runnerId, attentionStatus: "blocked", activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-running-blocked-other", "Running", otherRunnerId, attentionStatus: "blocked", activeWork: true);
+
+        using var scope = _fixture.Services.CreateScope();
+        var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
+
+        // Two active rows for the runner; the two blocked rows must NOT
+        // count, and the blocked row assigned to the other runner must
+        // also stay invisible to this runner.
+        Assert.Equal(2, await querier.CountRunningAssignedToAsync(runnerId));
+        Assert.Equal(0, await querier.CountRunningAssignedToAsync(otherRunnerId));
+    }
+
+    [Fact]
+    public async Task FindBlockedAsync_ReturnsOnlyDurablyBlockedRows()
+    {
+        // Issue-628 T-005: <c>FindBlockedAsync</c> is the inverse of the
+        // control-plane exclusion — only rows whose
+        // <c>AttentionStatus</c> is <c>blocked</c> appear. The aggregate
+        // assignment is preserved for a matching late authoritative
+        // report, so this query never clears the worker binding.
+        var prefix = NewPrefix("sched-find-blocked");
+        var projectId = prefix;
+        var runnerId = $"{prefix}-runner";
+
+        await InsertAttentionRowAsync($"{prefix}-blocked-A", "Running", runnerId, attentionStatus: "blocked", projectIdOverride: projectId);
+        await InsertAttentionRowAsync($"{prefix}-blocked-B", "Running", runnerId, attentionStatus: "blocked", projectIdOverride: projectId);
+        await InsertAttentionRowAsync($"{prefix}-active", "Running", runnerId, attentionStatus: null, projectIdOverride: projectId);
+        await InsertAttentionRowAsync($"{prefix}-other-project-blocked", "Running", runnerId, attentionStatus: "blocked", projectIdOverride: $"{prefix}-other");
+
+        using var scope = _fixture.Services.CreateScope();
+        var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
+
+        var allBlocked = await querier.FindBlockedAsync();
+        Assert.Contains($"{prefix}-blocked-A", allBlocked);
+        Assert.Contains($"{prefix}-blocked-B", allBlocked);
+        Assert.DoesNotContain($"{prefix}-active", allBlocked);
+
+        var onlyThisProject = await querier.FindBlockedAsync(projectId);
+        Assert.Equal(
+            new[] { $"{prefix}-blocked-A", $"{prefix}-blocked-B" }.OrderBy(id => id, StringComparer.Ordinal),
+            onlyThisProject.OrderBy(id => id, StringComparer.Ordinal));
+        Assert.DoesNotContain($"{prefix}-other-project-blocked", onlyThisProject);
+    }
+
+    private async Task InsertAttentionRowAsync(
+        string workflowRunId,
+        string status,
+        string runnerId,
+        string? attentionStatus,
+        string? projectIdOverride = null,
+        bool activeWork = false)
+    {
+        var projectId = projectIdOverride ?? NewPrefix("sched-attention");
+        await InsertRowAsync(
+            workflowRunId,
+            projectId: projectId,
+            status: status,
+            assignedWorkerId: runnerId,
+            activeWork: activeWork);
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.WorkflowRuns.FindAsync(workflowRunId);
+        Assert.NotNull(row);
+        row!.AttentionStatus = attentionStatus;
+        await db.SaveChangesAsync();
+    }
+
     private static string NewPrefix(string label) => $"{label}-{Guid.NewGuid():N}";
 }

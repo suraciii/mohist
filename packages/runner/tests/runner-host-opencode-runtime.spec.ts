@@ -146,10 +146,10 @@ vi.mock('../src/runtime/workspace.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/runtime/workspace.js')>()
   class FakeWorkspaceManager {
     async prepare() {
-      return { path: '/virtual/mohist-runner-host-opencode-runtime', branch: 'main', changeDir: null }
+      return { path: '/virtual/mohist-runner-host-opencode-runtime', branch: null, changeDir: null }
     }
     async verify() {
-      return { path: '/virtual/mohist-runner-host-opencode-runtime', branch: 'main', changeDir: null }
+      return { path: '/virtual/mohist-runner-host-opencode-runtime', branch: null, changeDir: null }
     }
   }
   return {

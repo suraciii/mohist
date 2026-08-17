@@ -209,8 +209,16 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
-    public async Task BlockedUnresolvedAgentWork_ReleasesDispatchAndKeepsLateResultSettlement()
+    public async Task Redelivery_BlockedUnresolvedAgentWork_StopsRedeliveringAfterDurableBlocked()
     {
+        // Issue-628 T-005: a durably Blocked Agent settlement is the
+        // sole exactly-once release boundary for the Runner control
+        // plane. Once the workflow commits Unknown→Blocked, the run is
+        // absent from FindRunningAssignedToAsync / AddMissingRedeliveriesAsync
+        // / Runner activeWorks, and a subsequent poll must not redeliver
+        // it. A matching late authoritative report still settles the
+        // attempt through the workflow report path because the
+        // task-run/work/runner identity is preserved on the aggregate.
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
             checks: []));
@@ -234,6 +242,11 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var blocked = await LoadRunAsync(_workflowId!);
         Assert.Equal(AgentResultSettlementState.Blocked, Assert.Single(blocked.CurrentStage().Tasks).AgentResultSettlement!.State);
 
+        // Same exactly-once boundary: the post-commit poll must not
+        // redeliver the now-Blocked attempt.
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        // Repeating the poll is idempotent — the release is durable, not
+        // a per-poll observation.
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
 
         Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(

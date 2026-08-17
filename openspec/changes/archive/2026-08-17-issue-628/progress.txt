@@ -1,0 +1,446 @@
+# Issue 628 progress — Workflow rebase recovery must restore the expected branch
+
+## T-001 (done) — Repair and verify workspaces on the expected run branch
+
+### Codebase Patterns (read first for later tasks)
+
+- **Shared health module**: `packages/runner/src/runtime/workspace-health.ts` owns the
+  semantic model + evaluator + diagnostics. NO git process adapters live there — each
+  consumer keeps its own narrow runner (`workspace-prepare` action uses
+  `RunnerGitRunner`/`workspacePrepareGitRunner` + `workspacePrepareExistsChecker`;
+  `WorkspaceManager` uses `runCommand` + direct `exists` file checks). Both share
+  `evaluateWorkspaceHealth(snapshot, expectedBranch)` and
+  `workspaceHealthDiagnostic({operation, expectedBranch, snapshot, detail})`.
+- **Health snapshot fields**: `{ residual: {rebaseMerge,rebaseApply,mergeHead,cherryPickHead},
+  head: {commit, ref}, porcelain, probeFailure: {step,message,exitCode}|null }`.
+  `ref` is the branch name or `(detached)`; a probe failure makes `healthy=false`.
+- **Diagnostic format** (assert on these stable fields): `workspace health failure:
+  operation=<step> expectedBranch=... observedBranch=... observedRef=... dirty=...
+  residual=<rebase,merge,cherry-pick|none>; <condition>[; <detail>]`.
+- **State machine order** (both action and manager reentry): probe → fast path (exact
+  branch + clean + no residual = no mutation) → abort residual ops in fixed order
+  (rebase → merge → cherry-pick), re-probe each → reset+clean dirty tree → checkout the
+  existing expected branch (never `-B`, never clone/fetch) → complete final probe; only
+  then success.
+- **Manager wiring**: `WorkspaceManager.prepare` reentry goes through
+  `reenterRunBranch` (now the full health-repair machine); `verify` goes through
+  `assertHealthyWorkspace` (probe → abort residual with re-probes → evaluate; throws
+  `WorkspaceBranchMismatchError` carrying the shared diagnostic). Both use
+  `captureHealthSnapshot` (sanitizes fd→display paths).
+- **Probe-failure detail dedup**: when `snapshot.probeFailure` exists, the condition
+  label already contains the probe message, so call sites pass `detail=undefined`
+  (via `probeFailureResult` / `probeFailureThrow`) to avoid duplication.
+
+### Gotchas discovered
+
+- **workspace.spec.ts FakeGitRunner**: extended to be a stateful fake worktree. Health
+  probes (`rev-parse --abbrev-ref HEAD`, `rev-parse HEAD`, `status --porcelain`) +
+  direct `.git/<marker>` files for residual detection (manager uses `exists()` on real
+  FS). Clone writes state under `<path>.preparing`; prepare renames to the stable path,
+  so the fake ADOPTS the `.preparing` sibling state on the first `-C <stable>` call.
+  Adoption must be **non-overwriting** — tests mutate state via `setDetached` /
+  `setBranch` / `setDirty` / `setResidual`, which mirror mutations onto the
+  `.preparing` sibling too so adoption can't undo them.
+- **`path.join(w, ".git", "")` drops the trailing slash** → residual exists-checker
+  must strip via `startsWith(gitDir + "/")` not `startsWith(join(...))`.
+- **`StatefulFakeWorktree`** (`tests/support/fake-worktree.ts`): reusable for the
+  `workspace-prepare` action (wired as `workspacePrepareGitRunner` +
+  `workspacePrepareExistsChecker`) — flags `abortLeavesResidual`, `resetCleanIneffective`,
+  per-state `checkoutAttaches` (checkout exits 0 but doesn't attach → final verify
+  branch-mismatch), plus `fail(match, msg, times)` transient injection.
+- Old manager fallback "on checkout failure, abort+reset and retry" was REMOVED —
+  checkout failure is now a durable failure (exact retry converges). Old
+  `runHealthGate`/`verifyWorkspaceBranch` replaced by the shared-contract methods.
+
+### Verification
+
+- Full runner suite green (155 files / 1699 tests), `tsc` (src + tests), and
+  `check:test-boundaries` all pass.
+- Focused suites: workspace-prepare.spec.ts (38), workspace.spec.ts (42 incl. new
+  health-contract block), workspace-prepare-workflow, git-action-contracts,
+  executor-workspace-boundary, executor-branch-stability.
+
+## T-002 (done) — Enforce expected-branch integrity at rebase recovery completion
+
+### Codebase Patterns (read first for later tasks)
+
+- **Engine-sourced rebase input**: `mohist/rebase` manifest gained
+  `expectedBranch: { types: ['string'], engineSource: 'workspace.branch' }`
+  (NOT required — `define-action` forbids required+engineSource). The executor's
+  `injectEngineInputs` populates it from `variables.workspace.branch`; the action
+  reads it via `stringInput(inputs, "expectedBranch")`. `baseBranch` stays the
+  rebase target and is never the workspace identity. If the engine value is
+  missing/null the action returns `invalid-input` (validated-input nulls are
+  dropped as absent) — never a baseBranch substitution.
+- **Completion invariant in rebase.ts**: after a successful rebase AND after any
+  squash, `runSquashIfRequested` calls `verifyRebaseCompletion(host, expectedBranch)`
+  which captures the shared health snapshot (`captureHealthSnapshot`, all 4
+  residual markers + head + porcelain) and evaluates with `evaluateWorkspaceHealth`.
+  Unhealthy → `fail("branch-invariant-violation", workspaceHealthDiagnostic({
+  operation:"verify", expectedBranch, snapshot, detail }))` with NO output
+  (successful rebase output is never exposed). Declared the new error code in the
+  rebase manifest so `normalizeActionResult` doesn't rewrite it to unexpected-error.
+- **Conflict path unchanged**: unresolved rebase conflicts still return the
+  existing `conflict` failure with file names and `rebaseLeftInProgress: true` —
+  the action never aborts/cleans the conflict state a resolver needs.
+- **StatefulFakeWorktree extended for rebase** (`tests/support/fake-worktree.ts`):
+  new `rebaseSimulation` ({ succeeds?, successBranch?: string|null, successCommit?,
+  conflictFiles? }) plus handlers for `fetch`, `rebase <ref>` (non-abort),
+  `diff --name-only --diff-filter=U`, `add .`, `commit`, `reset --soft`, and
+  generic `rev-parse <ref>` via a per-state `revs` map. A successful rebase keeps
+  HEAD on the current branch unless `successBranch` forces detached/null or
+  another branch. Conflict leaves `residual.rebaseMerge` + detached HEAD.
+- **Test wiring for rebase.spec.ts**: `installRebaseGitRunner` now wraps the
+  scenario runner to answer the three new completion probes that don't exist in
+  the pre-rebase flow (`rev-parse --git-path MERGE_HEAD`, `CHERRY_PICK_HEAD`,
+  `rev-parse --abbrev-ref HEAD`), keeping the underlying `calls` array focused on
+  rebase flow. `context()` gained `expectedBranch` in `with` + `workspace.branch`
+  in variables. Exact call assertions include the trailing health probe block
+  (rebase-merge, rebase-apply, [MERGE_HEAD], [CHERRY_PICK_HEAD], HEAD,
+  [--abbrev-ref], status).
+
+### Gotchas discovered
+
+- **Health probes land AFTER the rebase command in every success path**, so tests
+  with exact `calls` arrays and `rev-parse HEAD` count-based responses now see an
+  extra HEAD/status/git-path probe; make status stateful when a test simulates a
+  dirty pre-rebase tree (commitPendingChanges) followed by a clean post-rebase
+  tree, otherwise the completion probe reports dirty → branch-invariant failure.
+- **Dirty-after-rebase is a branch-invariant failure**: the completion invariant
+  requires clean + non-residual, so the `DirtyWorktreeBeforeRebase` fixed-stub test
+  had to be made stateful (dirty only before the prepare commit).
+- **Probe-failure detail dedup applies to rebase too**: when
+  `snapshot.probeFailure` exists, pass `detail=undefined` to the diagnostic (the
+  condition label already carries the probe message).
+- **biome `format:check` is NOT a passing gate** for this repo — the runner test
+  files already use double quotes and were failing at HEAD (T-001 left 6 files
+  non-clean). Follow the existing file style; avoid introducing NEW long-line
+  format errors (built-ins.ts descriptions had to be wrapped to stay clean).
+- **Server rebase recovery dispatch** (`IssueRoutes.Helpers.BuildRebaseTaskWith`)
+  sends only `{ baseBranch, remote }`; the runner engine injects `expectedBranch`
+  from workspace.branch at execution, so no server change was needed. Server
+  ActionContractValidator tests use synthetic catalogs and are unaffected.
+
+### Verification
+
+- Full runner suite green (155 files / 1714 tests), `tsc` (src + tests), and
+  `check:test-boundaries` all pass.
+- rebase.spec.ts: 28 tests (20 existing updated + 8 new stateful fake-worktree:
+  local/remote/squash expected-branch success, detached completion, detached after
+  squash, wrong-branch completion, conflict leaves residual for resolver, final
+  probe failure). git-action-contracts: engineSource + catalog-hiding + injection
+  + null-workspace tests. workflow-profile: rebase task declares no expectedBranch.
+  workspace-prepare-workflow: executor-level engine injection + detached failure.
+  worktree-cleanup-delivery: rebase context/mock updated for completion probes.
+
+## T-003 (done) — Reject invalid Git workspace state at task boundaries
+
+### Codebase Patterns (read first for later tasks)
+
+- **Boundary probes share the health model**: `branch-stability.ts` now captures the
+  full shared `WorkspaceHealthSnapshot` (residual markers via `rev-parse --git-path` +
+  exists checker, `rev-parse HEAD`, `rev-parse --abbrev-ref HEAD`, `status --porcelain`)
+  through the executor's narrow `git()` probe when an expected branch is defined. The
+  violation message is `workspaceHealthDiagnostic({operation, expectedBranch, snapshot,
+  detail})` — same expected/observed terminology as `workspace-prepare`/`rebase`/manager.
+  `branchInvariantViolationFailure` gained an optional `message` field that supersedes the
+  legacy format; the legacy fallback is kept only for direct unit callers.
+- **Start vs end asymmetry (important)**: the START boundary checks only alignment
+  (detached/mismatch) + probe failure (incl. non-Git = "unverified workspace"). It does
+  NOT reject residual state, because `mohist/workspace-prepare` runs precisely to repair
+  residual/detached state — failing start on residual would block workspace-prepare from
+  ever running (this was caught by the workspace-prepare-workflow regression test). The
+  END boundary additionally rejects residual rebase/merge/cherry-pick state after a
+  successful action. Dirty worktrees are deferred to `enforceCleanWorktree` at BOTH
+  boundaries (agent cleanup must still run).
+- **Non-Git + expected branch = failure now**: the old `checkBranchStability` returned
+  `ok` for a non-Git directory even with an expected branch; it now fails as a probe
+  failure ("unverified expected workspace"). Non-Git stays OK only for actions with NO
+  expected workspace branch (observational `readCurrentBranch` path, unchanged).
+- **Executor bypasses tryRecovery for branch-invariant**: new `isBranchInvariantViolation`
+  guard returns the failed `WorkItemResult` (status `failed`, no `addTasks`) directly —
+  BOTH for action-level failures (before `tryRecovery` on the projected result) AND the
+  end-boundary violation (was `tryRecovery(...) ?? result`, now just `result`). Start-check
+  violations already returned directly. Ordinary conflict failures still flow through
+  `tryRecovery`.
+- **StatefulFakeWorktree now answers worktree-enforcement probes**: added handlers for
+  `rev-parse --is-inside-work-tree`, `diff --cached --name-only`, `diff --name-only`,
+  `ls-files --others --exclude-standard`, and `rev-parse --git-path index.lock` so
+  executor-level tests where the action succeeds can settle through `enforceCleanWorktree`.
+
+### Gotchas discovered
+
+- **Executor tests with a non-null workspace branch need a real git probe now.** Tests
+  that ran the executor with `verifyOnlyWorkspaceManager({branch: 'main'})` (or a mocked
+  manager returning a branch) against the default `nonGitRunner` broke once expected-branch
+  probes fail on non-Git. Fixed by giving those tests a clean-branch runner
+  (`executor-raw-with.spec.ts` `cleanMainRunner`) or switching the mock manager to
+  `branch: null` (`runner-host-task-log`, `runner-host-opencode-runtime` — they test
+  log/opencode plumbing, not branch stability).
+- **Existing executor git stubs needed new cases**: `installExecutorGitProbe`
+  (workspace-prepare-workflow) and `installExecutorGit` (worktree-cleanup-delivery) now
+  answer `rev-parse --git-path <marker>`, `rev-parse HEAD`, `status --porcelain`.
+- **Executor order matters**: end probe runs before `captureAndUploadArtifactsForWork` and
+  `enforceCleanWorktree`, so an invalid workspace can never be settled as completed (the
+  acceptance criterion "before artifacts or work results can settle it").
+- **Test action must declare `branch-invariant-violation` in `errors`** for executor tests
+  where the action itself returns it — otherwise `normalizeActionResult` rewrites the code
+  to unexpected-error (same rule as rebase manifest).
+- **Full runner suite grew 1714 → 1731** (17 new tests: 10 unit `checkBranchStability`
+  + 8 executor boundary scenarios in `executor-workspace-boundary.spec.ts`; one test
+  reworked in executor-raw-with). `tsc` (src+tests) and `check:test-boundaries` green.
+
+### Verification
+
+- Full runner suite green (155 files / 1731 tests), `tsc` (src + tests), and
+  `check:test-boundaries` all pass.
+- Focused suites: executor-branch-stability (10), executor-workspace-boundary (11 incl.
+  the 8 new stateful fake-worktree scenarios), workspace-prepare-workflow,
+  worktree-cleanup-delivery, rebase, executor-recovery, recovery-round-cross-boundary all
+  green.
+
+## T-004 (done) — Preserve recovery identity and diagnostics across exact retries
+
+### Codebase Patterns (read first for later tasks)
+- `tryRecovery` clones `with` from the original `DispatchWorkItem` and
+  emits an `AddTaskInput` carrying `uses`, `with`, `artifacts`,
+  `setVars`, `recovery`, `recoveryRemaining`, `expect`. Variables and
+  `workflowRunId` are NOT in the `AddTaskInput` wire shape; the server
+  re-binds the same workflow run + variables when it materializes the
+  retry into a new dispatch. The runner therefore never needs to
+  duplicate the workspace branch in the retry's `with` (rebase's
+  `expectedBranch` remains engine-sourced from `workspace.branch`).
+- For `mohist/workspace-prepare`, the workflow profile declares
+  `with.expectedBranch: ${{ workspace.branch }}` once per profile
+  (per stage). A self-retry clones that `with` verbatim and does not
+  add a second declaration. The action's fast-path branch already
+  detects a healthy workspace and returns success without mutation
+  (`StatefulFastPath_HealthyWorkspace_NoMutation`).
+- `StatefulFakeWorktree.fail(match, message, times)` is the injection
+  mechanism: when a Git call matches, the runner returns the failure
+  message and decrements `remaining`. Once exhausted the failure is
+  spliced out, so `times=1` is a clean transient injection, while
+  `times=100` is a persistent injection.
+
+### Implementation summary
+- No runner code changes; tests are added on top of T-001/T-002/T-003's
+  identity-preserving workspace health contract.
+- Added stateful fake-worktree tests in `workspace-prepare.spec.ts` that
+  exercise transient / persistent failure injection across two
+  `workspacePrepareAction` calls on the same fake worktree:
+  - `StatefulTransientCheckoutFailure_FirstAttemptIsDurableFailureThenRetryRepairsSamePath`
+    — single-shot `checkout` failure; first call returns a durable
+    actionable failure with shared expected/observed diagnostic + no
+    successful output + workspace not replaced; subsequent call
+    converges on the same path and branch via the existing fast path
+    after the transient is exhausted.
+  - `StatefulTransientResidualFailure_FirstAttemptIsDurableFailureThenRetryRepairsSamePath`
+    — single-shot `rebase --abort` failure on a workspace that is
+    already on the expected branch but has residual rebase state; the
+    failed attempt does not replace the workspace or create a new
+    branch, and the retry finally aborts the residual state.
+  - `StatefulPersistentCheckoutFailure_BothAttemptsFailWithSameDiagnosticClass`
+    — `times=100` checkout failure; second attempt returns a failure
+    of the SAME diagnostic class (same `operation=checkout`,
+    `expectedBranch=...`, `observedBranch=(detached)`) and never a
+    successful output, with the workspace identity still preserved.
+  - `StatefulRepeatedPreparation_HealthyWorkspace_IsIdempotentFastPathEachTime`
+    — healthy workspace prepared twice; both succeed via the fast
+    path with no checkout/abort/reset/clean, no replacement path,
+    and no branch creation. Confirms `expectedBranch` does not
+    require a second declaration on the retry path.
+- Added recovery materialization tests in `executor-recovery.spec.ts`
+  under `recovery materialization preserves workspace and run-branch
+  identity`:
+  - `self-retry keeps the original with verbatim — no second
+    expectedBranch declaration is added` — a `mohist/rebase`
+    self-retry's `with` is exactly the original's
+    `{ baseBranch, remote }`; `expectedBranch` is engine-injected
+    from `variables.workspace.branch` and is never re-declared.
+  - `handler-materialized tasks inherit the original with and never
+    substitute baseBranch for expectedBranch` — a resolver task's
+    `with` is the workflow author's literal declaration; no
+    `expectedBranch` is synthesised and `baseBranch` is never
+    substituted into the workspace identity slot.
+  - `self-retry preserves variables.workspace.path and workflowRunId
+    via the immutable with clone` — the retry's `with` is a fresh
+    deep clone (so retries cannot regress the original declaration)
+    and `variables` travel separately through the server-side
+    dispatch materialisation, keeping `workflowRunId` and
+    `workspace.{path,branch}` bound to the original run.
+
+### Verification
+- Full runner suite green (156 files / 1739 tests), `tsc` (src + tests),
+  and `check:test-boundaries` all pass.
+- Focused suites: `workspace-prepare.spec.ts` (42 incl. 4 new
+  stateful-retry scenarios), `executor-recovery.spec.ts` (14 incl. 3
+  new identity-preservation scenarios), `workspace-prepare-workflow`,
+  `recovery-round-cross-boundary`, `workspace.spec.ts`,
+  `executor-branch-stability`, `executor-workspace-boundary`,
+  `worktree-cleanup-delivery`, `rebase`, `workflow-profile.spec.ts`
+  all pass.
+- T-001, T-002, T-003 suites remain green (no regressions).
+
+
+## T-005 (done) — Release durably blocked settlements from Runner projections
+
+### Codebase Patterns (read first for later tasks)
+
+- **Single release boundary on `AttentionStatus="blocked"`**:
+  `WorkflowRunQuerier.CountRunningAssignedToAsync` and
+  `WorkflowRunQuerier.FindRunningAssignedToAsync` now both filter on
+  `row.AttentionStatus != "blocked"`. They share the exact same
+  WHERE clause, sourced from the new `BlockedAttentionStatus`
+  constant on the querier. The blocked projection is rebuilt on
+  every `WorkflowRunStore.SaveAsync` (`entity.AttentionStatus =
+  run.HasBlockedAgentResult() ? "blocked" : null`) and is never
+  used to decide task or run lifecycle — only to filter control-plane
+  queries. Same column backs `FindBlockedAsync`.
+- **Runner `activeWorks` projection reuses the same boundary**:
+  `RunnerGrain.BuildRuntimeStateAsync` iterates
+  `_workflowRuns.FindRunningAssignedToAsync(workerId)` and only the
+  resulting ids get a `RunnerActiveWorkItem`. A durably Blocked row
+  is excluded at this lookup, so the runner's runtime view never
+  surfaces the attempt. `RunnerGrain.TryClaimAgentJobAsync` uses
+  `_workflowRuns.CountRunningAssignedToAsync(RunnerId)` for the slot
+  gate; the same filter keeps the count accurate.
+- **Capacity view follows activeWorks**: `RunnerStatusService.ProjectRunnerAsync`
+  computes `activeWorkflowCount = runtime.ActiveWorks.Where(w =>
+  w.OwnerKind == "Workflow").Select(w => w.OwnerId).Distinct().Count()`
+  and reports it as `RunnerCapacityView.UsedSlots`. Because the
+  activeWorks list already excludes blocked rows, capacity tracks the
+  same exactly-once boundary without a separate query.
+- **Stale unknown observations never reach task settlement**:
+  `WorkflowReportService.ReportAsync` short-circuits when the
+  translator returns `InboundReport.Unknown` AND the workflow grain's
+  `ObserveAgentResultUnknownAsync` answers `Stale`. The previous
+  fallback (re-issuing `unknown.Fallback` as `ReceiveTaskReportAsync`
+  with `TaskReportStatus.Failed`) is removed; that would have
+  re-authored `TaskFailed` after `Blocked` and re-introduced the run
+  into activeWorks / capacity / missing-redelivery.
+- **Blocked domain rejects observation writes**:
+  `WorkflowRun.Work.RecordObservation` returns
+  `AgentExecutionUpdate.Rejected` when the settlement state is
+  already `Blocked`. `ObserveAgentResultUnknownAsync` therefore
+  answers `Stale` for any unknown observation whose matching attempt
+  has already been durably blocked; the original task-run / work /
+  runner identity is preserved so a matching authoritative late
+  report still settles.
+
+### Implementation summary
+- **Querier filter (`Infrastructure/Data/Workflow/WorkflowRunQuerier.cs`)**:
+  - `CountRunningAssignedToAsync` and `FindRunningAssignedToAsync`
+    gain `&& row.AttentionStatus != BlockedAttentionStatus`.
+  - `FindBlockedAsync` reuses the same `BlockedAttentionStatus`
+    constant instead of the literal `"blocked"`.
+  - New `private const string BlockedAttentionStatus = "blocked"`
+    plus the same `///` doc comment contract as the existing
+    `StatusString` helper — every site that needs to filter the
+    blocked projection funnels through the constant.
+- **Report adapter (`Runner/Services/WorkflowReportService.cs`)**:
+  - After `ObserveAgentResultUnknownAsync` answers `Stale`, the
+    service returns `(ReportAck.Stale.ToString().ToLowerInvariant(),
+    workflow.GetRunStatusAsync())` and never re-enters
+    `ReceiveTaskReportAsync`. The translator's `TaskReportStatus.Failed`
+    fallback is dead code on this path.
+- **Tests added** (under `packages/server/tests/Mohist.Server.SpecTests/`):
+  - `Specs/Workflow/Grain/AgentResultSettlementSpecs.cs` — three
+    fake-time scenarios that drive the durable Blocked transition
+    through `ReceiveReminder(AgentResultSettlementReminderName, ...)`
+    after advancing `_fixture.TimeProvider` past
+    `settlement.DeadlineAt`:
+    - `BlockedSettlement_ReleasesRunnerActiveWorksAndCapacityAtOneExactlyOnceBoundary`
+      — pre-deadline Unknown lease: runner's
+      `GetRuntimeStateAsync().ActiveWorks` carries the work,
+      `DispatchService.PollAsync` returns it as a recovery
+      `AgentRecovery` dispatch, and `WorkflowRunQuerier.{Find,Count}RunningAssignedToAsync`
+      report the same view. After deadline: post-commit
+      `GetRuntimeStateAsync().ActiveWorks`, the dispatch service
+      `AddMissingRedeliveriesAsync` desired set, AND the querier
+      rows all omit the run at the same boundary, and three
+      repeated reminder + poll + status read rounds leave the
+      release unchanged. Configured slot totals stay at
+      `runner.GetSlotsAsync()` (no manual stop, no slot-policy
+      change). A matching late authoritative report then settles
+      the attempt without reintroducing it.
+    - `BlockedSettlement_FencesMatchingUnknownReportWithoutTaskFailed`
+      — matching `unknown` `WorkResult` through
+      `WorkflowReportService` returns `("stale", "Running")`; the
+      blocked settlement, task/workflow state, event stream,
+      activeWorks, capacity, and missing-redelivery desired set
+      remain unchanged; no `TaskFailed` / `TaskCompleted` /
+      `StageFailed` / `WorkflowRunFailed` event is appended.
+      Asserts that the `Output`/`ArtifactUploadIds`/`AddTasks` of
+      the unknown observation are NOT forwarded into the
+      aggregate. A matching authoritative late report still
+      settles.
+    - `BlockedSettlement_FencesMismatchedLateReportLeavingBlockedStateUntouched`
+      — mismatches on `taskRunId`, `workId`, AND `runnerId`
+      against the durably blocked attempt all answer `Stale`
+      through `ReceiveTaskReportAsync`; the settlement is
+      preserved, no terminal events are emitted, Runner
+      projections stay empty, and a matching authoritative late
+      report settles the original attempt.
+  - `Specs/Workflow/Querier/WorkflowRunQuerierSchedulingSpecs.cs` —
+    three DB-layer filters that seed `WorkflowRunRow`s directly and
+    assert against the raw `AttentionStatus` projection:
+    - `FindRunningAssignedToAsync_ExcludesDurablyBlockedAttentionRows`
+      — only non-blocked running rows assigned to the runner
+      appear; the blocked row assigned to the runner is omitted
+      and the blocked row assigned to another runner is also
+      invisible to this runner.
+    - `CountRunningAssignedToAsync_ExcludesDurablyBlockedAttentionRows`
+      — non-blocked rows count, blocked rows do not, other-runner
+      blocked rows are invisible.
+    - `FindBlockedAsync_ReturnsOnlyDurablyBlockedRows` — only
+      blocked rows appear, projectId filter narrows further, and
+      the inverse — non-blocked running rows never appear.
+    - New `InsertAttentionRowAsync` helper seeds
+      `WorkflowRunRow.AttentionStatus` via direct EF write so the
+      filter tests can exercise the indexed projection without
+      driving the workflow grain.
+
+### Gotchas discovered
+- **Pre-existing snapshot deletion on Unknown**: after `ObserveAgentExecutionAsync`
+  succeeds, `ReconcileAgentResultSettlementAsync` deletes the dispatch
+  snapshot for the attempt, so the snapshot is NOT still present
+  after the runner has reported `unknown`. Tests that wanted a
+  "snapshot before deadline" anchor had to drop that assertion and
+  rely on the runner view + querier instead.
+- **`ReportAck.Stale` is the ack we expect, not a fallback to
+  `ReceiveTaskReportAsync`** — the report adapter no longer
+  re-routes a stale unknown observation as a failed task report.
+  Asserting `("accepted", "Running")` for the blocked
+  case fails because the `Stale` branch is now taken.
+- **The runner's `activeWorks` projection is built from
+  `FindRunningAssignedToAsync`** — there is no separate runner-side
+  blocked filter. Asserting on `runtime.ActiveWorks` therefore
+  exercises the same querier filter through the grain, which is
+  what T-005 wants (one boundary, three surfaces). The grain tests
+  use `runner.GetRuntimeStateAsync()` directly rather than the
+  status service (`RunnerStatusService` is replaced with
+  `NoopRunnerStatusService` in the spec fixture).
+- **The arch test ratchets comment-reference counts**: the new
+  Issue-628 / T-005 doc comments in `WorkflowRunQuerier.cs` (×2)
+  and `WorkflowReportService.cs` (×1) register as
+  `T-\d{3}` offenders against the
+  `ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline`
+  ArchTests rule. Updated
+  `packages/server/tests/Mohist.Server.ArchTests/comment-reference-baseline.json`
+  with `Infrastructure/Data/Workflow/WorkflowRunQuerier.cs: 2` and
+  `Runner/Services/WorkflowReportService.cs: 1` — same ratchet
+  pattern as issue-511 T-004.
+
+### Verification
+- Full server SpecTests green (3879 tests, +6 new), UnitTests green
+  (2765 tests), ArchTests green (68 tests incl. updated baseline),
+  Mohist.Workflow.Definition.Tests green (178), Mohist.Cli.Tests
+  green (1865). Runner suite green (155 files / 1738 tests),
+  `tsc` (src + tests), and `check:test-boundaries` all pass.
+- Focused suites: `AgentResultSettlementSpecs` (16 incl. 3 new),
+  `WorkflowRunQuerierSchedulingSpecs` (12 incl. 3 new),
+  `DispatchServiceReconciliationSpecs` (22 incl. the updated
+  `Redelivery_BlockedUnresolvedAgentWork_StopsRedeliveringAfterDurableBlocked`
+  — same exactly-once boundary, asserted across repeated polls),
+  `RunnerOutstandingWorkSpecs` (10), `RunnerStatusProjectionSpecs`
+  (34), all green.
