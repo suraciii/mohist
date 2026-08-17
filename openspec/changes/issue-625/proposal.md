@@ -6,7 +6,7 @@ The build stage currently runs the complete verification sequence as one `core/s
 
 - Replace the single full-suite verification execution in the built-in local and GitHub PR workflows with ordered, independently bounded verification lanes.
 - Bind and persist the complete effective workflow definition when each run is initialized, then use that immutable snapshot for later stage materialization so profile activation cannot change a run's lane mode or task definition.
-- Preserve the existing strict verification requirements and live command mapping: `npm ci`; `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false`; Web typecheck; Web `test:run`; Runner typecheck; and Runner tests with `--no-file-parallelism`.
+- Preserve the existing strict verification requirements and live command mapping, including the project-profile `export DOTNET_ROOT=/home/szf/.dotnet` prelude required by the .NET apphosts: `npm ci`; `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false`; Web typecheck; Web `test:run`; Runner typecheck; and Runner tests with `--no-file-parallelism`. The `.NET` lane carries that prelude because each `core/script` task runs in its own shell.
 - Persist an observable result for every lane and allow the build stage to advance only after all required lanes pass.
 - Remove the enclosing full-suite 300000 ms timeout. Each lane must have its own explicit execution budget, and a lane timeout must remain a recoverable lane outcome rather than invalidate earlier passing lanes.
 - Resume recovery at the first unfinished lane while retaining prior passing results. Repeating the same recovery must not duplicate push, review, or merge side effects.

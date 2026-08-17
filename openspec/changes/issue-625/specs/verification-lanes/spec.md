@@ -52,11 +52,20 @@ The built-in `mohist/local` and `mohist/github-pr` build stages SHALL represent 
 ### Requirement: Verification commands and strictness remain unchanged
 The verification lanes SHALL preserve the existing required command mapping and its strict build, typecheck, and test thresholds. The lane definitions MUST NOT add skips, allowlists, reduced test scopes, altered failure thresholds, resource-containment settings, or Runner slot-policy changes.
 
+### Requirement: The .NET lane preserves the live runtime setup
+The built-in `verify-dotnet` lane SHALL run in the same shell as `export DOTNET_ROOT=/home/szf/.dotnet` followed by `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false`. This export is the existing project-profile prelude required by the .NET test apphosts and SHALL be present in both built-in profiles; it SHALL NOT be assumed to persist from `verify-install` or another lane because each `core/script` task has an independent shell. The export is setup for the unchanged .NET command, not an additional verification check.
+
 #### Scenario: The lane contract includes all required checks
 - **WHEN** the built-in workflow definition is inspected
 - **THEN** it contains `npm ci`, the specified single-process .NET test command, both Web commands, and both Runner commands
 - **AND** the Runner test command includes `--no-file-parallelism`
 - **AND** no lane permits a successful result by skipping a required command or narrowing its required scope
+
+#### Scenario: A fresh .NET lane shell receives the required runtime setup
+- **WHEN** a clean representative run starts `verify-dotnet` after `verify-install` in a new `core/script` shell
+- **THEN** the lane script exports `DOTNET_ROOT=/home/szf/.dotnet` before invoking `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false`
+- **AND** the .NET command can resolve the configured runtime without relying on an export from an earlier lane
+- **AND** profile contract tests assert this prelude and the clean-run test completes all six lanes for each built-in profile
 
 ### Requirement: Every verification lane has an independent execution budget
 Each verification lane SHALL declare and enforce its own explicit, finite execution budget. The build verification SHALL NOT be enclosed by the former full-suite `300000` millisecond timeout or by another single timeout that covers all lanes. A lane that exceeds its budget SHALL terminate as a timeout result for that lane.
