@@ -1,5 +1,26 @@
+### Requirement: Run initialization captures the immutable workflow definition
+The Server SHALL serialize the complete effective `WorkflowDefinition` at `BindWorkflowRun` time and persist it as the run's write-once `BoundWorkflowDefinitionJson`. The snapshot SHALL include every stage's task, check, approval, lock, and resource data plus top-level approval and recovery data, including command, timeout, and recovery fields. Later stage initialization and stage-lock resolution SHALL read this snapshot rather than the current profile provider. Existing state without this field SHALL remain readable as explicit legacy mode and SHALL use the retained pre-change aggregate definition for affected built-in profiles without rewriting historical task attempts.
+
+#### Scenario: A legacy run keeps its definition after profile activation
+- **WHEN** a run is bound while the affected built-in profile still contains aggregate `verify`
+- **AND** the profile is replaced with the six-lane definition before the run enters `build`
+- **THEN** the persisted `BoundWorkflowDefinitionJson` still contains the aggregate build task
+- **AND** build initialization materializes the aggregate task from that snapshot
+- **AND** the run does not receive synthesized lane state or the lane gate
+
+#### Scenario: A lane-enabled run keeps its bound task definitions
+- **WHEN** a run is bound with the complete six-lane definition
+- **AND** the profile is edited before its `build` stage is initialized
+- **THEN** stage initialization materializes the six tasks, commands, timeouts, and recovery declarations from the stored snapshot
+- **AND** the current profile edit cannot change the run's lane mode or task definitions
+
+#### Scenario: A bound definition survives reload
+- **WHEN** a run with a bound definition snapshot is reloaded before a later stage starts
+- **THEN** the snapshot remains available to stage initialization and lock resolution
+- **AND** no current-profile lookup can replace it
+
 ### Requirement: Lane gating is scoped to the persisted workflow definition
-The Server SHALL determine whether the lane gate applies from the immutable workflow definition bound when the run is initialized. A run is lane-enabled only when its build stage contains the complete six-lane sequence in the declared order. A legacy run whose bound definition contains the aggregate `verify` task SHALL retain its existing aggregate dispatch, recovery, and stage-gate behavior; the Server SHALL NOT synthesize missing lane state, rewrite its task attempts, or make it wait for the new lanes.
+The Server SHALL determine whether the lane gate applies from the immutable workflow definition bound when the run is initialized. A run is lane-enabled only when its persisted bound build stage contains the complete six-lane sequence in the declared order. A legacy run whose bound definition contains the aggregate `verify` task SHALL retain its existing aggregate dispatch, recovery, and stage-gate behavior; the Server SHALL NOT synthesize missing lane state, rewrite its task attempts, or make it wait for the new lanes.
 
 #### Scenario: Legacy aggregate runs are outside the lane gate
 - **WHEN** a run is loaded with a bound build definition containing the aggregate `verify` task and no six-lane sequence
