@@ -43,16 +43,28 @@ public sealed class WorkflowReportService : IScopedService
         var report = _translator.TranslateResult(item, result, workflowRunId);
         if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && item.IsTask)
         {
+            // Issue-628 T-005: a non-authoritative <c>unknown</c> result
+            // is an observation only. When the workflow grain's Agent
+            // settlement rejects the observation as <c>Stale</c> — which
+            // includes a matching attempt that has already been durably
+            // <c>Blocked</c> — the report adapter must acknowledge stale
+            // and MUST NOT forward the translator's <c>TaskReportStatus.Failed</c>
+            // fallback to <c>ReceiveTaskReportAsync</c>. Doing so would
+            // re-author a <c>TaskFailed</c> event for an attempt that
+            // the durable settlement has already classified as
+            // <c>Blocked</c>, mutating the blocked state and
+            // re-introducing the run into Runner activeWorks, capacity,
+            // and missing-redelivery reconciliation.
             var unknownAck = await workflow.ObserveAgentResultUnknownAsync(
                 runnerId,
                 taskRunId ?? string.Empty,
                 workId,
                 unknown.ReasonCode,
                 unknown.Message);
-            if (unknownAck != ReportAck.Stale)
-                return (unknownAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+            if (unknownAck == ReportAck.Stale)
+                return (ReportAck.Stale.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
 
-            report = new WorkflowItemTranslator.InboundReport.Task(unknown.Fallback);
+            return (unknownAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
         }
 
         ReportAck ack = report switch

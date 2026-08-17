@@ -281,3 +281,166 @@
   all pass.
 - T-001, T-002, T-003 suites remain green (no regressions).
 
+
+## T-005 (done) — Release durably blocked settlements from Runner projections
+
+### Codebase Patterns (read first for later tasks)
+
+- **Single release boundary on `AttentionStatus="blocked"`**:
+  `WorkflowRunQuerier.CountRunningAssignedToAsync` and
+  `WorkflowRunQuerier.FindRunningAssignedToAsync` now both filter on
+  `row.AttentionStatus != "blocked"`. They share the exact same
+  WHERE clause, sourced from the new `BlockedAttentionStatus`
+  constant on the querier. The blocked projection is rebuilt on
+  every `WorkflowRunStore.SaveAsync` (`entity.AttentionStatus =
+  run.HasBlockedAgentResult() ? "blocked" : null`) and is never
+  used to decide task or run lifecycle — only to filter control-plane
+  queries. Same column backs `FindBlockedAsync`.
+- **Runner `activeWorks` projection reuses the same boundary**:
+  `RunnerGrain.BuildRuntimeStateAsync` iterates
+  `_workflowRuns.FindRunningAssignedToAsync(workerId)` and only the
+  resulting ids get a `RunnerActiveWorkItem`. A durably Blocked row
+  is excluded at this lookup, so the runner's runtime view never
+  surfaces the attempt. `RunnerGrain.TryClaimAgentJobAsync` uses
+  `_workflowRuns.CountRunningAssignedToAsync(RunnerId)` for the slot
+  gate; the same filter keeps the count accurate.
+- **Capacity view follows activeWorks**: `RunnerStatusService.ProjectRunnerAsync`
+  computes `activeWorkflowCount = runtime.ActiveWorks.Where(w =>
+  w.OwnerKind == "Workflow").Select(w => w.OwnerId).Distinct().Count()`
+  and reports it as `RunnerCapacityView.UsedSlots`. Because the
+  activeWorks list already excludes blocked rows, capacity tracks the
+  same exactly-once boundary without a separate query.
+- **Stale unknown observations never reach task settlement**:
+  `WorkflowReportService.ReportAsync` short-circuits when the
+  translator returns `InboundReport.Unknown` AND the workflow grain's
+  `ObserveAgentResultUnknownAsync` answers `Stale`. The previous
+  fallback (re-issuing `unknown.Fallback` as `ReceiveTaskReportAsync`
+  with `TaskReportStatus.Failed`) is removed; that would have
+  re-authored `TaskFailed` after `Blocked` and re-introduced the run
+  into activeWorks / capacity / missing-redelivery.
+- **Blocked domain rejects observation writes**:
+  `WorkflowRun.Work.RecordObservation` returns
+  `AgentExecutionUpdate.Rejected` when the settlement state is
+  already `Blocked`. `ObserveAgentResultUnknownAsync` therefore
+  answers `Stale` for any unknown observation whose matching attempt
+  has already been durably blocked; the original task-run / work /
+  runner identity is preserved so a matching authoritative late
+  report still settles.
+
+### Implementation summary
+- **Querier filter (`Infrastructure/Data/Workflow/WorkflowRunQuerier.cs`)**:
+  - `CountRunningAssignedToAsync` and `FindRunningAssignedToAsync`
+    gain `&& row.AttentionStatus != BlockedAttentionStatus`.
+  - `FindBlockedAsync` reuses the same `BlockedAttentionStatus`
+    constant instead of the literal `"blocked"`.
+  - New `private const string BlockedAttentionStatus = "blocked"`
+    plus the same `///` doc comment contract as the existing
+    `StatusString` helper — every site that needs to filter the
+    blocked projection funnels through the constant.
+- **Report adapter (`Runner/Services/WorkflowReportService.cs`)**:
+  - After `ObserveAgentResultUnknownAsync` answers `Stale`, the
+    service returns `(ReportAck.Stale.ToString().ToLowerInvariant(),
+    workflow.GetRunStatusAsync())` and never re-enters
+    `ReceiveTaskReportAsync`. The translator's `TaskReportStatus.Failed`
+    fallback is dead code on this path.
+- **Tests added** (under `packages/server/tests/Mohist.Server.SpecTests/`):
+  - `Specs/Workflow/Grain/AgentResultSettlementSpecs.cs` — three
+    fake-time scenarios that drive the durable Blocked transition
+    through `ReceiveReminder(AgentResultSettlementReminderName, ...)`
+    after advancing `_fixture.TimeProvider` past
+    `settlement.DeadlineAt`:
+    - `BlockedSettlement_ReleasesRunnerActiveWorksAndCapacityAtOneExactlyOnceBoundary`
+      — pre-deadline Unknown lease: runner's
+      `GetRuntimeStateAsync().ActiveWorks` carries the work,
+      `DispatchService.PollAsync` returns it as a recovery
+      `AgentRecovery` dispatch, and `WorkflowRunQuerier.{Find,Count}RunningAssignedToAsync`
+      report the same view. After deadline: post-commit
+      `GetRuntimeStateAsync().ActiveWorks`, the dispatch service
+      `AddMissingRedeliveriesAsync` desired set, AND the querier
+      rows all omit the run at the same boundary, and three
+      repeated reminder + poll + status read rounds leave the
+      release unchanged. Configured slot totals stay at
+      `runner.GetSlotsAsync()` (no manual stop, no slot-policy
+      change). A matching late authoritative report then settles
+      the attempt without reintroducing it.
+    - `BlockedSettlement_FencesMatchingUnknownReportWithoutTaskFailed`
+      — matching `unknown` `WorkResult` through
+      `WorkflowReportService` returns `("stale", "Running")`; the
+      blocked settlement, task/workflow state, event stream,
+      activeWorks, capacity, and missing-redelivery desired set
+      remain unchanged; no `TaskFailed` / `TaskCompleted` /
+      `StageFailed` / `WorkflowRunFailed` event is appended.
+      Asserts that the `Output`/`ArtifactUploadIds`/`AddTasks` of
+      the unknown observation are NOT forwarded into the
+      aggregate. A matching authoritative late report still
+      settles.
+    - `BlockedSettlement_FencesMismatchedLateReportLeavingBlockedStateUntouched`
+      — mismatches on `taskRunId`, `workId`, AND `runnerId`
+      against the durably blocked attempt all answer `Stale`
+      through `ReceiveTaskReportAsync`; the settlement is
+      preserved, no terminal events are emitted, Runner
+      projections stay empty, and a matching authoritative late
+      report settles the original attempt.
+  - `Specs/Workflow/Querier/WorkflowRunQuerierSchedulingSpecs.cs` —
+    three DB-layer filters that seed `WorkflowRunRow`s directly and
+    assert against the raw `AttentionStatus` projection:
+    - `FindRunningAssignedToAsync_ExcludesDurablyBlockedAttentionRows`
+      — only non-blocked running rows assigned to the runner
+      appear; the blocked row assigned to the runner is omitted
+      and the blocked row assigned to another runner is also
+      invisible to this runner.
+    - `CountRunningAssignedToAsync_ExcludesDurablyBlockedAttentionRows`
+      — non-blocked rows count, blocked rows do not, other-runner
+      blocked rows are invisible.
+    - `FindBlockedAsync_ReturnsOnlyDurablyBlockedRows` — only
+      blocked rows appear, projectId filter narrows further, and
+      the inverse — non-blocked running rows never appear.
+    - New `InsertAttentionRowAsync` helper seeds
+      `WorkflowRunRow.AttentionStatus` via direct EF write so the
+      filter tests can exercise the indexed projection without
+      driving the workflow grain.
+
+### Gotchas discovered
+- **Pre-existing snapshot deletion on Unknown**: after `ObserveAgentExecutionAsync`
+  succeeds, `ReconcileAgentResultSettlementAsync` deletes the dispatch
+  snapshot for the attempt, so the snapshot is NOT still present
+  after the runner has reported `unknown`. Tests that wanted a
+  "snapshot before deadline" anchor had to drop that assertion and
+  rely on the runner view + querier instead.
+- **`ReportAck.Stale` is the ack we expect, not a fallback to
+  `ReceiveTaskReportAsync`** — the report adapter no longer
+  re-routes a stale unknown observation as a failed task report.
+  Asserting `("accepted", "Running")` for the blocked
+  case fails because the `Stale` branch is now taken.
+- **The runner's `activeWorks` projection is built from
+  `FindRunningAssignedToAsync`** — there is no separate runner-side
+  blocked filter. Asserting on `runtime.ActiveWorks` therefore
+  exercises the same querier filter through the grain, which is
+  what T-005 wants (one boundary, three surfaces). The grain tests
+  use `runner.GetRuntimeStateAsync()` directly rather than the
+  status service (`RunnerStatusService` is replaced with
+  `NoopRunnerStatusService` in the spec fixture).
+- **The arch test ratchets comment-reference counts**: the new
+  Issue-628 / T-005 doc comments in `WorkflowRunQuerier.cs` (×2)
+  and `WorkflowReportService.cs` (×1) register as
+  `T-\d{3}` offenders against the
+  `ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline`
+  ArchTests rule. Updated
+  `packages/server/tests/Mohist.Server.ArchTests/comment-reference-baseline.json`
+  with `Infrastructure/Data/Workflow/WorkflowRunQuerier.cs: 2` and
+  `Runner/Services/WorkflowReportService.cs: 1` — same ratchet
+  pattern as issue-511 T-004.
+
+### Verification
+- Full server SpecTests green (3879 tests, +6 new), UnitTests green
+  (2765 tests), ArchTests green (68 tests incl. updated baseline),
+  Mohist.Workflow.Definition.Tests green (178), Mohist.Cli.Tests
+  green (1865). Runner suite green (155 files / 1738 tests),
+  `tsc` (src + tests), and `check:test-boundaries` all pass.
+- Focused suites: `AgentResultSettlementSpecs` (16 incl. 3 new),
+  `WorkflowRunQuerierSchedulingSpecs` (12 incl. 3 new),
+  `DispatchServiceReconciliationSpecs` (22 incl. the updated
+  `Redelivery_BlockedUnresolvedAgentWork_StopsRedeliveringAfterDurableBlocked`
+  — same exactly-once boundary, asserted across repeated polls),
+  `RunnerOutstandingWorkSpecs` (10), `RunnerStatusProjectionSpecs`
+  (34), all green.
