@@ -56,11 +56,11 @@ public class DatabaseInitializationSpecs
         Assert.True(await IndexExistsAsync(connection, "IX_ProjectPromptTemplates_ProjectId_UpdatedAt"));
         var migrations = await RecordedMigrationsAsync(connection);
         Assert.NotEmpty(migrations);
-        Assert.Contains("20260605025642_InitialSchema", migrations);
+        Assert.Contains(SquashedMigrationHistory.BaselineId, migrations);
     }
 
     [Fact]
-    public async Task Migrate_WhenEmptyDatabase_AppliesDisabledWorkflowProfileIdsMigration()
+    public async Task Migrate_WhenEmptyDatabase_AppliesSquashedBaseline()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -74,7 +74,8 @@ public class DatabaseInitializationSpecs
 
         Assert.True(await ColumnExistsAsync(connection, "ProjectWorkflowProfiles", "DisabledWorkflowProfileIds"));
         var applied = await db.Database.GetAppliedMigrationsAsync();
-        Assert.Contains("20260629000000_AddDisabledWorkflowProfileIds", applied);
+        Assert.Contains(SquashedMigrationHistory.BaselineId, applied);
+        Assert.DoesNotContain("20260629000000_AddDisabledWorkflowProfileIds", applied);
     }
 
     [Fact]
@@ -146,7 +147,7 @@ public class DatabaseInitializationSpecs
             Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
             var migrations = await RecordedMigrationsAsync(connection);
             Assert.NotEmpty(migrations);
-            Assert.Contains("20260605025642_InitialSchema", migrations);
+            Assert.Contains(SquashedMigrationHistory.BaselineId, migrations);
         }
     }
 

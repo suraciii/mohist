@@ -1,8 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
@@ -178,25 +176,6 @@ public class AgentGrainSpecs
     }
 
     [Fact]
-    public async Task AddAgentsTable_migration_applies_and_rolls_back_cleanly()
-    {
-        await using var database = CreateDatabase("20260616062153_AddIssueRiskColumn");
-        await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        Assert.False(await TableExistsAsync(context, "Agents"));
-        Assert.True(await TableExistsAsync(context, "Issues"));
-
-        await migrator.MigrateAsync("20260618100150_AddAgentsTable");
-        Assert.True(await TableExistsAsync(context, "Agents"));
-        Assert.Equal(0, await CountForeignKeysAsync(context, "Agents"));
-
-        await migrator.MigrateAsync("20260616062153_AddIssueRiskColumn");
-        Assert.False(await TableExistsAsync(context, "Agents"));
-        Assert.True(await TableExistsAsync(context, "Issues"));
-    }
-
-    [Fact]
     public async Task Archive_then_unarchive_round_trips_agent_to_active_and_advances_updated_at()
     {
         var database = CreateModelSchemaDatabase();
@@ -313,43 +292,6 @@ public class AgentGrainSpecs
         nameof(AgentUpdateData.MaxConcurrentRuns),
         nameof(AgentUpdateData.Avatar),
     ];
-
-    private static async Task<bool> TableExistsAsync(MohistDbContext context, string tableName)
-    {
-        var connection = context.Database.GetDbConnection();
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $name";
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = "$name";
-        parameter.Value = tableName;
-        command.Parameters.Add(parameter);
-        return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
-    }
-
-    private static async Task<int> CountForeignKeysAsync(MohistDbContext context, string tableName)
-    {
-        var connection = context.Database.GetDbConnection();
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"PRAGMA foreign_key_list({tableName})";
-        await using var reader = await command.ExecuteReaderAsync();
-        var count = 0;
-        while (await reader.ReadAsync()) count++;
-        return count;
-    }
-
-    private static TestDatabase CreateDatabase(string? migratedTo = null)
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        if (migratedTo is not null)
-        {
-            MigratedSqliteTemplate.CopyTo(connection, migratedTo);
-        }
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        return new TestDatabase(connection, new TestDbContextFactory(options));
-    }
 
     private static TestDatabase CreateModelSchemaDatabase()
     {
