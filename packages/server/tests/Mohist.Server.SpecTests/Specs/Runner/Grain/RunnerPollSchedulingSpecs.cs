@@ -202,12 +202,12 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         var runnerA = $"{prefix}-runner-A";
         var runnerB = $"{prefix}-runner-B";
 
-        await InsertStatusRowAsync($"{prefix}-run-1", "Running", runnerA);
-        await InsertStatusRowAsync($"{prefix}-run-2", "Running", runnerA);
-        await InsertStatusRowAsync($"{prefix}-run-3", "Running", runnerA);
+        await InsertStatusRowAsync($"{prefix}-run-1", "Running", runnerA, activeWork: true);
+        await InsertStatusRowAsync($"{prefix}-run-2", "Running", runnerA, activeWork: true);
+        await InsertStatusRowAsync($"{prefix}-run-3", "Running", runnerA, activeWork: true);
         await InsertStatusRowAsync($"{prefix}-ready-A", "Ready", runnerA);
         await InsertStatusRowAsync($"{prefix}-completed-A", "Completed", runnerA);
-        await InsertStatusRowAsync($"{prefix}-run-B", "Running", runnerB);
+        await InsertStatusRowAsync($"{prefix}-run-B", "Running", runnerB, activeWork: true);
 
         using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
@@ -219,7 +219,9 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
     private async Task InsertStatusRowAsync(
         string workflowRunId,
         string status,
-        string runnerId)
+        string runnerId,
+        bool activeWork = false,
+        string? activeWorkerId = null)
     {
         using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -261,6 +263,8 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         {
             WorkflowRunId = workflowRunId,
             State = JSON.Serialize(run),
+            ActiveWorkId = activeWork ? $"{workflowRunId}-work" : null,
+            ActiveWorkerId = activeWork ? activeWorkerId ?? runnerId : null,
         });
         await db.SaveChangesAsync();
     }
