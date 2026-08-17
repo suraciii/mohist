@@ -663,7 +663,7 @@ public static class AgentTaskRoutes
             AllowedSubagentAgentIds: body.AllowedSubagentAgentIds,
             MaxConcurrentRuns: body.MaxConcurrentRuns);
 
-    private static string BuildScopeFingerprint(
+    internal static string BuildScopeFingerprint(
         AgentLaunchCoordinatorRequest request,
         ResolvedExecutionConfig execution,
         IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories) =>

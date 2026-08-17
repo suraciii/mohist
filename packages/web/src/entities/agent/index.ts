@@ -81,6 +81,7 @@ export {
   launchObservationQueryOptions,
   getAgentLaunchObservationMeaning,
   launchAgentSession,
+  preflightAgentSession,
   preflightAgentTask,
   startAgentTask,
   postGenericFollowup,
@@ -89,6 +90,7 @@ export {
   useGenericSessionSummary,
   useGenericSessionTranscript,
   useLaunchAgentSession,
+  usePreflightAgentSession,
   usePreflightAgentTask,
   useStartAgentTask,
 } from './api/agent-sessions'

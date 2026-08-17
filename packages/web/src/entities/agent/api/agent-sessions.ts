@@ -233,6 +233,7 @@ export function launchAgentSession(
   agentRef: string,
   input: AgentSessionLaunchInput,
   idempotencyKey?: string,
+  preflightFingerprint?: string,
 ) {
   return request<AgentSessionLaunchResponse>(
     projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/sessions`),
@@ -242,6 +243,26 @@ export function launchAgentSession(
       headers: {
         'X-Mohist-Launch-Origin': 'web',
         ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+        ...(preflightFingerprint ? { 'X-Mohist-Agent-Preflight': preflightFingerprint } : {}),
+      },
+    },
+  )
+}
+
+export function preflightAgentSession(
+  projectId: string,
+  agentRef: string,
+  input: AgentSessionLaunchInput,
+  idempotencyKey: string,
+) {
+  return request<AgentTaskPreflightResponse>(
+    projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/sessions/preflight`),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: {
+        'X-Mohist-Launch-Origin': 'web',
+        'Idempotency-Key': idempotencyKey,
       },
     },
   )
@@ -380,13 +401,16 @@ export function launchAgentSessionMutationOptions(
       context,
       attachments,
       idempotencyKey,
+      preflightFingerprint,
     }: {
       agentRef: string
       prompt: string
       context?: AgentSessionLaunchContext | null
       attachments?: string[]
       idempotencyKey?: string
-    }) => launchAgentSession(projectId!, agentRef, { prompt, context, attachments }, idempotencyKey),
+      preflightFingerprint?: string
+    }) =>
+      launchAgentSession(projectId!, agentRef, { prompt, context, attachments }, idempotencyKey, preflightFingerprint),
     onSuccess: (
       _data: AgentSessionLaunchResponse,
       variables: {
@@ -412,6 +436,27 @@ export function useLaunchAgentSession() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation(launchAgentSessionMutationOptions(projectId, queryClient))
+}
+
+export function preflightAgentSessionMutationOptions(projectId: string | null | undefined) {
+  return {
+    mutationFn: ({
+      agentRef,
+      idempotencyKey,
+      ...input
+    }: {
+      agentRef: string
+      idempotencyKey: string
+      prompt: string
+      context?: AgentSessionLaunchContext | null
+      attachments?: string[]
+    }) => preflightAgentSession(projectId!, agentRef, input, idempotencyKey),
+  }
+}
+
+export function usePreflightAgentSession() {
+  const { projectId } = useProject()
+  return useMutation(preflightAgentSessionMutationOptions(projectId))
 }
 
 export function preflightAgentTaskMutationOptions(projectId: string | null | undefined) {
