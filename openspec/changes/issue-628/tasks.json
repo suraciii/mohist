@@ -48,10 +48,11 @@
       "id": "T-003",
       "title": "Reject invalid Git workspace state at task boundaries",
       "spec": "specs/rebase-recovery-branch-integrity/spec.md#task-boundaries-shall-enforce-branch-integrity",
-      "description": "Align branch-stability and WorkExecutor start/end checks with the shared workspace-health semantics when an expected branch is defined. Fail closed before action invocation or before successful settlement for detached HEAD, branch mismatch, failed branch probes, or an unverified Git workspace, and carry the existing failure path without emitting invalid action output as success.",
+      "description": "Align branch-stability and WorkExecutor start/end checks with the shared workspace-health semantics when an expected branch is defined. Fail closed before action invocation or before successful settlement for detached HEAD, branch mismatch, failed branch probes, or an unverified Git workspace. A branch-integrity failure must bypass automatic recovery follow-ups and remain a failed report, so the existing server contract cannot convert it into successful completion or advance follow-up tasks.",
       "acceptanceCriteria": [
         "A task-start probe observing detached HEAD, a mismatched branch, a failed branch probe, or an unverified expected workspace fails before the action is invoked and identifies the expected branch plus observed ref or probe failure when available.",
         "A successful action whose task-end probe observes detached HEAD, a mismatched branch, or another failed health condition is converted to a branch-integrity failure before artifacts or work results can settle it as completed.",
+        "An action-level or end-boundary branch-integrity failure is returned with status failed and no addTasks; the executor does not call tryRecovery for that failure, so a matching handler or self-retry cannot reach the server as completed. Ordinary unresolved-conflict failures remain eligible for their configured recovery path.",
         "Boundary diagnostics use the same expected/observed terminology and failed-condition details as action and workspace-preparation failures, and branch evidence is kept in the error rather than successful output.",
         "Executor and branch-stability tests cover start rejection, end rejection, probe failure, detached-reference reporting, and preservation of existing behavior for actions without an expected workspace branch.",
         "The focused executor branch-stability and workspace-boundary test suites pass with the new stateful fake-worktree scenarios."
@@ -70,9 +71,9 @@
       "id": "T-004",
       "title": "Preserve recovery identity and diagnostics across exact retries",
       "spec": "specs/rebase-recovery-branch-integrity/spec.md#recovery-retries-shall-preserve-workspace-and-run-branch-identity",
-      "description": "Update recovery scheduling and workspace identity/binding paths so branch-integrity and workspace-health failures remain durable WorkItemResult failures through handler and retry materialization. Recovery tasks and exact retries must inherit the original workflow run, workspace path, expected branch, and branch reference, and a failed repair must never trigger a replacement workspace or a new branch.",
+      "description": "Update recovery reporting and workspace identity/binding paths so branch-integrity failures remain durable WorkItemResult failures and cannot be turned into success by handler or retry materialization. Eligible recovery tasks and explicit exact retries must inherit the original workflow run, workspace path, expected branch, and branch reference, and a failed repair must never trigger a replacement workspace or a new branch.",
       "acceptanceCriteria": [
-        "When recovery is scheduled after a branch-integrity failure, the original failure diagnostic remains attached to the result, the invalid action output is not projected as successful recovery, and task-boundary validation still runs before settlement.",
+        "When an action or task boundary produces a branch-integrity failure, the result remains status failed with its original diagnostic, has no addTasks, and the server translator/lifecycle persists failure without CompleteTask or follow-up insertion; task-boundary validation still runs before settlement.",
         "Materialized recovery tasks and exact self-retries preserve the original workflowRunId, workspace path, expected run branch, and branch binding without creating a replacement workspace or branch because repair failed.",
         "A stateful fake-worktree test injects a transient checkout or residual-cleanup failure, verifies the first attempt is a durable actionable failure, removes the transient failure, and verifies an exact retry repairs the same path and branch; a persistent failure remains a failure of the same diagnostic class.",
         "Repeated preparation of an already healthy workspace takes the idempotent fast path and issues no identity-changing commands, and recovery tests verify workspace/profile variables are inherited without a second branch declaration.",
@@ -89,6 +90,26 @@
       ],
       "passes": false,
       "notes": "Use the existing WorkItemResult and ActionError paths; do not add a server persistence model or a new result-replay protocol."
+    },
+    {
+      "id": "T-005",
+      "title": "Release durably blocked settlements from Runner projections",
+      "spec": "specs/rebase-recovery-branch-integrity/spec.md#durable-blocked-settlement-shall-release-runner-projections-at-one-exactly-once-boundary",
+      "description": "Align the existing durable Agent result settlement with the Runner control-plane projections. Keep an Unknown attempt active until its fake-time deadline, atomically project the committed Blocked attention state, and make the same committed boundary remove it from Runner activeWorks, used capacity, and missing-redelivery reconciliation while retaining the original assignment and task/work/Runner identity for a matching late report.",
+      "acceptanceCriteria": [
+        "Before the settlement deadline, an Unknown attempt remains visible in Runner activeWorks for its assigned runner and counts against used capacity; the implementation does not change configured slot totals or use manual stop as the release mechanism.",
+        "When fake time reaches the deadline, the workflow durably commits Unknown to Blocked and the post-commit Runner view, capacity calculation, and DispatchService.AddMissingRedeliveriesAsync desired set omit that run at the same exactly-once boundary; repeating the reminder, poll, or status read does not release or decrement it again.",
+        "WorkflowRunQuerier running-assigned and count-running queries filter the indexed blocked projection only after durable settlement and continue matching the assigned worker; blocked settlement does not clear the aggregate assignment or its original taskRunId/workId/runnerId identity.",
+        "A late report with the original taskRunId, workId, and runnerId is accepted by the authoritative workflow report path after Blocked and settles the original attempt without reintroducing it into activeWorks or capacity; a report with any mismatched identity is stale and leaves the blocked state and projections unchanged.",
+        "Fake-time server tests cover the pre-deadline Unknown lease, durable Blocked transition, one-time active-work/capacity release, no blocked redelivery, matching late settlement, mismatched late-result fence, and unchanged slot configuration; the focused settlement, workflow projection, dispatch, Runner runtime, and status suites pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Durable blocked-settlement projection release from Runner activeWorks, capacity, and missing redelivery, with identity-preserving late-result handling and passing fake-time server tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use the existing AttentionStatus projection and workflow settlement identity. Exclude only durably blocked rows from the Runner control-plane desired set; preserve pre-deadline Unknown leases and matching late authoritative reports. Do not increase slots, stop the runner, clear the assignment, or introduce a second settlement authority."
     }
   ]
 }

@@ -54,6 +54,8 @@ A rebase conflict SHALL be reported as a failure with its unresolved conflict in
 ### Requirement: Task boundaries SHALL enforce branch integrity
 The runner SHALL validate the expected run branch at the task start and before successful task completion for workflow actions operating in a Git workspace. A detached `HEAD`, a branch mismatch, or an unable-to-probe branch SHALL fail the task at the relevant boundary and SHALL prevent an invalid workspace from being converted into successful task completion.
 
+A `branch-invariant-violation` from an action's final health check or from the executor's end-boundary probe SHALL be reported with `status: failed` and without recovery `addTasks`. The runner SHALL NOT pass that result through `tryRecovery`, because the current server contract maps `completed` to task success and then completes the task and its follow-ups. An explicit later retry MAY repair the preserved workspace, but the failed attempt itself SHALL never settle as successful.
+
 #### Scenario: Task starts detached
 - **WHEN** the task start probe observes detached `HEAD` while an expected run branch is defined
 - **THEN** the runner SHALL fail the task before invoking the action
@@ -68,6 +70,41 @@ The runner SHALL validate the expected run branch at the task start and before s
 - **WHEN** the runner cannot determine the current branch at the start or end boundary
 - **THEN** it SHALL fail the task with an actionable branch-probe diagnostic
 - **AND** it SHALL NOT treat the missing observation as evidence that the expected branch invariant holds
+
+#### Scenario: End-boundary branch failure cannot be converted by a recovery handler
+- **WHEN** an action returns successfully but the end probe reports `branch-invariant-violation` and the work item declares a matching recovery handler or self-retry
+- **THEN** the runner SHALL return a failed `WorkItemResult` with the branch diagnostic
+- **AND** it SHALL omit `addTasks`
+- **AND** the server SHALL translate and persist the report as a failed task without completing the task or inserting follow-ups
+
+#### Scenario: Ordinary conflict recovery remains eligible
+- **WHEN** a rebase action returns its unresolved-conflict failure rather than a branch-integrity failure
+- **THEN** the existing configured resolver/retry path MAY schedule its follow-up tasks
+- **AND** the conflict result SHALL remain a failure until a later task independently succeeds
+
+### Requirement: Durable blocked settlement SHALL release Runner projections at one exactly-once boundary
+When an Agent result settlement reaches its deadline, the workflow SHALL durably commit the `Unknown` to `Blocked` transition before the Runner control plane removes that attempt from live projections. The same committed boundary SHALL make the run absent from Runner `activeWorks`, reduce used capacity, and exclude it from missing-redelivery reconciliation. This is a projection release, not a Runner slot-policy change.
+
+Before the deadline, an `Unknown` attempt SHALL remain represented as active work for its assigned Runner and SHALL retain its capacity reservation. After durable `Blocked`, the workflow SHALL retain the assignment and task/work/Runner settlement identity for a matching late authoritative report, while a mismatched report SHALL remain stale. Repeated reminders, polls, and status reads SHALL not release the same active work more than once.
+
+#### Scenario: Fake-time deadline releases active work and capacity once
+- **WHEN** fake time is before the settlement deadline and the attempt is `Unknown`
+- **THEN** Runner `activeWorks` SHALL contain the attempt and capacity SHALL count its slot
+- **WHEN** fake time reaches the deadline and the workflow durably commits `Blocked`
+- **THEN** the same post-commit observation SHALL omit the attempt from `activeWorks`, reduce used capacity by exactly one, and exclude it from `AddMissingRedeliveriesAsync`
+- **AND** Runner slot configuration SHALL remain unchanged
+- **WHEN** the reminder or poll reconciliation is repeated
+- **THEN** the active-work and capacity release SHALL remain unchanged rather than being applied again
+
+#### Scenario: Blocked settlement preserves an identity-matching late report
+- **WHEN** a late report carries the original `taskRunId`, `workId`, and assigned `runnerId` after the attempt is durably `Blocked`
+- **THEN** the workflow SHALL accept it through the authoritative report path and settle the original attempt
+- **AND** it SHALL not require the blocked attempt to be reintroduced into Runner `activeWorks` or capacity
+
+#### Scenario: Blocked settlement fences a mismatched late report
+- **WHEN** a late report carries a different task, work, or Runner identity after the attempt is durably `Blocked`
+- **THEN** the workflow SHALL reject it as stale
+- **AND** it SHALL not clear or revive the blocked settlement or alter Runner projections
 
 ### Requirement: Branch-recovery failures SHALL carry durable actionable diagnostics
 When the runner cannot restore the expected branch or establish a clean non-residual workspace, the existing workflow result failure SHALL carry a durable diagnostic that identifies the expected branch, the observed branch or detached reference, the relevant workspace state, and the operation that failed. The diagnostic SHALL be available to an exact retry without relying on inferred action output.

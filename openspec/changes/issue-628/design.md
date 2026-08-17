@@ -8,7 +8,7 @@ The current runner has several related but separate paths:
 - `mohist/workspace-prepare` cleans residual rebase, merge, and cherry-pick state, cleans dirty files, and accepts an explicit `expectedBranch` input.
 - `mohist/rebase` currently accepts `baseBranch` and `remote`, but its successful result is not intrinsically tied to the workflow run branch. The base ref is a rebase target, not a workspace identity.
 - `WorkExecutor` performs branch checks at task start and end through `branch-stability.ts`, but action-level success and workspace preparation do not yet share the same completion contract or diagnostic format.
-- Recovery scheduling returns the existing `WorkItemResult` and adds handler or retry tasks. The workspace path, workflow run, and run branch must remain bound to the original dispatch during this process.
+- Recovery scheduling normally returns the existing `WorkItemResult` and adds handler or retry tasks. A `branch-invariant-violation` is the exception: it remains a failed result with no recovery follow-up, because the current server contract maps `completed` to task success. The workspace path, workflow run, and run branch must remain bound to the original dispatch during every retryable recovery process.
 
 This design implements the motivation in `openspec/changes/issue-628/proposal.md` and the scenarios in `openspec/changes/issue-628/specs/rebase-recovery-branch-integrity/spec.md`. It does not alter AgentSession replay, Runner slot policy, or per-work resource limits.
 
@@ -21,7 +21,9 @@ This design implements the motivation in `openspec/changes/issue-628/proposal.md
 - Repair a detached or mismatched workspace when it is safe to do so, and verify the complete state after every repair step.
 - Return durable, actionable failures containing the expected branch, observed branch or detached ref, workspace condition, and failed operation.
 - Preserve the existing workflow workspace path, workflow run identity, and run branch across recovery failures and exact retries.
-- Prove detached-head, branch-mismatch, conflict, cleanup-failure, successful-repair, task-boundary, and idempotent-rerun behavior with deterministic fake-worktree tests.
+- Make a branch-integrity failure terminal for the current task report: it uses `status: failed`, carries no `addTasks`, and cannot be changed to successful completion by `tryRecovery`; an explicit later retry remains identity-preserving.
+- When an Agent result settlement becomes durably `Blocked`, release only the Runner control-plane active-work/capacity projection at that commit boundary, retain the settlement identity for a matching late result, and keep pre-deadline `Unknown` work represented.
+- Prove detached-head, branch-mismatch, conflict, cleanup-failure, successful-repair, task-boundary, idempotent-rerun, blocked-settlement, projection-release, capacity, and late-result-fence behavior with deterministic fake-worktree, fake-time, and server integration tests.
 
 **Non-Goals:**
 
@@ -29,7 +31,7 @@ This design implements the motivation in `openspec/changes/issue-628/proposal.md
 - Changing workflow recovery budgets, Runner slot allocation, or per-work resource limits.
 - Creating a new workspace or run branch as a fallback for a failed branch repair.
 - Changing rebase, squash, fetch, merge, push, or conflict-resolution semantics beyond their branch and workspace safety checks.
-- Adding a new server persistence model or changing the `WorkItemResult` transport contract.
+- Adding a new server persistence model, a third task-report status, or a new recovery/follow-up wire protocol. Branch-integrity failures use the existing failed result contract and do not schedule that task's configured recovery handler.
 
 ## Decisions
 
@@ -74,23 +76,23 @@ The rebase action will preserve an unresolved conflict as a `conflict` failure s
 
 `WorkExecutor` will keep the start probe before action invocation and the end probe after a successful action, before artifact/worktree settlement can convert the task to a completed result. When an expected branch is defined, a detached `HEAD`, a branch mismatch, a failed branch probe, or an inability to establish that the directory is the expected Git workspace is a failure. The diagnostic uses the same expected/observed terminology as action failures.
 
-Normal recovery scheduling remains compatible with the current `tryRecovery` flow, but a scheduled recovery is not an action success: the original branch-integrity error and its diagnostic must remain attached to the result, and no invalid action output may be emitted as successful recovery. The final task boundary must always run before a result can be settled as a successful task.
+Normal recovery scheduling remains compatible with the current `tryRecovery` flow for failures that are eligible for recovery. A `branch-invariant-violation` is deliberately ineligible: whether it comes from a rebase action's final health check or from the executor's end probe, the executor returns the original failed result directly, without calling `tryRecovery`, without `addTasks`, and without successful action output. The final task boundary must always run before a result can be settled as a successful task. An explicit later retry may repair the preserved workspace and run branch.
 
-**Alternative considered:** Check only at task start. This prevents an already-invalid workspace from being used, but does not protect against an action leaving the workspace detached. The end check is necessary for the observed failure mode.
+**Alternative considered:** Let `tryRecovery` schedule a resolver and preserve `status: failed` while the server also materializes follow-up tasks. The current server contract has no such protocol: it maps `completed` to `TaskReportStatus.Succeeded`, and success is what permits `CompleteTask` and follow-ups. Adding a third status or a new server protocol is outside this issue, so branch-integrity failures bypass automatic recovery and require an explicit retry. Check only at task start is also insufficient because it does not protect against an action leaving the workspace detached; the end check remains necessary for the observed failure mode.
 
 ### 4. Carry diagnostics through existing failure reporting
 
 Use the existing `ActionError` and `WorkItemResult` path. Rebase and workspace preparation failures will use their declared failure codes and a bounded diagnostic message containing stable fields such as `operation=checkout`, `expectedBranch=...`, `observedBranch=...`, `observedRef=...`, `dirty=...`, and residual-state details. Conflict failures will continue to list unresolved files. Probe failures will identify the Git command and its output or exit code.
 
-The diagnostic is assembled at the point of failure and survives normal recovery scheduling and exact retry without requiring callers to infer state from action output or logs. Existing output remains reserved for successful action output; no new result-replay or server schema is needed.
+The diagnostic is assembled at the point of failure and survives journaling, reporting, and an exact retry without requiring callers to infer state from action output or logs. A `branch-invariant-violation` result is explicitly `status: failed` with no `addTasks`; the server translator must map it to `TaskReportStatus.Failed`, so `WorkflowWorkLifecycle` cannot call `CompleteTask` or add follow-ups for that attempt. Existing output remains reserved for successful action output; no new result-replay or server schema is needed.
 
 **Alternative considered:** Add a new structured failure payload to `WorkItemResult`. That would make machine inspection easier, but it creates a wire-model change for a problem that can be addressed by the existing error envelope. The snapshot model can be introduced internally and promoted later if operational data shows that text is insufficient.
 
 ### 5. Preserve identity and make preparation idempotent
 
-`WorkspaceManager.prepare` and `verify` will use the same final branch and health checks for an existing workspace. A branch repair failure must leave the existing workspace and its identity binding in place. A retry must resolve the same `workflowRunId` to the same workspace path and the same run branch; it must not clone a replacement merely because checkout or cleanup previously failed.
+`WorkspaceManager.prepare` and `verify` will use the same final branch and health checks for an existing workspace. A branch repair failure must leave the existing workspace and its identity binding in place. An explicit retry must resolve the same `workflowRunId` to the same workspace path and the same run branch; it must not clone a replacement merely because checkout or cleanup previously failed.
 
-Recovery task materialization will continue to inherit the original workflow variables and workspace binding. Self-retry copies the original action declaration and recovery metadata, while the executor resolves the same workspace branch again. Repeated preparation of an already healthy workspace takes the fast path and issues no replacement or identity-changing commands.
+Recovery task materialization remains available for eligible failures such as a rebase conflict, and those tasks inherit the original workflow variables and workspace binding. A branch-integrity failure itself materializes no handler or self-retry task under this change. Repeated preparation of an already healthy workspace takes the fast path and issues no replacement or identity-changing commands.
 
 **Alternative considered:** Re-clone on any preparation error. Re-cloning can hide the original failure and discard the workspace needed by a conflict resolver, and it violates the retry identity requirement. It remains appropriate only for initial materialization or an independently detected corrupt/mismatched workspace identity, not for branch repair failure.
 
@@ -109,8 +111,9 @@ Coverage will include:
 - task-start detached/probe failures and action-end detached/mismatch failures;
 - a transient repair failure followed by an exact retry against the same path and branch;
 - repeated preparation of a healthy workspace without replacement or branch creation.
+- a branch-integrity failure with a matching recovery handler remains `failed`, has no `addTasks`, and is translated and persisted as a failed task without `CompleteTask` or follow-up insertion; ordinary conflict recovery still follows the existing handler/retry path.
 
-Manifest and executor tests will also verify that the engine-sourced expected branch is populated from `workspace.branch` and that existing workflow profiles do not need a second branch declaration.
+Manifest and executor tests will also verify that the engine-sourced expected branch is populated from `workspace.branch` and that existing workflow profiles do not need a second branch declaration. Server settlement tests will use a fake clock to keep an `Unknown` attempt active before its deadline, durably transition it to `Blocked`, observe one release from `activeWorks` and capacity, and accept only an identity-matching late report.
 
 ## Risks / Trade-offs
 
@@ -119,16 +122,19 @@ Manifest and executor tests will also verify that the engine-sourced expected br
 - [Risk] Repeated implementations of Git probing can drift between actions and `WorkspaceManager`. -> Mitigation: share the health snapshot/evaluator and diagnostic contract, keep adapters narrow, and require the same fake-worktree scenario matrix for each boundary.
 - [Risk] Older or custom workflows may invoke `mohist/rebase` without a usable `workspace.branch`. -> Mitigation: treat the missing engine value as an actionable preparation/input failure, audit built-in profiles before rollout, and do not silently substitute `baseBranch`.
 - [Risk] A branch checkout can fail because the expected branch ref is absent or the worktree remains in an unusable state. -> Mitigation: report expected and observed identity plus the checkout/reset operation, preserve the existing binding, and let the exact retry converge after the external failure is removed.
-- [Risk] Existing recovery scheduling represents a scheduled recovery as `completed`. -> Mitigation: preserve the original branch-integrity error and message, test that invalid action output is never projected as success, and distinguish orchestration scheduling from recovery action completion in diagnostics.
+- [Risk] A configured recovery handler could turn a branch-integrity error into successful task completion. -> Mitigation: classify `branch-invariant-violation` as ineligible for `tryRecovery` at both action-failure and end-boundary call sites; return `status: failed` with no `addTasks`, and assert the server translator/lifecycle never completes or advances that task.
+- [Risk] Filtering a durably blocked run from Runner projections could reject a legitimate late result or release the projection twice. -> Mitigation: filter only the indexed `AttentionStatus=blocked` projection after the settlement commit, keep the assignment and full task/work/Runner identity in the aggregate, accept matching late reports through the grain, reject mismatches as stale, and test repeated reconciliation/poll/status reads with fake time.
 - [Risk] Treating a non-Git directory as a successful branch check could bypass the invariant. -> Mitigation: when an expected branch is present, a failed or non-Git branch probe is a boundary failure; retain the non-Git exception only for actions with no expected workspace branch.
 
 ## Migration Plan
 
 1. Add the internal health contract and align `workspace-prepare`, `rebase`, `WorkspaceManager`, and executor boundary checks with it.
 2. Add the engine-sourced expected-branch declaration to the rebase action and update direct action tests and fake-worktree fixtures. Built-in workflow profiles continue to derive the value from `workspace.branch`; no workflow author migration is required.
-3. Run the focused runner test suites for rebase, workspace preparation, executor branch boundaries, recovery scheduling, and workflow-profile contracts, followed by the normal runner test suite.
-4. Deploy the runner change without a server or workspace schema migration. Existing workspaces remain at their current paths and retain their existing identity markers and run branches.
-5. For an affected run, the first retry should invoke the same workspace preparation and branch checks. Operational diagnostics should be monitored for expected/observed branch and failed-operation fields.
+3. Make branch-integrity results bypass automatic recovery follow-ups, and cover the existing runner-to-server failed-report mapping and lifecycle boundary with focused tests.
+4. Align durable blocked-settlement persistence, Runner active-work/capacity queries, and missing-redelivery reconciliation. Add fake-time tests for the exactly-once blocked boundary, pre-deadline `Unknown`, matching late reports, and mismatched late reports.
+5. Run the focused runner and server suites for rebase, workspace preparation, executor branch boundaries, recovery reporting, workflow settlement, Runner projections, and workflow-profile contracts, followed by the normal suites.
+6. Deploy without a server or workspace schema migration. Existing workspaces remain at their current paths and retain their existing identity markers, run branches, assignments, and settlement identities.
+7. For an affected run, the first explicit retry should invoke the same workspace preparation and branch checks. Operational diagnostics should be monitored for expected/observed branch and failed-operation fields; Runner status should show the blocked projection release without a slot-policy change.
 
 Rollback is a runner binary/configuration rollback only. It does not delete or replace workspaces. If a workspace was left detached by the newer runner, use the compatible preparation path or an operator-approved Git repair to restore the recorded run branch before retrying with the older runner; otherwise the pre-existing defect can recur. No server data rollback is required.
 
