@@ -89,6 +89,62 @@ public sealed class SlackRetryOperationStore : IScopedService
             .SingleOrDefaultAsync(row => row.ProjectId == projectId && row.ActionKey == actionKey, ct);
     }
 
+    /// <summary>
+    /// Claims the dispatch side effect for one pending operation. The
+    /// recovery lease is also the interaction claim: only the caller that
+    /// owns the live lease may invoke the launcher or follow-up dispatcher.
+    /// A replay that observes another live claimant must wait for recovery
+    /// rather than dispatching the same operation concurrently.
+    /// </summary>
+    public async Task<SlackRetryOperationRow?> ClaimDispatchAsync(
+        string projectId,
+        string actionKey,
+        string claimId,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(claimId);
+        var now = _time.GetUtcNow();
+        var expires = now.Add(leaseDuration);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var changed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "SlackRetryOperations"
+            SET "RecoveryLeaseId" = {claimId},
+                "RecoveryLeaseExpiresAt" = {expires},
+                "UpdatedAt" = {now}
+            WHERE "ProjectId" = {projectId}
+              AND "ActionKey" = {actionKey}
+              AND "State" = {SlackRetryOperationStates.DispatchPending}
+              AND "Outcome" IS NULL
+              AND ("RecoveryLeaseExpiresAt" IS NULL OR "RecoveryLeaseExpiresAt" <= {now})
+            """, ct);
+        return changed == 0
+            ? null
+            : await db.SlackRetryOperations.AsNoTracking().SingleAsync(
+                row => row.ProjectId == projectId && row.ActionKey == actionKey, ct);
+    }
+
+    public async Task ReleaseDispatchClaimAsync(
+        string projectId,
+        string actionKey,
+        string claimId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackRetryOperations.SingleOrDefaultAsync(
+            candidate => candidate.ProjectId == projectId
+                && candidate.ActionKey == actionKey
+                && candidate.State == SlackRetryOperationStates.DispatchPending
+                && candidate.RecoveryLeaseId == claimId,
+            ct);
+        if (row is null)
+            return;
+        row.RecoveryLeaseId = null;
+        row.RecoveryLeaseExpiresAt = null;
+        row.UpdatedAt = _time.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task<SlackRetryOperationRow?> RecordAdmissionAsync(
         string projectId,
         string actionKey,

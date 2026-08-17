@@ -1,7 +1,9 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -23,6 +25,34 @@ public sealed class SlackRetryOperationsMigrationSpecs
         var indexes = await IndexNamesAsync(context);
         Assert.Contains("UX_SlackRetryOperations_ProjectId_ActionKey", indexes);
         Assert.Contains("IX_SlackRetryOperations_State_RecoveryLeaseExpiresAt", indexes);
+    }
+
+    [Fact]
+    public async Task Dispatch_claim_is_single_winner_and_release_allows_recovery_takeover()
+    {
+        await using var database = CreateDatabase(Migration);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero));
+        await using (var context = database.CreateDbContext())
+        {
+            context.SlackRetryOperations.Add(NewRow("one", time.GetUtcNow()));
+            await context.SaveChangesAsync();
+        }
+
+        var store = new SlackRetryOperationStore(database.Factory, time);
+        var first = await store.ClaimDispatchAsync(
+            "project-1", "action-1", "claim-one", TimeSpan.FromMinutes(1));
+        var concurrent = await store.ClaimDispatchAsync(
+            "project-1", "action-1", "claim-two", TimeSpan.FromMinutes(1));
+
+        Assert.NotNull(first);
+        Assert.Null(concurrent);
+
+        await store.ReleaseDispatchClaimAsync("project-1", "action-1", "claim-one");
+        var recovered = await store.ClaimDispatchAsync(
+            "project-1", "action-1", "claim-two", TimeSpan.FromMinutes(1));
+
+        Assert.NotNull(recovered);
+        Assert.Equal("claim-two", recovered!.RecoveryLeaseId);
     }
 
     [Fact]
@@ -94,6 +124,7 @@ public sealed class SlackRetryOperationsMigrationSpecs
 
     private sealed class TestDatabase(SqliteConnection connection, TestDbContextFactory factory) : IAsyncDisposable
     {
+        public TestDbContextFactory Factory => factory;
         public MohistDbContext CreateDbContext() => factory.CreateDbContext();
         public ValueTask DisposeAsync() => connection.DisposeAsync();
     }

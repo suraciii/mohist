@@ -14,7 +14,9 @@ using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Slack;
 using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -113,15 +115,30 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
 
         await using var scope = provider.CreateAsyncScope();
         var rows = (await scope.ServiceProvider.GetRequiredService<SlackOutboxStore>().ListAsync("proj-1", "conn-1")).Entries;
-        // The reply body is the Agent's responsibility: it is sent via
-        // `mo slack message send` (the reply action), not extracted from the
-        // turn output. The terminal handler finalizes liveness only and must
-        // never author a Server-rendered reply, status template, or leak the
-        // raw turn output — silence is a legitimate outcome.
-        Assert.DoesNotContain(rows, row => row.Kind is SlackOutboxKinds.TerminalResult or SlackOutboxKinds.ExplicitFailure);
-        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("ship the release", StringComparison.Ordinal));
-        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("raw tool output", StringComparison.Ordinal));
-        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("xoxb-secret", StringComparison.Ordinal));
+        if (status == "failed")
+        {
+            // Failed Connection work receives a readable Server-owned
+            // projection even when its category is not retryable. The
+            // unrecognized category remains text-only and raw output is
+            // never copied into the presentation.
+            var failure = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
+            Assert.Contains("The task failed.", failure.PayloadJson, StringComparison.Ordinal);
+            Assert.Contains("runtime-failed", failure.PayloadJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("raw tool output", failure.PayloadJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("xoxb-secret", failure.PayloadJson, StringComparison.Ordinal);
+            Assert.DoesNotContain(SlackTurnControlService.RetryActionId, failure.PayloadJson, StringComparison.Ordinal);
+        }
+        else
+        {
+            // The reply body is the Agent's responsibility: it is sent via
+            // `mo slack message send` (the reply action), not extracted from
+            // the turn output. Completed, cancelled, and unknown terminal
+            // events finalize liveness only.
+            Assert.DoesNotContain(rows, row => row.Kind is SlackOutboxKinds.TerminalResult or SlackOutboxKinds.ExplicitFailure);
+            Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("ship the release", StringComparison.Ordinal));
+            Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("raw tool output", StringComparison.Ordinal));
+            Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("xoxb-secret", StringComparison.Ordinal));
+        }
     }
 
     [Fact]

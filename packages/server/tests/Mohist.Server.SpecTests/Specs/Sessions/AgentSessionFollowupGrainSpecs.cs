@@ -806,6 +806,45 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
                 IdempotencyKey: "no-rt-key")));
     }
 
+    [Fact]
+    public async Task Retry_force_new_turn_keeps_an_unrelated_queued_followup_separate()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-retry-force-new-turn");
+        var unrelated = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "unrelated queued work",
+            Source: "agent-session-followup",
+            IdempotencyKey: "unrelated-followup"));
+
+        var retry = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "authoritative failed input",
+            Source: "slack-retry",
+            IdempotencyKey: "slack-retry:project:action",
+            PreMintedInputId: "retry-input",
+            PreMintedTurnId: "retry-turn",
+            AssignmentMode: AgentSessionFollowupAssignmentMode.ForceNewTurnForRetry,
+            PreMintedOperationId: "retry-operation"));
+
+        Assert.NotEqual(unrelated.TurnId, retry.TurnId);
+        Assert.Equal("retry-input", retry.InputId);
+        Assert.Equal("retry-turn", retry.TurnId);
+        Assert.Equal("retry-operation", retry.OperationId);
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(2, state!.Status.Turns!.Count);
+        Assert.Contains(state.Status.Turns, turn => turn.Id == unrelated.TurnId);
+        Assert.Contains(state.Status.Turns, turn => turn.Id == retry.TurnId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AcceptFollowupAsync(
+            new AcceptFollowupCommand(
+                Text: "invalid force",
+                Source: "agent-session-followup",
+                IdempotencyKey: "invalid-force",
+                PreMintedInputId: "invalid-input",
+                PreMintedTurnId: "invalid-turn",
+                AssignmentMode: AgentSessionFollowupAssignmentMode.ForceNewTurnForRetry,
+                PreMintedOperationId: "invalid-operation")));
+    }
+
     private async Task<(IAgentSessionGrain Grain, string SessionId)> CreateAttachedSessionAsync(string runtimeSessionId)
     {
         var sessionId = $"followup-grain-{Guid.NewGuid():N}";

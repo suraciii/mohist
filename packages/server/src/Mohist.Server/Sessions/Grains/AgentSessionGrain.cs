@@ -576,6 +576,20 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         ArgumentNullException.ThrowIfNull(command);
         if (string.IsNullOrWhiteSpace(command.Source))
             throw new ArgumentException("Source is required.", nameof(command));
+        if (command.AssignmentMode == AgentSessionFollowupAssignmentMode.ForceNewTurnForRetry)
+        {
+            if (!string.Equals(command.Source, "slack-retry", StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "ForceNewTurnForRetry is reserved for the slack-retry source.");
+            if (string.IsNullOrWhiteSpace(command.PreMintedInputId)
+                || string.IsNullOrWhiteSpace(command.PreMintedTurnId)
+                || string.IsNullOrWhiteSpace(command.PreMintedOperationId))
+            {
+                throw new ArgumentException(
+                    "Retry follow-ups require pre-minted input, turn, and operation identities.",
+                    nameof(command));
+            }
+        }
 
         var hasText = !string.IsNullOrWhiteSpace(command.Text);
         var hasAttachments = command.Attachments is { Count: > 0 };

@@ -87,48 +87,34 @@ public sealed class SlackActionRecoveryService : IScopedService
         var connection = await _connections.GetAsync(operation.ProjectId, operation.ConnectionId, ct);
         if (connection is null || connection.DesiredState == Agent.Domain.DesiredStateKind.Disabled)
         {
-            await _operations.CompleteAsync(
-                operation.ProjectId,
-                operation.ActionKey,
-                SlackRetryOperationOutcomes.Unavailable,
-                "The Slack Connection is unavailable.",
-                null,
-                null,
-                null,
-                ct);
+            await CompleteUnavailableAsync(operation, "The Slack Connection is unavailable.", ct);
             return;
         }
 
         var source = _grains.GetGrain<IAgentSessionGrain>(operation.SessionId);
-        var retrySource = await source.ResolveRetrySourceAsync(operation.FailedInputId, operation.FailedTurnId);
+        AgentSessionRetrySource? retrySource;
+        try
+        {
+            retrySource = await source.ResolveRetrySourceAsync(operation.FailedInputId, operation.FailedTurnId);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            await CompleteUnavailableAsync(operation, "The failed execution is no longer available for retry.", ct);
+            return;
+        }
         if (retrySource is null
             || retrySource.Turn.Status != AgentTurnStatus.Failed
-            || !SlackTurnControlService.IsRetryableFailureCategory(retrySource.Turn.Result?.FailureCategory))
+            || !SlackTurnControlService.IsRetryableFailureCategory(retrySource.Turn.Result?.FailureCategory)
+            || !MatchesOperation(retrySource, operation))
         {
-            await _operations.CompleteAsync(
-                operation.ProjectId,
-                operation.ActionKey,
-                SlackRetryOperationOutcomes.Unavailable,
-                "The failed execution is no longer available for retry.",
-                null,
-                null,
-                null,
-                ct);
+            await CompleteUnavailableAsync(operation, "The failed execution is no longer available for retry.", ct);
             return;
         }
 
         var provenance = retrySource.Input.Provenance;
         if (provenance is null)
         {
-            await _operations.CompleteAsync(
-                operation.ProjectId,
-                operation.ActionKey,
-                SlackRetryOperationOutcomes.Unavailable,
-                "The original Slack provenance is unavailable.",
-                null,
-                null,
-                null,
-                ct);
+            await CompleteUnavailableAsync(operation, "The original Slack provenance is unavailable.", ct);
             return;
         }
 
@@ -136,7 +122,10 @@ public sealed class SlackActionRecoveryService : IScopedService
         {
             var agent = await _agents.GetByIdAsync(operation.ProjectId, connection.AgentId, ct);
             if (agent is null)
+            {
+                await CompleteUnavailableAsync(operation, "The Agent bound to this Connection is unavailable.", ct);
                 return;
+            }
             var launch = await _launcher.LaunchConnectionRetryAsync(
                 agent,
                 retrySource.Input.Text,
@@ -205,6 +194,74 @@ public sealed class SlackActionRecoveryService : IScopedService
             await PresentAcceptedAsync(connection, operation, followupCompleted, ct);
     }
 
+    private async Task<SlackRetryOperationRow?> CompleteUnavailableAsync(
+        SlackRetryOperationRow operation,
+        string reason,
+        CancellationToken ct)
+    {
+        var completed = await _operations.CompleteAsync(
+            operation.ProjectId,
+            operation.ActionKey,
+            SlackRetryOperationOutcomes.Unavailable,
+            reason,
+            null,
+            null,
+            null,
+            ct);
+        if (completed is not null)
+            await PresentOutcomeAsync(completed, ct);
+        return completed;
+    }
+
+    private async Task PresentOutcomeAsync(
+        SlackRetryOperationRow operation,
+        CancellationToken ct)
+    {
+        var text = operation.ResultReason
+            ?? "This Retry action is no longer available.";
+        await _outbox.UpsertRequiredAsync(new SlackOutboxDraft(
+            operation.ProjectId,
+            operation.ConnectionId,
+            operation.WorkspaceTeamId,
+            operation.ConversationId,
+            SlackOutboxKinds.UserAction,
+            SlackRetryOperationStore.ResultReference(operation.ActionKey),
+            JsonSerializer.Serialize(new SlackDeliveryPayload(
+                SlackDeliveryOperations.ChatUpdate,
+                text,
+                ProviderMessageIdentity: new SlackProviderMessageIdentity(
+                    operation.ConversationId,
+                    operation.MessageTs),
+                Blocks: PresentationBlocks(text))),
+            operation.ThreadTs), ct);
+    }
+
+    private static bool MatchesOperation(
+        AgentSessionRetrySource source,
+        SlackRetryOperationRow operation)
+    {
+        var provenance = source.Input.Provenance;
+        return provenance is not null
+            && string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
+            && string.Equals(provenance.ConnectionId, operation.ConnectionId, StringComparison.Ordinal)
+            && string.Equals(provenance.WorkspaceId, operation.WorkspaceTeamId, StringComparison.Ordinal)
+            && string.Equals(provenance.ConversationId, operation.ConversationId, StringComparison.Ordinal)
+            && string.Equals(provenance.MessageId, operation.MessageTs, StringComparison.Ordinal)
+            && string.Equals(provenance.ThreadId, operation.ThreadTs, StringComparison.Ordinal)
+            && string.Equals(provenance.MemberId, operation.ActorSlackUserId, StringComparison.Ordinal)
+            && provenance.OriginalDirectMessage == operation.OriginalDirectMessage;
+    }
+
+    private static JsonElement PresentationBlocks(string text) =>
+        JsonSerializer.SerializeToElement(new object[]
+        {
+            new
+            {
+                type = "section",
+                text = new { type = "mrkdwn", text },
+            },
+        });
+
     private async Task PresentAcceptedAsync(
         Agent.Domain.AgentConnection connection,
         SlackRetryOperationRow operation,
@@ -230,7 +287,7 @@ public sealed class SlackActionRecoveryService : IScopedService
             blocks = stop?.Blocks;
         }
 
-        await _outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
+        await _outbox.UpsertRequiredAsync(new SlackOutboxDraft(
             operation.ProjectId,
             operation.ConnectionId,
             operation.WorkspaceTeamId,

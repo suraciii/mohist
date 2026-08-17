@@ -125,6 +125,58 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
     }
 
+    /// <summary>
+    /// Enqueues a required action result or replaces the still-relevant
+    /// presentation for the same stable action reference. Recovery uses this
+    /// when an interaction first reported "waiting" and later completed; the
+    /// Slack target must receive the newer text and controls without creating
+    /// a second outbox row.
+    /// </summary>
+    public async Task<SlackOutboxEnqueueResult> UpsertRequiredAsync(
+        SlackOutboxDraft draft,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ValidateDraft(draft);
+        if (!SlackOutboxKinds.IsTerminal(draft.Kind) || string.IsNullOrWhiteSpace(draft.DispatchRef))
+            throw new ArgumentException("Required deliveries need a terminal kind and dispatch reference.", nameof(draft));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (!await IsLiveOwnerAsync(db, draft, ct))
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackOutboxEnqueueResult(string.Empty, MergedIntoExisting: false, Suppressed: true);
+        }
+
+        var existing = await db.SlackOutboxRows.FirstOrDefaultAsync(row =>
+            row.OwnerKind == draft.OwnerKind
+            && row.ConnectionId == draft.ConnectionId
+            && row.Kind == draft.Kind
+            && row.DispatchRef == draft.DispatchRef, ct);
+        if (existing is not null)
+        {
+            var now = _timeProvider.GetUtcNow();
+            existing.PayloadJson = draft.PayloadJson;
+            existing.ThreadTs = draft.ThreadTs;
+            existing.State = SlackOutboxStates.Pending;
+            existing.NextAttemptAt = now;
+            existing.ClaimedAt = null;
+            existing.ClaimedByAdapterId = null;
+            existing.DeliveredAt = null;
+            existing.DeliveryUncertainAt = null;
+            existing.DeadLetteredAt = null;
+            existing.LastError = null;
+            existing.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new SlackOutboxEnqueueResult(existing.Id, MergedIntoExisting: true);
+        }
+
+        await transaction.CommitAsync(ct);
+        return await EnqueueRequiredAsync(draft, ct);
+    }
+
     public async Task<SlackOutboxEnqueueResult> EnqueueRequiredAsync(SlackOutboxDraft draft, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(draft);

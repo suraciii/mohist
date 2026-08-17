@@ -20,6 +20,7 @@ public sealed class SlackTurnControlService : IScopedService
     public const string RetryActionId = "mohist_retry_turn";
     public const string SelectionActionId = "mohist_select_connection";
     private static readonly TimeSpan StopActionLifetime = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan RetryDispatchLeaseDuration = TimeSpan.FromSeconds(30);
     private static readonly HashSet<string> RetryableFailureCategories = new(StringComparer.OrdinalIgnoreCase)
     {
         "runner-unavailable",
@@ -166,7 +167,15 @@ public sealed class SlackTurnControlService : IScopedService
             || string.IsNullOrWhiteSpace(actorSlackUserId))
             return null;
 
-        var authoritative = await ResolveRetrySourceAsync(sessionId, inputId, turnId);
+        AgentSessionRetrySource? authoritative;
+        try
+        {
+            authoritative = await ResolveRetrySourceAsync(sessionId, inputId, turnId);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
         if (!IsRetryable(authoritative, connection.Id, actorSlackUserId, source, threadTs))
             return null;
 
@@ -307,7 +316,17 @@ public sealed class SlackTurnControlService : IScopedService
         CancellationToken ct)
     {
         var payload = await VerifySignedActionAsync<SlackRetryActionPayload>(connection, request.ActionValue, ct);
-        if (payload is null || !string.Equals(payload.Action, SlackActionCodec.RetryAction, StringComparison.Ordinal))
+        if (payload is null
+            || !string.Equals(payload.Action, SlackActionCodec.RetryAction, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(payload.ConnectionId)
+            || string.IsNullOrWhiteSpace(payload.SessionId)
+            || string.IsNullOrWhiteSpace(payload.InputId)
+            || string.IsNullOrWhiteSpace(payload.TurnId)
+            || string.IsNullOrWhiteSpace(payload.DispatchRef)
+            || string.IsNullOrWhiteSpace(payload.WorkspaceTeamId)
+            || string.IsNullOrWhiteSpace(payload.ConversationId)
+            || string.IsNullOrWhiteSpace(payload.MessageTs)
+            || string.IsNullOrWhiteSpace(payload.ActorSlackUserId))
             return Rejected("invalid", "This Retry action is invalid.");
         var actionKey = SlackRetryOperationStore.ActionKey(request.ActionValue);
         var resultReference = SlackRetryOperationStore.ResultReference(actionKey);
@@ -336,13 +355,83 @@ public sealed class SlackTurnControlService : IScopedService
         if (!authorization.Allowed)
             return RetryRejected("unauthorized", authorization.Reason, resultReference);
 
-        var authoritative = await ResolveRetrySourceAsync(payload.SessionId, payload.InputId, payload.TurnId);
-        var requestSource = new SlackMessageIdentity(request.TeamId, request.ConversationId, request.MessageTs);
-        if (!IsRetryable(authoritative, connection.Id, payload.ActorSlackUserId, requestSource, request.ThreadTs)
-            || authoritative!.Input.Provenance!.OriginalDirectMessage != payload.OriginalDirectMessage)
-            return RetryRejected("unavailable", "That failed execution is no longer available for retry.", resultReference);
+        var existingOperation = await _retryOperations.GetAsync(projectId, actionKey, ct);
+        if (existingOperation?.Outcome is not null)
+            return await RenderStoredRetryResultAsync(
+                connection,
+                payload,
+                existingOperation,
+                resultReference,
+                ct,
+                replayed: true);
 
-        var provenance = authoritative.Input.Provenance!;
+        AgentSessionRetrySource? authoritative;
+        try
+        {
+            authoritative = await ResolveRetrySourceAsync(payload.SessionId, payload.InputId, payload.TurnId);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return await RecordRetryTerminalOutcomeAsync(
+                projectId,
+                connection,
+                payload,
+                request,
+                actionKey,
+                resultReference,
+                SlackRetryOperationOutcomes.Unavailable,
+                "That failed execution is no longer available for retry.",
+                ct);
+        }
+        var requestSource = new SlackMessageIdentity(request.TeamId, request.ConversationId, request.MessageTs);
+        if (authoritative is null)
+            return await RecordRetryTerminalOutcomeAsync(
+                projectId,
+                connection,
+                payload,
+                request,
+                actionKey,
+                resultReference,
+                SlackRetryOperationOutcomes.Unavailable,
+                "That failed execution is no longer available for retry.",
+                ct);
+        if (authoritative.Turn.Status != AgentTurnStatus.Failed
+            || !IsRetryableFailureCategory(authoritative.Turn.Result?.FailureCategory))
+            return await RecordRetryTerminalOutcomeAsync(
+                projectId,
+                connection,
+                payload,
+                request,
+                actionKey,
+                resultReference,
+                SlackRetryOperationOutcomes.Unavailable,
+                "That failed execution is no longer available for retry.",
+                ct);
+        var provenance = authoritative.Input.Provenance;
+        if (provenance is null)
+            return await RecordRetryTerminalOutcomeAsync(
+                projectId,
+                connection,
+                payload,
+                request,
+                actionKey,
+                resultReference,
+                SlackRetryOperationOutcomes.Unavailable,
+                "The original Slack provenance is unavailable.",
+                ct);
+        if (!IsRetryable(authoritative, connection.Id, payload.ActorSlackUserId, requestSource, request.ThreadTs)
+            || provenance.OriginalDirectMessage != payload.OriginalDirectMessage)
+            return await RecordRetryTerminalOutcomeAsync(
+                projectId,
+                connection,
+                payload,
+                request,
+                actionKey,
+                resultReference,
+                SlackRetryOperationOutcomes.Stale,
+                "This Retry action no longer matches the failed execution.",
+                ct);
+
         var retryKey = SlackRetryOperationStore.RetryDispatchKey(projectId, actionKey);
         var isRoot = !string.IsNullOrWhiteSpace(authoritative.Turn.JobId);
         var preMintedSessionId = isRoot
@@ -383,7 +472,29 @@ public sealed class SlackTurnControlService : IScopedService
                 ct,
                 replayed: true);
 
-        var operation = operationResult.Operation;
+        var claimId = $"interaction:{Guid.NewGuid():N}";
+        var operation = await _retryOperations.ClaimDispatchAsync(
+            projectId,
+            actionKey,
+            claimId,
+            RetryDispatchLeaseDuration,
+            ct);
+        if (operation is null)
+        {
+            var current = await _retryOperations.GetAsync(projectId, actionKey, ct);
+            return current?.Outcome is not null
+                ? await RenderStoredRetryResultAsync(
+                    connection,
+                    payload,
+                    current,
+                    resultReference,
+                    ct,
+                    replayed: true)
+                : RetryAccepted(
+                    resultReference,
+                    "Retry was accepted and is waiting for the existing dispatch to finish.",
+                    null);
+        }
         if (isRoot)
         {
             var agent = await _agents.GetByIdAsync(projectId, connection.AgentId, ct);
@@ -409,7 +520,7 @@ public sealed class SlackTurnControlService : IScopedService
                     operation.PreMintedInputId,
                     operation.PreMintedTurnId,
                     ct);
-                operation = await _retryOperations.CompleteAsync(
+                var completed = await _retryOperations.CompleteAsync(
                     projectId,
                     actionKey,
                     SlackRetryOperationOutcomes.Accepted,
@@ -417,8 +528,13 @@ public sealed class SlackTurnControlService : IScopedService
                     launch.SessionId,
                     launch.InputId,
                     launch.TurnId,
-                    ct) ?? operation;
-                return await RenderStoredRetryResultAsync(connection, payload, operation, resultReference, ct);
+                    ct);
+                return completed?.Outcome is null
+                    ? RetryAccepted(
+                        resultReference,
+                        "Retry accepted and is waiting for the runtime launch to recover.",
+                        null)
+                    : await RenderStoredRetryResultAsync(connection, payload, completed, resultReference, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -472,19 +588,14 @@ public sealed class SlackTurnControlService : IScopedService
             ct);
         if (!dispatched)
         {
-            operation.Outcome = SlackRetryOperationOutcomes.Accepted;
-            operation.ResultSessionId = authoritative.SessionId;
-            operation.ResultInputId = accepted.InputId;
-            operation.ResultTurnId = accepted.TurnId;
-            return await RenderStoredRetryResultAsync(
-                connection,
-                payload,
-                operation,
+            await _retryOperations.ReleaseDispatchClaimAsync(projectId, actionKey, claimId, ct);
+            return RetryAccepted(
                 resultReference,
-                ct);
+                "Retry accepted and is waiting for the current turn to finish.",
+                null);
         }
 
-        operation = await _retryOperations.CompleteAsync(
+        var completedFollowup = await _retryOperations.CompleteAsync(
             projectId,
             actionKey,
             SlackRetryOperationOutcomes.Accepted,
@@ -492,8 +603,63 @@ public sealed class SlackTurnControlService : IScopedService
             authoritative.SessionId,
             accepted.InputId,
             accepted.TurnId,
-            ct) ?? operation;
-        return await RenderStoredRetryResultAsync(connection, payload, operation, resultReference, ct);
+            ct);
+        return completedFollowup?.Outcome is null
+            ? RetryAccepted(
+                resultReference,
+                "Retry accepted and is waiting for the runtime dispatch to recover.",
+                null)
+            : await RenderStoredRetryResultAsync(connection, payload, completedFollowup, resultReference, ct);
+    }
+
+    private async Task<SlackTurnControlResult> RecordRetryTerminalOutcomeAsync(
+        string projectId,
+        AgentConnection connection,
+        SlackRetryActionPayload payload,
+        SlackInteractionRequest request,
+        string actionKey,
+        string resultReference,
+        string outcome,
+        string reason,
+        CancellationToken ct)
+    {
+        var operationResult = await _retryOperations.CreateOrLoadAsync(
+            new SlackRetryOperationDraft(
+                projectId,
+                actionKey,
+                connection.Id,
+                payload.SessionId,
+                payload.InputId,
+                payload.TurnId,
+                payload.DispatchRef,
+                new SlackMessageIdentity(request.TeamId, request.ConversationId, request.MessageTs),
+                request.ThreadTs,
+                payload.OriginalDirectMessage,
+                payload.ActorSlackUserId,
+                SlackRetryOperationStore.RetryDispatchKey(projectId, actionKey),
+                "terminal",
+                null,
+                null,
+                null,
+                null),
+            ct);
+        var operation = operationResult.Operation;
+        if (operation.Outcome is null)
+        {
+            operation = await _retryOperations.CompleteAsync(
+                projectId,
+                actionKey,
+                outcome,
+                reason,
+                null,
+                null,
+                null,
+                ct) ?? operation;
+        }
+        return RetryRejected(
+            operation.Outcome ?? outcome,
+            operation.ResultReason ?? reason,
+            resultReference);
     }
 
     private async Task<SlackTurnControlResult> RenderStoredRetryResultAsync(

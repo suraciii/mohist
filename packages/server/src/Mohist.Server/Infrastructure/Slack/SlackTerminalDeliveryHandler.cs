@@ -78,9 +78,12 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             ? $"{delivery.JobKey}:progress"
             : null;
         var retryAction = await CreateRetryActionAsync(scope.ServiceProvider, projectId, delivery, source, ct);
-        if (string.Equals(delivery.Status, "failed", StringComparison.Ordinal)
-            && retryAction is not null)
+        if (string.Equals(delivery.Status, "failed", StringComparison.Ordinal))
         {
+            // Failed Connection work owns a readable Server-authored status
+            // projection even when its category is not retryable. Retry is
+            // deliberately the only optional control; legacy and
+            // non-retryable failures remain text-only.
             await projection.EnqueueTerminalAsync(
                 projectId,
                 delivery.ConnectionId,
