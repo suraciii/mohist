@@ -29,6 +29,7 @@ public sealed partial class AgentJobGrain
                 return false;
             }
 
+            await DeliverPendingSessionInterruptionAsync();
             if (State.PendingUpdateInterruptionEvent is { } pending)
             {
                 await EmitUpdateInterruptionEventAsync(pending);
@@ -78,13 +79,14 @@ public sealed partial class AgentJobGrain
             workId,
             interruptedAt,
             State.RecoveryGeneration);
+        QueueSessionInterruptionDelivery(
+            State.Input?.AgentSessionId,
+            interruption with { State = AgentWorkInterruptionStates.Interrupting });
+        QueueSessionInterruptionDelivery(State.Input?.AgentSessionId, interruption);
         DisposeJobTimeoutTimer();
         await EnsureRecoveryReminderAsync();
         await PersistAsync();
-        await ApplySessionInterruptionAsync(
-            State.Input?.AgentSessionId,
-            interruption with { State = AgentWorkInterruptionStates.Interrupting });
-        await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, interruption);
+        await DeliverPendingSessionInterruptionAsync();
         await EmitUpdateInterruptionEventAsync(State.PendingUpdateInterruptionEvent);
         if (State.PendingUpdateInterruptionEvent is not null)
             throw new InvalidOperationException($"AgentJob '{Key}' update interruption event is not committed.");

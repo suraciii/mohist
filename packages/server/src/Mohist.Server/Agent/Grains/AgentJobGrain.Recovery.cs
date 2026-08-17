@@ -405,6 +405,32 @@ public sealed partial class AgentJobGrain
         && State.UpdateInterruptionDeadlineAt is { } deadline
         && deadline <= _timeProvider.GetUtcNow();
 
+    private void QueueSessionInterruptionDelivery(
+        string? sessionId,
+        AgentWorkInterruptionTransition transition)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return;
+
+        State.PendingSessionInterruptionDeliveries ??= [];
+        var existing = State.PendingSessionInterruptionDeliveries.FirstOrDefault(delivery =>
+            string.Equals(delivery.SessionId, sessionId, StringComparison.Ordinal)
+            && string.Equals(delivery.Transition.IdentityKey, transition.IdentityKey, StringComparison.Ordinal)
+            && string.Equals(delivery.Transition.State, transition.State, StringComparison.Ordinal));
+        if (existing is null)
+        {
+            State.PendingSessionInterruptionDeliveries.Add(
+                new PendingAgentSessionInterruption(sessionId, transition));
+        }
+        else if (string.IsNullOrWhiteSpace(existing.Transition.StopFailure)
+            && !string.IsNullOrWhiteSpace(transition.StopFailure))
+        {
+            var index = State.PendingSessionInterruptionDeliveries.IndexOf(existing);
+            State.PendingSessionInterruptionDeliveries[index] = existing with { Transition = transition };
+        }
+    }
+
+
     private async Task DeliverPendingSessionInterruptionAsync()
     {
         State.PendingSessionInterruptionDeliveries ??= [];
