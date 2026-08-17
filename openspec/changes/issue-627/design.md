@@ -1,0 +1,117 @@
+## Context
+
+Issue 627 addresses a liveness gap in Workflow-owned Agent execution. The current flow records an unresolved Agent result as `Unknown`, schedules a durable deadline reminder, and retains the running task and Runner assignment so recovery can be attempted. At the deadline, `WorkflowRun` changes the settlement to `Blocked` and emits blocked events, but the run can still retain its assignment, dispatch-related state, and stage lock. The Runner therefore continues to count the run as active even though the physical Agent execution is no longer being redelivered.
+
+The Workflow aggregate owns the authoritative attempt and its `AgentResultSettlement`. `TaskRun.WorkId`, `TaskRun.WorkerId`, and settlement fields preserve the attempt identity. `WorkflowRun.Assignment` is operational ownership used by `CurrentActiveWorkFor`, the workflow work projection, Runner active-work discovery, and Runner slot accounting. Dispatch snapshots, Orleans reminders, and sequential stage locks are separate resources and must be cleaned up outside the aggregate.
+
+The main stakeholders are the Workflow grain and run store, Runner polling and capacity accounting, AgentSession/Runner result ingress, and Issue, Inbox, event, and status projections. The implementation must preserve the existing nonterminal blocked attention model, work with Orleans grain activation and reminder replay, and retain enough identity for a late authoritative result without allowing the released attempt to become active again.
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- Make the persisted deadline an exactly-once boundary that changes `Unknown` to `Blocked` without changing task, stage, or WorkflowRun execution into success or failure.
+- Release the active Workflow assignment and all Runner-visible active-slot ownership as part of the same durable run save as the blocked transition.
+- Retain `WorkflowRunId`, `TaskRunId`, `WorkId`, `RunnerId`, AgentSession, AgentTurn, runtime, runtime-session, stop-operation, observation, reason, message, and deadline facts.
+- Make snapshot deletion, reminder removal, and stage/resource lock release repeatable after partial failure or grain reactivation.
+- Keep blocked attention visible and actionable while excluding the attempt from claims, redelivery, active-work views, and Runner capacity.
+- Accept a matching late authoritative result exactly once through the existing full identity fence, without restoring assignment or capacity.
+- Add fake-time, replay, failure-injection, Runner-capacity, projection, and late-result coverage.
+
+**Non-Goals:**
+
+- Inferring success, failure, cancellation, or physical stop from an AgentSession, AgentTurn, runtime, Runner, idle, or disconnected observation.
+- Replaying the old AgentTurn, redelivering the old dispatch after release, auto-retrying the task, or creating a replacement `TaskRun` or `WorkId`.
+- Stopping or deleting the physical AgentSession as part of deadline reconciliation.
+- Redesigning Runner slot policy or introducing a new external dependency.
+- Changing the semantics of an explicit operator stop; it remains a separate cancellation boundary with its existing stale-receipt behavior.
+
+## Decisions
+
+### 1. Use `Blocked` plus assignment removal as the durable release boundary
+
+Extend the domain operation currently represented by `BlockUnresolvedAgentResult` so that, when the persisted deadline has passed, it atomically:
+
+1. verifies the settlement is still `Unknown` and due;
+2. changes it to `Blocked`;
+3. emits the existing `TaskBlocked`, `StageBlocked`, and `WorkflowRunBlocked` events once; and
+4. clears `WorkflowRun.Assignment` without clearing the task's `WorkId` or `WorkerId`.
+
+The run status and task status remain `Running`; blocked status remains a projection of the settlement rather than a new terminal lifecycle state. The grain also clears its in-memory assigned-worker cache after the save so `GetAssignedWorkerIdAsync` cannot expose a stale owner during the current activation.
+
+The assignment is an active-work lease, not the authoritative execution identity. The settlement and task fields are the identity record used for late reports. Clearing the assignment lets the existing `CountRunningAssignedToAsync` and `FindRunningAssignedToAsync` boundaries stop counting and discovering the released run without adding a second capacity flag.
+
+An alternative is to retain the assignment and add an `ActiveOwnershipReleased` field to the run projection and every Runner query. That would preserve more routing behavior, but would duplicate ownership semantics across the serialized run, SQL projection, Runner grain, and read models. It is rejected because it increases the chance that one active-work path continues to hold a slot.
+
+### 2. Reconcile cleanup after the durable boundary, one idempotent operation at a time
+
+`ReconcileAgentResultSettlementAsync` will commit the blocked-and-unassigned run before attempting external cleanup. Once the settlement is already `Blocked`, later reconciliation will skip event creation and only retry cleanup. Cleanup consists of:
+
+- deleting the workflow dispatch snapshot for the original `WorkId`;
+- releasing the stage/resource lock for the recorded stage; and
+- unregistering the Agent-result settlement reminder.
+
+Each operation will be safe when the resource is already absent or released. Reconciliation will attempt independent cleanup steps and log failures so one failed operation does not undo the durable boundary. A later reminder replay, grain activation, or explicit reconciliation retries all steps. No cleanup retry may call claim, dispatch, assignment, or result-settlement code.
+
+The reconciler will also repair older `Blocked` records that still have an assignment: it will clear the assignment and persist that repair before retrying external cleanup. This makes partial cleanup and deployment of the fix convergent without a new cleanup state machine.
+
+### 3. Define active work from active ownership, not from a running task alone
+
+Update the active-work boundaries to require the run's current assignment and worker match. In particular:
+
+- `CurrentActiveWorkFor`, `GetCurrentWorkIdAsync`, and `WorkflowReadModel.GetActiveWork` return no active work after assignment release.
+- `WorkflowRunWorkProjectionBuilder` persists null active-work and active-worker values for a released attempt.
+- `DispatchService` treats a blocked settlement as non-recoverable for polling and returns no dispatch with no slot reservation, including when it observes a stale pre-release snapshot or a run during reconciliation.
+- `HasUnresolvedAgentResult` and `HasDispatchableWork` continue to prevent replacement claims. A blocked run cannot become claimable merely because its assignment is gone.
+- Runner status and used-slot views are derived only from the active-work set, so another eligible work item can use the released slot.
+
+The existing `AttentionStatus = blocked` projection remains the consumer index for blocked attention. During rollout, Runner database queries will also exclude rows with blocked attention, which protects capacity for pre-existing blocked records before their grains have activated and repaired their assignments.
+
+### 4. Reuse the full execution identity fence for late authoritative results
+
+The settlement's complete binding remains immutable after it is populated. The late-result path will first reconcile a due settlement, then require the full tuple consisting of WorkflowRun, task, work, Runner, AgentSession, AgentTurn, runtime, and runtime-session identity before applying an Agent result. The existing `MatchesAttempt`, `MatchesBoundFields`, and full-binding checks should be centralized and used by both physical observation and terminal result ingress.
+
+For a blocked task, a matching success or failure uses the normal `ApplyTaskReportAsync` completion/failure path. It clears the settlement through the existing terminal cleanup path but never sets `Assignment`, stores a dispatch snapshot, reacquires a stage lock, or reserves a Runner slot. Once the task is terminal, duplicate receipts are stale and have no side effects. Physical observations after blocking are stale and cannot change reason, deadline, or state.
+
+Where the current Runner report envelope does not carry the Agent execution binding, add nullable, additive binding fields or route the terminal result through the existing AgentSession workflow-execution binding. A late Agent result without enough identity to pass the fence is acknowledged stale; it must not be accepted based only on reusable task/work/Runner identifiers. Non-Agent task report behavior remains unchanged.
+
+### 5. Preserve blocked projections while separating category from original reason
+
+The blocked events retain their stable blocked category for existing Issue and Inbox consumers, and are emitted only by the first boundary transition. The settlement remains the source of truth for the original reason code, message, last physical observation, first-unknown time, deadline, stop-operation identity, and execution binding.
+
+Status and task settlement views will expose the persisted reason/detail and deadline, with `agent-result-unconfirmed` as a fallback category when no original reason exists. Replaying the same blocked event or reactivating the grain must produce the same blocked attention and must not emit failure notifications, completion notifications, or duplicate blocked transitions.
+
+### 6. Test the boundary as a state-and-projection protocol
+
+Add or extend tests around the domain, Workflow grain, run-store projection, Runner grain, and dispatch service:
+
+- Advance a controllable clock to exactly the persisted deadline and verify one blocked-and-unassigned save, unchanged identity fields, no success/failure events, and an unchanged second reconciliation.
+- Inject failure into snapshot deletion, reminder removal, and stage-lock release independently and verify later reconciliation converges without duplicate events or renewed ownership.
+- Deactivate/reactivate the Workflow grain and verify the settlement and identity survive while active-work and assigned-worker views remain empty.
+- Poll a capacity-full Runner after release and verify the old attempt is absent, no recovery dispatch is emitted, no slot is reserved, and a different work item can claim capacity.
+- Deliver matching late success and failure reports, then duplicate and mismatched bindings, and verify exactly one original-task outcome with stale, side-effect-free acknowledgements for the rest.
+- Verify blocked status, Issue/Inbox attention, event projections, and Runner status preserve the reason and deadline without presenting the attempt as failed or running.
+
+## Risks / Trade-offs
+
+- [Cleanup fails after the blocked save] -> The active lease is already removed durably; every external cleanup step is idempotent, retried on reminder replay/activation, and logged for repair.
+- [A pre-existing blocked row still has an assignment during rollout] -> Runner queries exclude indexed blocked attention immediately, and grain reconciliation clears the persisted assignment on the next activation.
+- [Clearing assignment removes the normal Runner route for workspace operations] -> Preserve the original RunnerId and full execution binding in the settlement and keep workspace identity on the run; verify workspace cleanup behavior in rollout tests before enabling the repair sweep.
+- [A stale report races the deadline] -> Serialized Workflow grain turns reconcile due deadlines before applying observations or reports; only a complete matching binding can win after release.
+- [Legacy result callers lack full execution identity] -> Make the protocol extension additive and return stale for Agent results that cannot be fenced; keep the existing physical-observation path for recovery signals.
+- [A running task is mistaken for active work by an unupdated consumer] -> Centralize active ownership on assignment plus the persisted active-work projection and add Runner, artifact, and read-model assertions for released attempts.
+
+## Migration Plan
+
+1. Deploy the domain and grain changes with nullable/additive serialized fields only; no database schema migration is required for the settlement record.
+2. Deploy Runner and read-model query changes that exclude `AttentionStatus = blocked` from active capacity/redelivery and return no active work for a released assignment. This is backward-compatible with existing persisted runs.
+3. Allow the Workflow activation reconciler to repair already-blocked runs by clearing their assignments and retrying snapshot, reminder, and stage-lock cleanup. Run a bounded repair sweep over indexed blocked runs if operationally necessary.
+4. Observe Runner used-slot counts, blocked attention counts, cleanup retry logs, stale acknowledgements, and dispatch snapshot orphan counts. Confirm that late matching results still settle the original task.
+5. Rollback consists of reverting application binaries while retaining the persisted `Blocked` state and cleared assignments. Do not restore assignments during rollback; an older binary will still treat the run as non-dispatchable, and the next forward deployment can resume cleanup repair. Any additive report fields are ignored by older callers.
+
+## Open Questions
+
+- Should the public blocked attention `Reason` be the persisted physical reason code, the stable `agent-result-unconfirmed` category, or expose both as separate category/detail fields? The specification requires the persisted reason to remain observable, while existing consumers may depend on the stable category.
+- Which Runner-to-Workflow result path is authoritative for carrying the full AgentSession/AgentTurn/runtime binding: new fields on `RunnerReportRequest`, or a terminal-result callback from AgentSession? The choice must be settled before accepting late Agent results after release.
+- Does any workspace cleanup or workspace-read path require the original assigned Runner rather than an eligible Runner fallback after assignment release? If so, add a non-capacity routing fact separate from `WorkflowRun.Assignment`; it must never participate in slot accounting.
+- Is the existing startup snapshot orphan sweep sufficient for cleanup failures, or should blocked-settlement reconciliation be exposed as an explicit maintenance operation with metrics and retry counts?
