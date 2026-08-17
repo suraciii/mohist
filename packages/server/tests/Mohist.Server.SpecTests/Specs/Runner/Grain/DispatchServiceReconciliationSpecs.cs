@@ -209,7 +209,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
-    public async Task Redelivery_BlockedUnresolvedAgentWork_StillRedeliversUntilAuthoritativeResult()
+    public async Task BlockedUnresolvedAgentWork_ReleasesDispatchAndKeepsLateResultSettlement()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
@@ -234,9 +234,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var blocked = await LoadRunAsync(_workflowId!);
         Assert.Equal(AgentResultSettlementState.Blocked, Assert.Single(blocked.CurrentStage().Tasks).AgentResultSettlement!.State);
 
-        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.NotNull(redelivery.AgentRecovery);
-        Assert.Equal(first.WorkId, redelivery.WorkId);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
 
         Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
@@ -619,6 +617,8 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
 
         await InsertStatusRowAsync($"{prefix}-run-1", "Running", runnerA);
         await InsertStatusRowAsync($"{prefix}-run-2", "Running", runnerA);
+        await InsertStatusRowAsync($"{prefix}-blocked", "Running", runnerA, activeWork: false);
+        await InsertStatusRowAsync($"{prefix}-mismatched-active-worker", "Running", runnerA, activeWorkerId: runnerB);
         await InsertStatusRowAsync($"{prefix}-ready-A", "Ready", runnerA);
         await InsertStatusRowAsync($"{prefix}-completed-A", "Completed", runnerA);
         await InsertStatusRowAsync($"{prefix}-run-B", "Running", runnerB);
@@ -737,7 +737,12 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         }
     }
 
-    private async Task InsertStatusRowAsync(string workflowRunId, string status, string runnerId)
+    private async Task InsertStatusRowAsync(
+        string workflowRunId,
+        string status,
+        string runnerId,
+        bool activeWork = true,
+        string? activeWorkerId = null)
     {
         using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -779,6 +784,8 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         {
             WorkflowRunId = workflowRunId,
             State = JSON.Serialize(run),
+            ActiveWorkId = activeWork ? $"{workflowRunId}-work" : null,
+            ActiveWorkerId = activeWork ? activeWorkerId ?? runnerId : null,
         });
         await db.SaveChangesAsync();
     }

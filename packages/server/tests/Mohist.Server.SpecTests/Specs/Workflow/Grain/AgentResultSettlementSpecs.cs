@@ -348,6 +348,11 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Running, blocked.Status);
         Assert.Null(blocked.Failure);
         Assert.Null(blocked.CurrentStage().Failure);
+
+        var workflowRuns = Services.GetRequiredService<WorkflowRunQuerier>();
+        Assert.Equal(0, await workflowRuns.CountRunningAssignedToAsync(runnerId));
+        Assert.Empty(await workflowRuns.FindRunningAssignedToAsync(runnerId));
+
         var eventTypes = (await EventStore.ListAsync(_workflowId!)).Select(entry => entry.Envelope.Type).ToArray();
         Assert.Contains(EventCatalog.ReverseDns.TaskBlocked, eventTypes);
         Assert.Contains(EventCatalog.ReverseDns.StageBlocked, eventTypes);

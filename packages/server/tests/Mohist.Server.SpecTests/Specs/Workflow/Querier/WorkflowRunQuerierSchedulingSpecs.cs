@@ -246,12 +246,27 @@ public class WorkflowRunQuerierSchedulingSpecs
             $"{prefix}-running-1",
             projectId: prefix,
             status: "Running",
-            assignedWorkerId: runnerA);
+            assignedWorkerId: runnerA,
+            activeWork: true);
         await InsertRowAsync(
             $"{prefix}-running-2",
             projectId: prefix,
             status: "Running",
-            assignedWorkerId: runnerA);
+            assignedWorkerId: runnerA,
+            activeWork: true);
+        await InsertRowAsync(
+            $"{prefix}-blocked",
+            projectId: prefix,
+            status: "Running",
+            assignedWorkerId: runnerA,
+            activeWork: false);
+        await InsertRowAsync(
+            $"{prefix}-mismatched-active-worker",
+            projectId: prefix,
+            status: "Running",
+            assignedWorkerId: runnerA,
+            activeWork: true,
+            activeWorkerId: runnerB);
         await InsertRowAsync(
             $"{prefix}-ready-A",
             projectId: prefix,
@@ -261,7 +276,8 @@ public class WorkflowRunQuerierSchedulingSpecs
             $"{prefix}-running-B",
             projectId: prefix,
             status: "Running",
-            assignedWorkerId: runnerB);
+            assignedWorkerId: runnerB,
+            activeWork: true);
 
         using var scope = _fixture.Services.CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
@@ -379,7 +395,9 @@ public class WorkflowRunQuerierSchedulingSpecs
         string projectId,
         string status,
         string? assignedWorkerId,
-        string? stateOverride = null)
+        string? stateOverride = null,
+        bool activeWork = false,
+        string? activeWorkerId = null)
     {
         var state = stateOverride ?? BuildStatusJson(workflowRunId, projectId, status, assignedWorkerId);
         using var scope = _fixture.Services.CreateScope();
@@ -388,6 +406,8 @@ public class WorkflowRunQuerierSchedulingSpecs
         {
             WorkflowRunId = workflowRunId,
             State = state,
+            ActiveWorkId = activeWork ? $"{workflowRunId}-work" : null,
+            ActiveWorkerId = activeWork ? activeWorkerId ?? assignedWorkerId : null,
         });
         await db.SaveChangesAsync();
     }

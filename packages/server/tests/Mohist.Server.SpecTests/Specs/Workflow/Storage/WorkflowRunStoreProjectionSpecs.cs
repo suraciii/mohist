@@ -140,7 +140,7 @@ public partial class WorkflowRunStoreSpecs
     }
 
     [Fact]
-    public async Task SaveAsync_ProjectsBlockedSettlementForIndexedQueriesAndClearsItAfterLateResult()
+    public async Task SaveAsync_KeepsUnknownActiveAndRemovesBlockedSettlementFromCapacity()
     {
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
@@ -174,7 +174,7 @@ public partial class WorkflowRunStoreSpecs
                             WorkerId = "runner-1",
                             AgentResultSettlement = new AgentResultSettlement
                             {
-                                State = AgentResultSettlementState.Blocked,
+                                State = AgentResultSettlementState.Unknown,
                                 TaskRunId = "build.1",
                                 WorkId = "build-work",
                                 RunnerId = "runner-1",
@@ -198,8 +198,28 @@ public partial class WorkflowRunStoreSpecs
         await store.SaveAsync(running);
 
         var querier = new WorkflowRunQuerier(factory);
-        Assert.Equal([blocked.Id], await querier.FindBlockedAsync(ProjectId));
+        Assert.Empty(await querier.FindBlockedAsync(ProjectId));
         Assert.Empty(await querier.FindBlockedAsync("other-project"));
+        await using (var blockedDb = new MohistDbContext(database.Options))
+        {
+            var blockedRow = await blockedDb.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == blocked.Id);
+            Assert.Equal("build-work", blockedRow.ActiveWorkId);
+            Assert.Equal("runner-1", blockedRow.ActiveWorkerId);
+        }
+        Assert.Equal(1, await querier.CountRunningAssignedToAsync("runner-1"));
+        Assert.Equal([blocked.Id], await querier.FindRunningAssignedToAsync("runner-1"));
+
+        blocked.CurrentStage().Tasks.Single().AgentResultSettlement!.State = AgentResultSettlementState.Blocked;
+        await store.SaveAsync(blocked);
+        Assert.Equal([blocked.Id], await querier.FindBlockedAsync(ProjectId));
+        await using (var blockedDb = new MohistDbContext(database.Options))
+        {
+            var blockedRow = await blockedDb.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == blocked.Id);
+            Assert.Null(blockedRow.ActiveWorkId);
+            Assert.Null(blockedRow.ActiveWorkerId);
+        }
+        Assert.Equal(0, await querier.CountRunningAssignedToAsync("runner-1"));
+        Assert.Empty(await querier.FindRunningAssignedToAsync("runner-1"));
 
         var task = blocked.CurrentStage().Tasks.Single();
         task.AgentResultSettlement = null;
