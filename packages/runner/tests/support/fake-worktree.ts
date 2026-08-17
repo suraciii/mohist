@@ -164,6 +164,21 @@ export class StatefulFakeWorktree {
     if (command === "status --porcelain") {
       return ok(state.porcelain)
     }
+    if (command === "rev-parse --is-inside-work-tree") {
+      return ok("true\n")
+    }
+    if (
+      command === "diff --cached --name-only" ||
+      command === "diff --name-only" ||
+      command === "ls-files --others --exclude-standard"
+    ) {
+      // Worktree-enforcement snapshot: keep the file lists aligned with
+      // the clean-by-default state used by executor boundary tests.
+      return ok("")
+    }
+    if (command === "rev-parse --git-path index.lock") {
+      return ok(join(workDir, ".git", "index.lock") + "\n")
+    }
     if (command === "rebase --abort") {
       if (!this.abortLeavesResidual) {
         state.residual.rebaseMerge = false

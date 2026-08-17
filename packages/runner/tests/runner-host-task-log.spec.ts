@@ -140,8 +140,10 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
 vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runtime/workspace.js")>()
   return { ...actual, WorkspaceManager: class {
-    async prepare() { return { path: "/virtual/mohist-runner-host-task-log", branch: "main", changeDir: null } }
-    async verify() { return { path: "/virtual/mohist-runner-host-task-log", branch: "main", changeDir: null } }
+    // These host tests exercise task-log delivery, not branch stability;
+    // a null branch keeps the executor boundary probe observational.
+    async prepare() { return { path: "/virtual/mohist-runner-host-task-log", branch: null, changeDir: null } }
+    async verify() { return { path: "/virtual/mohist-runner-host-task-log", branch: null, changeDir: null } }
   } }
 })
 

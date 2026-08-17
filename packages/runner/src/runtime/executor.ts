@@ -224,13 +224,23 @@ export class WorkExecutor {
       const resultForRecovery = projected
       if (isActionFailure(validatedResult)) {
         if (resultForRecovery.status === 'unknown') return resultForRecovery
+        // A branch-integrity failure is deliberately ineligible for
+        // automatic recovery: the server contract maps `completed` to
+        // task success and then completes the task and its follow-ups.
+        // Returning it directly keeps it `failed` with no `addTasks`, so
+        // a matching handler or self-retry can never settle it as
+        // successful. Ordinary conflicts stay eligible for recovery.
+        if (isBranchInvariantViolation(resultForRecovery)) return resultForRecovery
         const recoveryResult = tryRecovery(work, resultForRecovery, variables)
         if (recoveryResult) return recoveryResult
         return resultForRecovery
       }
       const endCheck = await checkBranchStability(work, workDir, expectedBranch, 'end', signal, log)
       if (endCheck.kind === 'violation') {
-        return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
+        // End-boundary branch-integrity failures bypass tryRecovery too;
+        // the end probe must run before artifact/worktree settlement can
+        // convert the action result into successful task completion.
+        return endCheck.result
       }
       const artifactResult = await captureAndUploadArtifactsForWork(
         this.connection,
@@ -495,6 +505,18 @@ function removeDeferredFields(withInput: JsonObject | null | undefined, deferred
 
 function failureStatus(work: DispatchWorkItem): 'fail' | 'failed' {
   return CHECK_WORK_TYPES.has(work.workType) ? 'fail' : 'failed'
+}
+
+/**
+ * Branch-integrity failures are terminal for the current task report:
+ * the executor must not pass them through `tryRecovery`, because the
+ * server contract maps a `completed` result to task success and then
+ * completes the task and its follow-ups. A branch-invariant violation is
+ * therefore returned `failed` with no `addTasks`; an explicit later retry
+ * may repair the preserved workspace.
+ */
+function isBranchInvariantViolation(result: WorkItemResult): boolean {
+  return result.error?.code === 'branch-invariant-violation'
 }
 
 function removedActionMessage(uses: string, tombstone: { name: string; guidance: string }): string {

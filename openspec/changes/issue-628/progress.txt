@@ -132,3 +132,69 @@
   + null-workspace tests. workflow-profile: rebase task declares no expectedBranch.
   workspace-prepare-workflow: executor-level engine injection + detached failure.
   worktree-cleanup-delivery: rebase context/mock updated for completion probes.
+
+## T-003 (done) — Reject invalid Git workspace state at task boundaries
+
+### Codebase Patterns (read first for later tasks)
+
+- **Boundary probes share the health model**: `branch-stability.ts` now captures the
+  full shared `WorkspaceHealthSnapshot` (residual markers via `rev-parse --git-path` +
+  exists checker, `rev-parse HEAD`, `rev-parse --abbrev-ref HEAD`, `status --porcelain`)
+  through the executor's narrow `git()` probe when an expected branch is defined. The
+  violation message is `workspaceHealthDiagnostic({operation, expectedBranch, snapshot,
+  detail})` — same expected/observed terminology as `workspace-prepare`/`rebase`/manager.
+  `branchInvariantViolationFailure` gained an optional `message` field that supersedes the
+  legacy format; the legacy fallback is kept only for direct unit callers.
+- **Start vs end asymmetry (important)**: the START boundary checks only alignment
+  (detached/mismatch) + probe failure (incl. non-Git = "unverified workspace"). It does
+  NOT reject residual state, because `mohist/workspace-prepare` runs precisely to repair
+  residual/detached state — failing start on residual would block workspace-prepare from
+  ever running (this was caught by the workspace-prepare-workflow regression test). The
+  END boundary additionally rejects residual rebase/merge/cherry-pick state after a
+  successful action. Dirty worktrees are deferred to `enforceCleanWorktree` at BOTH
+  boundaries (agent cleanup must still run).
+- **Non-Git + expected branch = failure now**: the old `checkBranchStability` returned
+  `ok` for a non-Git directory even with an expected branch; it now fails as a probe
+  failure ("unverified expected workspace"). Non-Git stays OK only for actions with NO
+  expected workspace branch (observational `readCurrentBranch` path, unchanged).
+- **Executor bypasses tryRecovery for branch-invariant**: new `isBranchInvariantViolation`
+  guard returns the failed `WorkItemResult` (status `failed`, no `addTasks`) directly —
+  BOTH for action-level failures (before `tryRecovery` on the projected result) AND the
+  end-boundary violation (was `tryRecovery(...) ?? result`, now just `result`). Start-check
+  violations already returned directly. Ordinary conflict failures still flow through
+  `tryRecovery`.
+- **StatefulFakeWorktree now answers worktree-enforcement probes**: added handlers for
+  `rev-parse --is-inside-work-tree`, `diff --cached --name-only`, `diff --name-only`,
+  `ls-files --others --exclude-standard`, and `rev-parse --git-path index.lock` so
+  executor-level tests where the action succeeds can settle through `enforceCleanWorktree`.
+
+### Gotchas discovered
+
+- **Executor tests with a non-null workspace branch need a real git probe now.** Tests
+  that ran the executor with `verifyOnlyWorkspaceManager({branch: 'main'})` (or a mocked
+  manager returning a branch) against the default `nonGitRunner` broke once expected-branch
+  probes fail on non-Git. Fixed by giving those tests a clean-branch runner
+  (`executor-raw-with.spec.ts` `cleanMainRunner`) or switching the mock manager to
+  `branch: null` (`runner-host-task-log`, `runner-host-opencode-runtime` — they test
+  log/opencode plumbing, not branch stability).
+- **Existing executor git stubs needed new cases**: `installExecutorGitProbe`
+  (workspace-prepare-workflow) and `installExecutorGit` (worktree-cleanup-delivery) now
+  answer `rev-parse --git-path <marker>`, `rev-parse HEAD`, `status --porcelain`.
+- **Executor order matters**: end probe runs before `captureAndUploadArtifactsForWork` and
+  `enforceCleanWorktree`, so an invalid workspace can never be settled as completed (the
+  acceptance criterion "before artifacts or work results can settle it").
+- **Test action must declare `branch-invariant-violation` in `errors`** for executor tests
+  where the action itself returns it — otherwise `normalizeActionResult` rewrites the code
+  to unexpected-error (same rule as rebase manifest).
+- **Full runner suite grew 1714 → 1731** (17 new tests: 10 unit `checkBranchStability`
+  + 8 executor boundary scenarios in `executor-workspace-boundary.spec.ts`; one test
+  reworked in executor-raw-with). `tsc` (src+tests) and `check:test-boundaries` green.
+
+### Verification
+
+- Full runner suite green (155 files / 1731 tests), `tsc` (src + tests), and
+  `check:test-boundaries` all pass.
+- Focused suites: executor-branch-stability (10), executor-workspace-boundary (11 incl.
+  the 8 new stateful fake-worktree scenarios), workspace-prepare-workflow,
+  worktree-cleanup-delivery, rebase, executor-recovery, recovery-round-cross-boundary all
+  green.

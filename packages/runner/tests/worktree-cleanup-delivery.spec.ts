@@ -54,8 +54,17 @@ function installExecutorGit(resources: WorktreeTestResources, state: FakeWorktre
   resources.gitRunner = async (workDir, args) => {
     expect(workDir).toBe(state.workDir)
     switch (args.join(" ")) {
+      case "rev-parse --git-path rebase-merge":
+      case "rev-parse --git-path rebase-apply":
+      case "rev-parse --git-path MERGE_HEAD":
+      case "rev-parse --git-path CHERRY_PICK_HEAD":
+        return gitOk(`${workDir}/.git/${args[2] ?? ""}\n`)
+      case "rev-parse HEAD":
+        return gitOk("cleanup-head-sha\n")
       case "rev-parse --abbrev-ref HEAD":
         return gitOk(`${state.branch}\n`)
+      case "status --porcelain":
+        return gitOk("")
       case "rev-parse --is-inside-work-tree":
         return gitOk("true\n")
       case "diff --cached --name-only":

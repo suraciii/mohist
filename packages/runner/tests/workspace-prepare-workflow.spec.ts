@@ -32,11 +32,20 @@ function fail(stderr: string) {
 }
 
 function installExecutorGitProbe(): GitRunner {
-  return async (_workDir, args) => {
+  return async (workDir, args) => {
     const command = args.join(" ")
     switch (command) {
+      case "rev-parse --git-path rebase-merge":
+      case "rev-parse --git-path rebase-apply":
+      case "rev-parse --git-path MERGE_HEAD":
+      case "rev-parse --git-path CHERRY_PICK_HEAD":
+        return ok(`${workDir}/.git/${args[2] ?? ""}\n`)
+      case "rev-parse HEAD":
+        return ok("executor-head-sha\n")
       case "rev-parse --abbrev-ref HEAD":
         return ok(`${EXPECTED_BRANCH}\n`)
+      case "status --porcelain":
+        return ok("")
       case "rev-parse --is-inside-work-tree":
         return ok("true\n")
       case "diff --cached --name-only":
