@@ -1,71 +1,94 @@
 ## Context
 
-The built-in `mohist/local` and `mohist/github-pr` profiles currently model build verification as one `core/script` task whose command is the aggregate `vars.ci.verify` script and whose timeout is `300000` ms. The Runner can already enforce a timeout while executing a command, but the workflow only receives one task result. A timeout therefore loses which checks already passed, and normal recovery replays the whole sequence.
+Issue 625 addresses a failure in the built-in `mohist/local` and `mohist/github-pr` build stages. They currently execute the aggregate `${{ vars.ci.verify }}` script as one `core/script` task with a `300000` ms timeout. If an earlier command passes and a later command causes the aggregate task to time out, the control plane receives only one failed task result. The completed checks are not durable workflow evidence, so recovery repeats work and can approach downstream side effects more than once.
 
-Workflow task attempts are already durable in `TaskRun`, are claimed serially by `WorkflowRun.NextWork`, and are reported with a `(workflowRunId, workId, taskRunId, runnerId)` identity. The Runner's `WorkResultJournal` also persists a returned result before reporting it and retries failed result delivery. This change builds on those boundaries. The stakeholders are workflow users waiting for builds, workflow/status projections, the Server control plane, and Runner maintainers. The main constraints are the six exact commands and existing strict thresholds, no parallel verification, no resource-profile or slot-policy change, and no aggregate timeout.
+The existing system already provides the needed durability boundaries: `StageRun` and `TaskRun` are persisted with the workflow run, `WorkflowRun.NextWork` claims work serially, reports are fenced by workflow/task/work/runner identity, and the Runner `WorkResultJournal` persists returned results before retrying delivery. `core/script` and `runCommand` already support process-group termination and per-command timeouts. The stakeholders are workflow users, status/event consumers, the Server workflow control plane, and Runner maintainers. Constraints are the six exact verification commands, unchanged strictness, ordered execution, no resource-profile or Runner-slot change, and no aggregate verification timeout.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Represent verification in both built-in profiles as six ordered `core/script` tasks with stable lane IDs and finite per-lane budgets.
-- Preserve these commands exactly and run them in order: `npm ci`; `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false`; `npm run typecheck -w packages/web`; `npm run test:run -w packages/web`; `npm run typecheck -w packages/runner`; and `npm run test:run -w packages/runner -- --no-file-parallelism`.
-- Persist lane identity, order, configured budget, attempt identity, pass/fail/timeout outcome, and diagnostics so status survives grain reloads.
-- Resume recovery at the first lane whose latest durable outcome is not `pass`, without re-running earlier passing lanes or starting later lanes prematurely.
-- Keep downstream push, review, PR, and merge tasks behind the existing build-stage boundary and make their task identities idempotent under replay.
+- Replace aggregate verification in both built-in profiles with six ordered, independently reportable lanes:
+  1. `npm ci`
+  2. `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false`
+  3. `npm run typecheck -w packages/web`
+  4. `npm run test:run -w packages/web`
+  5. `npm run typecheck -w packages/runner`
+  6. `npm run test:run -w packages/runner -- --no-file-parallelism`
+- Give every lane a positive, finite `core/script` timeout and preserve the exact command and test scope.
+- Persist each lane's stable identity, order, configured budget, terminal outcome (`pass`, `fail`, or `timeout`), and diagnostics in the workflow state; expose the results through the existing workflow status projection.
+- Resume at the first lane without a durable pass, preserving earlier passes and preventing later lanes from starting early.
+- Keep build-stage advancement and existing push, review, PR, and merge ordering behind the all-lanes-pass gate.
 
 **Non-Goals:**
 
-- Running lanes in parallel, changing Runner slot policy, adding resource containment, or increasing one global timeout.
-- Changing test scope, failure thresholds, allowlists, skips, or the semantics of the six commands.
-- Adding a general-purpose lane DSL or changing verification for user-defined workflows outside the built-in profiles.
-- Redesigning unrelated workflow recovery, artifact, or downstream side-effect actions.
+- Running lanes in parallel or changing Runner slot policy, resource containment, test thresholds, skips, allowlists, or test scope.
+- Adding a general-purpose verification-lane DSL or changing verification semantics for arbitrary user-defined workflows.
+- Redesigning generic workflow recovery, artifact handling, or downstream Git/GitHub Actions.
+- Increasing the old aggregate timeout or retaining an enclosing timeout around all six lanes.
 
 ## Decisions
 
-1. **Use six ordinary serialized workflow tasks as the lane boundary.** The profiles will replace `verify` with stable task definitions such as `verify-install`, `verify-dotnet`, `verify-web-typecheck`, `verify-web-tests`, `verify-runner-typecheck`, and `verify-runner-tests`. Each task has one command and one literal finite `timeout` input. The profile owns the exact command contract; the aggregate `vars.ci.verify` value is no longer used for this gate. This keeps ordering in the existing `NextUnclaimedTask`/stage machinery and avoids a compound Action that would need to recreate claiming, reporting, and recovery semantics.
+1. **Use ordinary workflow tasks as the lane boundary.**
 
-   An alternative is one new `verification-lanes` Action that invokes all commands and emits child results. That would preserve one workflow task but would put durable child identity, partial completion, and retry fencing inside the Runner, duplicating the control plane. Six tasks make each lane independently claimable and observable with no new scheduling model.
+   Each built-in build stage will replace `verify` with six stable `core/script` task definitions, for example `verify-install`, `verify-dotnet`, `verify-web-typecheck`, `verify-web-tests`, `verify-runner-typecheck`, and `verify-runner-tests`. The task `run` values contain the exact commands above, and each task has its own literal positive `with.timeout`. The aggregate `${{ vars.ci.verify }}` task and its `300000` ms timeout are removed from this gate.
 
-2. **Store lane evidence as additive task-attempt metadata, with a derived lane projection.** `TaskRun` will retain a stable lane ID and order, the resolved budget, terminal outcome (`pass`, `fail`, or `timeout`), attempt ID, and diagnostic/error data. The existing `TaskRun.Id` is the recovery-attempt identity; all attempts for a lane remain in the stage history. A `VerificationLaneView` status projection will group those attempts by lane ID and expose the latest authoritative outcome while retaining prior diagnostics. The projection is derived from durable run state rather than becoming a second mutable source of truth.
+   This uses the existing task ordering, claim, report, and retry machinery. A single new `verification-lanes` Action was considered, but it would have to duplicate durable child identities, partial-result persistence, ordered scheduling, timeout attribution, and recovery fencing inside the Runner. Six workflow tasks make those facts control-plane state instead.
 
-   The Server will record the lane outcome before applying normal task completion/recovery logic. This matters when an Action schedules a recovery task: the generic task may be marked complete so the recovery task can run, but the original lane attempt must still be visible as failed or timed out. Existing task and workflow events remain emitted, with an additive lane-result event or equivalent read-model update committed in the same grain save.
+2. **Represent lane evidence as additive task-attempt state plus a derived status view.**
 
-   A new generic workflow-definition field for lane metadata was considered and rejected. The built-in lane catalog can be validated from the six stable task IDs and their command/timeout declarations, avoiding parser, schema, and migration costs for a construct that user profiles do not need.
+   Add optional verification metadata to each recognized built-in lane `TaskRun` attempt: stable lane ID, lane order, configured budget in milliseconds, outcome, and diagnostic/error data. The task's existing `TaskRunStatus` remains `Completed` or `Failed`; `timeout` is a lane outcome, not a new generic task status. A shared server-side lane catalog identifies the six built-in IDs and their order, while the profile YAML remains authoritative for the command and timeout declaration.
 
-3. **Make timeout a lane-scoped wire fact, not runner loss.** `core/script` continues to use `runCommand`'s per-command timer and process-group termination. The Runner result envelope will carry the optional fired `timeoutMs` alongside the existing `timeout` error code. The Server translator maps a successful result to `pass`, a non-timeout error to `fail`, and the structured timeout result to `timeout`, attaching the lane identity and configured budget from the dispatch. The generic task report status remains compatible with existing task processing; the separate lane outcome supplies the required third state.
+   When a report is applied, the Server classifies a successful script report as `pass`, a normal script failure as `fail`, and `error.code=timeout` as `timeout`. It stores the outcome and diagnostics in the same state commit as the normal task transition and recovery handling. The existing `TaskRun.Id` and its `WorkId` remain the durable attempt identity, so a retry creates a new attempt for the same lane without replacing the old evidence.
 
-   A single `TaskReportStatus.Timeout` was considered, but it would widen the task protocol and force every existing task consumer to understand a third generic status. Keeping timeout as an outcome classification preserves ordinary workflow behavior while making verification status precise.
+   Extend the existing workflow status model with an additive verification-lane projection on the build stage. It reports all six lanes, including pending/missing state, order, budget, current outcome, attempt identity, and failure or timeout diagnostics. No new event stream is required for correctness; existing task events remain available and the status projection is the authoritative current view.
 
-4. **Gate advancement on the lane catalog, not only generic task status.** The build-stage advancement predicate will require all six required lane IDs to have a durable latest `pass`. Missing, pending, failed, and timed-out lanes keep the build stage blocked. `NextWork` continues to expose only the first pending lane or its recovery work, so later lanes cannot be claimed out of order. The sixth pass then allows the existing downstream task order to continue unchanged.
+   A separate lane table or a new workflow-definition syntax was considered and rejected. The task attempts already have the required lifetime and persistence boundary, and a built-in catalog avoids parser, serializer, and migration costs for a construct that is not needed by user profiles.
 
-   Relying only on `TaskRunStatus.Completed` was considered insufficient because recovery scheduling can complete an attempt while its recorded lane outcome is still a failure. The explicit predicate prevents that representation detail from opening the gate.
+3. **Keep timeout execution and reporting lane-scoped.**
 
-5. **Recover by adding a new attempt for the first non-passing lane.** Recovery resolves the ordered lane catalog, selects the first lane whose current outcome is not `pass`, and creates a new attempt for that lane after any configured repair task. Earlier passing attempts are retained and are not requeued. Later lanes remain pending until the recovery attempt and all preceding lanes pass. The existing `fix-ci` recovery behavior can be attached to each lane without creating downstream tasks.
+   `core/script` continues to pass the lane's `timeout` to `runCommand`, which kills the command process group and returns the structured timeout outcome. The action maps that result to the existing failed work envelope with `error.code=timeout`; the configured budget and command output are retained on the lane attempt. No enclosing timeout is added around the build stage or the six tasks.
 
-   The grain's task-run ID, work ID, runner ID, and attempt identity remain the authoritative fence. A duplicate recovery request or duplicate report finds the existing attempt and reconciles as already applied/stale instead of inserting another active attempt. The Runner journal continues to hold an exact returned result while persistence or report delivery is unavailable; it must not execute the fenced lane again.
+   A new generic `TaskReportStatus.Timeout` or a separate runner protocol was considered, but it would force unrelated workflow consumers to understand a third task status. Classifying the existing action error at the verification boundary preserves the current task/report contract while exposing the required third lane outcome.
 
-6. **Keep the CI contract and side effects bounded.** The six command declarations and budgets will be covered by built-in profile tests for both profiles. Initial per-lane budgets will be explicit profile values chosen from current command behavior (for example, 300000 ms for dependency and .NET lanes and 120000 ms for the four focused Web/Runner lanes); changing one budget will never create or extend an aggregate deadline. No recovery path adds `push`, review, PR, or merge work. Those tasks remain after the lane gate and retain their existing durable task identities and idempotent Action/report behavior.
+4. **Make the build gate explicitly require all lane passes.**
+
+   Stage advancement will retain the existing serial task behavior and additionally require the built-in verification lane catalog to contain six durable `pass` outcomes before the build stage can complete. A lane that is pending, missing, failed, or timed out keeps the gate closed. `NextWork` exposes only the first pending lane or its recovery work, so later verification tasks cannot be claimed out of order.
+
+   Checking only whether tasks are terminal was considered insufficient because a failed lane may have completed a recovery helper task, and a generic task state does not distinguish a timeout from another failure. The explicit lane predicate makes the gate depend on the durable verification evidence.
+
+5. **Recover by creating one new attempt for the first non-passing lane.**
+
+   Existing recovery handling remains the repair boundary: a lane failure or timeout records its result, runs the declared `fix-ci` recovery task when applicable, and retries the failed lane as a new `TaskRun` attempt. Recovery resolution selects the first lane in catalog order whose authoritative outcome is not `pass`; earlier passing attempts are never requeued and later lanes remain pending.
+
+   Orleans grain serialization plus the failed attempt's stable task/work identity provide idempotency for repeated recovery requests. If a retry attempt already exists, is running, or has passed, a duplicate request reconciles with that state instead of inserting another active attempt. A late report from the old attempt is rejected as stale by the existing task-run/work/runner fence and cannot overwrite the newer lane result.
+
+   The Runner continues to use `WorkResultJournal`: a returned lane result is journaled before report delivery, report failures are retried, and a fenced work item is not executed again while its exact result is retained. Downstream tasks keep their existing durable identities and are only eligible after the lane gate passes, so repeated recovery cannot duplicate push, review, or merge effects.
+
+6. **Keep the CI contract explicit and testable.**
+
+   Profile-definition tests will inspect both built-in YAML definitions for the six IDs, exact command strings, order, finite per-lane budgets, absence of the old aggregate timeout, and absence of resource or slot-policy settings. Server tests will cover lane classification, durable projection, gate behavior, stale reports, and recovery preservation. Runner tests will cover command timeout propagation, process-group termination, journal fencing, and report retry. End-to-end workflow tests will cover a timeout after an earlier pass, recovery from that lane, and one-time downstream execution.
 
 ## Risks / Trade-offs
 
-- `[Profile and project-variable drift] -> Remove the aggregate variable from the built-in gate, validate the six exact command declarations in profile tests, and document any required environment setup outside the command contract.`
-- `[A recovery report races with a late original report] -> Fence reports by task-run/work/runner identity, keep the newer durable attempt authoritative, and treat stale reports as acknowledgements without reopening lanes.`
-- `[A returned timeout is lost during local persistence or network failure] -> Preserve the exact result in `WorkResultJournal`, block duplicate execution, retry persistence/reporting, and only release the fence after durable acknowledgement.`
-- `[Task status and lane outcome can diverge while repair work is running] -> Record lane outcome and diagnostics atomically with the task transition, and make the build gate read lane outcomes rather than task status alone.`
-- `[Existing runs contain the old aggregate verify task] -> Do not rewrite a running attempt in place. Provide a controlled build rerun/migration path for an unstarted or failed legacy verification task and keep legacy records readable during rollout.`
-- `[A lane budget is too small for a real environment] -> Tune the individual lane budget from observed command duration and diagnostics; never compensate with a new full-suite timeout or reduced checks.`
+- `[Per-lane budgets are too small for a cold or busy Runner] -> Choose budgets from observed command timings, keep them explicit per lane, and adjust only the affected lane without restoring an aggregate deadline.`
+- `[A timeout report races with a recovery attempt] -> Store the original timeout before recovery, fence reports by task/work/runner identity, and treat late reports as stale acknowledgements.`
+- `[Task status and lane outcome diverge while repair work runs] -> Update lane metadata and task lifecycle in one workflow commit, and make the build gate read lane outcomes rather than task status alone.`
+- `[Runner result persistence or delivery fails after a command returns] -> Retain the exact result in `WorkResultJournal`, block duplicate execution, and retry persistence/reporting before releasing the work fence.`
+- `[The aggregate CI variable remains configured with obsolete commands] -> Remove it from the built-in gate, validate literal commands in profile tests, and retain or deprecate the variable only for compatibility during the transition.`
+- `[Existing runs have the old aggregate task and no lane history] -> Do not rewrite active task attempts in place; keep legacy runs readable and require an explicit retry/rerun policy for converting an unfinished build.`
+- `[Rollback downgrades code while lane runs are active] -> Keep the additive state reader and lane-aware Server deployed until active lane runs drain, or stop/rerun those runs explicitly before reverting the profile and Server behavior.`
 
 ## Migration Plan
 
-1. Add the optional timeout/outcome fields and Server projections in a backward-compatible form. Old Runner results remain ordinary failures; new Runner results preserve timeout details.
-2. Deploy the Runner changes that propagate structured script timeouts and retain exact results through the existing journal/report retry path.
-3. Update both built-in profiles and their CI contract to the six task declarations, then update profile, translator, workflow-domain, Runner-action, and end-to-end recovery tests.
-4. New build stages use the lane catalog. A stage already executing the legacy aggregate task is left intact; operators recover it by rerunning the build stage under the new profile rather than mutating a live task or discarding its evidence. A pending legacy task may be expanded only before it is claimed, through an explicit compatibility migration that creates the six ordered tasks once.
-5. To roll back, restore the prior profile definitions and stop creating new lane stages. Keep the additive fields and projections readable, because removing stored lane outcomes would lose recovery evidence. Existing lane runs can be stopped or completed under their recorded identities without replaying downstream effects.
+1. Add the optional lane metadata, classification, gate, status projection, and idempotent recovery handling. Keep deserialization compatible with existing workflow state that has no lane fields.
+2. Verify Runner timeout propagation and journal behavior, then deploy the Runner and Server support before enabling new profile definitions.
+3. Update `mohist-local.workflow.yaml` and `mohist-github-pr.workflow.yaml` to the six ordered tasks, remove the aggregate `verify` task and enclosing timeout, and update profile contract tests.
+4. New workflow runs use six lanes. Runs already initialized with the aggregate task keep their recorded definition/state and are not silently rewritten; operators can finish legacy recovery or explicitly rerun the build stage under the new definition according to the run-control policy.
+5. To roll back, restore the previous built-in profile definitions and stop creating new lane runs. Keep the additive fields and readers so stored lane evidence remains readable; do not discard or replay downstream work during rollback.
 
 ## Open Questions
 
-- Confirm the final per-lane budget values against cold-workspace timing for the supported Runner environments; the design requires finite independent values but the specifications do not mandate exact numbers.
-- Confirm whether the existing project-level CI variable should be deleted immediately or retained as a deprecated, unused compatibility value during one release.
-- Decide whether the lane result should be exposed only through the existing workflow status projection or also through a dedicated workflow event stream entry for clients that consume events directly.
+- What initial timeout values meet cold-workspace and normal-load requirements for each lane on every supported Runner environment?
+- Should `vars.ci.verify` be retained as a deprecated, unused project variable for one release, or removed from the built-in CI variable contract immediately?
+- For an already-created run with the aggregate verification task, should the supported operator path be legacy retry only, explicit build-stage rerun, or a one-time state migration before rollout?
