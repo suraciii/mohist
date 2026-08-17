@@ -5,7 +5,7 @@ import {
   useCreateAgent,
   useUpdateAgent,
   useArchiveAgent,
-  readAgentModelAndVariant,
+  readAgentDefinitionModelAndVariant,
   writeAgentModelAndVariant,
 } from '../../../entities/agent'
 import type { AgentInfo, AgentCreateRequest, AgentUpdateRequest } from '../../../entities/agent'
@@ -57,7 +57,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
   const toProjectPath = useProjectPath()
   const { createAgent, updateAgent, archiveAgent } = operationsHook()
   const isEditing = !!agent
-  const initialModelVariant = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const initialModelVariant = useMemo(() => readAgentDefinitionModelAndVariant(agent), [agent])
 
   const [name, setName] = useState(agent?.name ?? '')
   const [description, setDescription] = useState(agent?.description ?? '')

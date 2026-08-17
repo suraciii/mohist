@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { readAgentModelAndVariant, unarchiveAgent, writeAgentModelAndVariant } from './client'
+import {
+  readAgentDefinitionModelAndVariant,
+  readAgentModelAndVariant,
+  unarchiveAgent,
+  writeAgentModelAndVariant,
+} from './client'
 
 useMswServer()
 
@@ -80,6 +85,14 @@ describe('readAgentModelAndVariant', () => {
         agentConfig: { model: 'anthropic/claude', variant: 'high' },
       }),
     ).toEqual({ model: 'anthropic/claude', variant: 'high', runtime: 'opencode' })
+  })
+
+  it('reads raw definition fields without materializing an effective default', () => {
+    const agent = {
+      agentConfig: null,
+      effectiveExecutionConfig: { runtime: 'pi' as const, model: 'provider/default', variant: 'balanced' },
+    }
+    expect(readAgentDefinitionModelAndVariant(agent)).toEqual({ model: null, variant: null, runtime: 'opencode' })
   })
 
   it('drops empty/whitespace model and variant', () => {

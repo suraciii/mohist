@@ -251,6 +251,23 @@ describe('AgentProfileEditor', () => {
       expect(callArgs.data.skills).toEqual(['code', 'debug'])
     })
 
+    it('preserves an effective default as unresolved when saving an unrelated edit', async () => {
+      const defaultResolvedAgent: AgentInfo = {
+        ...existingAgent,
+        agentConfig: null,
+        effectiveExecutionConfig: { runtime: 'pi', model: 'provider/default', variant: 'balanced' },
+      }
+      renderEditor({ agent: defaultResolvedAgent })
+      await act(async () => {
+        fireEvent.change(screen.getByTestId('editor-description'), { target: { value: 'Updated purpose' } })
+        screen.getByTestId('editor-save').click()
+      })
+
+      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(updateCall.data.description).toBe('Updated purpose')
+      expect(updateCall.data.agentConfig).toBeNull()
+    })
+
     it('persists an updated variant and restores its active state from stored agentConfig', async () => {
       renderEditor({ agent: existingAgent })
       await waitFor(() => {

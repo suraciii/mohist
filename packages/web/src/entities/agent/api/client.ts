@@ -165,17 +165,9 @@ export function unarchiveAgent(projectId: string, id: string) {
   })
 }
 
-export function readAgentModelAndVariant(
-  agent: (Pick<AgentInfo, 'agentConfig'> & Partial<Pick<AgentInfo, 'effectiveExecutionConfig'>>) | null | undefined,
+export function readAgentDefinitionModelAndVariant(
+  agent: Pick<AgentInfo, 'agentConfig'> | null | undefined,
 ): { model: string | null; variant: string | null; runtime: AgentRuntime } {
-  const effective = agent?.effectiveExecutionConfig
-  if (effective && (effective.runtime === 'opencode' || effective.runtime === 'pi')) {
-    return {
-      model: typeof effective.model === 'string' && effective.model.trim() ? effective.model : null,
-      variant: typeof effective.variant === 'string' && effective.variant.trim() ? effective.variant : null,
-      runtime: effective.runtime,
-    }
-  }
   const config = agent?.agentConfig
   if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
   const rawModel = typeof config.model === 'string' ? config.model : null
@@ -188,6 +180,20 @@ export function readAgentModelAndVariant(
     variant: rawVariant && rawVariant.trim() ? rawVariant : null,
     runtime,
   }
+}
+
+export function readAgentModelAndVariant(
+  agent: (Pick<AgentInfo, 'agentConfig'> & Partial<Pick<AgentInfo, 'effectiveExecutionConfig'>>) | null | undefined,
+): { model: string | null; variant: string | null; runtime: AgentRuntime } {
+  const effective = agent?.effectiveExecutionConfig
+  if (effective && (effective.runtime === 'opencode' || effective.runtime === 'pi')) {
+    return {
+      model: typeof effective.model === 'string' && effective.model.trim() ? effective.model : null,
+      variant: typeof effective.variant === 'string' && effective.variant.trim() ? effective.variant : null,
+      runtime: effective.runtime,
+    }
+  }
+  return readAgentDefinitionModelAndVariant(agent)
 }
 
 export function writeAgentModelAndVariant(

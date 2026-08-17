@@ -39,6 +39,7 @@ export {
   getAgentSessions,
   getAgentStatus,
   listAgents,
+  readAgentDefinitionModelAndVariant,
   readAgentModelAndVariant,
   unarchiveAgent,
   updateAgent,
