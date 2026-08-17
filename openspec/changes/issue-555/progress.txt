@@ -975,3 +975,7 @@ Runner delivery, and reconstructs pending retries from that frozen target.
   canonical coordinator before an optional active-Agent fallback. Added
   archive/invalidation replay regressions; focused launch and follow-up suites
   pass (8 each).
+- Full verification passed after all four fixes: `npm run verify` completed
+  docs, file-size, format, build, 3,984 Server SpecTests, 2,676 Server unit
+  tests, 69 architecture tests, 178 workflow tests, 1,848 CLI tests, 4,724
+  Web tests, 1,639 Runner tests, and 70 Slack tests.
