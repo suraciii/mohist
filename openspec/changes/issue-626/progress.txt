@@ -1,0 +1,12 @@
+## Codebase Patterns
+- `WorkExecutor` owns the Action execution boundary: it deep-clones `DispatchWorkItem.with`, injects engine inputs, checks unresolved references, renders deferred fields, validates, resolves the workspace directory, constructs cleanup input, and invokes the handler.
+- `ownerKind === 'agent-job'` is the only non-Workflow owner branch. Current Workflow dispatches use `workflow`; legacy envelopes may omit `ownerKind` and parse as `undefined`.
+- `tryRecovery` deep-clones the raw `with`, artifacts, setVars, recovery, and expect declarations for `retrySelf`, derives the parent continuation id, and decrements `recoveryRemaining` once. The continuation is normalized again when it executes.
+- The current `core/script` manifest declares required `run` and optional `shell` and `timeout`; the catalog projects those inputs and must not expose retired `resourceProfile`.
+
+## T-001
+- Added `normalizeWorkflowActionInput` beside Action input validation. It shallow-projects the already deep-cloned input and removes only top-level `resourceProfile` for `task` dispatches using `core/script` whose owner is not `agent-job`; nested keys, checks, other Actions, and agent-job inputs remain unchanged.
+- Applied normalization before unresolved-reference checks, deferred rendering, validation, work-directory resolution, cleanup input construction, and handler invocation. `DispatchWorkItem.with` and recovery declarations remain raw and untouched.
+- Added direct replay, omitted/current owner, retired unresolved/invalid data, strict unknown/type rejection, scope exclusions, manifest/catalog strictness, and retrySelf replay coverage.
+- Verification: Runner production typecheck, test typecheck, test-boundary check, focused suites (46 tests), and full Runner suite (156 files, 1,689 tests) passed.
+- The repository initially lacked installed JS dependencies; `npm ci --ignore-scripts` installed the locked workspace dependencies. It reported existing npm audit findings unrelated to this change.
