@@ -6,7 +6,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -28,7 +27,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public string ConnectionString => _keeper.ConnectionString;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public AgentSessionPersistenceTestProbe Persistence { get; }
-    public AgentSessionStatePersistenceFailureProbe SessionStatePersistence { get; } = new();
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
     public RunnerUpdateOperationWriteFailureProbe OperationWriteFailures =>
         Cluster.GetSiloServiceProvider(null).GetRequiredService<RunnerUpdateOperationWriteFailureProbe>();
@@ -67,13 +65,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
                 _sharedEventStore,
                 TimeProvider,
                 Persistence);
-            siloBuilder.Services.AddSingleton(SessionStatePersistence);
-            siloBuilder.Services.RemoveAll<IAgentSessionStore>();
-            siloBuilder.Services.AddScoped<AgentSessionStore>();
-            siloBuilder.Services.AddScoped<IAgentSessionStore>(services =>
-                new FailingAgentSessionStore(
-                    services.GetRequiredService<AgentSessionStore>(),
-                    services.GetRequiredService<AgentSessionStatePersistenceFailureProbe>()));
             siloBuilder.Services.AddSingleton<IDispatchPollObserver>(DispatchPollObserver);
             // IssueGrain + ProjectGrain dependencies: the workflow-only
             // tests above never activate issue/project grains, but the

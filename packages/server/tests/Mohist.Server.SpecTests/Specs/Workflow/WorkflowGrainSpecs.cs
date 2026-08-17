@@ -41,7 +41,6 @@ public abstract class WorkflowGrainSpecs
     protected WorkflowGrainSpecs(WorkflowGrainFixture fixture)
     {
         _fixture = fixture;
-        _fixture.SessionStatePersistence.Reset();
     }
 
     protected IGrainFactory Grains => _fixture.Grains;
