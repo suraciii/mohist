@@ -227,25 +227,6 @@ public static class AgentTaskRoutes
             var launchRequest = BuildCoordinatorRequest(body, workspaceName, launchOrigin, workspaceRepositories);
             var requestFingerprint = AgentLaunchCoordinatorCodec.Fingerprint(launchRequest);
             var preflightFingerprint = context.Request.Headers["X-Mohist-Agent-Preflight"].FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(preflightFingerprint))
-            {
-                var projectDefault = project.DefaultExecutionConfig;
-                var resolved = ExecutionConfigResolver.Resolve(
-                    new ExecutionConfigHint(
-                        NormalizeOptional(body.Runtime),
-                        NormalizeOptional(body.Model),
-                        NormalizeOptional(body.Variant)),
-                    null,
-                    projectDefault);
-                var actualScopeFingerprint = BuildScopeFingerprint(launchRequest, resolved, workspaceRepositories);
-                if (!string.Equals(preflightFingerprint.Trim(), actualScopeFingerprint, StringComparison.Ordinal))
-                {
-                    return ApiResults.Conflict(
-                        "The confirmed execution scope changed before launch. Run preflight again and confirm the new scope.",
-                        "launch_scope_changed",
-                        new { preflightFingerprint = actualScopeFingerprint });
-                }
-            }
 
             // Resume before any determinable validation. A changed malformed
             // request under an existing key must be a fingerprint conflict,
@@ -291,6 +272,26 @@ public static class AgentTaskRoutes
             catch (AgentExecutabilityException ex)
             {
                 return AgentSessionLaunchRoutes.ExecutabilityRejected(ex);
+            }
+
+            if (!string.IsNullOrWhiteSpace(preflightFingerprint))
+            {
+                var projectDefault = project.DefaultExecutionConfig;
+                var resolved = ExecutionConfigResolver.Resolve(
+                    new ExecutionConfigHint(
+                        NormalizeOptional(body.Runtime),
+                        NormalizeOptional(body.Model),
+                        NormalizeOptional(body.Variant)),
+                    null,
+                    projectDefault);
+                var actualScopeFingerprint = BuildScopeFingerprint(launchRequest, resolved, workspaceRepositories);
+                if (!string.Equals(preflightFingerprint.Trim(), actualScopeFingerprint, StringComparison.Ordinal))
+                {
+                    return ApiResults.Conflict(
+                        "The confirmed execution scope changed before launch. Run preflight again and confirm the new scope.",
+                        "launch_scope_changed",
+                        new { preflightFingerprint = actualScopeFingerprint });
+                }
             }
 
             var hintError = ValidateHints(body);
