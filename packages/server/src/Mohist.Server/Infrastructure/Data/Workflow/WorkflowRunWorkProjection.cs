@@ -24,11 +24,13 @@ public static class WorkflowRunWorkProjectionBuilder
             .ToList();
 
         var assignedWorkerId = run.Assignment?.WorkerId;
-            var active = string.IsNullOrWhiteSpace(assignedWorkerId)
-                ? null
-                : run.CurrentActiveWorkFor(assignedWorkerId);
-            if (run.HasUnresolvedAgentResult())
-                active = null;
+        var active = string.IsNullOrWhiteSpace(assignedWorkerId)
+            ? null
+            : run.CurrentActiveWorkFor(assignedWorkerId);
+        // Unknown work still owns its active lease until the persisted
+        // deadline. Only the blocked settlement has crossed that boundary.
+        if (run.HasBlockedAgentResult())
+            active = null;
         var activeWorkId = active is null
             ? null
             : EffectiveWorkId(active.WorkId, active.TaskRunId);
