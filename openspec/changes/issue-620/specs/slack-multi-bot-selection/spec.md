@@ -14,11 +14,24 @@ When a human Slack message addresses at least two eligible enabled Mohist Bots i
 - **THEN** that Bot does not appear as a selectable candidate and it does not receive or start work for the message
 
 ### Requirement: Selection actions are signed, actor-bound, and context-bound
-Each multi-Bot selection action MUST be signed with the credential of the Connection that owns the prompt delivery and MUST bind the original workspace, conversation, message, optional thread, original direct-message mode, actor, candidate set, selected Connection, nonce, and expiry. The Server MUST verify the signature with constant-time comparison and MUST revalidate the receiving Connection, workspace, conversation, thread, actor, selected Connection access authorization, candidate eligibility, and action expiry before dispatching. Client-submitted candidate identifiers or message content MUST NOT override the durable prompt context.
+Each multi-Bot selection action MUST be signed with the credential of the Connection that owns the prompt delivery and MUST bind the original workspace, conversation, message, optional thread, original direct-message mode, actor, candidate set, selected Connection, nonce, and expiry. The Server MUST verify the signature with constant-time comparison and MUST revalidate the receiving Connection, workspace, conversation, thread, actor, selected Connection access authorization, candidate eligibility, and action expiry before dispatching. The interaction route's validated lease for prompt-owner Connection A is the receiving proof. After the signed action and durable prompt row identify selected Connection B, the Server MUST resolve B's current runtime lease from the authenticated operator and the same adapter identity, validate that lease for B, and pass a B-bound `SlackLeaseContext` to `SlackConnectionAccessDecider`; it MUST NOT reuse A's lease, accept a client-supplied B lease, or treat prompt-time eligibility as current authorization. Client-submitted candidate identifiers or message content MUST NOT override the durable prompt context.
 
 #### Scenario: The original actor selects an eligible Bot
 - **WHEN** the actor bound to an unexpired signed action selects a candidate that is in the persisted candidate set, remains eligible, and remains authorized for that actor
 - **THEN** the Server accepts the selection for that original Slack message and dispatches only the selected Connection
+
+#### Scenario: A non-owner selection passes the selected Connection's live authorization
+- **WHEN** prompt-owner Connection A has a valid receiving lease, the actor selects eligible Connection B, B uses `allowlist` or `anyone`, and B has a current runtime lease held by the same adapter identity
+- **THEN** the Server resolves and validates B's own lease context, performs B's current allowlist or live member/channel checks with B's verified Bot token, and accepts the selection when those checks allow
+- **AND** A's lease is never used as B authorization
+
+#### Scenario: The selected Connection has no current lease
+- **WHEN** an otherwise eligible action selects B but B's current runtime lease cannot be resolved or validated for the authenticated adapter identity
+- **THEN** the Server reports unavailable, commits no winner, starts no work, and leaves the prompt available for an explicit new request
+
+#### Scenario: The selected Connection denies the actor under its current policy
+- **WHEN** the actor is allowed by prompt-owner A but B is `owner_only` and the actor is not B's owner, is removed from B's allowlist, is no longer B's owner after an owner transfer, or fails B's live member or channel-membership check
+- **THEN** the Server reports unauthorized, commits no winner, starts no work, and does not silently reroute to another candidate
 
 #### Scenario: A selection value is tampered with
 - **WHEN** a selection action value or its signed candidate data is modified
@@ -48,7 +61,7 @@ An accepted selection MUST dispatch the authoritative original message context, 
 - **THEN** the Server reports unavailable or stale, starts no work for that candidate, and leaves the original message available for an explicit new request rather than silently choosing another Bot
 
 ### Requirement: Ambiguous prompt state records candidates and one selection outcome
-The Server MUST persist one prompt record keyed by the stable Slack message identity `(workspace, conversation, message timestamp)`. The record MUST retain the original thread context, the eligible candidate set, the prompt delivery identity, and the selection outcome, including the selected Connection and resulting dispatch or terminal state when known. The record MUST retain a stable selection dispatch key and recovery-lease state once a winner is committed. The record MUST be sufficient to validate later actions without trusting redelivered Slack text.
+The Server MUST persist one prompt record keyed by the stable Slack message identity `(workspace, conversation, message timestamp)`. The record MUST retain the original thread context, the eligible candidate set, the prompt delivery identity, and the selection outcome, including the selected Connection and resulting dispatch or terminal state when known. The record MUST retain a stable selection dispatch key and recovery-lease state once a winner is committed. The record MUST be sufficient to validate later actions without trusting redelivered Slack text. A target-specific runtime lease context is a pre-commit authorization proof only; the prompt row MUST NOT persist a Slack credential or depend on a later click lease for recovery.
 
 #### Scenario: Concurrent Bot ingress handles one ambiguous message
 - **WHEN** multiple mentioned Connections process the same Slack message concurrently
@@ -75,8 +88,9 @@ The Server MUST commit at most one selection outcome for a prompt. A stable sele
 
 #### Scenario: The selection winner was committed before dispatch
 - **WHEN** the Server records the winner and `selection-dispatch-pending` before the selected Connection launch or follow-up dispatch, then the process dies
-- **THEN** the fixed-key action-recovery reminder claims the prompt row after restart and resumes the same selection operation using its persisted dispatch key and source snapshot
-- **AND** a selection redelivery may perform the same resume or observe the recovery lease, but no unselected or duplicate work starts
+- **THEN** the fixed-key action-recovery reminder claims the prompt row after restart and resumes the same selection operation using its persisted dispatch key and source snapshot without requiring A's or B's click-time lease
+- **AND** a selection redelivery that occurs before winner commit must resolve B's current target-specific lease again, while a redelivery after commit may perform the same resume or observe the recovery lease
+- **AND** no unselected or duplicate work starts
 
 ### Requirement: Selection outcomes replace the obsolete choice controls
 After a selection is accepted or rejected, the Server MUST enqueue an idempotent update for the prompt message that uses Server-provided text and blocks. An accepted selection MUST identify the selected Bot and show that the original request was dispatched; the choice actions MUST no longer be active for that prompt. A stale, unauthorized, expired, unavailable, or replayed selection MUST produce a readable outcome without claiming that unselected work started.
@@ -101,7 +115,7 @@ The choice prompt MUST include readable fallback text that names the candidates 
 - **THEN** normal single-Bot routing handles that new message, while the original ambiguous message remains single-winner and is not dispatched again
 
 ### Requirement: The adapter forwards selection actions without interpreting authorization or routing
-The Slack adapter MUST normalize multi-Bot selection `block_actions` events into the existing interaction envelope, preserve the signed action value and stable Slack identity, omit raw Slack payloads and credentials, acknowledge Slack before waiting for Server processing, and deliver Server-provided selection text and blocks through the existing outbox contract. Original message ingress is recorded in the provider inbox before prompt claim, but a button click uses the prompt row and selection operation as its separate durable interaction receipt; it MUST NOT be stopped by the source-message inbox's duplicate result. A replay MUST load or resume the selection operation and enqueue the stable prompt presentation reference. The adapter MUST NOT choose a Bot, validate the candidate, or dispatch work locally.
+The Slack adapter MUST normalize multi-Bot selection `block_actions` events into the existing interaction envelope, preserve the signed action value and stable Slack identity, omit raw Slack payloads and credentials, acknowledge Slack before waiting for Server processing, and deliver Server-provided selection text and blocks through the existing outbox contract. The adapter forwards the prompt-owner A lease already associated with the receiving Socket; the Server resolves any selected B lease context from the authenticated operator and adapter identity, so no extra target lease field or action parsing is added to the adapter envelope. Original message ingress is recorded in the provider inbox before prompt claim, but a button click uses the prompt row and selection operation as its separate durable interaction receipt; it MUST NOT be stopped by the source-message inbox's duplicate result. A replay MUST load or resume the selection operation and enqueue the stable prompt presentation reference. The adapter MUST NOT choose a Bot, validate the candidate, resolve a target lease, or dispatch work locally.
 
 #### Scenario: Slack delivers a Bot choice click
 - **WHEN** the Socket Mode adapter receives one candidate button click
