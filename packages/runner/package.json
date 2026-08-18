@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "postbuild": "tsx scripts/write-build-info.ts",
+    "postbuild": "tsx scripts/write-build-info.ts && node scripts/patch-pi-idle-timeout.mjs",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest run",
