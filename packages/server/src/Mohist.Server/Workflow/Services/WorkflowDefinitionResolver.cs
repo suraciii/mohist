@@ -101,7 +101,7 @@ public class WorkflowDefinitionResolver : IScopedService
     /// run's task definitions, commands, or per-lane timeouts. Pre-snapshot
     /// runs (no <c>BoundWorkflowDefinitionJson</c>) fall back to the live
     /// cascade for backward compatibility; the affected built-in profiles
-    /// keep their pre-issue-625 aggregate path through
+    /// keep their pre-change aggregate path through
     /// <c>RetainedLegacyAggregate</c>. Throws if neither the snapshot nor
     /// the resolved template contains <paramref name="stageId"/>.
     /// </summary>
@@ -149,12 +149,12 @@ public class WorkflowDefinitionResolver : IScopedService
     /// Snapshot-only stage resolver used by the Workflow grain's stage
     /// initializer and stage-lock coordinator. Reads the bound definition
     /// from the in-memory run first, falling back to a database load, and
-    /// never calls the live profile provider. A run without a snapshot
-    /// resolves its stage from the retained pre-change aggregate definition
-    /// for the affected built-in profiles; legacy aggregate state must not
-    /// be made to wait for synthesized lane state.
+    /// never calls the live profile provider for snapshot-backed runs. A run
+    /// without a snapshot resolves its stage from the retained pre-change
+    /// aggregate definition for the affected built-in profiles; legacy
+    /// aggregate state must not be made to wait for synthesized lane state.
     /// </summary>
-    public StageDefinition ResolveStageFromBoundSnapshot(
+    public async Task<StageDefinition> ResolveStageFromBoundSnapshotAsync(
         string runId,
         string stageId,
         WorkflowRun? inMemoryRun)
@@ -172,7 +172,7 @@ public class WorkflowDefinitionResolver : IScopedService
             if (legacy is not null) return legacy;
         }
 
-        return LoadStageSpecsAsync(runId, stageId).GetAwaiter().GetResult();
+        return await LoadStageSpecsAsync(runId, stageId);
     }
 
     private async Task<WorkflowRun?> TryLoadRunAsync(string runId)
@@ -184,42 +184,6 @@ public class WorkflowDefinitionResolver : IScopedService
         try
         {
             return JSON.Deserialize<WorkflowRun>(row.State);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Loads the bound definition snapshot for a run, if one was persisted
-    /// at <c>BindWorkflowRun</c> time. Returns <c>null</c> when the run is
-    /// pre-snapshot legacy; legacy resolution stays on the existing profile
-    /// cascade and, for the affected built-in profiles, the retained
-    /// pre-change aggregate definition.
-    /// </summary>
-    private async Task<WorkflowDefinition?> LoadBoundSnapshotAsync(
-        string runId,
-        string? projectId,
-        int? issueNumber)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.WorkflowRuns.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-        if (row is null) return null;
-        var state = row.State;
-        if (string.IsNullOrWhiteSpace(state)) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(state);
-            if (!doc.RootElement.TryGetProperty("boundWorkflowDefinitionJson", out var boundElement)
-                || boundElement.ValueKind != JsonValueKind.String)
-            {
-                return null;
-            }
-            var json = boundElement.GetString();
-            if (string.IsNullOrWhiteSpace(json)) return null;
-            return WorkflowYamlSerializer.FromJson(json);
         }
         catch
         {

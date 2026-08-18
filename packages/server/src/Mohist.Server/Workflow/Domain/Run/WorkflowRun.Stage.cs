@@ -1,5 +1,6 @@
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -47,7 +48,7 @@ public static partial class WorkflowRunExtensions
 
             var current = run.CurrentStage();
             var statusBefore = current.Status;
-            current.TryRequestApproval(now);
+            current.TryRequestApproval(run, now);
             if (statusBefore != StageRunStatus.AwaitingApproval && current.Status == StageRunStatus.AwaitingApproval)
                 events.Add(new StageApprovalRequested(current.Id));
 
@@ -116,7 +117,7 @@ public static partial class WorkflowRunExtensions
             return stage.Checks.All(c => c.Status == StageCheckStatus.Passed);
         }
 
-        private void TryRequestApproval(DateTimeOffset now)
+        private void TryRequestApproval(WorkflowRun run, DateTimeOffset now)
         {
             if (stage.RequiresApproval && stage.HasNoPendingTasksAndPassedChecks())
             {
@@ -142,6 +143,16 @@ public static partial class WorkflowRunExtensions
             }
             if (stage.HasNoPendingTasksAndPassedChecks())
             {
+                // Build-stage gate: for a lane-enabled run the stage must not
+                // advance until every required lane has a durable pass. The
+                // gate is scoped to the run's persisted bound definition, so
+                // a profile or deployment change cannot flip the mode; legacy
+                // aggregate runs are never held by it.
+                if (!VerificationLaneGate.CanAdvanceBuildStage(run))
+                {
+                    stage.Status = StageRunStatus.Running;
+                    return;
+                }
                 if (stage.RequiresApproval && stage.ApprovalStatus is not { Result: "approved" })
                 {
                     stage.Status = StageRunStatus.Running;

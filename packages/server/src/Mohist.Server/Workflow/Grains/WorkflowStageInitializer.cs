@@ -49,7 +49,7 @@ internal sealed class WorkflowStageInitializer
 
             initializedStages.Add(pendingStart.Stage);
 
-            var stageDef = _owner.DefinitionResolver.ResolveStageFromBoundSnapshot(
+            var stageDef = await _owner.DefinitionResolver.ResolveStageFromBoundSnapshotAsync(
                 _owner.GrainKey,
                 pendingStart.Stage,
                 run);

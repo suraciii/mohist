@@ -1,5 +1,6 @@
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -78,7 +79,42 @@ internal sealed class WorkflowWorkLifecycle
             events.AddRange(run.FailTask(stageId, taskRunId, taskResult, now));
         }
 
+        // Classify the report at the verification boundary and persist the
+        // lane outcome (pass/fail/timeout) in the same state transition that
+        // committed the normal task result, so the lane evidence is durable
+        // with the attempt that produced it.
+        ApplyLaneOutcome(currentTask, report, now);
+
         return events;
+    }
+
+    /// <summary>
+    /// Persists the additive verification-lane outcome for a recognized lane
+    /// attempt on the same commit as the normal task transition. A
+    /// <c>recover:fix-ci</c> helper is not a lane, so its report leaves the
+    /// lane metadata untouched (it can never promote a lane to <c>pass</c>).
+    /// The lane carries its stable identity, order, configured budget,
+    /// attempt identity (<see cref="TaskRun.Id"/> / <see cref="TaskRun.WorkId"/>),
+    /// and the failure or timeout diagnostics when applicable.
+    /// </summary>
+    private static void ApplyLaneOutcome(TaskRun? task, TaskReport report, DateTimeOffset now)
+    {
+        if (task?.Lane is null) return;
+
+        var outcome = VerificationLaneClassifier.Classify(task.DefinitionId, report);
+        if (outcome is null) return;
+
+        var detail = report.Detail ?? (report.Output.HasValue ? report.Output.Value.GetRawText() : null);
+        task.Lane = task.Lane with
+        {
+            Outcome = outcome.Value,
+            WorkId = task.WorkId ?? task.Lane.WorkId,
+            Error = report.Error ?? task.Lane.Error,
+            // Pass evidence needs no diagnostic; fail/timeout keep the exact
+            // detail text from the report or its output payload.
+            Detail = outcome.Value == VerificationLaneOutcome.Pass ? null : detail,
+            FinishedAt = now,
+        };
     }
 
     public Task<IReadOnlyList<WorkflowEvent>> ApplyCheckReportAsync(WorkflowRun run, CheckReport report)

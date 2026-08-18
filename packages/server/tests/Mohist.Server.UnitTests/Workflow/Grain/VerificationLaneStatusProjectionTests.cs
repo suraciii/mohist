@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
@@ -157,6 +158,56 @@ public sealed class VerificationLaneStatusProjectionTests
         var view = WorkflowStatusMapper.BuildStatusView(run, definition: null);
 
         Assert.Equal(VerificationLaneCatalog.VerifyWebTests, view!.VerificationLanes!.FirstNonPassingLane);
+    }
+
+    [Fact]
+    public void ReloadedRun_JsonRoundTrip_PreservesLaneOutcomesAndDiagnostics()
+    {
+        var run = CreateLaneEnabledRun();
+        var buildStage = run.Stages[0];
+
+        buildStage.Tasks[0].Status = TaskRunStatus.Completed;
+        buildStage.Tasks[0].Lane = buildStage.Tasks[0].Lane! with { Outcome = VerificationLaneOutcome.Pass };
+        buildStage.Tasks[1].Status = TaskRunStatus.Failed;
+        buildStage.Tasks[1].Lane = buildStage.Tasks[1].Lane! with
+        {
+            Outcome = VerificationLaneOutcome.Fail,
+            Error = new ExecutionError("script-failed", "npm ci exited with 1"),
+            Detail = "npm error code E401",
+            WorkId = "verify-dotnet.1",
+            FinishedAt = CreatedAt.AddSeconds(10),
+        };
+        buildStage.Tasks[2].Status = TaskRunStatus.Failed;
+        buildStage.Tasks[2].Lane = buildStage.Tasks[2].Lane! with
+        {
+            Outcome = VerificationLaneOutcome.Timeout,
+            Error = new ExecutionError("timeout", "killed after 120000 ms"),
+            Detail = "Command exceeded its 120000 ms budget",
+            WorkId = "verify-web-typecheck.1",
+            FinishedAt = CreatedAt.AddMinutes(2),
+        };
+
+        // The run state (including the bound definition snapshot and the
+        // additive lane metadata) must survive the persisted JSON round-trip
+        // and still project the same pass/fail/timeout evidence.
+        var json = JSON.Serialize(run);
+        var reloaded = JSON.Deserialize<WorkflowRun>(json)!;
+
+        Assert.True(VerificationLaneGate.IsLaneEnabledRun(reloaded));
+        var view = WorkflowStatusMapper.BuildStatusView(reloaded, definition: null);
+        Assert.NotNull(view!.VerificationLanes);
+
+        var lanes = view.VerificationLanes!.Lanes;
+        Assert.Equal("pass", lanes[0].Outcome);
+        Assert.Equal("fail", lanes[1].Outcome);
+        Assert.Equal("script-failed", lanes[1].Error!.Code);
+        Assert.Equal("npm error code E401", lanes[1].Detail);
+        Assert.Equal("verify-dotnet.1", lanes[1].WorkId);
+        Assert.Equal("timeout", lanes[2].Outcome);
+        Assert.Equal("timeout", lanes[2].Error!.Code);
+        Assert.Equal("Command exceeded its 120000 ms budget", lanes[2].Detail);
+        Assert.Equal(VerificationLaneCatalog.VerifyDotnet, view.VerificationLanes!.FirstNonPassingLane);
+        Assert.False(view.VerificationLanes!.AllPassing);
     }
 
     private static WorkflowRun CreateRun(WorkflowDefinition definition, string? definitionJson)

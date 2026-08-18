@@ -14,7 +14,7 @@ internal sealed class WorkflowStageLockCoordinator
 
     public async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
     {
-        var resource = GetSequentialLockResource(stage);
+        var resource = await GetSequentialLockResourceAsync(stage);
         if (resource is null) return true;
 
         var projectId = _owner.GetProjectId();
@@ -36,7 +36,7 @@ internal sealed class WorkflowStageLockCoordinator
 
     public async Task ReleaseStageLocksAsync(string stage, string reason)
     {
-        var resource = GetSequentialLockResource(stage);
+        var resource = await GetSequentialLockResourceAsync(stage);
         if (resource is null) return;
 
         var projectId = _owner.GetProjectId();
@@ -47,9 +47,9 @@ internal sealed class WorkflowStageLockCoordinator
         await lockGrain.ReleaseAsync(new StageLockOwner(_owner.GrainKey, stage));
     }
 
-    private string? GetSequentialLockResource(string stage)
+    private async Task<string?> GetSequentialLockResourceAsync(string stage)
     {
-        var stageDef = _owner.DefinitionResolver.ResolveStageFromBoundSnapshot(
+        var stageDef = await _owner.DefinitionResolver.ResolveStageFromBoundSnapshotAsync(
             _owner.GrainKey, stage, _owner.RunOrNull);
         if (stageDef.LockBehavior is null) return null;
         if (!string.Equals(stageDef.LockBehavior, "sequential", StringComparison.OrdinalIgnoreCase))

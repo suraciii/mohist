@@ -7,3 +7,27 @@
 - Re-review fix completed: plan artifacts now specify the concrete persisted definition boundary; `self-review.md` remains untouched. Artifact checks after the fix: `jq empty openspec/changes/issue-625/tasks.json` and `git diff --check` passed.
 - M-2 fixed in the plan: `BindWorkflowRun` now captures the complete effective definition as `BoundWorkflowStart.DefinitionJson` and persists it as the write-once `WorkflowRun.BoundWorkflowDefinitionJson`; stage initialization and lock resolution read that snapshot instead of hot-reloading the current profile. Pre-snapshot runs are explicit legacy mode and use retained pre-change aggregate definitions without synthesized lanes or rewritten attempts. The plan now requires mixed-version tests for aggregate binding before six-lane profile activation and build initialization afterward, plus the inverse six-lane binding case.
 - M-4 fixed in the plan: both built-in `verify-dotnet` lane run bodies explicitly export `DOTNET_ROOT=/home/szf/.dotnet` before the unchanged `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false` command. Profile contract tests assert the prelude, and clean-run tests execute lanes in fresh shells and complete all six lanes for both built-in profiles; the setup is not delegated to `verify-install` or the unused aggregate variable.
+
+# Progress: T-001 implementation (final)
+
+Implemented T-001 end to end on top of the plan-review fixes above.
+
+## Codebase Patterns (established here)
+- Lane evidence is additive `TaskRun.Lane` (`VerificationLaneAttempt`): populated at task creation (`TaskRun.MakeTask`) for any DefinitionId in `VerificationLaneCatalog` — lane id, catalog order, configured budget from `with.timeout` (int ms, positive), Pending outcome, and TaskRunId. So a pending lane exists in the same commit that materializes the task.
+- Report classification happens at the verification boundary in `WorkflowWorkLifecycle.ApplyTaskReportAsync` via `VerificationLaneClassifier.Classify` (Succeeded->pass unless AddTasks present->fail; Failed with error.code=timeout->timeout; else fail) and persists on the same transition. `TaskReportStatus` stays Succeeded/Failed (no third state).
+- `ResolveStageFromBoundSnapshotAsync` (WorkflowDefinitionResolver) is the ONLY stage/lock resolution path for the grain (stage initializer + stage-lock coordinator). Snapshot parsed from in-memory run first; no snapshot + built-in profile -> `RetainedLegacyAggregate` (single verify task build stage); other missing cases fall back to `LoadStageSpecsAsync` (which itself checks the DB snapshot first). It is async (no sync-over-async).
+- Ordered dispatch: `WorkflowRun.NextWork` filters the candidate pending task through `VerificationLaneGate.IsClaimableLaneTask` — for lane-enabled runs only the first non-passing lane is exposed; later lanes are blocked while predecessors are non-pass; legacy runs unaffected.
+- Stage gate: `WorkflowRun.Stage.TryRequestApproval` now takes the run and refuses to mark the build stage Completed unless `VerificationLaneGate.CanAdvanceBuildStage(run)` (all six lanes durable pass). Non-lane runs always advance as before.
+- `WorkflowStatusMapper.MapVerificationLanes` projects all six lanes (pending placeholders for missing) with pass/fail/timeout wire values + diagnostics; null for legacy runs.
+- Binding: coordinator serializes the entire effective `WorkflowDefinition` with `WorkflowYamlSerializer.ToJson` into `BoundWorkflowStart.DefinitionJson`; participant persists write-once `WorkflowRun.BoundWorkflowDefinitionJson`; idempotency compares the snapshot string.
+
+## Gotchas
+- MTP runner ignores VSTest `--filter`; use `dotnet test` without filter (full suite) or the MTP-native filter syntax.
+- Comment-reference arch rule scans comments for `issue-\d+`: NEVER write `issue-625` in production comments — reword to "pre-change"/"legacy" or add a baseline entry. (WorkflowDefinitionResolver.cs hit this once.)
+- `RetainedLegacyAggregate` is intentionally the minimal pre-change build definition (single aggregate `verify` task, 300000ms, fix-ci recovery) — unit tests pin that shape; non-build stages of predefined legacy runs resolve via the live cascade (unchanged by this task).
+- `verification-lanes` catalog lives in Services but TaskRun (Domain.Run) calls it — same assembly, allowed; no arch-rule hit.
+- Round-trip test `ReloadedRun_JsonRoundTrip...` proved `JSON.Serialize/Deserialize<WorkflowRun>` preserves `BoundWorkflowDefinitionJson` + Lane metadata; use `VerificationLaneCatalog.LaneIds[i]` (0-based) for FirstNonPassingLane assertions.
+
+## Verification
+- dotnet build Mohist.sln -p:SkipWebBuild=true: 0 warnings/errors (TreatWarningsAsErrors on).
+- UnitTests 2824 passed, SpecTests 3881 passed, ArchTests 68 passed, Workflow.Definition.Tests 178 passed.

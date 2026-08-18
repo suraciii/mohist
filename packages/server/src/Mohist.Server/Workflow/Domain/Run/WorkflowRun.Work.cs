@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -54,8 +55,11 @@ public static partial class WorkflowRunExtensions
             if (current is null) return null;
 
             var pendingTask = NextUnclaimedTask(current);
-            if (pendingTask is not null)
+            if (pendingTask is not null
+                && VerificationLaneGate.IsClaimableLaneTask(run, pendingTask))
+            {
                 return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.ExpectInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery, pendingTask.RecoveryRemaining);
+            }
 
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)
